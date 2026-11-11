@@ -252,14 +252,21 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
 
 // Connected entry point for runRequestOnce/runRequestQueue. Rechecks the Room
 // reservation before steering; no credentials enter the runtime's prompt.
-export function roomCodexHost({ connection, ...options }) {
+export function roomCodexHost({ connection, allowRequest, ...options }) {
+  if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
   const client = new RoomAgentClient(connection);
   return createCodexRuntimeHost({ ...options, scope: connection, authorize: async (binding, action) => {
     const context = await client.replyContext(binding.requestMessageId);
     if (context.viewerId !== binding.memberId || context.request.recipientId !== binding.memberId
       || context.roomCreatedEventId !== binding.roomCreatedEventId || context.request.openingEventId !== binding.openingEventId)
       throw new Error("Room request identity changed");
-    if (action === "start" || action === "steer") await client.requestRuns({ requestMessageId: binding.requestMessageId, attemptId: binding.attemptId,
-      action: "working", expectedRequestRevision: binding.expectedRequestRevision, contextEventId: binding.contextEventId });
+    if (action === "start" || action === "steer") {
+      // Recheck operator policy at execution, independently of queue selection.
+      // Revocation must never prevent interrupting an already-owned turn.
+      if (allowRequest && allowRequest(context.request) !== true)
+        throw Object.assign(new Error("Requester is not allowed by this host"), { code: "requester_not_allowed" });
+      await client.requestRuns({ requestMessageId: binding.requestMessageId, attemptId: binding.attemptId,
+        action: "working", expectedRequestRevision: binding.expectedRequestRevision, contextEventId: binding.contextEventId });
+    }
   } });
 }

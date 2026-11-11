@@ -1,0 +1,38 @@
+{
+  "base": "ac94d3d44f4011b3db05c30cae5219fa59b089bd",
+  "source": "3e72bf6b79550d04a229b742f33c3f0b0fd50931",
+  "change": "Reject planning update carrying own requestId key with422 invalid_claim_input and separate-planning-edit guidance before validation strips planning fields or any mutation. No new journal/digest format.",
+  "causalBefore": {
+    "pass": 6,
+    "fail": 2,
+    "reason": "both new actual-handler controls received200 rather than422",
+    "log": "before.tap"
+  },
+  "after": {
+    "pass": 8,
+    "fail": 0,
+    "log": "after.tap"
+  },
+  "final": {
+    "pass": 11,
+    "fail": 0,
+    "skip": 0,
+    "command": "TMPDIR=\"$PWD/.tmp\" /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/board-planning.test.js tests/work-claim-idempotency.test.js",
+    "log": "final.tap"
+  },
+  "controls": [
+    "fresh combined note/priority/requestId rejected",
+    "different priority same requestId rejected",
+    "null clearing with requestId rejected",
+    "claim and events unchanged on refusal",
+    "ordinary note requestId replay200",
+    "changed ordinary note same requestId409",
+    "adding planning to existing requestId rejected422",
+    "separate planning edit200"
+  ],
+  "limits": [
+    "Actual handler with RoomStore SQLite and synthetic members; no HTTP transport test",
+    "No Native/browser/provider/feature activation",
+    "No shared or author branch edits"
+  ]
+}

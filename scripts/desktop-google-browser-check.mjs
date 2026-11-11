@@ -10,10 +10,14 @@ import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { googleAuth, clientId, sub } from './helpers/google-oauth-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 
-for (const { outdatedTerms, selected, providerError } of [...([false, true].flatMap(outdatedTerms => [false, true].map(selected => ({ outdatedTerms, selected })))), { outdatedTerms: false, selected: true, providerError: 'access_denied' }, { outdatedTerms: false, selected: true, providerError: 'server_error' }]) test(`desktop ${selected ? 'selected' : 'generic'} ${providerError || 'success'} Google ${outdatedTerms ? 'updated terms' : 'new signup'} keeps same-tab native return and exact PKCE consent`, { timeout: 40000 }, async t => {
+for (const { outdatedTerms, selected, providerError, returningMember = false, abortAccountOnce = false } of [...([false, true].flatMap(outdatedTerms => [false, true].map(selected => ({ outdatedTerms, selected })))), { outdatedTerms: false, selected: true, providerError: 'access_denied' }, { outdatedTerms: false, selected: true, providerError: 'server_error' }, {outdatedTerms:false,selected:true,returningMember:true}, {outdatedTerms:true,selected:true,returningMember:true}, {outdatedTerms:false,selected:true,returningMember:true,abortAccountOnce:true}]) test(`desktop ${selected ? 'selected' : 'generic'} ${providerError || 'success'} Google ${outdatedTerms ? 'updated terms' : 'new signup'}${returningMember ? ' returning member' : ''}${abortAccountOnce ? ' after account retry' : ''} keeps same-tab native return and exact PKCE consent`, { timeout: 40000 }, async t => {
   const f = createAcceptanceFixture();
+  if (returningMember || outdatedTerms) f.store.createAccount(`google:${sub}`, 'google');
+  if (returningMember) {
+    f.store.command(f.keys.owner, 'commons', {id:'returning-google-member',type:'member.added',data:{memberId:'googler',displayName:'Googler',kind:'human',permissions:[]}});
+    f.store.bindHumanAccount('commons','googler',`google:${sub}`);
+  }
   if (outdatedTerms) {
-    f.store.createAccount(`google:${sub}`, 'google');
     f.store.db.prepare('UPDATE account_terms SET terms_version=? WHERE account_id=?').run('2026-09-01', `google:${sub}`);
   }
   const server = createRoomServer({ store: f.store, googleAuth: googleAuth() });
@@ -35,7 +39,7 @@ for (const { outdatedTerms, selected, providerError } of [...([false, true].flat
     assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
     assert.match(url.searchParams.get('state'), /^[A-Za-z0-9_-]{43}$/);
     const result = providerError && providerRequests.length === 1 ? `error=${providerError}` : 'code=synthetic-google-code';
-    res.writeHead(302, { Location: `${origin}/api/auth/google/callback?state=${url.searchParams.get('state')}&${result}` }); res.end();
+    res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<a href="${origin}/api/auth/google/callback?state=${url.searchParams.get('state')}&amp;${result}">Continue with fixture account</a>`);
   });
   await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve));
   const providerOrigin = `http://localhost:${provider.address().port}`;
@@ -49,7 +53,13 @@ for (const { outdatedTerms, selected, providerError } of [...([false, true].flat
     await route.fulfill({ response, headers: { ...response.headers(), location: providerOrigin + authorize.pathname + authorize.search } });
   });
   const started = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/desktop/start');
-  const callback = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/google/callback');
+  const nativeFailure = providerError ? page.waitForRequest(req => new URL(req.url()).pathname === '/api/auth/desktop/callback', { timeout: 3000 }) : null;
+  nativeFailure?.catch(() => {});
+  // The first callback commits the same-origin bridge; await actual completion.
+  const callback = page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return url.pathname === '/api/auth/google/callback' && url.searchParams.has('room_oauth_resume');
+  });
   await page.goto(`${origin}/api/auth/desktop/start?state=${nativeState}&challenge=${challenge}${selected ? '&provider=google' : ''}`);
   if (!selected) {
     await page.locator('#auth-panel').waitFor({ state: 'visible' });
@@ -57,6 +67,17 @@ for (const { outdatedTerms, selected, providerError } of [...([false, true].flat
     await page.getByRole('button', { name: 'Log in', exact: true }).click();
     await page.locator('#google-signin').click();
   }
+  await page.getByRole('link', { name: 'Continue with fixture account' }).waitFor();
+  const roomReads = [];
+  page.on('request', req => { const path = new URL(req.url()).pathname;
+    if (path === '/api/session' || path.startsWith('/api/rooms/')) roomReads.push(path);
+  });
+  let abortedAccount;
+  if (abortAccountOnce) {
+    abortedAccount = page.waitForEvent('requestfailed', req => new URL(req.url()).pathname === '/api/account-session');
+    await page.route(origin + '/api/account-session', route => route.abort('failed'), {times:1});
+  }
+  await page.getByRole('link', { name: 'Continue with fixture account' }).click();
   const firstCallback = await callback;
   assert.equal(firstCallback.status(), 200);
   if (providerError) assert.ok(firstCallback.headers()['x-room-auth-failure']);
@@ -67,22 +88,26 @@ for (const { outdatedTerms, selected, providerError } of [...([false, true].flat
   assert.equal(consentUrl.pathname, '/oauth/authorize');
   assert.equal(consentUrl.searchParams.get('state'), nativeState);
   assert.equal(consentUrl.searchParams.get('code_challenge'), challenge);
-  if (providerError) {
-    await page.locator('#auth-panel').waitFor({ state: 'visible' });
-    await page.locator('#google-signin').waitFor({ state: 'visible' });
-    assert.match(await page.locator('#auth-error').innerText(), /Google sign-in didn.t finish/);
-    assert.equal(new URL(page.url()).searchParams.has('provider'), false);
+  if (abortAccountOnce) {
+    await abortedAccount;
+    await page.waitForFunction(() => document.querySelector('#auth-panel')?.hidden === false);
     assert.equal(await page.evaluate(() => sessionStorage.getItem('project-room:oauth-return:v1')), returnTarget);
-    assert.equal((await (await page.context().request.get(`${origin}/api/account-session`)).json()).authenticated, false);
+    assert.deepEqual(roomReads, [], 'failed account confirmation must not start Room restoration');
     await page.reload();
-    await page.locator('#auth-panel').waitFor({ state: 'visible' });
-    assert.equal(providerRequests.length, 1, 'reload after provider error cannot auto-start again');
-    await page.getByRole('button', { name: 'Log in', exact: true }).click();
-    const retry = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/google/callback');
-    await page.locator('#google-signin').click();
-    assert.equal((await retry).status(), 200);
-    assert.equal(providerRequests.length, 2, 'explicit retry is the only second provider request');
   }
+  if (providerError) {
+    const handoff = await nativeFailure;
+    const failure = await page.context().request.get(handoff.url(), { maxRedirects: 0 });
+    assert.equal(failure.status(), 302);
+    const app = new URL(failure.headers().location);
+    assert.equal(app.protocol, 'projectroom:');
+    assert.equal(app.searchParams.get('state'), nativeState);
+    assert.equal(app.searchParams.get('error'), 'access_denied');
+    assert.equal(app.searchParams.has('code'), false);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('project-room:oauth-return:v1')), null);
+    return;
+  }
+
   const session = await (await page.context().request.get(`${origin}/api/account-session`)).json();
   assert.equal(session.authenticated, true); assert.equal(session.account.id, `google:${sub}`);
   assert.equal(session.terms.required, outdatedTerms, 'existing outdated terms require acceptance; fresh signup records the displayed terms');
@@ -114,6 +139,7 @@ for (const { outdatedTerms, selected, providerError } of [...([false, true].flat
   }
   await page.waitForURL(url => url.pathname === '/oauth/authorize');
   assert.equal(page.url(), consentUrl.href, 'terms acceptance resumes the original native consent byte-for-byte');
+  if (returningMember) assert.deepEqual(roomReads, [], 'native continuation must precede ordinary Room restoration');
   assert.equal(await page.evaluate(() => sessionStorage.getItem('project-room:oauth-return:v1')), null);
   assert.match(await page.locator('h1').innerText(), /Project Room for Mac/);
   mkdirSync('test-results', { recursive: true });
@@ -161,7 +187,7 @@ for (const { outdatedTerms, selected, providerError } of [...([false, true].flat
   assert.deepEqual(errors, []);
 });
 
-test('selected GitHub starts after real anonymous session restore and cancellation preserves native retry', { timeout: 20000 }, async t => {
+test('selected GitHub starts after real anonymous session restore and cancellation ends the native attempt', { timeout: 20000 }, async t => {
   const f = createAcceptanceFixture();
   const proxy = createServer((req, res) => {
     if (req.url === '/api/auth/github/start') {
@@ -200,18 +226,21 @@ test('selected GitHub starts after real anonymous session restore and cancellati
   // Playwright route.fetch would drop those late-generated browser headers.
   const started = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/desktop/start');
   const githubStarted = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/github/start');
+  const denied = page.waitForRequest(req => new URL(req.url()).pathname === '/api/auth/desktop/callback');
   const returned = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/github/callback');
   returned.catch(() => {}); // Keep a failed start diagnostic primary during teardown.
   await page.goto(`${origin}/api/auth/desktop/start?state=${'s'.repeat(43)}&challenge=${'c'.repeat(43)}&provider=github`);
   assert.equal((await githubStarted).status(), 302, 'actual browser navigation begins the provider flow');
   assert.equal((await returned).status(), 200);
-  await page.locator('#auth-panel').waitFor({ state: 'visible' });
-  assert.match(await page.locator('#auth-error').innerText(), /GitHub sign-in didn.t finish/);
-  const target = new URL((await started).headers().location, origin).searchParams.get('return');
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('project-room:oauth-return:v1')), target);
-  await page.reload(); await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  const handoff = await denied;
+  assert.equal(new URL(handoff.url()).searchParams.get('error'), 'access_denied');
+  assert.equal(new URL(handoff.url()).searchParams.get('state'), 's'.repeat(43));
+  const response = await page.context().request.get(handoff.url(), { maxRedirects: 0 });
+  assert.equal(response.status(), 302);
+  assert.equal(new URL(response.headers().location).protocol, 'projectroom:');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('project-room:oauth-return:v1')), null);
+  assert.equal((await started).status(), 302);
   assert.equal(providerRequests.length, 1);
-  assert.equal((await (await page.context().request.get(`${origin}/api/account-session`)).json()).authenticated, false);
   assert.deepEqual(errors, []);
 });
 
@@ -237,6 +266,34 @@ test('untrusted desktop provider entrance cannot start OAuth or store an externa
     assert.deepEqual(starts, [], 'only a single validated native provider intent may auto-start');
     assert.equal(new URL(page.url()).origin, origin);
     if (candidate.get('return').startsWith('https:')) assert.equal(await page.evaluate(() => sessionStorage.getItem('project-room:oauth-return:v1')), null);
+    await page.close();
+  }
+});
+
+for (const provider of ['google', 'github']) test(`${provider} browser failure rejects malformed native returns and preserves connector retry`, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const start = await fetch(`${origin}/api/auth/desktop/start?state=${'s'.repeat(43)}&challenge=${'c'.repeat(43)}`, { redirect: 'manual' });
+  const valid = start.headers.get('location');
+  const invalid = [null, 'https://evil.example/oauth/authorize?x=1'];
+  for (const [key, value] of [['client_id', 'connector'], ['redirect_uri', 'https://evil.example/callback'], ['state', 'short'], ['code_challenge', 'short'], ['code_challenge_method', 'plain']]) {
+    const url = new URL(valid, origin); url.searchParams.set(key, value); invalid.push(url.pathname + url.search);
+    const duplicate = new URL(valid, origin); duplicate.searchParams.append(key, value); invalid.push(duplicate.pathname + duplicate.search);
+  }
+  for (const value of invalid) {
+    const page = await browser.newPage(), callbacks = [];
+    await page.addInitScript(value => { if (value !== null) sessionStorage.setItem('project-room:oauth-return:v1', value); }, value);
+    page.on('request', req => { if (new URL(req.url()).pathname === '/api/auth/desktop/callback') callbacks.push(req.url()); });
+    await page.goto(`${origin}/?${provider}=error`);
+    await page.locator('#auth-panel').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector('#auth-error')?.textContent.includes('sign-in'));
+    assert.deepEqual(callbacks, []);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('project-room:oauth-return:v1')), value);
+    await page.reload();
+    await page.locator('#auth-panel').waitFor({ state: 'visible' });
+    assert.deepEqual(callbacks, []);
     await page.close();
   }
 });

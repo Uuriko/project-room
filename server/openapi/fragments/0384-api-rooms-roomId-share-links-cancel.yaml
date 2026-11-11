@@ -1,0 +1,25 @@
+  /api/rooms/{roomId}/share-links-cancel:
+    post:
+      summary: Cancel a human invitation link
+      description: Browser session (room-key cookie or account session) of a human member with `manage_members` plus CSRF, or the room owner's or owner-appointed agent admin's identity bearer (`manage_members` and `delegatedAdmin`); any other bearer is refused with 403 `access_denied`. Body is exactly `{ linkId }`; cancelling twice is idempotent.
+      security:
+        - roomSession: []
+        - accountSession: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkId]
+              properties:
+                linkId: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ link }" }
+        '403': { description: "access_denied (non-owner bearer, or no manage_members)" }
+        '410': { description: link_unavailable }
+        '422': { description: invalid_link }

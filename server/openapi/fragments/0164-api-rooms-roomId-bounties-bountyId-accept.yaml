@@ -1,0 +1,42 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/accept:
+    post:
+      summary: Accept submitted work (gated approval)
+      description: |
+        Explicit gated approval by the poster (or a distinct member under
+        the distinct_member review policy — the claimant cannot accept
+        their own work). Slice 6: `verifierAttestation.citations` is required
+        — one {criterionId, verdict: pass|fail} per pinned rubric criterion,
+        citing the rubric version pinned at accept time. The approval is
+        recorded as an explicit event and only the approval converts the
+        locked escrow into claimant attribution. Emits `bounty.accepted`.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verifierAttestation]
+              properties:
+                verifierAttestation: { type: object }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The acceptance with its approval and attribution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  approval: { type: object }
+                  attribution: { type: object }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }

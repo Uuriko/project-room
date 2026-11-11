@@ -1,0 +1,29 @@
+{
+  "base": "e1290f921e41a7ec065e65627d650ae7bc3e7f01",
+  "node": "v24.22.1",
+  "before": {
+    "tests": 3,
+    "fail": 3
+  },
+  "after": {
+    "focused": 3,
+    "affected": 29,
+    "fail": 0,
+    "skip": 0
+  },
+  "commands": [
+    "node --test tests/archived-claim-retirement.test.mjs",
+    "node --test tests/archived-claim-retirement.test.mjs tests/claim-pr-sync-room-scoping.test.js tests/claim-pr-sync-housekeeping-budget.test.js tests/work-claim-sqlite.test.js tests/claim-autolink.test.js"
+  ],
+  "limits": [
+    "Node SQLite qualification; no actual Native or live call.",
+    "Guards production legacy claim registry and claim background selectors, not all room side tables or external delivery queues.",
+    "No storage removal or archive UI/default/auth changes."
+  ],
+  "logs": {
+    "archived-claim-before-1102.log": "b2b92bc47b2309da00b643a0a95b9fdad9d1965cb4b8f87fa70606799ecba051",
+    "archived-claim-after-1102.log": "35aa4e06ec6606292add6c8760854bdc6d8a23a583e331b7651106483542ebab",
+    "archived-claim-affected-1102.log": "0b250b5bee768b85e85c4f91c8fd72b6f108fbbbbcd18ac9d427e1ab29cfa653",
+    "archived-claim-lint-1102.log": "a86f3bbdccca8ebf8e308d76ea40ad413f0976cccc4f5396856fbb4d8482b075"
+  }
+}

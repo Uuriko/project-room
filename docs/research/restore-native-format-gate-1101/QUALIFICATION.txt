@@ -1,0 +1,45 @@
+OFFLINE exact-format recovery fence — runtime7a5471142 on751f786639.
+Dependencies:8a6a637c3 verified-empty old4aa fixture correction, d2d1c4614
+causal red, writer1dfd7b8d5 leaf extraction adopted as23e650098.
+No live database migration, credential creation, publication or deployment.
+
+Genuine old625 coverage-aware runtime opened a sealed native-work-2 target,
+advanced128 rows and revision1→2 and returned202, despite not understanding that
+native format. Its later full audit would refuse; no unsafe final admission was
+claimed. Old625 cold continuation refusal was therefore NOT qualified before
+this correction. old625-red.log preserves that executable red at d2d1c4614.
+
+Cure: target-owned restore mutation guard DDL embeds CURRENT_WRITER_FORMAT from
+the same dependency-free leaf used by the current writer permit. Exact old
+control verification/suspension refuses before progress or DROP. Source seal
+also explicitly binds writerFormat and validates it against that leaf. No new
+principal, token, authorization scope, public flag or recovery service.
+
+10 focused Node controls pass, including genuine old625 cold constructor refusal,
+held625 operator request and exact request replay refusing422 twice, zero old
+control DROP attempts, unchanged source seal/cursor/revision, preopened prepared
+credential writer denied, and new cold continuation202. Earlier old4aa controls
+remain. Equal-size DDL negative, fault rollback, real-process commit/retry,
+Unicode/NULL/BLOB and full independent application-row equality controls pass.
+The old625 performance baseline against a native2 sealed target now intentionally
+refuses; historical comparable performance receipts remain pinned to their exact
+older format and are not relabeled as new-format authority.
+
+One actual production Native Worker control passes on current native-work-2:
+1,000 messages plus accepted useful native task; open workCapacity is populated;
+source independent full audit/export; interrupted import; cold Native constructor;
+operator seal and durable continuations, repeated requests and repeated runtime
+disposal; ordinary readiness503; separate required final full audit; coldready200;
+exact original task-proposal and saved-message retries. The current code-owned
+legacy-create guards remain present and exact throughout restoration. Source
+history/receipts/credentials are preserved. Targeted lint/diff checks pass.
+
+The verified-empty experimental45 fixture transition is explicit test setup,
+never an automatic populated-file migration. It first verifies old4aa/625 owned
+schema, then replaces the known format permit/control guards; previously absent
+native guards/indexes are added by the new constructor. Preserving the old permit
+guard correctly rejects the new source; the test now accounts for both gates.
+
+Not complete bounded recovery: source load/seal, SQLite atomic checks, current
+independent census/replay, cross-subsystem audits and report digests remain on the
+critical path. No weaker source-equality receipt replaces those invariants.

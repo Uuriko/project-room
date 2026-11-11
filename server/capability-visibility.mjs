@@ -149,13 +149,31 @@ export function resolveCatalogAgent(store, identity) {
       links = [];
     }
     for (const { roomId, memberId } of links) {
-      let state = null;
-      try {
-        state = store.room(roomId)?.state ?? null;
-      } catch {
-        state = null;
+      // The catalog needs only the member record and the room owner, so
+      // read them through roomAuthority(): a fresh storage read that
+      // extracts exactly that pair from the stored projection prefix
+      // (json_extract over the bytes before the messages array) instead
+      // of materialising the full room state — blob SELECT, JSON.parse,
+      // hydrate and deepFreeze — once per membership on every list and
+      // call-denial check. Tier rows below are still read fresh per
+      // membership, exactly as before. A store without the prefix read
+      // (a test double) falls back to the full load, unchanged.
+      let authority = null;
+      if (typeof store.roomAuthority === "function") {
+        try {
+          authority = store.roomAuthority(roomId) ?? null;
+        } catch {
+          authority = null;
+        }
+      } else {
+        try {
+          const state = store.room(roomId)?.state ?? null;
+          authority = state ? { ownerId: state.room?.ownerId, members: state.members } : null;
+        } catch {
+          authority = null;
+        }
       }
-      const member = state?.members?.[memberId] ?? null;
+      const member = authority?.members?.[memberId] ?? null;
       if (!member || member.active === false) continue;
       let tier = null;
       try {
@@ -168,7 +186,7 @@ export function resolveCatalogAgent(store, identity) {
         memberId,
         isGuest: isGuestAgentMemberId(memberId),
         autonomyTier: tier,
-        isOwner: state?.room?.ownerId === memberId,
+        isOwner: authority?.ownerId === memberId,
         active: true,
       });
     }

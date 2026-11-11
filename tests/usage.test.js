@@ -10,6 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { foldSessionEvents, parseUsageDays, USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS } from "../server/usage-summary.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // F5: read-only usage summary per room.
 const DAY = 86400000;
@@ -42,7 +43,7 @@ test("agents are never counted as human seats; identities are counted separately
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "bot-a", displayName: "Bot A", kind: "agent", permissions: ["accept_work"] });
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "bot-b", displayName: "Bot B", kind: "agent", permissions: ["accept_work"] });
   const identity = store.identities.create("Roaming agent");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  linkWithProof(store, ownerKey, "commons", identity, { permissions: ["accept_work"] });
 
   const before = await usage();
   assert.equal(before.status, 200);
@@ -134,17 +135,19 @@ test("sessions and spend follow the period; unreported spend is unknown, not zer
   const tripped = propose("Over budget");
   session(tripped, { expectedRevision: revision(tripped), status: "processing", budget: { maxSpendCents: 100 } });
   session(tripped, { expectedRevision: revision(tripped), status: "active", spendCents: 50 });
-  // The report that trips the wire is refused, so the forced stop keeps the last accepted number.
+  // The report that trips the wire is refused as a mutation, but the forced
+  // stop records the triggering spend (#3349): the session's recorded spend
+  // is the number that tripped it, not the last accepted report.
   assert.throws(() => session(tripped, { expectedRevision: revision(tripped), status: "processing", spendCents: 150 }), /budget/);
   const enforced = (await usage()).body;
   assert.deepEqual(enforced.sessions, { started: 3, stopped: 2, budgetStops: 1 });
-  assert.deepEqual(enforced.spend, { reportedCents: 170, sessionsReported: 2, sessionsUnreported: 1 });
+  assert.deepEqual(enforced.spend, { reportedCents: 270, sessionsReported: 2, sessionsUnreported: 1 });
 
   // Widening the period brings the old session back; a narrow one drops the early runs.
   const wide = (await usage("?days=60")).body;
   assert.equal(wide.period.days, 60);
   assert.deepEqual(wide.sessions, { started: 4, stopped: 3, budgetStops: 1 });
-  assert.equal(wide.spend.reportedCents, 670);
+  assert.equal(wide.spend.reportedCents, 770);
   clock.advance(2 * DAY);
   const narrow = (await usage("?days=1")).body;
   assert.deepEqual(narrow.sessions, { started: 0, stopped: 0, budgetStops: 0 });
@@ -211,12 +214,16 @@ test("non-members are refused and the response carries no secrets or hashes", as
   const { ownerKey, store, get, usage } = await serve(t);
   assert.equal((await get("/api/rooms/commons/usage")).status, 401);
   const stranger = store.identities.create("Unlinked identity");
-  assert.equal((await get("/api/rooms/commons/usage", stranger.secret)).status, 401);
+  const strangerReply = await get("/api/rooms/commons/usage", stranger.secret);
+  assert.equal(strangerReply.status, 403);
+  const strangerBody = await strangerReply.json();
+  assert.equal(strangerBody.error.code, "no_access");
+  assert.ok(!JSON.stringify(strangerBody).includes(stranger.secret));
   const labOwner = store.issueAccessKey("lab", "owner");
   assert.equal((await get("/api/rooms/commons/usage", labOwner)).status, 403);
 
   const identity = store.identities.create("Linked identity");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  linkWithProof(store, ownerKey, "commons", identity, { permissions: ["accept_work"] });
   const { status, body } = await usage();
   assert.equal(status, 200);
   const text = JSON.stringify(body);

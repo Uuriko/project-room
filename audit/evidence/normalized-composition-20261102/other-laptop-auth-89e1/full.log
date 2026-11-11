@@ -1,0 +1,37 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":48,"integrity":"deferred","phases":{"schema":{"ms":11,"rowsRead":8306},"plugin":{"ms":20,"rowsRead":41018},"fence":{"ms":12,"rowsRead":46781},"verifies":{"ms":3,"rowsRead":21470},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":48,"legacyColdStartMs":48,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":52,"storeInitializationMs":48}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":48,"firstRequestMs":5,"storeInitializationMs":48,"durableObjectInitializationMs":52,"rooms":0,"sequences":0,"projectionBytes":0,"phases":{"schema":{"ms":11,"rowsRead":8306},"plugin":{"ms":20,"rowsRead":41018},"fence":{"ms":12,"rowsRead":46781},"verifies":{"ms":3,"rowsRead":21470},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/normalization/plan","status":404,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/normalization/plan","status":404,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/normalization/plan","status":404,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/normalization/plan","status":404,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/normalization/plan","status":200,"appMs":2}
+service diagnostic op_Oajh4LRH 500 internal_error internal /api/operator/normalization/execute
+error-trace eid_mIMxlls9wpDW fp=46e51b4215eba655 status=500 code=internal_error
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/normalization/execute","status":500,"appMs":3}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":912},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":10},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":11,"projectionBytes":2594}
+{"event":"room.store_initialized","initializationMs":4,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":7,"storeInitializationMs":4}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":3,"firstRequestMs":8,"storeInitializationMs":4,"durableObjectInitializationMs":7,"rooms":1,"sequences":11,"projectionBytes":2594,"phases":{"schema":{"ms":1,"rowsRead":912},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":10},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/normalization/execute","status":200,"appMs":8}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":912},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":10},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":11,"projectionBytes":130}
+{"event":"room.store_initialized","initializationMs":4,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":7,"storeInitializationMs":4}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":3,"firstRequestMs":5,"storeInitializationMs":4,"durableObjectInitializationMs":7,"rooms":1,"sequences":11,"projectionBytes":130,"phases":{"schema":{"ms":1,"rowsRead":912},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":10},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/normalization/execute","status":200,"appMs":5}
+✔ production Native operator adoption preserves existing accounts/connections, fault rollback and lost-ACK cold retry (1661.505125ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1792.002541

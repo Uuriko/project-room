@@ -1,0 +1,71 @@
+{
+  "scope": "offline unpublished candidate cleanup and atomic privacy deletion; no live deployment",
+  "runtimeBase": "6190c0f60",
+  "causalRed": "/tmp/current-candidate-cleanup-red.log",
+  "privacyRed": "/tmp/current-candidate-privacy-red.log",
+  "node": {
+    "pass": 38,
+    "log": "/tmp/current-cleanup-privacy-final-node.log"
+  },
+  "actualWorker": {
+    "pass": 1,
+    "log": "/tmp/current-candidate-cleanup-privacy-worker.log",
+    "initialWorkItems": 60,
+    "initialMessages": 32,
+    "faultAfterActualTargetDelete": true,
+    "coldUnitRetry": true,
+    "sameHeadRecaptureFullActivation": true,
+    "postRestartRetry": true,
+    "targetUnits": [
+      {
+        "deleted": 160,
+        "rowsRead": 18048,
+        "adapterWrites": 170,
+        "rawNativeWrites": 2
+      },
+      {
+        "deleted": 95,
+        "rowsRead": 16841,
+        "adapterWrites": 105,
+        "rawNativeWrites": 2
+      }
+    ],
+    "sourceUnits": [
+      {
+        "deleted": 193,
+        "rowsRead": 899,
+        "adapterWrites": 197,
+        "rawNativeWrites": 2
+      },
+      {
+        "deleted": 26,
+        "rowsRead": 229,
+        "adapterWrites": 28,
+        "rawNativeWrites": 2
+      }
+    ],
+    "privacyErasure": {
+      "atomic": true,
+      "rowsRead": 3832,
+      "adapterWrites": 531,
+      "ordinaryBoundedOperation": false
+    },
+    "unknownUnitCounters": 0
+  },
+  "invariants": [
+    "Unpublished target ownership requires independently proved generation fence",
+    "Published current authority and its tombstones are never cleanup candidates",
+    "Fence removed last, after all unpublished payloads/proofs; source room/work unchanged",
+    "Immutable historical operator rows remain byte-identical",
+    "Receipt IDs deterministically bind control, previous receipt, and exact changed tuples to distinguish same-head generations",
+    "Recapture refuses uncleared targets before writing a witness",
+    "Privacy purge removes raw replay plus unpublished target in actual existing deletion transaction",
+    "Privacy deletion deliberately retains its existing atomic O(N) physical-write cost"
+  ],
+  "remaining": [
+    "Normalized private-work context exposure from latest main is next critical defect",
+    "Old raw key-move COW test seams need explicit45 registration/refusal reconciliation",
+    "Default needs_me/bootstrap/updates/events/listwork ports unfinished",
+    "No live45, no historical certification"
+  ]
+}

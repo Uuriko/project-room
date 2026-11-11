@@ -1,0 +1,31 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":29066496,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ existing owner can edit room instructions after normalized activation and retry exactly (124.729583ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 263.636834
+
+✖ failing tests:
+
+test at tests/current-charter-command.test.mjs:7:1
+✖ existing owner can edit room instructions after normalized activation and retry exactly (124.729583ms)
+  Error: This command has no qualified current-record dependency plan
+      at refuse (file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/current-room-repository.mjs:29:35)
+      at commandContextFromHead (file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/current-room-repository.mjs:403:35)
+      at currentCommandContext (file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/current-room-repository.mjs:399:10)
+      at file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/store.mjs:7082:30
+      at withCurrentRoomWriter (file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/current-room-repository.mjs:145:22)
+      at withCurrentServingWriter (file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/current-room-repository.mjs:384:14)
+      at file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/store.mjs:7067:14
+      at withCurrentReadContext (file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/current-room-repository.mjs:817:14)
+      at file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/store.mjs:7036:35
+      at run (file:///Users/johnpotter/src/pr-recovery-independent-census-1101/server/store.mjs:689:22) {
+    status: 409,
+    code: 'current_room_context_unavailable',
+    headers: null
+  }

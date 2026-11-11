@@ -11,6 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 const WAKE_TOOLS = [
@@ -69,7 +70,7 @@ test("wake tools stay behind a live identity secret", async t => {
   const owner = store.identities.create("Wake owner");
   const created = roomFor(store, rooms, owner);
   const listed = await rpc(origin, "tools/list");
-  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task", "room_identity_mint"]);
+  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task", "room_identity_mint", "room_check_access"]);
   const open = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL });
   assert.equal(open.status, 401);
   assert.equal(open.body.error.code, -32001);
@@ -256,14 +257,14 @@ test("wake.pause and wake.resume use the room wake-queue pause path", async t =>
   const owner = store.identities.create("Pause owner");
   const peer = store.identities.create("Pause peer");
   const created = roomFor(store, rooms, owner);
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "Pause peer", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, peer, { displayName: "Pause peer", permissions: [] });
   const outsider = await call(origin, "wake.pause", {
     roomId: created.roomId, memberId: created.ownerMemberId, requestId: "pause-1", reason: "away"
   }, store.identities.create("Pause outsider").secret);
   assert.equal(outsider.body.result.isError, true);
-  assert.equal(outsider.value.status, 401);
+  assert.equal(outsider.value.status, 403);
+  assert.equal(outsider.value.code, "not_member");
+  assert.equal(outsider.value.next.action, "pair");
 
   const cross = await call(origin, "wake.pause", {
     roomId: created.roomId, memberId: created.ownerMemberId, requestId: "pause-peer", reason: "no"
@@ -319,7 +320,7 @@ test("a session cookie without a bearer secret gets the anonymous MCP catalog", 
     body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/list" }),
   });
   const catalog = await listed.json();
-  assert.deepEqual(catalog.result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task", "room_identity_mint"]);
+  assert.deepEqual(catalog.result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task", "room_identity_mint", "room_check_access"]);
   const roomCall = await fetch(`${origin}/room/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: cookie },

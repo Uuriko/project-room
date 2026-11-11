@@ -1,0 +1,31 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":29934448,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":47,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":30665464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":26295120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":38178488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":34782800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":40925520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":41265384,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":32906152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ transferring the room does not break the audit or the backup (74.319084ms)
+✔ room instructions written before a transfer still audit after it (49.594ms)
+✔ the new owner can write room instructions, and that audits (49.059417ms)
+✔ a self-serve agent room audits clean (52.542958ms)
+✔ an active agent owner's live charter survives strict restore (99.253875ms)
+✔ a forged transfer is still caught (41.363667ms)
+✔ charter audit rejects a known active member who does not own the room (41.070917ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 546.314709

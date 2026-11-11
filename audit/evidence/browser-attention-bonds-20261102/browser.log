@@ -1,0 +1,46 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":58,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":14,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":67,"heapBytes":65367992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":58,"legacyColdStartMs":58,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+room diagnostic op_aEft29Lh 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":52,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":25,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":52,"heapBytes":80064904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":53,"legacyColdStartMs":52,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request access at 1440px: retry leaves a visible confirmation after hiding the form (649.768875ms)
+room diagnostic op_F0xijzgM 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":52,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":24,"rowsRead":0},"fence":{"ms":12,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":51,"heapBytes":97779856,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":52,"legacyColdStartMs":52,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request access at 390px: retry leaves a visible confirmation after hiding the form (574.751167ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":94021784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ access preview: a work card shows exactly what an agent can read before a run, and opening it starts nothing (789.099958ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":47,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":47,"heapBytes":93313208,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":48,"legacyColdStartMs":47,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ owner attention pages 26 pending requests without losing the total (767.805708ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":49,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":49,"heapBytes":110108536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":49,"legacyColdStartMs":49,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ owner attention pages 60 pending requests without losing the total (992.3815ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":21,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":108508664,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ late owner attention page cannot return after signing in as a different member (738.974708ms)
+✔ human attention hides shadow diagnostics until Advanced and reviews the actual receipt work (1048.683042ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":55,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":13,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":56,"heapBytes":79176240,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":56,"legacyColdStartMs":55,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+room diagnostic op_sY__dulr 403 no_bond access /api/rooms/:roomId/commands
+room diagnostic op_w3q7b0C3 403 bond_pending access /api/rooms/:roomId/commands
+room diagnostic op_6J2J-rgj 403 bond_revoked access /api/rooms/:roomId/commands
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":47,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":47,"heapBytes":89668384,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":48,"legacyColdStartMs":47,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ People Friend control proposes without scopes, accepts, messages, and refuses until active (1598.23875ms)
+✔ Enter on Friend does not revoke a bond the peer just accepted (979.396167ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5829.133542

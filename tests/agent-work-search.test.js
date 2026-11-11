@@ -35,6 +35,73 @@ async function setup(t) {
   return { ...f, config, client, send, propose, state, change, read, signEvidence };
 }
 
+async function privateDefinitionFixture(t) {
+  const f = await setup(t);
+  f.send('owner', 'member.added', { memberId: 'observer', displayName: 'Observer agent', kind: 'agent', permissions: [] });
+  f.keys.observer = f.store.issueAccessKey('commons', 'observer');
+  f.propose('private-brief', 'PRIVATE-TITLE-SENTINEL', 'producer', 'PRIVATE-DONE-SENTINEL');
+  f.propose('visible-brief', 'Public next action', 'observer');
+  f.store.dmConsents.request('commons', 'owner', 'producer', 'Synthetic private brief');
+  f.store.dmConsents.decide('commons', 'producer', 'owner', 'approve');
+  f.send('owner', 'message.posted', { messageId: 'private-question', toMemberId: 'producer',
+    workItemId: 'private-brief', requestKind: 'reply', body: 'PRIVATE-BODY-SENTINEL' });
+  return f;
+}
+
+test('orientation applies the same private definition boundary as the work view', async t => {
+  const f = await privateDefinitionFixture(t);
+  for (const view of ['work', 'orientation']) for (const actor of ['observer', 'owner', 'producer']) {
+    const response = await fetch(f.config(actor).origin + '/api/rooms/commons?view=' + view, {
+      headers: { Authorization: `Bearer ${f.keys[actor]}` }
+    });
+    assert.equal(response.status, 200);
+    const packet = await response.json(), item = packet.state.workItems['private-brief'];
+    assert.equal(item.title, actor === 'observer' ? null : 'PRIVATE-TITLE-SENTINEL', `${view}/${actor}`);
+    assert.equal(item.definitionOfDone, actor === 'observer' ? null : 'PRIVATE-DONE-SENTINEL', `${view}/${actor}`);
+    assert.equal(JSON.stringify(packet).includes('PRIVATE-BODY-SENTINEL'), false);
+  }
+});
+
+test('private definition redaction does not disable unrelated work discovery', async t => {
+  const f = await privateDefinitionFixture(t);
+  const response = await fetch(f.config('observer').origin + '/api/rooms/commons?view=work', {
+    headers: { Authorization: `Bearer ${f.keys.observer}` }
+  });
+  assert.equal(response.status, 200);
+  const packet = await response.json();
+  assert.equal(packet.state.workItems['private-brief'].title, null);
+  assert.equal(packet.state.workItems['private-brief'].definitionOfDone, null);
+  const found = await f.client('observer').orient({ query: 'Public next action' });
+  assert.deepEqual(found.work.map(item => item.id), ['visible-brief']);
+  const withheld = await f.client('observer').orient({ query: 'private-brief' });
+  assert.equal(withheld.work.length, 1, 'authorized metadata is not silently dropped');
+  assert.equal(withheld.work[0].title, null, 'withheld definition is not presented as an empty title');
+  assert.deepEqual(withheld.work[0].nextRead, { tool: 'room_read_work', arguments: { workItemId: 'private-brief' } });
+  const orientation = await f.client('observer').orient();
+  assert.equal(orientation.work.find(item => item.id === 'private-brief').title, null);
+  for (const hiddenQuery of ['PRIVATE-TITLE-SENTINEL', 'PRIVATE-DONE-SENTINEL']) {
+    assert.deepEqual((await f.client('observer').orient({ query: hiddenQuery })).work, []);
+  }
+  for (const value of [found, withheld, orientation]) for (const sentinel of ['PRIVATE-TITLE-SENTINEL', 'PRIVATE-DONE-SENTINEL', 'PRIVATE-BODY-SENTINEL']) {
+    assert.equal(JSON.stringify(value).includes(sentinel), false);
+  }
+  for (const actor of ['producer']) {
+    assert.equal((await f.client(actor).orient({ query: 'PRIVATE-TITLE-SENTINEL' })).work[0].title, 'PRIVATE-TITLE-SENTINEL');
+  }
+  assert.equal(f.state().workItems['private-brief'].title, 'PRIVATE-TITLE-SENTINEL', 'reads never rewrite stored evidence');
+  for (const mutate of [
+    item => { item.title = 'Visible half'; },
+    item => { item.definitionOfDone = ''; },
+    item => { item.title = {}; item.definitionOfDone = {}; },
+    item => { delete item.title; delete item.definitionOfDone; }
+  ]) {
+    const malformed = structuredClone(packet); mutate(malformed.state.workItems['private-brief']);
+    const client = new RoomAgentClient({ ...f.config('observer'), fetchImpl: (url, options) =>
+      new URL(url).searchParams.get('view') === 'work' ? Promise.resolve(Response.json(malformed)) : fetch(url, options) });
+    await assert.rejects(client.orient({ query: 'Public next action' }), { code: 'invalid_response' });
+  }
+});
+
 test('agent search shares human matching, returns exact read pointers, and leaves default orientation unchanged', async t => {
   const f = await setup(t);
   f.propose('unicode', 'Café [notes] 🚀', 'producer', 'İ'.repeat(300) + 'needle');
@@ -129,7 +196,8 @@ test('real MCP and CLI search use the shared projection with unchanged tool disc
   saveAgentConnection(directory, { version: 1, ...f.config('producer') });
   const mcp = await openMcpTestClient(directory); t.after(() => mcp.close());
   const before = auditRecovery(f.store).dataSha256, tools = (await mcp.request('tools/list')).result.tools;
-  assert.equal(tools.length, 46);
+  assert.equal(tools.length, 49);
+  assert.ok(tools.some(tool => tool.name === "room_map"));
   const tool = tools.find(tool => tool.name === 'room_list_work'); assert.equal(tool.annotations.readOnlyHint, true);
   assert.equal(tool.inputSchema.properties.query.maxLength, 200); assert.deepEqual(tool.inputSchema.required, []);
   const response = await mcp.call('room_list_work', { query: 'agenda', focus: 'needs_me' });

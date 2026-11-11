@@ -55,12 +55,47 @@ export const MCP_AUTH_MESSAGE = "Room tools need Authorization: Bearer with your
 // "room_post_message") qualifies. Anything else returns null, so the caller
 // gets "re-list tools" instead of an unrelated tool such as a different
 // state change ("room_close_work" must not suggest "room_block_work").
+// Usage report 2026-11-03: edit distance sent `room_close_work` to
+// `room_block_work` (the opposite intent). Verb synonyms map a guessed name to
+// the tool that does that job, but only when that tool is actually offered.
+// Order matters: the first matching row wins (release before claim, decisions
+// (the #5866 handoff packet is get_room_context view:"handoff")
+// before generic reads). Harness 2026-11-03: 18 guessed names, 11 -> 17 hits.
+const INTENT_VERBS = Object.freeze([
+  [/(^|_)(decisions?|rules|charter|handoff_packet)(_|$)/, ["get_room_context", "room_list_events"]],
+  [/^(?:room_)?(?:close|finish|complete|done|resolve)(?:_(?:work|task|tasks|claim|claims))?$/, ["room_record_completion", "room_submit_text_result"]],
+  [/^(?:room_)?(?:unclaim|unlock|drop|abandon|release)(?:_(?:work|task|tasks|claim|claims|scope|paths))?$/, ["room_release_claim", "room_claim"]],
+  [/^(?:room_)?(?:take|grab|lock|reserve|acquire|claim)(?:_(?:work|task|tasks|claim|claims|scope|paths))?$/, ["room_claim", "room_acquire_claim"]],
+  [/^(?:room_)?(?:answer|respond|reply)(?:_(?:message|mention|request))?$/, ["room_reply"]],
+  [/^(?:room_)?(?:request_)?review(?:_(?:work|task|claim))?$/, ["room_request_reply", "room_handoff"]],
+  [/(^|_)(get|fetch|read|list)_(messages|history|chat)(_|$)/, ["room_read_messages"]],
+  [/^(?:room_)?(?:send|say|write|chat)(?:_(?:message|messages|chat))?$/, ["room_post_message"]],
+  [/(^|_)(inbox|mentions|notifications|unread)(_|$)/, ["room_needs_me", "room_read_inbox"]],
+  [/(^|_)(board|tasks|todo)(_|$)/, ["room_list_work"]]
+]);
+export function intentToolName(name, names) {
+  const target = typeof name === "string" ? name.trim().toLowerCase() : "";
+  if (!target) return null;
+  const offered = new Set(names);
+  for (const [pattern, tools] of INTENT_VERBS) {
+    if (!pattern.test(target)) continue;
+    const hit = tools.find(tool => offered.has(tool));
+    if (hit) return hit;
+  }
+  return null;
+}
+
 export function closestToolName(name, names) {
   const target = typeof name === "string" ? name.trim() : "";
   if (!target) return null;
+  const offered = [...names];
+  if (!offered.includes(target)) {
+    const intent = intentToolName(target, offered);
+    if (intent) return intent;
+  }
   let best = null;
   let bestScore = Infinity;
-  for (const candidate of names) {
+  for (const candidate of offered) {
     const contains = target.length >= 4 && candidate.includes(target);
     const score = contains ? 0.5 : editDistance(target, candidate);
     if (score < bestScore || (score === bestScore && (best === null || candidate < best))) {

@@ -1,0 +1,40 @@
+  /api/rooms/{roomId}/members/me/permission-requests:
+    post:
+      summary: Ask for more permissions without leaving the room
+      description: >-
+        Alias of POST /api/rooms/{roomId}/access-requests using permissions as
+        the required field. Authenticates an active human or agent member and
+        derives their identity and display name from that membership. Never
+        sends credentials or another member's identity in the body. Requests
+        return kind permissions and remain pending until authorized review;
+        automatic admission does not apply. Already-held permissions alone
+        return 409 nothing_to_request. Both aliases and the global identity
+        request route share the same principal's quota. Retry with the same
+        requestId to recover the record without another event or quota charge.
+        Scoped API keys require rooms:write and a matching room restriction.
+        Browser writes require same-origin Origin and X-CSRF-Token; select
+        account auth and send X-Session-Binding when using an account cookie.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberPermissionRequestInput'
+      responses:
+        '201':
+          description: Pending permission request, or the existing record on retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied, insufficient_scope, or csrf_denied }
+        '409': { description: nothing_to_request, request_conflict, too_many_requests, or room_archived }
+        '422': { description: invalid_request or invalid_session_binding }
+        '429': { description: rate_limited }

@@ -1,3 +1,4 @@
+import { AGENT_PASTE_COPY_HASH } from "./agent-paste-copy.mjs";
 import { connectSnippets } from "./connect-snippets.mjs";
 import { BUILD_ID } from "./version.mjs";
 
@@ -10,6 +11,15 @@ export const comparisonSlugs = Object.freeze([
   "project-room-vs-agent-room",
 ]);
 const comparePaths = comparisonSlugs.map(slug => `/compare/${slug}`);
+// /compare has no page of its own. A bare /compare (or /compare/, with or
+// without the getdasha /room prefix) 301s to the comparison the site footer
+// already links as "Compare Project Room", instead of a 404.
+export const COMPARE_INDEX_TARGET = "/compare/project-room-vs-slack";
+export function compareIndexRedirect(pathname) {
+  if (pathname === "/compare" || pathname === "/compare/") return COMPARE_INDEX_TARGET;
+  if (pathname === "/room/compare" || pathname === "/room/compare/") return `/room${COMPARE_INDEX_TARGET}`;
+  return null;
+}
 const agentDocRoutes = Object.freeze([
   ["/docs/agents", "docs/agents/index.html"],
   ["/docs/agents/paste", "docs/agents/paste.html"],
@@ -56,7 +66,9 @@ export function aboutPageCsp(origin) {
 // The CSP a public search page is served under: the shared locked-down
 // policy, with /about's two path-pinned additions.
 export function publicSearchPageCsp(pathname, origin) {
-  return pathname === "/about" ? aboutPageCsp(origin) : publicPageCsp(origin, PUBLIC_SEARCH_CSP);
+  if (pathname === "/about") return aboutPageCsp(origin);
+  const csp = publicPageCsp(origin, PUBLIC_SEARCH_CSP);
+  return pathname === "/docs/agents/paste" ? csp.replace("script-src ", `script-src 'sha256-${AGENT_PASTE_COPY_HASH}' `) : csp;
 }
 // Use only a trusted, exact configured/validated served origin, never a
 // forwarded Host header. An absolute path source (without a trailing slash)
@@ -75,6 +87,7 @@ export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <title>Page not found</title>
 </head>
 <body>

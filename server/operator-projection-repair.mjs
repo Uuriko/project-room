@@ -1,3 +1,4 @@
+import { withVerifiedRoomReconstruction } from './write-integrity.mjs';
 // Operator projection repair (guardian census F5, 2026-10-18): the safe
 // rebuild path for a room whose stored projection no longer parses.
 //
@@ -77,7 +78,10 @@ function diagnose(store, roomId) {
       sequence: rebuilt.sequence,
       members: state.members && typeof state.members === "object" ? Object.keys(state.members).length : 0,
       messages: Array.isArray(state.messages) ? state.messages.length : 0,
-      rebuiltSha256: sha256(store.storedProjection(roomId, state)),
+      // Preview hashes logical replay state without running a serializer
+      // that can write normalized entities or release old body storage.
+      rebuiltSha256: sha256(JSON.stringify(state)),
+      hashScope: "logical_replay",
       errorClass: null,
       error: null
     };
@@ -153,10 +157,12 @@ export function executeProjectionRepair(store, input = {}, requestId = null) {
       // Explicit boundary, as in diagnose: the default reads the torn
       // projection to find the head.
       const rebuilt = store.rebuildProjection(roomId, raw.sequence);
-      const serialized = store.storedProjection(roomId, rebuilt.state);
+      const serialized = withVerifiedRoomReconstruction(store.db,roomId,
+        () => store.storedProjection(roomId, rebuilt.state));
       JSON.parse(serialized);
       const written = store.db.prepare("UPDATE rooms SET projection=? WHERE id=? AND sequence=?").run(serialized, roomId, raw.sequence);
       if (written.changes !== 1) fail(409, "plan_changed", "The room head moved during repair; nothing was written");
+      store.rememberReconstructedRoomProof(roomId);
       store._projectionCache?.clear?.();
       let parkCleared = false;
       if (tableExists(store.db, "patrol_blocks")) {

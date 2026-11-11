@@ -1,0 +1,64 @@
+  /api/rooms/{roomId}/directory:
+    get:
+      summary: Directory-listing status (owner)
+      description: >-
+        Room owner only. Whether this room opted into the public directory
+        (GET /api/public/rooms/directory) and when it was first listed.
+        Members and the public never see this; the public reads only the
+        sanitized listing without a credential.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Directory status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  discoverable: { type: boolean }
+                  publicReceipts: { type: boolean }
+                  listedAt: { type: [integer, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: owner_only
+    post:
+      summary: Toggle directory listing (owner)
+      description: >-
+        Room owner only. Accepts { discoverable } and/or { publicReceipts }.
+        Enabling discoverable lists the room in the public directory (title,
+        purpose, member count only); disabling removes it immediately.
+        publicReceipts toggles whether this room's public receipts appear in
+        the public receipts feed. At least one field is required; any other
+        field is 422 invalid_directory.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                discoverable: { type: boolean }
+                publicReceipts: { type: boolean }
+      responses:
+        '200':
+          description: New directory status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  discoverable: { type: boolean }
+                  publicReceipts: { type: boolean }
+                  listedAt: { type: [integer, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: owner_only
+        '422':
+          $ref: '#/components/responses/InvalidInput'

@@ -1,0 +1,180 @@
+{
+  "sourceHead": "d145936f78f2f430f905ff6a94b696167104f10d",
+  "sourceRootPin": "32a55b683724f9bfbd7969679f711af30df6ebe0",
+  "runtimeDiffFromRootPinEmpty": true,
+  "ownership": "Packaging allowlist, package controls and evidence only; runtime changes are root/writer/pairing commits merged without edits.",
+  "changes": [
+    "Existing capacity module and shared current format leaf explicitly included; previous legacy gate/restore modules were already registered.",
+    "Cold archive proves accepted native work, capacity refusal, completion/saved-result/retry and zero legacy mirror rows across reopen.",
+    "Existing actual Native durable fixture runs unchanged outside immutable archive with every production module resolving to archive; no new recovery protocol.",
+    "Current format export is compared against protected native writer-admission receipts; no grandfather/verifier weakening."
+  ],
+  "checks": [
+    {
+      "command": "node --test tests/runtime-package.test.js tests/candidate-manifest.test.js",
+      "head": "d145936f78f2f430f905ff6a94b696167104f10d",
+      "exitCode": 0,
+      "pass": 18,
+      "fail": 0
+    },
+    {
+      "command": "node node_modules/eslint/bin/eslint.js scripts/runtime-package.mjs tests/runtime-package.test.js",
+      "head": "d145936f78f2f430f905ff6a94b696167104f10d",
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "command": "node scripts/runtime-package.mjs create REPOSITORY EXACT_HEAD NEW_DIRECTORY",
+      "head": "d145936f78f2f430f905ff6a94b696167104f10d",
+      "exitCode": 0
+    },
+    {
+      "command": "tar create; extract; copied standalone runtime-package.mjs verify EXTRACTED EXACT_HEAD",
+      "head": "d145936f78f2f430f905ff6a94b696167104f10d",
+      "exitCode": 0
+    }
+  ],
+  "preservedFailures": [
+    {
+      "head": "9aacaeb00f0c6b1d5d7b380e7bbe95e2f0750f8a",
+      "pass": 11,
+      "fail": 6,
+      "cause": "missing current-work-capacity import allowlist"
+    },
+    {
+      "head": "5afb27de71fcb32fb7664b8d70388ecdf610a6c0",
+      "pass": 16,
+      "fail": 2,
+      "cause": "new leaf lacked direct test reference; new harness compared canonical /private/var against /var alias before executing Native fixture"
+    },
+    {
+      "head": "624f0dfc22d4e313563661fdf05051a99c161a6d",
+      "pass": 17,
+      "fail": 1,
+      "cause": "new leaf direct test-reference census only; actual archived Native already passed"
+    }
+  ],
+  "evidenceIntegrityCorrection": {
+    "incorrectIntermediateMessage": "Combined17 existing package/manifest checks pass on5afb",
+    "retracted": true,
+    "actual": "First combined5afb run was16/18: both preflight leaf census and path assertion failed.",
+    "cause": "I summarized only the terminal path failure before inspecting the complete totals; shell exit remained1.",
+    "final": "Finald145 full log totals18/18 and process exit0 were both inspected; original failed logs retained."
+  },
+  "sourceSha256": {
+    "scripts/runtime-package.mjs": "490cf3d252ae814b89c58f88a85021a3275a7f22d954acb3a2f871e85fd77adf",
+    "scripts/CANDIDATE-MANIFEST.json": "b8ffa735cebbebca8b3e7505d5df6de2cde6c7cdaac12b55e85517616ca5fac7",
+    "tests/runtime-package.test.js": "36f7616b9c76aeba69f71fb5a81ecc7e8e68108c7adbf4b13bb863c05672e55c",
+    "server/current-room-format.mjs": "9e1fbb3e862226a636879c3a87ae3989162112049d751cba0997aebd05401b3d",
+    "server/current-work-capacity.mjs": "0b19800f627d533e6f4dc10cfe21989a96a811ff599d6acf50cbd20d7fbcdccc",
+    "server/current-legacy-work-gate.mjs": "e1f5c8edb5d2d497f8b3a83767dbaf068ee39d5c30f3c28a24139e55fb4613a6",
+    "server/restore-admission.mjs": "bd0718fde61dbc1fc2fd2ae9f251eab6173ee0e22070a82981796696b21bfd93",
+    "server/restore-ndjson.mjs": "9a02790e3a065396a2bec64ee32757e10573f9d63a64e0a6868f9806a4447d78",
+    "server/current-room-repository.mjs": "6e2310042c5d694824eef423e368595c9565e88cab9108c42042a9aee3a203b6",
+    "cloudflare/durable-coverage.check.mjs": "2b3744635ad1d1a0aa8aeb69c8767391166668985541e5ff3f74d5c949342aab",
+    "cloudflare/durable-coverage-seed.test-fixture.mjs": "557ed8ea136a1f6acfc9001cd75943c7fc60f0a2a28237532ecdbbc1e2e963ef",
+    "cloudflare/durable-coverage-native.test-fixture.mjs": "d8dcd37619ae2f821662a772d6803d306b1cbc828bdeb346c9f6fa77a2907a7a",
+    "cloudflare/current-room-serving.test-fixture.mjs": "4b35e87d42ea6cc5146f5e544862284fdfcb79cd05f53db67c9ee4a7acfe19b7"
+  },
+  "packageCreate": {
+    "verified": true,
+    "sourceCommit": "d145936f78f2f430f905ff6a94b696167104f10d",
+    "sourceTree": "3dbd676ea3d8fbf9b3ac37d2792a44e52531ef95",
+    "schemaVersion": 45,
+    "files": 684,
+    "assets": 142,
+    "manifestSha256": "fd3b51faecf9cf3cb8a9b9561c0efd0b1acce2a2cbddf60de8d3cf5c2bc7e12e"
+  },
+  "standaloneExtractedVerify": {
+    "verified": true,
+    "sourceCommit": "d145936f78f2f430f905ff6a94b696167104f10d",
+    "sourceTree": "3dbd676ea3d8fbf9b3ac37d2792a44e52531ef95",
+    "schemaVersion": 45,
+    "files": 684,
+    "assets": 142,
+    "manifestSha256": "fd3b51faecf9cf3cb8a9b9561c0efd0b1acce2a2cbddf60de8d3cf5c2bc7e12e"
+  },
+  "nativeQualification": {
+    "sourceCommit": "d145936f78f2f430f905ff6a94b696167104f10d",
+    "package": {
+      "verified": true,
+      "sourceCommit": "d145936f78f2f430f905ff6a94b696167104f10d",
+      "sourceTree": "3dbd676ea3d8fbf9b3ac37d2792a44e52531ef95",
+      "schemaVersion": 45,
+      "files": 684,
+      "assets": 142,
+      "manifestSha256": "fd3b51faecf9cf3cb8a9b9561c0efd0b1acce2a2cbddf60de8d3cf5c2bc7e12e"
+    },
+    "qualification": {
+      "runtimeSource": "751f786639+native-work-2-restore-gate",
+      "actualNative": true,
+      "importedPartialEvents": 1000,
+      "sourceSeal": true,
+      "coverageSteps": 49,
+      "coverageRows": 6075,
+      "maxPayloadRowsPerStep": 128,
+      "coldDuringCoverage": true,
+      "preopenedPreparedDenied": true,
+      "ordinaryReady503UntilAudit": true,
+      "finalUnboundedAuditRequired": true,
+      "coldReady": true,
+      "exactRetry": true,
+      "wholeRecoveryBounded": false,
+      "acceptedNativeWorkCapacity": true,
+      "nativeWorkExactRetry": true
+    },
+    "fixturesOutsideArchive": [
+      "durable-coverage.check.mjs",
+      "durable-coverage-seed.test-fixture.mjs",
+      "durable-coverage-native.test-fixture.mjs",
+      "current-room-serving.test-fixture.mjs"
+    ],
+    "productionSource": "verified offline archive",
+    "archiveUnchanged": true
+  },
+  "fixtureSourceLabelNote": "qualification.runtimeSource is the unchanged fixture descriptive string, not the exact executed commit. sourceHead and package.sourceCommit above are the exact artifact identity.",
+  "artifact": {
+    "path": "/tmp/project-room-combined-offline-d145936f7.tar",
+    "bytes": 14261760,
+    "sha256": "ad891b490811267a68054b9581dcf8b9e5b1f689f5b96b2044095c9d6d1e00a6",
+    "extractedPath": "/tmp/project-room-combined-extracted-d145936f7",
+    "standaloneVerifierPath": "/tmp/combined-offline-final-verifier.mjs",
+    "standaloneVerifierSha256": "490cf3d252ae814b89c58f88a85021a3275a7f22d954acb3a2f871e85fd77adf"
+  },
+  "logs": {
+    "original-red": {
+      "path": "audit/evidence/combined-offline-package-original-red-20261101.log",
+      "sha256": "8d73136ae6fd60d70fdacf2f4260e4c2f58e3358d22ac4da68e108846888f219"
+    },
+    "path-and-census-red": {
+      "path": "audit/evidence/combined-offline-package-path-and-census-red-20261101.log",
+      "sha256": "6cdba8d4375164c3a6f9f7f2961d655f64a10dc02431746a0522362da8af928b"
+    },
+    "census-red": {
+      "path": "audit/evidence/combined-offline-package-census-red-20261101.log",
+      "sha256": "34aa0e5d4e7ba68f848725cf953fd19594791c54e78cc39e37dd7878e3ebe0fa"
+    },
+    "native-targeted": {
+      "path": "audit/evidence/combined-offline-package-native-targeted-20261101.log",
+      "sha256": "2f29188fa71133d788f77504687d327e5c8937c22b81b92c2dd88b8f8cc86051"
+    },
+    "green": {
+      "path": "audit/evidence/combined-offline-package-green-20261101.log",
+      "sha256": "31e3c42bedb05d8210a15bc87df6029bfa01d9aeb0fe1e54e6e3306ad3ecf589"
+    },
+    "lint": {
+      "path": "audit/evidence/combined-offline-package-lint-20261101.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "boundaries": [
+    "Offline only; no push, PR, deployment, live mutation or schema45 activation.",
+    "Private/hash/duplicate/symlink/schema46/import-closure and omitted-dependency controls preserved.",
+    "Operator target gates and ordinary refusal are observed by the existing Native fixture.",
+    "Coverage payload progress <=128 rows per step is not a whole-request physical SQL/CPU claim.",
+    "Source loading and final full recovery audit remain monolithic; wholeRecoveryBounded is explicitly false.",
+    "Root supplied old625 gate-negative qualification; this lane does not claim to rerun those separate10Node controls.",
+    "Final receipt commit may add evidence only; saved exact artifact is d145."
+  ]
+}

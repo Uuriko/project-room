@@ -21,6 +21,7 @@ import { allowlistProblems, extractLegacyRoutes, loadRouteSources } from "../scr
 import { methodCoverageProblems, openApiParseErrors } from "../scripts/openapi-gen.mjs";
 import { openapiOperations } from "../scripts/open-routes.mjs";
 import { parse as parseOpenApiYaml } from "yaml";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const root = new URL("..", import.meta.url);
 
@@ -416,7 +417,7 @@ test("docs 403 descriptions match the served error codes for owner-gated room ro
   });
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Docs parity prober");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  linkWithProof(store, ownerKey, "commons", identity, { permissions: ["accept_work"] });
   const probe = async (method, path, reqBody) => {
     const res = await fetch(`${origin}${path}`, {
       method,

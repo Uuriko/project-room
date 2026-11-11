@@ -189,3 +189,10 @@ test("C6 grouping handles empty history and unknown event types", () => {
   assert.equal(briefHistoryGroup(item(1, "member.added", {}), "owner"), "other");
   assert.deepEqual(BRIEF_HISTORY_GROUPS, ["outcome", "question", "blocker", "decision", "other"]);
 });
+
+test('native empty private history pages advance by explicit examinedThrough without acknowledging',async()=>{
+ const{client,view,pending,errors,acknowledgments}=fixture();client.sequence=6;const native=(items,examined)=>({...page(items,{horizon:6}),contractVersion:2,history:{...page(items,{horizon:6}).history,examinedThrough:examined,hasMore:examined<6,continuation:examined<6?{horizon:6,after:examined,cursor:0}:null}});
+ const first=view.refresh();pending[0].resolve(native([1,2],2));await first;const more=view.more();pending[1].resolve(native([],4));await more;assert.deepEqual(view.brief.history.items.map(r=>r.sequence),[1,2]);assert.deepEqual(view.brief.history.continuation,{horizon:6,after:4,cursor:0});const last=view.more();pending[2].resolve(native([6],6));await last;assert.deepEqual(view.brief.history.items.map(r=>r.sequence),[1,2,6]);assert.deepEqual(errors,[]);assert.deepEqual(acknowledgments,[]);
+});
+
+test('native private continuation refuses an unchanged or out-of-horizon examined bound',async()=>{for(const examined of[2,7]){const{view,pending,errors}=fixture(),native=(items,through)=>({...page(items,{horizon:6}),contractVersion:2,history:{...page(items,{horizon:6}).history,examinedThrough:through,hasMore:true,continuation:{horizon:6,after:through,cursor:0}}});const first=view.refresh();pending[0].resolve(native([1,2],2));await first;const more=view.more();pending[1].resolve(native([],examined));await more;assert.equal(errors.length,1);assert.deepEqual(view.brief.history.items.map(r=>r.sequence),[1,2]);}});

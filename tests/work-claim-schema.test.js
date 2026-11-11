@@ -1,3 +1,4 @@
+import {createDurableWorkClaimRegistry} from "../server/work-claim-sqlite.mjs";
 // Production startup is the boundary: incompatible existing tables must not
 // be silently repaired, while an older database with neither table may migrate.
 import test from "node:test";
@@ -46,7 +47,8 @@ for (const readOnly of [false, true]) {
     test(`RoomStore refuses ${label} claim schema on ${readOnly ? "read-only" : "write"} startup without repair`, t => {
       const { filename } = fixture(t);
       const before = inspect(filename, db => { db.exec(damage); return allSchema(db); });
-      assert.throws(() => { const unexpected = new RoomStore(filename, { readOnly }); unexpected.close(); }, /Work-claim schema requires operator reconciliation/);
+      assert.throws(() => { const unexpected = new RoomStore(filename, { readOnly }); unexpected.close(); }, label === "malformed" ? /Database writer fence requires operator reconciliation/ : /Work-claim schema requires operator reconciliation/);
+      inspect(filename, db => assert.throws(() => createDurableWorkClaimRegistry(db).verifySchema(), /Work-claim schema requires operator reconciliation/));
       assert.deepEqual(inspect(filename, allSchema), before, "refused startup must leave the existing schema unchanged");
     });
   }

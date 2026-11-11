@@ -1,0 +1,38 @@
+✔ parseArgs: link, subcommands, options and errors (0.521625ms)
+✔ known agents use the verified ACP commands (0.260333ms)
+✔ candidates: custom command wins; npx fallback only when an agent is named (0.183125ms)
+✔ spawnAgent: child env is an allowlist — no parent credential crosses (RES-0151/RES-0145, one site) (26.115584ms)
+✔ spawnAgent preserves an explicitly selected Codex configuration directory (23.547791ms)
+✔ probe: initialize against the fake agent reports capabilities (22.610417ms)
+✔ probe: a missing binary fails without throwing (0.678916ms)
+✔ doctor lists the fake agent's capabilities (23.56125ms)
+✔ doctor with no ACP agent names the adapters and flags plain claude (0.522833ms)
+✖ spawnAgent preserves exact locale/location/fixture names and excludes arbitrary prefixed context (20.855458ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 155.611917
+
+✖ failing tests:
+
+test at tests/room-acp-agents.test.js:118:1
+✖ spawnAgent preserves exact locale/location/fixture names and excludes arbitrary prefixed context (20.855458ms)
+  AssertionError [ERR_ASSERTION]: LC_ROOM_TOKEN crossed to child
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-acp-env-prefix-review-1101/tests/room-acp-agents.test.js:134:39)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

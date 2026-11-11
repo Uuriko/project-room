@@ -1,0 +1,156 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":52,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":21,"rowsRead":0},"fence":{"ms":12,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":57,"heapBytes":38696904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":53,"legacyColdStartMs":52,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ no event type leaves the room unauditable (0.278084ms)
+✔ the sweep covers enough of the event surface to be worth trusting (0.073792ms)
+✔ the event surface has not grown without this sweep noticing (0.0465ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":52,"integrity":"eager","phases":{"schema":{"ms":14,"rowsRead":0},"plugin":{"ms":21,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":55,"heapBytes":28582728,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":53,"legacyColdStartMs":52,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":45,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":29201336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":45,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":49,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":23,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":49,"heapBytes":36628352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":49,"legacyColdStartMs":49,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":43,"heapBytes":33062064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":30548144,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":44,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":45,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":43498568,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":45,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":39131664,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":43,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":34827576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":43,"heapBytes":30030792,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":41,"heapBytes":41079864,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a room with a reply request audits clean before anything is edited (78.68325ms)
+✔ editing a message unrelated to any request does not fail the audit (63.713792ms)
+✔ editing the request message itself does not fail the audit (64.857583ms)
+✔ deleting a message does not fail the audit, and the tombstone is replayed (61.371292ms)
+✔ repeated edits and then a delete on the same message audit clean (61.596584ms)
+✔ a projection body rewritten behind the log is still caught (59.166667ms)
+✔ a rewritten edit event is still caught (55.403833ms)
+✔ an edit naming a message that was never posted is still caught (51.984958ms)
+✔ removing the edit event while the projection keeps the edit is still caught (53.972709ms)
+✔ a message injected straight into the projection is still caught (53.145625ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":55,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":21,"rowsRead":0},"fence":{"ms":14,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":60,"heapBytes":38985480,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":55,"legacyColdStartMs":55,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":50183000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":45,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":56777984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":45,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a room that changed hands can still audit a request the new owner cancels (121.411292ms)
+✔ a member who is neither the requester nor the owner is still refused (91.83625ms)
+✔ the requester can still cancel their own request after a transfer (86.755334ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":12,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":51,"heapBytes":41019520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":47,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":49922584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ ordinary directed messages and ignored historical request fields remain ordinary (115.600208ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":45918344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":49931584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":65652864,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":91309864,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":78072576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":93835200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":124786216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":105527120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":114244800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":122743072,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":131659040,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":140605744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":116020976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":124866304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":139469672,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":147745024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":165022232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":134932248,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":148022896,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ compact message reads retain work links without exposing private messages to other members (67.676ms)
+✔ explicit answer appends once, retains exact historical retries and does not complete work (62.303541ms)
+✔ request bundles reject missing, null, mixed, spoofed and proposal fields without any writes (87.479542ms)
+✔ ordinary clarification changes context, but independent request/work branches do not (124.704458ms)
+✔ active recipient can decline after requester deactivation, without relaxing ordinary targeting (57.541625ms)
+✔ requester or actual human owner can cancel; the first terminal operation wins (56.820625ms)
+✔ full request history audit rejects matching forged checkpoints and projections (85.867459ms)
+✔ request map is bounded and unsupported event policies cannot be silently interpreted (1.037375ms)
+✔ selected exchange freezes pages, exposes basis only after context is drained, and stays read-only (69.319583ms)
+✔ request history keeps between-poll terminals and sparse/empty anchored progress (51.069541ms)
+✔ historical selection is frozen even when a request resolves between pages (47.782791ms)
+✔ resume tokens bind selection, identity and every retained boundary; rotation preserves identity (52.986334ms)
+✔ marked-event extras and malformed checkpoint-hidden clarification bytes are rejected (47.522333ms)
+✔ real account-session resume survives relogin, rejects stale binding and fences a changed auth epoch (60.069834ms)
+✔ zero checkpoints, post-terminal comments and pasted-draft provenance stay explicit (49.211667ms)
+✔ a reply request and its answer carry the channel they were written in (50.139125ms)
+✔ prepared instructions stay current while selected conversation pagination remains frozen (45.964208ms)
+✔ follow-up preparation carries bounded completed exchanges for the same pair only (55.374542ms)
+✔ follow-up refuses withdrawn context and oversized history instead of silently omitting it (61.947709ms)
+✔ follow-up chains stop at eight prior exchanges and never carry another work branch (55.470292ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":48459232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ reply discovery points to selected context and cannot bypass unfinished pages (55.09375ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":60293352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":70967776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":105675408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":132776520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":58984424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ needs-me orientation includes only incoming open request metadata (54.830875ms)
+✔ hosted needs-me discovers private incoming requests without exposing their bodies (53.618708ms)
+✔ reply audit rejects an access change for an inherited member id (0.088791ms)
+✔ selected archived reply context does not refetch every message in ID batches (169.428ms)
+✔ selected archived context keeps unrelated body text out of SQL result materialization (168.723333ms)
+✔ metadata context traversal preserves canonical corruption rejection outside the selected exchange (49.547667ms)
+room diagnostic op_rR3zO7GD 401 unauthenticated access /api/rooms/:roomId/reply-requests
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":83991120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request listing avoids full room hydration with 10 unrelated messages (96.370708ms)
+room diagnostic op_7wDWrnl3 401 unauthenticated access /api/rooms/:roomId/reply-requests
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":79704240,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request listing avoids full room hydration with 100 unrelated messages (168.567625ms)
+room diagnostic op_4OefimPD 404 reply_request_not_found not_found /api/rooms/:roomId/reply-context
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":90742488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":99880928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":108677600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request reads respect since-join history after member reactivation (56.067916ms)
+✔ follow-up preparation refuses prior exchanges hidden by a new history policy (46.863042ms)
+✔ history checkpoints do not disclose hidden answered exchanges after reactivation (46.349166ms)
+✔ history checkpoints do not disclose hidden cancelled exchanges after reactivation (45.773458ms)
+ℹ tests 50
+ℹ suites 0
+ℹ pass 50
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2550.563625

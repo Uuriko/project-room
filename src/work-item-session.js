@@ -122,6 +122,30 @@ export function validateAttemptModel(value) {
   return value.trim();
 }
 
+// Caller declarations, never provider attestation or an authorization input.
+export function validateAttemptDeclaration(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !value.trim() || value.length > 100 || /[\u0000-\u001f\u007f]/.test(value))
+    throw new Error("Declaration must be 1-100 printable characters");
+  return value.trim();
+}
+
+export function completionAttemptSnapshot(item, attemptNumber, actorId, producerId) {
+  if (attemptNumber === undefined) return null;
+  if (!Number.isSafeInteger(attemptNumber) || attemptNumber < 1) throw new Error("Completion attempt must be a positive integer");
+  const attempt = attemptLedger(item).find(a => a.attempt === attemptNumber);
+  if (!attempt || attempt.outcome !== "done" || !attempt.endedAt) throw new Error("Completion attempt must identify a finished successful attempt of this work");
+  if (attempt.performer !== actorId || producerId !== actorId) throw new Error("Completion attempt must belong to the reporter and explicitly reported producer");
+  return { ...attempt, limits: attempt.limits ? { ...attempt.limits } : null,
+    outputs: attempt.outputs ? [...attempt.outputs] : null, attribution: "declared-unverified" };
+}
+
+export function attemptDeclarationLabel(attempt) {
+  if (!attempt) return "";
+  const parts = ["provider", "client", "model"].filter(key => typeof attempt[key] === "string" && attempt[key]).map(key => `${key}: ${attempt[key]}`);
+  return parts.length ? `Declared, unverified · ${parts.join(" · ")}` : "";
+}
+
 export function validateAttemptOutputs(value) {
   if (value === undefined || value === null) return null;
   // Legacy session stops carried outputs as one free-text string; replay keeps it.
@@ -147,6 +171,8 @@ export function attemptLedger(item) {
       inputRevision: Number.isSafeInteger(a.inputRevision) ? a.inputRevision : null,
       environment: typeof a.environment === "string" ? a.environment : null,
       ...(typeof a.model === "string" ? { model: a.model } : {}),
+      ...(typeof a.provider === "string" ? { provider: a.provider } : {}),
+      ...(typeof a.client === "string" ? { client: a.client } : {}),
       limits: a.limits && typeof a.limits === "object" && !Array.isArray(a.limits) ? Object.freeze({ ...a.limits }) : null,
       endedAt: typeof a.endedAt === "string" ? a.endedAt : null,
       outcome: a.outcome === "done" || a.outcome === "failed" ? a.outcome : null,
@@ -287,6 +313,9 @@ export function attemptReceipts(item) {
     usageCents: a.usageCents ?? null, // measured at close; null = unknown
     estimateCents: a.limits?.maxSpendCents ?? null, // the estimate, kept apart from measurement
     ...(a.model ? { model: a.model } : {}), // declared at start; absent = unknown
+    ...(a.provider ? { provider: a.provider } : {}),
+    ...(a.client ? { client: a.client } : {}),
+    ...(a.provider || a.client ? { attribution: "declared-unverified" } : {}),
     successClaim: a.outcome !== "done" ? "not-claimed"
       : (Array.isArray(a.outputs) && a.outputs.length > 0 && Number.isSafeInteger(a.usageCents) ? "verified" : "unverified")
   })));
@@ -423,6 +452,8 @@ export function applySessionFields(item, incoming) {
     }
     const environment = validateAttemptEnvironment(incoming.data?.environment);
     const model = validateAttemptModel(incoming.data?.model);
+    const provider = validateAttemptDeclaration(incoming.data?.provider);
+    const client = validateAttemptDeclaration(incoming.data?.client);
     item.status = SESSION_STATUSES.PROCESSING;
     item.stop_requested_at = null;
     item.heartbeat_at = at;
@@ -436,7 +467,7 @@ export function applySessionFields(item, incoming) {
     item.suspended_by = null;
     (Array.isArray(item.attempts) ? item.attempts : (item.attempts = [])).push({
       attempt: attempts, performer: incoming.actorId, startedAt: at, inputRevision: item.revision,
-      environment, ...(model ? { model } : {}), limits: budget, endedAt: null, outcome: null, outputs: null });
+      environment, ...(model ? { model } : {}), ...(provider ? { provider } : {}), ...(client ? { client } : {}), limits: budget, endedAt: null, outcome: null, outputs: null });
     // #603: claiming (set_status: processing) automatically moves the work
     // item to accepted. The lifecycle and session ladders are unified.
     if (item.state === "proposed") item.state = "accepted";

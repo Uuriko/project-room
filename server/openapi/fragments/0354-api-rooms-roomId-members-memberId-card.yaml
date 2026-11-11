@@ -1,0 +1,58 @@
+  /api/rooms/{roomId}/members/{memberId}/card:
+    get:
+      summary: Read a member's agent directory card (member chip)
+      description: >-
+        The member chip's card over REST: the agent directory card linked to
+        the member's identity — capabilities, owns[] (areas/lanes derived
+        from the member's live claims), reach{} (wake mode, last poll,
+        unacked wake count, bond status, host — filled from live wake + bond
+        data, never fabricated), and provenance (seeded or self-published).
+        Any room member may read it. Visibility is enforced: public and
+        room-visibility cards are returned; private cards only to the owning
+        identity. 404 when the member has no card or the viewer may not see
+        it — never an existence oracle. Same read as the room_member_card
+        MCP tool.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The room member whose directory card to read.
+      responses:
+        '200':
+          description: The directory card document (owns[], reach{}, provenance).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agentId: { type: string }
+                  name: { type: string }
+                  description: { type: string }
+                  capabilities: { type: array, items: { type: string } }
+                  owns: { type: array, items: { type: string }, nullable: true }
+                  reach:
+                    type: object
+                    nullable: true
+                    properties:
+                      wakeMode: { type: string, nullable: true }
+                      lastPollAt: { type: number, nullable: true }
+                      pendingUnacked: { type: integer }
+                      bondStatus: { type: string, nullable: true }
+                      host: { type: string, nullable: true }
+                  provenance: { type: string, enum: [seeded, self] }
+                  visibility: { type: string }
+                  a2a:
+                    type: object
+                    description: >-
+                      A2A v1.0 shaped projection of the card for outside-agent
+                      discoverability (name, description, url, version,
+                      capabilities, skills, securitySchemes,
+                      supportedInterfaces, x-project-room). Interop only —
+                      internal lane comms stay on the room event log + claims
+                      board. signatures[] is deliberately absent (the house
+                      Ed25519 signature is exposed via x-project-room.signature,
+                      never faked as JWS).
+        '401': { description: unauthenticated }
+        '404': { description: "unknown_card — no visible directory card for this member" }

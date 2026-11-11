@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { redactEventPage, redactSnapshotState } from "../server/redact-read.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // Reads go through server/redact-read.mjs. One edited message and one deleted
 // message: earlier wording is absent on every listed read, and the edited
@@ -26,9 +27,7 @@ async function serve(t) {
   store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Read redaction");
-  store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Reader", permissions: []
-  });
+  linkWithProof(store, ownerKey, "commons", identity, { displayName: "Reader", permissions: [] });
   const cmd = (type, data) => store.command(ownerKey, "commons", { id: randomUUID(), type, data });
   cmd(T.MESSAGE_POSTED, { messageId: "kept", body: PRIOR });
   cmd(T.MESSAGE_EDITED, { messageId: "kept", body: CURRENT, expectedMessageRevision: 0 });

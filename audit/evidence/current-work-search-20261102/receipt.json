@@ -1,0 +1,95 @@
+{
+  "runtimeCommit": "34b1c7b98",
+  "baseRoot": "645857cd4",
+  "followup": "this commit: exact error catalog/AX, thin-title excerpt cure, cold+browser controls",
+  "results": {
+    "finalFocusedNode": {
+      "tests": 42,
+      "pass": 42,
+      "fail": 0,
+      "skip": 0
+    },
+    "actualChromiumBrowser": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "workPages": 3,
+      "searchPages": 6,
+      "tasks": 11
+    },
+    "runtimePreflight": {
+      "tests": 2,
+      "pass": 2,
+      "fail": 0
+    },
+    "openapi": "parse and route gate passed",
+    "followupLintErrors": 0
+  },
+  "causalControls": {
+    "originalPrivateBoundary": "Exact645 source:4/9 passed5failed; work snapshot/search failed old blob reads; unbounded snapshot intentionally unsupported.",
+    "eventPrivacy": "After bounded work/search ports but before selected event redaction:7/9 passed; historical proposal event exposed title/DOD in window/bootstrap.",
+    "browser": "Actual Chromium app search failed with undefined.toLocaleLowerCase on thin title match; retained log, then original matched-title excerpt fallback passes."
+  },
+  "limits": [
+    "No physical SQL or Native cost proof claimed for these new adapters.",
+    "Search version2 totals are always null; page completion does not turn the current page into a global count.",
+    "Browser local search examines only its held window and says so; complete source enumeration tested through actual authenticated browser HTTP requests and SDK. No GUI whole-room search claim.",
+    "Full legacy normalized snapshot still intentionally refuses; selected detail and current window preserve participant/privacy assertions.",
+    "Definition/receipt source bytes remain under existing shared256KiB admission; later full body candidates can defer into next page without increasing cap.",
+    "Cursors are viewer/credential/query/view/head bound, server encrypted, restart-invalid. Cold and revoked-key tests passed.",
+    "No schema, writer format, durable progress protocol or grants changed.",
+    "Default full recovery oracle remains mandatory."
+  ],
+  "logs": [
+    {
+      "name": "normalized-private-work-before.log",
+      "bytes": 11211,
+      "sha256": "cac6e1e66653487588d6e7de5817e36990a8eec66d1c02e66a04179573ecffd5"
+    },
+    {
+      "name": "native-private-work-after.log",
+      "bytes": 7247,
+      "sha256": "83945c1380bef7599d94a75971fcd0c68f8a98285fff44ad07e2ee5187d6534a"
+    },
+    {
+      "name": "current-work-search-browser.log",
+      "bytes": 2879,
+      "sha256": "48791aec0a06e9f1b5a971a4ce0b7a2d2c9704ef106e207396bd3ee5db92ebb1"
+    },
+    {
+      "name": "current-work-search-browser-final.log",
+      "bytes": 1419,
+      "sha256": "6091c94870ab5474b5dc209363a7df717064edd22ae2d20a7eb02d49459f6a7a"
+    },
+    {
+      "name": "current-work-search-final.log",
+      "bytes": 18722,
+      "sha256": "b37702b8354d509836a1badd16dddcb006ff769f3e3f4f9f59886dc76e8818f3"
+    },
+    {
+      "name": "current-work-search-package.log",
+      "bytes": 296,
+      "sha256": "d846fae2a9ee02fbdd9c48d78c0e9ebf4c14a3a986deee7976ac6a74298c61ce"
+    },
+    {
+      "name": "current-work-search-openapi.log",
+      "bytes": 137,
+      "sha256": "d27d074bd2d6ca8e91d89adfec46f59e934427d590ec418d7a715fdb940c541e"
+    },
+    {
+      "name": "current-work-search-followup-lint.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "sourceHashes": {
+    "server/current-search.mjs": "1a40da9f1927d04c0ea5ba63e58fb119eba08ede44bb852a39055bb66566a84a",
+    "server/current-work-snapshot.mjs": "b270ba6dca36b78a224e32125d886b1050ba8526b48529af4c4f920f4cf5d12a",
+    "server/current-room-events.mjs": "73149de5448a1ee2d4f0ba08f6365ff075239aff4e3f144584b556097c945b1a",
+    "src/work-selectors.js": "eeda5f25e3cbfd632c6b89387eadd96accbcc998a37fd7cf6cb2ef94889ec9c4",
+    "src/app.js": "3dd1fc785ed22581f3ac128d2d8e2f0e6ff59f50140bf0a5e5bf687ed6764805",
+    "client/room-agent.mjs": "c2b7bde55118830364a45072ebc0479d7f8afe72e114b84cd33a8882d40c6e56",
+    "tests/current-work-search.test.mjs": "99ac8d0a796b4a4c089be21f608af59f73ce21d91359f34b0aec5ee42cee8521",
+    "scripts/current-work-search-browser-check.mjs": "af54d2b1958aa8bfb18524b13575a6b10c35e61740a015c4cf9d57ffa1102ae2"
+  }
+}

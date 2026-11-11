@@ -86,6 +86,19 @@ test("room receipts list alongside public-work receipts, newest first, feed shap
   const { store, galleryKey, feed } = await serve(t);
   store.command(galleryKey, "gallery-room", { id: "opt-in", type: "room.public_receipts_set", data: { enabled: true } });
   store.workClaims.set("gallery-room", mergedClaim("settled-claim", "Room receipt, newer"));
+  // Production order (A6): the source record is inserted at submission
+  // and the mirror projected from it in the same operation — seed the
+  // source row too, or the feed's fail-closed leg hides the receipt.
+  store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    "pwr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "offer-feed", "public-gallery", 1, "ai_public", "note", "ab".repeat(32), 4,
+    JSON.stringify({
+      schema: "public-work-receipt/1",
+      receiptId: "pwr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      namespaceId: "public-gallery", identityId: "ai_public",
+      title: "Public work receipt, older", createdAt: "2026-10-01T00:00:00.000Z",
+      artifact: { sha256: "ab".repeat(32) },
+    }), Date.now());
   projectPublicWorkReceipt(store, {
     receiptId: "pwr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     title: "Public work receipt, older",

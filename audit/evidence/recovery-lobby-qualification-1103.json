@@ -1,0 +1,50 @@
+{
+  "base": "9b7eee36f9ca1c05b2629647f8a16fd2d1779fce",
+  "heads": {
+    "5854": "8213a4415b39e79ebb303b981c9c2d3587903db1",
+    "5849": "f3885e4e714987e01ffb46fbad4431d9145122af",
+    "5853": "24a9aca8b343c914ca9f25bcee9230c257907832",
+    "5848": "628013487e7e586b65d2465dab3fec8615e8516a",
+    "5892": "1bad7eb124e85f464d2505c194ef932b3da9795b"
+  },
+  "node": "24.22.1",
+  "results": {
+    "affectedNode": {
+      "pass": 51,
+      "fail": 0
+    },
+    "authBrowser": {
+      "pass": 2,
+      "fail": 0
+    },
+    "publicConnectionBrowserWidths": [
+      320,
+      1280
+    ],
+    "publicConnectionBrowser": "Enter expands native details;>=44px control; copy action visible; open-work link; zero page errors; whole-room hydration prohibited",
+    "native": {
+      "pass": 2,
+      "fail": 0
+    },
+    "preflightRuntimeFiles": 745,
+    "stringsBuild": "pass"
+  },
+  "rootCorrections": [
+    "Register actual capacity Native check in cloudflare npm test.",
+    "Replace stale text-only refresh assertion with visible/enabled/focused Reconnect click and actual sign-in-required recovery; original red log preserved.",
+    "Regenerate candidate manifest for composed assets.",
+    "Policy comment describes Root-adopted English MVP tradeoff instead of attributing an unverified quote to John.",
+    "Independent review found author policy warned for all RULES. Actual CLI placeholder-growth test failed before; Root restricts advisory to hardcoded-ui-string and retains structural failures."
+  ],
+  "safety": [
+    "Only409pilot_limit is retained as uncertain;401/403/session_binding_changed invalidate as before.",
+    "No authorization, account, identity, invite, scope or grant changes.",
+    "Only localization-copy count growth becomes advisory; scope, catalog, exact-baseline, placeholder and budget checks remain gates.",
+    "Public watch links remain gated by owner publication; withdrawal/privacy controls passed."
+  ],
+  "limits": [
+    "Local Chromium plus actual Miniflare fixtures, not a real human second-account install.",
+    "No production storage-error injection or real account expiry imposed."
+  ],
+  "negativeControl": "/tmp/root-copy-policy-placeholder-before.log"
+}

@@ -106,7 +106,7 @@ test("day 30: the expired room token 401s with recovery teaching; the identity s
   assert.equal(memberCount(store, "commons"), 1, "no replacement membership was created");
 });
 
-test("recovery: re-join with the original expired code + identity secret returns a fresh room token, same membership", async t => {
+test("recovery: re-join with the original expired code and identity secret keeps the membership; rotate issues the fresh room token", async t => {
   const { origin, ownerKey, clock, store } = await serve(t);
   const minted = await mint(origin, ownerKey);
   const code = minted.json.code;
@@ -132,17 +132,25 @@ test("recovery: re-join with the original expired code + identity secret returns
   assert.equal(viaRedeem.json.duplicate, true);
   assert.equal(viaRedeem.json.identityId, identityId);
   assert.equal(viaRedeem.json.memberId, memberId);
-  assert.ok(viaRedeem.json.mcpToken.credential.startsWith("rak_"));
-  assert.notEqual(viaRedeem.json.mcpToken.credential, deadToken);
+  assert.equal(viaRedeem.json.mcpToken, null, "re-redeeming does not mint another room token");
+  const rotateStep = viaRedeem.json.next.find(step => step.action === "rotate");
+  assert.equal(rotateStep?.method, "POST");
+  const rotated = await post(origin, rotateStep.path, {}, identitySecret);
+  assert.equal(rotated.status, 200, JSON.stringify(rotated.json));
+  assert.match(rotated.json.mcpToken.credential, /^rak_/);
+  assert.notEqual(rotated.json.mcpToken.credential, deadToken);
   const viaJoin = await post(origin, "/api/join", { displayName: "Recovering Bot", inviteCode: code }, identitySecret);
   assert.equal(viaJoin.status, 201, JSON.stringify(viaJoin.json));
   assert.equal(viaJoin.json.duplicate, true);
   assert.equal(viaJoin.json.identityId, identityId);
   assert.equal(viaJoin.json.memberId, memberId);
   assert.equal(viaJoin.json.displayName, "Recovering Bot", "the member keeps its name — no rename, no 422");
+  assert.equal(viaJoin.json.roomToken, null, "the join replay does not mint another room token");
   assert.ok(!("identitySecret" in viaJoin.json), "a presented credential is never echoed back");
-  const pack = await get(origin, "/api/rooms/commons/activation-pack", viaJoin.json.roomToken);
-  assert.equal(pack.status, 200, "the fresh room token works");
+  const deadPack = await get(origin, "/api/rooms/commons/activation-pack", deadToken);
+  assert.equal(deadPack.status, 401, "rotate retires the room token from the first join");
+  const pack = await get(origin, "/api/rooms/commons/activation-pack", rotated.json.mcpToken.credential);
+  assert.equal(pack.status, 200, "the rotated room token works");
   assert.equal(memberCount(store, "commons"), 1, "recovery created no second membership");
 });
 
@@ -168,7 +176,15 @@ test("the requestId replay of a lost join rotates a fresh durable secret", async
   assert.equal(replay.json.identityId, first.json.identityId);
   assert.match(replay.json.identitySecret, /^pri_/, "the replay rotates a fresh durable secret");
   assert.notEqual(replay.json.identitySecret, first.json.identitySecret, "the lost secret is never re-revealed, a new one is minted");
-  assert.match(replay.json.roomToken, /^rak_/, "the replay still recovers the working room credential");
+  assert.equal(replay.json.roomToken, null, "the replay does not mint another room token");
+  const rotated = await post(origin, `/api/agent-rooms/${replay.json.roomId}/token/rotate`, {}, replay.json.identitySecret);
+  assert.equal(rotated.status, 200, JSON.stringify(rotated.json));
+  assert.match(rotated.json.mcpToken.credential, /^rak_/);
+  assert.notEqual(rotated.json.mcpToken.credential, first.json.roomToken);
+  const retired = await get(origin, `/api/rooms/${replay.json.roomId}/activation-pack`, first.json.roomToken);
+  assert.equal(retired.status, 401, "rotate retires the room token from the lost join");
+  const recovered = await get(origin, `/api/rooms/${replay.json.roomId}/activation-pack`, rotated.json.mcpToken.credential);
+  assert.equal(recovered.status, 200, "the rotated room token works");
   const dead = await get(origin, "/api/agent-rooms", first.json.identitySecret);
   assert.equal(dead.status, 401, "the lost first secret no longer authenticates");
   const live = await get(origin, "/api/agent-rooms", replay.json.identitySecret);
@@ -186,5 +202,7 @@ test("a caller that presents its own identity secret is never echoed one", async
   assert.match(joined.json.roomToken, /^rak_/);
   const next = joined.json.next.join("\n");
   assert.match(next, /identity secret remains your durable credential/);
-  assert.match(next, /original inviteCode/, "the recovery is taught on this branch too");
+  assert.match(next, /token\/rotate/, "recovery names the rotate route");
+  assert.match(next, /does not mint another room token/);
+  assert.match(next, /do NOT mint a replacement identity/);
 });

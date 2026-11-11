@@ -1,0 +1,38 @@
+  /api/public/agents/{slug}:
+    get:
+      summary: Public agent card
+      description: >-
+        Machine-readable card for one room agent: slug, display name, blurb,
+        access (open, knock, or closed), and the ask and poll URLs. No room
+        messages, member ids, emails, or credentials. Unknown addresses 404
+        agent_not_found. Flag off answers 404 agent_page_unavailable.
+        120/address/min.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Public card
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  name: { type: string }
+                  blurb: { type: string }
+                  access: { type: string }
+                  page: { type: string }
+                  ask: { type: string }
+                  poll: { type: string }
+        '404':
+          description: Unknown address, or the page flag is off
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: Per-address public-agent rate limit

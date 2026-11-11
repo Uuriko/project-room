@@ -1,0 +1,19 @@
+  /api/rooms/{roomId}/cursor:
+    post:
+      summary: Move the durable read cursor
+      description: The only acknowledgement; durable unread marker.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sequence]
+              properties:
+                sequence: { type: integer, minimum: 0 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: Cursor stored }
+        '422': { description: "invalid_cursor - body is not exactly `{ sequence }`, or sequence is negative or beyond the room's sequence" }

@@ -1,0 +1,113 @@
+{
+  "source": "6b1bb06620064edb50e357b9e414af56c8316035",
+  "parent": "68d141ad17bc7467771ed1f07e4122826672c65a",
+  "runtime": "Node v24.22.1",
+  "beforeFact": {
+    "exit": 1,
+    "tests": 1,
+    "pass": 0,
+    "fail": 1,
+    "batches": 10,
+    "fullThreadRefusals": 10,
+    "directHttpRequests": 80,
+    "perBatch": [
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  "beforeCooldown": {
+    "exit": 1,
+    "tests": 5,
+    "pass": 0,
+    "fail": 5
+  },
+  "after": {
+    "exit": 0,
+    "tests": 135,
+    "pass": 135,
+    "fail": 0,
+    "skip": 0,
+    "batches": 10,
+    "fullThreadRefusals": 1,
+    "directHttpRequests": 71,
+    "perBatch": [
+      8,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7
+    ]
+  },
+  "intermediate": {
+    "exit": 1,
+    "tests": 127,
+    "pass": 126,
+    "fail": 1,
+    "explanation": "Terminal-formal test tried final queue observation through newly stopped work client. Assertion preserved using independent reader with identical existing fixture credential."
+  },
+  "sanitizedLiveObservation": {
+    "logLines": 37,
+    "parkEvents": 18,
+    "distinctRoots": 3,
+    "blockedSignals": 52,
+    "chat429Diagnostics": 12,
+    "poll429Diagnostics": 4,
+    "total429Diagnostics": 16,
+    "actualTotalHttp": "not captured; no private raw logs published"
+  },
+  "lintExit": 0,
+  "secretFilesExit": 0,
+  "secretDiffExit": 0,
+  "logs": {
+    "fact-before": {
+      "rawBytes": 3259,
+      "rawSha256": "a0a934da86ed375be05784c22e77ae9d6c337a6161d36b53674604bf7a40d3bb"
+    },
+    "cooldown-before": {
+      "rawBytes": 7151,
+      "rawSha256": "b3e5d29cfca724c1101e0c9c89a4a26d23ac328c291cd3f5f6b0844128af3481"
+    },
+    "intermediate": {
+      "rawBytes": 60955,
+      "rawSha256": "5582b11d49fe4cc054a7aed23ac1bbb886dec4391a5f07b354ad0ebc3d78cab2"
+    },
+    "final": {
+      "rawBytes": 61061,
+      "rawSha256": "59c24c1197f9883c20457538ad2bfa932b5e298f32012ec191c7b89718214f68"
+    },
+    "lint": {
+      "rawBytes": 0,
+      "rawSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "secret": {
+      "rawBytes": 24,
+      "rawSha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    },
+    "secret-diff": {
+      "rawBytes": 24,
+      "rawSha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    }
+  },
+  "files": {
+    "room-acp/README.md": "a45dd28e7f56e827cf3a46d91b1b301e35de04749af45edf1503229980e7b289",
+    "room-acp/src/bridge.mjs": "2df0668db296b7b0f072b0e322597fed99463c02cd421ed4799de827dde12dbe",
+    "room-acp/src/room.mjs": "c4807301fd161737722231fb112670deff4411fc388570dab4a5773675dd4546",
+    "scripts/CANDIDATE-MANIFEST.json": "5d0a5f4a8746f96a4d067c21eb87898a7372e8af0b3c5a4a75ea046a72d91030",
+    "tests/room-acp-cooldown.test.mjs": "75641e1b3653015cf182da5d55b85b7e1ab2680380c2e9ccca44943597aaea83",
+    "tests/room-acp-formal-delivery.test.mjs": "776a7a00ce5de641858f6814dac6fb5c061d43448a0a59c1486cd4d634a102e8",
+    "tests/room-acp-park-context.test.mjs": "0ebb2951ea9456b2497be7ab26bf83a4cfc3817f21151a780c06622f74b65775"
+  }
+}

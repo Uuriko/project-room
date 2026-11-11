@@ -26,7 +26,13 @@ if (phase === "first-review") {
 await change(producer, `${phase}-start`, T.WORK_STARTED);
 const summary = phase === "first-review" ? "Agenda: discuss the proposal." : "Owner: Room owner. Agenda: discuss the proposal and record the decision.";
 const evidenceVersion = `sha256:${createHash("sha256").update(summary).digest("hex")}`;
-await change(producer, `${phase}-complete`, T.WORK_COMPLETED, { summary, evidenceVersion, producerId: "producer", evidenceUrl: "https://example.invalid/synthetic-agenda", nextAction: "Review the inline text; this is not a live external artifact." });
+const evidenceMessageId = `acceptance-${phase}-result`;
+const posted = await producer.command({ id: `${evidenceMessageId}-post`, type: T.MESSAGE_POSTED,
+  data: { messageId: evidenceMessageId, workItemId: "test-handoff", body: summary } });
+await change(producer, `${phase}-complete`, T.WORK_COMPLETED, { summary, evidenceVersion, producerId: "producer",
+  evidenceKind: "room_text", evidenceMessageId, evidenceMessageEventId: posted.event.id,
+  previousCompletionEventId: (await item()).receipt?.eventId ?? null,
+  nextAction: "Review the exact in-room result; this is synthetic fixture work." });
 const receipt = (await item()).receipt;
 await change(reviewer, `${phase}-review`, T.VERIFICATION_RECORDED, { result: phase === "first-review" ? "fail" : "pass", completionEventId: receipt.eventId, evidenceVersion, summary: phase === "first-review" ? "Missing owner; add one." : "Synthetic reviewer: exact text hash checked and owner is named.", ...(phase === "first-review" ? { nextAction: "Add the owner to the agenda." } : {}) });
 console.log(JSON.stringify({ phase, next: (await item()).next, evidenceVersion }));

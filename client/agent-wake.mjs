@@ -65,12 +65,31 @@ export class AgentWakeClient {
         ...(body === undefined ? {} : { body: JSON.stringify(body) })
       });
       let length = 0; const chunks = [];
-      if (response.body) for await (const chunk of response.body) {
-        length += chunk.length; if (length > 262144) { throw invalid(); }
-        chunks.push(Buffer.from(chunk));
+      try {
+        if (response.body) for await (const chunk of response.body) {
+          length += chunk.length; if (length > 262144) { throw invalid(); }
+          chunks.push(Buffer.from(chunk));
+        }
+      } catch (error) {
+        // A failed error body cannot override headers already received:
+        // auth failures stay fatal and transient failures retain Retry-After.
+        // Successful responses still require a complete, bounded body.
+        if (response.ok) throw error;
+        chunks.length = 0;
       }
-      let value; try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw invalid(); }
-      if (!response.ok) throw new RoomClientError(response.status, typeof value?.error?.code === 'string' ? value.error.code : 'service_unavailable', 'Wake request not confirmed');
+      let value;
+      try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+      catch { if (response.ok) throw invalid(); }
+      // An edge/proxy can rate-limit or fail before producing the Room JSON
+      // envelope. Preserve HTTP failure semantics for the existing listener
+      // retry policy, without retrying this operation or trusting error text.
+      if (!response.ok) {
+        const retry = response.headers.get('retry-after');
+        const parsed = retry === null ? NaN : /^\d+$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
+        const retryAfterMs = Number.isFinite(parsed) ? Math.min(300000, Math.max(0, parsed)) : null;
+        throw new RoomClientError(response.status, typeof value?.error?.code === 'string' ? value.error.code : 'service_unavailable',
+          'Wake request not confirmed', retryAfterMs);
+      }
       if (!object(value) || JSON.stringify(value).includes(this.#connection.token)) throw invalid();
       return value;
     } catch (error) {

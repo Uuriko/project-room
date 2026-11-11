@@ -1,0 +1,40 @@
+{
+  "sourceCommit": "ca06d0ba39bc68456174a65264dcd7b411edeacf",
+  "status": "offline intermediate",
+  "node": {
+    "tests": 36,
+    "pass": 36,
+    "fail": 0,
+    "skip": 0,
+    "log": "/tmp/current-composed-inbox-readers-1101.log"
+  },
+  "actualWorker": {
+    "tests": 3,
+    "pass": 3,
+    "fail": 0,
+    "skip": 0,
+    "log": "/tmp/current-composed-inbox-reply-worker-1101.log",
+    "controls": [
+      "legal500request list/selected with1k/5kbackground",
+      "native inbox privacy and exact obligations",
+      "committed cancellation response loss and cold exact retry"
+    ]
+  },
+  "secretScan": "explicit exit0 against origin/main",
+  "coverage": [
+    "server-private credential-bound work and reply continuations",
+    "recent-default inbox and explicit catch-up",
+    "reply list selected history and prior exchange",
+    "request cancellation using existing reducer",
+    "ordinaryHTTP snapshot and actualRoomClient conversation paging"
+  ],
+  "limits": [
+    "Not deployed; no schema45 activation.",
+    "Snapshot partial work/UI lookup, channel and Record consumers remain unqualified.",
+    "Request state is explicitly unavailable in bootstrap until request-client composition.",
+    "Full recovery finalization and source seal remain unbounded.",
+    "Browser affected CI is not full qualification.",
+    "Production readiness503 recurrence remains open.",
+    "Actual cross-owner saved-result and Android journeys not proved."
+  ]
+}

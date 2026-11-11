@@ -1,0 +1,17 @@
+  /api/auth/passkey/register/finish:
+    post:
+      summary: Verify a passkey registration and persist the credential (slice 5)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`,
+        `X-CSRF-Token`): verifies the attestation against the challenge issued
+        by /register/options (single-use, 5-minute TTL, bound to the account)
+        and stores the credential in the account's login methods.
+        Attestation failures answer 401, never 500. 10/account/min.
+      security:
+        - accountSession: []
+      responses:
+        '201': { description: "{ ok: true, credentialId }" }
+        '401': { description: unauthenticated or passkey_verification_failed }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_passkey_response or passkey_origin_rejected }
+        '429': { description: rate_limited }

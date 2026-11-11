@@ -1,0 +1,48 @@
+  /api/rooms/{roomId}/conversation:
+    get:
+      summary: Read a bounded viewer-scoped conversation window
+      description: |
+        Current message records (including deletion tombstones), in chronological order.
+        Targeted DMs are filtered before pagination; editHistory is omitted. Default 50,
+        maximum 100 messages and 512 KiB of message JSON. No raw events are replayed.
+        `cursor` reads an older page; `since` conditionally revalidates the latest window;
+        `messageId` reads one current visible record (hidden and absent both return 404).
+        Choose at most one. Authenticated encrypted continuations bind the room, viewer, credential,
+        session and limit. Changed room history, a different viewer or a service restart
+        yields mode=reset; discard cached pages and fetch the latest page without a token.
+        mode=replace replaces the selected window; a latest-window replacement also
+        invalidates all older cached pages. mode=not_modified preserves current content.
+        Reply root IDs remain intact; retrieve an older root explicitly by messageId.
+        Authentication and scope checks run on every read, including conditional reads.
+        This additive API does not change the legacy full room snapshot.
+        Optional `channelId` selects public messages in that channel (including replies),
+        before pagination. DMs are excluded even for their participants. Legacy messages
+        without a channel belong to general; archived channel history remains readable.
+        Scoped responses include channelId, and continuations bind that selection:
+        changing or removing it yields mode=reset. Without channelId, the existing
+        viewer-scoped room/DM selection is unchanged. Storage still reads the projection;
+        this selector does not complete the indexed-message migration.
+        Optional `peerMemberId` instead selects only messages between the caller and
+        that peer, filtered before pagination. It cannot be combined with channelId.
+        Responses and encrypted continuations bind the selected peer; switching peers
+        or dropping the selector resets the continuation. Unknown peers return an empty
+        page and do not reveal other members' private relationships.
+        Private-pair continuations can survive a proven public-only append of at most
+        100 events, preserving the private page being read. Any other intervening
+        event, changed storage domain, or longer gap retains conservative invalidation.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string } }
+        - { name: messageId, in: query, schema: { type: string } }
+        - { name: channelId, in: query, schema: { type: string }, description: Public channel selection; excludes DMs and binds continuations }
+        - { name: peerMemberId, in: query, schema: { type: string }, description: Private conversation with the caller; mutually exclusive with channelId }
+      responses:
+        '200':
+          description: Viewer-bound version 1 response with mode, sequence, messages, nextCursor and checkpoint; not_modified omits messages
+        '401': { description: Credential expired or revoked }
+        '403': { description: Current membership or rooms read scope required }
+        '404': { description: Channel absent, or requested message absent or not visible in the selected scope }
+        '413': { description: One current message exceeds the bounded read byte limit }
+        '422': { description: Invalid selection }

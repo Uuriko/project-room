@@ -48,6 +48,10 @@ export function prepareWorkOffer(input, { context } = {}) {
   if (approvalPolicy !== "human_with_agent_review" && !context) fail("Current Room context is required for this approval policy");
   const humanDecisionRequired = approvalPolicy === "human_with_agent_review" || context?.policy?.requireOwnerDecision === true;
   if (approvalPolicy === "agent" && humanDecisionRequired) fail("Room policy requires a human decision; choose human_with_agent_review");
+  // The output asserts independentVerificationRequired and, when a human
+  // decision is required, promises a decision "after independent review":
+  // the reviewer cannot be the human who will take that decision.
+  if (humanDecisionRequired && verifierMemberId === humanDecisionMakerId) fail("Verifier must be independent of the human decision-maker");
   if (context) {
     if (context.contractVersion !== 1 || typeof context.roomId !== "string" || !Array.isArray(context.roster)
       || !context.policy || typeof context.policy.requireOwnerDecision !== "boolean" || typeof context.policy.requireIndependentReview !== "boolean") fail("Invalid Room context");

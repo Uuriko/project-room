@@ -1,0 +1,406 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":68,"integrity":"eager","phases":{"schema":{"ms":14,"rowsRead":0},"plugin":{"ms":29,"rowsRead":0},"fence":{"ms":17,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":66,"heapBytes":27679992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":69,"legacyColdStartMs":68,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":14,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":36389312,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":44,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":78,"integrity":"eager","phases":{"schema":{"ms":13,"rowsRead":0},"plugin":{"ms":29,"rowsRead":0},"fence":{"ms":34,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":34215536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":78,"legacyColdStartMs":78,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":54,"integrity":"eager","phases":{"schema":{"ms":14,"rowsRead":0},"plugin":{"ms":26,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":53,"heapBytes":32137824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":54,"legacyColdStartMs":54,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":10,"integrity":"eager","phases":{"schema":{"ms":3,"rowsRead":0},"plugin":{"ms":2,"rowsRead":0},"fence":{"ms":3,"rowsRead":0},"verifies":{"ms":0,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":10,"heapBytes":30940792,"rooms":1,"sequences":8,"projectionBytes":130,"events":8}
+{"event":"room.store_initialized","initializationMs":11,"legacyColdStartMs":10,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ normalized request cancellation uses existing requester policy and exact lost-ack retry (122.544416ms)
+✔ recipient and unrelated agent cannot cancel; human room owner retains exact cleanup policy (62.052083ms)
+✔ stale revision and revoked caller refuse without mutating current state or replaying receipt (96.934542ms)
+✔ committed cancellation survives cold restart and lost response retry without another transition (78.931709ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":64,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":29,"rowsRead":0},"fence":{"ms":16,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":67,"heapBytes":40021808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":66,"legacyColdStartMs":64,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":55,"integrity":"eager","phases":{"schema":{"ms":14,"rowsRead":0},"plugin":{"ms":26,"rowsRead":0},"fence":{"ms":12,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":52,"heapBytes":40892064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":55,"legacyColdStartMs":55,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":16,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":51363968,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":45,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":56,"heapBytes":40476032,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":45,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":51720848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":69390568,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":63331664,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":43,"heapBytes":48194448,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+✔ normalized current requests list does not report an existing incoming obligation as empty (81.478875ms)
+✔ normalized selected request is readable through the existing reader and supplies exact answer basis (61.933583ms)
+✔ normalized current request remains absent to nonparticipants (54.657ms)
+✔ v2 selected and list pass the actual shared SDK/MCP validator without v1 cursor synthesis (56.545084ms)
+✔ bounded list empty-more pages retain late obligation and hide excluded IDs in opaque cursor (56.230417ms)
+✔ selected continuation binds viewer and request, rejects tampering and carries source progress (67.645333ms)
+✔ requester cancellation is exposed only after supported command and remains readable to its parties (49.813166ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":57977464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":41,"heapBytes":68321176,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":60138800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":76651544,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":70747408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":84940584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ actual HTTP and SDK consume normalized list continuation and selected answer without legacy hydration (93.427625ms)
+✔ normalized same-pair follow-up prepares the earlier useful answer without hydrating the room (40.650667ms)
+✔ normalized history drains excluded source windows and resumes checkpoint for a late obligation (63.089625ms)
+✔ same-member active credentials cannot transfer selected, list, or history continuations (48.605542ms)
+✔ hosted MCP reply continuations include their required room and can be followed verbatim (54.702083ms)
+✔ reactivation history floor hides the older obligation consistently across list, selected and history (46.691916ms)
+✔ denied directional consent removes answer and reply actions without acknowledging or changing obligations (44.440167ms)
+✔ room_reply accepts an omitted requestId (0.450209ms)
+✔ room_reply derives a stable id and message id when requestId is omitted (0.505208ms)
+✔ room_reply reuses the supplied requestId as the idempotent command id (0.065834ms)
+✔ room_reply body matches the message cap and other reply text stays at 4096 (0.151375ms)
+✔ respond with required fields only refuses 422 naming all three template fields (0.088042ms)
+✔ respond without the context pair refuses 422 naming only the context fields (0.07375ms)
+✔ respond without workItemId refuses 422 naming workItemId (0.062125ms)
+✔ template-complete respond still builds the identical command shape (0.078417ms)
+✔ template-complete respond with a null workItemId still builds (null is present, not missing) (0.072917ms)
+✔ the incomplete respond shapes stay schema-valid (the fix is handler-side, not a schema change) (0.082375ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":79,"integrity":"eager","phases":{"schema":{"ms":15,"rowsRead":0},"plugin":{"ms":25,"rowsRead":0},"fence":{"ms":22,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":79,"heapBytes":39258920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":79,"legacyColdStartMs":79,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+room diagnostic op_xq5gSGkH 409 command_rejected conflict /api/rooms/:roomId/commands
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":52551984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ direct, MCP and CLI share one request/clarification/answer journey with exact retries (448.739ms)
+room diagnostic op_vAqlRIY3 422 invalid_reply_selection input /api/rooms/:roomId/reply-requests
+room diagnostic op_3IiFfbBi 422 invalid_reply_selection input /api/rooms/:roomId/reply-requests
+room diagnostic op_kEgc0gNY 422 invalid_reply_selection input /api/rooms/:roomId/reply-requests
+room diagnostic op__GPsJNmB 422 invalid_reply_selection input /api/rooms/:roomId/reply-context
+room diagnostic op_Q734LJfh 422 invalid_reply_selection input /api/rooms/:roomId/reply-context
+room diagnostic op_9xKsxa9u 422 invalid_reply_selection input /api/rooms/:roomId/reply-history
+room diagnostic op_TAHwzEhN 422 invalid_reply_selection input /api/rooms/:roomId/reply-history
+room diagnostic op_1W6JWrmB 422 invalid_reply_selection input /api/rooms/:roomId/reply-history
+room diagnostic op_zRERN6_t 422 invalid_reply_cursor input /api/rooms/:roomId/reply-history
+room diagnostic op_PxPJgxyP 422 invalid_reply_cursor input /api/rooms/:roomId/reply-history
+room diagnostic op_Q-2OU42O 422 invalid_reply_selection input /api/rooms/:roomId/reply-history
+room diagnostic op__msh_0kq 409 session_binding_changed conflict /api/rooms/:roomId/reply-history
+room diagnostic op_umaldvpQ 401 unauthenticated access /api/rooms/:roomId/reply-requests
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":64277600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ HTTP rejects unknown, duplicate, mixed and malformed selections; each read reauthenticates (87.549167ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":73889104,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ exact policy-stamped receipts are required and unknown transport outcomes retain original input (71.406ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":61734744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ read validators refuse changed identity, window, body, lineage and answer basis (81.698042ms)
+✔ reply tool schemas are finite and partial/null bundles cannot be silently converted (0.181208ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":83423928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ lost answer and cancellation responses keep the original terminal operation retryable (121.701ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":75631224,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request tools automatically prepare only current room instructions and linked work (142.916083ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":87669136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ configured host receives prepared request once and its answer returns through real Room HTTP (79.045584ms)
+room diagnostic op_-NiwJimK 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":81553944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ lost delivery response reuses saved answer without executing host again (82.988167ms)
+room diagnostic op_JFvYW4Np 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":45,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":94600560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":45,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a lost 'delivered' run report is surfaced and retried until the service records it (83.081708ms)
+room diagnostic op_Pdvsa250 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":106045936,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ the queue reports a pending run report as report_pending, keeps working, and does not mark it needs_attention (84.222208ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":115919968,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a terminally refused 'delivered' report is recorded and stops retrying (70.709209ms)
+room diagnostic op_HZ7EZCWQ 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":126948584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ an unconfirmed 'delivered' report (HTTP 408) stays pending and later reconciles without replaying the host or reply (84.950292ms)
+room diagnostic op_RiQIQRKq 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":96313576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ an unconfirmed 'delivered' report (a malformed HTTP 200) stays pending and later reconciles without replaying the host or reply (80.235125ms)
+✔ upgrading an old journal keeps delivered-but-unreported attempts pending instead of certifying them (1.977791ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":105902920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ host failure is unknown and is never automatically executed a second time (68.6225ms)
+room diagnostic op_El-x2qij 409 command_rejected conflict /api/rooms/:roomId/commands
+room diagnostic op_uUWnS6eT 409 command_rejected conflict /api/rooms/:roomId/commands
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":118390216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ human clarification during execution refuses stale delivery without rerunning or rebasing (83.375416ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":129990272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ durable host result survives journal reopen and excludes concurrent execution (77.9725ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":139566400,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ closed and unaddressed requests never execute the configured host (70.330458ms)
+﹣ one command drives a separate host process and repeat invocation reuses its result (0.068208ms) # Requires Linux bubblewrap isolation
+room diagnostic op_L410pleV 409 request_run_owned conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":52772280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ separate journals racing one request start exactly one host and disclose status only to participants (117.769208ms)
+room diagnostic op_xNx5CyVW 409 request_run_owned conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":63109672,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a lost reservation response cannot launch or relaunch a host (76.496291ms)
+room diagnostic op_RvK5c0Kl 409 request_run_owned conflict /api/rooms/:roomId/request-runs
+room diagnostic op_pnanH_aA 409 request_run_not_delivered conflict /api/rooms/:roomId/request-runs
+room diagnostic op_KvPeekBZ 409 request_run_terminal conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":74557256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ stale heartbeats show unknown without transferring ownership; status does not change answer basis (74.279291ms)
+room diagnostic op_nBz202lN 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+room diagnostic op_LKDfBO3l 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+room diagnostic op_lYiB3uYb 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+room diagnostic op_Z77A7-Q1 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":89054824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ cancelled and declined requests cannot be flipped to result_ready or needs_attention (87.292584ms)
+room diagnostic op_4x126sLj 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":100074648,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ paused agents cannot start and a definite preflight refusal can be retried after resume (77.336208ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":66118984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ automatic mode ignores ordinary chat and delivers an addressed request without a per-request command (232.450292ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":78105096,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ automatic restart delivers a saved response without another model call (78.342958ms)
+room diagnostic op_5hpkHVdf 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":89239112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ heartbeat detects new clarification and signals the running host to stop (72.783583ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":13,"rowsRead":0},"plugin":{"ms":21,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":100454280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ transient heartbeat failures do not abort the running host (278.52525ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":111066696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ rate-limited reservation is a definite refusal, not an uncertain execution (84.446ms)
+room diagnostic op_X4aQi-nE 409 command_rejected conflict /api/rooms/:roomId/commands
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":79811904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ saved-answer recovery stops retrying when clarification arrived while the host was offline (81.632709ms)
+room diagnostic op_U1d4JnPX 409 request_run_changed conflict /api/rooms/:roomId/request-runs
+room diagnostic op_WQxZp0JD 404 reply_request_not_found not_found /api/rooms/:roomId/reply-context
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":91790248,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ coding result survives lost delivery with exact patch bytes and stays private (75.571ms)
+room diagnostic op_bVQdDL_e 409 reply_context_unavailable conflict /api/rooms/:roomId/reply-context
+room diagnostic op_Pg6lsDc1 404 reply_request_not_found not_found /api/rooms/:roomId/reply-context
+room diagnostic op_2CyqUvCd 404 reply_request_not_found not_found /api/rooms/:roomId/reply-context
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":102439336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request reads reject nonparticipants and exclude another private reply before paging (72.366625ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":116500752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a follow-up host receives the earlier result and runs independently without repeating its parent (84.799208ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":90152560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a room stream wakes the automatic host before its polling interval (77.727125ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":48,"integrity":"eager","phases":{"schema":{"ms":14,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":100994160,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":48,"legacyColdStartMs":48,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ an unavailable stream falls back to bounded polling without losing a request (1092.986375ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":109846048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":44,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ stream wakeups retain deadlines, reject malformed cursors and enforce revocation (182.511042ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":120903520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a fresh recipient discovers how to answer from messages and verifies closure without reconstructing fixed arguments (142.321542ms)
+room diagnostic op_haAniqtN 409 command_rejected conflict /api/rooms/:roomId/commands
+room diagnostic op_CotZzeN0 409 command_rejected conflict /api/rooms/:roomId/commands
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":131964864,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ HTTP response templates require completed current recipient context and stale templates cannot write (73.398708ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":143760424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ hosted discovery keeps room identity and distinguishes formal requests from ordinary private chat (78.752958ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":104279272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a REST-only recipient follows the supplied command recipe and verifies its exact retried answer (71.733625ms)
+room diagnostic op_UQbrAPjb 404 reply_request_not_found not_found /api/rooms/:roomId/reply-context
+room diagnostic op_LKkzF29P 404 reply_request_not_found not_found /api/rooms/:roomId/reply-context
+room diagnostic op_IYB7iRTG 409 reply_history_changed conflict /api/rooms/:roomId/reply-context
+room diagnostic op_nODGMBQi 422 invalid_reply_cursor input /api/rooms/:roomId/reply-context
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":114272024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ MCP failed request reads give private-safe read recovery instead of uncertain-write advice (131.642875ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":59,"integrity":"eager","phases":{"schema":{"ms":19,"rowsRead":0},"plugin":{"ms":25,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":59,"heapBytes":122941768,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":59,"legacyColdStartMs":59,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ automatic pickup reports one connection failure per outage and reports a later outage after recovery (9139.426875ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":133264000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ MCP transport failures distinguish a failed read from a saved answer with a lost response (164.738917ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":143974256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ automatic pickup keeps separate failed-request notifications visible (70.118583ms)
+✔ a reply refused because its channel is archived names channel_archived instead of not_confirmed (0.148584ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":57639776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ saved answer is delivered despite transient result status failure null (81.318417ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":69215512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ saved answer is delivered despite transient result status failure 503 (71.741167ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":81046208,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ saved answer is delivered despite transient result status failure 408 (71.9ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":92613120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ saved answer is delivered despite transient result status failure 429 (72.217958ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":101840624,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a definite result status refusal never falls through to answer delivery (65.455583ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":68774296,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ execution preflight precedes reservation and saved-result recovery bypasses it (76.559291ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":77667736,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ automatic pickup surfaces unavailable isolation without reserving work or polling forever (66.421375ms)
+✔ implicit private replies confirm over HTTP without changing retry input or accepting forged fields (71.078708ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":93,"integrity":"eager","phases":{"schema":{"ms":25,"rowsRead":0},"plugin":{"ms":44,"rowsRead":0},"fence":{"ms":21,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":87,"heapBytes":27650888,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":94,"legacyColdStartMs":93,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":56,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":38,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":53,"heapBytes":33415720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":56,"legacyColdStartMs":56,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":13,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":33856152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":13,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":31996824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":45456352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":41699912,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ selected reply context batches global event validation without one room-sized SQL result (152.742583ms)
+✔ bounded reply event scan rejects unrelated gap corruption (96.67ms)
+✔ bounded reply event scan rejects unrelated zero-sequence corruption (64.0705ms)
+✔ bounded reply event scan rejects unrelated event-id corruption (67.896916ms)
+✔ bounded reply event scan rejects unrelated posted-author corruption (60.674834ms)
+✔ bounded reply event scan rejects unrelated posted-time corruption (58.778666ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":83,"integrity":"eager","phases":{"schema":{"ms":23,"rowsRead":0},"plugin":{"ms":30,"rowsRead":0},"fence":{"ms":19,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":70,"heapBytes":40871960,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":83,"legacyColdStartMs":83,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":14,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":52,"heapBytes":49433096,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":44,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ ordinary directed messages and ignored historical request fields remain ordinary (178.419708ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":43,"integrity":"eager","phases":{"schema":{"ms":14,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":45482432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":43,"legacyColdStartMs":43,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":48752040,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":62861080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":86559712,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":74185984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":89292024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":117996976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":54,"heapBytes":97561016,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":105790200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":113782112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":122046848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":130440776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":144885272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":12,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":53,"heapBytes":114175424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":128210776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":136064280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":152577912,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":168600608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":133749344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ compact message reads retain work links without exposing private messages to other members (72.414208ms)
+✔ explicit answer appends once, retains exact historical retries and does not complete work (63.54375ms)
+✔ request bundles reject missing, null, mixed, spoofed and proposal fields without any writes (89.148792ms)
+✔ ordinary clarification changes context, but independent request/work branches do not (128.508375ms)
+✔ active recipient can decline after requester deactivation, without relaxing ordinary targeting (54.219416ms)
+✔ requester or actual human owner can cancel; the first terminal operation wins (58.646083ms)
+✔ full request history audit rejects matching forged checkpoints and projections (89.598417ms)
+✔ request map is bounded and unsupported event policies cannot be silently interpreted (1.105916ms)
+✔ selected exchange freezes pages, exposes basis only after context is drained, and stays read-only (68.464708ms)
+✔ request history keeps between-poll terminals and sparse/empty anchored progress (52.808167ms)
+✔ historical selection is frozen even when a request resolves between pages (45.588167ms)
+✔ resume tokens bind selection, identity and every retained boundary; rotation preserves identity (48.003292ms)
+✔ marked-event extras and malformed checkpoint-hidden clarification bytes are rejected (45.9ms)
+✔ real account-session resume survives relogin, rejects stale binding and fences a changed auth epoch (55.608542ms)
+✔ zero checkpoints, post-terminal comments and pasted-draft provenance stay explicit (47.636959ms)
+✔ a reply request and its answer carry the channel they were written in (55.444291ms)
+✔ prepared instructions stay current while selected conversation pagination remains frozen (45.439667ms)
+✔ follow-up preparation carries bounded completed exchanges for the same pair only (57.324833ms)
+✔ follow-up refuses withdrawn context and oversized history instead of silently omitting it (58.866791ms)
+✔ follow-up chains stop at eight prior exchanges and never carry another work branch (59.5845ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":47689128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ reply discovery points to selected context and cannot bypass unfinished pages (54.394417ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":58801984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":68804216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":106341064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":135550144,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":61074360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ needs-me orientation includes only incoming open request metadata (54.546917ms)
+✔ hosted needs-me discovers private incoming requests without exposing their bodies (54.205708ms)
+✔ reply audit rejects an access change for an inherited member id (0.115666ms)
+✔ selected archived reply context does not refetch every message in ID batches (172.206625ms)
+✔ selected archived context keeps unrelated body text out of SQL result materialization (168.632542ms)
+✔ metadata context traversal preserves canonical corruption rejection outside the selected exchange (51.012125ms)
+room diagnostic op_We9IOC1v 401 unauthenticated access /api/rooms/:roomId/reply-requests
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":83775568,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request listing avoids full room hydration with 10 unrelated messages (96.436ms)
+room diagnostic op_6tv16n8p 401 unauthenticated access /api/rooms/:roomId/reply-requests
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":80417032,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request listing avoids full room hydration with 100 unrelated messages (175.340208ms)
+room diagnostic op_MUGjKEnx 404 reply_request_not_found not_found /api/rooms/:roomId/reply-context
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":90727776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":99238920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":107579368,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ request reads respect since-join history after member reactivation (53.833666ms)
+✔ follow-up preparation refuses prior exchanges hidden by a new history policy (46.769709ms)
+✔ history checkpoints do not disclose hidden answered exchanges after reactivation (45.398125ms)
+✔ history checkpoints do not disclose hidden cancelled exchanges after reactivation (44.630459ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":60,"integrity":"eager","phases":{"schema":{"ms":13,"rowsRead":0},"plugin":{"ms":29,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":60,"heapBytes":33863872,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":61,"legacyColdStartMs":60,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":49,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":21,"rowsRead":0},"fence":{"ms":17,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":50,"heapBytes":42563272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":49,"legacyColdStartMs":49,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ hosted MCP missing response body is422 for answered and declined, without changing the request (161.402791ms)
+✔ complete response and non-message cancel stay supported; unexpected command errors remain500 (121.396667ms)
+ℹ tests 124
+ℹ suites 0
+ℹ pass 123
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 15355.995042

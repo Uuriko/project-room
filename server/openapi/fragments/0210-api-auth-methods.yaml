@@ -1,0 +1,17 @@
+  /api/auth/methods:
+    get:
+      summary: List the account's linked sign-in methods (slice 7)
+      description: >-
+        Authenticated read (account_session cookie): returns the account's
+        login methods as safe public descriptors
+        `{ id, type, provider, label, email, createdAt, lastUsedAt, disabled }`
+        — verifiers and credential material are never exposed — plus honest
+        provider configuration status
+        `{ providers: { github: { configured }, google: { configured }, passkey: { configured }, mail: { configured } } }`
+        so the settings UI can show "not configured" states instead of dead
+        buttons.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ methods, providers }" }
+        '401': { description: unauthenticated }

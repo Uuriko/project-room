@@ -1,0 +1,878 @@
+{
+  "runtimeSourceCommit": "cde86fdbadf8e54fae8ac25caeca0f0c8fd35d49",
+  "runtimeSourceTree": "b098fc17d62b103ddbcb34278f71beab84b9cb44",
+  "base": "ef583ba81eeeb284c8b743829aa4a0555752a0e8",
+  "status": "qualified locally; not merged, deployed, production-admitted or activated",
+  "files": [
+    "cloudflare/work-wake-input-budget.check.mjs",
+    "cloudflare/work-wake-input-budget.test-fixture.mjs",
+    "docs/AGENT-WAKE-SETUP.md",
+    "docs/INDEX.md",
+    "docs/openapi.yaml",
+    "docs/research/2026-11-01-work-wake-bounded-delivery-contract.md",
+    "docs/research/2026-11-01-work-wake-window-evidence.json",
+    "plugins/project-room/skills/project-room/references/errors-catalog.md",
+    "room-acp/src/bridge.mjs",
+    "scripts/CANDIDATE-MANIFEST.json",
+    "scripts/runtime-package.mjs",
+    "server/agent-heartbeats.mjs",
+    "server/agent-plugin-routes.mjs",
+    "server/openapi/fragments/0199-api-operator-wake-ordered-indexes.yaml",
+    "server/openapi/fragments/0270-api-agent-wakes-poll.yaml",
+    "server/operator-routes.mjs",
+    "server/operator-wake-index.mjs",
+    "server/routes/table.mjs",
+    "server/wake-delivery-window.mjs",
+    "server/work-wakes.mjs",
+    "skills/project-room/references/errors-catalog.md",
+    "src/agent-error.mjs",
+    "tests/room-acp-wake-drain.test.js",
+    "tests/wake-delivery-composition.test.js",
+    "tests/wake-delivery-window.test.js",
+    "tests/wake-index-logical-restore.test.js"
+  ],
+  "runtimeFileSha256": {
+    "room-acp/src/bridge.mjs": "0a06dc800e66b33e3d7b1fa5170a7213deb003802578186b686ee168084a197b",
+    "server/agent-heartbeats.mjs": "1f051efa7336e7d40bd37fa69b723734a1098ace5126e14058e5e0e1f8d2516a",
+    "server/agent-plugin-routes.mjs": "06d44d956cbc5df62f30c8489ce88d0c1bc32577ebd97e5f7bb9b70eac52cf70",
+    "server/operator-routes.mjs": "84d4f41442c5fce7136bcb51407fe5a00e5491779798a9239c1843e0f8c92a36",
+    "server/operator-wake-index.mjs": "f171c19e9ca86173652a5f9afc2780fc54d753d31a1162b40b2dc1266d762b17",
+    "server/routes/table.mjs": "fabc861772d7a0ec1007ea1255007dc8944dc1bc4b124ea84bf773f72f943e4f",
+    "server/wake-delivery-window.mjs": "c5d223adb932f94c42a673eb54e162eb2ef44dd7e424ee304fd97e6a84530b3a",
+    "server/work-wakes.mjs": "da744a4cf2c41ca26139d813e52c7bd20663c37a5b350120589f081bf4fa43d9",
+    "src/agent-error.mjs": "5b8be5bf18e3e69053dbc3bccb7b8770b614cefaa053cffa63a31079a950673c"
+  },
+  "qualification": {
+    "node": {
+      "tests": 116,
+      "pass": 116,
+      "fail": 0,
+      "skipped": 0,
+      "testedCommit": "81f175d9946bba1797911e671d7027dcd6033c40"
+    },
+    "actualWorker": {
+      "checks": 2,
+      "pass": 2,
+      "fail": 0,
+      "runtime": "workerd 2026-07-30",
+      "binarySha256": "2c52aed3c28135467406eb8c8dcfb1b6ea942d2a0f8d6510f3b3a912b3cc87e1",
+      "testedCommit": "81f175d9946bba1797911e671d7027dcd6033c40"
+    },
+    "runtimePreflightFiles": 669,
+    "lint": {
+      "fullBase": "ef583ba81eeeb284c8b743829aa4a0555752a0e8",
+      "environmentVariable": "I18N_BASE_REF",
+      "errors": 0,
+      "existingWarnings": 335,
+      "finalTwoFileCorrectionErrors": 0
+    },
+    "contract": "CI=1 scripts/check.mjs passed at cde86fdbadf8e54fae8ac25caeca0f0c8fd35d49: syntax, lint, secrets/docs/routes/schema/skills/design and 15 error/OpenAPI contract checks; initial orphan/catalog/skill-mirror failures retained, corrected without exclusions.",
+    "postTestSourceDelta": "cde86fdba only synchronizes the generated plugin error catalog to the already-tested canonical reference; runtime algorithms and public assets unchanged.",
+    "docsLinks": 802
+  },
+  "workerReceipts": [
+    {
+      "event": "room.cold_start",
+      "clockSemantics": "io-bound",
+      "durationMs": 138,
+      "integrity": "eager",
+      "phases": {
+        "schema": {
+          "ms": 20,
+          "rowsRead": 7935
+        },
+        "plugin": {
+          "ms": 52,
+          "rowsRead": 40258
+        },
+        "fence": {
+          "ms": 25,
+          "rowsRead": 41608
+        },
+        "verifies": {
+          "ms": 37,
+          "rowsRead": 19095
+        },
+        "checksum": {
+          "ms": 0,
+          "rowsRead": 0
+        }
+      },
+      "rooms": 0,
+      "sequences": 0,
+      "projectionBytes": 0,
+      "events": 0
+    },
+    {
+      "event": "room.store_initialized",
+      "initializationMs": 139,
+      "legacyColdStartMs": 138,
+      "clockSemantics": "io-bound",
+      "cpuMeasured": false
+    },
+    {
+      "count": 1000,
+      "kind": "opted-out",
+      "controls": null,
+      "installation": {
+        "rowsRead": 13553,
+        "rowsWritten": 2010,
+        "statements": 30,
+        "unknownWriteCounters": 0
+      },
+      "plans": [
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ]
+      ],
+      "pages": 8,
+      "emptyMorePages": 7,
+      "selected": 129,
+      "candidateRowsRead": 131,
+      "totalRowsRead": 268,
+      "roomReads": 1,
+      "signals": [
+        {
+          "kind": "work",
+          "workItemId": "task",
+          "workRevision": 0,
+          "action": "accept",
+          "nextRead": {
+            "tool": "room_read_work",
+            "arguments": {
+              "roomId": "commons",
+              "workItemId": "task"
+            }
+          }
+        }
+      ],
+      "more": false,
+      "nextCursor": null
+    },
+    {
+      "event": "room.cold_start",
+      "clockSemantics": "io-bound",
+      "durationMs": 68,
+      "integrity": "eager",
+      "phases": {
+        "schema": {
+          "ms": 14,
+          "rowsRead": 7935
+        },
+        "plugin": {
+          "ms": 35,
+          "rowsRead": 40258
+        },
+        "fence": {
+          "ms": 14,
+          "rowsRead": 41608
+        },
+        "verifies": {
+          "ms": 5,
+          "rowsRead": 19095
+        },
+        "checksum": {
+          "ms": 0,
+          "rowsRead": 0
+        }
+      },
+      "rooms": 0,
+      "sequences": 0,
+      "projectionBytes": 0,
+      "events": 0
+    },
+    {
+      "event": "room.store_initialized",
+      "initializationMs": 68,
+      "legacyColdStartMs": 68,
+      "clockSemantics": "io-bound",
+      "cpuMeasured": false
+    },
+    {
+      "count": 10000,
+      "kind": "opted-out",
+      "controls": null,
+      "installation": {
+        "rowsRead": 86025,
+        "rowsWritten": 20010,
+        "statements": 30,
+        "unknownWriteCounters": 0
+      },
+      "plans": [
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ]
+      ],
+      "pages": 79,
+      "emptyMorePages": 78,
+      "selected": 129,
+      "candidateRowsRead": 131,
+      "totalRowsRead": 268,
+      "roomReads": 1,
+      "signals": [
+        {
+          "kind": "work",
+          "workItemId": "task",
+          "workRevision": 0,
+          "action": "accept",
+          "nextRead": {
+            "tool": "room_read_work",
+            "arguments": {
+              "roomId": "commons",
+              "workItemId": "task"
+            }
+          }
+        }
+      ],
+      "more": false,
+      "nextCursor": null
+    },
+    {
+      "event": "room.cold_start",
+      "clockSemantics": "io-bound",
+      "durationMs": 67,
+      "integrity": "eager",
+      "phases": {
+        "schema": {
+          "ms": 18,
+          "rowsRead": 7935
+        },
+        "plugin": {
+          "ms": 31,
+          "rowsRead": 40258
+        },
+        "fence": {
+          "ms": 13,
+          "rowsRead": 41608
+        },
+        "verifies": {
+          "ms": 5,
+          "rowsRead": 19095
+        },
+        "checksum": {
+          "ms": 0,
+          "rowsRead": 0
+        }
+      },
+      "rooms": 0,
+      "sequences": 0,
+      "projectionBytes": 0,
+      "events": 0
+    },
+    {
+      "event": "room.store_initialized",
+      "initializationMs": 68,
+      "legacyColdStartMs": 67,
+      "clockSemantics": "io-bound",
+      "cpuMeasured": false
+    },
+    {
+      "count": 1000,
+      "kind": "stale",
+      "controls": {
+        "optedOut": 0,
+        "paused": 0,
+        "quiet": 0,
+        "restored": 1,
+        "removed": 0
+      },
+      "installation": {
+        "rowsRead": 13555,
+        "rowsWritten": 2010,
+        "statements": 30,
+        "unknownWriteCounters": 0
+      },
+      "plans": [
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ]
+      ],
+      "pages": 8,
+      "emptyMorePages": 7,
+      "selected": 129,
+      "candidateRowsRead": 131,
+      "totalRowsRead": 271,
+      "roomReads": 1,
+      "signals": [
+        {
+          "kind": "work",
+          "workItemId": "task",
+          "workRevision": 0,
+          "action": "accept",
+          "nextRead": {
+            "tool": "room_read_work",
+            "arguments": {
+              "roomId": "commons",
+              "workItemId": "task"
+            }
+          }
+        }
+      ],
+      "more": false,
+      "nextCursor": null
+    },
+    {
+      "event": "room.cold_start",
+      "clockSemantics": "io-bound",
+      "durationMs": 60,
+      "integrity": "eager",
+      "phases": {
+        "schema": {
+          "ms": 18,
+          "rowsRead": 7935
+        },
+        "plugin": {
+          "ms": 26,
+          "rowsRead": 40258
+        },
+        "fence": {
+          "ms": 14,
+          "rowsRead": 41608
+        },
+        "verifies": {
+          "ms": 2,
+          "rowsRead": 19095
+        },
+        "checksum": {
+          "ms": 0,
+          "rowsRead": 0
+        }
+      },
+      "rooms": 0,
+      "sequences": 0,
+      "projectionBytes": 0,
+      "events": 0
+    },
+    {
+      "event": "room.store_initialized",
+      "initializationMs": 60,
+      "legacyColdStartMs": 60,
+      "clockSemantics": "io-bound",
+      "cpuMeasured": false
+    },
+    {
+      "count": 10000,
+      "kind": "stale",
+      "controls": null,
+      "installation": {
+        "rowsRead": 86033,
+        "rowsWritten": 20010,
+        "statements": 30,
+        "unknownWriteCounters": 0
+      },
+      "plans": [
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ]
+      ],
+      "pages": 79,
+      "emptyMorePages": 78,
+      "selected": 129,
+      "candidateRowsRead": 131,
+      "totalRowsRead": 271,
+      "roomReads": 1,
+      "signals": [
+        {
+          "kind": "work",
+          "workItemId": "task",
+          "workRevision": 0,
+          "action": "accept",
+          "nextRead": {
+            "tool": "room_read_work",
+            "arguments": {
+              "roomId": "commons",
+              "workItemId": "task"
+            }
+          }
+        }
+      ],
+      "more": false,
+      "nextCursor": null
+    },
+    {
+      "event": "room.cold_start",
+      "clockSemantics": "io-bound",
+      "durationMs": 67,
+      "integrity": "eager",
+      "phases": {
+        "schema": {
+          "ms": 12,
+          "rowsRead": 7935
+        },
+        "plugin": {
+          "ms": 41,
+          "rowsRead": 40258
+        },
+        "fence": {
+          "ms": 10,
+          "rowsRead": 41608
+        },
+        "verifies": {
+          "ms": 4,
+          "rowsRead": 19095
+        },
+        "checksum": {
+          "ms": 0,
+          "rowsRead": 0
+        }
+      },
+      "rooms": 0,
+      "sequences": 0,
+      "projectionBytes": 0,
+      "events": 0
+    },
+    {
+      "event": "room.store_initialized",
+      "initializationMs": 67,
+      "legacyColdStartMs": 67,
+      "clockSemantics": "io-bound",
+      "cpuMeasured": false
+    },
+    {
+      "count": 1000,
+      "kind": "messages",
+      "controls": null,
+      "installation": {
+        "rowsRead": 13544,
+        "rowsWritten": 2010,
+        "statements": 30,
+        "unknownWriteCounters": 0
+      },
+      "plans": [
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ]
+      ],
+      "pages": 1,
+      "emptyMorePages": 0,
+      "selected": 1,
+      "candidateRowsRead": 1,
+      "totalRowsRead": 14,
+      "roomReads": 1,
+      "signals": [
+        {
+          "kind": "work",
+          "workItemId": "task",
+          "workRevision": 0,
+          "action": "accept",
+          "nextRead": {
+            "tool": "room_read_work",
+            "arguments": {
+              "roomId": "commons",
+              "workItemId": "task"
+            }
+          }
+        }
+      ],
+      "more": false,
+      "nextCursor": null
+    },
+    {
+      "event": "room.cold_start",
+      "clockSemantics": "io-bound",
+      "durationMs": 50,
+      "integrity": "eager",
+      "phases": {
+        "schema": {
+          "ms": 12,
+          "rowsRead": 7935
+        },
+        "plugin": {
+          "ms": 27,
+          "rowsRead": 40258
+        },
+        "fence": {
+          "ms": 9,
+          "rowsRead": 41608
+        },
+        "verifies": {
+          "ms": 2,
+          "rowsRead": 19095
+        },
+        "checksum": {
+          "ms": 0,
+          "rowsRead": 0
+        }
+      },
+      "rooms": 0,
+      "sequences": 0,
+      "projectionBytes": 0,
+      "events": 0
+    },
+    {
+      "event": "room.store_initialized",
+      "initializationMs": 51,
+      "legacyColdStartMs": 50,
+      "clockSemantics": "io-bound",
+      "cpuMeasured": false
+    },
+    {
+      "count": 10000,
+      "kind": "messages",
+      "controls": null,
+      "installation": {
+        "rowsRead": 85990,
+        "rowsWritten": 20010,
+        "statements": 30,
+        "unknownWriteCounters": 0
+      },
+      "plans": [
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_pending (agent_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_wake_signals USING INDEX agent_wake_signals_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ],
+        [
+          "SEARCH agent_work_wakes USING INDEX agent_work_wakes_ordered_room_pending (agent_id=? AND room_id=? AND (created_at,signal_id)>(?,?))"
+        ]
+      ],
+      "pages": 1,
+      "emptyMorePages": 0,
+      "selected": 1,
+      "candidateRowsRead": 1,
+      "totalRowsRead": 14,
+      "roomReads": 1,
+      "signals": [
+        {
+          "kind": "work",
+          "workItemId": "task",
+          "workRevision": 0,
+          "action": "accept",
+          "nextRead": {
+            "tool": "room_read_work",
+            "arguments": {
+              "roomId": "commons",
+              "workItemId": "task"
+            }
+          }
+        }
+      ],
+      "more": false,
+      "nextCursor": null
+    },
+    {
+      "event": "room.cold_start",
+      "clockSemantics": "io-bound",
+      "durationMs": 96,
+      "integrity": "eager",
+      "phases": {
+        "schema": {
+          "ms": 26,
+          "rowsRead": 7935
+        },
+        "plugin": {
+          "ms": 42,
+          "rowsRead": 40258
+        },
+        "fence": {
+          "ms": 19,
+          "rowsRead": 41608
+        },
+        "verifies": {
+          "ms": 6,
+          "rowsRead": 19095
+        },
+        "checksum": {
+          "ms": 0,
+          "rowsRead": 0
+        }
+      },
+      "rooms": 0,
+      "sequences": 0,
+      "projectionBytes": 0,
+      "events": 0
+    },
+    {
+      "event": "room.store_initialized",
+      "initializationMs": 97,
+      "legacyColdStartMs": 96,
+      "clockSemantics": "io-bound",
+      "cpuMeasured": false
+    },
+    {
+      "event": "room.cold_start",
+      "clockSemantics": "io-bound",
+      "durationMs": 26,
+      "integrity": "eager",
+      "phases": {
+        "schema": {
+          "ms": 5,
+          "rowsRead": 22150
+        },
+        "plugin": {
+          "ms": 8,
+          "rowsRead": 48892
+        },
+        "fence": {
+          "ms": 8,
+          "rowsRead": 41685
+        },
+        "verifies": {
+          "ms": 3,
+          "rowsRead": 19668
+        },
+        "checksum": {
+          "ms": 0,
+          "rowsRead": 0
+        }
+      },
+      "rooms": 2,
+      "sequences": 7,
+      "projectionBytes": 1756,
+      "events": 7
+    },
+    {
+      "event": "room.store_initialized",
+      "initializationMs": 28,
+      "legacyColdStartMs": 26,
+      "clockSemantics": "io-bound",
+      "cpuMeasured": false
+    },
+    {
+      "coldRowsRead": 1054,
+      "warmRowsRead": 270,
+      "catalogRows": 786,
+      "oversized": {
+        "code": "storage_unavailable",
+        "payloadReads": 0
+      }
+    }
+  ],
+  "logSha256": {
+    "node": "61e1cb91bd9b2d00f6be43f859b80da5f872001866134d5be4982a9d27fccf16",
+    "worker": "65d0e16142fb5ac26c76befee39cf904e94737b8ab9d97e39dcc16fb66a4c911",
+    "fullLint": "47e5721b0f4f22a0da1526c5b474690d5cb00d5686a5d29ffede2ee599350900",
+    "narrowCorrectionLint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "initialContractOrphanFailure": "e8f9cf85054db60fffc03ceae794f164b75913f271b4e11e7564e4a7cefb48fb",
+    "runtimePreflight": "15143173333f2b0b8593cec4f8c93aa6fa84069e05002f68732009373b3df7f5",
+    "initialCatalogDriftFailure": "478877656b37466ed4fee7a3794ba5c501df9a1a99ad2dde84a56dc2377606ea",
+    "initialSkillMirrorFailure": "20be4b674c993e36aa6efa79c101ad34664bf8e00dd18534e716bf6df2347090",
+    "finalCiContract": "2d0991eee887fca168e111553c1b33fd971ea4ed77b034519121e57c9e6c982a",
+    "finalDocsLinks": "a1a85670e256c6533b9588313c5bdce211ced117c0c45d2d63465bad647c7ea2"
+  },
+  "preservedCausalRedLogSha256": {
+    "legacyWorkSourceGrowth": "bf1b90063c70b392eb38f1283b67ce2e23de59b85c17f7793fc9d3f78177e267",
+    "unboundedWholePage600Guard": "589e780e48f4d5073960b15ed4af3d6bbbd0e6dcb77226f468db80bbde0369f9",
+    "logicalRestoreReinstall": "a0484e3aa8b1cc9edbe1af9415262fccb0efc49dc2c866697cff8892ac93e53d",
+    "acpCursorCycleReset": "a16f4bd2a430d453c62771f0b8b9da1c2104a86e711e5829f8a3db4452ba5bf6",
+    "scopedPrivacy": "26aac5d724226091f5b732845d2fa57d016e1f5d6c3f8d138b7153f63e76c997",
+    "sameByteAndNullRoomPlanInput": "5b6f128ebd85dfca3bd52b10c904782076415d825ff9a4d159534ae55b9609db"
+  },
+  "graphify": {
+    "revision": "583a21bb05f0f42ffd9e4c7e6f58fcf23557d732",
+    "scope": "server/work-wakes.mjs",
+    "sourceUnchangedThroughRuntimeCommit": true,
+    "version": "0.9.96",
+    "mode": "code-only/offline",
+    "modelCalls": 0,
+    "sourceFiles": 1,
+    "sourceBytes": 10159,
+    "sourceManifestSha256": "b37723bd417878cadae7dc27a34b4cb555dd21a758ec6ab49633f6bd38e10dce",
+    "nodes": 21,
+    "edges": 13,
+    "semanticCompleteness": "partial; advisory navigation, not caller or correctness proof"
+  },
+  "remainingLimits": [
+    "Full room state hydration once per admitted room remains; linked-room pause enumeration remains. The source row/octet bound is not a whole-request history or universal600physical-read bound.",
+    "All-source traversal remains linear across finite pages; ACP carries observation progress across capped cycles. Restart starts a fresh observation, with existing effect/receipt recovery unchanged.",
+    "Index installation is linear within fixed admission; actual production fit is unverified. No threshold reset, constructor/read DDL, new queue, schema floor, permission, host opt-in or live installation.",
+    "No actual native model turn, physical laptop/mobile background wake, public plugin install or production timing claim follows from these local checks."
+  ],
+  "composition": {
+    "sourceCommit": "e71c34261c9da65c39f768737d1606b84f742593",
+    "mergedMain": "c52db58787467390042295b181b152ef3ba4de12",
+    "originalCandidate": "2694effc0d6db9b48dd52aea492232e25d021dc0",
+    "method": "merge preserving both histories; no conflicts; generated ACP archive/manifest rebuilt; truthful legacy-wake removal INDEX link added",
+    "preservedMainPaths": [
+      "room-acp/src/agents.mjs",
+      "room-acp/src/link.mjs"
+    ],
+    "node": {
+      "tests": 73,
+      "pass": 73,
+      "fail": 0,
+      "skipped": 0
+    },
+    "actualWorker": {
+      "checks": 2,
+      "pass": 2,
+      "fail": 0
+    },
+    "ciContract": "CI=1 scripts/check.mjs passed, I18N_BASE_REF=c52db58787467390042295b181b152ef3ba4de12; affected tests only, no second full Node suite",
+    "logSha256": {
+      "node": "c0e043dbb81cb65958830f146bed7b5ded21def904c4b60bd530730a85d534b9",
+      "worker": "f863b793f915569a444bb7e2f3b28511e9b5134c87338c4f8262b42b169ad42b",
+      "acpPack": "8bb4c9bcb87e4f874097bcc11235bd8e1e0a58b1e3a71e70d199660ccde165c1",
+      "ciContract": "931b97eca51a94ac2e0e7ae310cfa402c4d7cfff85c1c4e6dc06fb8b79db2e29",
+      "runtimePreflight": "0460502a76704df9d0f119833e02d2fd4f21eab3e1070524360063be86debe80"
+    },
+    "runtimePreflightFiles": 669
+  },
+  "currentSourceCommit": "d5fe9531f9a9ad8d367bee8ca96ecad878e5e5f4",
+  "inactiveRolloutCorrection": {
+    "sourceCommit": "d5fe9531f9a9ad8d367bee8ca96ecad878e5e5f4",
+    "absentReceipt": "Indexed original-receipt lookup first; absent receipt returns legacy false without optional catalog inspection. No absence cache. Operator plan/execute still diagnose/refuse unreceipted adoption.",
+    "activatedReceipt": "Present malformed receipt refuses; valid receipt requires all four exact indexes, including after logical restore.",
+    "node": {
+      "tests": 19,
+      "pass": 18,
+      "fail": 1,
+      "correction": "Previously misreported19/19 despite the pinned full log ending in append-only audit failure; no ancestry change caused this. Root corrected the fixture and requalified below."
+    },
+    "actualWorker": {
+      "checks": 3,
+      "pass": 3,
+      "fail": 0
+    },
+    "baseline": "Exact main c52db58787467390042295b181b152ef3ba4de12 agent-heartbeats module bundled with the same current fixture/shared dependencies, not an independently packaged main artifact.",
+    "catalogRows": 782,
+    "baselineTotalReads": [
+      10,
+      11,
+      11
+    ],
+    "beforeFixTotalReads": [
+      792,
+      793,
+      793
+    ],
+    "beforeFixCatalogReads": [
+      782,
+      782,
+      782
+    ],
+    "afterFixTotalReads": [
+      10,
+      11,
+      11
+    ],
+    "afterFixCatalogReads": [
+      0,
+      0,
+      0
+    ],
+    "ciContract": "CI=1 scripts/check.mjs passed on exact d5fe9531f9a9ad8d367bee8ca96ecad878e5e5f4 source, I18N_BASE_REF=c52db58787467390042295b181b152ef3ba4de12",
+    "logSha256": {
+      "mainModuleBaseline": "ba0649ca7bdb9f009497cddeb2ef3090f6f4718ebeea3ae6236af289b7195e30",
+      "causalRed": "c8affdebf0cdec9f4bbc15cf6030a157d583dc8e88404b0ad9e8ee38b2dd92c9",
+      "node": "e4b80f96ce423a82e8e5d83a032d3b1055b677c9b8f21ec583a7aaeae5208526",
+      "worker": "077a1020474aacf589fb9bd54cf16b6f189540697108f654b4f6dbae0d77b574",
+      "repairReplayMissingOriginalRed": "cad203a1e747943876d383fd6b59d7c2b6f45516dabcc3d7934ab953c0376142",
+      "initialReceiptFirstCi": "8f242244b2560e02e86c0c66a764be64b514929b21f40df8ff39e9f55a899f94",
+      "ciContract": "2807c898c33980664ea506ec2e40823c059154b557fdc72d6910f4b8e54917df",
+      "runtimePreflight": "d12c5eb46bd6418e0400744aa7985eca40d15ec14bc7d9decd2f70c4385cb3d9"
+    },
+    "repairReplay": "Runtime guard retained; original claimed TypeError causal log actually failed earlier at the immutable audit guard. Root separately reproduced TypeError using an explicitly corrupted fixture on b2d875d5 and qualified typed409 on final source below.",
+    "runtimePreflightFiles": 669
+  },
+  "rootFinalComposition": {
+    "sourceCommit": "003a1f5fd",
+    "main": "dcec4be404d0138f2a8eac9bb9610bbfc899bfb9",
+    "mergeCommit": "7f878a5d3",
+    "at": "2026-11-01T19:17:22.362799+00:00",
+    "node": {
+      "tests": 80,
+      "pass": 80,
+      "fail": 0,
+      "skip": 0
+    },
+    "actualWorker": {
+      "tests": 3,
+      "pass": 3,
+      "fail": 0,
+      "skip": 0
+    },
+    "ci": "CI=1 scripts/check.mjs exit0; exact dcec I18N_BASE_REF; lint0errors335warnings;15contract tests pass. CI intentionally skips full Node suite.",
+    "originalFailure": "Composed initial run79/80: intended repair corruption fixture stopped at immutable append-only audit guard, which exists unchanged on both c52 and dcec. Prior helper19/19 summary contradicted its own pinned18/19 log and is retracted.",
+    "fixtureCure": "Assert ordinary DELETE is denied, then explicitly DROP append-only-delete trigger only inside synthetic corruption fixture before deleting original activation receipt; no runtime guard weakened.",
+    "causalRed": {
+      "source": "b2d875d5f3f1932b547b8d4c18a71c6ed0dc1483",
+      "testFixture": "003a1f5fd tests/wake-index-logical-restore.test.js",
+      "result": "1pass/1fail; reaches expected409 assertion and observes TypeError null.row before d5 guard. This supersedes\u2014not relabels\u2014the invalid earlier causal claim."
+    },
+    "logs": {
+      "initialComposedFailure": {
+        "path": "/tmp/wake-final-dcec-composed-tests-1101.log",
+        "sha256": "114565c00fcc8088f838300d841c15f131eb8e07397c6e8607d6ddaec866eb80"
+      },
+      "correctedFixtureCausalRed": {
+        "path": "/tmp/wake-repair-corrected-fixture-causal-red-1101.log",
+        "sha256": "350b2420e157cd7041ed6584ac25398acce04f18e5e72c3775c1c0b965d06bd8"
+      },
+      "node": {
+        "path": "/tmp/wake-final-dcec-composed-qualified-1101.log",
+        "sha256": "e02a24801513670b0a25c676d63c07f4f36ab4e690087bc55f4516438393b478"
+      },
+      "worker": {
+        "path": "/tmp/wake-final-dcec-worker-1101.log",
+        "sha256": "784de3a5d6ff7591683fdeab8582e99ccc061ef0c0a5f89ed3bd444b5dff7869"
+      },
+      "ci": {
+        "path": "/tmp/wake-final-dcec-composed-contract-1101.log",
+        "sha256": "e74393789055f9bc742aa8ecddd9995d568c2c258f3a7b5d4fc7aec1a9d4b806"
+      },
+      "focusedRestore": {
+        "path": "/tmp/wake-final-restore-fixture-qualified-1101.log",
+        "sha256": "6e4ce902be109cd8a9d4662f037ae1e9464f206bfc9f63f13225ff4e3b97bfba"
+      }
+    },
+    "deployment": "Not deployed. No production index plan/execute/install or activation."
+  },
+  "rootHostedSafetyNet": {
+    "head": "2228801c71b4dee0d96a9070a8358297ff8fa881",
+    "run": 41341013438,
+    "result": "FAILED",
+    "cause": "i18n hardcoded-ui-string ratchet3030->3034; four named operator recovery strings. Local CI-mode contract does not execute this separate safety-net ratchet.",
+    "logSha256": "94480fc0193ed615a360beb880c410c6ac8714d0f0ba4d362f6549aa88eb0f93",
+    "correction": "Use existing documented PR-body i18n-growth declaration with specific reason; baseline unchanged, fresh push required for new Actions payload. No failed run relabeled."
+  }
+}

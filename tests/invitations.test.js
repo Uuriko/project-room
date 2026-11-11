@@ -1,3 +1,4 @@
+import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -450,7 +451,7 @@ test("v3 to v4 is additive and a failed migration leaves the v3 database untouch
   store.close();
 
   store = new RoomStore(filename);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 42);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
   assert.deepEqual({
     rooms: store.db.prepare("SELECT * FROM rooms ORDER BY id").all().map(row => ({ ...row })),
     events: store.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row })),

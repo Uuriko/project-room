@@ -1,0 +1,25 @@
+  /api/inbox/quarantine:
+    get:
+      summary: Held-message quarantine review listing
+      description: >-
+        Account-session read. The owner's held-message backlog: each item
+        carries the spam score, the exact signals that fired (key, weight,
+        plain-language detail), sender, channel, age, and the resolved
+        imported source, plus status counts. `status=held` (default) lists
+        oldest first; `released` and `dismissed` list newest first.
+        Account-scoped: another account never sees these holds.
+      security:
+        - accountSession: []
+      parameters:
+        - name: status
+          in: query
+          description: Which verdicts to list. Default held.
+          schema: { type: string, enum: [held, released, dismissed] }
+        - name: limit
+          in: query
+          description: Max items, a positive integer.
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, status, counts: { held, released, dismissed }, items: [{ id, messageId, channel, connectionId, accountId, sourceId, reason: [{ key, weight, detail }], score, quarantinedAt, status, reviewedBy, reviewedAt, note, sender, subject, excerpt, source, shadow }] }  — accountId/sourceId are null on holds written before the gap-#2 columns existed; shadow is the source.import receipt's shadowQuarantine decision ({ policyVersion, threshold, wouldHold, gateBlock }) or null when no shadow decision was journaled" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_quarantine }

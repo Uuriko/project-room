@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSlaDashboard, responseTimePercentiles, severityFor,
   slaSeverities, criticalAtRatio, SlaDashboardError } from "../server/sla-dashboard.mjs";
-import { slaTargets, SlaError } from "../server/sla-clocks.mjs";
+import { slaTargets } from "../server/sla-clocks.mjs";
 
 const HOUR = 3600000, MIN = 60000;
 const NOW = Date.UTC(2026, 8, 18, 12, 0, 0); // fixed clock, no real time
@@ -177,10 +177,23 @@ test("buildSlaDashboard: rejects malformed inputs", () => {
   assert.throws(() => buildSlaDashboard({ ...good, owners: new Map([[1, "x"]]) }), SlaDashboardError);
   assert.throws(() => buildSlaDashboard({ ...good, breachAlerts: [{ threadId: "t" }] }), SlaDashboardError);
   assert.throws(() => buildSlaDashboard({ ...good, breachAlerts: "nope" }), SlaDashboardError);
-  // A now that precedes the latest inbound is a clock skew: the reused
-  // clocks surface their own SlaError, which the dashboard propagates.
-  assert.throws(() => buildSlaDashboard({ ...good,
-    threads: [thread("t", "telegram", [["m1", 10 * MIN, "inbound"]])], now: NOW - 60 * MIN }), SlaError);
+});
+
+test("buildSlaDashboard: one future-dated thread is isolated, not fatal to the batch", () => {
+  // A now that precedes a thread's latest inbound is a clock skew in that
+  // thread only. The dashboard must still serve every other thread and
+  // surface the skewed thread in errors, never throw for the whole batch.
+  const dashboard = buildSlaDashboard({ now: NOW, targets: slaTargets,
+    threads: [
+      thread("skewed", "telegram", [["m1", -10 * MIN, "inbound"]]),
+      thread("fine", "telegram", [["m2", 10 * MIN, "inbound"]]),
+    ] });
+  assert.equal(dashboard.threadCount, 1);
+  assert.equal(dashboard.openCount, 1);
+  assert.deepEqual(dashboard.openSweep.map(row => row.threadId), ["fine"]);
+  assert.equal(dashboard.errors.length, 1);
+  assert.equal(dashboard.errors[0].threadId, "skewed");
+  assert.equal(dashboard.errors[0].code, "invalid_sla_input");
 });
 
 test("severityFor: rejects bad inputs", () => {

@@ -1,0 +1,55 @@
+{
+  "source": "8153eb4fe3e6197c64af9aff3a4436f8a4048b0f",
+  "base": "a637e3d107ec5f53d0d3e9c514d88907ad6c8886",
+  "node": "24.22.1",
+  "heads": {
+    "5843": "7a77bff2fd3615bba8b9c29bd3a4a817a95c75a0",
+    "5855": "fb4497de48ad016c7a1f13279574c591d7635ca7",
+    "5866": "14c64ea15848ff93e1fb1a313ce7c6232bc5d970",
+    "5868": "c2023ac262cb57ddedcada6101d399fa82b52138",
+    "5871": "0b39a6cc5494f647e9bbcc337343a1fe6591d3cd"
+  },
+  "runs": [
+    {
+      "log": "node-default.tap",
+      "sha256": "4a36ab6beaa57c327afdf5b8582433518fcb13662fc4fdb92006b1f53b6d8807",
+      "pass": 59,
+      "fail": 0,
+      "skip": 4
+    },
+    {
+      "log": "board-scope-enabled.tap",
+      "sha256": "300b4574569a7512c9c8a44a5d320ef291ee0cbcf14b408b1fb6fca12e792af6",
+      "pass": 19,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "log": "native.tap",
+      "sha256": "455c026fc87638adc92d421f122adecfb0916297af776171d0764ff3b7091e2a",
+      "pass": 7,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "log": "cold-package.tap",
+      "sha256": "51e3c7dd5b8fdf99fed417cb80bee23ca3800663a3f861c072ad525005d8f1e4",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    }
+  ],
+  "review": [
+    "Exact author heads retained in five no-ff merges. Prior causal WebMCP and handoff successors retained.",
+    "Board facade uses same REST handlers and rooms:write key boundary; new actual MCP test rejects read-only key without mutation and permits read+write.",
+    "WebMCP helper requires enabled:true and is not installed automatically by app; no new browser experiment activated. Confirmation text localized.",
+    "Handoff uses caller-owned summaries and honest omitted/null coverage with bounded continuation, not all open repository/lease data. OAuth get_room_context scope unchanged.",
+    "Contract notices default off; enabled helper still hydrates room/claims and is not qualified at production scale. No claim of cost improvement for enabled notices.",
+    "No schema, identity, credential, grant or deployment flag changes. All new feature flags remain off."
+  ],
+  "limits": [
+    "No real browser modelContext activation or provider credential setup.",
+    "No full repository suite; targeted Node and actual Native HTTP/inbox plus cold exact-commit package.",
+    "Enabled contract-notice room-wide scan remains a reason to keep feature off pending redesign."
+  ]
+}

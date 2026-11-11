@@ -1,0 +1,93 @@
+{
+  "runtime": "Node SQLite",
+  "clock": "wall-only; not CPU",
+  "scope": "ledger fold only, excludes fixture creation/auth/authority/priced dispatch",
+  "rowMetric": "returned rows, not physical SQLite engine rows",
+  "bytesMetric": "JSON-serialized statement results, not physical IO or bind bytes",
+  "samples": [
+    {
+      "workItems": 3,
+      "fixtureMsExcluded": 58.111875,
+      "measured": [
+        {
+          "elapsedMs": 1.6542499999999905,
+          "get": 26,
+          "all": 8,
+          "run": 0,
+          "returnedRows": 180,
+          "serializedResultBytes": 75990,
+          "workBodyReads": 3,
+          "catalogCalls": 3,
+          "committedCents": 120
+        },
+        {
+          "elapsedMs": 1.1442920000000072,
+          "get": 26,
+          "all": 8,
+          "run": 0,
+          "returnedRows": 180,
+          "serializedResultBytes": 75990,
+          "workBodyReads": 3,
+          "catalogCalls": 3,
+          "committedCents": 120
+        }
+      ]
+    },
+    {
+      "workItems": 43,
+      "fixtureMsExcluded": 65.92895899999999,
+      "measured": [
+        {
+          "elapsedMs": 2.5986249999999984,
+          "get": 228,
+          "all": 10,
+          "run": 0,
+          "returnedRows": 462,
+          "serializedResultBytes": 145687,
+          "workBodyReads": 43,
+          "catalogCalls": 3,
+          "committedCents": 120
+        },
+        {
+          "elapsedMs": 2.328000000000003,
+          "get": 228,
+          "all": 10,
+          "run": 0,
+          "returnedRows": 462,
+          "serializedResultBytes": 145687,
+          "workBodyReads": 43,
+          "catalogCalls": 3,
+          "committedCents": 120
+        }
+      ]
+    },
+    {
+      "workItems": 500,
+      "fixtureMsExcluded": 1058.605458,
+      "measured": [
+        {
+          "elapsedMs": 25.754167000000052,
+          "get": 2521,
+          "all": 38,
+          "run": 0,
+          "returnedRows": 3669,
+          "serializedResultBytes": 801686,
+          "workBodyReads": 500,
+          "catalogCalls": 3,
+          "committedCents": 120
+        },
+        {
+          "elapsedMs": 18.599040999999943,
+          "get": 2521,
+          "all": 38,
+          "run": 0,
+          "returnedRows": 3669,
+          "serializedResultBytes": 801686,
+          "workBodyReads": 500,
+          "catalogCalls": 3,
+          "committedCents": 120
+        }
+      ]
+    }
+  ]
+}

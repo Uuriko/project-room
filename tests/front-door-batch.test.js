@@ -36,7 +36,7 @@ test("B-4: receipt page states a named verification tier, not the self-disclaime
   const selfAttested = renderReceiptDetailHtml({ ...base, verification: { state: "self_attested" } });
   assert.match(selfAttested, /Verification tier: bundle unaltered \(self-asserted\)/);
   const memberVerified = renderReceiptDetailHtml({ ...base, verification: { state: "verified" } });
-  assert.match(memberVerified, /Verification tier: human verdict \(member-verified\)/);
+  assert.match(memberVerified, /Verification tier: member-reviewed verdict/);
   for (const html of [merged, selfAttested, memberVerified]) {
     // The tier leads; the factual caveats (stored hashes, unsigned
     // envelope) follow it instead of standing as the whole statement.
@@ -69,9 +69,9 @@ test("B-8: one coarse-pointer token, applied via the token", () => {
   assert.match(read("src/project-offers.css"), /min-height: var\(--control-min-target-coarse\)/);
 });
 
-test("B-9: the matcher sits below the offers workspace, and the copy assumes no agent", () => {
+test("B-9: the matcher precedes the offers workspace, and the copy assumes no agent", () => {
   const offers = read("src/project-offers-ui.js");
-  assert.match(offers, /\(\$\('\.workspace'\) \?\? \$\('\.intro'\)\)\.after\(matching\)/);
+  assert.match(offers, /\(\$\('\.workspace'\) \?\? \$\('\.intro'\)\)\.before\(matching\)/);
   assert.doesNotMatch(read("offers.html"), /work on with your agent/);
 });
 

@@ -1,5 +1,5 @@
 import { backup, DatabaseSync } from "node:sqlite";
-import { chmodSync, mkdtempSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, createReadStream, mkdtempSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { RoomStore } from "./store.mjs";
@@ -32,6 +32,29 @@ export function backupDigests(db) {
     attachments: { rows: fileRows, bytes: fileBytes, mismatched, sha256: files.digest("hex") } };
 }
 
+// Backups are immutable standalone SQLite files. A non-empty WAL means the
+// main file alone no longer describes the database that a reader will see.
+export async function backupSnapshotDigest(filename) {
+  const assertStandalone = () => {
+    try {
+      if (statSync(`${filename}-wal`).size > 0) throw new Error("Backup has a non-empty WAL; standalone snapshot integrity is not provable");
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+  };
+  const stamp = () => {
+    const value = statSync(filename, { bigint: true });
+    if (!value.isFile()) throw new Error("Backup snapshot must be a regular file");
+    return [value.dev, value.ino, value.size, value.mtimeNs, value.ctimeNs].join(":");
+  };
+  assertStandalone();
+  const before = stamp();
+  const hash = createHash("sha256");
+  let bytes = 0;
+  for await (const chunk of createReadStream(filename)) { bytes += chunk.length; hash.update(chunk); }
+  assertStandalone();
+  if (stamp() !== before) throw new Error("Backup changed while its snapshot digest was being read");
+  return { bytes, sha256: hash.digest("hex") };
+}
+
 // Fresh private destination only; never overwrite or restore into the live DB.
 export async function backupRoom(source, destinationDirectory) {
   const input = realpathSync(source);
@@ -55,7 +78,9 @@ export async function backupRoom(source, destinationDirectory) {
     const events = restored.db.prepare("SELECT count(*) AS n FROM events").get().n;
     const digests = backupDigests(restored.db);
     if (digests.attachments.mismatched) throw new Error(`Backup holds ${digests.attachments.mismatched} attachment(s) whose bytes do not match their sha256`);
-    const watermark = { version: 1, backedUpAt: Date.now(), rooms, events, digests };
+    restored.close(); restored = null;
+    const snapshot = await backupSnapshotDigest(filename);
+    const watermark = { version: 1, backedUpAt: Date.now(), rooms, events, digests, snapshot };
     const sidecar = join(destination, "room-backup.json");
     writeFileSync(sidecar, JSON.stringify(watermark, null, 2));
     chmodSync(sidecar, 0o600);
@@ -521,6 +546,23 @@ const RECONCILE_CLASSES = [
     // silently un-happen in the restored store. Consumable codes and
     // account session credentials compare in the restored direction.
     let examined = 0;
+    // Restoring an old authenticated slot can undo a later sign-out,
+    // rotation, or account switch even if its parent credential still exists.
+    if (tableExists(restored.db, 'account_session_slots')) {
+      const select = 'SELECT hash,revision,account_id,account_auth_epoch,parent_credential_hash,expires_at,authenticated_until FROM account_session_slots';
+      const old = restored.db.prepare(select).all();
+      const live = new Map((tableExists(current.db, 'account_session_slots') ? current.db.prepare(select).all() : []).map(row=>[row.hash,row]));
+      const checkedAt = current.now();
+      examined += old.length;
+      for (const row of old) {
+        if (!row.account_id || row.expires_at <= checkedAt || row.authenticated_until <= checkedAt) continue;
+        const now = live.get(row.hash);
+        if (!now || now.expires_at <= checkedAt || now.authenticated_until == null || now.authenticated_until <= checkedAt
+            || now.account_id !== row.account_id || now.account_auth_epoch !== row.account_auth_epoch
+            || now.parent_credential_hash !== row.parent_credential_hash || now.revision !== row.revision)
+          stale.push({kind:'login_method',id:row.hash.slice(0,12),detail:`account session for ${String(row.account_id).slice(0,12)} changed or ended after the backup`});
+      }
+    }
     const bindings = [
       { table: "account_login_methods", key: "id", noun: "login method" },
       { table: "account_passkey_credentials", key: "credential_id", noun: "passkey credential" },

@@ -1,0 +1,29 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":127,"integrity":"eager","phases":{"schema":{"ms":20,"rowsRead":0},"plugin":{"ms":61,"rowsRead":0},"fence":{"ms":29,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":86,"heapBytes":30167432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":128,"legacyColdStartMs":127,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":9,"integrity":"eager","phases":{"schema":{"ms":3,"rowsRead":0},"plugin":{"ms":2,"rowsRead":0},"fence":{"ms":2,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":11,"heapBytes":40474712,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.store_initialized","initializationMs":10,"legacyColdStartMs":9,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ v45 open claim writer is fenced after upgrade, without losing accounts or claim fields (229.153667ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 377.932834
+
+✖ failing tests:
+
+test at tests/work-claim-writer-upgrade.test.mjs:22:1
+✖ v45 open claim writer is fenced after upgrade, without losing accounts or claim fields (229.153667ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-fresh-wake-release-1103/tests/work-claim-writer-upgrade.test.mjs:51:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /no such function: project_room_writer_v46|unsupported database writer/,
+    operator: 'throws',
+    diff: 'simple'
+  }

@@ -16,6 +16,7 @@ import {
 } from "../server/agent-heartbeats.mjs";
 import { agentCard } from "../server/agent-discovery.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const T0 = 1_750_000_000_000;
 const PUSH_URL = "https://push.example.test/hooks/room";
@@ -252,6 +253,23 @@ test("push delivery POSTs a pointer-only body with the token header", async t =>
   assert.deepEqual(pushFailuresOf(hb), { failures: 0, suspended: 0 }, "2xx resets failures");
 });
 
+test("push delivery sends registered bearer credentials as Authorization", async t => {
+  const transport = mockTransport();
+  const { hb } = await offlineWithPush(t, transport,
+    { ...pushSub(), authentication: { schemes: ["bearer"], credentials: "sender-key-test" } });
+  hb.pushNotify({ identityId: "ai_testagent", eventType: "message.posted", roomId: "room-1", id: "evt-2", ts: T0 });
+  await hb.flushPushes();
+  assert.equal(transport.calls[0].headers.Authorization, "Bearer sender-key-test");
+});
+
+test("push delivery omits Authorization when no credentials were registered", async t => {
+  const transport = mockTransport();
+  const { hb } = await offlineWithPush(t, transport);
+  hb.pushNotify({ identityId: "ai_testagent", eventType: "message.posted", roomId: "room-1", id: "evt-3", ts: T0 });
+  await hb.flushPushes();
+  assert.equal(transport.calls[0].headers.Authorization, undefined);
+});
+
 test("all four event types flow through the pointer body", async t => {
   const transport = mockTransport();
   const { hb } = await offlineWithPush(t, transport);
@@ -461,10 +479,7 @@ async function triggerFixture(t, memberId = "pushagent") {
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("push-trigger-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId, displayName: "Push Agent",
-    permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId, displayName: "Push Agent", permissions: ["accept_work"] });
   const transport = mockTransport();
   f.store.agentHeartbeats.setPushTransport(transport);
   // Register a wakeable host with a push subscription, then let it go stale.
@@ -524,10 +539,7 @@ test("trigger: room DM to an offline agent POSTs dm.posted", async t => {
 test("trigger: bond proposal POSTs bond.proposed to the offline party", async t => {
   const { f, transport, identity } = await triggerFixture(t, "bondagent");
   const proposer = f.store.identities.create("bond-proposer");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: proposer.identityId, memberId: "proposer",
-    displayName: "Proposer", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", proposer, { memberId: "proposer", displayName: "Proposer", permissions: ["accept_work"] });
   // #953: new agent members default to t1_readonly; proposer needs write access for bond.propose
   setTier(f.store.db, "commons", "proposer", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const proposed = f.store.command(proposer.secret, "commons", {
@@ -561,10 +573,7 @@ test("trigger: assignment to an offline agent without push config POSTs nothing"
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("no-push-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "nopush",
-    displayName: "No Push", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "nopush", displayName: "No Push", permissions: ["accept_work"] });
   const transport = mockTransport();
   f.store.agentHeartbeats.setPushTransport(transport);
   const assignRes = await post(origin, "/api/rooms/commons/collab/assignments", {
@@ -602,10 +611,7 @@ const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
 test("trigger: bond proposal enqueues a durable bond wake that survives a dead push endpoint (#3257)", async t => {
   const { f, origin, transport, identity } = await triggerFixture(t, "bondagent");
   const proposer = f.store.identities.create("bond-proposer");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: proposer.identityId, memberId: "proposer",
-    displayName: "Proposer", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", proposer, { memberId: "proposer", displayName: "Proposer", permissions: ["accept_work"] });
   setTier(f.store.db, "commons", "proposer", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   // Fault injection: the doorbell endpoint is dead (D5's proof shape).
   transport.setStatus(500);
@@ -650,4 +656,28 @@ test("trigger: collab assignment enqueues a durable assignment wake (#3257)", as
   const beat = await (await post(origin, "/api/agent-heartbeats", { hostId: "push-host", mode: "wakeable" }, identity.secret)).json();
   assert.deepEqual(beat.pendingWakes.map(w => [w.kind, w.messageId]), [["assignment", assignmentId]],
     "the assignee's next heartbeat carries the assignment wake");
+});
+
+for (const crossOrigin of [false, true]) test(`wake credentials ${crossOrigin ? 'never follow another origin' : 'survive same-origin redirect'}`, async t => {
+  const calls = [];
+  const transport = {
+    dnsResolvers: { resolve4: async () => ['93.184.216.34'], resolve6: async () => [] },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, headers: options.headers });
+      return calls.length === 1 ? new Response(null, { status: 307, headers: {
+        location: crossOrigin ? 'https://other.example.test/receiver' : '/moved'
+      } }) : new Response(null, { status: 204 });
+    }
+  };
+  const { hb } = await offlineWithPush(t, transport,
+    { ...pushSub(), authentication: { schemes: ['bearer'], credentials: 'synthetic-sender-key' } });
+  hb.pushNotify({ identityId: 'ai_testagent', eventType: 'message.posted', roomId: 'room-1', id: 'redirect-test', ts: T0 });
+  await hb.flushPushes();
+  assert.equal(calls.length, crossOrigin ? 1 : 2);
+  assert.equal(calls[0].headers.Authorization, 'Bearer synthetic-sender-key');
+  if (!crossOrigin) {
+    assert.equal(calls[1].headers.Authorization, calls[0].headers.Authorization);
+    assert.equal(calls[1].headers['X-Room-Notification-Token'], TOKEN);
+  }
+  assert.equal(pushFailuresOf(hb).failures, crossOrigin ? 1 : 0);
 });

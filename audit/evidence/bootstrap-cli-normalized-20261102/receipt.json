@@ -1,0 +1,78 @@
+{
+  "base": "fa297f4436ef23ca548d8fb04e0dc52fa57e065f",
+  "runtimeAndTestSource": "51a1563f02a5307dd60bbe181d8ac588a49223a1",
+  "node": "v24.22.1",
+  "runs": [
+    {
+      "name": "original-before",
+      "file": "original-before.log.gz",
+      "exitCode": 1,
+      "sha256": "369676354f064a469f1915a7d47ef4178941e104843046d8d1a9e7f71eb96e8f",
+      "compressedSha256": "bf825bd7865e74420d243df23ef9cef809fbcf532931d8213ba1cab14f291382"
+    },
+    {
+      "name": "focused-before",
+      "file": "focused-before.log.gz",
+      "exitCode": 1,
+      "sha256": "f8ca4b789385e40d8bffe2d9ac684968a02f705a1958f09ec5218b8c841f8f04",
+      "compressedSha256": "15510e9edc4def1ea4395a568d26af43196380d045c5f03fb25aebb40c001ff2"
+    },
+    {
+      "name": "original-after",
+      "file": "original-after.log.gz",
+      "exitCode": 0,
+      "sha256": "4cbf368390d9923d1614bede294ed2f318c3c0b3329f84d361ec3180ec5825f1",
+      "compressedSha256": "81925c281cc4db1a2dc074952ef00cb43c65256fbaa3b971fb1606547ddcb083"
+    },
+    {
+      "name": "focused-after",
+      "file": "focused-after.log.gz",
+      "exitCode": 0,
+      "sha256": "dd2b4d5b5f316f6c5449d0828c9bc1d9e1d07de3e661ae39502468d3f9c70217",
+      "compressedSha256": "6fcfa26e962ce29bcb6fc5837a592d44b4ac0f0102fcb4dc3973deae95804c35"
+    },
+    {
+      "name": "neighbors-after",
+      "file": "neighbors-after.log.gz",
+      "exitCode": 0,
+      "sha256": "60b622bf4a206f4258e29249a7539588030f218248ae6f1b6a7e6d8157cf8c69",
+      "compressedSha256": "72a6f81b99121fd6d3981c65043989bb3fc5a47b328b380bb16fb9af285fd3cd"
+    },
+    {
+      "name": "secret-scan",
+      "file": "secret-scan.log.gz",
+      "exitCode": 0,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "compressedSha256": "e7c7cd96c65009a7fb69bda792d31999cad4cf5590cbd1c248092ae9ae8c926b"
+    }
+  ],
+  "commands": [
+    "node --test --test-name-pattern=CLI:\\ bootstrap-agent-room\\ one-shot tests/agent-rooms.test.js",
+    "node --test tests/bootstrap-cli-normalized-orientation.test.mjs",
+    "node --test tests/agent-orientation-read.test.js tests/agent-connection.test.js",
+    "node scripts/secret-scan-diff.mjs --base fa297f443"
+  ],
+  "tests": {
+    "originalJourney": {
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    "focused": {
+      "pass": 2,
+      "fail": 0,
+      "skip": 0
+    },
+    "neighbors": {
+      "pass": 12,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "limits": [
+    "Node SQLite real HTTP/child CLI only, no Native Worker/live qualification.",
+    "Saved connect/check already passed before; failure was orient at original line699.",
+    "Fallback preserves existing pagination and authenticated identity; full SDK orient default unchanged.",
+    "No account/config/origin/token/timeout/grant changes; no broad full-suite claim."
+  ]
+}

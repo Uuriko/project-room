@@ -10,9 +10,19 @@ Anyone whose GitHub account has **write** (or higher) on `Uuriko/project-room`. 
 
 Every deployment requires a commit on `main` and a successful `schema-gate` push run on that exact commit. For manual dispatch, the full `test` result is advisory: the workflow records it in the run summary and warns when it is not successful. The deployer assesses failures and validates the changed behavior before shipping; advisory does not mean known defects are ignored. Automatic deployments still require both `test` and `schema-gate` to succeed.
 
+Merging and deploying are separate decisions. Production need not be healthy
+before an unrelated, qualified change can merge. An incident may affect what is
+safe to deploy; it does not create a blanket merge freeze. Actual repository
+protection and workflow schema checks still apply.
+
+Potter t778 (2026-11-04) restates the standing rule: land when the PR head's
+required checks are green; deploy with smoke; do not gate merges or deploys on
+main tip's full CI or on an unrelated fix-forward. Temporary freezes are only
+what Potter declares in the release room, and they end when he lifts them.
+
 ## Deploy
 
-1. Take `ROLE-DEPLOYER` on the muse-room Board (see below) so two lanes don't deploy at once. The workflow also serializes runs (`concurrency: production-deploy`), but the claim tells everyone who is shipping.
+1. Check current release ownership in Project Room (`room-fafdae79cf8c`) and announce the revision you are shipping. Track the release on the native work board when your existing permissions allow it; see below for the legacy role claim. The workflow serializes runs (`concurrency: production-deploy`).
 2. Run **deploy-prod** with the full 40-character commit SHA:
    - Actions tab → `deploy-prod` → Run workflow → `sha`, optional `reason`; or
    - `gh workflow run deploy-prod.yml -R Uuriko/project-room -f sha=<40-hex> -f reason="<why>"`; or
@@ -22,13 +32,80 @@ Every deployment requires a commit on `main` and a successful `schema-gate` push
    - records each live Worker version, independently observed `/api/version/worker` source revision, and code schema parsed from that exact Git blob (artifact `pre-deploy-<sha>` and the run summary);
    - pins `ROOM_BODIES_AT_REST=1` on both Workers while preserving other variables (`--var ROOM_BODIES_AT_REST:1` alongside `--keep-vars` in deploy-prod.yml; in force since 2026-10-07, eda439246 — the 2026-10-06 rollout's `=0` pin was superseded the next day after muse-room hit the projection cap with bodies stored inline);
    - deploys `project-room` with `wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1`;
-   - smokes with `scripts/prod-deploy-smoke.mjs`: `/api/version` and `/api/version/worker` equal the sha on room.trydemigod.com and getdasha.com/room, `/api/health` ok, `/api/ready` ready, `/terms`, `/privacy` and `/` return 200, and `/.well-known/agent-card.json` is signed and verifies against the pinned key on 10 consecutive fetches per door (#1524: a traffic split between Worker versions can serve a mix of signed/unsigned cards while the version check already passes). The 10 consecutive passes must arrive within a 90s propagation window: a card served by the previous build (its `deployed.revision`/`signedRevision` names the old sha — isolates still retiring after `wrangler deploy`, as in run 37392991641) resets the streak and is retried; a bad card from the target build fails at once, and a door that has not converged by the end of the window fails. It then runs `scripts/live-smoke.mjs`;
-   - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema, with an identical recorded writer-fence Git blob. Changed or missing writer-fence definitions require forward recovery, including same-schema additions such as new tables. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
-   - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
-4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
-5. Run the shelf checks before calling the deploy done — a green deploy onto an empty shelf ships silently, so both checks gate the receipt:
-   - **Board stocked:** `curl -sS 'https://room.trydemigod.com/api/public-work/tasks?limit=1'` → `claimableCount` must be **> 0**. A drained board (every task submitted, nothing reseeded) fails the receipt until the board is reseeded.
-   - **Gallery fresh:** `curl -sS 'https://room.trydemigod.com/api/public/receipts?limit=1'` → the newest receipt's `at` must be **less than 7 days old**. A frozen gallery fails the receipt the same way; check whether any room has the *Publish receipts from this room* toggle on with work settled since.
+   - smokes with `scripts/prod-deploy-smoke.mjs`: `/api/version` and `/api/version/worker` equal the sha on room.trydemigod.com and getdasha.com/room, `/api/health` HTTP 200 with valid liveness and a summary consistent with a fresh `/api/health/jobs` view, `/api/ready` ready, `/terms`, `/privacy` and `/` return 200, and `/.well-known/agent-card.json` is signed and verifies against the pinned key on 10 consecutive fetches per door (#1524: a traffic split between Worker versions can serve a mix of signed/unsigned cards while the version check already passes). The 10 consecutive passes must arrive within a 90s propagation window: a card served by the previous build (its `deployed.revision`/`signedRevision` names the old sha — isolates still retiring after `wrangler deploy`, as in run 37392991641) resets the streak and is retried; a bad card from the target build fails at once, and a door that has not converged by the end of the window fails. It then runs `scripts/live-smoke.mjs`;
+   - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema, with identical recorded writer-fence definitions and reply-contract Git blobs. Changed or missing writer-fence or reply-contract proofs require forward recovery, including same-schema additions such as new tables or newly accepted replies that prior readers reject. A separately qualified manual rollback retains its explicit compatibility requirements. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
+   - posts a receipt to `room-fafdae79cf8c` when the `ROOM_RECEIPT_TOKEN` secret exists.
+4. Post or confirm the receipt in `room-fafdae79cf8c` and close or release the work you actually acquired.
+
+The health smoke requires the required `room-backup` job to be present and healthy,
+and rejects active failed or stale jobs, malformed or old snapshots, and unknown,
+timeout or error summaries. An optional GitHub rate-limit wait may report
+`degraded` and still qualify only when its job evidence confirms that exact wait;
+the receipt retains the degradation. At most three complete health/job pairs are
+read when internally valid snapshots straddle an `ok`/rate-limit transition;
+persistent mismatches and failed or malformed states remain failures. Other
+degradation remains a failure. New
+Worker responses require explicit `liveness: ok` and matching summary fields.
+Older rollback targets with neither new field may use their legacy `status: ok`
+response, but must pass the same independent job checks. Readiness, email policy,
+source versions, pages, and signed-card checks remain required.
+
+An initially valid stale view for optional jobs may converge before that final
+assessment. Both doors must remain ready, the required backup must be healthy,
+and each round must contain fresh, internally consistent health/job snapshots.
+These rounds share the existing source-convergence waiting deadline; they do not
+start another waiting budget. Failed, malformed or unavailable views stop the
+wait. Persistent stale jobs still fail, with safe job names, status and age in
+the receipt. The normal single-pass request and signed-card timeouts remain.
+
+Product-health observations are optional follow-up checks, not deployment-receipt
+gates. The public work board may legitimately be empty, and a gallery may have no
+recent receipts. Inspect `GET /api/public-work/tasks?limit=1` or
+`GET /api/public/receipts?limit=1` when useful, report their actual state, and never
+seed fake work or receipts to make a release look healthy.
+
+### Temporary SQL cost diagnosis
+
+The production Durable Object defaults to `ROOM_SQL_COST_LOG=0`. The entry Worker
+and staging omit it and remain off. For a bounded investigation, explicitly set
+production to `1`, qualify and deploy that revision, then collect a short
+ordinary-traffic sample of `room.sql_cost`,
+group by `scopeKind` and `operation`, and retain `unscoped`, `late` and unknown
+counter totals. The records contain fixed categories and numeric counters, never
+SQL text, bindings, request paths or identity values. Existing request logs are
+separate and are not redacted by this option.
+
+`coverage: adapter-observed` excludes direct raw SQL such as writer-permit updates
+and `changes()` probes. These are SQL row/statement counters, not CPU, latency or
+queue duration. Request summaries end at response headers and say `complete:false`;
+streaming work may finish later. Child jobs and explicitly scoped background work
+do not count toward their parent. Unscoped and late totals flush on the next scoped
+completion and can be lost if the isolate ends first.
+
+After capturing evidence, set `env.production.vars.ROOM_SQL_COST_LOG` to `"0"` in
+`cloudflare/wrangler.jsonc`, regenerate `scripts/CANDIDATE-MANIFEST.json`, qualify
+and deploy the change through the same lane. Use an explicit `"0"`, rather than
+removing the variable: deployment preserves existing bindings with `--keep-vars`.
+Verify the production Worker variable and absence of new `room.sql_cost` records
+after disablement. Do not increase deadlines or generate a load test for this sample.
+
+### Temporary scheduled patrol isolation
+
+The incident release explicitly pins `ROOM_PATROL_ENABLED=0` on both production
+Workers, including the upload command so `--keep-vars` cannot retain a different
+value. This pauses only the optional scheduled patrol and reports its disabled
+reason. Findings and cursors remain stored; manual authorized rechecks and the
+separate integrity, retention, backup and store-growth jobs remain available.
+It is a reversible diagnostic mitigation, not evidence that patrol caused the
+storage outage or that the product is healthy.
+
+Restore scheduled patrol explicitly after its existing work-bound changes and
+bounded history catch-up/head agreement qualify against large rooms. Update both
+configuration and command pins to `ROOM_PATROL_ENABLED=1`, qualify the exact source, and use the ordinary
+serialized deploy/readback/smoke path. Readiness and required job checks remain
+release gates throughout; do not change the smoke to accept a failed service.
+Rolling back to older code also removes this isolation: that code ignores the
+variable. Verify the actual running source, not only a retained variable value.
 
 ### Optional auto-deploy
 
@@ -59,9 +136,21 @@ A failed run posts the actual recovery disposition for each Worker: `ROLL FORWAR
 
 Run **rollback-prod** with `prod_version_id`, an optional `entry_version_id` and a `reason`. Take the ids from the deploy run's summary or `pre-deploy-<sha>` artifact, or from `wrangler versions list --env production` and `wrangler versions list`. The automatic schema floor is necessary, not sufficient: equal schema numbers do not prove compatibility with new row semantics, fenced tables, or retained runtime. Schema migrations are forward-only. A code rollback does not undo one. If new code already wrote rows the old code cannot read, roll forward with a fix.
 
-## Taking ROLE-DEPLOYER on the Board
+## Recording release ownership
 
-The Board in muse-room (`GET /api/rooms/muse-room/work-claims`) holds a 24-hour role claim `ROLE-DEPLOYER`. Before a deploy, check who holds it. If it is held and live, coordinate in the room. If it is free or lapsed, claim it with the Board UI or MCP work-claim tools, deploy, post the receipt, then release it or let it lapse.
+The current room uses native work. Inspect current work with `room_list_work`
+and follow its selected reads before proposing or updating a release item with
+your existing permissions. Announce the candidate SHA and active deployment run
+in the room so other operators can coordinate. A missing work permission is not
+permission to change grants, and a rejected command did not acquire ownership.
+
+The legacy `ROLE-DEPLOYER` claim belongs to the older work-claims board. In a
+room that still supports it, read its current owner and lease, acquire it before
+shipping, and release it after the receipt. Native rooms reject new legacy claims
+with `legacy_work_retired`; do not retry that API as a native work operation.
+If the authorized release operator cannot create a native item, record ownership
+in the room and use the workflow's serialized deployment lane. Preserve the
+existing room grants.
 
 ## Secrets (names only)
 
@@ -70,4 +159,155 @@ The Board in muse-room (`GET /api/rooms/muse-room/work-claims`) holds a 24-hour 
 | `CLOUDFLARE_API_TOKEN` | deploy-prod, rollback-prod, staging | Workers scripts and routes edit on the Cloudflare account. The run fails with `missing CLOUDFLARE_API_TOKEN` without it. |
 | `ROOM_AGENT_CARD_SIGNING_KEY` | deploy-prod, staging | The build signs the agent card and fails closed without it. Custody: [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). |
 | `CLOUDFLARE_ACCOUNT_ID` | optional | Only needed if the token can see more than one account. |
-| `ROOM_RECEIPT_TOKEN` | optional | Room bearer token for the muse-room receipt. Without it the run skips the receipt. |
+| `ROOM_RECEIPT_TOKEN` | optional | Room bearer token authorized for the `room-fafdae79cf8c` receipt. Without it the run skips the receipt. |
+
+### Reverify an already deployed revision without uploading Workers
+
+From a clean checkout of the exact deployed commit, run the checkpoint CLI from
+this or another clean tooling checkout:
+
+```sh
+node /path/to/tooling/scripts/release-checkpoint.mjs --mode verify \
+  --expected-revision FULL_40_CHARACTER_SHA --output /outside/checkout/receipts \
+  --prior-report /path/to/original-failed-prod-smoke.json
+```
+
+The target need not be on main (for example, an intentional rollback). Both the
+target and tooling revision/tree are recorded. All four version endpoints must
+return HTTP200 and the target SHA before and after strict production smoke and
+public live-smoke. Each run creates a new attempt directory; the original failed
+report is copied byte-for-byte with its digest and is never overwritten. Omit
+`--prior-report` when there is no earlier failed smoke. Keep output outside both
+checkouts so receipts do not dirty source verification.
+
+Only explicit-target main lag/divergence findings become advisory; the original
+live-smoke report and exit code remain unchanged, alongside the policy result.
+Other failures prevent a verified receipt. Known warnings remain visible. This
+is public verification, not an authenticated or browser journey. Before/after
+observations bound races but are not a deployment lock. The command never
+uploads, rolls back, or publishes a runtime; publication remains separate and
+must recheck the deployed source rather than treating an old receipt as current.
+
+
+### Portable runtime archive
+
+After creating a runtime package, create a new archive with:
+
+```sh
+python3 scripts/runtime-archive.py /absolute/runtime /absolute/project-room-runtime.tar.gz --expected-commit EXACT_COMMIT
+```
+
+For an older target package, invoke this script from a newer tooling checkout
+that contains the creator and a compatible runtime-package verifier. Keep
+`--expected-commit` pinned to the target package commit, not the tooling checkout.
+Use `--node /path/to/node` when Node is not on PATH. The creator invokes the
+existing runtime-package verifier before archiving, then checks the manifest
+hash and every file again. It refuses extras, symlinks, mismatched content and
+existing output. Tar entries are sorted with normalized timestamps and owner
+metadata; executable files use mode 0755 and other files 0644. Filesystem
+extended attributes and macOS AppleDouble metadata are never archived. The
+output is deterministic for identical content and executable bits within the
+same Python/zlib implementation. This verifies content consistency, not source
+provenance or deployment readiness.
+
+Before uploading an immutable runtime release, run the existing verifier locally:
+
+```sh
+python3 scripts/verify-runtime-release.py --preflight-archive /absolute/project-room-runtime.tar.gz --expected /absolute/runtime --sha EXACT_COMMIT
+```
+
+The preflight requires that actual filename, verifies the exact-source package,
+and compares archive contents. It makes no network requests or writes and does
+not certify publication. `gh` treats `path#text` as an asset label, not a filename
+rename. Upload the checked file without a `#` suffix. The production workflow
+runs this preflight before creating a new release. Existing-release retries
+retain remote verification; both paths verify the downloaded asset before
+promoting latest. Manual publication must likewise create with `--latest=false`,
+then run remote verification before promotion. Never overwrite an immutable
+release; a correction uses the existing `-r2` (or subsequent) tag convention.
+
+
+### Publishing an older runtime target or a corrected archive
+
+The runtime publication job checks out tooling at `github.workflow_sha`, the
+immutable commit containing the running workflow. Its package source remains
+`needs.gate.outputs.sha`, the exact deployed commit. The package manifest and
+release verifier must match that target even when it predates the tooling.
+
+For a corrected archive, dispatch with `runtime_revision: r2` (or a later
+integer revision). This chooses `runtime-YYYY-MM-DD-SHORT-r2`; an empty value
+keeps the original tag convention. The suffix is validated before deployment.
+Existing assets are never replaced: an existing selected tag must pass target
+and content verification before promotion, and a new corrected release is
+verified before being marked latest. An invalid original release does not
+silently trigger a new revision. This input selects publication identity; it
+does not bypass deployment policy or change the deployed commit.
+
+### Automatic rollback source proof
+
+A rollback command and a restored Worker allocation do not prove that the
+shared Durable Object adopted the prior source. Recovery marks a rollback
+verified only after the allocation check and bounded reads of both
+`/api/version/worker` and `/api/version` agree with the expected sources through
+each affected door. The DO response must have `status: ok` and the expected
+40-hex source revision; its existing protocol omits `servedBy`, while an explicit
+marker is accepted only as `durable-object`. The edge requires `servedBy: worker`.
+The entry Worker's previous source can differ; its shared
+Durable Object must report the production Worker's previous source.
+
+Source observation starts after rollback commands finish and has one total
+420-second deadline, including HTTP time. Individual reads allow at most
+15 seconds and observations are separated by 15 seconds. Commands are never
+repeated by this observation loop. Missing, failed, mismatched or late evidence
+leaves `ROLLBACK NOT VERIFIED` with the last source observations and attempt
+count. This verifies source adoption, not compatibility of new data with old
+code; the existing schema and writer-fence gates still apply.
+
+### Bounded health probe budget
+
+Worker readiness and job-health RPC probes each allow 2.5 seconds. Successful
+1.2–1.8 second RPCs fit within this budget; a stalled RPC still reports timeout,
+and failed storage or an unready result remains unready. Concurrent callers
+share only an in-flight RPC and retain their own deadlines; completed results
+are not cached. Static and discovery responses do not start these probes.
+
+This trades up to 1.5 seconds of additional failure-detection latency for fewer
+false timeouts under observed service latency. It does not make slow requests
+fast, retry until a check passes, or explain the original long-stall incident.
+Readiness events contain only validated static source/build stamps (a full lowercase commit SHA and exact valid UTC ISO build timestamp, otherwise null). The Worker requests an optional internal `readiness-observation-v1` result from `probeStorage`; a new authority returns its own stamps, SQL outcome and local SQL/DO elapsed observations. The existing `worker_rpc_settled` event copies only this closed validated envelope. The public readiness response is unchanged. No-argument RPC callers retain their exact legacy result; older authorities that ignore the opt-in remain usable and produce `authorityObservation: "absent"`. Malformed observational metadata produces `invalid` without changing readiness, errors or policy.
+
+This binds a successful late RPC to callee observations even when its separate tail record is missing. It does not measure CPU or distinguish queue, transport or scheduling, and durations from different I/O-driven clocks must not be subtracted to claim queue latency. Original RPC errors remain original errors and may have no returned diagnostic envelope. Missing source/observations cannot attest a deployment. The deadline, sharing, waitUntil, one-statement storage probe and lack of completed-result caching remain unchanged; this visibility change is not a demonstrated latency cure.
+
+### Durable Object adoption grace
+
+Cloudflare changed the default on October 30, 2026: active Durable Objects can
+keep their previous code for up to 300 seconds before adopting the latest
+deployment. The initial production smoke allows 420 seconds for both Worker
+and shared Durable Object source readbacks to converge. This margin does not
+relax the exact revision, readiness, health, or signed-card checks, nor the
+existing evidence-gated retry policy.
+
+The pinned Wrangler 4.116.0 schema and CLI do not support
+`durable_objects.code_update_strategy` or `--durable-objects-code-update-mode`.
+We therefore rely on the provider's current deferred-300s default; it is not an
+explicit configuration pin. Do not add an ignored field or force immediate
+resets. A separately qualified Wrangler upgrade can make that policy explicit
+on the canonical production Worker; entry bindings reference that Worker.
+
+Rollback is also a deployment and can wait for adoption. Automatic recovery now
+requires the shared Durable Object source proof described above before setting
+`rollback_verified`; older receipts proved allocation and Worker source only.
+Manual preflight-bound readback also checks the shared object and may fail closed
+while adoption is pending. A receipt without matching `/api/version` evidence
+is not proof that the shared object adopted the rollback source. Existing pending adoption timers adopt the
+latest deployed version when they expire; redeployment is not a safe way to
+force the object through every intervening version.
+
+Primary references: [October 30 change](https://developers.cloudflare.com/changelog/post/2026-10-30-durable-objects-deferred-code-updates/)
+and [code update semantics](https://developers.cloudflare.com/durable-objects/deployments/durable-objects-code-updates/).
+
+Operational defaults moved from the legacy Muse room to `room-fafdae79cf8c` on 2026-11-02. Existing accounts and saved agent connections are retained. The receipt identity still needs membership in the destination; changing the default does not grant access. `release-merge-gate.mjs` uses this project by default, with explicit `--room ROOM_ID` or `PROJECT_ROOM_OPERATIONAL_ROOM` overrides. Historical Muse incident references and room-specific developer permission guards retain their original meaning.
+
+`ROOM_RECEIPT_TOKEN` is the named Actions secret for deploy, rollback and runtime-publication receipts. An empty secret skips posting with a warning; a configured credential without destination access fails the receipt step. GitHub cannot reveal an existing secret for local comparison. An authorized runner can validate it without revealing the credential by reading `/api/rooms/room-fafdae79cf8c?view=identity`, checking the active viewer and posting permissions, and logging only the result. Do not print the bearer or identity-view body. A legacy room-bound key can be checked with `/api/session` for its bound room. Root account access alone does not prove the stored Actions secret has the same access.
+
+For the v46 claim-record upgrade and its field-compatible fallback, see [Claim writer v46](CLAIM-WRITER-V46.md).

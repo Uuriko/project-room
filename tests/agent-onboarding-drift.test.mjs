@@ -68,3 +68,14 @@ test("proof-of-work numbers in the cold docs match server/agent-identities.mjs",
     "AGENT-START-HERE.md must spell the PoW input format",
   );
 });
+
+test("llms-full packet states acceptanceCriteria shapes: strings at create, objects in delivery", async () => {
+  const { llmsFullTxt } = await import("../server/agent-discovery.mjs");
+  const packet = llmsFullTxt();
+  assert.ok(
+    packet.includes("at create, `acceptanceCriteria` is a list of plain strings"),
+    "packet must state that acceptanceCriteria at work-claim create time is a list of plain strings; " +
+      "the {criterion, status} object shape belongs only to the delivery bundle. " +
+      "Production repro (G1 walk, 2026-10-31, build 1ab906c3): object-shaped criteria at create returned 422 invalid_claim_input.",
+  );
+});

@@ -1,0 +1,14 @@
+  /api/account/onboarding/complete:
+    post:
+      summary: Mark first-run onboarding complete
+      description: |
+        RC-2026-09-19-078. Account-session write (X-CSRF-Token, Origin).
+        Marks the caller's account onboarded; idempotent. 30 per address
+        per minute.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: Onboarding state with completed true }
+        '401': { description: account_session_required or invalid_session }
+        '403': { description: origin_denied or csrf_denied }
+        '429': { description: rate_limited }

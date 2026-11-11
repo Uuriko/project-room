@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "base": "2bf4cfb7d15265d6b6f690e0659a0c38a88ca25e",
+  "source": "2db087a99c474583124dcde77748e5a2086ca7be",
+  "node": "v24.22.1",
+  "results": {
+    "baselineTransport": {
+      "tests": 5,
+      "pass": 3,
+      "fail": 2
+    },
+    "baselineRefresh": {
+      "tests": 3,
+      "pass": 1,
+      "fail": 2
+    },
+    "finalAffected": {
+      "tests": 66,
+      "pass": 66,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "logs": [
+    {
+      "file": "transport-before.log.gz",
+      "decompressedSha256": "058543b77941f53bd06cff0991ed74b0577dead45a8ee5c015b96ec4d22b2364",
+      "bytes": 3158,
+      "exitCode": 1
+    },
+    {
+      "file": "refresh-before.log.gz",
+      "decompressedSha256": "955231a95a9cd8c7b7e3431b6f93907e09de1665abf823ca7af6258e783114ab",
+      "bytes": 2010,
+      "exitCode": 1
+    },
+    {
+      "file": "final-node.log.gz",
+      "decompressedSha256": "2026889ad4f1c3cf0732fd8dd716e83d08e82acc78a644616468575f28304115",
+      "bytes": 6231,
+      "exitCode": 0
+    },
+    {
+      "file": "lint.log.gz",
+      "decompressedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "exitCode": 0
+    },
+    {
+      "file": "i18n.log.gz",
+      "decompressedSha256": "25e410b2e0d08e14608d9057fb64835223ee1c75c870fca722459bf084c4293a",
+      "bytes": 134,
+      "exitCode": 0
+    },
+    {
+      "file": "secret-diff.log.gz",
+      "decompressedSha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "bytes": 24,
+      "exitCode": 0
+    }
+  ],
+  "limits": [
+    "Synthetic deterministic transport deadlines, not live service measurements.",
+    "Production refresh and invoke function bodies run in a VM with a supplied DOM boundary; no actual browser run. Fo owns browser qualification.",
+    "No production calls, credentials, grants, storage, timeout duration, request IDs or pending-write ownership changed.",
+    "Root must regenerate candidate manifest for changed public assets before release."
+  ]
+}

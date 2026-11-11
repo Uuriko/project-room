@@ -46,6 +46,10 @@ export const ALLOWLIST = [
   // when every character outside an interpolation is a separator, so a literal
   // run long enough to be a credential is still caught.
   /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*`(?:\$\{[^{}`]*\}|[\s.\-_:/+,;=&?#|])*`/i,
+  // Scratch OpenAPI probe: conditional random generation, never a literal
+  // credential. Pin the complete expression/line so either literal branch or
+  // an adjacent credential cannot inherit this exemption.
+  /^\s*const token = operatorEnabled \? randomBytes\(32\)\.toString\("hex"\) : null;$/,
   // Verified false positives (2026-09-16 audit):
   /IDENTITY_SECRET_PREFIX/, // runtime-generated: `secret = PREFIX + base64url(randomBytes(32))`
   /secret = suppliedSecret/, // server/agent-identities.mjs:186 — variable reference, not a hardcoded secret
@@ -101,6 +105,8 @@ export const ALLOWLIST = [
   // (no blanket *-fixture.mjs / *-check.mjs skip). Their genuinely-safe
   // placeholder values are allowlisted explicitly below — each entry names
   // the file and why the value is not a credential.
+  /^\s*const token\s*=\s*'synthetic-selected-parity-operator-0123456789';\s*$/, // cloudflare/operator-selected-parity.check.mjs —
+    // exact Miniflare-only synthetic Operator declaration; never deployed or a real credential
   /synthetic-test-secret/, // scripts/agent-signin-browser-check.mjs:51 — mocked
     // /api/agent-identities route fulfillment; obvious placeholder, not a credential
   /synthetic-test-private-key/, // scripts/agent-signin-browser-check.mjs:51 — same
@@ -135,6 +141,12 @@ export const ALLOWLIST = [
 // Exact non-secret tokens only. Unlike the line allowlist, these suppress
 // entropy noise without skipping credential-pattern checks or adjacent tokens.
 export const SAFE_ENTROPY_TOKENS = [
+  // current-room-events.mjs loop guard: boolean expression of identifiers, not a credential.
+  "boundedWindow||trimmed||events.length>=limit||!chunk.hasMore||chunk.next<=scanAfter||source.bytes>=CURRENT_EVENT_SOURCE_BYTES",
+  // Public Apache license URL in the home page structured data; not a credential.
+  "https://www.apache.org/licenses/LICENSE-2.0",
+  // Public relative documentation link embedded by wiki-build, not a credential.
+  "ROOM-COORDINATION.md#when-the-room-is-unavailable",
   // Public release artifact URLs in the herdr pin manifest; they contain no
   // credentials. Exact tokens retain scanning of all neighboring values.
   // Both releases are listed: pkg-v2 is the pin this branch introduces,
@@ -180,6 +192,15 @@ export const SAFE_ENTROPY_TOKENS = [
   // joined path token over the entropy threshold.
   "archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt", // DESIGN.md citation
   "archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md", // scripts/grok-room-host.mjs pointer string
+  // Doc citations in OpenAPI fragment descriptions (server/openapi/fragments/); prose paths, not credentials.
+  "docs/PRIVATE-INBOX-FOUNDATION-2026-09-08.md.",
+  "docs/PRIVATE-REMINDERS-CHECKPOINT-2026-09-07.md",
+  "docs/REPLY-REQUESTS-FOUNDATION-CHECKPOINT-2026-09-08.md",
+  // server/share-links.mjs AGENT_INVITE_CODE_PATTERN character classes — invite
+  // code shape alphabets (Crockford / base32-ish), not credentials. Exact tokens
+  // only; a real credential on the same line still trips pattern rules.
+  "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "ABCDEFGHJKMNPQRSTUVWXYZ23456789",
 ];
 
 // Directories scanned: source code where a real secret could hide.

@@ -1,3 +1,4 @@
+import { isCurrentRoom, currentThreadParticipants, readCurrentMessage, currentMessageMayBeVisible, withCurrentReadContext } from './current-room-repository.mjs';
 import { messageRepository } from "./message-repository.mjs";
 // Personal attention surfaces: activity feed, read horizons, saved messages,
 // thread mutes. Write-time fan-out for mention/reply/thread_reply
@@ -180,7 +181,7 @@ function applyActivityFanOut(store, roomId, state, senderId, command, incoming, 
     const data = command.data ?? {};
     const messageId = data.messageId || incoming.id;
     const body = typeof data.body === "string" ? data.body : "";
-    const identityNames = identityNamesFor(store, roomId);
+    const identityNames = body.includes("@") ? identityNamesFor(store, roomId) : {};
     const recipients = new Map(); // userId -> { type, threadId }
     for (const target of resolveMentionTargetsInText(members, identityNames, body, senderId)) {
       recipients.set(target, { type: "mention", threadId: "" });
@@ -198,7 +199,7 @@ function applyActivityFanOut(store, roomId, state, senderId, command, incoming, 
     if (threadRootId) {
       const muted = new Set(db.prepare(
         "SELECT member_id FROM thread_mutes WHERE room_id=? AND thread_id=?").all(roomId, threadRootId).map(r => r.member_id));
-      for (const participant of threadParticipants(messages, threadRootId)) {
+      for (const participant of (isCurrentRoom(db,roomId) ? currentThreadParticipants(db,roomId,threadRootId) : threadParticipants(messages, threadRootId))) {
         if (participant === senderId || recipients.has(participant) || muted.has(participant)) continue;
         recipients.set(participant, { type: "thread_reply", threadId: threadRootId });
       }
@@ -421,49 +422,81 @@ export function markActivityReadAll(store, token, roomId, data = {}, expectedSes
 
 // --- read horizons ------------------------------------------------------------
 
-export function getReadHorizon(store, token, roomId, params = {}, expectedSessionBinding = null) {
-  const auth = authed(store, token, roomId, expectedSessionBinding);
-  const member = auth.member;
+function horizonScope(params) {
   const threadId = params?.threadId ?? "";
-  if (typeof threadId !== "string" || threadId.length > 384) fail(422, "invalid_horizon", "threadId must be a short string");
-  return store.readTransaction(() => {
+  const peerMemberId = params?.peerMemberId;
+  if (typeof threadId !== "string" || threadId.length > 384 || threadId.startsWith('["direct",')) {
+    fail(422, "invalid_horizon", "threadId must be a short thread identifier");
+  }
+  if (peerMemberId !== undefined && (threadId || typeof peerMemberId !== "string" || !peerMemberId.trim() || peerMemberId.length > 100)) {
+    fail(422, "invalid_horizon", "Choose a thread or a private conversation");
+  }
+  return { threadId, peerMemberId, key: peerMemberId === undefined ? threadId : JSON.stringify(["direct", peerMemberId]) };
+}
+function inPrivateConversation(message, viewerId, peerMemberId) {
+  return Boolean(message && (message.authorId === viewerId && message.toMemberId === peerMemberId
+    || message.authorId === peerMemberId && message.toMemberId === viewerId));
+}
+
+export function getReadHorizon(store, token, roomId, params = {}, expectedSessionBinding = null) {
+  return store.readTransaction(() => withCurrentReadContext(store.db, roomId, () => {
+    const auth = authed(store, token, roomId, expectedSessionBinding);
+    const member = auth.member;
+    const { threadId, peerMemberId, key } = horizonScope(params);
     const row = store.db.prepare(
       "SELECT last_read_message_id FROM read_horizons WHERE room_id=? AND member_id=? AND thread_id=?")
-      .get(roomId, member.id, threadId);
-    return { ...viewerEnvelope(auth, roomId), threadId, lastReadMessageId: row?.last_read_message_id ?? null };
-  });
+      .get(roomId, member.id, key);
+    let lastReadMessageId = row?.last_read_message_id ?? null;
+    if (lastReadMessageId !== null) {
+      if (isCurrentRoom(store.db,roomId) && !currentMessageMayBeVisible(store.db,roomId,lastReadMessageId,member.id,undefined,store.historyFloor(roomId,member.id))) lastReadMessageId = null;
+    }
+    if (lastReadMessageId !== null) {
+      const message = isCurrentRoom(store.db, roomId)
+        ? readCurrentMessage(store.db, roomId, lastReadMessageId)?.value
+        : messageOrArchived(store, roomId, lastReadMessageId);
+      if (!message || !dmVisible(message, member.id)
+        || peerMemberId !== undefined && !inPrivateConversation(message, member.id, peerMemberId)
+        || !messageInHistory(message, store.historyFloor(roomId, member.id))) lastReadMessageId = null;
+    }
+    return { ...viewerEnvelope(auth, roomId), threadId, ...(peerMemberId === undefined ? {} : { peerMemberId }), lastReadMessageId };
+  }));
 }
 
 export function setReadHorizon(store, token, roomId, data, expectedSessionBinding = null) {
   if (!data || typeof data !== "object" || Array.isArray(data)) fail(422, "invalid_horizon", "Supply threadId and lastReadMessageId");
   const keys = Object.keys(data);
-  if (!keys.includes("lastReadMessageId") || keys.some(key => !["threadId", "lastReadMessageId"].includes(key))) {
+  if (!keys.includes("lastReadMessageId") || keys.some(key => !["threadId", "peerMemberId", "lastReadMessageId"].includes(key))) {
     fail(422, "invalid_horizon", "Supply lastReadMessageId; threadId is optional");
   }
-  const threadId = data.threadId ?? "";
-  if (typeof threadId !== "string" || threadId.length > 384) fail(422, "invalid_horizon", "threadId must be a short string");
+  const { threadId, peerMemberId, key } = horizonScope(data);
   const lastReadMessageId = data.lastReadMessageId;
   if (lastReadMessageId !== null && (typeof lastReadMessageId !== "string" || !lastReadMessageId.trim() || lastReadMessageId.length > 384)) {
     fail(422, "invalid_horizon", "lastReadMessageId must be a message id or null");
   }
-  const auth = authed(store, token, roomId, expectedSessionBinding);
-  const member = auth.member;
-  return store.transaction(() => {
+  return store.transaction(() => withCurrentReadContext(store.db, roomId, () => {
+    const auth = authed(store, token, roomId, expectedSessionBinding);
+    const member = auth.member;
     if (lastReadMessageId !== null) {
-      const message = messageOrArchived(store, roomId, lastReadMessageId);
+      if (isCurrentRoom(store.db,roomId) && !currentMessageMayBeVisible(store.db,roomId,lastReadMessageId,member.id,undefined,store.historyFloor(roomId,member.id))) fail(404, 'message_not_found', 'No such message in this room');
+      const message = isCurrentRoom(store.db, roomId)
+        ? readCurrentMessage(store.db, roomId, lastReadMessageId)?.value
+        : messageOrArchived(store, roomId, lastReadMessageId);
       // Same answer for a DM the reader is not party to, and for a message
       // from before a since_join reactivation, as for an unknown id.
       if (!message || !dmVisible(message, member.id) || !messageInHistory(message, store.historyFloor(roomId, member.id))) {
         fail(404, "message_not_found", "No such message in this room");
+      }
+      if (peerMemberId !== undefined && !inPrivateConversation(message, member.id, peerMemberId)) {
+        fail(404, "message_not_found", "No such message in this conversation");
       }
     }
     const now = store.now();
     store.db.prepare(
       `INSERT INTO read_horizons (room_id,member_id,thread_id,last_read_message_id,updated_at) VALUES(?,?,?,?,?)
        ON CONFLICT(room_id,member_id,thread_id) DO UPDATE SET last_read_message_id=excluded.last_read_message_id, updated_at=excluded.updated_at`)
-      .run(roomId, member.id, threadId, lastReadMessageId, now);
-    return { ...viewerEnvelope(auth, roomId), threadId, lastReadMessageId };
-  });
+      .run(roomId, member.id, key, lastReadMessageId, now);
+    return { ...viewerEnvelope(auth, roomId), threadId, ...(peerMemberId === undefined ? {} : { peerMemberId }), lastReadMessageId };
+  }));
 }
 
 // --- saved messages -----------------------------------------------------------
@@ -527,4 +560,3 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
     return { ...viewerEnvelope(auth, roomId), messageId: data.messageId, saved: data.saved };
   });
 }
-

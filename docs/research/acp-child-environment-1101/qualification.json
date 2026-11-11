@@ -1,0 +1,100 @@
+{
+  "base": "dcec4be404d0138f2a8eac9bb9610bbfc899bfb9",
+  "causalRedCommit": "3a1e8e681",
+  "sourceCommit": "d274de95466bf085c0d077fb78f8547357e97d73",
+  "status": "locally qualified; independent challenge completed without remaining blocker; not published/deployed",
+  "scope": "Exact ambient child environment names only; no model, host login or live auth invoked. No filesystem or full credential isolation claim.",
+  "originalReceiptsSha256": {
+    "actual-child-before.json": "9075b131a89091cc9249e1aae501d2883776fc5368e8a8dc2d1c60f6ced2a994",
+    "exact-contract-prototype.json": "cf429f34fa3726c039ccfa1f5503614c3c0fd79618432bb9c333f267fecfb0cd",
+    "regression-red.log": "5f8939daf9cecf2096343a73a10c9104fcd2f82dce42d2252b7fcd115ad84773"
+  },
+  "priorWakeEvidenceCorrection": {
+    "incorrectClaim": "a30 wake evidence claimed 19/19 on d5 and an observed TypeError-to-409 causal fix. Both claims are retracted.",
+    "actual": "Final focused Node log reports18pass/1fail at operator audit append-only DELETE; attempted corruption never reached either old dereference or new guard. c52 and dcec already contain same immutable trigger.",
+    "nodeLogSha256": "e4b80f96ce423a82e8e5d83a032d3b1055b677c9b8f21ec583a7aaeae5208526",
+    "repairFixtureRedSha256": "cad203a1e747943876d383fd6b59d7c2b6f45516dabcc3d7934ab953c0376142",
+    "mechanism": "After adding the repair corruption fixture, Node exited1 but later successful git commands masked the shell status. I reused the preceding green19 summary without inspecting the final log and hardcoded19/0 while hashing the actual failing log. The a30 JSON node digest matches that failing log.",
+    "ancestryRetraction": "Earlier explanation that c52 predated the trigger was unverified and false; diff c52..dcec for operator-actions/store/restore is empty.",
+    "validScope": "Earlier19green before the added corruption fixture does not qualify d5. Actual Worker3 and CI-mode contract are separate checks and do not clear this failure. Root owns corrected explicit append-only/fault-injection fixture003a1f5fd and later composition qualification.",
+    "preservedCopies": [
+      "/tmp/queue-evidence-correction-original-node-failure.log",
+      "/tmp/queue-evidence-correction-original-repair-fixture-failure.log"
+    ],
+    "currentCommandDiscipline": "Each env-lane test command captures its immediate exit status, prints final full failure summary, and exits with that status; no later successful command substitutes for it."
+  },
+  "qualification": {
+    "affectedNode": {
+      "sourceCommit": "d274de95466bf085c0d077fb78f8547357e97d73",
+      "exitCode": 0,
+      "tests": 45,
+      "pass": 45,
+      "fail": 0,
+      "skipped": 0,
+      "command": "node --test tests/room-acp-agents.test.js tests/room-acp-bridge.test.js tests/room-acp-permission.test.js tests/room-acp-preflight.test.js tests/room-acp-restart.test.js tests/room-acp-pack-npm.test.js tests/candidate-manifest.test.js"
+    },
+    "ciContract": {
+      "sourceCommit": "d274de95466bf085c0d077fb78f8547357e97d73",
+      "exitCode": 0,
+      "command": "CI=1 I18N_BASE_REF=dcec4be404d0138f2a8eac9bb9610bbfc899bfb9 node scripts/check.mjs"
+    },
+    "docsLinks": {
+      "exitCode": 0,
+      "links": 810
+    },
+    "logSha256": {
+      "affectedNode": "d42be9628dac87562574c204074f3a3e5474b47134131ba8fde4ea5a9e17ddf5",
+      "ciContract": "6543020c053062137d6841a14cc2a951024e9b2cce525b8e23b1533943bb8700",
+      "pack": "8bb4c9bcb87e4f874097bcc11235bd8e1e0a58b1e3a71e70d199660ccde165c1",
+      "docsLinks": "e433437dc492f9bf532c0dc4888375a2ec01a3557a4691fbd4f5320b8caf2efa",
+      "evidenceSecretScan": "78a520dcc50d77315acf455b4df7db5561e07f95d326ef8e737410b2f8df4d4c"
+    },
+    "evidenceSecretScan": {
+      "exitCode": 0,
+      "findings": 0,
+      "filesReported": 1704
+    }
+  },
+  "independentChallenge": {
+    "requestedFrom": "pairing_resume",
+    "sourceCommit": "d274de95466bf085c0d077fb78f8547357e97d73",
+    "status": "complete: initial standalone-commit test-gap objection withdrawn after full dcec-to-head review; actual-child adversarial regression is in preceding red commit",
+    "finding": "No remaining blocker found within scope; exact keys/README correct, PATH and selected CODEX_HOME controls retained, filesystem/config-access limitation explicit."
+  },
+  "composition": {
+    "sourceCommit": "f2a95316d41bc311d4b2086540d16b9fcbb793b0",
+    "mergedMain": "3a091d68154efb4a2f7b1aa0b432891b53cb3a38",
+    "originalCandidate": "292eafca1e1350a480f73ffe73bfd64da3acc9ac",
+    "method": "normal merge preserving both histories; no conflicts; ACP source/README unchanged; package/manifest regenerated",
+    "affectedNode": {
+      "exitCode": 0,
+      "tests": 45,
+      "pass": 45,
+      "fail": 0,
+      "skipped": 0
+    },
+    "safetyLint": {
+      "exitCode": 0,
+      "command": "I18N_BASE_REF=3a091d68154efb4a2f7b1aa0b432891b53cb3a38 npm run lint",
+      "errors": 0,
+      "existingWarnings": 335,
+      "designTokens": "clean",
+      "reachability": "clean",
+      "i18n": "passes actual-base ratchet"
+    },
+    "ciContract": {
+      "exitCode": 0,
+      "sourceCommit": "f2a95316d41bc311d4b2086540d16b9fcbb793b0",
+      "command": "CI=1 I18N_BASE_REF=3a091d68154efb4a2f7b1aa0b432891b53cb3a38 node scripts/check.mjs",
+      "contractTests": 15,
+      "pass": 15,
+      "fail": 0
+    },
+    "logSha256": {
+      "affectedNode": "54194c0e65f8232dc2da6ba35f0763ad04ba72eaa4bb326429943499de0ce8b1",
+      "safetyLint": "13e386189f1f03d5afb52efd05350d35fb4cbd0dbf7631ee70612ce017221859",
+      "pack": "8bb4c9bcb87e4f874097bcc11235bd8e1e0a58b1e3a71e70d199660ccde165c1",
+      "ciContract": "96522b3cf06cf6cb9421c7d4d95592d0c12de80b1c2b8c6ca0f44a133c01bc39"
+    }
+  }
+}

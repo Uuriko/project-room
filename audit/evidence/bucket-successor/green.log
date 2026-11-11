@@ -1,0 +1,60 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":47,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":50,"heapBytes":39747232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":47,"legacyColdStartMs":47,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":42328168,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ in budget: a held poll is released as soon as a wake is queued (203.787334ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":51,"integrity":"eager","phases":{"schema":{"ms":14,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":52,"heapBytes":53567600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":52,"legacyColdStartMs":51,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ over budget: the held poll rides out waitMs, then returns every queued signal and ack drains them (1283.703042ms)
+ℹ extra wait for an over-budget wake: 1106 ms at waitMs=1200; bounded by waitMs (room-acp first page holds 25000 ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":47,"heapBytes":63349688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":47,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a real mention in a reply releases the held poll within one poll cycle (185.794042ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":55,"integrity":"eager","phases":{"schema":{"ms":16,"rowsRead":0},"plugin":{"ms":24,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":55,"heapBytes":67876160,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":56,"legacyColdStartMs":55,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ ping-pong: replies that keep mentioning the agent are throttled once the bucket is spent (1029.868333ms)
+ℹ ping-pong throttled at turn 21; signal still delivered on the same poll
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":54,"integrity":"eager","phases":{"schema":{"ms":16,"rowsRead":0},"plugin":{"ms":23,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":54,"heapBytes":77746824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":55,"legacyColdStartMs":54,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ over budget, queued before the poll: the poll still holds, so model turns are capped (899.704958ms)
+ℹ turn cap: over-budget turn waited 805 ms at waitMs=800; sustained rate bounded by refill 6/min or one turn per waitMs
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":55,"integrity":"eager","phases":{"schema":{"ms":16,"rowsRead":0},"plugin":{"ms":24,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":61,"heapBytes":71456896,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":55,"legacyColdStartMs":55,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ pingpong with pre-queued wakes: turns past the burst each cost a full waitMs (1336.207458ms)
+ℹ 24 turns in 1259 ms; 4 held turns
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":80781272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ ask bypasses an exhausted chat bucket for an actually held poll (81.205583ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":70719432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ assignment bypasses an exhausted chat bucket for an actually held poll (63.491833ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":80350584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ heartbeat delivery clears throttle bookkeeping without acknowledging (61.276583ms)
+✔ only successful scoped ack clears throttle bookkeeping (60.048459ms)
+✔ bucket spends, refuses when empty, refills, and is keyed per agent and room (0.289833ms)
+✔ over-budget wakes stay queued but do not release the poll (3.057ms)
+✔ throttle bookkeeping has one global 4096-id cap; eviction leaves durable signals intact (258.313083ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":37236680,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":47745080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":45931352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":54765352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ drained delivery schedules real job retries and fresh generation (host URL false) (81.379042ms)
+✔ drained delivery schedules real job retries and fresh generation (host URL true) (63.332792ms)
+✔ assignment-only heartbeat acknowledgement stops scheduled rewake (63.119292ms)
+✔ late heartbeat ack of old signal preserves the fresh coalesced generation until its own ack (57.691458ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6100.290459

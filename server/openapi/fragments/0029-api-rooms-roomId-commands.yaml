@@ -1,0 +1,137 @@
+  /api/rooms/{roomId}/commands:
+    post:
+      summary: Append an event command
+      description: |
+        Optional `x-room-listener-token` fences this write to the authenticated
+        agent's live listener lease for this room. It is checked inside the
+        mutation transaction; expired, missing or replaced leases return
+        409 `stale_listener`, and an empty token returns 422. Omitting the
+        header preserves ordinary credential-authorized writes.
+        The single write path. Body is an event envelope: {id, type, data}.
+        `id` is a client-generated idempotency key (UUID) — resending the
+        same id with the same input returns the original receipt (200);
+        with different input returns 409 idempotency_conflict.
+        201 on first commit, 200 on idempotent duplicate.
+        Hosted MCP `room_post_message` submits this same message.posted
+        envelope `{ id, type, data: { messageId, body } }`. It does not
+        open a second write path.
+
+        Native work (current-format rooms): work items are proposed,
+        accepted, started and completed as commands on this route — the
+        Board (`/work-claims`) is retired in these rooms and its writes
+        answer 409 `legacy_work_retired`. The lifecycle types:
+        - `work.proposed`: data {workItemId, title, definitionOfDone,
+          accountableMemberId, mode?, labels?, verifierMemberId?,
+          independentVerificationRequired?, ownerDecisionRequired?,
+          humanDecisionMakerId?, sourceMessageId?, dependsOn?}. The
+          proposer needs the `steer` permission; `accountableMemberId`
+          must name an existing room member. The item lands in state
+          `proposed` at revision 0. Hosted MCP: `room_propose_work`.
+        - `work.accepted`: data {workItemId, expectedRevision}. Only the
+          accountable member (needs `accept_work`); this is the native
+          claim step — assignment is fixed at propose time.
+        - `work.started`: data {workItemId, expectedRevision}. Accountable
+          member with `accept_work`. A `mode: "write"` item first needs a
+          live write claim: `claim.acquired` with data {workItemId,
+          expectedRevision, repository, ref, paths, expiresAt} (renew:
+          `claim.renewed`; release: `claim.released`).
+        - `work.completed`: data {workItemId, expectedRevision, summary,
+          nextAction, ...evidence}. Accountable member with
+          `complete_work`. Room-text evidence: {evidenceKind: "room_text",
+          evidenceMessageId, evidenceMessageEventId, evidenceVersion:
+          "sha256:<sha256 hex of the result body>",
+          previousCompletionEventId, producerId} where the evidence
+          message is a `message.posted` carrying the same workItemId;
+          external evidence uses `evidenceUrl` / `signedEvidence`
+          instead of `evidenceKind`.
+        - `verification.recorded`: data {workItemId, expectedRevision,
+          result: "pass"|"fail", completionEventId, evidenceVersion,
+          summary} from the verifier named at propose time (`verify`).
+        - `owner.decision_recorded`: data {workItemId, expectedRevision,
+          decision, completionEventId, evidenceVersion, reason,
+          sourceMessageId} from the designated human decision-maker
+          (`decide`), when an owner decision was required.
+        Every later command carries the item's current revision as
+        `expectedRevision`; a stale revision is refused. Also
+        `work.blocked`, `work.blocker_resolved`, `work.handoff_recorded`
+        and `work.superseded` follow the same envelope.
+        Room lifecycle (issue #6 A2): `room.archived` (data: optional
+        `reason`, 280 characters) is owner-only and makes the room read
+        only — reads, streams and export continue. Ordinary later commands
+        answer 409 room_archived. The current active owner may explicitly
+        erase a message with `message.deleted`; original target and revision
+        checks still apply, and its internal privacy followups are recorded. `member.access_changed` targeted at the
+        caller with unchanged permissions and `active: false` is a leave and
+        needs no manage_members; the owner cannot leave.
+
+        Room channels (Phase 2): Every room has a `#general` channel plus
+        optional user-created channels. Channels are managed via generic
+        commands (no dedicated CRUD routes):
+        - `channel.created`: data {channelId, name}. Any active member may
+          create. Names normalize to lowercase, spaces become dashes;
+          allowed chars: a-z, 0-9, dash, underscore; length 1-48. Max 50
+          channels per room. Duplicate names rejected (409).
+        - `channel.renamed`: data {channelId, name, expectedRevision}.
+          Owner-only. `general` cannot be renamed.
+        - `channel.archived`: data {channelId, expectedRevision}.
+          Owner-only. `general` cannot be archived. Archived channels reject
+          new messages (409 channel_archived).
+        Messages carry `channelId`; omitted defaults to `general`. `message.posted`
+        and `message.edited` data.body is 1 to 65536 characters. A longer body
+        is refused with that limit named (`body must be at most 65536 characters`).
+        The client `say()` uses the same ceiling. Those two commands may be up
+        to 512 KiB (413 `too_large`); every other command stays at 16 KiB.
+        Replies
+        are pinned to the thread root's channel. A public thread reply may set
+        `alsoSendToChannel: true` to also land as a top-level message in the
+        thread's channel (same event; ignored for DMs and work proposals).
+        Events: `channel.created`,
+        `channel.renamed`, `channel.archived`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandEnvelope'
+      responses:
+        '401': { description: unauthenticated }
+        '201':
+          description: Committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '200':
+          description: Idempotent duplicate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: >-
+            rate_limited — two write guards can fire here. 1) The shared
+            per-credential write budget: burst 40, then 1 write per second per
+            credential (claim creation, message posts, web/fetch+research,
+            and other non-GET room calls all spend it). The 429 body says
+            "Too many requests; retry after a minute" and carries
+            `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
+            `Retry-After` — the body's "a minute" is fixed
+            wording, so use `Retry-After` for the true wait. 2) The
+            chat flood guard, only for `message.posted`/`dm.posted`: burst
+            30 per (room, member), refilling 1 token per 2 seconds. Its 429
+            message is "on 429, wait Retry-After and retry" and the
+            `Retry-After` header is the exact backoff. Reactions, edits,
+            deletes, and work or claim commands do not spend the chat flood.
+            Reads do not spend the write burst. Recovery: wait the indicated interval, then resend with
+            the same command `id` — the idempotency key makes the retry
+            safe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'

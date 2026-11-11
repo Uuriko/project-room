@@ -1,7 +1,8 @@
-// Per-request timing that stays visible when a Durable Object stalls.
-// `app` is handler time inside the object. `total` is what the Worker
-// spent waiting for the response, including queueing and cold start.
-// The gap is the stall. Query strings are never logged.
+// Runtime clock deltas, not CPU or queue measurements. Cloudflare clocks
+// advance on I/O; synchronous work can report zero. Header timing excludes
+// subsequent response-body work. Preserve legacy queueMs as an unattributed
+// residual for compatibility, never use it to locate the delay.
+export const runtimeTiming = Object.freeze({ clockSemantics: 'io-bound', cpuMeasured: false });
 
 export function serverTimingMetric(name, durMs) {
   const dur = Number.isFinite(durMs) ? Math.max(0, Math.round(durMs)) : 0;
@@ -30,10 +31,12 @@ export function appDurationMs(headers) {
 }
 
 export function logRoomRequest({ method, path, status, totalMs, servedBy, appMs }) {
-  const entry = { event: 'room.request', method, path, status, totalMs, servedBy };
+  const entry = { event: 'room.request', method, path, status, totalMs, servedBy, ...runtimeTiming };
   if (Number.isFinite(appMs)) {
     entry.appMs = appMs;
     entry.queueMs = Math.max(0, totalMs - appMs);
+    entry.residualMs = entry.queueMs;
+    entry.residualAttribution = 'unattributed';
   }
   console.info(JSON.stringify(entry));
 }

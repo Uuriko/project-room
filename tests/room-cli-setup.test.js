@@ -10,6 +10,7 @@ import { readAgentConnection } from "../client/agent-connection.mjs";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, readPointer, safeName, writePointer } from "../cli/paths.mjs";
 import { nodeSatisfies } from "../cli/commands/doctor.mjs";
+import { chooseRoomLists } from "../cli/commands/login.mjs";
 
 const ORIGIN = "http://127.0.0.1:9";
 const MCP = ORIGIN + "/mcp";
@@ -282,6 +283,34 @@ test("login stores the connection as a private file and the printed result has n
   assert.equal(token.out, saved.token + "\n");
 });
 
+test("login without a room prints the choose_room memberships and directory, never secrets", async t => {
+  const root = mkdtempSync(join(tmpdir(), "room-choose-"));
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  const key = store.issueAccessKey("commons", "owner");
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(root, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const invite = store.invites.create(key, "commons", { profile: "chat", displayName: "Ada" });
+  const home = join(root, "home"), project = join(root, "project");
+  mkdirSync(home); mkdirSync(project);
+  const env = envFor(home);
+  const joined = await run(["login", "--room", `${origin}/join/${invite.code}`, "--name", "Ada", "--accept"], { env, cwd: project });
+  assert.equal(joined.code, 0, joined.out);
+  const choose = await run(["login", "--room", origin, "--name", "Ada"], { env, cwd: project });
+  assert.equal(choose.code, 1, choose.out);
+  const printed = JSON.parse(choose.out.trim().split("\n").at(-1));
+  assert.equal(printed.status, "choose_room");
+  assert.deepEqual(printed.memberships.map(room => room.roomId), ["commons"]);
+  assert.deepEqual(Object.keys(printed.memberships[0]).sort(), ["archivedAt", "memberId", "roomId", "title"]);
+  assert.ok(Array.isArray(printed.directory.rooms));
+  assert.ok(Object.hasOwn(printed.directory, "nextCursor"));
+  for (const room of printed.directory.rooms) assert.ok(room.listedAt === null || ["string", "number"].includes(typeof room.listedAt));
+  assert.equal(choose.out.includes("pri_"), false);
+  assert.equal(choose.out.includes(invite.code), false);
+});
+
 
 test("dot-only agent names cannot escape the connections root (#2877)", t => {
   const root = mkdtempSync(join(tmpdir(), "room-cli-dots-"));
@@ -321,4 +350,59 @@ test("saved connections accept a canonical home alias and reject symlinks escapi
   symlinkSync(outside, escaped, "dir");
   writeFileSync(join(directory, "pointer.json"), JSON.stringify({ version: 1, name: "room-agent", configDirectory: escaped }), { mode: 0o600 });
   assert.throws(() => readPointer("room-agent", env), /outside the connection directory/);
+});
+
+test("an approval_required invite preview and a retried login keep one identity, and choose_room never shows another identity's private rooms", async t => {
+  const root = mkdtempSync(join(tmpdir(), "room-choose-id-"));
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  store.initialize(initialRoom("secret-lab"));
+  const commonsKey = store.issueAccessKey("commons", "owner");
+  const labKey = store.issueAccessKey("secret-lab", "owner");
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(root, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const last = r => JSON.parse(r.out.trim().split("\n").at(-1));
+  const adaHome = join(root, "ada"), bobHome = join(root, "bob"), project = join(root, "project");
+  for (const d of [adaHome, bobHome, project]) mkdirSync(d);
+  const adaInvite = store.invites.create(commonsKey, "commons", { profile: "chat", displayName: "Ada" });
+  const link = `${origin}/join/${adaInvite.code}`;
+  const first = await run(["login", "--room", link, "--name", "Ada"], { env: envFor(adaHome), cwd: project });
+  const retry = await run(["login", "--room", link, "--name", "Ada"], { env: envFor(adaHome), cwd: project });
+  assert.equal(first.code, 1); assert.equal(retry.code, 1);
+  assert.equal(last(first).status, "approval_required");
+  assert.deepEqual(last(retry), last(first));
+  assert.equal(first.out.includes("pri_"), false);
+  const accepted = await run(["login", "--room", link, "--name", "Ada", "--accept"], { env: envFor(adaHome), cwd: project });
+  assert.equal(accepted.code, 0, accepted.out);
+  const adaChoose = last(await run(["login", "--room", origin, "--name", "Ada"], { env: envFor(adaHome), cwd: project }));
+  const adaRetry = last(await run(["login", "--room", origin, "--name", "Ada"], { env: envFor(adaHome), cwd: project }));
+  assert.equal(adaChoose.status, "choose_room");
+  const pendingId = adaChoose.identityId;
+  assert.ok(pendingId);
+  assert.equal(adaRetry.identityId, pendingId);
+  assert.deepEqual(adaRetry.memberships, adaChoose.memberships);
+  assert.deepEqual(adaChoose.memberships.map(r => r.roomId), ["commons"]);
+  const bobInvite = store.invites.create(labKey, "secret-lab", { profile: "chat", displayName: "Bob" });
+  const bobJoined = await run(["login", "--room", `${origin}/join/${bobInvite.code}`, "--name", "Bob", "--accept"], { env: envFor(bobHome), cwd: project });
+  assert.equal(bobJoined.code, 0, bobJoined.out);
+  const bobChoose = await run(["login", "--room", origin, "--name", "Bob"], { env: envFor(bobHome), cwd: project });
+  const bob = last(bobChoose);
+  assert.notEqual(bob.identityId, pendingId);
+  assert.deepEqual(bob.memberships.map(r => r.roomId), ["secret-lab"]);
+  assert.equal(bobChoose.out.includes("commons"), false);
+  const adaAgain = await run(["login", "--room", origin, "--name", "Ada"], { env: envFor(adaHome), cwd: project });
+  assert.equal(adaAgain.out.includes("secret-lab"), false);
+});
+
+test("choose_room directory boundary: valid row kept, malformed envelopes unavailable, nested sentinels dropped", () => {
+  const valid = chooseRoomLists({ memberships: [], directory: { rooms: [{ roomId: "pub", title: "Pub", purpose: "p", kind: "public", memberCount: 3, listedAt: "2026-11-01T00:00:00Z", secret: "x" }], nextCursor: "c1" } });
+  assert.deepEqual(valid.directory, { rooms: [{ roomId: "pub", title: "Pub", purpose: "p", kind: "public", memberCount: 3, listedAt: "2026-11-01T00:00:00Z" }], nextCursor: "c1" });
+  for (const directory of [undefined, null, [], "rooms", { rooms: "nope" }, { rooms: { 0: { roomId: "a" } } }])
+    assert.equal(chooseRoomLists({ memberships: [], directory }).directory, null, JSON.stringify(directory));
+  const nested = chooseRoomLists({ memberships: [{ roomId: "m", archivedAt: { $date: 1 } }], directory: { rooms: [{ roomId: "pub", listedAt: { $date: "2026" }, memberCount: -1 }, { title: "no id" }], nextCursor: { evil: 1 } } });
+  assert.deepEqual(nested.directory, { rooms: [{ roomId: "pub", title: null, purpose: null, kind: null, memberCount: null, listedAt: null }], nextCursor: null });
+  assert.equal(nested.memberships[0].archivedAt, null);
+  assert.equal(chooseRoomLists({ memberships: "nope", directory: null }).memberships, null);
 });

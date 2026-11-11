@@ -1,0 +1,53 @@
+import { receiveCloudNotifications } from "./notification-receiver.mjs";
+// `room-acp run`: load the saved connection, pick the agent, run the bridge.
+import { candidates, probe } from "./agents.mjs";
+import { loadConnection, saveConnection } from "./credentials.mjs";
+import { Bridge } from "./bridge.mjs";
+import { logger } from "./redact.mjs";
+
+// Probe before consuming a single-use invitation. The selected adapter is
+// reused for the run so discovery cannot pick a different executable later.
+export async function selectAgent(options, { env = process.env, onFailure = () => {} } = {}) {
+  const list = candidates({ agent: options.agent, agentCmd: options.agentCmd, env });
+  for (const entry of list) {
+    const result = await probe(entry, { cwd: options.cwd ?? process.cwd(), env, mode: options.mode, executionReady: true, timeoutMs: entry.command === "npx" ? 120000 : 10000 });
+    if (result.ok) return entry;
+    onFailure(result);
+  }
+  return null;
+}
+
+export async function run(options, { print, env = process.env, fetchImpl = fetch, onBridge = null, candidate: preparedCandidate = null, observeStage = null, writeStage = line => process.stderr.write(line + "\n") } = {}) {
+  const receiverPolicy = options.receiverPolicy === undefined ? 'respond' : options.receiverPolicy;
+  if (!['respond', 'disabled', 'notify-cloud'].includes(receiverPolicy)) throw Error('Receiver policy must be respond, disabled or notify-cloud');
+  if (receiverPolicy === 'disabled') {
+    print('Room receiver disabled. No host or receiver was started; no wakes or formal requests were accepted, answered or acknowledged. Existing Room work and local retry state are unchanged.');
+    return 0;
+  }
+  const connection = loadConnection({ roomId: options.room }, env);
+  if (!connection) { print("Not joined. Run: room-acp <invite link>"); return 1; }
+  if (receiverPolicy === 'notify-cloud') {
+    const controller = new AbortController(), stop = () => controller.abort();
+    process.once('SIGINT', stop); process.once('SIGTERM', stop);
+    try { return await receiveCloudNotifications({connection, configFile:options.notifyConfig, env, fetchImpl, print, signal:controller.signal}); }
+    finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
+  }
+  if (options.permissionApprover !== undefined) {
+    connection.permissionApproverId = options.permissionApprover === "none" ? null : options.permissionApprover;
+    saveConnection(connection, env);
+  }
+  const candidate = preparedCandidate ?? await selectAgent({ ...options, agent: options.agent ?? connection.agent }, { env });
+  if (!candidate) { print("No working ACP agent found. Run `room-acp doctor`, or pass --agent / --agent-cmd."); return 1; }
+  const log = logger(line => print(line));
+  const stageSink = observeStage ?? (options.observeStages ? event => writeStage(JSON.stringify({event: 'agent_stage', ...event})) : null);
+  const bridge = new Bridge({ connection, candidate, cwd: options.cwd ?? process.cwd(), env, mode: options.mode, respondTo: options.respondTo, maxSessions: options.maxSessions, fetchImpl, log, observeStage: stageSink });
+  onBridge?.(bridge);
+  const stop = () => bridge.stop();
+  process.once("SIGINT", stop); process.once("SIGTERM", stop);
+  print(connection.permissionApproverId
+    ? `Host tool approvals: locally authorized Room human ${connection.permissionApproverId}. Use --permission-approver none to disable.`
+    : "Host tool approvals: Room approvals disabled; permission requests are cancelled. Use --permission-approver <member-id> only for a human you trust with this laptop.");
+  print(`room-acp: ${candidate.label} is listening in room ${connection.roomId} as ${connection.displayName}. Mention it in the Room. Ctrl-C to stop.`);
+  try { const reason = await bridge.run(); return reason === "access_ended" ? 3 : reason === "context_unavailable" ? 4 : 0; }
+  finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); }
+}

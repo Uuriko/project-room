@@ -7,6 +7,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { join } from 'node:path';
 import { RoomAssistant } from '../server/room-assistant.mjs';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
 import { demoteToReadonly } from '../server/autonomy-tiers.mjs';
 
 async function setup(t) {
@@ -301,7 +302,7 @@ test('hosted MCP discovers scoped coordinator tools and executes the real public
   const { setTier }=await import('../server/autonomy-tiers.mjs');
   const identity=f.store.identities.create('Connected lead');
   const memberId=identity.identityId;
-  f.store.identities.link(f.keys.owner,'commons',{identityId:memberId,permissions:['accept_work','complete_work']});
+  linkWithProof(f.store,f.keys.owner,'commons',identity,{permissions:['accept_work','complete_work']});
   setTier(f.store.db,'commons',memberId,'t2_standard',{updatedBy:'owner',nowMs:f.store.now()});
   await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:memberId});
   await api('owner',{action:'invoke',runId:'mcp-shared',sourceMessageId:'test-welcome'});

@@ -1,0 +1,19 @@
+{
+  "base": "e05a438e4",
+  "red": "007ec4a7d",
+  "runtime": "1d8fdde8c",
+  "focused": {
+    "pass": 8,
+    "fail": 0
+  },
+  "broaderBeforeFinalRetainedRunControl": {
+    "pass": 21,
+    "fail": 2,
+    "failures": [
+      "agent-resume compact attention unavailable",
+      "agent-resume reply-only missing cursor"
+    ]
+  },
+  "live": false,
+  "requestRunWritesQualified": false
+}

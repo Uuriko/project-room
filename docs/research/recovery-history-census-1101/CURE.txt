@@ -1,0 +1,5 @@
+Supersedes3644 runtime qualification: e7ad033d5 on780ced1b9.
+Causal3644 regression: valid229B RFC timestamp was refused by unnecessary128B timestamp cap; the exact new test fails on archived3644 production modules. A second legitimate small-room case missed queued event facts before dependent SQL scans.
+Cure keeps exact timestamp keys/equality with actual byte admission, permits existing legal source/platform-sized atom, only retains since-join member activation (existing current-record representation), and checkpoints facts before dependent floor queries.
+No hash equality shortcut, source mutation, guard bypass or new recovery store. Source cap/historical uncertainty unchanged. Report1/fulloracle remain.
+50Node + actual production Native1/1 pass;145calls/6093rows. Exact ordinary24BISO and229BRFC timestamps pass, duplicate aliases remain deduplicated, wrong accumulator refusal and all earlier oldruntime controls remain. Original logs adjacent/in /tmp as named.

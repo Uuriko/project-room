@@ -1,0 +1,22 @@
+{
+  "before": {
+    "bytes": 3340,
+    "sha256": "38d1b63832945014403382b90bbdac943a3df8cccc53aa362188173d20c01a37"
+  },
+  "node": {
+    "bytes": 18480,
+    "sha256": "8864c6279de6817b9e69ef6e550f7986cbb31960e5358666e4eedf51d358f95d"
+  },
+  "native": {
+    "bytes": 1274,
+    "sha256": "20947cf9e421c5f361352dfc262379ef7c1fcdb8dc82f5372ef80f9fcff79515"
+  },
+  "lint": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "secret": {
+    "bytes": 24,
+    "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+  }
+}

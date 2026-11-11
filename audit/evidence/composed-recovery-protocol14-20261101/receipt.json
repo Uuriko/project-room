@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "coreSource": "bbcf27060a7d7e7013ed98d25dddffc161b532ae",
+  "publicationAndArchiveSource": "c185a706f2ee9d97f55275857f468267c3beed4e",
+  "manifestCorrection": "d94ece134",
+  "schema": 45,
+  "writerFormat": "normalized-current-v1-native-work-5",
+  "auditProtocol": 14,
+  "reportVersion": 1,
+  "live": false,
+  "results": {
+    "composedNode": "99/99, no skips",
+    "actualNative": "2/2 historical privacy plus mixed warm/cold text; original full oracle mandatory",
+    "publication": "CI-mode exit0;15 drift tests; full Node explicitly skipped",
+    "archiveSuite": "9/10; preflight refused stale shared-charter asset hash",
+    "archiveNative": "PASS verified704file archive,1000partial events,365continuations,6096coverage rows,128maxpayload rows per call, pending503/coldready/retry",
+    "fixedPreflight": "1/1 pass after manifest digest regenerated; no checker change",
+    "manifest": "8/8 pass;schema45/179assets"
+  },
+  "limitations": [
+    "Final full oracle still unbounded and repeats these independent checks; no net end-to-end speedup claimed.",
+    "Whole privacy purge and remaining global subsystem audits are not completely bounded.",
+    "No deployment, production migration or actual Claude acceptance.",
+    "Runtime source unchanged by the final manifest metadata correction; original archive pin is recorded exactly.",
+    "Reply-request and help-offer independent phases remain in separate work branches."
+  ],
+  "logs": [
+    {
+      "file": "root-protocol14-composed-node-1101.log.gz",
+      "uncompressedSha256": "badc202f5f62af404ee4ba941899c17bed06153592b94500956fc4559bab98b9"
+    },
+    {
+      "file": "root-protocol14-composed-native-1101.log.gz",
+      "uncompressedSha256": "eb6fac927eba270399e50708b0e2978be203ec7551499209d39602da9eba3662"
+    },
+    {
+      "file": "root-protocol14-composed-publication-1101.log.gz",
+      "uncompressedSha256": "485cf30c3b4a271d46dc11af3461201ed1674db25fa9b24caa08c2f4bbaf5e29"
+    },
+    {
+      "file": "root-protocol14-packaged-runtime-1101.log.gz",
+      "uncompressedSha256": "757b012b1442db67fbf9f788f63fb86e202a4f8929baa5917a44b310ee0dc95c"
+    },
+    {
+      "file": "root-protocol14-manifest-fixed-1101.log.gz",
+      "uncompressedSha256": "ebe16ef57f41a591e85b06a5ddbb306746839000e17e93fc7c57007b96bea123"
+    },
+    {
+      "file": "root-protocol14-package-preflight-fixed-1101.log.gz",
+      "uncompressedSha256": "537c2667023b5743c6244e3ff9f4902a191558d4d5c58762b4c51b8d03fac2d8"
+    }
+  ]
+}

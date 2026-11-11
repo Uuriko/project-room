@@ -1,3 +1,4 @@
+import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync, mkdtempSync } from "node:fs";
@@ -122,7 +123,10 @@ for (const corruption of ["help", "basis", "definition", "access", "event-author
 test("withdrawal remains possible at event and projection capacity; reopening does not", t => {
   const f = setup(t); f.send();
   const state = structuredClone(f.store.room("commons").state); state.messages.push({ body: "x".repeat(PILOT_LIMITS.projectionBytes) });
-  f.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, JSON.stringify(state));
+  f.store.transaction(() => {
+    const projection = f.store.storedProjection("commons", state);
+    f.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, projection);
+  });
   assert.throws(() => f.send(f.command({ scope: "Updated" })), { code: "pilot_limit" });
   const withdrawal = f.withdraw(); assert.equal(f.send(withdrawal, "owner").sequence, PILOT_LIMITS.eventsPerRoom + 1);
   assert.equal(f.send(withdrawal, "owner").duplicate, true);
@@ -183,7 +187,7 @@ test("genuine schema12 upgrade preserves old help-like message text and refuses 
       }
       const current = new RoomStore(f.filename, { now: f.now });
       try {
-        assert.equal(auditRecovery(current).schemaVersion, 42);
+        assert.equal(auditRecovery(current).schemaVersion, STORE_SCHEMA_VERSION);
         assert.equal(current.room("old-text").state.messages[0].body, "Help wanted, just ordinary text");
         assert.equal(Object.hasOwn(current.room("old-text").state.messages[0], "helpWanted"), false);
         assert.equal(Object.hasOwn(current.room("commons").state.workItems[Object.keys(row.state.workItems)[0]], "helpWanted"), false);

@@ -1,0 +1,71 @@
+{
+  "base": "2dbf1f5470030ffed7fa4cb0e46bcd60db9afee8",
+  "runtime": "8b56372d2",
+  "measurement": "Production Native ProjectRoom direct verifier invocation; original verifier alias versus candidate at identical catalog. Constructor excluded.",
+  "results": {
+    "baseline": {
+      "cold": {
+        "statements": 50,
+        "rowsRead": 42484,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlBytes": 23784,
+        "permits": 1,
+        "catalogQueries": 49
+      },
+      "warm": {
+        "statements": 50,
+        "rowsRead": 42484,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlBytes": 23784,
+        "permits": 1,
+        "catalogQueries": 49
+      },
+      "restarted": {
+        "statements": 50,
+        "rowsRead": 42484,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlBytes": 23784,
+        "permits": 1,
+        "catalogQueries": 49
+      }
+    },
+    "candidate": {
+      "cold": {
+        "statements": 2,
+        "rowsRead": 868,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlBytes": 23784,
+        "permits": 1,
+        "catalogQueries": 1
+      },
+      "warm": {
+        "statements": 2,
+        "rowsRead": 99,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlBytes": 23784,
+        "permits": 1,
+        "catalogQueries": 1
+      },
+      "restarted": {
+        "statements": 2,
+        "rowsRead": 868,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlBytes": 23784,
+        "permits": 1,
+        "catalogQueries": 1
+      }
+    }
+  },
+  "limits": [
+    "Original49-definition audit inventory only, not serving indexes or global writer inventory.",
+    "All SQL definition bytes checked every call; no CPU or whole restore cost claim.",
+    "Other laptop373 catalog calls include other verifiers.",
+    "Dominant666 DROP TRIGGER lifecycle remains root-owned."
+  ]
+}

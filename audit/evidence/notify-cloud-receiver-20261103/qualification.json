@@ -1,0 +1,73 @@
+{
+  "source": "388cca95fae95a10ae3df745f035b4f9b2e4b749",
+  "base": "e36b384338c8c22e91d1b20ae14e86dfe6efc4e6",
+  "actuatorAdoptions": [
+    "503635489",
+    "e27b45131",
+    "4684bf448",
+    "097936c3d"
+  ],
+  "actuatorOriginalFinal": "fec9e8ed21fd41e18637d0651eae29da370a8732",
+  "node": "v24.22.1",
+  "results": {
+    "baselineModeAndBatch": {
+      "pass": 0,
+      "fail": 2
+    },
+    "preRefinement": {
+      "pass": 0,
+      "fail": 2
+    },
+    "frozenFocused": {
+      "pass": 41,
+      "fail": 0,
+      "skip": 0
+    },
+    "archiveAndManifest": {
+      "pass": 11,
+      "fail": 0
+    },
+    "eslintExit": 0,
+    "secretScanExit": 0,
+    "diffCheckExit": 0
+  },
+  "logs": [
+    {
+      "file": "notify-receiver-before-1103.log.gz",
+      "bytes": 1855,
+      "uncompressedSha256": "98b1cdf099176449d6fbb2509a9e271511ae7ab03667f9a55b52786ccf7fcf4f"
+    },
+    {
+      "file": "notify-receiver-refinement-before-1103.log.gz",
+      "bytes": 1985,
+      "uncompressedSha256": "280c3c0c8284e08c9ed61d4598732ed3e6e5c9e13e33480e568c76842a2e2981"
+    },
+    {
+      "file": "notify-receiver-frozen-1103.log.gz",
+      "bytes": 5193,
+      "uncompressedSha256": "c67ce912be77db40da0a955c70b50975bcf7df5975324a8396e4a1635bfe60f9"
+    },
+    {
+      "file": "notify-receiver-package-1103.log.gz",
+      "bytes": 1009,
+      "uncompressedSha256": "2da9a3ac57e7e04e0c108b991d9f04ef1d1844dc2d19826a3dd2aa01c985d600"
+    },
+    {
+      "file": "notify-receiver-lint-final-1103.log.gz",
+      "bytes": 0,
+      "uncompressedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "notify-receiver-secret-final-1103.log.gz",
+      "bytes": 53,
+      "uncompressedSha256": "032a58df7b52e989dfb33600fb6db9192497702e2e00b21f2c5cd456d253892a"
+    }
+  ],
+  "limitations": [
+    "No live activation, provider or production call, credential grant or lease",
+    "Actual HTTP fake CLI and actual protected normalized MCP are local Node tests, not new Native120s qualification",
+    "Attention wait remains normalized-only and not a complete historical/standing-work attention census",
+    "Provider accepted means notification queued, not read/execution/result; unknown retains input and never auto-resends",
+    "One wait per room/member supersedes old generation; competing cloud wait must not run concurrently"
+  ]
+}

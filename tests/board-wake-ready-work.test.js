@@ -23,6 +23,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { normalizeWantsWork, wantsWorkMatches } from "../server/work-wants.mjs";
 import { WANTS_WORK_ROUTES } from "../server/routes/wants-work.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const TEN_MINUTES = 10 * 60 * 1000;
 
@@ -53,10 +54,7 @@ async function fixture(t) {
   const enroll = async name => {
     const identity = store.identities.create(name);
     const memberId = name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 32);
-    store.identities.link(ownerKey, "commons", {
-      identityId: identity.identityId, memberId, displayName: name,
-      permissions: ["accept_work", "complete_work"]
-    });
+    linkWithProof(store, ownerKey, "commons", identity, { memberId, displayName: name, permissions: ["accept_work", "complete_work"] });
     const beat = await call("POST", "/api/agent-heartbeats", identity.secret, { hostId: "host-1", mode: "pull-only" });
     assert.equal(beat.status, 200);
     const key = store.issueAccessKey("commons", memberId);

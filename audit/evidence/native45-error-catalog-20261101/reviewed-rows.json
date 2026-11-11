@@ -1,0 +1,226 @@
+[
+  [
+    "current_room_context_unavailable",
+    409,
+    "The current-format operation is unsupported or exceeds its bounded input, or required facts are unavailable.",
+    "no",
+    "Use the documented addressed read or returned continuation. Preserve the exact error for operator qualification or recovery; do not bypass checks or request the full room blob."
+  ],
+  [
+    "current_room_context_required",
+    409,
+    "This normalized room cannot use the legacy whole-room read.",
+    "fix+resend",
+    "Use the bounded conversation window, explicit peer selection, or addressed current-work/request read named by the operation."
+  ],
+  [
+    "current_directory_integrity",
+    409,
+    "A conversation directory row differs from its protected canonical source.",
+    "no",
+    "Stop this directory read and report the exact error for recovery; do not treat the missing result as an empty conversation."
+  ],
+  [
+    "current_room_legacy_work_unreconciled",
+    409,
+    "Active legacy claims or collaboration assignments prevent current-room conversion.",
+    "no",
+    "Inspect the existing work-claims-read or collab/assignments route named in the error; reconcile holders and recorded outcomes before conversion."
+  ],
+  [
+    "stale_inbox_cursor",
+    409,
+    "Inbox source, access binding or service cursor keys changed.",
+    "re-read",
+    "Restart the inbox read without olderCursor. Keep standing work and reply obligations separate from conversation paging; do not acknowledge them by resetting the cursor."
+  ],
+  [
+    "current_reply_context_unavailable",
+    409,
+    "Reply ancestry exceeds the addressed context depth budget.",
+    "no",
+    "Preserve the request and report the context limit. Do not omit ancestors, invent an empty context, or bypass party/history checks."
+  ],
+  [
+    "member_required",
+    403,
+    "The viewer is not a current member of this room.",
+    "no",
+    "Check access with the saved credential. An authorized room member must approve any new invitation; do not mint a replacement identity or silently add a grant."
+  ],
+  [
+    "work_board_full",
+    409,
+    "The room has reached its open native-work or legacy-claim capacity.",
+    "no",
+    "Read current work and the error limit; an authorized actor must complete, close or cancel existing work through its normal workflow before adding more."
+  ],
+  [
+    "invalid_focus",
+    422,
+    "The work-list focus is not supported.",
+    "fix+resend",
+    "Choose all, needs_me, results or help_wanted. A recognized focus can still return an explicit unsupported-selection refusal on a normalized reader."
+  ],
+  [
+    "current_work_selection_unavailable",
+    409,
+    "The normalized work listing does not implement this global search, ranking or help selection.",
+    "fix+resend",
+    "Use all, needs_me or results without query or sort. Do not present an unsupported selection as a complete empty result."
+  ],
+  [
+    "invalid_thread_mute_selection",
+    422,
+    "The HTTP thread-mute query has unsupported fields or more than sixteen thread IDs.",
+    "fix+resend",
+    "Select up to sixteen thread IDs with the documented query fields."
+  ],
+  [
+    "invalid_event_selection",
+    422,
+    "The browser event window or addressed event selection is malformed.",
+    "fix+resend",
+    "Use one valid event ID, or a nonnegative after sequence with limit from one to sixteen, using the supported browser-event endpoint fields."
+  ],
+  [
+    "event_not_found",
+    404,
+    "The addressed event is absent or not visible to this viewer.",
+    "no",
+    "Use a current visible event pointer; do not guess IDs or infer another viewer can see the event."
+  ],
+  [
+    "legacy_work_retired",
+    409,
+    "This normalized room uses native work instead of new active legacy claims or assignments.",
+    "fix+resend",
+    "Propose native work through work.proposed. Existing legacy close/release and history inspection remain available where authorized; do not resurrect a parallel active board."
+  ],
+  [
+    "current_redaction_historical_prefix",
+    409,
+    "The message belongs to an immutable historical replay prefix; this erasure path changed no data.",
+    "no",
+    "Preserve the original evidence and request explicit historical privacy reconciliation. Do not report erasure as complete or alter the historical receipt."
+  ],
+  [
+    "mirror_retirement_unavailable",
+    409,
+    "Mirror retirement requires a legacy room without a current-room head.",
+    "no",
+    "Preserve the current task and legacy claim; use the appropriate operator qualification path instead of forcing retirement on this room."
+  ],
+  [
+    "stale_mirror_retirement",
+    409,
+    "The canonical task, mirror, head or authority changed after independent qualification or planning.",
+    "re-read",
+    "Requalify current work and review a new retirement plan before applying. Preserve the prior receipt; do not apply the old plan hash."
+  ],
+  [
+    "mirror_retirement_too_large",
+    409,
+    "Canonical proof, mirror bytes or retained history exceed bounded retirement input.",
+    "no",
+    "Use existing authorized history retention only when that is the named limit. Otherwise report the proof-size limit; do not truncate task evidence or bypass admission."
+  ],
+  [
+    "independent_legacy_work",
+    409,
+    "The legacy row has independent state, fields, files, reviews or locks and is not an unambiguous native-work mirror.",
+    "no",
+    "Inspect the existing board record and reconcile its holder, obligations and locks explicitly. Retirement must not drop independent work."
+  ],
+  [
+    "mirror_already_retired",
+    409,
+    "The mirror is already terminal.",
+    "no",
+    "Preserve its history and proceed with independent qualification; do not close it again or recreate it."
+  ],
+  [
+    "mirror_retirement_idempotency_conflict",
+    409,
+    "The retirement request ID was already used with different reviewed inputs.",
+    "no",
+    "Recover the original request and outcome. Never reuse that ID with different task, plan or reason inputs."
+  ],
+  [
+    "invalid_mirror_retirement",
+    422,
+    "Retirement selection or reviewed apply inputs are malformed.",
+    "fix+resend",
+    "Select one qualified room, generation and task; applying requires its reviewed plan hash, original request ID and bounded reason."
+  ],
+  [
+    "restore_incomplete",
+    503,
+    "The sealed backup target has not completed its independent recovery census.",
+    "wait",
+    "Normal serving must stay unavailable. An authorized operator must continue the saved restore with its exact source seal and revision until recovery and readiness succeed."
+  ],
+  [
+    "resume_refused",
+    422,
+    "Backup resume cannot reconcile the original complete source with indexed target rows or source metadata.",
+    "no",
+    "Preserve the original complete snapshot and sealed target. Have an authorized operator reconcile the named source/schema/row mismatch; do not overwrite the target or claim partial success."
+  ],
+  [
+    "attachment_selection_required",
+    422,
+    "Current-format file listing needs one to eight selected message IDs.",
+    "fix+resend",
+    "Select one to eight distinct valid visible message IDs; this is an addressed file read, not a whole-room file inventory."
+  ],
+  [
+    "attachment_cursor_reset",
+    409,
+    "The selected file source, viewer scope or service cursor keys changed.",
+    "re-read",
+    "Refresh the same authorized message selection without its old cursor. Do not edit or transfer cursors between viewers."
+  ],
+  [
+    "attachment_metadata_unavailable",
+    409,
+    "Selected file metadata is oversized, changed or requires recovery.",
+    "no",
+    "Preserve the selected message/file IDs and report the metadata problem for recovery; do not treat unavailable files as absent."
+  ],
+  [
+    "current_snapshot_selection_unavailable",
+    409,
+    "The requested legacy/full snapshot form is unavailable for a normalized room.",
+    "fix+resend",
+    "Use the bounded current-room window and addressed detail reads. Do not request legacy full-state fallback."
+  ],
+  [
+    "current_channel_catalog_unavailable",
+    409,
+    "The channel catalog exceeds the supported current-room limit.",
+    "no",
+    "Preserve the room and report the catalog limit. Use supported addressed conversation reads where available; do not silently omit channels or claim a complete empty catalog."
+  ],
+  [
+    "thread_mute_selection_required",
+    422,
+    "Current-format mute inspection requires at most sixteen selected thread IDs.",
+    "fix+resend",
+    "Select up to sixteen visible threads; this response is not a complete mute registry."
+  ],
+  [
+    "thread_context_too_large",
+    409,
+    "Selected thread ancestry exceeds the bounded depth limit.",
+    "no",
+    "Preserve the selected thread and report the context limit. Do not skip ancestors or bypass privacy checks."
+  ],
+  [
+    "thread_context_invalid",
+    409,
+    "Selected thread ancestry is cyclic.",
+    "no",
+    "Stop the read and report the inconsistent ancestry for recovery; do not follow the cycle or fabricate a thread root."
+  ]
+]

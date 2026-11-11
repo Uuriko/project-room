@@ -1,0 +1,17 @@
+  /api/auth/recovery-codes/generate:
+    post:
+      summary: Mint or regenerate the account's recovery-code set (slice 6)
+      description: >-
+        Account-level write (account_session cookie, `Origin`,
+        `X-CSRF-Token`): the authenticated account's recovery-code set is
+        generated (or regenerated — a regeneration invalidates the previous
+        set) and returned exactly once as
+        `{ codes, count, generatedAt, warning }`. Codes are salted SHA-256 at
+        rest and are never logged or re-displayed. 10 per address per minute.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ codes (10, shown once), count, generatedAt, warning }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied or csrf_denied }
+        '429': { description: rate_limited }

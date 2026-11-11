@@ -1,0 +1,38 @@
+
+/Users/johnpotter/src/pr-archived-claim-retirement-1102/server/operator-lifecycle-archive.mjs
+  25:89  warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+
+/Users/johnpotter/src/pr-archived-claim-retirement-1102/server/store.mjs
+  1022:9    warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  1028:11   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  1033:21   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  1046:31   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  4732:20   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  4767:77   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  4811:9    warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  4904:30   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  4930:31   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5045:28   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5129:79   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5147:79   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5176:20   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5262:61   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5312:22   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5358:76   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5358:101  warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5878:74   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  5884:17   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  6209:17   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  7135:22   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  7196:23   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  7326:15   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  7596:62   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  7654:22   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  7729:21   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  7895:10   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  8045:24   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  8064:20   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  8091:58   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+
+✖ 31 problems (0 errors, 31 warnings)
+

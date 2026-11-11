@@ -1,0 +1,45 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":48,"integrity":"deferred","phases":{"schema":{"ms":11,"rowsRead":8306},"plugin":{"ms":20,"rowsRead":41018},"fence":{"ms":12,"rowsRead":46561},"verifies":{"ms":3,"rowsRead":21370},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":48,"legacyColdStartMs":48,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":52,"storeInitializationMs":48}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":17,"integrity":"deferred","phases":{"schema":{"ms":5,"rowsRead":33176},"plugin":{"ms":4,"rowsRead":54100},"fence":{"ms":6,"rowsRead":46807},"verifies":{"ms":0,"rowsRead":1},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":2,"projectionBytes":737}
+{"event":"room.store_initialized","initializationMs":18,"legacyColdStartMs":17,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":22,"storeInitializationMs":18}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":0,"rowsRead":884},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":1,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":2,"projectionBytes":737}
+{"event":"room.store_initialized","initializationMs":3,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":7,"storeInitializationMs":3}
+{
+  "schema": "member2-genuine-native-upgrade-v1",
+  "pass": true,
+  "pins": [
+    "8e65a6e73ae191ffa7fc89c2e88fa382ad2ac000",
+    "2ebce68b3c556f313476716afdae84f2a2b33e6d"
+  ],
+  "node": "v24.22.1",
+  "compatibilityDate": "2026-07-30",
+  "bundleSha256": [
+    "f2264831162a05c80af8d383cc36018337a0f334653436efde9685556ac80e7d",
+    "9a5c50a92e74a571069d78d772a3e9d9540b5afdba5b70e870e76e1b82bf2e38"
+  ],
+  "observations": [
+    {
+      "phase": "genuine-old-seed",
+      "guardFormat": 5,
+      "preservedAuthSnapshot": "995696b6611f1066d2cd78383138a59a3d1fe60d70494899d124774d37dbfc62",
+      "roomsSha256": "6b7bcd0dc97e37a378e03d33dfe462a8318bdb9e705659c3982102a95d4fa01b"
+    },
+    {
+      "phase": "first-new-cold-open",
+      "guardFormat": 6,
+      "preservedAuthSnapshot": "995696b6611f1066d2cd78383138a59a3d1fe60d70494899d124774d37dbfc62",
+      "roomsSha256": "6b7bcd0dc97e37a378e03d33dfe462a8318bdb9e705659c3982102a95d4fa01b"
+    },
+    {
+      "phase": "second-new-cold-open",
+      "guardFormat": 6,
+      "preservedAuthSnapshot": "995696b6611f1066d2cd78383138a59a3d1fe60d70494899d124774d37dbfc62",
+      "roomsSha256": "6b7bcd0dc97e37a378e03d33dfe462a8318bdb9e705659c3982102a95d4fa01b"
+    }
+  ],
+  "wallSeconds": 1.4941497920000002,
+  "limits": "Synthetic local legacy data only; no populated-format migration, production state, or current composition qualification. No guard SQL relabeling or schema stamp deletion."
+}

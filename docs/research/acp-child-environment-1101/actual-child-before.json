@@ -1,0 +1,52 @@
+{
+  "source": "dcec4be404d0138f2a8eac9bb9610bbfc899bfb9",
+  "code": 0,
+  "signal": null,
+  "leaked": {
+    "LC_ROOM_TOKEN": true,
+    "XDG_GITHUB_TOKEN": true,
+    "FAKE_ACP_OPENAI_API_KEY": true
+  },
+  "denied": {
+    "ROOM_ACP_TOKEN": true,
+    "OPENAI_API_KEY": true,
+    "NODE_OPTIONS": true
+  },
+  "preserved": {
+    "PATH": true,
+    "HOME": true,
+    "CODEX_HOME": true,
+    "CODEX_PATH": true,
+    "LANG": true,
+    "LC_ALL": true,
+    "LC_CTYPE": true,
+    "XDG_CONFIG_HOME": true,
+    "XDG_DATA_HOME": true,
+    "XDG_CACHE_HOME": true,
+    "XDG_STATE_HOME": true,
+    "XDG_RUNTIME_DIR": true,
+    "FAKE_ACP_MODE": true,
+    "FAKE_ACP_DELAY_MS": true,
+    "FAKE_ACP_TRACE": true
+  },
+  "selectedKeys": [
+    "CODEX_HOME",
+    "CODEX_PATH",
+    "FAKE_ACP_DELAY_MS",
+    "FAKE_ACP_MODE",
+    "FAKE_ACP_OPENAI_API_KEY",
+    "FAKE_ACP_TRACE",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_ROOM_TOKEN",
+    "PATH",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_GITHUB_TOKEN",
+    "XDG_RUNTIME_DIR",
+    "XDG_STATE_HOME"
+  ]
+}

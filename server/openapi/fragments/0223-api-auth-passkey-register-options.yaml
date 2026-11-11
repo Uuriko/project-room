@@ -1,0 +1,18 @@
+  /api/auth/passkey/register/options:
+    post:
+      summary: Begin a passkey registration ceremony for the signed-in account (slice 5)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`,
+        `X-CSRF-Token`): issues a single-use challenge and returns the
+        `navigator.credentials.create()` options plus a `challengeId` the
+        client echoes to /register/finish. Already-registered credentials are
+        excluded so the authenticator will not silently re-register.
+        10/account/min.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "WebAuthn registration options + challengeId" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_passkey_request or passkey_origin_rejected }
+        '429': { description: rate_limited }

@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { ACCESS_PRESETS, permissionLabel } from "./access-presets.js";
 // #662 owner attention rollup, plus MEMBER-PERMS reviewed access requests.
 // Admins see only the existing access-request queue their authority permits;
@@ -41,6 +42,11 @@ export function createNeedsAttentionCard(options) {
     const { member } = viewer();
     return Boolean(member?.active !== false && member?.permissions?.includes("manage_members"));
   }
+  function canReadOwnerRollup() {
+    if (!hasRoomState) return true; // Legacy reader relies on the server owner gate.
+    const { member, owner } = viewer();
+    return owner && member?.kind === "human";
+  }
   function canGrant(permission) {
     if (!hasRoomState) return true; // Legacy reader authenticates the owner.
     const { member, owner } = viewer();
@@ -48,6 +54,9 @@ export function createNeedsAttentionCard(options) {
   }
   function requestItem(request) {
     const path = client.path(`/access-requests/${encodeURIComponent(request.requestId)}/decide`);
+    if(request.kind==='agent-sponsor-transfer')return {kind:'access_request',id:request.requestId,severity:'action',requestKind:request.kind,
+      title:uiText("agentSponsor.requestTitle", {name:request.displayName}),detail:request.note,requestedPermissions:[],
+      actions:['approve','deny'].map(decision=>({action:decision,method:'POST',path,body:{decision}}))};
     return { kind: "access_request", id: request.requestId, severity: "action", requestKind: request.kind,
       title: request.kind === "permissions" ? `${request.displayName} wants more permissions` : `${request.displayName} asks to join`,
       detail: `Requested: ${request.requestedPermissions.map(permissionLabel).join(", ") || "read and chat"}${request.kind === "permissions" ? ". Approval adds permissions and keeps existing access." : ""}`,
@@ -63,7 +72,7 @@ export function createNeedsAttentionCard(options) {
 
   function owns(ticket, session, generation) {
     if (ticket !== epoch || session !== client.session || generation !== client.generation) return false;
-    if (!canReview() || hasRoomState && currentReport?.ownerOnly && !viewer().owner) { hide(); return false; }
+    if (!canReview() || hasRoomState && currentReport?.ownerOnly && !canReadOwnerRollup()) { hide(); return false; }
     return true;
   }
   function clearRetry() {
@@ -104,15 +113,18 @@ export function createNeedsAttentionCard(options) {
 
   function actionControls(item) {
     const controls = item.actions.map((action, index) => {
+      const namedAction = action => esc(uiText("action.itemAccessibleName", { action, item: item.title || item.id }));
       if (action.method === "GET" && item.kind !== "spend") {
         const workId = item.kind === "jev_escalation" ? item.workItemId : item.id;
-        return workId ? `<a class="button ghost" href="#pr-record/work/${esc(encodeURIComponent(workId))}" data-open-work="${esc(workId)}">Review</a>`
-          : `<a class="button ghost" href="${esc(action.path)}">Diagnostics</a>`;
+        const reviewName = namedAction("Review");
+        const diagnosticsAttributes = ['href="', esc(action.path), '" aria-label="', namedAction("Diagnostics"), '"'].join("");
+        return workId ? `<a class="button ghost" href="#pr-record/work/${esc(encodeURIComponent(workId))}" data-open-work="${esc(workId)}" aria-label="${reviewName}">Review</a>`
+          : `<a class="button ghost" ${diagnosticsAttributes}>Diagnostics</a>`;
       }
       if (action.method === "POST" && action.body) {
         const label = action.action === "approve" ? "Approve" : action.action === "deny" ? (item.requestKind === "permissions" ? "Decline" : "Deny") : action.action;
         const unavailable = action.action === "approve" && (action.body.permissions ?? []).some(permission => !canGrant(permission));
-        return `<button type="button" class="button${action.action === "approve" ? " primary" : ""} attention-decide" data-action-index="${index}" data-unavailable="${unavailable}"${unavailable ? " disabled" : ""}>${esc(label)}</button>`;
+        return `<button type="button" class="button${action.action === "approve" ? " primary" : ""} attention-decide" data-action-index="${index}" data-unavailable="${unavailable}" aria-label="${namedAction(label)}"${unavailable ? " disabled" : ""}>${esc(label)}</button>`;
       }
       return action.hint ? `<span class="attention-hint">${esc(action.hint)}</span>` : "";
     }).join("");
@@ -123,23 +135,23 @@ export function createNeedsAttentionCard(options) {
     if (permissions.length === 1) return controls + hint;
     const choose = partial?.id === item.id;
     const partialControls = choose ? `<fieldset data-permission-selection><legend>Choose permissions to approve</legend>${permissions.map(permission => `<label><input type="checkbox" data-permission-choice value="${esc(permission)}"${partial.selected.has(permission) ? " checked" : ""}${canGrant(permission) ? "" : " disabled"}> ${esc(permissionLabel(permission))}</label>`).join("")}
-      <button type="button" class="button primary attention-selected" data-unavailable="${!partial.selected.size}"${partial.selected.size ? "" : " disabled"}>Approve selected</button>
-      <button type="button" class="button ghost attention-cancel">Cancel</button></fieldset>`
-      : `<button type="button" class="button ghost attention-partial">Approve partial</button>`;
+      <button type="button" class="button primary attention-selected" data-unavailable="${!partial.selected.size}" aria-label="${esc(uiText("action.itemAccessibleName", { action: "Approve selected", item: item.title || item.id }))}"${partial.selected.size ? "" : " disabled"}>Approve selected</button>
+      <button type="button" class="button ghost attention-cancel" aria-label="${esc(uiText("action.itemAccessibleName", { action: "Cancel", item: item.title || item.id }))}">Cancel</button></fieldset>`
+      : `<button type="button" class="button ghost attention-partial" aria-label="${esc(uiText("action.itemAccessibleName", { action: "Approve partial", item: item.title || item.id }))}">Approve partial</button>`;
     return controls + partialControls + hint;
   }
 
   function render(report) {
     const items = report?.items ?? [];
     currentReport = report;
-    count.textContent = String(report?.itemCount ?? items.length);
+    count.textContent = report?.coverage?uiText(report.coverage.complete?"currentRoom.attentionCount":"currentRoom.attentionLoaded",{count:items.length}):String(report?.itemCount??items.length);
     pages.hidden = !report?.nextCursor && !report?.previousCursor;
-    range.textContent = items.length ? `Showing ${report.pageOffset + 1}–${report.pageOffset + items.length} of ${report.itemCount}` : "";
-    section.hidden = items.length === 0;
+    range.textContent=report?.coverage?uiText(report.coverage.complete?"currentRoom.attentionComplete":"currentRoom.attentionPartial"):(items.length?uiText("currentRoom.attentionRange",{from:report.pageOffset+1,to:report.pageOffset+items.length,count:report.itemCount}):'');
+    section.hidden = items.length === 0&&!report?.coverage;
     list.innerHTML = items.map((item, itemIndex) => `
       <li class="attention-item attention-${esc(item.kind)} attention-severity-${esc(item.severity)}" data-item-index="${itemIndex}" data-access-request-id="${item.kind === "access_request" ? esc(item.id) : ""}">
         <div class="attention-body">
-          <span class="attention-kind">${esc(item.requestKind === "permissions" ? "Permission request" : KIND_LABEL[item.kind] ?? item.kind)}</span>
+          <span class="attention-kind">${esc(item.requestKind === "agent-sponsor-transfer" ? "Agent sponsorship" : item.requestKind === "permissions" ? "Permission request" : KIND_LABEL[item.kind] ?? item.kind)}</span>
           <strong class="attention-title">${esc(item.title)}</strong>
           <p class="attention-detail">${esc(item.detail)}</p>
         </div>
@@ -213,6 +225,7 @@ export function createNeedsAttentionCard(options) {
   });
 
   async function refresh(cursor = null) {
+    if (currentReport?.ownerOnly && !canReadOwnerRollup()) hide();
     if (!client.session || !canReview()) { hide(); return; }
     if (hasRoomState && !client.ownsAccountSession()) { hide(); client.endAccess(); return; }
     clearRetry();
@@ -229,7 +242,7 @@ export function createNeedsAttentionCard(options) {
       // Independent authorized reads overlap instead of waiting in sequence.
       // Promise.all also observes both failures if either read rejects first.
       let [report, queue] = await Promise.all([
-        client.needsAttention(cursor, { includeShadow: includeShadow() }),
+        canReadOwnerRollup() ? client.needsAttention(cursor, { includeShadow: includeShadow() }) : null,
         hasRoomState ? client.request(client.path("/access-requests?status=pending")) : null,
       ]);
       if (!owns(ticket, session, generation)) return;
@@ -238,8 +251,8 @@ export function createNeedsAttentionCard(options) {
         const requests = queue.requests.map(requestItem), byId = new Map(requests.map(item => [item.id, item]));
         // Owners retain their paged rollup; admins receive only the request queue
         // their existing manage_members authority permits, never the owner rollup.
-        if (!viewer().owner) report = null;
-        report = report ? { ...report, ownerOnly: true, items: report.items.map(item => item.kind === "access_request" ? byId.get(item.id) : item).filter(Boolean) }
+        if (!canReadOwnerRollup()) report = null;
+        report = report ? { ...report, ownerOnly: true, items: (report.contractVersion === 2 ? [...requests, ...report.items] : report.items).map(item => item.kind === "access_request" ? byId.get(item.id) : item).filter(Boolean) }
           : { items: requests, itemCount: requests.length, pageOffset: 0, ownerOnly: false };
       }
       if (partial && !report?.items.some(item => item.id === partial.id)) partial = null;
@@ -284,7 +297,7 @@ export function createNeedsAttentionCard(options) {
     const { member, owner } = viewer(), grants = `${owner}:${member.permissions.join(",")}`;
     // An ex-owner may remain an admin. The owner rollup contains more than
     // requests, so invalidate its page/editor and outstanding reads first.
-    if (currentReport?.ownerOnly && !owner) { hide(); activeScope = identity; }
+    if (currentReport?.ownerOnly && !canReadOwnerRollup()) { hide(); activeScope = identity; }
     if (authority !== grants && currentReport) {
       if (partial) partial.selected = new Set([...partial.selected].filter(canGrant));
       const wasBusy = busy;

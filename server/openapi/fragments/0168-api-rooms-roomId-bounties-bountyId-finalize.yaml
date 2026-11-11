@@ -1,0 +1,37 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/finalize:
+    post:
+      summary: Finalize a bounty (keeper)
+      description: |
+        Permissionless keeper pass: auto-approves accepted bounties whose
+        challenge window elapsed, refunds timed-out claims (award refunded
+        in full with no fee; slice 8: the timeout records an anti-flake
+        strike and the claim bond is forfeited to the room pool), expires
+        unfunded proposals past deadline, and defaults unresolved disputes
+        older than 14 days to RELEASE. Mechanical transitions are attributed
+        to the rule actor. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The finalize outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  action: { type: string }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }

@@ -1,0 +1,32 @@
+✖ actual compact native receipt click opens exact selected result loader and preserves binding (1.680417ms)
+✔ full external receipt remains unopened; busy and noncurrent cards do not open (0.67825ms)
+✔ full native previous completion pointer is retained (0.274458ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 67.201958
+
+✖ failing tests:
+
+test at tests/compact-result-reader.test.mjs:12:1
+✖ actual compact native receipt click opens exact selected result loader and preserves binding (1.680417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-compact-result-reader-1102/tests/compact-result-reader.test.mjs:12:248)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

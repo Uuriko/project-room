@@ -1,0 +1,42 @@
+  /api/rooms/{roomId}/collab/notes:
+    post:
+      summary: Add an internal note to a thread
+      description: >-
+        Room-token write (CSRF + rate limit). Notes are internal to the room's
+        collaborator plane: they are readable only through this route and
+        never appear in room events, inbox source payloads, or channel-bound
+        data (assertNoInternal in server/inbox-internal-notes.mjs is the
+        tripwire).
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, body]
+              properties:
+                threadId: { type: string }
+                body: { type: string, maxLength: 10000 }
+                tag: { type: string, maxLength: 64 }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ note: { noteId, threadId, author, body, tag, internal: true, createdAt } }" }
+        '422': { description: note_invalid }
+    get:
+      summary: List internal notes for a thread
+      description: >-
+        Room-token read. Notes are ordered oldest first and are never
+        exposed outside this route.
+      security:
+        - roomToken: []
+      parameters:
+        - name: threadId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ notes: [{ noteId, threadId, author, body, tag, internal: true, createdAt }] }" }
+        '422': { description: invalid_input (threadId required) }

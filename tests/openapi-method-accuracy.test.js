@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { classify, concrete, probeMethodAccuracy, renderReport, scratchParent } from "../scripts/openapi-method-accuracy.mjs";
+import { classify, concrete, probeMethodAccuracy, renderReport, scratchParent, serveScratch } from "../scripts/openapi-method-accuracy.mjs";
 import { openapiOperations } from "../scripts/open-routes.mjs";
 
 test("classifier: 405 on the documented method is a method mismatch", () => {
@@ -72,4 +72,28 @@ test("concrete() uses a declared vocabulary where the server constrains the segm
   assert.equal(concrete("/api/rooms/{roomId}/x", { roomId: "ignored" }), "/api/rooms/commons/x",
     "the seeded room wins over a declared sample");
   assert.equal(concrete("/api/x/{id}", { id: "a b/c" }), "/api/x/a%20b%2Fc", "samples are escaped");
+});
+
+
+test("scratch Operator probes reach validation and methods while anonymous and unknown paths stay hidden", async t => {
+  const prior = process.env.ROOM_OPERATOR_TOKEN_SHA256;
+  process.env.ROOM_OPERATOR_TOKEN_SHA256 = "f".repeat(64);
+  t.after(() => { if (prior === undefined) delete process.env.ROOM_OPERATOR_TOKEN_SHA256; else process.env.ROOM_OPERATOR_TOKEN_SHA256 = prior; });
+  const { origin, close, operatorAuthorization } = await serveScratch({ operatorEnabled: true });
+  try {
+    assert.match(operatorAuthorization, /^Operator [a-f0-9]{64}$/);
+    assert.notEqual(process.env.ROOM_OPERATOR_TOKEN_SHA256, "f".repeat(64));
+    const request = async (path, method, authorization) => {
+      const response = await fetch(origin + path, { method, headers: { Origin: origin, ...(authorization ? { Authorization: authorization } : {}), ...(method === "POST" ? { "Content-Type": "application/json" } : {}) }, ...(method === "POST" ? { body: "{}" } : {}) });
+      return { status: response.status, code: (await response.json()).error?.code };
+    };
+    for (const phase of ["plan", "execute"]) {
+      const path = "/api/operator/attachments/live-index/" + phase;
+      assert.equal((await request(path, "POST")).status, 404);
+      assert.equal((await request(path, "POST", operatorAuthorization)).status, 422);
+      assert.deepEqual(await request(path, "GET", operatorAuthorization), { status: 405, code: "method_not_allowed" });
+    }
+    assert.deepEqual(await request("/api/operator/attachments/live-index/unknown", "POST", operatorAuthorization), { status: 404, code: "not_found" });
+  } finally { await close(); }
+  assert.equal(process.env.ROOM_OPERATOR_TOKEN_SHA256, "f".repeat(64), "scratch cleanup restores the prior configuration");
 });

@@ -1,0 +1,30 @@
+import {initialRoom} from '../../server/bootstrap.mjs';
+import {applyEvent,replayEvents,emptyRoomState,event} from '../../src/events.js';
+export function recoveryWorkLifecycle() {
+ const history=initialRoom();let state=replayEvents(emptyRoomState(),structuredClone(history));let index=0;
+ const push=(type,data,actorId='owner')=>{const entry=event({id:'lifecycle-'+index++,roomId:'commons',actorId,type,at:'2026-11-01T00:00:00.000Z',data:{...(data.workItemId&&state.workItems[data.workItemId]?{expectedRevision:state.workItems[data.workItemId].revision}:{}),...data}});state=applyEvent(state,structuredClone(entry));history.push(entry);return entry;};
+ push('member.added',{memberId:'reviewer',displayName:'Reviewer',kind:'agent',permissions:['verify']});
+ push('work.proposed',{workItemId:'main',title:'Useful exact work',definitionOfDone:'Save and verify result',accountableMemberId:'owner',verifierMemberId:'reviewer',independentVerificationRequired:true,ownerDecisionRequired:true,humanDecisionMakerId:'owner'});
+ push('work.accepted',{workItemId:'main'});
+ push('session.started',{workItemId:'main',budget:{maxAttempts:2,maxSpendCents:100},environment:'local fixture'});
+ push('session.status_changed',{workItemId:'main',status:'active',spendCents:2});
+ push('session.stop_requested',{workItemId:'main'});
+ push('session.stopped',{workItemId:'main',status:'done',spendCents:4});
+ push('work.blocked',{workItemId:'main',reason:'Need exact input',nextAction:'Resolve input'});
+ push('work.blocker_resolved',{workItemId:'main',resolution:'Input resolved'});
+ push('work.started',{workItemId:'main'});
+ push('message.posted',{messageId:'lifecycle-rationale',body:'Exact public rationale for the verified version'});
+ const complete=version=>push('work.completed',{workItemId:'main',summary:'Saved useful result '+version,evidenceUrl:'https://example.com/result',evidenceVersion:version,nextAction:'Review exact version',producerId:'owner'});
+ const first=complete('v1');
+ push('verification.recorded',{workItemId:'main',result:'pass',completionEventId:first.id,evidenceVersion:'v1',summary:'Independent exact version pass'},'reviewer');
+ push('owner.decision_recorded',{workItemId:'main',decision:'approved',completionEventId:first.id,evidenceVersion:'v1',reason:'Accepted exact result',sourceMessageId:'lifecycle-rationale'});
+ push('work.blocked',{workItemId:'main',reason:'Refine saved output',nextAction:'Improve exact version'});
+ push('work.blocker_resolved',{workItemId:'main',resolution:'Ready to improve'});push('work.started',{workItemId:'main'});
+ const second=complete('v2');
+ push('verification.recorded',{workItemId:'main',result:'fail',completionEventId:first.id,evidenceVersion:'v1',summary:'Historical finding remains historical'},'reviewer');
+ push('verification.recorded',{workItemId:'main',result:'pass',completionEventId:second.id,evidenceVersion:'v2',summary:'Current exact version pass'},'reviewer');
+ push('owner.decision_recorded',{workItemId:'main',decision:'approved',completionEventId:second.id,evidenceVersion:'v2',reason:'Accepted improved result',sourceMessageId:'lifecycle-rationale'});
+ push('work.proposed',{workItemId:'replacement',title:'Replacement work',definitionOfDone:'Continue exact result',accountableMemberId:'owner'});
+ push('work.superseded',{workItemId:'main',supersededByWorkItemId:'replacement',reason:'Continue through replacement'});
+ return {history,state};
+}

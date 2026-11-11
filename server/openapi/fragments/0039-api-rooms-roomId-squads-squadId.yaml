@@ -1,0 +1,23 @@
+  /api/rooms/{roomId}/squads/{squadId}:
+    get:
+      summary: Read one squad
+      description: |
+        plan-squads. Read a squad by id (`sq_…`) or name. Members only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: squadId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Squad id or squad name
+      responses:
+        '200':
+          description: The squad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SquadResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          description: No such squad in this room (squad_not_found)

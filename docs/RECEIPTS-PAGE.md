@@ -37,8 +37,9 @@ the badge in the receipt link with the verdict line as its alt text.
 ## Per-room proof page
 
 `/r/<slug>/proof` is one room's shareable proof page (`.json` twin:
-`project-room-public-room-proof/1`). It exists only when the room is
-publicly listed and its owner has public receipts on. It lists the room's
+`project-room-public-room-proof/1`). It exists only when its owner has
+recorded both the public-page setting and the public-receipts setting
+(see *Turning it on* below). It lists the room's
 own public receipts — the same records as above, through the same toggle
 and unpublish filters — and labels each with the level of proof its record
 carries:
@@ -63,6 +64,25 @@ their level notes) and a per-room share card at
 `/r/<slug>/proof/og.png` — the room's counts and the stored-hashes
 footer — gated by the same view and cacheable under the same five-minute
 exception as the receipt card.
+
+### Turning it on
+
+Both settings are owner-recorded room commands, posted to
+`POST /api/rooms/ROOM_ID/commands` with the owner's credential:
+
+```
+{"id":"<unique-id>","type":"room.public_receipts_set","data":{"enabled":true}}
+{"id":"<unique-id>","type":"room.public_page_set","data":{"enabled":true}}
+```
+
+The first records the public-receipts setting; the second records the
+public page. The proof page exists only once **both** are recorded on.
+Listing the room in the public directory
+(`POST /api/rooms/ROOM_ID/directory` with `{"discoverable":true}`) is a
+third, separate switch: it controls the directory listing, and its
+`publicReceipts` field can hide a room's receipts — but recording it
+does not record either setting above, so on its own the proof page
+still 404s.
 
 ## What is public
 
@@ -89,7 +109,7 @@ exception as the receipt card.
   operator unpublish hide it too — the same switches that hide the
   other shapes.
 - The setting is `room.public_receipts_set`. It is off until the owner
-  records it. A non-owner cannot change it.
+  records it (see *Turning it on* above). A non-owner cannot change it.
 - The room title is shown when the room is in the public directory or has
   a public face. Otherwise the page omits the title. A private room's
   claims and work items never appear while the setting is off.

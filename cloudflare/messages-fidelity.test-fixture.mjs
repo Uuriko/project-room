@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
+import {STORE_SCHEMA_VERSION,writerVersions} from '../server/writer-fence.mjs';
 import { DurableDatabase, durableStorage, durableFenceDefinitions } from './storage.mjs';
 
 function finish(store) {
@@ -30,7 +31,13 @@ export class MessageFidelityRoom {
       // This is test-only migration input; all production behavior below uses
       // the shared RoomStore and real Durable Object adapter.
       store.transaction(() => {
-        for (const row of this.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND (name GLOB 'writer_v3[89]_*' OR name GLOB 'writer_v4[012]_*')").all()) this.db.exec(`DROP TRIGGER ${row.name}`);
+        const newer=new Map(writerVersions.filter(version=>version>37).flatMap(version=>durableFenceDefinitions(version)).map(def=>[def.name,def.sql]));
+        for (const row of this.db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
+          const version=Number(/^writer_v(\d+)_/.exec(row.name)?.[1]);
+          if(version<=37)continue;
+          assert.equal(row.sql,newer.get(row.name),'only exact known newer fixture fences may be removed');
+          this.db.exec(`DROP TRIGGER ${row.name}`);
+        }
         this.db.exec('ALTER TABLE messages DROP COLUMN record_json');
         this.db.exec('ALTER TABLE messages_backfill_cursor ADD COLUMN state_json TEXT');
         this.db.exec(`UPDATE messages_backfill_cursor SET state_json=(
@@ -48,7 +55,7 @@ export class MessageFidelityRoom {
     }
     if (path === '/resume-v39') {
       const { owner } = await request.json();
-      assert.equal(durableStorage.version(this.db), 42);
+      assert.equal(durableStorage.version(this.db), STORE_SCHEMA_VERSION);
       assert.equal(JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id='fidelity'").get().projection).workItems.work._workEntity, 1);
       assert.equal(store.room('fidelity').state.workItems.work.title, 'Migration work');
       store.command(owner, 'fidelity', { id: 'accept-work', type: 'work.accepted', data: { workItemId: 'work', expectedRevision: 0 } });

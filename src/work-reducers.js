@@ -2,9 +2,28 @@
 // and cloning; this module owns work transitions and their local invariants.
 // Shared authority guards are injected once for identical replay/live behavior.
 import { nativeTextEvidence, reportedProducer, validateResultSegments } from './work-packet.js';
-import { applySessionFields } from './work-item-session.js';
+import { normalizeWorkDependencies } from './work-dependencies.js';
+import { applySessionFields, completionAttemptSnapshot } from './work-item-session.js';
+
+export const WRITE_GRANT_POLICY_VERSION = 1;
 
 export function createWorkReducers({ WORK_STATES, requirePermission, requireFields, requireMember, knownMember, receiptHasKnownProducer, requireWorkItem, assertRoomTrust, roomPolicy, claimIsActive, claimOverlaps, hasPermission, matchesReceipt, hasConfirmedIndependentPass, requirePublicDecisionSource }) {
+// Item-scoped implied write grant (FUNNEL-FIXES pack 01, Option D): an item
+// proposed by the room owner or a write_external holder carries a stamp
+// naming the proposer and the accountable member it was granted to. The
+// stamp satisfies the write-mode write_external check for that member on
+// that item only; it is a stateless comparison, so any reassignment of
+// accountability (e.g. member.merged) voids it while accountability sits
+// elsewhere, and it revives for the original member if accountability
+// returns. It never modifies member.permissions.
+function stampSatisfies(item, actorId) {
+  return Boolean(item.externalWriteGrantBy) && item.externalWriteGrantFor === actorId;
+}
+function requireWriteAuthority(state, item, incoming) {
+  if (hasPermission(state, incoming.actorId, "write_external")) return;
+  if (stampSatisfies(item, incoming.actorId)) return;
+  requirePermission(state, incoming.actorId, "write_external");
+}
 function proposeWork(state, incoming) {
   requirePermission(state, incoming.actorId, "steer");
   requireFields(incoming.data, ["workItemId", "title", "definitionOfDone", "accountableMemberId"]);
@@ -48,15 +67,30 @@ function proposeWork(state, incoming) {
   if (independentVerificationRequired && incoming.data.accountableMemberId === incoming.data.verifierMemberId) {
     throw new Error("Independent verification requires a different accountable member and verifier");
   }
+  if (independentVerificationRequired && ownerDecisionRequired && incoming.data.verifierMemberId && incoming.data.verifierMemberId === humanDecisionMakerId) {
+    throw new Error("Independent verification requires a verifier different from the human decision-maker");
+  }
   if (incoming.data.sourceMessageId && !state.messages.some((message) => message.id === incoming.data.sourceMessageId)) {
     throw new Error("Source message must exist in this Room");
   }
 
+  // Option D stamp: born with the item iff the proposer is the room owner or
+  // holds write_external at proposal time. Only proposals admitted under the
+  // policy carry writeGrantPolicyVersion (stamped by the store at admission,
+  // like pinDmPartyPolicyVersion), so every proposal recorded before it
+  // replays exactly as it was reduced then: no stamp, no implied grant.
+  if (incoming.data.writeGrantPolicyVersion !== undefined && incoming.data.writeGrantPolicyVersion !== WRITE_GRANT_POLICY_VERSION)
+    throw new Error("Unknown write grant policy version");
+  const externalWriteGrant = incoming.data.writeGrantPolicyVersion === WRITE_GRANT_POLICY_VERSION
+    && (incoming.actorId === state.room.ownerId || hasPermission(state, incoming.actorId, "write_external"))
+    ? { externalWriteGrantBy: incoming.actorId, externalWriteGrantFor: incoming.data.accountableMemberId }
+    : {};
   state.workItems[incoming.data.workItemId] = {
     id: incoming.data.workItemId,
     title: incoming.data.title,
     definitionOfDone: incoming.data.definitionOfDone,
     accountableMemberId: incoming.data.accountableMemberId,
+    ...externalWriteGrant,
     verifierMemberId: incoming.data.verifierMemberId || null,
     independentVerificationRequired,
     ownerDecisionRequired,
@@ -64,6 +98,7 @@ function proposeWork(state, incoming) {
     mode: incoming.data.mode || "read",
     sourceMessageId: incoming.data.sourceMessageId || null,
     ...(labels !== undefined ? { labels } : {}),
+    ...(incoming.data.dependsOn !== undefined ? { dependsOn: normalizeWorkDependencies(incoming.data.dependsOn) } : {}),
     // The proposer is the envelope actor alone (disposition 5557850637): replay recovers it
     // wherever the envelope exists; it is never read from data and never inferred from the
     // source message's author. Pre-field legacy rows simply lack the key and render unknown.
@@ -96,7 +131,7 @@ function startWork(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.BLOCKED]);
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may start work");
   requirePermission(state, incoming.actorId, "accept_work");
-  if (item.mode === "write") requirePermission(state, incoming.actorId, "write_external");
+  if (item.mode === "write") requireWriteAuthority(state, item, incoming);
   if (item.state === WORK_STATES.BLOCKED) requireFields(incoming.data, ["resolvedBlocker"]);
   if (item.mode === "write" && (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId)) {
     throw new Error("Contested writes require a current exact-scope claim");
@@ -132,6 +167,15 @@ function recordHandoff(state, incoming) {
       if (url.protocol !== "https:" || url.username || url.password) throw new Error();
     } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
   }
+  // Optional recipient: triage goes to that member instead of the Room owner,
+  // so an agent-to-agent handoff does not land on the owner's needs-me.
+  // Events without the field reduce exactly as before.
+  const toMemberId = incoming.data.toMemberId;
+  if (toMemberId !== undefined) {
+    if (typeof toMemberId !== "string" || toMemberId === incoming.actorId) throw new Error("toMemberId must name another room member");
+    requireMember(state, toMemberId);
+    if (state.members[toMemberId]?.active === false) throw new Error("toMemberId must name an active room member");
+  }
   // A handoff never advances or closes the state; review and decision gates stay untouched.
   if (item.handoff) {
     item.handoffHistory = item.handoffHistory || [];
@@ -142,7 +186,7 @@ function recordHandoff(state, incoming) {
     open: true, eventId: incoming.id, at: incoming.at, actorId: incoming.actorId,
     // An open handoff is triage work addressed to the Room owner, so needs-me
     // views and attention inboxes can surface it to a named member.
-    triageMemberId: state.room.ownerId,
+    triageMemberId: toMemberId ?? state.room.ownerId,
     doneSummary: incoming.data.doneSummary,
     evidenceUrl: incoming.data.evidenceUrl ?? null, evidenceVersion: incoming.data.evidenceVersion ?? null,
     nextAction: incoming.data.nextAction, limitReason: incoming.data.limitReason,
@@ -182,7 +226,7 @@ function completeWork(state, incoming) {
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may report completion");
   requirePermission(state, incoming.actorId, "complete_work");
   if (item.mode === "write") {
-    requirePermission(state, incoming.actorId, "write_external");
+    requireWriteAuthority(state, item, incoming);
     if (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId) throw new Error("Completion requires a current exact-scope claim");
   }
   let nativeText = null, signedEvidence = null;
@@ -208,6 +252,7 @@ function completeWork(state, incoming) {
   }
   const attribution = reportedProducer(incoming.data), { producerId } = attribution;
   if (producerId !== null) knownMember(state, producerId);
+  const attemptSnapshot = completionAttemptSnapshot(item, incoming.data.attempt, incoming.actorId, producerId);
   if (item.receipt) item.receiptHistory.push(item.receipt);
   if (item.verification) item.verificationHistory.push(item.verification);
   if (item.decision) item.decisionHistory.push(item.decision);
@@ -217,6 +262,7 @@ function completeWork(state, incoming) {
     // the reporter. This also lets verification enforce independence when a producer is
     // actually known.
     reportedById: incoming.actorId,
+    ...(attemptSnapshot ? { attemptSnapshot } : {}),
     ...attribution,
     summary: incoming.data.summary,
     evidenceUrl: nativeText ? null : (incoming.data.evidenceUrl ?? null),
@@ -339,6 +385,9 @@ function recordVerification(state, incoming) {
   requirePermission(state, incoming.actorId, "verify");
   if (item.independentVerificationRequired && incoming.actorId === item.accountableMemberId) {
     throw new Error("Independent verification requires a different actor");
+  }
+  if (item.independentVerificationRequired && item.ownerDecisionRequired && item.humanDecisionMakerId && incoming.actorId === item.humanDecisionMakerId) {
+    throw new Error("Independent verification requires a verifier different from the human decision-maker");
   }
   requireFields(incoming.data, ["result", "completionEventId", "evidenceVersion", "summary"]);
   const matchesCurrentReceipt = matchesReceipt(incoming.data, item.receipt);

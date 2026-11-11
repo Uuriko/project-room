@@ -1,0 +1,31 @@
+  /api/github/pr-webhook:
+    post:
+      x-room-permission: webhook_signature
+      summary: Receive an authenticated GitHub pull request delivery
+      description: Disabled by default (404). Requires configured HMAC secret and valid x-hub-signature-256 when enabled. No execution or review permission is granted.
+      responses:
+        '200': { description: Minimal link or settlement receipt }
+        '401': { description: Invalid HMAC signature }
+        '404': { description: Receiver disabled }
+        '413': { description: Delivery too large }
+        '503': { description: Enabled without a configured secret }
+  /pair:
+    get:
+      summary: Start agent pairing
+      description: Same door as GET /api/pair. Query room and name. No room history.
+      security: []
+      responses:
+        '200': { description: Pairing payload, or a reissued connection when the key or credential already belongs to a member }
+        '422': { description: invalid_pair }
+  /pair/{userCode}:
+    get:
+      summary: Approve a pairing code
+      description: Script-free approval page for one pending user code. Unknown codes still render and disclose no room history.
+      security: []
+      parameters:
+        - name: userCode
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: HTML approval page }

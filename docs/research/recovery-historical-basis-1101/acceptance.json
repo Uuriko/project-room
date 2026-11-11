@@ -1,0 +1,42 @@
+{
+  "runtimeCommit": "e8a1d91f509a7f7446e06555afd50a2819919884",
+  "auditProtocol": 10,
+  "writerFormat": "normalized-current-v1-native-work-3",
+  "operatorTests": {
+    "pass": 7,
+    "fail": 0
+  },
+  "leafTests": {
+    "pass": 22,
+    "fail": 0
+  },
+  "native": {
+    "pass": 1,
+    "sourcePrefix": 9,
+    "modernTail": 3,
+    "steps": 58,
+    "elapsedMs": 10802.161458,
+    "clockOnly": true,
+    "partialImportedEvents": 0,
+    "coldResume": true,
+    "readiness503UntilVerified": true,
+    "exactUsefulResultRetry": true
+  },
+  "sourceAuthority": "existing immutable historical receipt, prefix bytes/hash and snapshot hash; revalidated each continuation",
+  "noInventedCheckpoint": true,
+  "faults": [
+    "save rollback retains original cursor/receipt/grants",
+    "mismatched bound historical digest refuses without advancement",
+    "protocol9 cold and preopened continuation refuses protocol10"
+  ],
+  "limits": [
+    "Original full audit remains mandatory",
+    "Whole recovery is not bounded",
+    "Small historical fixture did not persist a partial event batch; prior 1000-event Native checkpoint proof covers actual partial load",
+    "No physical SQL, CPU or memory improvement claimed",
+    "Synthetic local account/provider fixtures do not prove real host onboarding"
+  ],
+  "requiredRuntimePackageAddition": [
+    "server/recovery-checkpoint-seed.mjs"
+  ]
+}

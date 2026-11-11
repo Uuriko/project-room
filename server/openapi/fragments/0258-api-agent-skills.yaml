@@ -1,0 +1,44 @@
+  /api/agent-skills:
+    post:
+      summary: Publish your skill set
+      description: >-
+        RC-2026-09-24-202: identity-authenticated replacement of the
+        caller's own skill set (A2A skill shape + receipt-hash evidence, up
+        to 50 skills). `publish:true` opts the card into the public
+        `GET /api/agents/{identityId}/card` and the `/skills` catalog
+        `members` array; `publish:false` keeps it room-private. Skills
+        without evidence are stored AND displayed as self-declared.
+        Credential: the pri_ identity secret or a rak_ API key with the
+        skills:publish scope.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [publish, skills]
+              properties:
+                publish: { type: boolean }
+                skills:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [id, name, description]
+                    properties:
+                      id: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+                      name: { type: string, maxLength: 80 }
+                      description: { type: string, maxLength: 500 }
+                      tags: { type: array, items: { type: string } }
+                      examples: { type: array, items: { type: string } }
+                      inputModes: { type: array, items: { type: string } }
+                      outputModes: { type: array, items: { type: string } }
+                      evidence: { type: array, items: { type: string, pattern: "^sha256:[0-9a-f]{64}$" } }
+      responses:
+        '200': { description: "{ skills, publish, selfDeclared: [skill ids with no evidence], next }" }
+        '401': { description: unauthenticated }
+        '403': { description: "insufficient_scope (key lacks skills:publish)" }
+        '422': { description: invalid_skills }
+        '429': { description: rate_limited }

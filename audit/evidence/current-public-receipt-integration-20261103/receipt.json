@@ -1,0 +1,49 @@
+{
+  "baseline": "924492a4143b59bb6c663be4d16977668dcf8185",
+  "source": "b24e3628e9f03aa708c394896206a56b9c490a8e",
+  "adoptedPrHead": "b1849bab00ba7d8e704558d52a2fb00dc7d22cee",
+  "node": "24.22.1",
+  "focusedNode": {
+    "pass": 57,
+    "fail": 0,
+    "skip": 0
+  },
+  "coldCandidatePackage": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0
+  },
+  "lint": {
+    "errors": 0,
+    "unchangedCodeWarnings": 3
+  },
+  "secretScan": "clean",
+  "independentEvidence": "ae8bf4a24",
+  "independentNodeMatrix": "96responses each at baseline and composition; baseline10agreementfailures, composition0",
+  "independentWorkerd": "36served requests; composition12/12 orphan refusals; five-of-six public positive faces200 on each revision; PNG500 on both remains unqualified",
+  "limits": [
+    "deliberate synthetic row deletion; no naturally occurring or production leak established",
+    "availability agreement only; no content-rewrite agreement claim",
+    "recorded task-owner opt-out and receipt operator unpublish matrix; not a combined room-wide-unpublish/origin-directory matrix",
+    "no schema, identity, write-path, projection or grant changes",
+    "not yet merged or deployed"
+  ],
+  "logs": {
+    "node.log.gz": {
+      "decodedBytes": 33911,
+      "decodedSha256": "530799e5d6902117d6b05f40a74aaa53bdaeee5b727c46cae38343f5a8eded1f"
+    },
+    "cold-package.log.gz": {
+      "decodedBytes": 247,
+      "decodedSha256": "a68e26f43ce0787db6a6e12c65b1dd67999d84f5070dc145c9b0d036305c7a28"
+    },
+    "lint.log.gz": {
+      "decodedBytes": 735,
+      "decodedSha256": "1f1ba21cfec6e5c51c6c6f11d0516c4488221d26c0986dd235a59ed9461839fb"
+    },
+    "secret.log.gz": {
+      "decodedBytes": 24,
+      "decodedSha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    }
+  }
+}

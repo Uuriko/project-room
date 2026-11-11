@@ -169,8 +169,11 @@ test('SDK lease renewal needs the owner and a fresh public progress message', as
   const foreign = (await peer.say('Someone else checked in')).event.data.messageId;
   const privateProgress = (await owner.say('Private update', { toMemberId: 'reviewer' })).event.data.messageId;
   const before = stripTrust(await owner.workClaimGet('renewed'));
+  // FUNNEL-FIXES C2: the peer holds no work profile, so renew refuses at
+  // the gate (work_claims_not_permitted) before any holder answer — a
+  // non-writer no longer learns who holds the claim (was work_not_owner).
   await assert.rejects(peer.renewWorkItem('renewed', { progressMessageId: foreign }),
-    error => error.status === 403 && error.code === 'work_not_owner');
+    error => error.status === 403 && error.code === 'work_claims_not_permitted');
   assert.deepEqual(stripTrust(await owner.workClaimGet('renewed')), before);
   for (const [progressMessageId, code] of [[foreign, 'claim_renewal_source_foreign'],
     [privateProgress, 'claim_renewal_source_required'], ['missing', 'claim_renewal_source_required']]) {
@@ -342,7 +345,7 @@ test('SDK board reads exactly one canonical claim page and forwards explicit con
   assert.equal(first.claimsPage.hasMore, true);
   assert.equal(Object.hasOwn(first.claimsPage, 'claims'), false);
   assert.equal(Object.hasOwn(first.claimsPage, 'swept'), false);
-  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/work-claims-read')).length, 1);
+  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/board')).length, 1);
   const last = await owner.board({ cursor: first.claimsPage.nextCursor });
   assert.deepEqual(last.claims.map(item => item.id), ids.slice(50));
   assert.equal(last.claimsPage.hasMore, false);
@@ -371,12 +374,12 @@ test('SDK board propagates canonical query refusals without returning a legacy-o
     { cursor: '' }, { cursor: 'invalid' }, { queue: 'ready', state: 'done' }]) {
     await assert.rejects(owner.board(options), invalid);
   }
-  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/work-claims-read')).length, 8);
+  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/board')).length, 8);
   assert.equal(requests.some(path => /^\/api\/rooms\/commons\/work-claims(?:\?|$)/.test(path)), false);
 });
 
 // Delay an actual canonical HTTP response after the real route has evaluated
-// it. This detects a lost signal on board()'s second request without a fetch double.
+// it. This detects a lost signal on the Board read without a fetch double.
 test('SDK board cancellation aborts an in-flight canonical claim response', async t => {
   const { origin, token } = await fixture(t);
   let entered, closed, release;
@@ -386,12 +389,12 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   const requests = [];
   const proxy = createServer(async (req, res) => {
     requests.push(req.url);
-    if (req.method !== 'GET' || !['/api/rooms/commons', '/api/rooms/commons/work-claims-read'].includes(req.url)) {
+    if (req.method !== 'GET' || req.url !== '/api/rooms/commons/board') {
       res.writeHead(500).end(); return;
     }
     const response = await fetch(origin + req.url, { headers: { authorization: req.headers.authorization } });
     const body = await response.text();
-    if (req.url.endsWith('/work-claims-read')) {
+    if (req.url.endsWith('/board')) {
       res.on('close', closed);
       entered();
       await gate;
@@ -409,5 +412,118 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   await refused;
   await disconnected;
   release();
-  assert.deepEqual(requests, ['/api/rooms/commons', '/api/rooms/commons/work-claims-read']);
+  assert.deepEqual(requests, ['/api/rooms/commons/board']);
+});
+
+
+test('SDK repository and branch reach creation, claiming, and convenience reclaim over HTTP', async t => {
+  const { owner } = await fixture(t);
+  const created = await owner.workClaimCreate({ id: 'repo-direct', repo: 'acme/widgets', branch: 'codex/create' });
+  assert.equal(created.repo, 'acme/widgets'); assert.equal(created.branch, 'codex/create');
+  const claimed = await owner.claimWorkItem('repo-direct', { repo: 'acme/other', branch: 'codex/claim' });
+  assert.equal(claimed.repo, 'acme/other'); assert.equal(claimed.branch, 'codex/claim');
+  const convenient = await owner.workClaim('repo-convenience', { repo: 'acme/widgets', branch: 'codex/new' });
+  assert.equal(convenient.repo, 'acme/widgets'); assert.equal(convenient.branch, 'codex/new');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const reclaimed = await owner.workClaim('repo-convenience', { repo: 'acme/changed', branch: 'codex/reclaim' });
+  assert.equal(reclaimed.repo, 'acme/changed'); assert.equal(reclaimed.branch, 'codex/reclaim');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const retained = await owner.workClaim('repo-convenience');
+  assert.equal(retained.repo, 'acme/changed'); assert.equal(retained.branch, 'codex/reclaim');
+  assert.equal((await owner.workClaimGet('repo-convenience')).repo, 'acme/changed');
+});
+
+test('SDK invalid repository and branch declarations reach server validation', async t => {
+  const { owner } = await fixture(t);
+  for (const fields of [{ repo: 'invalid repo' }, { branch: 'invalid branch' }]) {
+    await assert.rejects(owner.workClaimCreate({ id: 'bad-repo-create', ...fields }), invalid);
+    await assert.rejects(owner.workClaim('bad-repo-convenience', fields), invalid);
+    await assert.rejects(owner.workClaimGet('bad-repo-create'), error => error.status === 404);
+    await assert.rejects(owner.workClaimGet('bad-repo-convenience'), error => error.status === 404);
+  }
+  await owner.workClaimCreate({ id: 'bad-repo-existing', repo: 'acme/widgets', branch: 'main' });
+  await assert.rejects(owner.claimWorkItem('bad-repo-existing', { repo: 'invalid repo' }), invalid);
+  await assert.rejects(owner.workClaim('bad-repo-existing', { branch: 'invalid branch' }), invalid);
+  const unchanged = await owner.workClaimGet('bad-repo-existing');
+  assert.equal(unchanged.state, 'unclaimed'); assert.equal(unchanged.repo, 'acme/widgets'); assert.equal(unchanged.branch, 'main');
+});
+
+
+test('SDK preserves incomplete coverage on malformed continuation pages and cursor cycles', async () => {
+  for (const more of [
+    { claims: [], hasMore: true },
+    { claims: [], hasMore: true, nextCursor: 42 },
+    { claims: [], nextCursor: null },
+    { claims: [], hasMore: false, nextCursor: 'repeat' },
+    { claims: [], hasMore: true, nextCursor: 'repeat' },
+    { hasMore: false, nextCursor: null }
+  ]) {
+    let reads = 0;
+    const client = new RoomAgentClient({ origin: 'https://room.example', roomId: 'commons', token: 'a'.repeat(43),
+      fetchImpl: async () => {
+        reads += 1;
+        return new Response(JSON.stringify(reads === 1 ? { claims: [], hasMore: true, nextCursor: 'repeat' } : more),
+          { headers: { 'content-type': 'application/json' } });
+      }
+    });
+    const result = await client.workClaims();
+    assert.equal(result.hasMore, true, JSON.stringify(more));
+    assert.equal(reads, 2, 'malformed/cyclic metadata never causes an unbounded walk');
+  }
+});
+
+
+test('malformed first or middle pages cannot be hidden by a later terminal page', async () => {
+  const first = { claims: [{ id: 'first' }], hasMore: true, nextCursor: 'middle' };
+  const terminal = { claims: [{ id: 'last' }], hasMore: false, nextCursor: null };
+  for (const pages of [
+    [{ hasMore: true, nextCursor: 'middle' }, terminal],
+    [{ claims: [], hasMore: 'true', nextCursor: 'middle' }, terminal],
+    [{ claims: [], hasMore: 1, nextCursor: 'middle' }, terminal],
+    [first, { hasMore: true, nextCursor: 'terminal' }, terminal],
+    [first, { claims: [], hasMore: false, nextCursor: 'terminal' }, terminal],
+    [first, { claims: [], nextCursor: 'terminal' }, terminal]
+  ]) {
+    let reads = 0;
+    const client = new RoomAgentClient({ origin: 'https://room.example', roomId: 'commons', token: 'a'.repeat(43),
+      fetchImpl: async () => new Response(JSON.stringify(pages[reads++]), { headers: { 'content-type': 'application/json' } }) });
+    const result = await client.workClaims();
+    assert.equal(result.hasMore, true);
+    assert.equal(reads, pages.length - 1, 'stop before the terminal page can erase an earlier gap');
+    assert.equal(result.claims.some(claim => claim.id === 'last'), false);
+  }
+});
+
+test('discovery release instructions work with a truncated board read and reject stale rounds', async t => {
+  const { llmsFullTxt } = await import('../server/agent-discovery.mjs');
+  const releaseInstruction = llmsFullTxt().split('\n').find(line => line.includes('/work-claims/{claimId}/release'));
+  assert.match(releaseInstruction, /history\.length \+ \(historyOmitted \?\? 0\)/);
+  const { owner, store } = await fixture(t);
+  await owner.workClaimCreate({ id: 'listed-release' });
+  let item = await owner.claimWorkItem('listed-release');
+  for (let i = 0; i < 4; i++) item = updateWork(item, 'owner', { note: `Progress ${i}` });
+  store.workClaims.set('commons', item);
+  const listed = (await owner.workClaims()).claims.find(claim => claim.id === item.id);
+  assert.equal(listed.history.length, 3);
+  assert.ok(listed.historyOmitted > 0);
+  const basis = { expectedClaimedAt: listed.claimedAt,
+    expectedHistoryLength: listed.history.length + (listed.historyOmitted ?? 0) };
+  await assert.rejects(owner.releaseWorkItem(item.id, { ...basis, expectedHistoryLength: listed.history.length }), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, 'work_claim_conflict');
+    // DC4-A1: the claim itself never changed — the round is stale because
+    // the list read truncated the history. The message says exactly that
+    // (and the resolved route body, pinned in
+    // tests/work-claim-release-round-refusal.test.js, carries the cure).
+    assert.match(error.message, /round is stale/);
+    assert.match(error.message, /truncated the claim history/);
+    assert.doesNotMatch(error.message, /changed since it was read|claim has moved/);
+    return true;
+  });
+  assert.equal((await owner.workClaimGet(item.id)).owner, 'owner');
+  assert.equal((await owner.releaseWorkItem(item.id, basis)).state, 'unclaimed');
+  await owner.claimWorkItem(item.id);
+  await assert.rejects(owner.releaseWorkItem(item.id, basis),
+    error => error.status === 409 && error.code === 'work_claim_conflict');
+  assert.equal((await owner.workClaimGet(item.id)).state, 'claimed');
 });

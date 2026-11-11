@@ -133,3 +133,21 @@ test("ANCHOR-D8: settle → retry settle with the same payload records exactly o
   assert.equal(final.history.filter(step => step?.action === "pr_merged").length, 1,
     "the row carries exactly one pr_merged stamp");
 });
+
+// Distinct from retry idempotency: an event/projection failure must also roll
+// back the registry transition, so a retry can still perform the settlement.
+test("failed standalone settlement rolls back its claim and can be retried", t => {
+  const store = new RoomStore(":memory:"); t.after(() => store.close());
+  store.initialize(initialRoom(ROOM));
+  const item = openClaim("failed-settle"); store.workClaims.set(ROOM, item);
+  const head = store.headSequence(ROOM);
+  const result = { claimId: item.id, url: PR, kind: "merged" };
+  store.db.exec("CREATE TRIGGER reject_settlement BEFORE UPDATE OF projection ON rooms BEGIN SELECT RAISE(ABORT,'injected settlement failure'); END");
+  assert.throws(() => commitPullRequestLookup(store, store.workClaims, ROOM, item, result, NOW));
+  assert.equal(store.workClaims.get(ROOM, item.id).state, item.state);
+  assert.equal(store.headSequence(ROOM), head);
+  assert.equal(prMergedEvents(store).length, 0);
+  store.db.exec("DROP TRIGGER reject_settlement");
+  assert.equal(commitPullRequestLookup(store, store.workClaims, ROOM, item, result, NOW), true);
+  assert.equal(prMergedEvents(store).length, 1);
+});

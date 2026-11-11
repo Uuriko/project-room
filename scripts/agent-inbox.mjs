@@ -1,4 +1,5 @@
 import { workContextMarkdown, RoomAgentClient, RoomClientError, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
+import { orientAgentRoom } from "./bootstrap-agent-room.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { MAX_LEASE_HOURS } from "../server/work-claims.mjs";
@@ -309,7 +310,9 @@ if (action === "join") {
   node scripts/agent-inbox.mjs room-create ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs account-link ROOM_ID IDENTITY_ID DISPLAY_NAME [PERM1,PERM2] [NOTE]
   node scripts/agent-inbox.mjs identity-link IDENTITY_ID [PERM1,PERM2] [MEMBER_ID] [DISPLAY_NAME]
-  (omit permissions for a read/chat-only link)
+  (omit permissions for a read/chat-only link; a direct link needs holder
+  proof — set ROOM_AGENT_LINK_CODE to a link code the identity holder
+  minted for this room, unless an approved access request is on record)
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
   node scripts/agent-inbox.mjs leave-room
@@ -453,7 +456,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "work" ? await client.workContext(checkpoint, { includeSource: extra.includes("--include-source"), includeOffers: extra.includes("--include-offers") })
       : action === "next" ? await client.orient({ focus: "needs_me" })
       : action === "search" ? await client.orient({ query: checkpoint, focus: extra[0] === "--needs-me" ? "needs_me" : "all" })
-      : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief()
+      : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await orientAgentRoom(client) : action === "brief" ? await client.returnBrief()
       : action === "context" ? await client.roomContext(checkpoint === undefined ? {} : { sinceVersion: checkpoint })
       : action === "presence" ? await client.presence()
       : action === "capabilities" ? await client.capabilities(checkpoint === undefined ? {} : { search: checkpoint })
@@ -475,7 +478,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "identity-create" ? await createAgentIdentity(process.env.ROOM_AGENT_ORIGIN, checkpoint)
       : action === "rooms" ? await listAgentRooms(process.env.ROOM_AGENT_ORIGIN, process.env.ROOM_AGENT_TOKEN, { after: checkpoint ?? "" })
       : action === "room-create" ? await createAgentRoom(process.env.ROOM_AGENT_ORIGIN, process.env.ROOM_AGENT_TOKEN, parseRoomCreate(checkpoint, extra))
-      : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
+      : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }), ...(process.env.ROOM_AGENT_LINK_CODE ? { identityLinkCode: process.env.ROOM_AGENT_LINK_CODE } : {}) })
       : action === "identity-links" ? await client.identityLinks()
       : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)
       : action === "leave-room" ? await client.deactivateMembership()

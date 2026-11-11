@@ -1,7 +1,16 @@
+import { canInviteCoOwners, museDevelopmentAccess } from "./room-administration.js";
 import { publicJoinInviteHref } from "./room-deep-link.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
 import { stashPendingJoin, clearPendingJoin } from "./invite-context.js";
 import { uiText } from "./strings.js";
+import { roomAcpCommand } from "./agent-invite-ui.js";
+import { canInviteMembers } from "./events.js";
+import { isDeadLinkCode } from "./error-copy.js";
+
+export function canOpenAgentInvitation(state, session) {
+  return Boolean(session && state?.room?.id === session.roomId
+    && canInviteMembers(state, session.member?.id));
+}
 
 // Kept in this module so the browser asset list does not need a new file.
 export function inviteMessage(title) {
@@ -283,7 +292,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#share-note-text").value = ""; $("#share-note-preview").value = "";
     $("#share-note").open = false; $("#share-note-result").hidden = true;
     $("#share-purpose-note").hidden = true;
+    if ($("#share-acp-command")) $("#share-acp-command").textContent = "";
     $("#share-link-result").hidden = true; $("#share-link-form").hidden = false;
+    for (const selector of ['label[for="share-link-url"]', "#share-link-url", "#share-link-copy"]) { if ($(selector)) $(selector).hidden = false; }
     status(message); updateCopyControls();
     if (heldFocus && manager.open && ownsManagement()) $("#share-link-create").focus();
   }
@@ -304,7 +315,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   function updateLimits() {
     const hours = Number($("#share-link-expiry").value), limit = Number($("#share-link-limit").value);
     const duration = hours === 168 ? "7 days" : `${hours} ${hours === 1 ? "hour" : "hours"}`;
-    $("#share-settings-summary").textContent = `${duration} · ${Number.isInteger(limit) && limit >= 1 && limit <= 25 ? `${limit} ${limit === 1 ? "guest" : "guests"}` : "Choose a guest limit"}`;
+    $("#share-settings-summary").textContent = `${duration} · ${Number.isInteger(limit) && limit >= 1 && limit <= 25 ? `${limit} ${limit === 1 ? "join" : "joins"}` : "Choose a join limit"}`;
   }
   let creating = false;
   function creationBusy(value) {
@@ -352,7 +363,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const copyMessage = $("#growth-copy-message");
     if (copyLink) copyLink.disabled = !url;
     const copyAgent = $("#growth-copy-agent");
-    if (copyAgent) copyAgent.disabled = !url;
+    if (copyAgent) copyAgent.disabled = !canOpenAgentInvitation(getState(), getSession());
     if (copyMessage) copyMessage.disabled = !message;
     const kitStatus = $("#growth-kit-status");
     if (kitStatus) setShareLinkStatus(kitStatus, data?.inviteBlocked === "email_unverified"
@@ -365,12 +376,18 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const roomId = owned?.roomId || getState()?.room?.id;
     if (!roomId || typeof client?.request !== "function" || typeof client?.path !== "function") return;
     const current = () => version === kitLoadVersion && getSession() === owned && client.generation === generation && manager.open;
+    const devOwner = museDevelopmentAccess(getState()) && canInviteCoOwners(getState(), owned?.member?.id);
+    if ($("#growth-kit")) $("#growth-kit").hidden = devOwner;
+    if (devOwner) {
+      renderKit(null);
+      return;
+    }
     renderKit(null);
     setShareLinkStatus($("#growth-kit-status"), uiText("entry.invite.loading"));
     const retry = $("#growth-kit-retry");
     if (retry) retry.hidden = true;
     try {
-      const data = await client.request(client.path("/referrals"), { method: "GET" });
+      const data = await client.request(client.path("/referrals?view=invitation"), { method: "GET" });
       if (current()) renderKit(data);
     } catch {
       if (!current()) return;
@@ -404,8 +421,14 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#growth-copy-link")?.addEventListener("click", () => copyGrowth($("#growth-invite-url")?.value, "Link copied."));
       $("#growth-copy-message")?.addEventListener("click", () => copyGrowth($("#growth-invite-message")?.value, "Message copied."));
       $("#growth-copy-agent")?.addEventListener("click", () => {
-        const url = $("#growth-invite-url")?.value;
-        if (url) void copyGrowth(uiText("entry.invite.agentInstructions", { url }), uiText("entry.invite.agentCopied"));
+        // Native OAuth accepts an unused RM invitation, not the reusable
+        // people link. Open the existing authorized mint flow; never redeem
+        // or mint behind a clipboard action.
+        if (!canOpenAgentInvitation(getState(), getSession())) return;
+        const profile = $("#share-link-access")?.value === "guest" ? "guest" : "member";
+        manager.close();
+        $("#invite-agents-button")?.click();
+        if ($("#agent-invite-dialog")?.open && $("#agent-invite-profile")) $("#agent-invite-profile").value = profile;
       });
       $("#growth-kit-retry")?.addEventListener("click", () => loadKit());
       $("#growth-agent-code")?.addEventListener("click", () => $("#invite-agents-button")?.click());
@@ -420,6 +443,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   function sync() {
     $("#invite-people-button").hidden = !(canManage() || inRoom());
+    const agentInvite = $("#growth-copy-agent");
+    if (agentInvite) agentInvite.disabled = !canOpenAgentInvitation(getState(), getSession());
     refreshAgentCode();
     applyKitChrome();
     if (manager.open && kitOnly) {
@@ -451,7 +476,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const items = result.links.map(link => {
       const li = document.createElement("li"), text = document.createElement("p");
       li.dataset.linkId = link.id;
-      const kind = link.access === "co_admin" ? "Co-admin" : link.access === "member" ? "Member" : "Guest";
+      const kind = link.access === "co_owner" ? uiText("muse.invite.role") : link.access === "co_admin" ? "Co-admin" : link.access === "member" ? "Member" : "Guest";
       const description = status => `${kind} · ${link.joins}/${link.maxJoins} joined · ${status.replaceAll("_", " ")} · expires ${date(link.expiresAt)}`;
       text.textContent = description(link.status);
       li.append(text);
@@ -513,11 +538,20 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     // Member and co-admin links are the room creator's to make.
     // Optional chrome: its absence must never keep the dialog from opening.
     const accessLabel = $("#share-link-access-label"), access = $("#share-link-access");
-    if (accessLabel) accessLabel.hidden = getState()?.room?.ownerId !== getSession()?.member?.id;
-    if (access) access.value = "guest";
+    const devOwner = museDevelopmentAccess(getState()) && canInviteCoOwners(getState(), getSession()?.member?.id);
+    if (accessLabel) accessLabel.hidden = getState()?.room?.ownerId !== getSession()?.member?.id && !devOwner;
+    const devOption = $('#share-link-access option[value="co_owner"]');
+    if (devOption) { devOption.hidden = !devOwner; devOption.disabled = !devOwner; }
+    if (access) access.value = accessLabel?.hidden === false ? "member" : "guest";
     manager.showModal(); $("#share-link-create").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
     await Promise.all([list(version, generation).catch(() => {}), loadKit()]);
+  });
+  $("#share-acp-copy")?.addEventListener("click", async () => {
+    const command = $("#share-acp-command")?.textContent ?? "";
+    if (!command) return;
+    try { await navigator.clipboard.writeText(command); status(uiText("share.acp.copied")); }
+    catch { status(uiText("share.acp.copyFailed")); }
   });
   $("#share-link-close").addEventListener("click", () => { if (!creating) manager.close(); });
   manager.addEventListener("cancel", event => { if (creating) event.preventDefault(); });
@@ -551,10 +585,17 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const inviteUrl = publicJoinInviteHref(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "")
         || humanJoinShareUrl(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "");
       $("#share-link-url").value = inviteUrl;
-      $("#share-purpose-note").hidden = !purposeItem;
-      if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Guests can read the room and its history, post messages, and react.`;
-      if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full working permissions (not membership administration). Share it only with people and agents you trust."; }
-      else if (result.link.access === "member") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "People and agents who join can take, complete and verify work."; }
+      // One link for people and agents: room-acp joins with this same link.
+      if ($("#share-acp-command")) $("#share-acp-command").textContent = roomAcpCommand(inviteUrl);
+      if (result.link.access === "co_owner") {
+        renderKit({ invite: { token: request.linkToken, status: "active", message: uiText("muse.invite.message", { url: inviteUrl }) } });
+        if ($("#growth-kit")) $("#growth-kit").hidden = false;
+      }
+      const scope = result.link.access === "co_owner" ? uiText("muse.invite.scope")
+        : result.link.access === "co_admin" ? uiText("share.scopeCoAdmin")
+        : result.link.access === "member" ? uiText("share.scopeMember") : uiText("share.scopeGuest");
+      $("#share-purpose-note").hidden = !purposeItem && !["co_owner", "co_admin", "member"].includes(result.link.access);
+      $("#share-purpose-note").textContent = [purposeItem ? uiText("share.purposeOpening", { title: purposeItem.title }) : "", scope].filter(Boolean).join(" ");
       $("#share-link-url").dataset.linkId = result.link.id;
       // #3794: the growth-kit field at the top of this dialog still showed
       // a pre-existing (guest) link after a create — the only URL many
@@ -563,16 +604,19 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const growthUrl = $("#growth-invite-url");
       if (growthUrl) growthUrl.value = inviteUrl;
       const growthStatus = $("#growth-kit-status");
-      if (growthStatus) growthStatus.textContent = uiText("share.linkCreated", { fragmentA: result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest" });
+      if (growthStatus) growthStatus.textContent = uiText("share.linkCreated", { fragmentA: result.link.access === "co_owner" ? uiText("muse.invite.role") : result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest" });
       $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;
+      if (result.link.access === "co_owner") {
+        for (const selector of ['label[for="share-link-url"]', "#share-link-url", "#share-link-copy"]) { if ($(selector)) $(selector).hidden = true; }
+      }
       expiryTimer = setTimeout(checkResult, Math.max(0, currentLink.expiresAt - Date.now()));
       expiryTimer.unref?.();
       updateCopyControls();
       // Unlock the dialog before clipboard. A hanging writeText (or a test
       // stub that waits for finish) must not keep Create disabled.
-      status(uiText("share.linkReady", { fragmentA: result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest" }));
-      $("#share-link-copy").focus();
+      status(uiText("share.linkReady", { fragmentA: result.link.access === "co_owner" ? uiText("muse.invite.role") : result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest" }));
+      $(result.link.access === "co_owner" ? "#growth-copy-link" : "#share-link-copy").focus();
       creationBusy(false);
       list(version, generation).catch(() => {});
       const clipboard = globalThis.navigator?.clipboard;
@@ -669,14 +713,14 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} places left.`;
       const sharedUrl = publicJoinInviteHref(joinSecret);
       $("#shared-agent-details").hidden = !sharedUrl;
-      $("#shared-agent-instructions").value = sharedUrl ? `Join ${preview.room.title}: ${sharedUrl}\nDownload and verify the agent runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). From its folder run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(sharedUrl)} ./room-connection --name "My agent"\nReview the destination and read/chat access, then repeat with --accept when authorized. Reuse room-connection to resume. Import the returned host configuration into your MCP client. A running host is required to answer requests.` : "";
+      $("#shared-agent-instructions").value = sharedUrl ? uiText("entry.invite.agentInstructions", { url: sharedUrl }) : "";
       updateSwitchWarning();
       $("#join-account-choices").hidden = Boolean(account.authenticated) || Boolean(resume);
       $("#join-guest-note").hidden = Boolean(account.authenticated);
       const elevatedLink = preview.link.access && preview.link.access !== "guest";
       $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated || elevatedLink ? "Join room" : "Continue as guest";
       const accessSummary = $("#join-access-details").querySelector?.("summary");
-      if (accessSummary) accessSummary.textContent = elevatedLink ? (preview.link.access === "co_admin" ? "Co-admin access" : "Member access") : "Guest access";
+      if (accessSummary) accessSummary.textContent = elevatedLink ? (preview.link.access === "co_owner" ? uiText("muse.invite.access") : preview.link.access === "co_admin" ? "Co-admin access" : "Member access") : "Guest access";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
       if (account.authenticated && !resume && !fragment.reviewSession) await applyAccountDefaults(version);
       if (version !== joinVersion) return;
@@ -716,7 +760,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       }
     } catch (error) {
       if (version !== joinVersion) return;
-      if (resume && error.code === "link_unavailable") {
+      if (resume && isDeadLinkCode(error?.code)) {
         // The earlier join may have consumed the final place. Preview refuses
         // new joins, but the authenticated idempotent replay can still recover it.
         previewRoomId = resume.roomId; previewRoomTitle = resume.roomTitle;
@@ -726,7 +770,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         await performJoin({ resume: true });
         return;
       }
-      if (!resume && error?.code === "link_unavailable") {
+      if (!resume && isDeadLinkCode(error?.code)) {
         const dead = deadInviteCopy();
         // A signed-in person needs neither the Log in choice nor the guest
         // hint; they keep the fresh-link ask and a link back to their rooms.
@@ -856,7 +900,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         $("#join-link-retry").textContent = "Review browser session";
       }
       if (error.code === "join_session_lost") $("#join-account-choices").hidden = false;
-      const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated === false;
+      // The client drops a lost anonymous session (cookie gone), so a missing
+      // session is still a guest browser; only a signed-in account is not.
+      const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated !== true;
       $("#join-link-signout").hidden = error.code !== "guest_session_ended" && !lostGuest;
       $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Log out of expired guest session";
       if (joined) $("#join-link-submit").textContent = "Open joined room";

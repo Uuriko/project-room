@@ -25,19 +25,20 @@ export async function createWorkBrief(context) {
     progress: { session: pick(work, 'status displayStatus stop_requested_at started_at attempt_count suspended_by'),
       blocker: pick(work.blocker, 'reason nextAction eventId'),
       handoff: pick(work.handoff, 'open eventId doneSummary nextAction limitReason haltAll'),
-      next: pick(context.next, 'action label memberId addressedToViewer'),
+      next: pick(context.next, 'action label memberId addressedToViewer replacement'),
       budget: structuredClone(context.accessSummary.budget) },
     evidence: { receipt: pick(work.receipt, 'eventId reportedById producerId summary evidenceUrl evidenceVersion nextAction'),
       verification: pick(work.verification, 'eventId verifierId result completionEventId evidenceVersion summary independenceConfirmed'),
       decision: pick(work.decision, 'eventId actorId decision completionEventId evidenceVersion reason'),
       references: structuredClone(context.accessSummary.evidence.records), retrieved: false },
-    source: { ...structuredClone(context.accessSummary.conversation), contentObserved: false },
+    source: { ...structuredClone(context.accessSummary.conversation), contentObserved: ["included", "not_modified"].includes(context.context.source?.status),
+      ...(context.context.source?.freshness ? { observation: structuredClone(context.context.source.observation) } : {}) },
     conversations: structuredClone(context.replyRequestContext ?? null)
   };
   const sectionVersions = Object.fromEntries(await Promise.all(Object.entries(sections)
     .map(async ([key, value]) => [key, await fingerprint(value)])));
   const brief = { contractVersion: 1, scope, version: await fingerprint({ scope, sectionVersions }), sectionVersions,
-    observed: { workRevision: work.revision, evaluatedThrough: context.evaluatedThrough, evaluatedAt: context.evaluatedAt },
+    observed: { sourceFreshness: context.context.source?.freshness ?? "unknown", sourceBodyDelivered: context.context.source?.status === "included", workRevision: work.revision, evaluatedThrough: context.evaluatedThrough, evaluatedAt: context.evaluatedAt },
     sections, omitted: [...context.context.omitted, 'discussion_text', 'source_text', 'result_body'],
     nextReads: [{ tool: 'room_read_work', arguments: { roomId: context.roomId, workItemId: work.id } },
       { tool: 'room_read_work_discussion', arguments: { roomId: context.roomId, workItemId: work.id } },

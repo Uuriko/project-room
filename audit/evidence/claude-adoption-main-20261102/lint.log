@@ -1,0 +1,7 @@
+
+/Users/johnpotter/src/pr-claude-existing-seat-main-1102/server/http.mjs
+   605:79  warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  1077:9   warning  'timer' is never reassigned. Use 'const' instead                                                                                                             prefer-const
+
+✖ 2 problems (0 errors, 2 warnings)
+

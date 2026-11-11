@@ -148,6 +148,27 @@ export function classifyHttpStatus(status) {
   return "dead";
 }
 
+// Parse Retry-After (seconds or HTTP-date). Cap at 1 hour so a hostile
+// receiver cannot park a delivery forever. Invalid / missing -> null.
+export const MAX_RETRY_AFTER_MS = 60 * 60 * 1000;
+export function parseRetryAfterMs(headerValue, now = Date.now()) {
+  if (headerValue == null) return null;
+  const raw = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (typeof raw !== "string" && typeof raw !== "number") return null;
+  const text = String(raw).trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) {
+    const seconds = Number(text);
+    if (!Number.isFinite(seconds) || seconds < 0) return null;
+    return Math.min(Math.floor(seconds * 1000), MAX_RETRY_AFTER_MS);
+  }
+  const when = Date.parse(text);
+  if (!Number.isFinite(when)) return null;
+  const delta = when - now;
+  if (delta <= 0) return 0;
+  return Math.min(delta, MAX_RETRY_AFTER_MS);
+}
+
 export const MAX_REDIRECT_HOPS = 3;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 // Cap on the response body the pinned transport buffers: deliveries only
@@ -250,7 +271,7 @@ async function checkDispatchTarget(target, dnsResolvers) {
 // so the Workers egress sandbox stays the backstop and plain fetch is used.
 // fetchImpl remains as an injectable override (tests); when it is given,
 // pinning is the caller's responsibility.
-export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers } = {}) {
+export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers, allowCrossOriginRedirects = true } = {}) {
   check(fetchImpl === undefined || typeof fetchImpl === "function", "fetchImpl must be a function");
   check(typeof url === "string" && url.length > 0, "url must be a non-empty string");
   check(envelope !== null && typeof envelope === "object", "envelope must be an object");
@@ -258,6 +279,7 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
   check(Number.isInteger(timeoutMs) && timeoutMs > 0, "timeoutMs must be a positive integer");
   check(dnsResolvers === undefined || (dnsResolvers !== null && typeof dnsResolvers === "object"),
     "dnsResolvers must be an object");
+  check(typeof allowCrossOriginRedirects === "boolean", "allowCrossOriginRedirects must be a boolean");
   const body = JSON.stringify(envelope);
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
@@ -298,6 +320,9 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
       if (next.protocol !== "https:") {
         return { ok: false, status, error: "redirect target must stay https (no protocol downgrade)", classification: "dead" };
       }
+      if (!allowCrossOriginRedirects && next.origin !== new URL(current).origin) {
+        return { ok: false, status, error: "redirect target must stay on the registered origin", classification: "dead" };
+      }
       current = next.toString();
       continue;
     }
@@ -308,8 +333,11 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
       const text = await response.text();
       if (typeof text === "string" && text.length > 0) detail = `: ${text.slice(0, 200)}`;
     } catch { /* a body that cannot be read adds nothing */ }
+    const retryAfterMs = status === 429
+      ? parseRetryAfterMs(response?.headers?.get?.("retry-after"))
+      : null;
     return { ok: false, status, error: `HTTP ${status}${detail}`.slice(0, 500),
-      classification };
+      classification, retryAfterMs };
   }
   // Unreachable: the loop always returns.
   return { ok: false, status: 0, error: "redirect handling fell through", classification: "dead" };

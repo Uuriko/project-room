@@ -1,0 +1,59 @@
+✔ actual compact native receipt click opens exact selected result loader and preserves binding (0.949125ms)
+✔ full external receipt remains unopened; busy and noncurrent cards do not open (0.758583ms)
+✔ full native previous completion pointer is retained (0.281834ms)
+✖ actual thin external receipt never opens the text reader (1.180083ms)
+✔ actual compact native work receipt renders selected result control without summary or nativeText (0.774125ms)
+✔ full text and external receipts preserve exact display and evidence behavior (0.230375ms)
+✖ actual thin external result preserves safe evidence anchor instead of text-reader control (0.369084ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 5
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 106.059375
+
+✖ failing tests:
+
+test at tests/compact-result-reader.test.mjs:16:1
+✖ actual thin external receipt never opens the text reader (1.180083ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  1 !== 0
+
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-compact-result-reader-1102/tests/compact-result-reader.test.mjs:16:309)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/compact-return-brief.test.mjs:25:1
+✖ actual thin external result preserves safe evidence anchor instead of text-reader control (0.369084ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /href="https:\/\/example.test\/proof"/. Input:
+
+  '<article class="result-row" data-result-work-id="saved-task"><button type="button" data-read-result="saved-task" data-focus-key="result:saved-task">Useful result</button><p>Saved result</p><div class="result-meta"><span>Completed</span><button type="button" class="text-button" data-result-work="saved-task">Work details</button></div></article>'
+
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-compact-result-reader-1102/tests/compact-return-brief.test.mjs:25:265)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '<article class="result-row" data-result-work-id="saved-task"><button type="button" data-read-result="saved-task" data-focus-key="result:saved-task">Useful result</button><p>Saved result</p><div class="result-meta"><span>Completed</span><button type="button" class="text-button" data-result-work="saved-task">Work details</button></div></article>',
+    expected: /href="https:\/\/example.test\/proof"/,
+    operator: 'match',
+    diff: 'simple'
+  }

@@ -31,6 +31,7 @@ public enum LocalHostReadiness {
         case "assistant_not_selected": return "This Mac’s agent is not selected for its room. Ask a room administrator to select it using Connect in room settings."
         case "retrying_room": return "This Mac’s agent is reconnecting to its room. Check the connection in My Mac."
         case "recovery_pending": return "This Mac’s agent is reconciling earlier work. Open My Mac for status."
+        case "report_reconciliation_pending": return "This Mac’s agent saved a result and is waiting to report it to the room. Open My Mac for status."
         case "stopped": return "This Mac’s agent is stopping. Wait before starting it again."
         case "running", "watching_room", "protocol_qualified", "settled": break
         default: return "This Mac’s agent is checking its connection and sign-in."

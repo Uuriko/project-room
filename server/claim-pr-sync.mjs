@@ -2,7 +2,8 @@
 //
 // No inbound GitHub webhook is mounted (server/land-queue.mjs). The per-minute
 // cron and POST /work-claims/sweep poll instead. applyPullRequestWebhook is
-// the same settlement a pull_request webhook would call.
+// the same settlement a verified pull_request webhook calls; it verifies
+// the delivery's HMAC itself before settling (RES-0140).
 //
 // Unauthenticated GitHub allows 60 requests an hour per IP, and Workers share
 // that IP. The tick therefore:
@@ -23,14 +24,17 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
+import { notifyConcurrentMerge } from "./agent-collisions.mjs";
+import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, ClaimError, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
+import { notifyLeaseExpired } from "./agent-collisions.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
   batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
   pullVerificationDue, pullsReadyToSettle, rateLimitUntil, recordPullOutcome, rememberPoll, rollupClaimCi, settlePullRequest,
   stampVerifiedPullOutcome, usableEtag
 } from "./claim-coordination.mjs";
+import { verifyWebhook } from "./github-app/verify.mjs";
 
 // #3464: the durable registry decodes stored rows WITHOUT validation while
 // every state-machine touch re-validates, so one stored row with a malformed
@@ -51,6 +55,29 @@ function noteSkippedInvalidClaim(skipped, roomId, claimId, error) {
   return entry;
 }
 
+// --- public-work namespace boundary ---------------------------------------
+// Rows whose room_id is a public-work namespace key (minted by the
+// public-work module's enable()) are partitions of work_claims owned
+// end-to-end by that module: the door is their sole lifecycle authority —
+// generation-fenced, journaled, settled by receipt and escrow attach under
+// its writer permit, never by PR outcome or board housekeeping. The sync
+// family's whole-registry phases therefore never select namespace rows for
+// any transition (lease release, stale retirement, deployed close, PR
+// settlement, autolink, deploy link). Selecting them is what wedged
+// claim-prs at 307 consecutive failures: the writer fence
+// (server/public-work-claim-fence.mjs) aborts the write, and in the lease
+// sweep the aborted write was the release itself, so the row re-tripped
+// every tick. (CP-DIAG diagnosis, CP-CENSUS G1–G5, CP-ADVERSARY verdict.)
+export function isPublicClaimNamespace(store, roomId) {
+  if (!store?.db || typeof store.db.prepare !== "function" || typeof roomId !== "string") return false;
+  try {
+    return Boolean(store.db.prepare("SELECT 1 FROM public_work_tasks WHERE namespace_key=?").get(roomId));
+  } catch (error) {
+    if (/no such table: public_work_tasks/i.test(error?.message ?? "")) return false;
+    throw error;
+  }
+}
+
 const LOOKUP_LIMIT = 4;
 const LOOKUP_LIMIT_NO_TOKEN = 1;
 const MAX_BODY_CHARS = 65_536;
@@ -65,6 +92,17 @@ function githubToken(env) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
+}
+
+// The PR webhook secret's env var name — the same name claim-autolink's
+// PR_WEBHOOK_SECRET_ENV export names for the route. The value is read
+// from the caller's env at call time (the githubToken pattern above) and
+// is never stored, logged, or accepted from the delivery itself.
+const PR_WEBHOOK_SECRET_ENV = "GITHUB_PR_WEBHOOK_SECRET";
+
+function prWebhookKey(env) {
+  const value = (env ?? process.env)?.[PR_WEBHOOK_SECRET_ENV];
+  return typeof value === "string" ? value : "";
 }
 
 // Receipt verification (server/receipt-verify.mjs) resolves its GitHub
@@ -107,6 +145,40 @@ async function readJson(response) {
   return { error: true };
 }
 
+// T2-L04a-C5: the endpoint URL is built from the stored link, but the
+// response body is not proof it describes that pull — a transferred-repo
+// redirect, a cache/proxy fault, or a future fetch change could hand back
+// another pull's body, and pullRequestOutcomeFromApi reads only
+// merged/state. Verify every identity field the body carries (number,
+// html_url, the API url, and base.repo.full_name) against the requested
+// pull, exactly as the search path below cross-checks its hits. A field
+// that is present and disagrees refuses the lookup; fields a body does
+// not carry cannot disagree (older test doubles omit them).
+function pullBodyMatchesRequest(body, pullRequest) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const repo = String(pullRequest?.repo ?? "").toLowerCase();
+  const number = pullRequest?.number;
+  if (body.number !== undefined && body.number !== null) {
+    if (!Number.isSafeInteger(body.number) || body.number !== number) return false;
+  }
+  if (body.html_url !== undefined && body.html_url !== null) {
+    const parsed = parsePullRequestUrl(body.html_url);
+    if (!parsed || parsed.number !== number || parsed.repo.toLowerCase() !== repo) return false;
+  }
+  if (body.url !== undefined && body.url !== null) {
+    if (typeof body.url !== "string") return false;
+    let parsed;
+    try { parsed = new URL(body.url); } catch { return false; }
+    if (parsed.origin !== "https://api.github.com" || parsed.search || parsed.hash
+      || parsed.pathname.toLowerCase() !== `/repos/${repo}/pulls/${number}`) return false;
+  }
+  const fullName = body.base?.repo?.full_name;
+  if (fullName !== undefined && fullName !== null) {
+    if (typeof fullName !== "string" || fullName.toLowerCase() !== repo) return false;
+  }
+  return true;
+}
+
 async function lookupPull(pullRequest, { fetchImpl, token, nowMs, deadline = Infinity }) {
   const [owner, name] = pullRequest.repo.split("/");
   const endpoint = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${pullRequest.number}`;
@@ -147,6 +219,9 @@ async function lookupPull(pullRequest, { fetchImpl, token, nowMs, deadline = Inf
   if (!response.ok) return { kind: "error" };
   const read = await readJson(response);
   if (read.error) return { kind: "error", etag };
+  // A body that is not the pull we asked for settles nothing: report an
+  // error (the claim is remembered and re-polled) rather than an outcome.
+  if (!pullBodyMatchesRequest(read.body, pullRequest)) return { kind: "error", etag };
   const outcome = pullRequestOutcomeFromApi(read.body);
   const headSha = typeof read.body?.head?.sha === "string" && /^[0-9a-f]{40}$/.test(read.body.head.sha) ? read.body.head.sha : null;
   const mergedSha = read.body?.merged === true && typeof read.body?.merge_commit_sha === "string" && /^[0-9a-f]{40}$/.test(read.body.merge_commit_sha)
@@ -368,6 +443,12 @@ function ciReadDue(item, nowMs) {
 // Reading the current row first makes the retry a no-op: the links are
 // already stamped, so `linked` misses and the function returns false.
 export function commitPullRequestLookup(store, registry, roomId, item, result, nowMs) {
+  // The network lookup is already complete. Commit registry, event and
+  // projection together, including standalone webhook/retry callers.
+  if (store.db && !store.db.isTransaction && typeof store.transaction === "function") {
+    return store.transaction(() => commitPullRequestLookup(store, registry, roomId, item, result, nowMs));
+  }
+  if (isPublicClaimNamespace(store, roomId)) return false;
   const current = registry?.get?.(roomId, item?.id) ?? item;
   const linked = pullLinks(current).find(pull => pull.url === result.url && !pull.outcome);
   if (!linked) return false;
@@ -410,6 +491,10 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       paths: settled.paths,
       pullRequest: { url: fresh.pullRequest.url, outcome: result.kind }
     });
+    if (result.kind === "merged") {
+      try { notifyConcurrentMerge(store, roomId, fresh, { url: result.url, mergedSha: result.mergedSha }); }
+      catch (error) { console.error("concurrent merge notice failed:", error?.message ?? error); }
+    }
     return true;
   }
   if (result.kind === "open" || result.kind === "notModified" || result.kind === "missing" || result.kind === "error" || result.kind === "unconfigured") {
@@ -474,18 +559,52 @@ export function writeClaimPullBudget(store, until, nowMs) {
     .run(BUDGET_ROOM, JSON.stringify({ rateLimitedUntil: until }), nowMs);
 }
 
-function holdDue(registry, roomId, items, until, nowMs) {
+function holdDue(store, roomId, items, until, nowMs) {
+  // Defense in depth behind the poll's candidate exclusion: a namespace
+  // room's claims are never held by the sync (the door owns their
+  // lifecycle), and this set is uncaught inside the batch transaction —
+  // one refused hold would roll back every settlement in the batch.
+  if (isPublicClaimNamespace(store, roomId)) return;
   for (const item of items) {
-    const current = registry.get(roomId, item.id);
+    const current = store.workClaims.get(roomId, item.id);
     if (!current?.pullRequest?.url || current.pullRequest.outcome) continue;
     if (!["claimed", "in_progress", "blocked"].includes(current.state)) continue;
-    registry.set(roomId, holdForRateLimit(current, nowMs, until));
+    store.workClaims.set(roomId, holdForRateLimit(current, nowMs, until));
   }
+}
+
+// The namespace skip must hold BEFORE the candidate LIMIT, not only in
+// the JS pass below: when 32 or more earlier-due namespace rows are
+// queued, the LIMIT fills entirely with rows the JS pass then discards,
+// and due private claims starve tick after tick (admission defect —
+// Codex review, muse-room 15734; the same defect was found on #4246's
+// original head and fixed there first). Exclude namespace rows in SQL
+// when public_work_tasks exists; a registry without the table keeps the
+// legacy no-exclusion shape (the loaders' catch already tolerates the
+// missing table). The per-row isPublicClaimNamespace check in each
+// loader stays as the mid-run backstop.
+// Lifecycle exclusion is selection only, not certification or authority.
+// Registry-only fixtures have no rooms table; production always has it.
+function archivedRoomSqlExclusion(store) {
+  if (!store?.db?.prepare) return '';
+  if (!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='rooms'").get()) return '';
+  return " AND NOT EXISTS(SELECT 1 FROM rooms WHERE id=work_claims.room_id AND archived_at IS NOT NULL)";
+}
+export function publicNamespaceSqlExclusion(store) {
+  if (!store?.db || typeof store.db.prepare !== 'function') return '';
+  try {
+    store.db.prepare("SELECT 1 FROM public_work_tasks LIMIT 1").get();
+  } catch (error) {
+    if (/no such table: public_work_tasks(?:\s|$)/i.test(error?.message ?? "")) return archivedRoomSqlExclusion(store);
+    throw error;
+  }
+  return " AND NOT EXISTS(SELECT 1 FROM public_work_tasks WHERE namespace_key = work_claims.room_id)" + archivedRoomSqlExclusion(store);
 }
 
 // Live claims with an unsettled pull. SQL keeps the tick off the rest of the
 // registry. The cap is the CPU bound: at most 32 rows are decoded.
 function loadDueClaims(store, nowMs) {
+  const exclusion = publicNamespaceSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -498,7 +617,7 @@ function loadDueClaims(store, nowMs) {
         AND (json_extract(item_json, '$.data.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.data.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       ) OR (
         json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
         AND typeof(json_extract(item_json, '$.pullRequest.url')) = 'text'
@@ -506,7 +625,7 @@ function loadDueClaims(store, nowMs) {
         AND (json_extract(item_json, '$.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       )
       ORDER BY COALESCE(
         json_extract(item_json, '$.data.pullRequest.nextPollAt'),
@@ -521,6 +640,7 @@ function loadDueClaims(store, nowMs) {
   }
   const due = [];
   for (const row of rows) {
+    if (isPublicClaimNamespace(store, row.roomId)) continue;
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullRequestDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -536,6 +656,7 @@ function loadDueClaims(store, nowMs) {
 // pullVerificationDue both require an unstamped outcome).
 function loadVerificationClaims(store, nowMs, limit) {
   if (!(limit > 0)) return [];
+  const exclusion = publicNamespaceSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -549,7 +670,7 @@ function loadVerificationClaims(store, nowMs, limit) {
         AND (json_extract(item_json, '$.data.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.data.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       ) OR (
         json_extract(item_json, '$.state') = 'done'
         AND json_extract(item_json, '$.deliveryMode') = 'merged'
@@ -558,7 +679,7 @@ function loadVerificationClaims(store, nowMs, limit) {
         AND (json_extract(item_json, '$.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       )
       ORDER BY COALESCE(
         json_extract(item_json, '$.data.pullRequest.nextPollAt'),
@@ -573,6 +694,7 @@ function loadVerificationClaims(store, nowMs, limit) {
   }
   const due = [];
   for (const row of rows) {
+    if (isPublicClaimNamespace(store, row.roomId)) continue;
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullVerificationDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -626,7 +748,7 @@ function heldPullIndex(store) {
         COALESCE(json_extract(item_json, '$.data.pullRequests'), json_extract(item_json, '$.pullRequests'), '[]') AS links,
         COALESCE(json_extract(item_json, '$.data.pullRequest.url'), json_extract(item_json, '$.pullRequest.url')) AS url
       FROM work_claims
-      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) IN ('claimed', 'in_progress', 'blocked')
+      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) IN ('claimed', 'in_progress', 'blocked')${publicNamespaceSqlExclusion(store)}
     `).all();
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return new Map();
@@ -634,6 +756,7 @@ function heldPullIndex(store) {
   }
   const index = new Map();
   for (const row of rows) {
+    if (isPublicClaimNamespace(store, row.roomId)) continue;
     let urls = [];
     try { urls = (JSON.parse(row.links) ?? []).map(pull => pull?.url); } catch { /* fall back to the primary link */ }
     if (typeof row.url === "string") urls.push(row.url);
@@ -842,7 +965,7 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
         list.push(entry.item);
         byRoom.set(entry.roomId, list);
       }
-      for (const [roomId, items] of byRoom) holdDue(store.workClaims, roomId, items, batch.rateLimitedUntil, nowMs);
+      for (const [roomId, items] of byRoom) holdDue(store, roomId, items, batch.rateLimitedUntil, nowMs);
       writeClaimPullBudget(store, batch.rateLimitedUntil, nowMs);
     }
   });
@@ -894,6 +1017,10 @@ function writeHousekeepingState(store, state, nowMs) {
 // rotation. #3464: closeWhenLive re-validates the stored row; isolate per
 // item so one invalid row cannot abort the phase for every other room.
 function applyDeployedClose(store, roomId, claimId, nowMs, skipped) {
+  // Namespace rows are public-work tasks, never land/deploy board
+  // claims: kind and revision are room-board facts the door's items do
+  // not carry, so a deployed close can never legitimately select one.
+  if (isPublicClaimNamespace(store, roomId)) return;
   let item;
   try {
     item = store.workClaims.get(roomId, claimId);
@@ -905,9 +1032,11 @@ function applyDeployedClose(store, roomId, claimId, nowMs, skipped) {
   try {
     const closed = closeWhenLive(item, SOURCE_REVISION, nowMs);
     if (!closed) return;
-    store.workClaims.set(roomId, closed);
-    emitWorkClaimEvent(store, roomId, {
-      actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
+    store.workClaims.transaction(() => {
+      store.workClaims.set(roomId, closed);
+      emitWorkClaimEvent(store, roomId, {
+        actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
+      });
     });
   } catch (error) {
     noteSkippedInvalidClaim(skipped, roomId, item?.id, error);
@@ -921,7 +1050,7 @@ function closeDeployedClaims(store, nowMs, skipped = null, deadline = Infinity) 
   // full each tick and processed in deadline-checked chunks.
   const pairs = claimCandidatePairs(store, `
     SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
-    WHERE COALESCE(${fieldText("kind")}, 'work') IN ('land', 'deploy')
+    WHERE COALESCE(${fieldText("kind")}, 'work') IN ('land', 'deploy')${publicNamespaceSqlExclusion(store)}
       AND COALESCE(${fieldText("state")}, 'unclaimed') NOT IN ('done', 'closed')
       AND (${fieldText("revision")} = ? OR ${fieldText("ci.headSha")} = ?)
     ORDER BY room_id, rowid`, [SOURCE_REVISION, SOURCE_REVISION]);
@@ -948,9 +1077,10 @@ function validateRegistryRotation(store, nowMs, skipped, deadline) {
   const cursor = saved && typeof saved.roomId === "string" && typeof saved.claimId === "string" ? saved : null;
   const rows = claimCandidatePairs(store, cursor
     ? `SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
-       WHERE room_id > ? OR (room_id = ? AND claim_id > ?)
+       WHERE (room_id > ? OR (room_id = ? AND claim_id > ?))${publicNamespaceSqlExclusion(store)}
        ORDER BY room_id, claim_id LIMIT ?`
     : `SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
+       WHERE 1=1${publicNamespaceSqlExclusion(store)}
        ORDER BY room_id, claim_id LIMIT ?`,
   cursor ? [cursor.roomId, cursor.roomId, cursor.claimId, VALIDATION_ROTATION_LIMIT] : [VALIDATION_ROTATION_LIMIT]);
   let last = cursor;
@@ -987,7 +1117,7 @@ function sweepExpiredClaimLeases(store, nowMs, skipped = null, deadline = Infini
   const leaseText = fieldText("leaseExpiresAt");
   const pairs = claimCandidatePairs(store, `
     SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
-    WHERE COALESCE(${fieldText("state")}, 'unclaimed') IN ('claimed', 'in_progress', 'blocked')
+    WHERE COALESCE(${fieldText("state")}, 'unclaimed') IN ('claimed', 'in_progress', 'blocked')${publicNamespaceSqlExclusion(store)}
       AND typeof(${leaseText}) = 'text'
       AND (${leaseText} NOT GLOB '????-??-??T??:??:??.???Z' OR ${leaseText} <= ?)
     ORDER BY room_id, rowid`, [new Date(nowMs).toISOString()]);
@@ -1009,6 +1139,11 @@ function sweepExpiredClaimLeases(store, nowMs, skipped = null, deadline = Infini
 }
 
 function releaseExpiredCandidates(store, roomId, claimIds, nowMs, skipped) {
+  // Namespace partitions are the public-work door's jurisdiction: their
+  // lapsed leases are released by the door's own sweep inside apply(),
+  // under the permit. The cron never selects them (see the namespace
+  // boundary note above) — this set is the one that wedged claim-prs.
+  if (isPublicClaimNamespace(store, roomId)) return 0;
   const candidates = [];
   for (const claimId of claimIds) {
     let item;
@@ -1052,6 +1187,7 @@ function releaseExpiredCandidates(store, roomId, claimIds, nowMs, skipped) {
       enqueueClaimWake(store, roomId, before.owner,
         `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
         { reason: "lease_expired", actorId: before.owner });
+      notifyLeaseExpired(store, roomId, before);
       released += 1;
     }
   });
@@ -1099,7 +1235,7 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
   let roomIds = [];
   try {
     roomIds = store.db.prepare(`SELECT DISTINCT room_id AS roomId FROM work_claims
-      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state'), 'unclaimed') = 'unclaimed'`)
+      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state'), 'unclaimed') = 'unclaimed'${publicNamespaceSqlExclusion(store)}`)
       .all().map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return 0;
@@ -1114,6 +1250,10 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
       if (progress) progress.complete = false;
       return closed;
     }
+    // Namespace partitions belong to the public-work module's lifecycle;
+    // the board stale sweep never retires their rows, whatever a config
+    // row says (a namespace's claim row projects a live public task).
+    if (isPublicClaimNamespace(store, roomId)) continue;
     if (typeof store.workClaims.configFor === "function" && store.workClaims.configFor(roomId).staleSweep !== true) continue;
     const items = unclaimedRoomItems(store, roomId, skipped);
     let pairs;
@@ -1173,7 +1313,7 @@ export function staleSweepDueAt(store, _nowMs) {
           ) AS activity
         FROM work_claims
         JOIN work_claim_config ON work_claim_config.room_id = work_claims.room_id
-        WHERE json_extract(work_claim_config.config_json, '$.staleSweep') = 1
+        WHERE json_extract(work_claim_config.config_json, '$.staleSweep') = 1${publicNamespaceSqlExclusion(store)}
           AND COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) = 'unclaimed'
           AND NOT EXISTS (
             SELECT 1 FROM json_each(COALESCE(json_extract(item_json, '$.data.tags'), json_extract(item_json, '$.tags'), '[]'))
@@ -1195,29 +1335,92 @@ export function staleSweepDueAt(store, _nowMs) {
 }
 
 // Settle every live claim linked to a closing pull_request webhook payload.
-export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } = {}) {
-  const decision = pullRequestOutcomeFromWebhook(payload);
-  if (!decision || !store?.db || !store.workClaims) return { applied: [] };
+//
+// RES-0140: this export settles claims (done-by-merge / release-by-close),
+// so it authenticates the delivery itself, with the same verifier and the
+// same secret the PR webhook route uses (server/github-app/verify.mjs,
+// GITHUB_PR_WEBHOOK_SECRET): the caller passes the delivery's raw body
+// and its x-hub-signature-256 header; the secret is read from the env
+// (never from the caller), and an unverified call is refused before the
+// store is touched. Settlement authority no longer rests on the
+// caller's say-so.
+//
+// Candidate rows are SQL-selected by the payload's pull URL (the same
+// json_extract discipline as the tick's loaders), so a delivery decodes
+// only the claims actually linked to that pull instead of enumerating
+// the whole registry across every room (#3698).
+export async function applyPullRequestWebhook(store, payload, { nowMs = Date.now(), rawBody, signature256, env } = {}) {
+  if (!store?.db || !store.workClaims) return { applied: [] };
+  const hookKey = prWebhookKey(env);
+  const check = await verifyWebhook({ rawBody, signature256, secret: hookKey });
+  if (!check.ok) return { applied: [], refused: check.reason };
+  // The signature covers the raw body, so the raw body — not the caller's
+  // parsed copy — is the payload of record: a divergent object passed
+  // alongside a valid signature cannot change what settles.
+  const bodyText = typeof rawBody === "string" ? rawBody
+    : rawBody instanceof Uint8Array ? new TextDecoder().decode(rawBody) : null;
+  let signedPayload = null;
+  if (bodyText !== null) {
+    try { signedPayload = JSON.parse(bodyText); } catch { signedPayload = null; }
+  }
+  if (!signedPayload || typeof signedPayload !== "object" || Array.isArray(signedPayload)) {
+    return { applied: [], refused: "invalid_json" };
+  }
+  const decision = pullRequestOutcomeFromWebhook(signedPayload);
+  if (!decision) return { applied: [] };
   const applied = [];
-  let roomIds = [];
+  let rows = [];
   try {
-    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
+    // CASE evaluates lazily: malformed records and non-object array elements
+    // must never reach json_extract (AND does not guarantee that ordering).
+    rows = store.db.prepare(`
+      SELECT room_id AS roomId, claim_id AS claimId
+      FROM work_claims
+      WHERE CASE WHEN json_valid(item_json) THEN CASE WHEN json_type(item_json) = 'object' THEN (
+        EXISTS (
+          SELECT 1 FROM json_each(CASE WHEN json_type(item_json, '$.pullRequests') = 'array'
+            THEN json_extract(item_json, '$.pullRequests') ELSE '[]' END)
+          WHERE CASE WHEN type = 'object' THEN
+            json_extract(value, '$.url') = ? AND json_extract(value, '$.outcome') IS NULL ELSE 0 END
+        )
+        OR EXISTS (
+          SELECT 1 FROM json_each(CASE WHEN json_type(item_json, '$.data.pullRequests') = 'array'
+            THEN json_extract(item_json, '$.data.pullRequests') ELSE '[]' END)
+          WHERE CASE WHEN type = 'object' THEN
+            json_extract(value, '$.url') = ? AND json_extract(value, '$.outcome') IS NULL ELSE 0 END
+        )
+        OR (json_extract(item_json, '$.pullRequest.url') = ?
+            AND json_extract(item_json, '$.pullRequest.outcome') IS NULL)
+        OR (json_extract(item_json, '$.data.pullRequest.url') = ?
+            AND json_extract(item_json, '$.data.pullRequest.outcome') IS NULL)
+      ) ELSE 0 END ELSE 0 END${publicNamespaceSqlExclusion(store)}
+    `).all(decision.url, decision.url, decision.url, decision.url);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return { applied: [] };
     throw error;
   }
-  for (const roomId of roomIds) {
+  const byRoom = new Map();
+  for (const row of rows) {
+    if (!byRoom.has(row.roomId)) byRoom.set(row.roomId, []);
+    byRoom.get(row.roomId).push(row.claimId);
+  }
+  for (const [roomId, claimIds] of byRoom) {
+    // The door's claims never settle by PR outcome (receipts, not pulls).
+    if (isPublicClaimNamespace(store, roomId)) continue;
     store.workClaims.transaction(() => {
-      for (const item of store.workClaims.list(roomId)) {
+      for (const claimId of claimIds) {
+        const item = store.workClaims.get(roomId, claimId);
+        if (!item) continue;
         if (!pullLinks(item).some(pull => pull.url === decision.url && !pull.outcome)) continue;
-        // #3464: same per-item isolation as the poll path — one invalid
-        // linked row must not fail settlement for the rest of the room.
+        // Isolate each item before its known validation refusal can be skipped.
+        // Storage and unexpected faults must abort the surrounding room write.
         let settled = false;
         try {
-          settled = commitPullRequestLookup(store, store.workClaims, roomId, item, {
+          settled = store.transaction(() => commitPullRequestLookup(store, store.workClaims, roomId, item, {
             claimId: item.id, url: decision.url, kind: decision.outcome
-          }, nowMs);
+          }, nowMs), { isolated: true });
         } catch (error) {
+          if (!(error instanceof ClaimError) || error.code !== "invalid_claim_input") throw error;
           noteSkippedInvalidClaim(null, roomId, item.id, error);
         }
         if (settled) applied.push({ roomId, claimId: item.id, outcome: decision.outcome });

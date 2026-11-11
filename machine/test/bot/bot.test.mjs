@@ -478,7 +478,12 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     const stranger = await reply(minted.secret, "go", planMessage.id);
     assert.equal(stranger.status, 201, JSON.stringify(stranger.json));
     const rejected = await step(room, bot);
-    assert.equal(rejected.results?.[0]?.ignored, "reply_notification", JSON.stringify(rejected));
+    // An untagged agent reply wakes the host but is absent from actionable attention.
+    assert.equal(rejected.results?.[0]?.ignored, "handled", JSON.stringify(rejected));
+    assert.equal(room.store.db.prepare("SELECT count(*) AS n FROM mention_states WHERE room_id = ? AND message_event_id = ?")
+      .get("commons", stranger.json.event.id).n, 0);
+    const strangerDrained = await get(room.origin, "/api/agent-wakes/poll?hostId=room-machine&waitMs=0", secret);
+    assert.equal(strangerDrained.json.pendingWakes.length, 0);
     assert.equal((await claims(room.origin, secret)).length, 0);
     assert.equal(JSON.parse(readFileSync(join(room.home, "bot-state.json"), "utf8")).pending.planMessageId, planMessage.id);
     const topic = await mention(room, "A human discussion topic");
@@ -534,7 +539,9 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     const notified = await get(first.origin, "/api/agent-wakes/poll?hostId=room-machine&waitMs=0", firstSecret);
     assert.equal(notified.json.pendingWakes.length, 1);
     const acknowledged = await step(first, firstBot);
-    assert.equal(acknowledged.results[0].ignored, "reply_notification");
+    assert.equal(acknowledged.results[0].ignored, "handled", "passive reply is not actionable work");
+    const replyRows = first.store.db.prepare("SELECT count(*) AS n FROM mention_states WHERE room_id = ?").get("commons");
+    assert.equal(replyRows.n, 1, "only the explicit initial tag creates an obligation");
     const count = (await bodies(first.origin, "commons", firstSecret)).length;
     for (let i = 0; i < 2; i++) { await step(second, secondBot); await step(first, firstBot); }
     assert.equal((await bodies(first.origin, "commons", firstSecret)).length, count);
@@ -614,7 +621,8 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(work.state, "blocked");
     assert.equal(lease.state, "unclaimed");
     const said = await bodies(room.origin, "commons", secret);
-    assert.equal(said.some(body => body.startsWith("Paused.")), true);
+    // The stop is local. A paused agent cannot post the note; that write is 423.
+    assert.equal(said.some(body => body.startsWith("Paused.")), false);
   });
 
   test("none and a text-only provider refuse before claiming a slot", async (t) => {

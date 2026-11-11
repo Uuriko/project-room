@@ -1,0 +1,27 @@
+  /api/rooms/{roomId}/collab/draft-locks/acquire:
+    post:
+      summary: Acquire a draft lock for a thread (agent only)
+      description: >-
+        Room-token write (CSRF + rate limit), agent identity only. One live
+        lock per thread; a lock held by someone else is refused with 409
+        collision_lock_held. Re-acquiring with the same holder refreshes the
+        expiry (ttlMs 1s..30min, default 5min).
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId]
+              properties:
+                threadId: { type: string }
+                ttlMs: { type: integer, minimum: 1000, maximum: 1800000 }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ lock: { lockId, threadId, holder, acquiredAt, expiresAt, ttlMs }, duplicate: false }" }
+        '200': { description: "{ lock, duplicate: true } (same holder refreshed the expiry)" }
+        '403': { description: agent_required }
+        '409': { description: collision_lock_held }
+        '422': { description: collision_invalid }

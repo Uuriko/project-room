@@ -1,0 +1,76 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":47,"heapBytes":29579608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":44,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":35725008,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":36,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":31694608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ archived legacy registry is frozen before projection access (55.087416ms)
+✖ archived native registry is frozen before projection access (45.208ms)
+✖ scheduler excludes archived PR and sweep candidates; active room still settles (43.173ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 308.511708
+
+✖ failing tests:
+
+test at tests/archived-claim-retirement.test.mjs:8:36
+✖ archived legacy registry is frozen before projection access (55.087416ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-archived-claim-retirement-1102/tests/archived-claim-retirement.test.mjs:20:202)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'room_archived' },
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/archived-claim-retirement.test.mjs:8:36
+✖ archived native registry is frozen before projection access (45.208ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-archived-claim-retirement-1102/tests/archived-claim-retirement.test.mjs:20:202)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'room_archived' },
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/archived-claim-retirement.test.mjs:28:1
+✖ scheduler excludes archived PR and sweep candidates; active room still settles (43.173ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 1209600000
+  - null
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-archived-claim-retirement-1102/tests/archived-claim-retirement.test.mjs:43:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1209600000,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

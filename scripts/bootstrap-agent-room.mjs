@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
-  RoomAgentClient, createAgentIdentity, createAgentRoom, requestAccess,
+  RoomAgentClient, RoomClientError, createAgentIdentity, createAgentRoom, requestAccess,
 } from "../client/room-agent.mjs";
 import { validId, AGENT_AUTONOMY_PERMISSIONS } from "../src/events.js";
 import { connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
@@ -14,6 +14,19 @@ import { connectionDiagnostic, ConnectionError } from "../client/agent-connectio
 //   node scripts/agent-inbox.mjs bootstrap-agent-room "Grok Bot"
 
 const INVITE_PROFILES = Object.freeze(["chat", "contribute", "review", "collaborate"]);
+
+// CLI compatibility: the legacy orientation requires complete current records.
+// A normalized room explicitly refuses that read. Use its existing bounded
+// listing instead, preserving the returned page/nextRead and identity checks.
+// Other failures must remain failures; this does not change SDK orient defaults.
+export async function orientAgentRoom(client, options = {}) {
+  try { return await client.orient(options); }
+  catch (error) {
+    if (!(error instanceof RoomClientError) || error.status !== 409
+      || error.code !== "current_room_context_unavailable" || options.paginate) throw error;
+    return client.orient({ ...options, paginate: true });
+  }
+}
 
 export function slugRoomId(displayName, entropy = randomBytes(4).toString("hex")) {
   const base = String(displayName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || "den";
@@ -153,7 +166,7 @@ export async function bootstrapAgentRoom(origin, args, { fetchImpl = globalThis.
   }
   let orientation = { roomId: room.roomId, viewerId: identity.identityId };
   try {
-    const oriented = await client.orient();
+    const oriented = await orientAgentRoom(client);
     orientation = { roomId: oriented.roomId ?? room.roomId, viewerId: oriented.viewerId ?? identity.identityId };
   } catch { /* room + invite already minted; orient is a convenience */ }
   return {

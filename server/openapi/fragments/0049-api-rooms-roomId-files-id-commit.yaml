@@ -1,0 +1,32 @@
+  /api/rooms/{roomId}/files/{id}/commit:
+    post:
+      summary: Commit a staged room file onto a message
+      description: |
+        Binds a staged file to a chat message the caller already posted. Does
+        not post a new message. The same id and messageId is a duplicate.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId]
+              properties:
+                messageId: { type: string }
+      responses:
+        '200':
+          description: File committed, or the same commit replayed
+        '401':
+          description: No room credential
+        '403':
+          description: Only the uploader can commit onto their own message
+        '404':
+          description: File or message not found
+        '422':
+          description: messageId is missing or invalid

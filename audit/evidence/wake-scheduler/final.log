@@ -1,0 +1,37 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":47,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":50,"heapBytes":42017080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":48,"legacyColdStartMs":47,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":43831720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":53751200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ drained delivery schedules real job retries and fresh generation (host URL false) (84.728709ms)
+✔ drained delivery schedules real job retries and fresh generation (host URL true) (63.899291ms)
+✔ assignment-only heartbeat acknowledgement stops scheduled rewake (58.1375ms)
+✔ flag is off by default and on only for explicit values (0.312041ms)
+✔ adapter kind is inferred from the target url (0.369333ms)
+✔ bodies are content-free: ids only, unsafe values dropped (0.407667ms)
+✔ bursts coalesce per agent and room, and the next wake carries the count (0.093ms)
+✔ unread wakes are re-sent up to maxRewakes; an ack stops them (0.085083ms)
+✔ evicts oldest keys past maxKeys (0.048375ms)
+✔ context pointer names where to read, and liveness moves pending -> unresponsive -> stale (0.056125ms)
+✔ a fresh coalesced generation has its own bounded retry budget and ack (0.061834ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":47,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":50,"heapBytes":42162840,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":48,"legacyColdStartMs":47,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":58,"integrity":"eager","phases":{"schema":{"ms":18,"rowsRead":0},"plugin":{"ms":24,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":60,"heapBytes":44681600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":59,"legacyColdStartMs":58,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ two concurrent drains POST one pending delivery exactly once (585.130417ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":58,"integrity":"eager","phases":{"schema":{"ms":18,"rowsRead":0},"plugin":{"ms":24,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":60,"heapBytes":53236744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":59,"legacyColdStartMs":58,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a stale concurrent failure cannot resurrect a delivered row to 'failed' (583.996958ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":61309512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ a delivery deleted mid-flight is not resurrected by the completion write (80.34975ms)
+✔ drains on two store instances sharing one database cannot both claim a delivery (566.863792ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2428.564084

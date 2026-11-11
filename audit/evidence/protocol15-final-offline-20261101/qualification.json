@@ -1,0 +1,455 @@
+{
+  "sourceCommit": "53d0bfe654cb9ca689aadc159c37aead4cd81254",
+  "runtimeEdits": false,
+  "productionCalls": 0,
+  "scope": "offline protocol15 final composed affected suite after final checkpoint-leaf cure and guard changes",
+  "writerFormat": "normalized-current-v1-native-work-5",
+  "storeSchemaVersion": 45,
+  "restoreAuditVersion": 15,
+  "restoreReportVersion": 1,
+  "results": {
+    "node": {
+      "passed": 123,
+      "failed": 0,
+      "skipped": 0
+    },
+    "native": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "packageClosureAssetsPreflight": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "finalCommittedManifest": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "commands": {
+    "node": "/Users/johnpotter/.local/bin/node --test tests/recovery-work-help.test.mjs tests/recovery-reply-continuation.test.mjs tests/recovery-reply-rules.test.mjs tests/recovery-charter-continuation.test.mjs tests/recovery-text-results.test.mjs tests/restore-durable-coverage.test.mjs tests/recovery-census-cursor.test.mjs",
+    "native": "MINIFLARE_WORKERD_PATH=/Users/johnpotter/.npm/_npx/c943b712072b77c4/node_modules/workerd/bin/workerd /Users/johnpotter/.local/bin/node --test cloudflare/recovery-work-help-native.check.mjs cloudflare/recovery-reply-help-native.check.mjs",
+    "package": "/Users/johnpotter/.local/bin/node --test --test-name-pattern=\"every module in the server import closure|runtime preflight checks the working source|every currently served asset\" tests/runtime-package.test.js"
+  },
+  "logs": {
+    "node": {
+      "path": "/tmp/root-protocol15-composed-node-53d0-final.log",
+      "sha256": "bab161ab38ddba032020fbb986f47776ccc523ef2ef745503b7d57ce8cd9b07f"
+    },
+    "native": {
+      "path": "/tmp/root-protocol15-composed-native-53d0-final.log",
+      "sha256": "4f3d002a929a267a1809e96879a881773f7e2f1de29911d10616a3b7b1ebad51"
+    },
+    "packageClosure": {
+      "path": "/tmp/root-protocol15-package-closure-53d0.log",
+      "sha256": "57d83ea9a01c96f5627556b2ad0eb1d8f93f07455b2d3004f6cc14b4ffc6b0c6"
+    },
+    "manifest": {
+      "path": "/tmp/root-protocol15-manifest-5b7-final.log",
+      "sha256": "6e2f551acc0c797979b98f10ab9817a4be632632bee37dc3396dc912b288d0b2"
+    }
+  },
+  "sourceSHA256": {
+    "server/current-room-format.mjs": "533ae02fdad342e4050fe319e31cd9d3ce5c5ab51ad9bfcd7b2dc4a8caa62872",
+    "server/restore-admission.mjs": "7d9bbb9fc5003ad8bbb6ddc0d6a7a30cbc1876a49e8bbedeb205f4c4695d30c2",
+    "server/recovery-census-continuation.mjs": "2233d74a4f63c8bdb20ca9209fd081f0adcb783eada9feadc23fb132215f2d64",
+    "server/recovery-work-help.mjs": "a0aa23f510d12b96fb3c4d5104377ef73668e261abd05e4c2e0eaba8c3fb9bcb",
+    "server/recovery-reply-continuation.mjs": "96617799d95ae27409815df3be439048f8cb43a44e4a655d021bb7ab1745e07f",
+    "server/restore-ndjson.mjs": "6148feac52423a5fa6a9c3e6855c94264a6749bef1afe06efb489c7fae9c1016",
+    "src/help-offers.js": "004b38c6b6273b35143d79c9095fbd64409a17beb3c15ade4026cbf4fa900d41"
+  },
+  "nativeReceipts": {
+    "REPLY_HELP_RECOVERY_NATIVE": {
+      "writerFormat": "normalized-current-v1-native-work-5",
+      "protocol": 15,
+      "steps": 88,
+      "coldResume": true,
+      "warmContinuations": true,
+      "exactRequestsMessagesOffers": true,
+      "rooms": 2,
+      "textProjected": 2,
+      "originalFullOracleRequired": true,
+      "wholeRecoveryBounded": false
+    },
+    "WORK_HELP_NATIVE": {
+      "seed": {
+        "events": 142,
+        "helps": 13,
+        "offers": 14
+      },
+      "sourceBytes": 664340,
+      "finalCounters": {
+        "rooms": 1,
+        "deferred": 0,
+        "offersScanned": 14,
+        "offerChecks": 197,
+        "helpsScanned": 13
+      },
+      "calls": [
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 222,
+            "rowsRead": 45184,
+            "rowsWritten": 21,
+            "unknown": 0
+          },
+          "clockMs": 10,
+          "bytes": 211582
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 227,
+            "rowsRead": 45177,
+            "rowsWritten": 11,
+            "unknown": 0
+          },
+          "clockMs": 7,
+          "bytes": 146187
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 231,
+            "rowsRead": 45183,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 7,
+          "bytes": 146864
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 235,
+            "rowsRead": 45186,
+            "rowsWritten": 13,
+            "unknown": 0
+          },
+          "clockMs": 8,
+          "bytes": 147462
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 231,
+            "rowsRead": 45183,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 7,
+          "bytes": 147205
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 283,
+            "rowsRead": 49893,
+            "rowsWritten": 29,
+            "unknown": 0
+          },
+          "clockMs": 8,
+          "bytes": 162669
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 322,
+            "rowsRead": 37673,
+            "rowsWritten": 27,
+            "unknown": 0
+          },
+          "clockMs": 18,
+          "bytes": 183031
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 599,
+            "rowsRead": 45560,
+            "rowsWritten": 19,
+            "unknown": 0
+          },
+          "clockMs": 9,
+          "bytes": 197688
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 537,
+            "rowsRead": 37845,
+            "rowsWritten": 20,
+            "unknown": 0
+          },
+          "clockMs": 18,
+          "bytes": 200473
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 713,
+            "rowsRead": 45679,
+            "rowsWritten": 16,
+            "unknown": 0
+          },
+          "clockMs": 11,
+          "bytes": 191546
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 507,
+            "rowsRead": 37820,
+            "rowsWritten": 17,
+            "unknown": 0
+          },
+          "clockMs": 18,
+          "bytes": 191991
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 787,
+            "rowsRead": 45748,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 11,
+          "bytes": 200376
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 679,
+            "rowsRead": 37991,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 20,
+          "bytes": 195119
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 788,
+            "rowsRead": 45749,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 10,
+          "bytes": 194716
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 670,
+            "rowsRead": 37982,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 20,
+          "bytes": 194418
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 803,
+            "rowsRead": 45764,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 11,
+          "bytes": 179892
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 252,
+            "rowsRead": 37561,
+            "rowsWritten": 14,
+            "unknown": 0
+          },
+          "clockMs": 20,
+          "bytes": 70109
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 107,
+            "rowsRead": 37420,
+            "rowsWritten": 21,
+            "unknown": 0
+          },
+          "clockMs": 15,
+          "bytes": 211582
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 112,
+            "rowsRead": 37413,
+            "rowsWritten": 11,
+            "unknown": 0
+          },
+          "clockMs": 14,
+          "bytes": 146187
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 116,
+            "rowsRead": 37419,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 15,
+          "bytes": 146864
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 120,
+            "rowsRead": 37422,
+            "rowsWritten": 13,
+            "unknown": 0
+          },
+          "clockMs": 14,
+          "bytes": 147462
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 116,
+            "rowsRead": 37419,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 14,
+          "bytes": 147205
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 162,
+            "rowsRead": 37464,
+            "rowsWritten": 29,
+            "unknown": 0
+          },
+          "clockMs": 16,
+          "bytes": 162669
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 322,
+            "rowsRead": 37673,
+            "rowsWritten": 27,
+            "unknown": 0
+          },
+          "clockMs": 16,
+          "bytes": 183031
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 484,
+            "rowsRead": 37796,
+            "rowsWritten": 19,
+            "unknown": 0
+          },
+          "clockMs": 18,
+          "bytes": 197688
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 537,
+            "rowsRead": 37845,
+            "rowsWritten": 20,
+            "unknown": 0
+          },
+          "clockMs": 20,
+          "bytes": 200473
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 132,
+            "rowsRead": 6379,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "clockMs": 13,
+          "bytes": null
+        }
+      ],
+      "faultCalls": [
+        {
+          "cost": {
+            "statements": 255,
+            "rowsRead": 28119,
+            "rowsWritten": 19,
+            "unknown": 0
+          },
+          "clockMs": 9,
+          "unchanged": true
+        }
+      ],
+      "counterScope": "per-request adapter spans; excludes cold constructors, raw runtime permit SQL and test-only forensic snapshots",
+      "fullOracleStillRequired": true
+    }
+  },
+  "publicationCorrections": [
+    "RESOLVED by root5b7e6cd0b: committed candidate manifest refresh; final candidate-manifest tests8/8, zero drift.",
+    "Keep exact source53d0 final qualification distinct from older9e-equivalent progress-budget receipt and phase-specific ancestry.",
+    "Retain offline schema45/native-work5/protocol15 label; production incident release remains separate schema44."
+  ],
+  "limitations": [
+    "Full synchronous auditRecovery plus invitation audit remains mandatory in final admission transaction; whole recovery is not bounded.",
+    "Required per-table SQLite quick_check/foreign_key_check internal atoms are not strictly CPU-bounded.",
+    "Unsupported replay/checkpoint grammar remains explicitly deferred and must pass original oracle.",
+    "Legal large sealed event/leaf atoms may exceed normal4MiB quantum and execute alone; no strict peak-memory/CPU claim.",
+    "Work-help global scans before offer transitions may be quadratic within existing500offer cap; independent phases duplicate checkpoint reads and final oracle repeats checks.",
+    "Node/Native elapsed clock and adapter-only physical counters are not production CPU/whole-recovery cost.",
+    "No deployment, live verification, actual production backup restore, permission widening or new production audit was performed."
+  ],
+  "postCheckGitStatus": "clean",
+  "publicationCommit": "5b7e6cd0bb2c21e323f194775cea50cc0cd68a86",
+  "publicationDelta": "Only root-owned candidate manifest hash correction; no runtime/test changes from53d0."
+}

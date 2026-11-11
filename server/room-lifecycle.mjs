@@ -1,3 +1,4 @@
+import {isCurrentRoom,readCurrentRecord,withCurrentReadContext} from './current-room-repository.mjs';
 // Issue #6 A2: room lifecycle on the server side — create a room for an
 // account, archive it, and read its lifecycle for discovery.
 //
@@ -49,20 +50,36 @@ export function verifyRoomLifecycle(store) {
   // #4126: a room whose projection is unreadable is quarantined at boot and
   // named in the quarantine record; it cannot agree or disagree here, so it
   // is excluded instead of throwing malformed JSON over the whole boot.
-  if (store.db.prepare("SELECT 1 FROM rooms WHERE json_valid(projection) AND archived_at IS NOT json_extract(projection,'$.room.archivedAt') LIMIT 1").get()) {
+  if (store.db.prepare("SELECT 1 FROM rooms WHERE json_valid(projection) AND json_type(projection,'$.normalizedCurrent') IS NULL AND archived_at IS NOT json_extract(projection,'$.room.archivedAt') LIMIT 1").get()) {
     throw new Error("Room lifecycle requires operator reconciliation");
+  }
+  // The closed current carrier deliberately has no room metadata. Verify its
+  // SQL lifecycle column against the independently protected singleton, not
+  // against a fabricated NULL from the legacy JSON path.
+  for(const row of store.db.prepare("SELECT id,archived_at FROM rooms WHERE json_valid(projection) AND json_type(projection,'$.normalizedCurrent') IS NOT NULL").iterate()) {
+    const room=withCurrentReadContext(store.db,row.id,()=>readCurrentRecord(store.db,row.id,'metadata','room'));
+    if(!room||room.id!==row.id||(room.archivedAt??null)!==row.archived_at)throw new Error("Room lifecycle requires operator reconciliation");
   }
 }
 
 // Archive closes every write to the room: commands, history import and the
 // join paths that append membership events. Reads, streams and export stay.
+// Store.command separately admits the active owner privacy exception only.
 export function refuseArchivedWrite(state) {
-  if (isRoomArchived(state)) fail(409, "room_archived", "This room is archived: reading and export stay available, nothing new is recorded");
+  if (isRoomArchived(state)) fail(409, "room_archived", "This room is archived: reading, export and explicit owner erasure stay available; ordinary coordination is closed");
 }
 
 export const archivedAtOf = state => (typeof state?.room?.archivedAt === "string" ? state.room.archivedAt : null);
 
 export const ACCOUNT_ROOM_SELECT = "SELECT id, archived_at, json_extract(projection,'$.room.title') AS title, json_extract(projection,'$.room.kind') AS kind FROM rooms WHERE id=?";
+export function readAccountRoomRow(store,roomId){
+  if(!isCurrentRoom(store.db,roomId))return store.db.prepare(ACCOUNT_ROOM_SELECT).get(roomId);
+  return withCurrentReadContext(store.db,roomId,()=>{const room=readCurrentRecord(store.db,roomId,'metadata','room'),row=store.db.prepare('SELECT id,archived_at FROM rooms WHERE id=?').get(roomId);return row?{...row,title:room.title,kind:room.kind}:row;});
+}
+function creationState(store,roomId,memberId){
+  if(!isCurrentRoom(store.db,roomId))return store.room(roomId).state;
+  return withCurrentReadContext(store.db,roomId,()=>({room:readCurrentRecord(store.db,roomId,'metadata','room'),members:store.roomAuthority(roomId,{memberId}).members}));
+}
 export const accountRoomEntry = (row, memberId) => ({
   id: row.id, title: row.title, memberId, kind: roomKind({ kind: row.kind }),
   archived: row.archived_at !== null && row.archived_at !== undefined, archivedAt: row.archived_at ?? null
@@ -79,7 +96,7 @@ const text = (value, max, multiline = false) => typeof value === "string" && val
 // bound to the account like any other human membership. The client-chosen
 // roomId is the idempotency key: the same request returns the same room with
 // duplicate: true; a different room under that id is 409 room_exists.
-const STARTER_FIELDS = Object.freeze(["intent", "start", "templateSlug"]);
+const STARTER_FIELDS = Object.freeze(["intent", "start", "templateSlug", "visibility"]);
 
 export function createAccountRoom(store, token, binding, request) {
   if (!request || typeof request !== "object" || Array.isArray(request)
@@ -87,6 +104,7 @@ export function createAccountRoom(store, token, binding, request) {
     || Object.keys(request).some(field => !CREATE_FIELDS.includes(field) && !STARTER_FIELDS.includes(field))) {
     fail(422, "invalid_room_request", "Supply roomId, title, purpose, kind and displayName");
   }
+  if (Object.hasOwn(request, "visibility") && !["open", "private"].includes(request.visibility)) fail(422, "invalid_room_request", "visibility must be open or private");
   const { roomId, kind } = request;
   // #3013: a reserved prototype name (validId's denylist) is not a charset
   // or length failure — name the real cause so API consumers are not told
@@ -124,14 +142,16 @@ export function createAccountRoom(store, token, binding, request) {
     const auth = store.authenticateAccountSession(token, null, binding);
     const accountId = auth.account.id;
     const view = (memberId, duplicate) => ({ contractVersion: 1, viewer: accountViewer(auth),
-      room: accountRoomEntry(store.db.prepare(ACCOUNT_ROOM_SELECT).get(roomId), memberId), duplicate });
+      room: accountRoomEntry(readAccountRoomRow(store,roomId), memberId), duplicate,
+      ...(wantsStarter && isCurrentRoom(store.db,roomId) ? {starter:{workItemId:'native-starter',nextRead:{tool:'room_read_work',arguments:{workItemId:'native-starter'}}}} : {}) });
     if (store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) {
       const bound = store.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, accountId);
-      const state = bound ? store.room(roomId).state : null;
+      const state = bound ? creationState(store,roomId,bound.member_id) : null;
       const same = state && state.room.ownerId === bound.member_id && state.room.title === title && state.room.purpose === purpose
         && roomKind(state.room) === kind && ownMember(state.members, bound.member_id)?.displayName === displayName;
       if (!same) fail(409, "room_exists", "That room id is already in use");
-      if (wantsStarter) seedStarterForNewAccount(store, accountId, { intent, templateSlug, roomId, ownerMemberId: bound.member_id, start });
+      if (request.visibility === "private" && state.room.publicPage?.enabled === true) fail(409, "room_exists", "This saved room is public. Open its owner settings to make it private; creation retry did not change visibility.");
+      if (wantsStarter) seedStarterForNewAccount(store, accountId, { intent, templateSlug, roomId, ownerMemberId: bound.member_id, start, token, binding });
       return view(bound.member_id, true);
     }
     // A provisional account exists for exactly one room key membership and can never bind elsewhere.
@@ -155,7 +175,7 @@ export function createAccountRoom(store, token, binding, request) {
       activeMemberships += 1;
       const origin = store.db.prepare("SELECT origin FROM member_accounts WHERE room_id=? AND account_id=?").get(room_id, accountId)?.origin;
       if (origin === GROWTH_ROOM_ORIGIN) return false;
-      return member.id === store.roomAuthority(room_id).ownerId || member.permissions.includes("manage_members");
+      return member.id === store.roomOwnerId(room_id) || member.permissions.includes("manage_members");
     });
     const naturallyAdministers = activeMemberships === 0 || administers;
     if (!naturallyAdministers) {
@@ -168,9 +188,13 @@ export function createAccountRoom(store, token, binding, request) {
     store.initialize([
       event({ type: T.ROOM_CREATED, actorId: ownerId, roomId, at, data: { roomId, ownerId, title, purpose, kind, historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
       event({ type: T.MEMBER_ADDED, actorId: ownerId, roomId, at, data: { memberId: ownerId, displayName, kind: "human", permissions: [...PERMISSIONS] } })
-    ]);
+    ], {representation:'normalized-current-v1'});
     store.ensureHumanAccountBinding(roomId, ownerId, accountId, foundedWithGrowth ? GROWTH_ROOM_ORIGIN : "account-room-create");
-    if (wantsStarter) seedStarterForNewAccount(store, accountId, { intent, templateSlug, roomId, ownerMemberId: ownerId, start });
+    if (request.visibility !== "private") {
+      store.command(token, roomId, {id:"creation-public-page",type:T.ROOM_PUBLIC_PAGE_SET,data:{enabled:true}}, binding);
+      store.command(token, roomId, {id:"creation-open-join",type:T.ROOM_JOIN_LINK_SET,data:{enabled:true}}, binding);
+    }
+    if (wantsStarter) seedStarterForNewAccount(store, accountId, { intent, templateSlug, roomId, ownerMemberId: ownerId, start, token, binding });
     return view(ownerId, false);
   });
 }

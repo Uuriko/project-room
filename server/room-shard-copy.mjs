@@ -34,11 +34,43 @@ function dbOf(storeOrDb) {
   return storeOrDb?.db ?? storeOrDb;
 }
 
+const NORMALIZED_MARKER = Buffer.from('{"normalizedCurrent":');
+const NORMALIZED_ROOM_TABLES = Object.freeze(["current_room_head", "current_room_records", "current_room_record_proofs"]);
+function refuseNormalizedTransfer() {
+  throw new Error("Normalized room shard transfer requires receipt-closure qualification; keep this room on the primary store");
+}
+// Current data needs its linked immutable directory evidence and exact format
+// admission. This legacy copier has neither; refuse before any target work.
+function assertLegacyRoomTransfer(db, roomId) {
+  for (const table of NORMALIZED_ROOM_TABLES) {
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
+      && db.prepare(`SELECT 1 FROM ${quoteIdent(table)} WHERE room_id=? LIMIT 1`).get(roomId)) refuseNormalizedTransfer();
+  }
+  const row = db.prepare("SELECT substr(CAST(projection AS BLOB),1,?) marker FROM rooms WHERE id=?").get(NORMALIZED_MARKER.length, roomId);
+  if (row && Buffer.from(row.marker).equals(NORMALIZED_MARKER)) refuseNormalizedTransfer();
+}
+function assertLegacyRoomSlice(ndjson) {
+  // An input can come from elsewhere, bypassing our export refusal. Inspect
+  // before replay creates a file; the existing parser still owns validation.
+  for (const line of ndjson.split("\n")) {
+    let record;
+    try { record = JSON.parse(line); } catch { continue; }
+    if (NORMALIZED_ROOM_TABLES.includes(record?.table)) refuseNormalizedTransfer();
+    if (record?.table !== "rooms" || typeof record.row?.projection !== "string"
+      || !record.row.projection.includes('"normalizedCurrent"')) continue;
+    let projection;
+    try { projection = JSON.parse(record.row.projection); } catch { continue; }
+    if (projection && Object.hasOwn(projection, "normalizedCurrent")) refuseNormalizedTransfer();
+  }
+}
+
 export function copyRoomRows(pilot, shard, roomId) {
   assertRoomId(roomId);
   if (typeof shard?.transaction !== "function") throw new Error("Shard copy needs a store transaction");
   const pilotDb = dbOf(pilot);
   const shardDb = dbOf(shard);
+  assertLegacyRoomTransfer(pilotDb, roomId);
+  assertLegacyRoomTransfer(shardDb, roomId);
   const order = roomCopyOrder();
   shard.transaction(() => {
     // Foreign keys stay on inside a transaction, so children go before rooms
@@ -72,6 +104,7 @@ export function copyRoomRows(pilot, shard, roomId) {
 export function roomHomeDigest(storeOrDb, roomId) {
   assertRoomId(roomId);
   const db = dbOf(storeOrDb);
+  assertLegacyRoomTransfer(db, roomId);
   const rows = db.prepare("SELECT sequence, id, body FROM events WHERE room_id = ? ORDER BY sequence").all(roomId);
   const hash = createHash("sha256");
   for (const row of rows) hash.update(`${row.sequence}\t${row.id}\t${row.body}\n`);
@@ -111,6 +144,7 @@ function sanitizeRow(table, row) {
 export function exportRoomNdjson(storeOrDb, roomId) {
   assertRoomId(roomId);
   const db = dbOf(storeOrDb);
+  assertLegacyRoomTransfer(db, roomId);
   const room = db.prepare("SELECT id, sequence FROM rooms WHERE id = ?").get(roomId);
   if (!room) throw new Error("Room is not on the pilot");
   const lines = [JSON.stringify({
@@ -149,5 +183,6 @@ export function exportRoomNdjson(storeOrDb, roomId) {
 // The file keeps the full schema so existing triggers still run; directory
 // rows from the export are not loaded.
 export function restoreRoomNdjson(ndjson, filename) {
+  assertLegacyRoomSlice(ndjson);
   return replayNdjson(ndjson, filename, { audit: "strict", retainTables: roomTablesPresent });
 }

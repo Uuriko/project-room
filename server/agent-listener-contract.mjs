@@ -1,5 +1,6 @@
 // Shared synchronous heartbeat/receiving-lease operation. Call inside the same
 // transaction as fresh credential resolution. A lease never grants execution.
+import { boundedWakeDeliveryActive } from "./wake-delivery-window.mjs";
 import { ownMember } from "../src/events.js";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { assertRoomKeyPullOnly, roomKeyHostId, assertScopedKeyListener, scopedKeyHostId } from "./room-key-presence.mjs";
@@ -44,7 +45,7 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
   // Presence reporting never fails because another host holds the
   // lease — the response says so (acquired:false + the active
   // listener's id).
-  let listener = null;
+  let listener = null, wakeSelection;
   if (data.listenerLease !== undefined) {
     const requestedRoom = data.listenerLease === true ? null : data.listenerLease.roomId;
     let leaseRoomId;
@@ -58,7 +59,7 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
       // Links survive access suspension (see scopedKeyRoomBinding):
       // recheck the live room member, not just the identity mapping,
       // before an identity-level credential may hold the room's lease.
-      const member = link ? ownMember(store.room(requestedRoom).state.members, link.memberId) : null;
+      const member = link ? ownMember(store.roomAuthority(requestedRoom, { memberId: link.memberId }).members, link.memberId) : null;
       if (!member || member.active === false || member.kind !== "agent" || member.identityId !== auth.identityId)
         reject(403, "room_mismatch", "The identity is not a member of the requested listener room");
       leaseRoomId = requestedRoom;
@@ -72,6 +73,19 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
     listener = lease.acquired
       ? { acquired: true, fencingToken: lease.fencingToken, leaseExpiresAt: lease.leaseExpiresAt, renewed: lease.renewed === true }
       : { acquired: false, activeListenerId: presentListenerId(lease.activeListenerId), leaseExpiresAt: lease.leaseExpiresAt };
+    if (lease.acquired && leaseRoomId !== null && boundedWakeDeliveryActive(store.db))
+      wakeSelection = { version: 1, newest: true, roomId: leaseRoomId };
   }
-  return { ...result, listener };
+  return { ...result, listener, ...(wakeSelection ? { wakeSelection } : {}) };
+}
+
+// Graceful disconnect (#5382 follow-up): resolve the stored host id the same
+// way a heartbeat does, then mark it gone and release the caller's lease.
+export function disconnectWithListener(store, auth, data, { roomKey = false } = {}) {
+  let hostId = data.hostId;
+  if (roomKey) hostId = roomKeyHostId(auth, data.hostId);
+  else if (auth.scopedKey) hostId = scopedKeyHostId(auth, data.hostId);
+  const fencingToken = data.disconnect === true ? null : data.disconnect.fencingToken ?? null;
+  const roomId = auth.roomId ?? (data.listenerLease && data.listenerLease !== true ? data.listenerLease.roomId : null);
+  return store.agentHeartbeats.disconnectHost({ agentId: auth.identityId, hostId, roomId, fencingToken });
 }

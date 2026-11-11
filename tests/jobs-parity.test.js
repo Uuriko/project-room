@@ -11,7 +11,7 @@ test("node and worker job names match aside from single-runtime jobs", () => {
   const onlyNode = [...node.keys()].filter(name => !worker.has(name));
   const onlyWorker = [...worker.keys()].filter(name => !node.has(name));
   assert.deepEqual(onlyNode, ["growth-watch"]);
-  assert.deepEqual(onlyWorker, ["room-backup"]);
+  assert.deepEqual(onlyWorker, ["native-mcp-events", "room-backup"]);
   for (const name of [...onlyNode, ...onlyWorker]) {
     const job = JOBS.find(item => item.name === name);
     assert.equal(job.runtimes.length, 1);

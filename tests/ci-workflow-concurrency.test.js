@@ -213,13 +213,26 @@ test("main pushes never cancel an in-progress test or schema-gate run", () => {
 // a failed runtime suite cannot be hidden by later browser success.
 test("required merge-gate jobs stay present and the unit suite is one job", () => {
   const workflow = parse(readFileSync(join(WORKFLOWS, "test.yml"), "utf8"));
-  for (const id of ["test", "contract", "lint", "browser", "cloudflare"]) {
+  for (const id of ["test", "contract", "lint", "browser", "cloudflare", "friend-agent-e2e"]) {
     assert.ok(workflow.jobs[id], `required check job ${id} is missing`);
   }
+  // The friend's-agent journey is part of the landing gate.
+  assert.ok(workflow.jobs.test.needs.includes("friend-agent-e2e"));
+  assert.match(workflow.jobs["friend-agent-e2e"].steps.map(step => step.run).filter(Boolean).join("\n"), /qa-friend-agent-e2e\.mjs --local/);
   assert.equal(workflow.jobs["unit-shards"], undefined);
   assert.equal(workflow.jobs.unit.strategy, undefined);
   const runs = workflow.jobs.unit.steps.map(step => step.run).filter(Boolean).join("\n");
   assert.match(runs, /unit-ci\.mjs --all/);
+  assert.match(runs, /unit-ci\.mjs --affected/);
+  assert.equal(String(workflow.jobs["browser-shards"].if).includes("github.event_name != 'push'"), false);
+  const safety = workflow.jobs["safety-net"];
+  assert.ok(safety, "safety-net job is missing");
+  const safetyRun = safety.steps.map(step => step.run).filter(Boolean).join("\n");
+  assert.equal(String(safety.if).includes("ready-to-land"), false);
+  assert.match(String(safety.if), /pull_request/);
+  assert.match(safetyRun, /npm run lint/);
+  assert.match(safetyRun, /--run-stories/);
+  assert.match(safetyRun, /--run-page-weight/);
   const coverageIf = String(workflow.jobs.coverage.if);
   assert.match(coverageIf, /schedule/);
   assert.match(coverageIf, /workflow_dispatch/);
@@ -248,6 +261,7 @@ test("heavy pull-request jobs wait for ready-to-land", () => {
     expectsLabel("test.yml", id, String(testWf.jobs[id].if));
   }
   assert.equal(String(testWf.jobs.coverage.if).includes("ready-to-land"), false);
+  assert.equal(String(testWf.jobs["safety-net"].if).includes("ready-to-land"), false);
 
   for (const file of ["schema-gate.yml", "machine.yml", "relay.yml"]) {
     const wf = open(file);
@@ -282,11 +296,20 @@ test("Cloudflare CI runs canonical runtime then browser scripts and preserves fa
   const pkg = JSON.parse(readFileSync(new URL("../cloudflare/package.json", import.meta.url), "utf8"));
   assert.ok(pkg.scripts.test.startsWith("node --test "));
   assert.ok(pkg.scripts["test:browser"].startsWith("node --test "));
+  // #5961 shards the runtime suite: shard 1/2 here, shard 2/2 in cloudflare-shard-2.
+  const shard2 = workflow.jobs["cloudflare-shard-2"].steps.find(item => /shard 2\/2/.test(item.name ?? ""));
+  assert.ok(shard2 && /--test-shard=2\/2/.test(shard2.run) && shard2["working-directory"] === "cloudflare");
   const dir = mkdtempSync(join(tmpdir(), "cloudflare-ci-command-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  writeFileSync(join(dir, "npm"), `#!/usr/bin/env node
-import('node:fs').then(({appendFileSync})=>{const args=process.argv.slice(2);appendFileSync(process.env.CI_COMMAND_LOG,JSON.stringify(args)+'\\n');if(process.env.FAIL_RUNTIME==='1'&&args.join(' ')==='test')process.exitCode=17;});
-`, { mode: 0o755 });
+  const logger = `#!${process.execPath}
+const args=process.argv.slice(2);
+if(args[0]==='-p'){console.log('a.check.mjs b.check.mjs');process.exit(0);}
+// getBuiltinModule works whether the stub loads as CommonJS or ESM (CI's TMPDIR sits under the type:module root).
+process.getBuiltinModule('node:fs').appendFileSync(process.env.CI_COMMAND_LOG,JSON.stringify([process.getBuiltinModule('node:path').basename(process.argv[1]),...args])+'\\n');
+if(process.env.FAIL_RUNTIME==='1'&&args.includes('--test-shard=1/2'))process.exitCode=17;
+`;
+  writeFileSync(join(dir, "npm"), logger, { mode: 0o755 });
+  writeFileSync(join(dir, "node"), logger, { mode: 0o755 });
   for (const fail of [false, true]) {
     const log = join(dir, fail ? "fail.log" : "success.log");
     writeFileSync(log, "");
@@ -294,7 +317,27 @@ import('node:fs').then(({appendFileSync})=>{const args=process.argv.slice(2);app
       cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CI_COMMAND_LOG: log, FAIL_RUNTIME: fail ? "1" : "0" },
     });
     const calls = readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
-    assert.deepEqual(calls, fail ? [["test"]] : [["test"], ["run", "test:browser"]]);
+    const runtime = ["node", "--test", "--test-shard=1/2", "a.check.mjs", "b.check.mjs"];
+    assert.deepEqual(calls, fail ? [runtime] : [runtime, ["npm", "run", "test:browser"]], result.stdout + result.stderr);
     assert.equal(result.status, fail ? 17 : 0, result.stdout + result.stderr);
+  }
+});
+
+
+test("invariant diagnostics survive a failed gate without changing its result", () => {
+  const steps = parse(readFileSync(join(WORKFLOWS, "pr-gates.yml"), "utf8")).jobs.gates.steps;
+  const gate = steps.find(step => step.id === "invariants");
+  assert.notEqual(gate["continue-on-error"], true);
+  for (const name of ["Upload invariant results", "Comment invariant results on PR"]) {
+    const condition = steps.find(step => step.name === name).if;
+    // GitHub implicitly prepends success() unless a status function occurs.
+    const explicitStatus = /\b(always|success|failure|cancelled)\(\)/.test(condition);
+    for (const conclusion of ["success", "failure", "skipped", "cancelled"]) {
+      const source = condition.replaceAll("always()", "true")
+        .replaceAll("github.event_name", JSON.stringify("pull_request"))
+        .replaceAll("steps.invariants.conclusion", JSON.stringify(conclusion));
+      const runs = (explicitStatus || conclusion === "success") && Function(`return (${source})`)();
+      assert.equal(runs, ["success", "failure"].includes(conclusion), `${name}: ${conclusion}`);
+    }
   }
 });

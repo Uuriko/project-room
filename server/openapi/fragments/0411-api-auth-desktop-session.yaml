@@ -1,0 +1,21 @@
+  /api/auth/desktop/session:
+    post:
+      x-room-permission: public
+      summary: Exchange a single-use native PKCE code for a separate human cookie session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, verifier]
+              properties:
+                code: { type: string }
+                verifier: { type: string }
+      responses:
+        '201': { description: HttpOnly native Room session installed; no token in JSON }
+        '401': { description: Invalid, expired, mismatched or consumed proof }
+        '409': { description: Existing account cookie refused }
+

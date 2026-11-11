@@ -1,0 +1,56 @@
+{
+  "utc": "2026-11-04T08:34:29.502428+00:00",
+  "authorHead": "65ee1232765a80f60e4655a921f7bb8d6835367c",
+  "source": "258cdb74a483d0260e91dcc7e3b9fc0e39b3baf0",
+  "node": "v24.22.1",
+  "causalRed": [
+    {
+      "command": "TMPDIR=\"$PWD/.tmp\" /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/agent-wake-bucket.test.js tests/agent-wake-bucket-poll.test.js",
+      "pass": 8,
+      "fail": 4,
+      "log": "red.log",
+      "failures": [
+        "ask waited full2500ms",
+        "assignment waited full2500ms",
+        "heartbeat-delivered mark remained",
+        "global5000 bookkeeping IDs exceeded4096"
+      ]
+    },
+    {
+      "command": "TMPDIR=\"$PWD/.tmp\" /Users/johnpotter/.local/bin/node --test --test-name-pattern=\"only successful scoped ack\" tests/agent-wake-bucket-poll.test.js",
+      "pass": 0,
+      "fail": 1,
+      "log": "red-ack.log",
+      "note": "Split ack control from heartbeat control to prove its independent original failure."
+    }
+  ],
+  "green": [
+    {
+      "command": "TMPDIR=\"$PWD/.tmp\" /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/agent-wake-bucket.test.js tests/agent-wake-bucket-poll.test.js tests/wake-adapters-scheduler.test.mjs",
+      "pass": 17,
+      "fail": 0,
+      "skip": 0,
+      "log": "green.log"
+    },
+    {
+      "command": "TMPDIR=\"$PWD/.tmp\" /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/agent-heartbeats.test.js tests/agent-wake-poll.test.js tests/agent-wake-listener-lease.test.js",
+      "pass": 57,
+      "fail": 0,
+      "skip": 0,
+      "log": "affected.log"
+    }
+  ],
+  "scope": [
+    "Trusted existing enqueue producers retain kind/auth/work/request gates; only ask/assignment bypass ordinary bucket. Paused-room check unchanged.",
+    "Map signalId->agentId globally capped4096. FIFO eviction affects memory delay only, not durable storage.",
+    "Heartbeat page and actual scoped ack clear only matching IDs; completed held poll clears delivered marks; hold-once preserved.",
+    "Wrong-room ack returns empty and cannot clear mark. Heartbeat read leaves durable pending signal.5000 synthetic queued rows remain after cap eviction.",
+    "Existing latest-generation late-ack/coalescer and listener fences pass unchanged."
+  ],
+  "limits": [
+    "Priority test uses real RoomStore, registered authenticated HTTP poll and internal trusted enqueue kind; does not exercise public ask/admission or assignment producer authorization end-to-end. Existing heartbeat auth/scoping tests pass.",
+    "No generic no-signal-loss guarantee; evidence is durable5000 rows, matching poll signals, heartbeat-not-ack, scoped acknowledgements in these controls.",
+    "No browser, Native, provider, live records, host grants, runtime flags, author branch edit, push, merge or deployment.",
+    "Metadata eviction and restart fail open for delay; no strict universal model-turn rate limit claim."
+  ]
+}

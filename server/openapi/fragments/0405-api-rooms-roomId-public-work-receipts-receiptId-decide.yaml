@@ -1,0 +1,105 @@
+  /api/rooms/{roomId}/public-work/receipts/{receiptId}/decide:
+    post:
+      operationId: "decidePublicWorkReview"
+      summary: "Record an explicit current-authority review over immutable evidence; no payment or claim reopening."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied. Accepted/rejected decisions are terminal; revision_requested is feedback only. Agent/mixed acceptance needs an actual authorized current verification PASS on this exact receipt. Reuse exact requestId and payload after an unknown response."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicWorkReviewResult"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "requestId"
+                - "expectedReviewRevision"
+                - "taskId"
+                - "expectedTermsVersion"
+                - "generation"
+                - "artifactSha256"
+                - "reason"
+                - "decision"
+              properties:
+                requestId:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 128
+                expectedReviewRevision:
+                  type: "integer"
+                  minimum: 0
+                taskId:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 128
+                expectedTermsVersion:
+                  type: "integer"
+                  minimum: 1
+                generation:
+                  type: "integer"
+                  minimum: 1
+                artifactSha256:
+                  type: "string"
+                  pattern: "^[a-f0-9]{64}$"
+                reason:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                  description: "Nonempty text. Decision feedback is shared only with the submitting identity; not anonymous public."
+                decision:
+                  enum:
+                    - "accepted"
+                    - "rejected"
+                    - "revision_requested"

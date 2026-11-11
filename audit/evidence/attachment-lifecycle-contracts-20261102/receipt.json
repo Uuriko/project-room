@@ -1,0 +1,77 @@
+{
+  "source": "4c75f889e6720cd22693ce1e080c57d3c00b99a0",
+  "base": "a2a4e31b4b4f911e541ca648ec418c1cd1fd52b2",
+  "node": "v24.22.1",
+  "runtimeChanged": false,
+  "tests": {
+    "before": {
+      "total": 17,
+      "pass": 12,
+      "fail": 5,
+      "exit": 1
+    },
+    "assignedAfter": {
+      "total": 21,
+      "pass": 21,
+      "skip": 0,
+      "exit": 0,
+      "hostWallMs": 27043.573833
+    },
+    "neighbors": {
+      "total": 19,
+      "pass": 19,
+      "skip": 0,
+      "exit": 0
+    }
+  },
+  "sourceSha256": {
+    "tests/room-attachment-quota-ratchet.test.js": "9836d48b01dfebe58870cdc8daa66da90c4cee0c0f898f9d99031bf3de685f21",
+    "tests/room-attachment-committed-delete.test.js": "fafec9afc56c7053d2d16b4f66e2f7420d9037c52aca328659b1adf01ee28d99",
+    "server/room-attachment-bytes.mjs": "f96f3294331464140a137eb63e1ac7bd6136f64d0a2846a83d44490a29ffbd28",
+    "tests/helpers/historical-needs-me-room.mjs": "ed136b420db8a2a19889b2259a5e3d794414c707c0c42f61f82ec2a22a39877e"
+  },
+  "logs": [
+    {
+      "file": "before.log.gz",
+      "original": "/tmp/attachment-lifecycle-contracts-before-1102.log",
+      "exitCode": 1,
+      "bytes": 16342,
+      "sha256": "9e7971d88c872340f2db6f870c849e7204778d262a4199752c83fdf975fb90bd"
+    },
+    {
+      "file": "intermediate-fixture-detail.log.gz",
+      "original": "/tmp/attachment-lifecycle-contracts-after-1102.log",
+      "exitCode": 1,
+      "bytes": 18637,
+      "sha256": "3b48b30c0a1eadc4d8c5b1a77b3ffbd8350ce16d25e786c6cc1ecee438666881"
+    },
+    {
+      "file": "assigned-after.log.gz",
+      "original": "/tmp/attachment-lifecycle-contracts-after-v2-1102.log",
+      "exitCode": 0,
+      "bytes": 12497,
+      "sha256": "210c4d37e46dac38fb60f51954ebc86dc87f4a47bba457c898b73f24d4e35630"
+    },
+    {
+      "file": "neighbors.log.gz",
+      "original": "/tmp/attachment-lifecycle-neighbors-1102.log",
+      "exitCode": 0,
+      "bytes": 11982,
+      "sha256": "c2bbd274143c7d9cb50e6550a6f8dbd2199e137457064aadd46ae63295772f2d"
+    },
+    {
+      "file": "lint.log.gz",
+      "original": "/tmp/attachment-lifecycle-lint-1102.log",
+      "exitCode": 0,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "secrets.log.gz",
+      "original": "/tmp/attachment-lifecycle-secrets-1102.log",
+      "exitCode": 0,
+      "bytes": 24,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    }
+  ]
+}

@@ -33,6 +33,7 @@ import { generateEd25519KeyPair } from "../server/agent-key-registry.mjs";
 import { issueSpendGrant, revokeSpendGrant } from "../server/spend-grants.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { issueSignedEvidence, verifySignedEvidence, contentHashOf } from "../server/signed-evidence.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const graph = JSON.parse(readFileSync(new URL("./fixtures/capability-graph.json", import.meta.url), "utf8"));
 const blindKinds = graph.nodes.filter(n => n.restore_resurrects && !n.reconcile_named).map(n => n.id);
@@ -111,10 +112,10 @@ const PLANTS = {
   },
   link_code: {
     plant(ctx, X) {
-      const { linkCode } = ctx.store.identities.mintLinkCode(X.identityId, X.secret);
+      const { linkCode } = ctx.store.identities.mintLinkCode(X.identityId, X.secret, { roomId: "commons" });
       return { linkCode };
     },
-    withdraw(ctx, X, memberId, planted) { ctx.store.identities.consumeLinkCode(X.identityId, planted.linkCode); },
+    withdraw(ctx, X, memberId, planted) { ctx.store.identities.consumeLinkCode(X.identityId, planted.linkCode, { roomId: "commons" }); },
   },
   approved_access_row: {
     plant(ctx, X) {
@@ -317,7 +318,7 @@ for (const kind of blindKinds) {
   test(`matrix: ${kind} withdrawn after the backup is named on restore`, async (t) => {
     const ctx = boot(t);
     const X = ctx.store.identities.create(`Matrix ${kind}`);
-    ctx.store.identities.link(ctx.owner, "commons", { identityId: X.identityId, permissions: ["accept_work"] });
+    linkWithProof(ctx.store, ctx.owner, "commons", X, { permissions: ["accept_work"] });
     const memberId = memberIdOf(ctx.store, X.identityId);
     const planted = await PLANTS[kind].plant(ctx, X, memberId);
     const restored = await backupAndRestore(ctx);
@@ -338,7 +339,7 @@ for (const kind of blindKinds) {
 test("Fixture A anchor: spend grant, claim key and tier demotion are named; delegation control names exactly one", async (t) => {
   const ctx = boot(t);
   const X = ctx.store.identities.create("Graph Agent A");
-  ctx.store.identities.link(ctx.owner, "commons", { identityId: X.identityId, permissions: ["accept_work"] });
+  linkWithProof(ctx.store, ctx.owner, "commons", X, { permissions: ["accept_work"] });
   const memberId = memberIdOf(ctx.store, X.identityId);
   ctx.store.delegation.grant(ctx.owner, "commons", { identityId: X.identityId });
   issueSpendGrant(ctx.store.db, "commons", memberId, { grantedBy: ctx.ownerMemberId, capCents: "5000", perTxCapCents: "1000" });
@@ -377,7 +378,7 @@ test("Fixture A anchor: spend grant, claim key and tier demotion are named; dele
 test("C-D anchor: all five planted classes are named (was: one of five)", async (t) => {
   const ctx = boot(t);
   const X = ctx.store.identities.create("Restore Agent");
-  ctx.store.identities.link(ctx.owner, "commons", { identityId: X.identityId, permissions: ["accept_work", "steer"] });
+  linkWithProof(ctx.store, ctx.owner, "commons", X, { permissions: ["accept_work", "steer"] });
   ctx.store.delegation.grant(ctx.owner, "commons", { identityId: X.identityId });
   ctx.store.ownerDelegates.grant(ctx.owner, "commons", { identityId: X.identityId });
   const issued = ctx.store.agentPlugin.issueApiKey({
@@ -385,7 +386,7 @@ test("C-D anchor: all five planted classes are named (was: one of five)", async 
   });
   ctx.store.agentPlugin.verifyIdentity({ identityId: X.identityId, verifiedBy: "owner" });
   const W = ctx.store.identities.create("Code Holder");
-  const { linkCode } = ctx.store.identities.mintLinkCode(W.identityId, W.secret);
+  const { linkCode } = ctx.store.identities.mintLinkCode(W.identityId, W.secret, { roomId: "commons" });
 
   const restored = await backupAndRestore(ctx);
   t.after(() => restored.close());
@@ -394,7 +395,7 @@ test("C-D anchor: all five planted classes are named (was: one of five)", async 
   ctx.store.ownerDelegates.revoke(ctx.owner, "commons", { identityId: X.identityId });
   ctx.store.agentPlugin.revokeApiKey({ identityId: X.identityId, keyId: issued.keyId });
   ctx.store.agentPlugin.unverifyIdentity({ identityId: X.identityId });
-  ctx.store.identities.consumeLinkCode(W.identityId, linkCode);
+  ctx.store.identities.consumeLinkCode(W.identityId, linkCode, { roomId: "commons" });
   // Timestamp hygiene for the divergence rule below: the scenario's
   // timeline has the live spend and the restored re-spend well apart,
   // but two adjacent calls can land in the same millisecond — and
@@ -406,7 +407,7 @@ test("C-D anchor: all five planted classes are named (was: one of five)", async 
   // The original repro proves the re-spend in the restored store BEFORE
   // reconciling; the reconcile must still name the code (its restored
   // consumption timestamp cannot be the live store's consumption).
-  restored.identities.consumeLinkCode(W.identityId, linkCode);
+  restored.identities.consumeLinkCode(W.identityId, linkCode, { roomId: "commons" });
 
   const report = reconcileRestoredAuthority(restored, ctx.store);
   const kinds = new Set(report.stale.map(row => row.kind));
@@ -419,7 +420,7 @@ test("C-D anchor: all five planted classes are named (was: one of five)", async 
 test("quiet restore: a backup taken after the mutations reconciles clean", async (t) => {
   const ctx = boot(t);
   const X = ctx.store.identities.create("Quiet Agent");
-  ctx.store.identities.link(ctx.owner, "commons", { identityId: X.identityId, permissions: ["accept_work"] });
+  linkWithProof(ctx.store, ctx.owner, "commons", X, { permissions: ["accept_work"] });
   const memberId = memberIdOf(ctx.store, X.identityId);
   // A spread of classes, including the two-direction login-binding check
   // and an explicit tier row, all in their final state BEFORE the backup.

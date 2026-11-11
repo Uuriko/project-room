@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readCurrentWorkItem, readCurrentMessage } from "../server/current-room-repository.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { verifyIdentityMintProof } from "../server/agent-identities.mjs";
@@ -44,7 +45,7 @@ test("the doc solver matches the fixture and the identity verifier accepts it", 
   assert.equal(verifyIdentityMintProof(name, proof, now), true);
 });
 
-test("an agent executing START.md closes the starter in at most 6 calls", async t => {
+test("an agent executing START.md closes the starter in at most 7 calls", async t => {
   const { origin, store, directory } = await serve(t);
   const [script] = javascriptBlocks(doc);
   const file = join(directory, "start.mjs");
@@ -67,14 +68,14 @@ test("an agent executing START.md closes the starter in at most 6 calls", async 
     if (previous.id === undefined) delete process.env.ROOM_ID; else process.env.ROOM_ID = previous.id;
     if (previous.name === undefined) delete process.env.ROOM_AGENT_NAME; else process.env.ROOM_AGENT_NAME = previous.name;
   }
-  assert.ok(calls <= 6, `START.md made ${calls} HTTP calls`);
-  const starter = store.workClaims.get("doc-room", "starter");
-  assert.equal(starter.state, "done");
-  assert.equal(starter.deliveryMode, "result");
-  const done = store.db.prepare("SELECT 1 FROM events WHERE room_id=? AND json_extract(body,'$.type')='work_claim.updated' AND json_extract(body,'$.data.workClaim')='starter' AND json_extract(body,'$.data.claimState')='done'").get("doc-room");
-  assert.ok(done, "claim_completed is the done work_claim.updated event");
-  const posted = store.room("doc-room").state.messages.some(message => message.body === "Plan: close the starter.");
-  assert.equal(posted, true);
+  assert.ok(calls <= 7, `START.md made ${calls} HTTP calls`);
+  const starter = readCurrentWorkItem(store.db, "doc-room", "starter");
+  assert.equal(starter.state, "completed");
+  assert.ok(starter.receipt.nativeText, "completion retains the exact saved native result");
+  const done = store.db.prepare("SELECT 1 FROM events WHERE room_id=? AND json_extract(body,'$.type')='work.completed' AND json_extract(body,'$.data.workItemId')='starter' AND json_extract(body,'$.data.evidenceKind')='room_text'").get("doc-room");
+  assert.ok(done, "the native completion event was saved");
+  const posted = readCurrentMessage(store.db, "doc-room", starter.receipt.nativeText.messageId);
+  assert.equal(posted.value.body, "Plan: close the starter.");
 });
 
 test("a duplicate agent room returns the same starter, and starter:false creates none", async t => {
@@ -92,9 +93,12 @@ test("a duplicate agent room returns the same starter, and starter:false creates
   const firstResponse = await create({ roomId: "agent-start", title: "Agent start", purpose: "Close one task." });
   const first = await firstResponse.json();
   assert.equal(firstResponse.status, 201, JSON.stringify(first));
-  assert.equal(first.next[0].action, "start-work");
-  assert.equal(first.next[0].path, "/api/rooms/agent-start/work-claims/starter/update");
-  assert.deepEqual(first.starter, { claimId: "starter", state: "claimed" });
+  assert.equal(first.next[0].action, "read-work");
+  const start = first.next.find(step => step.action === "start-work");
+  assert.equal(start.path, "/api/rooms/agent-start/commands");
+  assert.equal(start.body.type, "work.started");
+  assert.equal(start.body.data.expectedRevision, 1);
+  assert.deepEqual(first.starter, { workItemId: "starter", state: "accepted", nextRead: { tool: "room_read_work", arguments: { workItemId: "starter" } } });
   const againResponse = await create({ roomId: "agent-start", title: "Agent start", purpose: "Close one task." });
   const again = await againResponse.json();
   assert.equal(againResponse.status, 200, JSON.stringify(again));
@@ -104,5 +108,5 @@ test("a duplicate agent room returns the same starter, and starter:false creates
   const opted = await optedResponse.json();
   assert.equal(optedResponse.status, 201, JSON.stringify(opted));
   assert.equal(opted.starter, null);
-  assert.equal(opted.next[0].action, "start-work");
+  assert.equal(opted.next[0].action, "post-message");
 });

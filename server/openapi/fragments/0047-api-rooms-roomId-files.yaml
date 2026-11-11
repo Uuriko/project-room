@@ -1,0 +1,83 @@
+  /api/rooms/{roomId}/files:
+    get:
+      summary: List committed files for selected visible messages
+      description: |
+        Normalized rooms require 1–8 messageId query values. Returns committed
+        metadata for those messages only, never a complete room inventory or
+        staged-file list. Keep the uploader-only staging receipt/id for get or
+        commit. Follow page.nextCursor with the same messageId selection until
+        page.hasMore is false, even when files is empty. A changed selection,
+        credential, room revision or server restart requires a fresh read.
+        Unknown, private and pre-join message selections are not found. Legacy
+        rooms retain their historical unselected staged/committed list.
+        No bytes are returned. Hosted room_list_files uses messageIds (array)
+        and cursor for the same service and scope.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: messageId
+          in: query
+          description: Required for normalized rooms; repeat for 1–8 visible messages.
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 8
+            uniqueItems: true
+            items: {type: string, minLength: 1, maxLength: 128}
+        - name: cursor
+          in: query
+          description: Opaque page.nextCursor from the exact same selection.
+          schema: {type: string, minLength: 1, maxLength: 4096}
+      responses:
+        '200':
+          description: Selected file page (normalized v2) or historical legacy list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  files: { type: array, items: { type: object } }
+                  contractVersion: {type: integer, enum: [2]}
+                  coverage: {type: object, description: Selected messages only; complete refers to this source window.}
+                  page: {type: object, description: Follow nextCursor while hasMore is true.}
+        '401':
+          description: No room credential
+        '404':
+          description: Message selection is unavailable or not visible to this viewer.
+        '409':
+          description: Continuation or metadata requires reconciliation; restart the selection.
+        '422':
+          description: Select one to eight distinct visible message ids.
+    post:
+      summary: Stage one room file
+      description: |
+        Stage a file (canonical base64 `data`, at most 1 MiB) for the signed-in
+        member. Commit it onto a message the member already posted. A repeat of
+        the same id and bytes is 200; a conflicting id is 409.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, filename, mediaType, data]
+              properties:
+                id: { type: string }
+                filename: { type: string }
+                mediaType: { type: string }
+                data: { type: string, description: Canonical base64 file bytes }
+      responses:
+        '201':
+          description: File staged
+        '200':
+          description: The same staged file was already stored
+        '401':
+          description: No room credential
+        '413':
+          description: File or request exceeds the room attachment limit
+        '422':
+          description: Attachment was rejected

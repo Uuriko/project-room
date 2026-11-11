@@ -36,9 +36,14 @@
    overflow the claim card on 375px viewports (~280px content). Wrap anywhere,
    like the card's other free-text rows. */
 .claim-pr, .claim-repo { overflow-wrap: anywhere; }
+.overlap-chip { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--text-xs); }
+.overlap-chip summary { min-height: 1.5rem; cursor: pointer; color: var(--amber); }
+.overlap-chip p { margin: var(--space-2) 0 0; overflow-wrap: anywhere; }
 /* M-02 mobile: the per-card file list disclosure had no touch sizing
    (~20px tall) — below the 44px coarse-pointer floor from PR 2034. */
 .claim-files summary { min-height: 44px; padding-block: .65rem; cursor: pointer; }
+.claim-thread summary { min-height: 44px; padding-block: .65rem; cursor: pointer; }
+.claim-thread-entries { margin: 0; padding-inline-start: 1.1rem; font-size: var(--text-sm); }
 .claim-owner { display: flex; align-items: center; gap: var(--space-2); }
 .claim-deps, .claim-chain { overflow-wrap: anywhere; }
 .claim-files, .claim-reviews, .claim-deps { margin: 0 0 var(--space-2); }
@@ -51,6 +56,8 @@
 .claim-record-label { font-weight: 600; }
 .claim-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .claim-actions button, .claim-actions select { min-height: 44px; }
+/* Acceptance links are standalone actions too, so match the button hit area. */
+.claim-actions > a { display: inline-flex; align-items: center; min-height: 44px; }
 .ci-badge { display: inline-block; padding: 0 .4rem; border: 1px solid var(--line); border-radius: 99px; font-size: var(--text-xs); text-transform: uppercase; }
 .ci-success { color: var(--green); }
 .ci-failure { color: var(--red); }

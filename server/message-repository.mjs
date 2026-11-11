@@ -1,10 +1,14 @@
+import { isCurrentRoom, readCurrentMessage } from './current-room-repository.mjs';
 import { messageQueries, decodeMessageRecord as decode } from './message-queries.mjs';
 // Current message records across the migration boundary. The working set wins;
 // only rows explicitly removed by the archive marker may supply missing records.
 // Uncertified non-archived rows are never used as a fallback. Authorization stays
 // with the caller; this repository neither caches viewers nor relaxes visibility.
+import { hasMessageAuthority } from './message-authority.mjs';
 import { messageReadIndex } from './message-read-index.mjs';
-import { archiveMarker } from './messages-store.mjs';
+import { archiveMarker, archivedMessageRow } from './messages-store.mjs';
+import { hydrateRecordText } from './projection-at-rest.mjs';
+import { hydrateMessageEntities, isMessageEntityRef } from './message-entity-projection.mjs';
 
 export function messageRepository(store, roomId, state = store.room(roomId).state) {
   const live = messageReadIndex(state.messages);
@@ -70,4 +74,27 @@ export function messageThreadRoot(repository, id) {
     message = parent;
   }
   return message?.id;
+}
+
+// Selected canonical lookup across inline, body-reference, entity and archive
+// storage. SQLite still scans the legacy JSON carrier; only one record crosses
+// into JS and unrelated bodies are never hydrated. Call inside a read transaction.
+export function selectedMessageRecord(store, roomId, id, hasArchive = false) {
+  if (isCurrentRoom(store.db,roomId)) return readCurrentMessage(store.db,roomId,id)?.value;
+  const marker = store.db.prepare("SELECT json_extract(projection,'$.messageAuthority') AS marker FROM rooms WHERE id=?").get(roomId);
+  if (marker?.marker !== null && marker?.marker !== undefined) {
+    hasMessageAuthority({ messageAuthority: JSON.parse(marker.marker) });
+    const canonical = store.db.prepare('SELECT message_id,body,record_json FROM messages WHERE room_id=? AND message_id=?').get(roomId, id);
+    return canonical ? decode(canonical) : undefined;
+  }
+  const row = store.db.prepare("SELECT m.value FROM rooms r,json_each(r.projection,'$.messages') m WHERE r.id=? AND json_extract(m.value,'$.id')=? ORDER BY CAST(m.key AS INTEGER) DESC LIMIT 1").get(roomId, id);
+  if (row) {
+    const record = JSON.parse(row.value);
+    if (isMessageEntityRef(record)) return hydrateMessageEntities(store.db, roomId, [record])[0];
+    return JSON.parse(hydrateRecordText(store.db, roomId, row.value,
+      messageId => store.room(roomId, { verifyBodyHashes: true }).state.messages.find(message => message.id === messageId)?.body));
+  }
+  if (!hasArchive) return undefined;
+  const archived = archivedMessageRow(store.db, roomId, id);
+  return archived ? decode(archived) : undefined;
 }

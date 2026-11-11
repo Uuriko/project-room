@@ -23,34 +23,18 @@ export function defineExperiment({ id, arms, metric, minSamplePerArm, startedAt 
   return Object.freeze({ id, arms: Object.freeze([...arms]), metric, minSamplePerArm, startedAt });
 }
 
-// Seeded from the virality plan. `bottom` and `run_this` are the control
-// arms (index 0). A winner needs at least minSamplePerArm exposures.
+// Seeded from the virality plan. `bottom` is the control arm (index 0).
+// A winner needs at least minSamplePerArm exposures.
+// Only pr_footer_placement is assigned anywhere in runtime
+// (server/github-app/render.mjs). The receipt_cta_copy,
+// approval_join_placement and template_cta definitions were removed
+// (RES-1347): never assigned outside tests, so their 400/arm sample
+// plans could never fill.
 const EXPERIMENTS = Object.freeze([
-  defineExperiment({
-    id: "receipt_cta_copy",
-    arms: ["run_this", "start_own"],
-    metric: "public_artifact_cta_clicked",
-    minSamplePerArm: 400,
-    startedAt: "2026-10-02",
-  }),
   defineExperiment({
     id: "pr_footer_placement",
     arms: ["bottom", "top"],
     metric: "public_artifact_cta_clicked",
-    minSamplePerArm: 400,
-    startedAt: "2026-10-02",
-  }),
-  defineExperiment({
-    id: "approval_join_placement",
-    arms: ["after", "beside"],
-    metric: "public_artifact_cta_clicked",
-    minSamplePerArm: 400,
-    startedAt: "2026-10-02",
-  }),
-  defineExperiment({
-    id: "template_cta",
-    arms: ["use_this", "fork"],
-    metric: "template_forked",
     minSamplePerArm: 400,
     startedAt: "2026-10-02",
   }),

@@ -21,7 +21,9 @@ test('cursor traversal reaches51 without replaying accepted or unknown receipts'
   const { journal } = fixture(t), store = new RoomStore(':memory:');
   store.initialize(initialRoom('commons'));
   const owner = store.issueAccessKey('commons', 'owner');
-  const server = createRoomServer({ store });
+  // The queue probe reads the room once per wake. Fifty-one wakes are wider
+  // than the production read burst, so this fixture keeps the previous window.
+  const server = createRoomServer({ store, credentialReadBurst: 600 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`;

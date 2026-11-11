@@ -1,0 +1,17 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":27852752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":7,"cpuMs":7,"heapBytes":39896216,"rooms":1,"sequences":26,"projectionBytes":130,"events":26}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":39193360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ existing offline file CLI independently audits exact immutable input and promotes a new checked file (343.946541ms)
+ℹ {"inputSha256":"8418abbf1327ff1bbb6e5bdc8eff292913445f0291622aac00ae2ba62f10d8aa","sourceSchema":45,"offlineFullAudit":true,"immutableInput":true,"targetFile":true,"remoteAdmissionAuthority":false}
+✔ recomputed complete content trailer is insufficient when independent metadata invariants fail (206.124959ms)
+ℹ {"fullTrailerRecomputed":true,"independentAuditRefused":true,"targetNotPromoted":true,"contentEqualityDoesNotImplyLogicalValidity":true}
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 691.464541

@@ -1,0 +1,65 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":42411000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+✔ real room-cookie browser session reads normalized selected native work absent from its snapshot (84.266417ms)
+✖ normalized missing native id reads and mounts the selected record instead of opening a legacy claim board (1.057208ms)
+✖ normalized held thin summary also needs full selected details before rendering (0.352667ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 250.049167
+
+✖ failing tests:
+
+test at tests/partial-work-browser.test.mjs:18:1
+✖ normalized missing native id reads and mounts the selected record instead of opening a legacy claim board (1.057208ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      [
+  +     'legacy-board',
+  -     'read',
+        'late'
+      ],
+  -   [
+  -     'mount',
+  -     'late'
+  -   ]
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-partial-work-consumer-1101/tests/partial-work-browser.test.mjs:19:55)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ [ 'legacy-board', 'late' ] ],
+    expected: [ [ 'read', 'late' ], [ 'mount', 'late' ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/partial-work-browser.test.mjs:21:1
+✖ normalized held thin summary also needs full selected details before rendering (0.352667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'mount' !== 'read'
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-partial-work-consumer-1101/tests/partial-work-browser.test.mjs:22:107)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'mount',
+    expected: 'read',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

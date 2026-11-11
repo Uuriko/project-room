@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // An in-thread reply to an agent's post must notify that agent: a delivered
 // mention_states row (needs-me surfaces it) and a wake signal for a
@@ -78,14 +79,14 @@ test("reply that also @mentions the author creates exactly one row", (t) => {
   assert.equal(rows[0].state, "delivered");
 });
 
-test("reply to an agent's post wakes the agent's registered host", async (t) => {
+test("passive agent reply preserves registered-host wake without a new obligation", async (t) => {
   const { AgentRooms } = await import("../server/agent-rooms.mjs");
   const store = new RoomStore(":memory:");
   t.after(() => store.close());
   const owner = store.identities.create("Wake owner");
   new AgentRooms(store).create(owner.secret, { roomId: "wake-room", title: "Wake", purpose: "Reply wake testing" });
   const alias = store.identities.create("Linked alias");
-  store.identities.link(owner.secret, "wake-room", { identityId: alias.identityId, memberId: "linked-alias", displayName: "Alias", permissions: [] });
+  linkWithProof(store, owner.secret, "wake-room", alias, { memberId: "linked-alias", displayName: "Alias", permissions: [] });
   store.agentHeartbeats.heartbeat({ agentId: alias.identityId, hostId: "laptop", mode: "pull-only", cadenceSeconds: 60 });
   store.command(alias.secret, "wake-room", { id: randomUUID(), type: "message.posted", data: { messageId: "m1", body: "agent post" } });
   assert.equal(store.agentHeartbeats.pendingWakes(alias.identityId).length, 0);
@@ -97,5 +98,42 @@ test("reply to an agent's post wakes the agent's registered host", async (t) => 
   const row = store.db.prepare(
     "SELECT state FROM mention_states WHERE room_id='wake-room' AND mentioned_member_id='linked-alias'"
   ).get();
-  assert.equal(row.state, "delivered");
+  assert.equal(row, undefined, "transport wake is not an accountable reply obligation");
+});
+
+test("passive agent replies answer existing mentions without creating an acknowledgment loop", t => {
+  const f = setup(t);
+  f.send("claude", T.MESSAGE_POSTED, { messageId: "ask", body: "@Dave verify this" });
+  const answer = f.send("dave", T.MESSAGE_POSTED, { messageId: "answer", body: "Verified", replyToId: "ask" });
+  assert.equal(f.mentionRows("dave")[0].state, "responded");
+  assert.deepEqual(f.mentionRows("claude"), [], "passive answer is not a new obligation");
+  f.send("claude", T.MESSAGE_POSTED, { messageId: "thanks", body: "Acknowledged", replyToId: "answer" });
+  assert.equal(f.mentionRows("dave").length, 1, "acknowledgment does not re-arm the recipient");
+  assert.equal(f.store.room("commons").state.messages.find(m => m.id === "answer").body, "Verified");
+  assert.equal(answer.event.data.toMemberId ?? null, null, "public audience unchanged");
+});
+
+test("agent reply with an explicit tag creates only that recipient's row and retry is idempotent", t => {
+  const f = setup(t);
+  f.send("claude", T.MESSAGE_POSTED, { messageId: "ask", body: "@Dave verify this" });
+  const command = { id: "explicit-reply", type: T.MESSAGE_POSTED,
+    data: { messageId: "answer", body: "@Claude verified; check again", replyToId: "ask" } };
+  const first = f.store.command(f.keys.dave, "commons", command);
+  const retry = f.store.command(f.keys.dave, "commons", command);
+  assert.equal(retry.event.id, first.event.id);
+  assert.equal(f.mentionRows("claude").length, 1);
+  assert.equal(f.mentionRows("claude")[0].state, "delivered");
+  f.send("claude", T.MESSAGE_POSTED, { messageId: "done", body: "Done", replyToId: "answer" });
+  assert.equal(f.mentionRows("claude")[0].state, "responded");
+  assert.equal(f.mentionRows("dave").length, 1, "plain answer creates no return obligation");
+});
+
+test("agent DM reply preserves private audience and creates no passive mention", t => {
+  const f = setup(t);
+  f.send("claude", T.MESSAGE_POSTED, { messageId: "private-ask", body: "Please verify", toMemberId: "dave" });
+  const reply = f.send("dave", T.MESSAGE_POSTED, { messageId: "private-answer", body: "Verified",
+    replyToId: "private-ask", toMemberId: "claude" });
+  assert.equal(reply.event.data.toMemberId, "claude");
+  assert.deepEqual(f.mentionRows("claude"), []);
+  assert.deepEqual(f.mentionRows("dave"), []);
 });

@@ -1,0 +1,75 @@
+  /api/rooms/{roomId}/dm-consents:
+    get:
+      summary: List DM consent pairs
+      description: >-
+        The caller's own directional DM consent pairs (requester/target as
+        display handles plus the authoritative requesterId/targetId — display
+        names are not unique per room, so browser actions resolve by id).
+        The room owner additionally sees pair metadata for moderation — never
+        DM contents. DMs are open by default: a DM (message.posted with
+        toMemberId) posts without any consent row, and is rejected with 403
+        dm_consent_required (or dm_blocked) only when the target has
+        explicitly denied the direction (rejected / revoked / blocked).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Consent pairs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    requester: { type: string }
+                    target: { type: string }
+                    requesterId: { type: string }
+                    targetId: { type: string }
+                    status: { type: string, enum: [pending, approved, rejected, blocked, revoked] }
+                    reason: { type: [string, 'null'] }
+                    createdAt: { type: integer }
+                    decidedAt: { type: [integer, 'null'] }
+                    outgoing: { type: boolean }
+        '401':
+          description: unauthenticated
+    post:
+      summary: Request DM consent
+      description: >-
+        Request consent to DM another active member. Directional and
+        forward-looking: exactly { targetId, reason? }. Either side may
+        revoke later; a blocked pair needs an explicit unblock first.
+        Idempotent: re-requesting an approved pair returns it unchanged.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetId]
+              properties:
+                targetId: { type: string }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '201':
+          description: Consent requested (pending)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  requesterId: { type: string }
+                  targetId: { type: string }
+                  status: { type: string }
+                  reason: { type: [string, 'null'] }
+                  createdAt: { type: integer }
+                  decidedAt: { type: [integer, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: dm_target_invalid or dm_blocked
+        '422':
+          $ref: '#/components/responses/InvalidInput'

@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { MAX_INCOMING_PROPOSALS, BOND_TTL_MS } from "../server/bonds.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -102,8 +103,8 @@ test("incoming pending proposals are capped per recipient", async t => {
   let lastStatus = 201;
   for (let i = 0; i < MAX_INCOMING_PROPOSALS + 2 && lastStatus === 201; i++) {
     const proposer = fixture.store.identities.create(`m3 proposer ${i}`);
-    const linked = fixture.store.identities.link(owner.secret, roomId, {
-      identityId: proposer.identityId, displayName: `P${i}`, permissions: ["accept_work"]
+    const linked = linkWithProof(fixture.store, owner.secret, roomId, proposer, {
+      displayName: `P${i}`, permissions: ["accept_work"]
     });
     // #953: new members default to t1_readonly; proposers need write access for bond.propose
     setTier(fixture.store.db, roomId, linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
@@ -122,8 +123,8 @@ test("expired proposals stop counting toward the incoming cap (they can no longe
  await admit(origin, roomId, owner.secret, target, "Expiry target");
  const proposer = i => {
  const identity = fixture.store.identities.create(`m3 expiry proposer ${i}`);
- const linked = fixture.store.identities.link(owner.secret, roomId, {
- identityId: identity.identityId, displayName: `E${i}`, permissions: ["accept_work"]
+ const linked = linkWithProof(fixture.store, owner.secret, roomId, identity, {
+ displayName: `E${i}`, permissions: ["accept_work"]
  });
  setTier(fixture.store.db, roomId, linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
  return identity;

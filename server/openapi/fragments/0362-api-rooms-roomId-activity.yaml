@@ -1,0 +1,24 @@
+  /api/rooms/{roomId}/activity:
+    get:
+      summary: List the caller's personal activity feed
+      description: >-
+        Member-readable persisted activity feed: mention, reply,
+        thread_reply, and reaction events naming the caller, newest first.
+        Optional type filter (mention, reply, thread_reply, reaction) and
+        before/limit paging. Every response carries the session-ownership
+        envelope (viewerId, viewerAccountId, viewerAuthEpoch,
+        viewerSessionBinding, viewerSessionRevision).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: type
+          in: query
+          schema: { type: string, enum: [mention, reply, thread_reply, reaction] }
+        - name: before
+          in: query
+          schema: { type: string, description: "page before this event id" }
+        - name: limit
+          in: query
+          schema: { type: integer }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, items: [{ id, type, actorId, messageId, threadId, messageBody, messageDeleted, createdAt, readAt }], hasMore, before }" }

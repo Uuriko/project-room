@@ -27,6 +27,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import {
   buildOpenApiJson,
+  discoverabilityErrorOverride,
   DISCOVERABILITY_ROUTES,
   MCP_DISCOVERY_BLOCK,
   nextActionsForIdentityMint,
@@ -508,7 +509,10 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
     "list-tools pointer names public_work_recommend");
   assert.ok(listTools.description.includes("public_work_read_task"),
     "list-tools pointer names public_work_read_task");
-  assert.ok(listTools.description.includes("seven"), "list-tools pointer states the seven-tool count");
+  assert.match(listTools.description, /eight discovery entries/);
+  assert.match(listTools.description, /seven anonymous public actions/);
+  assert.match(listTools.description, /room_check_access[^.]*HTTP 401[^.]*OAuth/);
+  assert.match(listTools.description, /listing it grants no anonymous Room access/);
   assert.equal(listTools.path, "/mcp", "list-tools pointer uses the canonical /mcp path");
   assert.equal(minted.next.find(s => s.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
   for (const step of minted.nextActions) {
@@ -517,14 +521,14 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   }
   const secret = minted.secret;
   // Room creation -> invite mint + first post pointers.
-  const roomRes = await post(origin, "/api/agent-rooms", { title: "Onboard", purpose: "Pointers" }, secret);
+  const roomRes = await post(origin, "/api/agent-rooms", { title: "Onboard", purpose: "Pointers", visibility: "private" }, secret);
   assert.equal(roomRes.status, 201);
   const room = await roomRes.json();
   const roomActions = room.next.map(s => s.action);
   assert.ok(roomActions.includes("invite-members"), "room create points at invite mint");
   assert.ok(roomActions.includes("post-message"), "room create points at first post");
   assert.deepEqual(room.nextActions.map(s => s.action),
-    ["start-work", "post-message", "finish-work", "claim-work", "handoff-work", "create-task", "invite-members"],
+    ["read-work", "start-work", "post-message", "invite-members"],
     "room create nextActions is the canonical verb list");
   assert.ok(room.nextActions.every(s => s.transport !== "http" || s.path.includes(room.roomId)), "room nextActions HTTP paths are room-scoped");
   // Invite redemption -> orient + access pointers.
@@ -665,4 +669,20 @@ test("cold walkthrough stranger surface: every documented no-credential endpoint
     assert.ok(route, `stranger endpoint documented: ${path}`);
     assert.equal(route.auth, "none", `${path} needs no credential`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// 8. Agent-keys hint route accuracy (regression guard).
+// ---------------------------------------------------------------------------
+// The 403 override for agent-credential routes told an under-scoped agent to
+// issue a key at POST /api/agent-api-keys — a path no dispatch serves. The
+// real issue route is POST /api/agent-keys (server/agent-plugin-routes.mjs,
+// documented as /api/agent-keys in docs/openapi.yaml). This probe pins the
+// hint and its next[] pointer to the real route.
+test("403 agent-credential hint names the real agent-keys route", () => {
+  const override = discoverabilityErrorOverride({ pathname: "/api/agent-webhooks", httpStatus: 403, code: "insufficient_scope" });
+  assert.ok(override, "403 on an agent-credential route returns an override");
+  assert.match(override.hint, /POST \/api\/agent-keys\b/, "hint names POST /api/agent-keys");
+  assert.ok(!override.hint.includes("/api/agent-api-keys"), "hint does not name the non-route /api/agent-api-keys");
+  assert.deepEqual(override.next[0], { path: "/api/agent-keys", method: "POST" }, "next[] points at POST /api/agent-keys");
 });

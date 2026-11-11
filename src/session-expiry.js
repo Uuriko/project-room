@@ -10,12 +10,16 @@ export function validSessionExpiry(expiresAt) {
   return Number.isSafeInteger(expiresAt) && expiresAt > 0 ? expiresAt : null;
 }
 
-// -> the expiry as a date/time in the user's locale, or null when the server
-// did not supply a usable one (the caller hides the line instead of guessing).
-export function formatSessionExpiry(expiresAt) {
+// -> the expiry in the user's locale without seconds: just the time when it
+// falls on the same day as `now`, otherwise date and time. null when the
+// server did not supply a usable one (the caller hides the line instead of
+// guessing).
+export function formatSessionExpiry(expiresAt, now = Date.now()) {
   const at = validSessionExpiry(expiresAt);
   if (at === null) return null;
   const date = new Date(at);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString();
+  const today = new Date(now);
+  const sameDay = !Number.isNaN(today.getTime()) && date.toDateString() === today.toDateString();
+  return new Intl.DateTimeFormat(undefined, sameDay ? { timeStyle: "short" } : { dateStyle: "medium", timeStyle: "short" }).format(date);
 }

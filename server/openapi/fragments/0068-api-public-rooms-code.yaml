@@ -1,0 +1,56 @@
+  /api/public/rooms/{code}:
+    get:
+      summary: Public read-only room face
+      description: >-
+        Owner opt-in read-only snapshot of a room: title, purpose, recent
+        public messages (newest first), and member display handles. No login.
+        The code is the credential (unguessable pub1.*); unknown codes 404
+        without distinguishing disabled from nonexistent. DMs, deleted
+        messages, member ids, emails, permissions, invite codes, and
+        attachments never leave. X-Robots-Tag: noindex, nofollow. The same
+        bytes are served as HTML at /p/{code} (Accept: text/html) and JSON
+        here and at /p/{code} (Accept: application/json).
+      security: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sanitized public snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  room:
+                    type: object
+                    properties:
+                      title: { type: string }
+                      purpose: { type: string }
+                      openedAt: { type: [string, 'null'] }
+                  members:
+                    type: array
+                    items: { type: string }
+                  messages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        from: { type: string }
+                        body: { type: string }
+                        at: { type: [string, 'null'] }
+                  fetchedAt: { type: integer }
+        '404':
+          description: Unknown, malformed, or disabled public code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: Per-address public-face rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'

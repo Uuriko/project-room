@@ -366,7 +366,7 @@ function assertMigrated(t, fixture, version, before, stripAttachmentMessageId) {
   rooms.create(agentIdentity.secret, {
     roomId: "agent-den", title: "Den", purpose: "migration check", kind: "personal", displayName: "Keeper"
   });
-  const memberRevision = store.room("agent-den").state.members[agentIdentity.identityId].revision;
+  const memberRevision = store.roomAuthority("agent-den",{memberId:agentIdentity.identityId}).members[agentIdentity.identityId].revision;
   const agentIssued = store.issueInvitation(agentIdentity.secret, "agent-den", {
     requestId: randomUUID(), token: token(), intendedAccountId: "account-target",
     intendedMemberId: "target-agent", displayName: "Target", role: "member",
@@ -380,6 +380,16 @@ function assertMigrated(t, fixture, version, before, stripAttachmentMessageId) {
   }, null).link;
   assert.equal(db.prepare("SELECT issuer_account_id FROM share_links WHERE id=?").get(agentLink.id).issuer_account_id, null);
   assert.equal(store.verifyInvitationAudit().consistent, true);
+  // The migrated historic data and newly created normalized issuer must both
+  // remain usable after a real cold open, including every security row.
+  const preserved=snapshot(db,false);store.close();
+  const cold=new RoomStore(fixture.filename,{now:()=>fixture.now});
+  try {
+    assert.deepEqual(snapshot(cold.db,false),preserved,"cold open preserves every migrated/current row");
+    assert.equal(cold.authenticate(agentIdentity.secret,"agent-den").member.id,agentIdentity.identityId);
+    assert.equal(cold.roomAuthority("agent-den",{memberId:agentIdentity.identityId}).members[agentIdentity.identityId].revision,memberRevision);
+    assert.equal(cold.verifyInvitationAudit().consistent,true);cold.shareLinks.verify();auditRecovery(cold);
+  } finally {cold.close();}
 }
 
 test("a v33 database migrates to the current schema with every row intact", async t => {

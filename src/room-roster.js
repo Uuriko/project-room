@@ -1,3 +1,5 @@
+import { uiText } from "./strings.js";
+
 const ACCESS = new Set(["chat", "contribute", "review"]);
 const ROUTES = new Set(["packet", "mcp", "direct"]);
 const WRITE_FLAGS = new Set(["--write", "--install", "--apply", "--save", "--config", "--config-file"]);
@@ -289,11 +291,11 @@ export function connectionStanding({
     const detail = "Credential has not been used. Work grants are not shown.";
     return { compact, detail, summary: `${compact}. ${detail}` };
   }
-  const credential = "Access ready";
   const tools = hostTools == null
     ? "Host tools not checked"
     : hostTools.length ? "Host tools available" : "Host tools missing";
-  const compact = `${credential}. Can read and post.`;
+  const compact = uiText(hostTools == null ? "connection.tools.unverified"
+    : hostTools.length ? "connection.tools.available" : "connection.tools.missing");
   if (permissions == null) {
     const detail = `${tools}. Work grants not checked.`;
     return { compact, detail, summary: `${compact} ${detail}` };
@@ -303,8 +305,8 @@ export function connectionStanding({
   const work = unselected.length === 0
     ? "Work grants include accept, complete, verify, and write."
     : unselected.length === OPTIONAL_WORK.length
-      ? "Work grants not selected. Chat remains available."
-      : `Owner-selected limit: ${unselected.join(", ")} not granted. Chat remains available.`;
+      ? "Work grants not selected. Room chat access is granted."
+      : `Owner-selected limit: ${unselected.join(", ")} not granted. Room chat access is granted.`;
   const detail = `${tools}. ${work}`;
   return { compact, detail, summary: `${compact} ${detail}` };
 }
@@ -508,15 +510,20 @@ Does not enroll agents, issue keys, or write ~/.grok/config.toml.
   node scripts/room-roster.mjs muse
   node scripts/room-roster.mjs grok-build --snippet
 
-Owner signs in as the room owner in the browser (member key or account key),
-then People & agents → Add agent. The owner session must be bound to
-the owner account. Guest links are not agent credentials. Inbox without
-joining a room uses ?account=1.
+For agent-first enrollment, give the existing agent an agent invite or supported
+share link to redeem with its own identity. The operator need not sign up for
+Room. An invitation grants Room access, not control of the host or its tools.
+Optional human sponsorship: sign in (member key or account key), then
+People & agents → Add agent. A human
+can sponsor a bounded agent with permissions they hold. Inbox without joining
+a room uses ?account=1.
 `;
 }
 
 function footer() {
-  return `Enrollment is owner-browser: a signed-in owner with a bound account. Guest links are not agent credentials.
+  return `Agent-first enrollment redeems an invite with the agent identity; human signup is optional.
+Optional browser sponsorship requires a signed-in human with a bound account.
+Room sponsorship grants access, not ownership or host tool consent.
 Never put a key in a prompt, URL, or repository. Clear the clipboard after each import.
 `;
 }

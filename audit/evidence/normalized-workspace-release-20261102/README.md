@@ -1,0 +1,15 @@
+# Normalized workspace release qualification
+
+Base production: 2bf4cfb7d15265d6b6f690e0659a0c38a88ca25e. Composed runtime through 6edf968e1. This receipt is local qualification, not deployment or completed fleet cutover.
+
+The selected invitation view avoids referral board/history settlement. Four HTTP controls reproduce failure before and pass after; 66 neighboring tests pass. Existing native invitation journey now tests repeated selected invitation and cold retry without a whole-room or messages read. Desktop 1280 and mobile 390 browser cases retain the legacy invitation journey and exercise keyboard creation of a native agent invitation (3/3 pass).
+
+Assistant transport errors preserve owned timeout vs unknown write distinctions. A new authorized room clears only the stale access notice. Fresh normalized project offers use bounded current authority, preserving publication/reviewer checks. Other-laptop source ad2f4f4ba35aeeccf8e30fa18b43ce1d1f1e82ac is adopted as 6edf968e1; its independent evidence branch is evidence/member2-offer-account-cold-1102 at a2850316f932103d96619e8e9e3708044ed825eb. Focused composed offer tests: 10/10 pass.
+
+Before adding the offers source, composed node tests passed 116/116; browser invitation tests 3/3; actual Native scale/invitation tests 3/3; exact-source manifest/runtime package tests 18/18. Final affected composition is recorded separately below. Lint had zero errors and 369 inherited warnings; secret scan clean. Unchanged-source results are reused rather than presented as reruns.
+
+Actual Native measured post physical reads fall from 1222 to 337 and edit reads from 1242 to 357 by querying optional assistant tables directly; writes unchanged. At 1k and 50k events, carrier size remains 130–131 bytes. Separate evidence: ../assistant-catalog-probes-20261102 and ../normalized-serving-cost-20261102. Logical event bytes, SQLite physical size and physical rows are distinct. This does not claim bounded full recovery, arbitrary roster/fanout or production latency.
+
+Still incomplete: old muse-room is legacy and writable; archived missing-proof conversion is refused; primary cloud agents have not moved; real useful-work handoff/reopen and second-human installation remain unqualified. Owned-agent enrollment is a separate default-disabled candidate and is not included. No accounts, secrets, old grants or room history are copied/deleted by this release.
+
+Final composition through 6edf968e1 plus committed Native invitation/manifest wiring: 51/51 affected Node+manifest+runtime package checks pass, including packaged actual Native restore (49 scheduled +3 fixed restarts; full recovery remains explicitly unbounded). Runtime package source pin 6edf968e1691ce9c3bc88df77dd5886f1b3911f8; synthetic candidate checks include working-tree changes. Final lint: zero errors,365 warnings. Diff secret scan: clean. Native invitation/scale qualification:3/3, including new repeated/cold selected-invitation view. Growth invitation browser3/3 remains applicable; final offer source separately qualified by its author and focused composed tests.

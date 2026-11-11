@@ -1,0 +1,23 @@
+{
+  "base": "a8729b406",
+  "source": "dd0c1962b7f0aabae061f9b7ef5205e58ce84cd8",
+  "command": "/Users/johnpotter/.local/bin/node --test tests/pending-constructor-write-protocol.test.mjs",
+  "pass": 7,
+  "fail": 0,
+  "skip": 0,
+  "exit": 0,
+  "scanExit": 0,
+  "runtimeChanges": false,
+  "artifacts": [
+    {
+      "artifact": "pending-constructor-operator-drain-1102.log.gz",
+      "bytes": 9839,
+      "sha256": "f9df86f0b746a0fa8989d9e2785f9f307a6caf387b0f626519b58dab1fc00b4f"
+    },
+    {
+      "artifact": "pending-constructor-drain-scan-1102.log.gz",
+      "bytes": 53,
+      "sha256": "0aef2bd77e5bb6988196580c4cd8614e9d1c33a477135501d4bd26e108447e5f"
+    }
+  ]
+}

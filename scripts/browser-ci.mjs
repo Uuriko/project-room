@@ -20,14 +20,14 @@ export const RESULTS_FILE = "test-results/browser-junit.xml";
 
 // Build node's argv from the test:browser script string. Every flag after
 // `node --test` (notably --test-concurrency=1) and the file list are kept.
-export function ciArgs(script, destination = RESULTS_FILE, shard = null) {
-  const plan = browserPlan(script);
+export function ciArgs(script, destination = RESULTS_FILE, shard = null, plan = null) {
+  const resolved = plan ?? browserPlan(script);
   return [
     "--test",
     "--test-reporter=spec", "--test-reporter-destination=stdout",
     "--test-reporter=junit", `--test-reporter-destination=${destination}`,
     "--test-reporter=./scripts/browser-ci-reporter.mjs", "--test-reporter-destination=stdout",
-    ...plan.flags, ...(shard ? plan.shards[shard.index - 1].files : plan.files),
+    ...resolved.flags, ...(shard ? resolved.shards[shard.index - 1].files : resolved.files),
   ];
 }
 
@@ -40,13 +40,34 @@ async function suiteScriptFromPackage(script) {
   return resolveBrowserScript(script);
 }
 
+async function resolvePlan(script) {
+  if (process.env.CI_BROWSER_SCOPE !== "affected") return browserPlan(script);
+  const { affectedBrowserFiles } = await import("./ci-affected.mjs");
+  const selection = affectedBrowserFiles(process.env.BASE_SHA);
+  return { ...selection.plan, selection: {
+    scope: selection.coverage, base: process.env.BASE_SHA, changed: selection.changed,
+    budgetMs: selection.budgetMs, selected: selection.selected, omitted: selection.omitted,
+  } };
+}
+
+// Selection is not an execution result. Persist it before even an empty shard
+// returns so uploaded evidence cannot imply omitted checks ran successfully.
+export function writeBrowserSelection(plan, destination, revision = "local") {
+  const report = { schemaVersion: 1, revision, planHash: plan.planHash,
+    ...(plan.selection ?? { scope: "full", base: null, changed: [], budgetMs: null,
+      selected: plan.files.map(test => ({ test, via: "full suite" })), omitted: [] }) };
+  mkdirSync(dirname(destination), { recursive: true });
+  writeFileSync(destination, JSON.stringify(report, null, 2) + "\n");
+  return report;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   if (argv.length > 1 || (argv.length && !argv[0].startsWith("--shard="))) throw new Error("Usage: browser-ci.mjs [--shard=1/4]");
   const shard = argv.length ? parseShard(argv[0].slice(8)) : null;
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
   const script = await suiteScriptFromPackage(pkg.scripts?.["test:browser"]);
-  const plan = browserPlan(script);
+  const plan = await resolvePlan(script);
   const suffix = shard ? `-${shard.index}-of-${shard.total}` : "";
   const destination = `test-results/browser-junit${suffix}.xml`;
   // The receipt filename carries the run attempt: a single-shard re-run
@@ -56,13 +77,24 @@ async function main() {
   const attempt = process.env.GITHUB_RUN_ATTEMPT ?? "local";
   const receiptPath = `test-results/browser-shard${suffix}-attempt-${attempt}.json`;
   const files = shard ? plan.shards[shard.index - 1].files : plan.files;
-  if (!files.length) throw new Error("Refusing an empty browser shard");
+  writeBrowserSelection(plan, `test-results/browser-selection${suffix}-attempt-${attempt}.json`, process.env.GITHUB_SHA ?? "local");
+  if (!files.length) {
+    if (!shard || process.env.CI_BROWSER_SCOPE !== "affected") throw new Error("Refusing an empty browser shard");
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(receiptPath, JSON.stringify({
+      ...shard, files, planHash: plan.planHash, status: 0, signal: null,
+      revision: process.env.GITHUB_SHA ?? "local", runId: process.env.GITHUB_RUN_ID ?? "local",
+      runAttempt: attempt, elapsedMs: 0,
+    }, null, 2) + "\n");
+    console.log(`browser-ci: shard ${shard.index}/${shard.total} has no affected scripts`);
+    return;
+  }
   mkdirSync(dirname(destination), { recursive: true });
   rmSync(receiptPath, { force: true });
   rmSync(destination, { force: true });
-  console.log(`browser-ci: ${shard ? `shard ${shard.index}/${shard.total}` : "full suite"}, ${files.length} scripts; spec + annotations -> stdout, junit -> ${destination}`);
+  console.log(`browser-ci: ${shard ? `shard ${shard.index}/${shard.total}` : plan.selection ? "affected suite" : "full suite"}, ${files.length} scripts; spec + annotations -> stdout, junit -> ${destination}`);
   const started = Date.now();
-  const result = spawnSync(process.execPath, ciArgs(script, destination, shard), { stdio: "inherit" });
+  const result = spawnSync(process.execPath, ciArgs(script, destination, shard, plan), { stdio: "inherit" });
   if (result.error) throw result.error;
   const status = result.status ?? 1;
   if (shard) writeFileSync(receiptPath, JSON.stringify({

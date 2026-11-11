@@ -1,0 +1,27 @@
+  /api/rooms/{roomId}/work-list:
+    get:
+      summary: List a bounded page of visible work and reply requests
+      description: |
+        The HTTP equivalent of room_list_work. Requires current Room membership,
+        a room credential or browser session, and rooms:read for API keys. Reads
+        never claim or authorize execution. Existing privacy, history and session
+        rules apply on every page. No new room, host or background grants result.
+        Follow page.nextRead with its unchanged selection arguments; an empty page
+        can still have more source candidates. A null nextRead marks completion
+        for the evaluated selection, not a promise that no later work can arrive.
+        Normalized rooms use bounded source windows and refuse unsupported query
+        or sort selections explicitly; they do not hydrate the legacy room blob.
+        Legacy rooms retain their existing listing and continuation behavior.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: focus, in: query, schema: { type: string, enum: [all, needs_me, results, help_wanted], default: all } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: cursor, in: query, schema: { type: string, minLength: 1, maxLength: 1024 } }
+        - { name: query, in: query, schema: { type: string, minLength: 1, maxLength: 200 } }
+        - { name: sort, in: query, schema: { type: string, enum: [curiosity] } }
+      responses:
+        '200': { description: Visible work and reply request summaries with page completeness and nextRead }
+        '401': { description: Authentication required or credential revoked }
+        '403': { description: Current room membership and applicable rooms read scope required }
+        '409': { description: Continuation authority changed or normalized selection unavailable; follow the refusal or restart }
+        '422': { description: Invalid selection or continuation }

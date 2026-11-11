@@ -36,13 +36,10 @@ export const KEEP = [
   "server/channel-adapters/webhook-secret.mjs",
   "server/channel-adapters/slack-webhook.mjs",
   "server/channel-adapters/discord-webhook.mjs",
-  // Existing merge-queue integration remains unmounted.
-  "server/merge-queue.mjs",
   // Client stores restored for audit-wave-3c regression coverage (#2893);
   // runtime wiring is a separate product decision, not implicit enablement.
   "src/handoff-store.mjs",
   "src/dm-room-wiring.mjs",
-  "src/owner-alerts.mjs",
   // Operational/test entry points not discovered by this literal graph.
   "server/secret-scan.mjs",
   "server/spam-shadow-report.mjs",
@@ -60,6 +57,10 @@ export const KEEP = [
   // whose generated inventory is what the runtime reads. It lived in deploy/
   // (outside this checker's scope) until the 2026-10 move into server/.
   "server/push-notifications-supported.mjs",
+  // Pure checks. Wake, route, and MCP wiring waits on open PRs that already
+  // edit those files, and the runtime package list is one of them.
+  "server/repro-check.mjs",
+  "server/agent-audit.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);

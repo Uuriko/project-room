@@ -1,0 +1,20 @@
+  /api/rooms/{roomId}/feedback/notifications:
+    get:
+      summary: Read the caller's feedback notifications
+      description: |
+        Drain-on-read lane events (triage verdicts, appeal outcomes,
+        outcome attributions). API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The caller's notifications (empty after each read)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items: { type: object, description: "Notification (seq, type, feedback_id, message, created_at)" }
+        '401': { description: unauthenticated }

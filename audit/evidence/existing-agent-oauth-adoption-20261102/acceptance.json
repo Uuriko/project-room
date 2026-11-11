@@ -1,0 +1,65 @@
+{
+  "base": "f813130af",
+  "runtime": "a25187173b4b57c0e3ba4f5a9e834aa86490420a",
+  "sourceHashes": {
+    "server/agent-sponsor-transfer.mjs": "b91c070e327f4d2d0478547465bfb19ef661effdebf1a4771d43e83a9ba1e85c",
+    "tests/agent-sponsor-transfer.test.mjs": "0cbefce9feef080442cfa118a0bc1755f78322ed5eec4805144d111c8ee7d83d",
+    "tests/agent-sponsor-transfer-http.test.mjs": "5f7f87d725782abf35f7cee970e77f69e00b8d93827ae0964fd2aa6a46a28f5a",
+    "cloudflare/agent-sponsor-transfer-native.test-fixture.mjs": "c40a67740ebffff7179bb24ebda0d3f4ccf595bc09104ce38fcfa75a74177fb4",
+    "cloudflare/agent-sponsor-transfer-native.check.mjs": "a8c78e7d82b388b27de0660d0e69e0f6432ee09a0cb7dc40ed6e3c42c526179e"
+  },
+  "causalBefore": {
+    "revision": "f813130af",
+    "test": "tests/agent-sponsor-transfer-http.test.mjs",
+    "actual": 409,
+    "expected": 200,
+    "failingTests": 1
+  },
+  "after": {
+    "affectedNode": {
+      "pass": 80,
+      "fail": 0,
+      "note": "Includes 15 earlier core controls; not additive with final core run"
+    },
+    "finalCore": {
+      "pass": 16,
+      "fail": 0
+    },
+    "actualNative": {
+      "pass": 1,
+      "fail": 0,
+      "constructor": "production ProjectRoom",
+      "restarts": 4,
+      "fault": "SQLite abort before access_requests approval status save; exact prior membership/request state restored"
+    },
+    "packageClosure": {
+      "pass": 2,
+      "fail": 0
+    },
+    "treeSecretScan": {
+      "files": 1877,
+      "findings": 0
+    },
+    "targetedLint": {
+      "errors": 0
+    }
+  },
+  "safety": {
+    "newSqlTables": 0,
+    "newIdentity": false,
+    "identityRotation": false,
+    "roomOwnershipTransfer": false,
+    "permissionsChanged": false,
+    "recipientAuthority": "current account session + exact member_accounts binding to active human",
+    "reviewAuthority": "current owner or active manage_members+decide administrator holding every existing agent permission",
+    "oldGrantFence": "selected room/member codes expired and OAuth access/refresh revoked; invited grant revoked; existing managed connection credential revoked, operation history unchanged, revision authority reports access_changed",
+    "grantFormat": "closed account-adopted-agent with request id and account epoch; exact approved private intent digest and request/decision events required"
+  },
+  "limits": [
+    "No live account binding or Google identity reconciliation was performed. Missing or different member_accounts binding refuses.",
+    "No real Claude host, Android account, production deployment or user browser approval qualification claimed. HTTP DCR fixture uses real callback allowlist but synthetic account and identity.",
+    "OAuth consent HTML and owner card model tested; no visual browser layout qualification claimed.",
+    "No claims about recovery/storage release qualification, throughput improvement or outage cure.",
+    "Existing broader scoped credentials or sovereign agent identity secrets are not rotated; only recorded selected managed connection key and OAuth grants are fenced."
+  ]
+}

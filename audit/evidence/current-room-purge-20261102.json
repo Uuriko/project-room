@@ -1,0 +1,93 @@
+{
+  "runtimeCommit": "275af8762244de9ef76ed9ed1f4154e5b79c1ee7",
+  "base": "89816a27e",
+  "scope": [
+    "server/operator-purge.mjs",
+    "server/purge-registry.mjs",
+    "tests/current-operator-purge.test.mjs"
+  ],
+  "command": "node --test tests/current-operator-purge.test.mjs tests/operator-purge.test.js tests/operator-room-purge.test.js",
+  "testSourceSha256": "1526eaa9b70d4a559e69e8438a556fa74c751bfa3fac8f05a23d576e36336f21",
+  "before": {
+    "source": "archived89816a27e server/src/client/strings/package/backup helper, final exact new test copied unchanged",
+    "tests": 7,
+    "passed": 0,
+    "failed": 7,
+    "skipped": 0,
+    "qualification": "Several later negative controls first stop at the common unsupported normalized plan; they are not claimed as seven separate preexisting runtime vulnerabilities."
+  },
+  "after": {
+    "tests": 36,
+    "newTests": 7,
+    "existingTests": 29,
+    "passed": 36,
+    "failed": 0,
+    "skipped": 0,
+    "lintErrors": 0,
+    "secretScanClean": true
+  },
+  "behavior": {
+    "delete": [
+      "current_room_records",
+      "current_room_record_proofs",
+      "current_room_head",
+      "message_replay_units (optional)",
+      "existing selected-room payload/history registry rows",
+      "rooms selected carrier"
+    ],
+    "retain": [
+      "target-wide closed current_room_writer_permit singleton",
+      "target-wide current_restore_admission and exact guards",
+      "restore/cleanup-owned current_restore_audit_scratch",
+      "all prior immutable operator_actions",
+      "unrelated room and directory account"
+    ],
+    "admission": "Existing format writer scope and operator transaction; exact current schema checked, restore admission required by count/plan/execute. Conditional current guards and replay writer guard remain installed.",
+    "legacy": "Original full-room active-human selection is retained for legacy rooms, preserving original JSON.parse duplicate semantics. Normalized rooms use protected roomAuthority."
+  },
+  "proved": [
+    "Real legacy room H capture/hash/codec/work/message qualification and activation before purge, with proposed work and public/private messages.",
+    "Selected row/entity/proof/carrier/staging removal; retained room data byte-equivalent.",
+    "All prior operator receipts identical; selected private body absent from retained operator counts.",
+    "Exact trigger/index SQL preserved, closed permit and restore control unchanged; default full audit passes before and after cold reopen.",
+    "Same-floor raw prepared writer still refused before/after purge despite registering writer version functions.",
+    "Injected failure after real current metadata DELETE rolls back rows/guards/controls/permit; identical saved plan then succeeds.",
+    "Changed current guard SQL and count drift refuse without rebaselining or deletion.",
+    "Actual partial restore refuses counts/plan/execute; exact control/DDL unchanged.",
+    "Actual operator HTTP unauthenticated404 then authenticated plan200/execute200.",
+    "Existing money/proof protection, archive/panel and directory-retention tests remain green."
+  ],
+  "limitations": [
+    "No production changes, schema change, or activation.",
+    "Node/real SQLite and HTTP evidence only; no new actual Native qualification claimed.",
+    "Purge remains the existing bounded-row-count atomic administrative operation, not a strict CPU-bounded serving path.",
+    "Global restore scratch is intentionally retained as restore-owned evidence, not a claim of erasing external backups or all global historical evidence."
+  ],
+  "logs": {
+    "before": {
+      "path": "audit/evidence/current-room-purge-20261102/before.log.gz",
+      "sha256": "06131623d6326994a06f3f0db916a09edaeb17715da0b7d753a2f4e7e74c7c9a",
+      "uncompressedBytes": 14586
+    },
+    "census-before": {
+      "path": "audit/evidence/current-room-purge-20261102/census-before.log.gz",
+      "sha256": "63ae5c5b1bc545b3b83c8b0bce3b5e8bbf4b2f83bb8b42315a89c5eb87e9883f",
+      "uncompressedBytes": 2529
+    },
+    "after": {
+      "path": "audit/evidence/current-room-purge-20261102/after.log.gz",
+      "sha256": "32aa6e7ce08f8802ad94483056e2a65cc1ba4b6f53f80baf12a61623553c7eb6",
+      "uncompressedBytes": 24469
+    },
+    "lint": {
+      "path": "audit/evidence/current-room-purge-20261102/lint.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "uncompressedBytes": 0
+    },
+    "secret": {
+      "path": "audit/evidence/current-room-purge-20261102/secret.log.gz",
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "uncompressedBytes": 24
+    }
+  }
+}

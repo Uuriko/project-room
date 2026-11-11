@@ -1,3 +1,5 @@
+import {legacy44RestoreSource} from './helpers/legacy44-restore-source.mjs';
+import {restoreProgress} from '../server/restore-admission.mjs';
 // #3409: restore the daily backup from the KV namespace it already lives
 // in. The request-body restore (POST /api/operator/restore) caps at
 // RESTORE_MAX_BYTES because it buffers the whole export; production's
@@ -16,10 +18,14 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonStream, exportNdjsonText, exportTrailer, createTableDigests, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
 import {
-  operatorRestoreResponse, operatorRestoreFromBackupResponse, RESTORE_MAX_BYTES,
+  operatorRestoreResponse as beginOperatorRestoreResponse, operatorRestoreFromBackupResponse as beginOperatorRestoreFromBackupResponse, RESTORE_MAX_BYTES, createBackupReplaySession,
 } from "../server/restore-ndjson.mjs";
 import { writeKvBackup, backupObjectKey, backupPartKey, BACKUP_KV_PART_BYTES } from "../cloudflare/room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import {completeOperatorRestore} from './helpers/complete-operator-restore.mjs';
+const operatorRestoreResponse = async (request,token,store,...rest) => completeOperatorRestore(await beginOperatorRestoreResponse(request,token,store,...rest),token,store);
+const operatorRestoreFromBackupResponse = async (request,token,store,...rest) => completeOperatorRestore(await beginOperatorRestoreFromBackupResponse(request,token,store,...rest),token,store);
+
 
 const OPERATOR_TOKEN = "<MASKED_SECRET_001>";
 const KEY = "room-backups/2026-10-14.ndjson";
@@ -454,10 +460,11 @@ test("restore-from-backup refuses a drifted backup in strict mode and names the 
   const response = await operatorRestoreFromBackupResponse(fakeRequest({ body: JSON.stringify({ key: KEY }) }), OPERATOR_TOKEN, target, kv);
   assert.equal(response.status, 422, "the reconciliation refusal is operator-legible, not a generic 500");
   const payload = await response.json();
-  assert.equal(payload.error.code, "restore_verification_failed");
+  assert.equal(payload.error.code, "restore_continuation_refused");
   assert.match(payload.error.message, /commons/);
   assert.match(payload.error.message, /displayName/);
-  assert.equal(target.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 0, "no partial restore remains");
+  assert.equal(restoreProgress(target.db).state,'pending','durable strict rejection retains its exact sealed recovery target');
+  assert.throws(()=>target.room('commons'),error=>error.code==='restore_incomplete');
 });
 
 test("restore-from-backup lands a drifted backup under the report opt-in, drift named", async t => {
@@ -568,4 +575,57 @@ test("restore-from-backup restores the production bodies-at-rest shape and the s
   assert.equal(payload.contentVerification, "full");
   const message = target.room("commons").state.messages.find(entry => entry.id === messageId);
   assert.equal(message?.body, body, "the slim body round-trips through the restore");
+});
+
+for (const failure of ["rows", "permit", "foreign-keys"]) {
+  test(`restore-from-backup reports ${failure} cleanup failure after the final audit rejects restored data`, async t => {
+    const kv = fakeKv();
+    await writeKvBackup(kv,KEY,await legacy44RestoreSource(),{partBytes:2048});
+    const target = openStore(t, "restore-cleanup-failed-");
+    let finalAuditRejected = false;
+    t.mock.method(target, "verifyInvitationAudit", () => { finalAuditRejected = true; throw new Error("Restore requires operator reconciliation"); });
+    const prepare = target.db.prepare.bind(target.db);
+    t.mock.method(target.db, "prepare", (sql, ...args) => {
+      if (finalAuditRejected && (failure === "rows" && sql === 'DELETE FROM "rooms"'
+        || failure === "permit" && sql === "UPDATE public_work_claim_writer_permit SET enabled=0 WHERE singleton=1"))
+        throw new Error("Injected cleanup write failure");
+      return prepare(sql, ...args);
+    });
+    const exec = target.db.exec.bind(target.db);
+    t.mock.method(target.db, "exec", (sql, ...args) => {
+      if (finalAuditRejected && failure === "foreign-keys" && sql === "PRAGMA foreign_keys=ON")
+        throw new Error("Injected foreign-key restoration failure");
+      return exec(sql, ...args);
+    });
+    const response = await operatorRestoreFromBackupResponse(fakeRequest({ key: KEY }), OPERATOR_TOKEN, target, kv);
+    assert.equal(response.status, 422);
+    const result = await response.json();
+    assert.equal(result.error.code, "restore_verification_failed");
+    assert.equal(result.error.message, "Restore requires operator reconciliation", "cleanup must preserve the original failure");
+    if (failure === "rows") assert.ok(prepare("SELECT count(*) AS n FROM rooms").get().n > 0,
+      "failed cleanup really leaves restored data behind");
+    assert.equal(result.error.cleanupFailed, true, "operator must not mistake this destination for empty and retryable");
+  });
+}
+
+
+test("final foreign-key restoration failure aborts the otherwise successful replay", t => {
+  const seeded = seedStore(t);
+  const target = openStore(t, "restore-final-fk-failed-");
+  const session = createBackupReplaySession(target);
+  session.writeText(exportNdjsonText(seeded.db));
+  const original = new Error("Injected final foreign-key restoration failure");
+  const exec = target.db.exec.bind(target.db);
+  let attempts = 0;
+  t.mock.method(target.db, "exec", (sql, ...args) => {
+    if (sql === "PRAGMA foreign_keys=ON" && ++attempts === 1) throw original;
+    return exec(sql, ...args);
+  });
+  assert.throws(() => session.finish(), error => error === original);
+  const cleanup = session.abort();
+  assert.equal(cleanup.cleaned, true);
+  assert.equal(cleanup.skipped, false, "failed finalization must not look like a successful settled restore");
+  assert.equal(target.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 0);
+  assert.equal(target.db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
+  assert.strictEqual(session.abort(), cleanup, "repeat abort preserves the original outcome without deleting again");
 });

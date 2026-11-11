@@ -54,12 +54,14 @@ export function createRateLimiter({ store, now, capacity = 60, refillPerSecond =
     if (bucket.tokens >= 1) {
       bucket.tokens -= 1;
       buckets.set(identityId, bucket);
-      return Object.freeze({ allowed: true, retryAfterMs: 0,
-        message: "OK" });
+      return Object.freeze({ allowed: true, retryAfterMs: 0, remaining: Math.floor(bucket.tokens),
+        nextAllowedAfterMs: Math.ceil(Math.max(0, 1 - bucket.tokens) / refillPerSecond * 1000),
+        resetAfterMs: Math.ceil((capacity - bucket.tokens) / refillPerSecond * 1000), message: "OK" });
     }
     const retryAfterMs = Math.ceil((1 - bucket.tokens) / refillPerSecond * 1000);
     const seconds = Math.ceil(retryAfterMs / 1000);
-    return Object.freeze({ allowed: false, retryAfterMs,
+    return Object.freeze({ allowed: false, retryAfterMs, remaining: 0, nextAllowedAfterMs: retryAfterMs,
+      resetAfterMs: Math.ceil((capacity - bucket.tokens) / refillPerSecond * 1000),
       message: `Rate limit reached. Please wait ${seconds} second${seconds === 1 ? "" : "s"} and try again.` });
   };
   // Return one token spent by an earlier check() — for callers whose action

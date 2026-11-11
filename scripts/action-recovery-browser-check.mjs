@@ -1,4 +1,4 @@
-import { clickChrome, clickWorkAction, enableHumanAdvanced } from "./room-chrome.mjs";
+import { clickChrome, clickWorkAction, enableHumanAdvanced, openWorkFromSearch } from "./room-chrome.mjs";
 // Simulated human flows in disposable loopback rooms. No external work or evidence is fetched.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -69,7 +69,7 @@ async function setup(t, { action = "complete", mobile = false, live = true, adva
   await login(action === "verify" ? "human-reviewer" : "owner");
   const card = page.locator(`[data-work-record-id="${workId}"]`), dialog = page.locator("#action-dialog"), form = page.locator("#action-form"), save = form.locator("button[type=submit]");
   const input = name => page.locator(`#action-fields [name='${name}']`);
-  const open = async (selected = action) => { await clickWorkAction(card, selected); await dialog.waitFor({ state: "visible" }); };
+  const open = async (selected = action) => { if (!await card.isVisible()) await openWorkFromSearch(page, workId, "Synthetic room result"); await clickWorkAction(card, selected); await dialog.waitFor({ state: "visible" }); };
   const fill = async () => {
     const values = action === "complete" ? { producerId: "owner", summary: "Synthetic result with café and 🪷", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", nextAction: "Review the exact result",
         // Slice 5: the complete form requires signed evidence JSON; native validation blocks submission without it.
@@ -397,7 +397,7 @@ for(const replacement of ['revision','session','account']) test(`human approval 
       f.send(T.WORK_ACCEPTED,{workItemId:'replacement-work',expectedRevision:0},'guest');
     }
     await f.login(replacement==='account'?'guest':'owner');
-    if(replacement==='account') {await clickWorkAction(page.locator('[data-work-record-id="replacement-work"]'),'block');await f.dialog.waitFor({state:'visible'});}
+    if(replacement==='account') {await openWorkFromSearch(page,"replacement-work","Replacement account task");await clickWorkAction(page.locator('[data-work-record-id="replacement-work"]'),'block');await f.dialog.waitFor({state:'visible'});}
     else await f.open('block');
     await f.input('reason').fill('Replacement session draft.');
     release();await page.waitForFunction(()=>window.oldActionRead);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));

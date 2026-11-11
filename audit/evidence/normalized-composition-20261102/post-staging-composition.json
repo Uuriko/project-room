@@ -1,0 +1,21 @@
+{
+  "stagedHead": "8e65a6e73",
+  "attentionPrivacy": {
+    "head": "645857cd4",
+    "tests": 34,
+    "pass": 29,
+    "fail": 5,
+    "remaining": "private work snapshot/search and legacy fullsnapshot/summary assumptions"
+  },
+  "spendResume": {
+    "head": "2b47527fa",
+    "tests": 29,
+    "pass": 29,
+    "fail": 0
+  },
+  "reviewFindings": [
+    "RequestRuns v1 cap before viewer filtering leaks a hidden-run threshold; queue is fixing, not privacy-qualified",
+    "Spend ledger remains O(all work) complete scan; correctness port, not final performance optimization"
+  ],
+  "productionChanged": false
+}

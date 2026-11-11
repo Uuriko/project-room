@@ -1,0 +1,37 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":52,"integrity":"deferred","phases":{"schema":{"ms":13,"rowsRead":8232},"plugin":{"ms":23,"rowsRead":40866},"fence":{"ms":12,"rowsRead":45305},"verifies":{"ms":3,"rowsRead":20795},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":52,"legacyColdStartMs":52,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":46,"integrity":"deferred","phases":{"schema":{"ms":10,"rowsRead":8232},"plugin":{"ms":20,"rowsRead":40866},"fence":{"ms":10,"rowsRead":45305},"verifies":{"ms":2,"rowsRead":20795},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":46,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":848},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":1516,"projectionBytes":131}
+{"event":"room.store_initialized","initializationMs":4,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":1,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":848},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":5516,"projectionBytes":131}
+{"event":"room.store_initialized","initializationMs":1,"legacyColdStartMs":1,"clockSemantics":"io-bound","cpuMeasured":false}
+✖ actual Worker normalized reply list and selected source costs remain bounded across 1k and5k background messages at legal500 request capacity (2129.358125ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2267.734917
+
+✖ failing tests:
+
+test at cloudflare/current-replies-worker.check.mjs:2:1
+✖ actual Worker normalized reply list and selected source costs remain bounded across 1k and5k background messages at legal500 request capacity (2129.358125ms)
+  AssertionError [ERR_ASSERTION]: [{"count":1000,"cold":{"statements":80,"rowsRead":1789,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":57065,"eventPayloadBytes":0,"rawRuntime":{"statements":0,"rowsWritten":0,"unknown":0}},"warm":{"statements":80,"rowsRead":203,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":57065,"eventPayloadBytes":0,"rawRuntime":{"statements":0,"rowsWritten":0,"unknown":0}},"selected":{"statements":105,"rowsRead":227,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":86886,"eventPayloadBytes":0,"rawRuntime":{"statements":0,"rowsWritten":0,"unknown":0}}},{"count":5000,"cold":{"statements":80,"rowsRead":1789,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":49203,"eventPayloadBytes":0,"rawRuntime":{"statements":0,"rowsWritten":0,"unknown":0}},"warm":{"statements":80,"rowsRead":203,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":49203,"eventPayloadBytes":0,"rawRuntime":{"statements":0,"rowsWritten":0,"unknown":0}},"selected":{"statements":107,"rowsRead":229,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":94696,"eventPayloadBytes":0,"rawRuntime":{"statements":0,"rowsWritten":0,"unknown":0}}}]
+  
+  229 !== 227
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-reply-reader-1101/cloudflare/current-replies-worker.check.mjs:17:47)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 229,
+    expected: 227,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,64 @@
+  /api/operator/attachments/live-index/plan:
+    post:
+      x-room-permission: operator
+      summary: Plan optional database-wide attachment live index adoption
+      description: >-
+        Existing Operator-token management door; not a room permission or MCP tool.
+        Body {reason, reverse?}. Scalar admission covers every attachment row in
+        this database, including terminal tombstones and every room, before
+        admitted key text is read. Limits are 32768 rows, 4 MiB key/state bytes
+        and 64 MiB stored variable-column bytes, including blob lengths.
+        These optional-operation limits do not change attachment quotas.
+        Plans write an operator audit only. Over-budget inputs retain the existing
+        attachment path; no constructor, flag or schema stamp installs the index.
+      security:
+        - operatorToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string }
+                reverse: { type: boolean, default: false }
+      responses:
+        '200': { description: "Bounded inventory, actual index state, limits and exact planHash; no payloads or row identifiers." }
+        '404': { description: Operator surface unset or credential not accepted }
+        '409': { description: Admission refused, read-only store or conflicting schema/index definition }
+        '422': { description: Invalid operator request }
+  /api/operator/attachments/live-index/execute:
+    post:
+      x-room-permission: operator
+      summary: Execute the exact bounded attachment index plan
+      description: >-
+        Body {reason, reverse?, planHash, requestId}. Fresh global scalar admission
+        and dependency hash verification run in the writer transaction before
+        CREATE INDEX or explicit reverse DROP INDEX. Index and immutable receipt
+        commit atomically. An exact requestId retry returns the original receipt
+        before inspecting current state; changed input conflicts. The receipt is
+        historical evidence, not a claim that the index is still present later.
+        Reversal drops only the exact optional index and retains every row,
+        primary key, owner index and existing attachment permissions.
+      security:
+        - operatorToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason, planHash, requestId]
+              properties:
+                reason: { type: string }
+                reverse: { type: boolean, default: false }
+                planHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+                requestId: { type: string, pattern: '^[A-Za-z0-9:_-]{1,128}$' }
+      responses:
+        '200': { description: Original saved receipt, changed/installed result and optional duplicate marker }
+        '404': { description: Operator surface unset or credential not accepted }
+        '409': { description: Admission, exact-plan, idempotency, schema or read-only refusal }
+        '422': { description: Invalid operator request }

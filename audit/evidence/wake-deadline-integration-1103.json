@@ -1,0 +1,40 @@
+{
+  "baseMain": "f70d042eadf0161553c1a8d8f58878c804f7b0ea",
+  "wakeSources": [
+    "c47419c54c2e7c50e008dc49956d4eab1890fb78",
+    "6e4c90eb0654a1d9520ad5f7f4503a02d7a0e250",
+    "cbfe7fea6b0bc657a5c473c0e8836c430187d87e"
+  ],
+  "node": "24.22.1",
+  "affectedNode": {
+    "pass": 45,
+    "fail": 0,
+    "note": "45/45 supersets on prior composed candidate included held deadline. Separate current wake-only qualification follows."
+  },
+  "productionFlags": "Both normal deployments explicitly force ROOM_WAKE_ADAPTERS:0 and ROOM_ASSIGNMENT_DEADLINES:0, staging too. No relays/providers configured or enabled.",
+  "fixes": [
+    "Fresh coalesced generation resets bounded retry eligibility without same-ID renewal.",
+    "Earliest coalescer retry participates in scheduler even when initial delivery rows drained.",
+    "Each bounded retry has distinct durable idempotency suffix; same attempt remains deduped.",
+    "Actual acknowledged signal IDs stop only matching latest generation and room; late old ack cannot stop new wake."
+  ],
+  "limits": [
+    "Coalescer state is memory-only; no new durable host-wake guarantee or actual provider end-to-end proof.",
+    "Assignment feature remains disabled; its all-room discovery/hydration path is not qualified for production-size enablement.",
+    "Fake DNS/transport and injected times used for Node integration, not real wallclock provider latency."
+  ],
+  "deadlineSourceHeld": "44116b0b73a267cf60e7c85fa0d0968579cc5b85",
+  "deadlineHold": "NOT INCLUDED. Actual assignment-only fixture leaves claim-pr-sync disabled and alarm null; no bounded temporal index. Keep5858 out of this release rather than add all-room hydration or busy polling.",
+  "wakeOnlyCurrentQualification": {
+    "pass": 77,
+    "fail": 0,
+    "log": "/tmp/root-wake-only-final.log",
+    "coverage": "wake pure and actual scheduler/ack; job heartbeat; deployment argv; qualified manual rollback"
+  },
+  "nativeFeatureOffSuperset": {
+    "pass": 14,
+    "fail": 0,
+    "log": "/tmp/root-wake-native-off.log",
+    "limit": "Prior composed source included the held deadline module; same wake runtime and explicit off behavior. No adapter-enabled real DO/provider guarantee."
+  }
+}

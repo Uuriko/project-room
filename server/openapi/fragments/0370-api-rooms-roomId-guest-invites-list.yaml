@@ -1,0 +1,18 @@
+  /api/rooms/{roomId}/guest-invites-list:
+    post:
+      x-consumer: agent-api
+      summary: List GX guest invites
+      description: >-
+        Owner by ID with `manage_members`. Returns every invite for the room
+        (active, redeemed, revoked, expired-by-window) without code hashes
+        or plaintext codes. Empty body. 30 per address per minute.
+        Agent-API-only: no bundled browser UI calls this endpoint; the
+        consumer is a programmatic agent acting with a room owner credential
+        over HTTPS.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: Invite list }
+        '403': { description: owner_required }
+        '429': { description: rate_limited }

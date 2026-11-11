@@ -1,0 +1,30 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":49,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":53,"heapBytes":42425696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":50,"legacyColdStartMs":49,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ late heartbeat ack of old signal preserves the fresh coalesced generation until its own ack (85.33225ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 275.822875
+
+✖ failing tests:
+
+test at tests/wake-adapters-scheduler.test.mjs:55:1
+✖ late heartbeat ack of old signal preserves the fresh coalesced generation until its own ack (85.33225ms)
+  AssertionError [ERR_ASSERTION]: old ack cannot consume newer generation
+  
+  'acked' !== 'pending'
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/successor-wake-5857/tests/wake-adapters-scheduler.test.mjs:64:9)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'acked',
+    expected: 'pending',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

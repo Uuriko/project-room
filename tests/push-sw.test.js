@@ -58,7 +58,9 @@ function load({ actions = false, failFetch = false, clients = [], cacheNames = [
   };
   const fetch = async (request) => {
     if (failFetch) throw new Error("offline");
-    return { ok: true, url: request.url, network: true };
+    const response = { ok: true, url: request.url, network: true };
+    response.clone = () => response;
+    return response;
   };
   vm.runInContext(source, vm.createContext({
     self, caches, navigator, Notification, fetch, URL, Response, Promise
@@ -94,6 +96,9 @@ test("fetch never caches app code, and a failed navigation uses the offline page
   const api = await fire(online.listeners, "fetch", { request: { url: "https://room.example/api/rooms", mode: "cors" } });
   assert.equal(api.network, true);
   assert.deepEqual(online.puts, []);
+  const css = await fire(online.listeners, "fetch", { request: { url: "https://room.example/src/styles.css", mode: "cors", method: "GET" } });
+  assert.equal(css.network, true);
+  assert.deepEqual(online.puts, ["https://room.example/src/styles.css"]);
 
   const offline = load({ failFetch: true });
   await fire(offline.listeners, "install", {});

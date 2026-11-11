@@ -1,0 +1,62 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":53,"integrity":"deferred","phases":{"schema":{"ms":11,"rowsRead":8402},"plugin":{"ms":22,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":54,"legacyColdStartMs":53,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":58,"storeInitializationMs":54}
+{"event":"room.request","method":"GET","path":"/__test-provision","status":200,"totalMs":75,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":53,"firstRequestMs":11,"storeInitializationMs":54,"durableObjectInitializationMs":58,"rooms":0,"sequences":0,"projectionBytes":0,"phases":{"schema":{"ms":11,"rowsRead":8402},"plugin":{"ms":22,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":11}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":12,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":11,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+room diagnostic op_afXa6r-9 404 not_found not_found /api/rooms/:roomId/inbound-hooks
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/inbound-hooks","status":404,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/inbound-hooks","status":404,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_lOb0TUbM 404 not_found not_found /api/rooms/:roomId/automations
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/automations","status":404,"appMs":0}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/automations","status":404,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_nZYxKOAM 404 not_found not_found /api/rooms/:roomId/board-views
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/board-views","status":404,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/board-views","status":404,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_iq9K1EiY 404 not_found not_found /api/rooms/:roomId/work-claims/absent/delegate
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/work-claims/absent/delegate","status":404,"appMs":4}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/work-claims/absent/delegate","status":404,"totalMs":4,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":4,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_J4LFmV6Y 404 not_found not_found /api/rooms/:roomId/work-claims/absent/approval
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/work-claims/absent/approval","status":404,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/work-claims/absent/approval","status":404,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+✔ Native integration and delegation doors remain off without feature configuration (919.371667ms)
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":49,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":20,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":2,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":49,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":55,"storeInitializationMs":51}
+{"event":"room.request","method":"GET","path":"/__test-provision","status":200,"totalMs":67,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":49,"firstRequestMs":12,"storeInitializationMs":51,"durableObjectInitializationMs":55,"rooms":0,"sequences":0,"projectionBytes":0,"phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":20,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":2,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/work-claims","status":201,"appMs":12}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/work-claims","status":201,"totalMs":14,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":12,"queueMs":2,"residualMs":2,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/work-claims/native-plan/update","status":200,"appMs":3}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/work-claims/native-plan/update","status":200,"totalMs":4,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/board-views","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/board-views","status":201,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-claims","status":200,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-claims","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_ZNSoDV4o 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-claims","status":422,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-claims","status":422,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":900},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":4,"projectionBytes":719}
+{"event":"room.store_initialized","initializationMs":3,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":8,"storeInitializationMs":3}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":3,"firstRequestMs":10,"storeInitializationMs":3,"durableObjectInitializationMs":8,"rooms":1,"sequences":4,"projectionBytes":719,"phases":{"schema":{"ms":1,"rowsRead":900},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-claims","status":200,"appMs":10}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-claims","status":200,"totalMs":21,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":10,"queueMs":11,"residualMs":11,"residualAttribution":"unattributed"}
+✔ Native opt-in planning and saved view survive a cold restart (1130.748875ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2210.622208

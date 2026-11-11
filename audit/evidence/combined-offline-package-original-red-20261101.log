@@ -1,0 +1,130 @@
+✔ runtime and schema pins are exact and deterministic (2.968083ms)
+✔ file pins change when bytes change and are sorted (1.810208ms)
+✔ CI runtime must satisfy engines.node (1.54125ms)
+✔ schema pin refuses a missing version marker (1.818ms)
+✔ drift names the changed file, added file and removed file (1.833167ms)
+✔ drift refuses malformed manifests without reading sections (0.078083ms)
+✔ frozen deployment manifest pins the recovery helper and production workflow bytes (0.416708ms)
+✔ committed candidate manifest has zero drift from the tree (6.140667ms)
+✔ every currently served asset is registered in the exact-source runtime (0.913292ms)
+✖ exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data (6334.46825ms)
+✖ every module in the server import closure is in the runtime-package allowlist (20.932667ms)
+✖ uncommitted candidate packages cold in an isolated synthetic commit, including request observer dependencies (6043.968459ms)
+✔ Codex host entrypoint and every dependency ship without scratch demo fixtures (2.328667ms)
+✔ runtime preflight catches unregistered client imports before cold packaging (0.271375ms)
+✖ runtime preflight checks the working source without making a package (107.948542ms)
+✖ project preflight composes dependency, coverage and runtime checks (424.882625ms)
+✖ offline schema45 archive cold-imports normalized serving and refuses an omitted dependency (6066.8525ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 11
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19056.490042
+
+✖ failing tests:
+
+test at tests/runtime-package.test.js:23:1
+✖ exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data (6334.46825ms)
+  Error: Runtime package does not match its exact allowlisted contract: server/current-room-repository.mjs imports "./current-work-capacity.mjs" (resolves to server/current-work-capacity.mjs), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs
+      at check (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:476:25)
+      at verifyRuntimeImports (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:593:7)
+      at verifyRuntimePackage (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:702:3)
+      at createRuntimePackage (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:645:10)
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-combined-offline-package-1101/tests/runtime-package.test.js:28:17)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+
+test at tests/runtime-package.test.js:237:1
+✖ every module in the server import closure is in the runtime-package allowlist (20.932667ms)
+  AssertionError [ERR_ASSERTION]: Imported but not allowlisted for the runtime package. Add to scripts/runtime-package.mjs: server/current-work-capacity.mjs
+  + actual - expected
+  
+  + [
+  +   'server/current-work-capacity.mjs'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-combined-offline-package-1101/tests/runtime-package.test.js:245:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'server/current-work-capacity.mjs' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/runtime-package.test.js:249:1
+✖ uncommitted candidate packages cold in an isolated synthetic commit, including request observer dependencies (6043.968459ms)
+  Error: Runtime package does not match its exact allowlisted contract: server/current-room-repository.mjs imports "./current-work-capacity.mjs" (resolves to server/current-work-capacity.mjs), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs
+      at check (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:476:25)
+      at verifyRuntimeImports (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:593:7)
+      at verifyRuntimePackage (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:702:3)
+      at createRuntimePackage (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:645:10)
+      at candidateRuntimeFixture (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/candidate-runtime-fixture.mjs:11:3)
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-combined-offline-package-1101/tests/runtime-package.test.js:252:21)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+
+test at tests/runtime-package.test.js:317:1
+✖ runtime preflight checks the working source without making a package (107.948542ms)
+  Error: Runtime package does not match its exact allowlisted contract: server/replay-cutover.mjs imports "./current-work-capacity.mjs" (resolves to server/current-work-capacity.mjs), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs
+      at check (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:476:25)
+      at verifyRuntimeImports (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:593:7)
+      at verifyRuntimeSource (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:606:3)
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-combined-offline-package-1101/tests/runtime-package.test.js:318:13)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+test at tests/runtime-package.test.js:324:1
+✖ project preflight composes dependency, coverage and runtime checks (424.882625ms)
+  AssertionError [ERR_ASSERTION]: Runtime package does not match its exact allowlisted contract: server/replay-cutover.mjs imports "./current-work-capacity.mjs" (resolves to server/current-work-capacity.mjs), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs
+  
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-combined-offline-package-1101/tests/runtime-package.test.js:326:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/runtime-package.test.js:333:1
+✖ offline schema45 archive cold-imports normalized serving and refuses an omitted dependency (6066.8525ms)
+  Error: Runtime package does not match its exact allowlisted contract: server/current-room-repository.mjs imports "./current-work-capacity.mjs" (resolves to server/current-work-capacity.mjs), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs
+      at check (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:476:25)
+      at verifyRuntimeImports (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:593:7)
+      at verifyRuntimePackage (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:702:3)
+      at createRuntimePackage (file:///Users/johnpotter/src/pr-combined-offline-package-1101/scripts/runtime-package.mjs:645:10)
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-combined-offline-package-1101/tests/runtime-package.test.js:337:61)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)

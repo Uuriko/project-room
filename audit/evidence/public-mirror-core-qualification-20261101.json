@@ -1,0 +1,28 @@
+{
+  "pr": 5623,
+  "head": "5db7b2c97e27ed0c0c102f0b910586b283a7c311",
+  "merge": "dc4d96aa744e3e5035e23cb223a7d07cafdca9f7",
+  "composition": "bdf34940a",
+  "tree": "e847b98f54fb29c4f549f71e83e38b8657562022",
+  "treeMatchesMain": true,
+  "baseline": {
+    "pass": 1,
+    "fail": 6
+  },
+  "composed": {
+    "focusedPass": 40,
+    "readModelPass": 9,
+    "fail": 0,
+    "skip": 0
+  },
+  "limits": [
+    "Write-triggered repair only; periodic reconciliation open",
+    "Initial missing-head merge did not happen; its33baseline tests excluded from cure proof",
+    "Not deployed at receipt creation"
+  ],
+  "logs": {
+    "mirror-core-current-baseline-red-1101.log": "b8a392e52036d59d727c2d1c5b7230aa3604cbe7c539c79b9808f1f538cbcc17",
+    "mirror-core-actual-composed-1101.log": "39bc0d0323a2a8a737e3a57833ed10e9a598dbf38b9b63198cae7591ace5ca8f",
+    "mirror-core-read-budget-1101.log": "d3f6ac68f723b1477da608ae5ddca79be0e156cc926acce9f3812a5ad7f54067"
+  }
+}

@@ -1,0 +1,36 @@
+✔ shared retained checkpoint default preserves original null timestamp and no-op semantics (0.492916ms)
+✔ restore-only sealed scan partitions journals, auxiliary maps and event log across cold cursors (14.390375ms)
+✔ legal checkpoint beyond cutover4MiB and individual128KiB limits remains byte framed (101.689542ms)
+✔ sealed source framing cannot be used by old cutover scanner or escape source bounds (0.169042ms)
+✔ malformed checkpoint framing and malformed complete leaves cannot grant completion (0.191792ms)
+✔ same reducer common replay uses point reads and matches full 1000 message history (92.123292ms)
+ℹ {"messages":1000,"maxPointReads":8,"physicalSQLiteCostMeasured":false,"checkpointAndGlobalPlansComplete":false}
+✔ same reducer common replay uses point reads and matches full 5000 message history (437.818875ms)
+ℹ {"messages":5000,"maxPointReads":8,"physicalSQLiteCostMeasured":false,"checkpointAndGlobalPlansComplete":false}
+✔ same reducer long-chain and private request branches preserve context, channel copies and work transitions (23.042ms)
+✔ same reducer refuses invalid parents, duplicates and idempotency conflicts without producing partial effects (0.696375ms)
+✔ unqualified event and stamped-name plans are explicitly incomplete rather than certified (0.06925ms)
+✔ scoped root-channel readers cannot bypass direct parent existence or channel gates (0.430542ms)
+✔ common replay does not accept asynchronous or malformed record readers (0.090708ms)
+✔ addressed scalar policy, member preference and thin receipt handlers preserve full reducer authority (3.855292ms)
+✔ Muse-only development access uses exact addressed owner and rejects ordinary-room input (0.482ms)
+✔ independently folded insertion ordinals preserve source order rather than lexical SQL order (0.638959ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":53,"integrity":"eager","phases":{"schema":{"ms":13,"rowsRead":0},"plugin":{"ms":21,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":54,"heapBytes":36755344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":54,"legacyColdStartMs":53,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":33056376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ legal long fingerprint survives bounded scratch parts, unicode boundaries and cold adapter (25.843417ms)
+✔ missing, reordered, mutated and ambiguous base64 parts fail closed (7.354666ms)
+✔ insufficient transaction row admission leaves old working head and all parts unchanged (5.471916ms)
+✔ source scalar admission and exact part index are enforced (1.092458ms)
+✔ existing guarded SQLite scratch atomically checkpoints large replay value and survives cold reopen (84.440459ms)
+✔ actual process exit preserves reducer patch parts and exact independently folded cursor together (1133.345333ms)
+✔ declared entity bytes are admitted before allocating or fetching any large body part (2.635042ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1378.203083

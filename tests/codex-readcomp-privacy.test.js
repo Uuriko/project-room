@@ -7,6 +7,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { RoomAgentClient } from '../client/room-agent.mjs';
 import { readWorkSelection } from '../client/work-preparation.mjs';
 import { textVersion } from '../server/text-results.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // CX3 composition gate (Codex lanes #3229 + #3295): native result text follows
 // artifact-party authorization on the ACTUAL composed read paths. The evidence
@@ -31,7 +32,7 @@ async function setup(t) {
   // Fresh linked identities: the hosted door requires identity secrets, and
   // the DM's addressee must be one of the parties we can authenticate as.
   const linkMember = name => { const identity = f.store.identities.create(name);
-    f.store.identities.link(f.keys.owner, 'commons', { identityId: identity.identityId, displayName: name, permissions: [] });
+    linkWithProof(f.store, f.keys.owner, 'commons', identity, { displayName: name, permissions: [] });
     return identity; };
   const party = linkMember('Party reader'), third = linkMember('Third member');
   const clientFor = (memberId, token) => new RoomAgentClient({ version: 1, origin, roomId: 'commons', memberId, token });

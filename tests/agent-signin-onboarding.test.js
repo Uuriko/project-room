@@ -107,10 +107,10 @@ test("first-run: card mounts once, is dismissible, and never shows again", (t) =
   } });
   assert.ok(card, "mounts on first sight");
   assert.match(card.innerHTML, /You're in the room/);
-  assert.match(card.innerHTML, /DMs are open by default/);
   assert.match(card.innerHTML, /data-step="greet"/);
   assert.match(card.innerHTML, /data-step="discover"/);
-  assert.match(card.innerHTML, /data-step="skill"/);
+  assert.match(card.innerHTML, /data-step="board"/);
+  assert.doesNotMatch(card.innerHTML, /data-step="skill"/);
   // The greet step fires its action and dismisses.
   card.fireClick("greet");
   assert.deepEqual(calls, ["greet"]);
@@ -122,7 +122,7 @@ test("first-run: card mounts once, is dismissible, and never shows again", (t) =
   assert.ok(elements.length > 0);
 });
 
-test("first-run: discover step fires and dismisses; skill step reveals the entry-points link", (t) => {
+test("first-run: discover step fires and dismisses", (t) => {
   installDom(t);
   const calls = [];
   const card = mountAgentFirstRun({ container: globalThis.document.body, actions: {
@@ -132,21 +132,34 @@ test("first-run: discover step fires and dismisses; skill step reveals the entry
   card.fireClick("discover");
   assert.deepEqual(calls, ["discover"]);
   assert.equal(card.removed, true);
+});
 
-  globalThis.localStorage.removeItem(FIRST_RUN_SEEN_KEY);
-  const card2 = mountAgentFirstRun({ container: globalThis.document.body, actions: { baseUrl: "https://room.example/" } });
-  card2.fireClick("skill");
-  assert.equal(card2.removed, false, "skill step keeps the card open");
-  const foot = card2.children.find((c) => c.className === "agent-first-run-foot");
-  const hint = foot.children.find((c) => c.className === "agent-first-run-hint");
-  assert.equal(hint.hidden, false);
-  const link = hint.children.find((c) => c.tagName === "A");
-  assert.equal(link.href, "https://room.example/agents.json");
-  assert.equal(link.target, "_blank");
-  // Dismiss still works from the skill view.
-  card2.fireClick("dismiss");
-  assert.equal(card2.removed, true);
-  assert.equal(agentFirstRunSeen(), true);
+test("first-run: board step dismisses when the host opens the board, and explains when it cannot", (t) => {
+  installDom(t);
+  const calls = [];
+  const card = mountAgentFirstRun({ container: globalThis.document.body, actions: {
+    board: () => { calls.push("board"); return true; }
+  } });
+  card.fireClick("board");
+  assert.deepEqual(calls, ["board"]);
+  assert.equal(card.removed, true, "a opened board dismisses the card");
+
+  const unavailable = (name, boardAction) => {
+    globalThis.localStorage.removeItem(FIRST_RUN_SEEN_KEY);
+    const c = mountAgentFirstRun({ container: globalThis.document.body, actions: { board: boardAction } });
+    c.fireClick("board");
+    assert.equal(c.removed, false, `${name}: the card stays open`);
+    const foot = c.children.find((x) => x.className === "agent-first-run-foot");
+    const hint = foot.children.find((x) => x.className === "agent-first-run-hint");
+    assert.equal(hint.hidden, false, `${name}: the unavailable-board hint shows`);
+    assert.match(String(hint.textContent), /work board/);
+    // Dismiss still works from the unavailable view.
+    c.fireClick("dismiss");
+    assert.equal(c.removed, true);
+    assert.equal(agentFirstRunSeen(), true);
+  };
+  unavailable("a host that reports no board", () => false);
+  unavailable("a board action that throws", () => { throw new Error("boom"); });
 });
 
 test("first-run: a failing step action never breaks the card", (t) => {
@@ -161,4 +174,11 @@ test("first-run: a failing step action never breaks the card", (t) => {
 test("skillPackLink points at the served machine-readable entry points", () => {
   assert.equal(skillPackLink("https://room.trydemigod.com/"), "https://room.trydemigod.com/agents.json");
   assert.equal(skillPackLink(""), "/agents.json");
+});
+
+test("first-run: task action is primary before either dismissing social action", (t) => {
+  installDom(t);
+  const card = mountAgentFirstRun({ container: globalThis.document.body });
+  const actions = [...card.innerHTML.matchAll(/data-step="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(actions, ["board", "greet", "discover"], "the first useful-work action must precede actions that dismiss the card");
 });

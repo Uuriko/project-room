@@ -170,7 +170,7 @@ async function execute(path) {
   for (const name of names) {
     if (!targets[name]) continue;
     command(['pnpm', 'exec', 'wrangler', 'rollback', targets[name].versionId, ...(name === 'prod' ? ['--env', 'production'] : []),
-      '--message', `rollback-prod run ${process.env.GITHUB_RUN_ID}: ${(process.env.REASON ?? '').slice(0, 150)}`, '--yes'], 'cloudflare');
+      '--durable-objects-code-update-mode', 'immediate', '--message', `rollback-prod run ${process.env.GITHUB_RUN_ID}: ${(process.env.REASON ?? '').slice(0, 150)}`, '--yes'], 'cloudflare');
   }
 }
 

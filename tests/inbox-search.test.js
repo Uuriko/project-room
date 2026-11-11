@@ -33,6 +33,27 @@ test("limit caps the result list", () => {
   assert.equal(result.results.length, 1);
   assert.equal(result.total, 2);
 });
+test("non-Latin scripts index and are searchable in their own script", () => {
+  const index = indexMessages([
+    { id: "ar", subject: "", body: "مرحبا بالعالم هذا اختبار" },
+    { id: "ru", subject: "", body: "привет мир тест" },
+    { id: "zh", subject: "", body: "你好 世界 测试" },
+    { id: "fr", subject: "", body: "café au lait" },
+  ]);
+  assert.deepEqual(search(index, "مرحبا").results.map(r => r.message.id), ["ar"]);
+  assert.deepEqual(search(index, "привет").results.map(r => r.message.id), ["ru"]);
+  assert.deepEqual(search(index, "世界").results.map(r => r.message.id), ["zh"]);
+  assert.deepEqual(search(index, "café").results.map(r => r.message.id), ["fr"]);
+});
+test("ASCII tokenisation is unchanged", () => {
+  const index = indexMessages([
+    { id: "m-1", subject: "Mac provider onboarding", body: "Welcome aboard! Your Mac is ready to compute." },
+    { id: "m-2", subject: "Invoice 42", body: "Your Mac compute invoice for September. Order 123-456, don't split_a-part x" },
+    { id: "m-3", subject: "Hello", body: "Just saying hello, no computers here. A I an it is on up" },
+  ]);
+  assert.deepEqual([...index.terms.keys()].sort(), ["123", "42", "456", "aboard", "an", "compute", "computers", "don", "for", "hello", "here", "invoice", "is", "it", "just", "mac", "no", "on", "onboarding", "order", "part", "provider", "ready", "saying", "september", "split", "to", "up", "welcome", "your"]);
+  assert.deepEqual(search(index, "mac compute").results.map(r => [r.message.id, r.score]), [["m-1", 3], ["m-2", 2]]);
+});
 test("malformed inputs are refused", () => {
   throwsCode(() => indexMessages(null), "invalid_search_input");
   throwsCode(() => indexMessages([{ id: "m-1" }, { id: "m-1" }]), "invalid_search_input");

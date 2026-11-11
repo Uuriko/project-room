@@ -228,3 +228,40 @@ test("a command after body recovery caches the same restored text as a cold read
   finally { cold.close(); }
   assert.equal(warm.state.messages.find(m => m.id === "recover").body, "restore:" + "x".repeat(870));
 });
+
+
+test("single-room writes preserve unrelated warm reads without hiding same-room or bulk changes", t => {
+  const f = fixture(t);
+  f.store.initialize(initialRoom("other"));
+  const otherOwner = f.store.issueAccessKey("other", "owner");
+  const original = f.store.room("commons");
+  f.store.room("other");
+  f.store.command(otherOwner, "other", command(T.MESSAGE_POSTED, { messageId: "other-post", body: "other room" }));
+  const reads = f.projectionReads();
+  assert.equal(f.store.room("commons"), original);
+  assert.equal(f.projectionReads(), reads, "other-room command must not reparse this room");
+  for (const sql of [
+    "UPDATE rooms SET projection=? WHERE id=?",
+    "UPDATE rooms SET sequence=?,projection=? WHERE id=?",
+    "UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?"
+  ]) {
+    const before = f.store.room("other");
+    const state = structuredClone(before.state);
+    state.room.title = sql;
+    const args = sql.includes("archived_at") ? [before.sequence, JSON.stringify(state), null, "other"]
+      : sql.includes("sequence") ? [before.sequence, JSON.stringify(state), "other"] : [JSON.stringify(state), "other"];
+    f.store.db.prepare(sql).run(...args);
+    assert.equal(f.store.room("other").state.room.title, sql);
+    assert.equal(f.store.room("commons"), original);
+    const cold = new RoomStore(f.file, { readOnly: true });
+    try { assert.deepEqual(f.store.room("other"), cold.room("other")); }
+    finally { cold.close(); }
+    assert.equal(f.store._projectionCache.bytes, [...f.store._projectionCache.entries.values()].reduce((sum, entry) => sum + entry.weight, 0));
+  }
+  f.store.db.prepare("UPDATE rooms SET projection=projection").run();
+  assert.notEqual(f.store.room("commons"), original, "unclassified/bulk SQL must retain global invalidation");
+  const warmed = f.store.room("commons");
+  f.store.revoke(f.owner);
+  assert.throws(() => f.store.snapshot(f.owner, "commons", null, "work"));
+  assert.equal(f.store.room("commons"), warmed, "authorization is fresh even when projection remains warm");
+});

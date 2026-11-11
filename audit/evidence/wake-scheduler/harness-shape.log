@@ -1,0 +1,43 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":41654960,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":43831720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ drained delivery schedules real job retries, including a fresh coalesced generation, then becomes idle (80.862709ms)
+✔ assignment-only heartbeat acknowledgement stops scheduled rewake (61.681709ms)
+✔ flag is off by default and on only for explicit values (0.318208ms)
+✔ adapter kind is inferred from the target url (0.383417ms)
+✔ bodies are content-free: ids only, unsafe values dropped (0.415583ms)
+✔ bursts coalesce per agent and room, and the next wake carries the count (0.097042ms)
+✔ unread wakes are re-sent up to maxRewakes; an ack stops them (0.089042ms)
+✔ evicts oldest keys past maxKeys (0.055916ms)
+✔ context pointer names where to read, and liveness moves pending -> unresponsive -> stale (0.064375ms)
+✔ a fresh coalesced generation has its own bounded retry budget and ack (0.064583ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 350.245083
+
+✖ failing tests:
+
+test at tests/wake-adapters-scheduler.test.mjs:21:1
+✖ drained delivery schedules real job retries, including a fresh coalesced generation, then becomes idle (80.862709ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + undefined
+  - 'fresh'
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/successor-wake-5857/tests/wake-adapters-scheduler.test.mjs:37:40)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'fresh',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

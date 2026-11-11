@@ -1,0 +1,130 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":41,"heapBytes":30949176,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":15,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":37912832,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ pure: pending hold blocks delivery until the approver approves (2.192375ms)
+✔ route registered; 404 while flag off (52.388875ms)
+✔ flag on: request wakes approver, delivery refused, approve lets it through (41.840208ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":43,"heapBytes":30501184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":15,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":36498656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ automation wake fails closed for former owner and preserves rule (46.465916ms)
+✔ automation open_task fails closed for former owner and preserves rule (34.901458ms)
+✔ runtime and schema pins are exact and deterministic (3.354208ms)
+✔ file pins change when bytes change and are sorted (2.094917ms)
+✔ CI runtime must satisfy engines.node (2.101709ms)
+✔ schema pin refuses a missing version marker (1.782792ms)
+✔ drift names the changed file, added file and removed file (1.885208ms)
+✔ drift refuses malformed manifests without reading sections (0.052291ms)
+✔ frozen deployment manifest pins the recovery helper and production workflow bytes (0.225ms)
+✔ committed candidate manifest has zero drift from the tree (5.161584ms)
+✔ previous delegate loses write authority on reassignment (1.898084ms)
+✔ denied approval cannot deliver until approved again (0.244125ms)
+✔ delegate cannot approve its own work as distinct reviewer (0.228375ms)
+✔ delegate cannot survive release and fresh claim (0.2095ms)
+✔ delegate cannot survive expire and fresh claim (0.16025ms)
+✔ automatic live close honors pending and denied approval; approved control closes (0.414125ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":30885880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":15,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":37818816,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ pure: owner sets and clears delegate; others and terminal claims refused (1.717084ms)
+✔ route is registered and 404s while the flag is off (52.609ms)
+✔ flag on: owner delegates to a member, delegate is woken, owner unchanged (40.083667ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":45492512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":59,"heapBytes":43548456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":43509376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+✔ trigger validation and matching (0.333916ms)
+✔ post-deploy template wakes the assigned agent once per event; off by default; no loops (54.385ms)
+✔ open_task action opens one Board task per event through the real event path (49.618375ms)
+room diagnostic op_M0O4OBug 401 unauthenticated access /api/rooms/:roomId/automations
+room diagnostic op_yLAC_Enr 404 not_found not_found /api/rooms/:roomId/automations
+room diagnostic op_LvkgVWgG 422 unknown_template input /api/rooms/:roomId/automations
+room diagnostic op_2MIxqQl4 422 invalid_trigger input /api/rooms/:roomId/automations
+room diagnostic op_V1-krGQl 404 unknown_rule not_found /api/rooms/:roomId/automations
+✔ admin route: owner only, flag-gated after auth, template creates a disabled rule (80.432042ms)
+✔ trigger states are the real claim states (0.102958ms)
+✔ automation routes are registered rows with parity notes (0.193541ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":49,"heapBytes":41469072,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":47,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+✔ payload parsing keeps text as data and rejects bad shapes (0.333084ms)
+✔ Standard Webhooks verification: tolerance, tamper, rotation list (0.297375ms)
+room diagnostic op_99chArLB 404 not_found not_found /api/rooms/:roomId/inbound-hooks
+room diagnostic op_fE3XbinH 503 inbound_hooks_unavailable unavailable /api/rooms/:roomId/inbound-hooks
+error-trace eid_a89F39KxTPBN fp=624d84937246918a status=503 code=inbound_hooks_unavailable
+room diagnostic op_PaocXC3m 422 unknown_member input /api/rooms/:roomId/inbound-hooks
+✔ signed delivery opens one Board task assigned to the target; off by default (92.072542ms)
+✔ sealed secrets are bound to the hook id and key (0.331708ms)
+✔ inbound hook routes are registered rows with parity notes (0.116625ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":45478456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+room diagnostic op_p2LMExMd 403 insufficient_scope access /api/rooms/:roomId/inbound-hooks
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":47,"heapBytes":52196816,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ inbound-hooks requires rooms:write even for owner API key (87.767416ms)
+room diagnostic op_Y5de6kzL 403 insufficient_scope access /api/rooms/:roomId/automations
+✔ automations requires rooms:write even for owner API key (52.486167ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":45,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":30451096,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":45,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":36164112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":51,"heapBytes":24025792,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":29464696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":34888776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":40333920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":29075536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ revoking a hook while its signed body is pending refuses mutation and replay receipt (54.849166ms)
+✔ hooks rechecks owner after body read (43.402916ms)
+✔ hooks rechecks credential after body read (45.757833ms)
+✔ hooks rechecks identity after body read (42.117458ms)
+✔ automations rechecks owner after body read (41.779375ms)
+✔ automations rechecks credential after body read (41.328125ms)
+✔ automations rechecks identity after body read (41.866583ms)
+✔ summary keeps only tool, outcome, reason, latency (0.515708ms)
+✔ tool errors, rpc errors and unsafe names (0.063333ms)
+✔ off by default; on logs once per tools/call and never breaks the call (0.4395ms)
+✔ token-shaped untrusted tool names and error codes never enter logs (0.075084ms)
+✔ an unclaimed deploy claim at the live revision does not close (1.575916ms)
+✔ a mid-lifecycle land claim with no merged pull does not close (0.362417ms)
+✔ a held land claim whose pull is open or closed-unmerged does not close (0.418584ms)
+✔ a held land claim with a lapsed lease does not close even when its pull merged (0.227041ms)
+✔ the preserved path: held claim, pull merged, revision live — closes to done (0.099166ms)
+✔ a delivered claim with a merged pull and live revision also closes (0.484ms)
+✔ non-land/deploy kinds and revision mismatches never close (0.142917ms)
+✔ reassign binds the claim round: a stale or replayed reassign is a 409 and moves nothing (4.584792ms)
+✔ reassign without the claim round is refused as invalid input (0.246208ms)
+✔ an unclaimed item reassigns with expectedClaimedAt null (0.186833ms)
+✔ reassigning an unclaimed item makes it a claim with the room default lease (1.577666ms)
+✔ the room's configured default lease is used (0.424333ms)
+✔ an assigned item expires and returns to the pool like any claim (0.193458ms)
+✔ reassigning a held claim keeps its state and current lease (0.159875ms)
+✔ stale-only 409 (truncated list round) carries currentRound and a verbatim retry that succeeds (4.7305ms)
+✔ moved 409 (state changed since the read) names the transition and prefills no retry (0.75425ms)
+✔ moved 409 (released and re-claimed by another member) reports the owner change (0.427708ms)
+✔ the permission gate still runs before the round check: a non-owner gets 403, never the 409 payload (0.310625ms)
+ℹ tests 64
+ℹ suites 0
+ℹ pass 64
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2273.49125

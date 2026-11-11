@@ -18,17 +18,22 @@
 //    needed here.
 // 4. No production seam: the script's exported functions are the boundary.
 import test from "node:test";
+import {parse} from "yaml";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, realpathSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { discoverUnitTests } from "../scripts/unit-shards.mjs";
 
 import {
   checkThresholds,
+  coverageTestBatches,
   coverableLines,
   coveredLinesForPayload,
   evaluateModules,
+  evaluatePayloads,
   groupFunctionsByUrl,
   lineCoverage,
   listModuleFiles,
@@ -306,6 +311,12 @@ test("real V8: split-process coverage equals single-process coverage", () => {
       }
       return union;
     };
+    const config = { modules: { all: { dir: ".", threshold: 100 } } };
+    for (const inputs of [together, splitA, splitB, [...splitA, ...splitB]]) {
+      assert.deepEqual(evaluatePayloads(dir, config, inputs.values()).results,
+        evaluateModules(dir, config, groupFunctionsByUrl(inputs, dir)),
+        "streaming and grouped evaluators agree on actual V8 process payloads");
+    }
     const covTogether = coverTarget(together);
     const covSplit = coverTarget([...splitA, ...splitB]);
     assert.deepEqual(
@@ -321,4 +332,154 @@ test("real V8: split-process coverage equals single-process coverage", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// The root suite executes the offline archive in actual workerd. Coverage must
+// provision that same locked runtime before invoking the full test suite.
+test("coverage provisions the unit job's Native archive runtime before the suite", () => {
+  const workflow = parse(readFileSync(new URL("../.github/workflows/test.yml", import.meta.url), "utf8"));
+  const unit = workflow.jobs.unit.steps, coverage = workflow.jobs.coverage.steps;
+  const required = unit.filter(step => step.uses?.startsWith("pnpm/action-setup@") || step.id === "cloudflare-modules" || step.name === "Install the Native offline-archive test runtime");
+  assert.equal(required.length, 3);
+  const gate = coverage.findIndex(step => step.name === "Enforce per-module coverage thresholds");
+  assert.ok(gate > 0);
+  for (const expected of required) {
+    const index = coverage.findIndex(step => expected.id ? step.id === expected.id : expected.name ? step.name === expected.name : step.uses === expected.uses);
+    assert.ok(index >= 0 && index < gate, "Native dependency setup must precede coverage: " + (expected.name ?? expected.id ?? expected.uses));
+    assert.deepEqual(coverage[index], expected);
+  }
+});
+
+function collectorFixture(t, failFirst = false) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "coverage-batches-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const dir of ["tests", "src", "coverage"]) mkdirSync(join(root, dir));
+  writeFileSync(join(root, "coverage", "stale.json"), JSON.stringify({ result: [] }));
+  const files = ["runtime-package.test.js", "store-relief-bounded.test.js", "ordinary.test.js"];
+  for (const [index, file] of files.entries()) {
+    writeFileSync(join(root, "src", `part${index}.mjs`), `export const value = ${index};\n`);
+    writeFileSync(join(root, "tests", file), `
+      import test from 'node:test';
+      import assert from 'node:assert/strict';
+      import { appendFileSync } from 'node:fs';
+      import { value } from '../src/part${index}.mjs';
+      test('batch ${index}', () => {
+        appendFileSync(${JSON.stringify(join(root, "executions.jsonl"))}, JSON.stringify({file:${JSON.stringify(file)}, runner:process.ppid, value})+${JSON.stringify("\n")});
+        assert.equal(value, ${failFirst && index === 0 ? -1 : index});
+      });
+    `);
+  }
+  return { root, files };
+}
+
+function runCollectorFixture(root, inheritedContext = false) {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const script = new URL("../scripts/coverage-thresholds.mjs", import.meta.url).href;
+  return spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import { collectCoverage } from ${JSON.stringify(script)};
+    ${inheritedContext ? 'process.env.NODE_TEST_CONTEXT="child-v8";' : ''}
+    const result=collectCoverage({root:${JSON.stringify(root)}});
+    process.exit(result.status);
+  `], { env, encoding: "utf8", timeout: 15000 });
+}
+
+function fixtureExecutions(root) {
+  return readFileSync(join(root, "executions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+}
+
+test("collector isolates expensive files and retains real coverage from every discovered batch", t => {
+  const { root, files } = collectorFixture(t);
+  const result = runCollectorFixture(root);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const executions = fixtureExecutions(root);
+  assert.deepEqual(executions.map(row => row.file).sort(), files.sort());
+  assert.equal(new Set(executions.map(row => row.runner)).size, 3, "each expensive file must run alone in a separate completed runner");
+  const payloads = [...readCoveragePayloads(join(root, "coverage"))];
+  assert.ok(payloads.length >= 3);
+  assert.ok(payloads.every(value => value.result.length > 0), "stale payload was removed before collection");
+  const grouped = groupFunctionsByUrl(payloads, root);
+  const config = { modules: { src: { dir: "src", threshold: 100 } } };
+  const measured = evaluateModules(root, config, grouped);
+  assert.equal(measured.src.files, 3);
+  assert.equal(measured.src.pct, 100, "earlier batches must not be erased by a later batch");
+  assert.equal(checkThresholds(config, measured).ok, true);
+});
+
+test("collector clears inherited test context and finishes later batches after a failure", t => {
+  const { root, files } = collectorFixture(t, true);
+  const result = runCollectorFixture(root, true);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.deepEqual(fixtureExecutions(root).map(row => row.file).sort(), files.sort());
+  const grouped = groupFunctionsByUrl([...readCoveragePayloads(join(root, "coverage"))], root);
+  assert.equal(evaluateModules(root, { modules: { src: { dir: "src", threshold: 100 } } }, grouped).src.pct, 100);
+});
+
+
+test("collector partitions exactly existing Node discovery with no missing or duplicate files", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
+  const expected = discoverUnitTests(root);
+  const batches = coverageTestBatches(root);
+  assert.deepEqual(batches[0], [join(root, "tests/runtime-package.test.js")]);
+  assert.deepEqual(batches[1], [join(root, "tests/store-relief-bounded.test.js")]);
+  assert.equal(batches.length, 3);
+  assert.deepEqual(batches.flat().sort(), expected);
+  assert.equal(new Set(batches.flat()).size, expected.length);
+});
+
+
+test("streaming evaluator preserves grouped results across changing ranges, excludes and missing files", () => {
+  const root = mkdtempSync(join(tmpdir(), "coverage-stream-parity-"));
+  try {
+    mkdirSync(join(root, "mod"));
+    const text = "export function f(flag) {\n  if (flag) return 1;\n  return 2;\n}\n";
+    writeFileSync(join(root, "mod/a.mjs"), text);
+    writeFileSync(join(root, "mod/missing.mjs"), "export const missing = true;\n");
+    writeFileSync(join(root, "mod/blank.mjs"), "// blank\n");
+    writeFileSync(join(root, "mod/excluded.mjs"), "export const excluded = true;\n");
+    const url = scriptUrl(root, "mod/a.mjs");
+    const inputs = [
+      payload(url, [fn("f", [range(0, text.length, 1), range(27, 50, 0)])]),
+      payload(url, [fn("f", [range(0, text.length, 0)])]),
+      payload(url, [fn("f", [range(0, text.length, 1), range(50, 62, 0)])]),
+      payload(scriptUrl(root, "node_modules/ignore.mjs"), [fn("", [range(0, 10, 1)])]),
+      { result: null },
+    ];
+    const config = { modules: { mod: { dir: "mod", threshold: 95, exclude: ["excluded.mjs"] }, overlapping: { dir: "mod", threshold: 100 } } };
+    const expected = evaluateModules(root, config, groupFunctionsByUrl(inputs, root));
+    for (const values of [inputs, inputs.toReversed(), [...inputs, ...inputs]]) {
+      const actual = evaluatePayloads(root, config, values.values());
+      assert.equal(actual.payloadCount, values.length);
+      assert.deepEqual(actual.results, expected);
+      assert.deepEqual(checkThresholds(config, actual.results), checkThresholds(config, expected));
+    }
+    assert.deepEqual(evaluatePayloads(root, config, []).results, evaluateModules(root, config, new Map()));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("streaming evaluator does not retain raw ranges across thousands of payloads", () => {
+  const root = mkdtempSync(join(tmpdir(), "coverage-stream-memory-"));
+  try {
+    mkdirSync(join(root, "mod"));
+    writeFileSync(join(root, "mod/a.mjs"), "export const used = true;\n");
+    const program = `
+      import * as gate from ${JSON.stringify(new URL("../scripts/coverage-thresholds.mjs", import.meta.url).href)};
+      const root = ${JSON.stringify(root)};
+      const url = new URL('mod/a.mjs', 'file://' + root + '/').href;
+      function* payloads() {
+        for (let i = 0; i < 2000; i++) yield { result: [{ url, functions:
+          Array.from({ length: 150 }, () => ({ functionName: 'synthetic', ranges:
+            Array.from({ length: 12 }, () => ({ startOffset: 0, endOffset: 24, count: 1 })) })) }] };
+      }
+      const config = { modules: { mod: { dir: 'mod', threshold: 100 } } };
+      const result = gate.evaluatePayloads(root, config, payloads());
+      console.log(JSON.stringify(result));
+    `;
+    const env = { ...process.env }; delete env.NODE_V8_COVERAGE; delete env.NODE_TEST_CONTEXT;
+    const result = spawnSync(process.execPath, ["--max-old-space-size=64", "--input-type=module", "-e", program], { encoding: "utf8", env, timeout: 30000, maxBuffer: 1024 * 1024 });
+    assert.equal(result.status, 0, result.stderr);
+    const measured = JSON.parse(result.stdout.trim());
+    assert.equal(measured.payloadCount, 2000);
+    assert.equal(measured.results.mod.pct, 100);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

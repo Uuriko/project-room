@@ -5,11 +5,14 @@
 // rooms projection and its bodies, messages, that room's work claims and
 // work entities, its bounties, and the journals whose rows carry room_id.
 // Accounts, sessions, credentials, grants, and anything ambiguous stay
-// "directory" on invite-only-pilot. Tables in REPLAY_SKIPPED_TABLES are
+// "directory" on invite-only-pilot. Other tables in REPLAY_SKIPPED_TABLES are
 // "skipped": a fresh Node store does not create them, and replay already
 // refuses to invent a home for them.
 //
-// A table missing from all three sets throws. Copy will not guess.
+// Target-local controls are created and owned by each destination; they never
+// move with room bytes or directory authority. A missing classification throws.
+import { OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
+import { MCP_EVENT_ADDITIVE_TABLES } from "./writer-fence.mjs";
 import { REPLAY_SKIPPED_TABLES } from "./room-export.mjs";
 
 export const ROOM_TABLE_KEYS = Object.freeze({
@@ -26,6 +29,9 @@ export const ROOM_TABLE_KEYS = Object.freeze({
   bounty_sybil_flags: "room_id",
   bounty_watchers: "room_id",
   commands: "room_id",
+  current_room_head: "room_id",
+  current_room_records: "room_id",
+  current_room_record_proofs: "room_id",
   events: "room_id",
   jev_shadow_decisions: "room_id",
   membership_delegation_journal: "room_id",
@@ -41,6 +47,8 @@ export const ROOM_TABLE_KEYS = Object.freeze({
   work_entities: "room_id",
 });
 
+export const LOCAL_TABLES = Object.freeze(["current_restore_admission", "current_restore_audit_scratch", "current_room_writer_permit"]);
+
 export const DIRECTORY_TABLES = Object.freeze([
   "access_requests", "account_access_events", "account_credentials", "account_login_methods",
   "account_magic_codes", "account_passkey_credentials", "account_recovery_codes",
@@ -49,14 +57,14 @@ export const DIRECTORY_TABLES = Object.freeze([
   "agent_bonds", "agent_capability_grants", "agent_connection_operations", "agent_connections",
   "agent_directory_cards", "agent_hosts", "agent_identities", "agent_identity_rotation_receipts",
   "agent_identity_verification", "agent_invite_codes", "agent_invite_redeem_receipts",
-  "agent_key_registry", "agent_public_asks", "agent_public_pages", "agent_push_configs",
+  "agent_key_registry", "agent_member_keys", "agent_public_asks", "agent_public_pages", "agent_push_configs",
   "agent_room_ownership", "agent_skill_cards",
   "agent_wake_polls", "agent_wake_signals", "agent_wants_work", "agent_webhook_deliveries",
   "agent_webhook_subs", "agent_work_wake_hosts", "agent_work_wakes", "buyer_signoff_loops",
   "buyer_signoff_requests", "collab_approvals", "collab_assignments", "collab_draft_locks",
   "collab_notes", "collab_routing_events", "credentials", "cursors", "demigod_contract_requests",
   "demigod_contracts", "demigod_offer_profiles", "demigod_offer_requests", "direct_channel_sends",
-  "dm_consents", "gmail_linked_mailboxes", "gmail_mailboxes", "gmail_operations", "gmail_pending",
+  "development_co_owner_links", "dm_consents", "gmail_linked_mailboxes", "gmail_mailboxes", "gmail_operations", "gmail_pending",
   "guest_invite_authority", "guest_invites", "guest_members",
   "guest_selfserve", "guest_selfserve_idem", "handoff_envelopes", "human_push_preferences",
   "human_push_subscriptions", "identity_link_codes", "identity_links", "inbox_attachment_bytes",
@@ -66,6 +74,7 @@ export const DIRECTORY_TABLES = Object.freeze([
   "membership_invitations", "mention_observations", "mention_states", "message_replay_snapshots",
   "message_reports", "messages_backfill_blocks", "messages_backfill_cursor",
   "messages_backfill_state", "oauth_pending_states", "operator_actions", "owner_delegate_grants",
+  "pair_code_locks", "pairs",
   "peer_dm_messages", "peer_dm_threads", "pending_channel_updates", "private_attention_commands",
   "private_attention_prefs", "private_email_commands", "private_email_connections",
   "private_email_folders", "private_inbox_commands", "private_inbox_drafts", "private_inbox_reads",
@@ -78,9 +87,9 @@ export const DIRECTORY_TABLES = Object.freeze([
   "public_work_review_versions", "public_work_reviews", "public_work_settlements",
   "public_work_successor_requests", "public_work_successors", "public_work_tasks",
   "quarantine_thread_splits", "read_horizons", "referral_chain_members", "referral_invite_keys",
-  "referral_invites", "referrals", "request_runs", "room_access_auto_approve",
+  "referral_invites", "referrals", "request_runs", "room_access_auto_approve", "room_join_policy",
   "room_assistant_config", "room_assistant_ops", "room_assistant_runs", "room_attachments",
-  "room_code_checks", "room_code_drops", "room_directory_settings", "room_mention_settings",
+  "room_code_checks", "room_code_drops", "room_directory_settings", "room_mention_settings", "agent_talk_policies",
   "room_public_receipts_setting", "room_public_settings", "room_schema_stamp",
   "room_trial_requests", "room_trial_tasks", "room_verification_policy", "room_vetting_keys",
   "room_vetting_receipts", "saved_messages", "share_link_access", "share_link_codes",
@@ -105,13 +114,18 @@ export function roomTablesPresent(db) {
   return kept;
 }
 
+// Grant families and callback secrets remain directory authority. They are
+// optional because a fresh store has never mounted OAuth or event delivery.
+const optionalDirectory = new Set(["message_replay_units", ...OAUTH_PROVIDER_TABLES, ...MCP_EVENT_ADDITIVE_TABLES]);
 const directory = new Set(DIRECTORY_TABLES);
+const local = new Set(LOCAL_TABLES);
 const skipped = new Set(REPLAY_SKIPPED_TABLES);
 
 export function tableHome(name) {
+  if (local.has(name)) return "local";
   if (skipped.has(name)) return "skipped";
   if (Object.hasOwn(ROOM_TABLE_KEYS, name)) return "room";
-  if (directory.has(name)) return "directory";
+  if (directory.has(name) || optionalDirectory.has(name)) return "directory";
   throw new Error(`Unclassified SQLite table ${name}`);
 }
 
@@ -137,6 +151,9 @@ export function assertShardClassification(names) {
   }
   for (const name of Object.keys(ROOM_TABLE_KEYS)) {
     if (!seen.has(name)) problems.push(`room table ${name} is not in the live schema`);
+  }
+  for (const name of LOCAL_TABLES) {
+    if (!seen.has(name)) problems.push(`local table ${name} is not in the live schema`);
   }
   for (const name of DIRECTORY_TABLES) {
     if (!seen.has(name)) problems.push(`directory table ${name} is not in the live schema`);

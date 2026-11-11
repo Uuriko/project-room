@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs"; import { tmpdir } from "node:os"; import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs"; import { createRoomServer } from "../server/http.mjs"; import { AgentRooms } from "../server/agent-rooms.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 function serve(t) {
   const d = mkdtempSync(join(tmpdir(), "mcp-scoped-ack-")); const store = new RoomStore(join(d, "room.sqlite")); installFakeWebhookDns(store);
   const rooms = new AgentRooms(store); const s = createRoomServer({ store });
@@ -24,7 +25,7 @@ async function setup(t) {
   rooms.create(owner.secret, { roomId: "wake-den", title: "W", purpose: "p", kind: "personal", displayName: "Wren" });
   rooms.create(owner.secret, { roomId: "other-den", title: "O", purpose: "p", kind: "personal", displayName: "Wren" });
   const peer = store.identities.create("Lark");
-  for (const roomId of ["wake-den", "other-den"]) store.identities.link(owner.secret, roomId, { identityId: peer.identityId, displayName: "Lark", permissions: [] });
+  for (const roomId of ["wake-den", "other-den"]) linkWithProof(store, owner.secret, roomId, peer, { displayName: "Lark", permissions: [] });
   // #3266: ackWakes enforces poll's registration gate — an identity no host
   // has reported for gets 404 agent_not_registered before scoping is even
   // evaluated. These tests are about the room scoping, so register a host.

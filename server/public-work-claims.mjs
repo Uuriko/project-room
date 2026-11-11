@@ -7,6 +7,7 @@ import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
+import { recordedReceiptsOptOut } from './public-visibility.mjs'; // the authoritative recorded opt-out hides the room's receipts from non-members too
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -53,6 +54,12 @@ const filesOf = input => {
   return [...new Set(files)].sort();
 };
 const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
+// Short Latin, Greek and Cyrillic skill acronyms should not match incidental substrings
+// (e.g. `ui` inside `guide`). Longer preferences retain substring matching.
+const matchesPreference = (text, value) => {
+  if (!/^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{N}]{1,2}$/u.test(value)) return text.includes(value);
+  return text.split(/[^\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{N}_]+/u).includes(value);
+};
 
 // #3530: the standard public-work starter set — the newcomer tasks an
 // operator first seeded on the public board (the pw-garden round of
@@ -258,18 +265,23 @@ export class PublicWorkClaims {
   // match() opts out: its `after` cursor is an offer_id-order scan position
   // with its own documented continuation semantics, so it passes
   // claimableFirst: false and keeps scanning in offer_id order.
-  list({ limit = 20, after = '', claimable = false, claimableFirst = true } = {}) {
+  // Optional roomId keeps first-connect (and other room-scoped callers) on
+  // work from the room the agent just joined, not the global board.
+  list({ limit = 20, after = '', claimable = false, claimableFirst = true, roomId = null } = {}) {
     check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
     check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
+    check(roomId == null || identifier(roomId), 'Invalid page');
     return this.store.readTransaction(() => {
       if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
         JOIN rooms r ON r.id=t.room_id WHERE o.status='published' AND r.archived_at IS NULL
-        AND o.version=t.terms_version AND (json_extract(o.terms,'$.reward.kind')='unpaid' OR (json_extract(o.terms,'$.reward.kind')='work_trade' AND json_extract(o.terms,'$.reward.unit')='credit')) ORDER BY t.offer_id`).all();
+        AND o.version=t.terms_version AND (json_extract(o.terms,'$.reward.kind')='unpaid' OR (json_extract(o.terms,'$.reward.kind')='work_trade' AND json_extract(o.terms,'$.reward.unit')='credit'))
+        AND (?1 IS NULL OR t.room_id=?1) ORDER BY t.offer_id`).all(roomId);
       // Claim state lives in the work-claims store and receipts, not in a
       // column SQL can order by, so packets are materialized before ordering.
       // Operator-unpublished rooms are dropped before materializing: their
       // packets (including submittedReceiptId) must never be built or served.
+      // roomId, when set, is applied in SQL above (joined-room-first).
       let tasks = rows.filter(row => !isUnpublished(this.db, 'room', row.room_id))
         .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
       const claimableCount = tasks.filter(task => task.claimable).length;
@@ -312,6 +324,20 @@ export class PublicWorkClaims {
       if (this._starterTaskState(family.at(-1).row) === 'submitted') due.push(baseId);
     }
     return { available: true, anchored, claimable, due };
+  }
+  // Scheduler-only request for a periodic check, NOT a zero-supply proof.
+  // Original anchored submissions remain a conservative signal after later
+  // rounds exist. Four exact primary-key probes + indexed receipt existence
+  // keep every request's alarm re-arm independent of public-board size. The
+  // actual scheduled reseed still checks exact global claimability below.
+  starterPoolPending() {
+    return this.store.readTransaction(() => {
+      if (!this.available()) return false;
+      return Boolean(this.db.prepare(`SELECT 1 FROM public_work_tasks t
+        WHERE t.offer_id IN (${PUBLIC_WORK_STARTER_SEED_IDS.map(() => '?').join(',')})
+          AND EXISTS (SELECT 1 FROM public_work_receipts p WHERE p.offer_id=t.offer_id)
+        LIMIT 1`).get(...PUBLIC_WORK_STARTER_SEED_IDS));
+    });
   }
   _starterFamily(baseId) {
     const rows = this.db.prepare('SELECT * FROM public_work_tasks WHERE offer_id=? OR offer_id LIKE ?').all(baseId, `${baseId}-r%`);
@@ -619,12 +645,12 @@ export class PublicWorkClaims {
         const candidates = page.tasks.filter(task => {
           // claimable (not just unclaimed): a task past its submission
           // deadline must not be recommended as claimable (#3707).
-          if (task.claim.state !== 'unclaimed' || !task.claimable) return false;
+          if (task.reward?.kind !== 'unpaid' || task.claim.state !== 'unclaimed' || !task.claimable) return false;
           return !releaseExpired(this.store.workClaims.list(task.namespaceId), this.store.now()).some(other =>
             other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
         }).map(task => {
           const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();
-          const matched = [...new Set(preferences.filter(value => text.includes(value)))];
+          const matched = [...new Set(preferences.filter(value => matchesPreference(text, value)))];
           return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
         }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
         outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));
@@ -679,10 +705,27 @@ export class PublicWorkClaims {
       || (row.roomId && isUnpublished(this.db, 'room', row.roomId))) {
       fail(404, 'public_receipt_not_found', 'Public receipt not found');
     }
+    // The HTML faces serve the mirror (public_receipts); this face
+    // serves the source. A receipt is public only when both records
+    // exist (A6): a source row with no projection is not public yet —
+    // the read-model backfill projects it — and this face must not
+    // disagree with the /receipts faces about whether the id is
+    // available. Existence only, deliberately not mirror visibility:
+    // the unpublish check above and the owner-toggle semantics in
+    // _requireReceiptVisible keep their pinned behaviour.
+    if (!this.db.prepare('SELECT 1 FROM public_receipts WHERE id = ?').get(receiptId)) {
+      fail(404, 'public_receipt_not_found', 'Public receipt not found');
+    }
     return { receiptJson: row.receiptJson, roomId: row.roomId ?? null };
   }
   _requireReceiptVisible(roomId, memberId) {
-    if (this.store.roomDirectory.publicReceiptsVisible(roomId)) return;
+    // Public serving requires both owner controls open: the directory
+    // toggle AND no authoritative recorded opt-out (room.public_
+    // receipts_set enabled:false — R08-F1: the toggle alone left an
+    // opted-out room's receipts serving on this door). Members of the
+    // room are still served below, as with the toggle.
+    if (this.store.roomDirectory.publicReceiptsVisible(roomId)
+      && !recordedReceiptsOptOut(this.db, roomId)) return;
     if (typeof memberId === "string" && memberId) {
       const members = this.store.roomAuthority(roomId)?.members ?? {};
       const member = members[memberId];

@@ -13,6 +13,10 @@
 import { retentionReport } from "../retention-response.mjs";
 import { isGuestAgentMemberId } from "../guest-agent-links.mjs";
 import { buildWorkClaimPage, handleWorkClaims } from "../work-claim-routes.mjs";
+import { withProjectMapOverlap } from "../project-map-store.mjs";
+import { readBoard } from "../board-read.mjs";
+import { claimThread } from "../claim-thread.mjs";
+import { withContentTrust } from "../content-trust.mjs";
 
 function requireRoomScope(ctx, auth, writing = false) {
   const required = writing ? "rooms:write" : "rooms:read";
@@ -44,7 +48,12 @@ function authenticateRead(ctx, writing = false) {
   if (!member || member.active === false) {
     ctx.reject(403, "not_member", `Member "${auth.member.id}" is not a member of room "${roomId}"`);
   }
-  return { roomId, auth };
+  return { roomId, auth, selected, fence };
+}
+
+export async function getBoardRead(ctx) {
+  const { roomId, selected, fence } = authenticateRead(ctx);
+  return ctx.json(ctx.res, 200, readBoard(ctx.store, selected.token, roomId, fence, ctx.url.searchParams));
 }
 
 export async function getRetentionDashboard(ctx) {
@@ -56,8 +65,8 @@ export async function getRetentionDashboard(ctx) {
 export async function getWorkClaimsRead(ctx) {
   const { roomId, auth } = authenticateRead(ctx);
   const now = typeof ctx.store.now === "function" ? ctx.store.now() : Date.now();
-  return ctx.json(ctx.res, 200, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
-    auth.member.id, ctx.url.searchParams, now));
+  return ctx.json(ctx.res, 200, withProjectMapOverlap(ctx.store, roomId, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
+    auth.member.id, ctx.url.searchParams, now)));
 }
 
 export async function provenanceRoute(ctx) {
@@ -80,6 +89,41 @@ export async function closeRoute(ctx) {
     helpers: { json: ctx.json, reject: ctx.reject, body: ctx.body } });
 }
 
+// Linear-parity delegate: owner stays accountable, delegate does the work.
+// 404 unless ROOM_CLAIM_DELEGATE=1 (checked in handleWorkClaims).
+export async function delegateRoute(ctx) {
+  const { roomId, auth } = authenticateRead(ctx, true);
+  return handleWorkClaims({ req: ctx.req, res: ctx.res, url: ctx.url, store: ctx.store,
+    roomId, auth, workClaimRoute: "delegate", workClaimId: ctx.params.claimId,
+    registry: ctx.store.workClaims, reauthorize: () => authenticateRead(ctx, true).auth,
+    helpers: { json: ctx.json, reject: ctx.reject, body: ctx.body } });
+}
+
+// Approval hold: pause a risky step until a named approver says yes.
+// 404 unless ROOM_APPROVAL_HOLD=1 (checked in handleWorkClaims).
+export async function approvalRoute(ctx) {
+  const { roomId, auth } = authenticateRead(ctx, true);
+  return handleWorkClaims({ req: ctx.req, res: ctx.res, url: ctx.url, store: ctx.store,
+    roomId, auth, workClaimRoute: "approval", workClaimId: ctx.params.claimId,
+    registry: ctx.store.workClaims, reauthorize: () => authenticateRead(ctx, true).auth,
+    helpers: { json: ctx.json, reject: ctx.reject, body: ctx.body } });
+}
+
+// #5378: the claim thread, one ordered record per Board claim. Same
+// visibility as the claim read: any active room member who may read the
+// claim reads its thread. Entries are board events and the claim's own
+// history only, never chat, so private replies and DMs cannot leak.
+export async function threadRoute(ctx) {
+  const { roomId } = authenticateRead(ctx);
+  const claimId = ctx.params.claimId;
+  if (typeof claimId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(claimId)) {
+    ctx.reject(422, "invalid_claim_input", "Expected claimId matching [A-Za-z0-9_-]{1,128}.");
+  }
+  const item = ctx.store.workClaims.get(roomId, claimId);
+  if (!item) ctx.reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
+  return ctx.json(ctx.res, 200, withContentTrust(claimThread(ctx.store, roomId, item)));
+}
+
 const claimParameters = Object.freeze({ type: "object", required: ["roomId", "claimId"],
   properties: { roomId: { type: "string" }, claimId: { type: "string" } } });
 const parameters = Object.freeze({ type: "object", required: ["roomId"],
@@ -87,12 +131,27 @@ const parameters = Object.freeze({ type: "object", required: ["roomId"],
 
 // Deliberately non-punitive: queues for reviewers, never strikes or sanctions.
 export const WORK_CLAIM_ROUTES = Object.freeze([
+  Object.freeze({ id: "board-read", method: "GET", path: "/api/rooms/{roomId}/board", parity: "mcp:room_read_board",
+    auth: "room", capability: null, scope: "room", handler: getBoardRead,
+    schema: { params: parameters, response: { type: "object" } }, events: [] }),
   ...["GET", "HEAD", "POST"].map(method => Object.freeze({ id: `claim-provenance-${method}`, method,
     path: `/api/rooms/{roomId}/work-claims/{claimId}/${method === "POST" ? "premise-invalid" : "provenance"}`,
     auth: "room", capability: null, scope: "room", handler: provenanceRoute,
     schema: { params: { type: "object", required: ["roomId", "claimId"], properties: { roomId: { type: "string" }, claimId: { type: "string" } } }, response: { type: "object" } }, events: [] })),
+  ...["GET", "HEAD"].map(method => Object.freeze({ id: `claim-thread-${method}`, method,
+    path: "/api/rooms/{roomId}/work-claims/{claimId}/thread", parity: "mcp:room_work_claim_thread",
+    auth: "room", capability: null, scope: "room", handler: threadRoute,
+    schema: { params: claimParameters, response: { type: "object" } }, events: [] })),
   Object.freeze({ id: "work-claim-close", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/close",
     auth: "room", capability: null, scope: "room", handler: closeRoute,
+    schema: { params: claimParameters, response: { type: "object" } }, events: ["work_claim.updated"] }),
+  Object.freeze({ id: "work-claim-delegate", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/delegate",
+    parity: "exempt:delegate is a Board REST write behind ROOM_CLAIM_DELEGATE (off by default); no MCP tool yet",
+    auth: "room", capability: null, scope: "room", handler: delegateRoute,
+    schema: { params: claimParameters, response: { type: "object" } }, events: ["work_claim.updated"] }),
+  Object.freeze({ id: "work-claim-approval", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/approval",
+    parity: "exempt:approval hold is a Board REST write behind ROOM_APPROVAL_HOLD (off by default); no MCP tool yet",
+    auth: "room", capability: null, scope: "room", handler: approvalRoute,
     schema: { params: claimParameters, response: { type: "object" } }, events: ["work_claim.updated"] }),
   Object.freeze({ id: "work-claim-cancel", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/cancel",
     auth: "room", capability: null, scope: "room", handler: closeRoute,

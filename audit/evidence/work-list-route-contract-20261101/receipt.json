@@ -1,0 +1,107 @@
+{
+  "sourceHead": "47b40b5114045234f88fc6cae6abe11d5ea39aa7",
+  "base": "1f2f30356db4f19fa9237073c1a8eb51d4ec5c7b",
+  "runtime": "749f211da9e5844c6af923e2b72d43debf418a56",
+  "parentAdopted": "c345e555a",
+  "results": {
+    "routeGateBefore": {
+      "exit": 1,
+      "failures": 3
+    },
+    "routeGateAfter": {
+      "exit": 0
+    },
+    "focusedNode": {
+      "exit": 0,
+      "pass": 29
+    },
+    "finalOwnAndManifest": {
+      "exit": 0,
+      "pass": 11
+    },
+    "authDocsNeighbors": {
+      "exit": 0,
+      "pass": 14
+    },
+    "unusedCleanupAffected": {
+      "exit": 0,
+      "pass": 16
+    },
+    "handlerAstEquivalent": true,
+    "candidateManifest": "regenerated schema45/179assets/9deployment, bytes unchanged",
+    "secretScan": {
+      "exit": 0,
+      "files": 1818
+    },
+    "docsLinks": {
+      "exit": 0,
+      "links": 843
+    },
+    "ciModeCheck": {
+      "exit": 1,
+      "reason": "32 preexisting native45 error codes absent catalog; next separate task assigned by parent"
+    }
+  },
+  "legacyBaselineSha256": "0f4cb5e33cdb637097cc0b571bb73923e5a661757a81ed445855229d3d5264cb",
+  "logs": {
+    "work-list-route-before": {
+      "bytes": 265,
+      "sha256": "307d061632aff6da856ccc1f5d03be8be142d60feaca0286912d575f76e4c7d7"
+    },
+    "work-list-route-after-final": {
+      "bytes": 137,
+      "sha256": "d27d074bd2d6ca8e91d89adfec46f59e934427d590ec418d7a715fdb940c541e"
+    },
+    "work-list-route-tests-final": {
+      "bytes": 13133,
+      "sha256": "fb755d88b9146ef5b260f25e0596cc8d68f03cbf7c01969e8843d42ed0b68693"
+    },
+    "work-list-route-final-own": {
+      "bytes": 2736,
+      "sha256": "30161198a6bd2fd8c1000be199e3d9834cc79669845b4bcda77c2e6a50a56be5"
+    },
+    "work-list-route-auth-docs": {
+      "bytes": 1145,
+      "sha256": "0033e16348aeb83d2f646d0c1ac13caa7cf90e2ed43abfe2964d415d1851cce2"
+    },
+    "work-list-route-cleanup-tests": {
+      "bytes": 9599,
+      "sha256": "0781bcf53b8dd73b229a29c2d719d56894eec3ecf26146a3b3d400e6a4913d25"
+    },
+    "work-list-route-ast": {
+      "bytes": 122,
+      "sha256": "2df6142d7b0e81f6e2447ab9d40f86b5b465d26eeb9d004884c196113b9a847e"
+    },
+    "work-list-route-ci": {
+      "bytes": 606,
+      "sha256": "7445fdcd4aa824023ecbb21756a03d6c74643e1ee2fda0f063c2e846d170e2af"
+    },
+    "work-list-route-ci-final": {
+      "bytes": 69964,
+      "sha256": "f444ca914fd9df756ff9f2bb1b17d79dec8b57dabe35353c0c0e11e796266560"
+    },
+    "work-list-route-ci-terminal": {
+      "bytes": 75450,
+      "sha256": "36ca759c08bab2cb9100db35ce3466e6487786ad0ba4a9c45cd7bdda1ff49027"
+    },
+    "work-list-route-ci-complete": {
+      "bytes": 75322,
+      "sha256": "1f277107301fb856f4f9ef6f42be057f3422ead365f5aa90888455505b1dec5f"
+    },
+    "work-list-route-doc-links-final": {
+      "bytes": 32,
+      "sha256": "7e787977b033625de698e31fb639cf70caa04410fe9103dee1408826992ba575"
+    },
+    "work-list-route-secret-final": {
+      "bytes": 53,
+      "sha256": "e4aae997915ba83d01e1e85411ed268f9c4407d1826888e6a9c9c53dbef9e4ed"
+    }
+  },
+  "limitations": [
+    "No full Node suite, live deployment or production mutation.",
+    "Distinct test runs overlap; counts are not added into a fictional single suite.",
+    "First test fixture incorrectly tried agent browser session; corrected to real human member. Another assumed optional replyRequests field always present; corrected without runtime change.",
+    "Schema source45 retained explicit production44 distinction.",
+    "Unused imports removed while retaining bare module import side effects; _room rename preserves independent record read."
+  ]
+}

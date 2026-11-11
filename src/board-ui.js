@@ -47,14 +47,14 @@ function dependenciesMet(item, byId) {
 }
 
 export function columnOf(item, byId, now) {
-  if (!item) return null;
+  if (!item || item.state === "closed") return null;
   if (item.state === "done") {
     const at = Date.parse(updatedAt(item));
     return Number.isFinite(at) && now - at <= WEEK ? "landed" : null;
   }
   if (item.state === "unclaimed" && !item.owner && !dependenciesMet(item, byId)) return "blocked";
-  if (item.state === "delivered" || openPull(item)) return "review";
   if (item.state === "blocked") return "blocked";
+  if (item.state === "delivered" || openPull(item)) return "review";
   if (item.state === "claimed" || item.state === "in_progress") return "claimed";
   if (item.state === "unclaimed" && !item.owner && dependenciesMet(item, byId)) return "ready";
   return null;
@@ -296,13 +296,17 @@ export function canReviewClaim(item, viewer, members) {
 // revision and CI head must match, and — since #3684 — so must the delivery:
 // an approval bound to a delivery digest counts only for that delivery, and
 // an approval recorded before any delivery (generation 0) counts only for
-// the round's first delivery; a re-delivery stales it like a head move.
+// the round's first delivery; a re-delivery stales it like a head move. A
+// bundle-less delivery has no digest, so its reviews bind to the delivery
+// generation: current only on the generation they were recorded against.
 function basisCurrent(review, item) {
   const basis = review?.basis;
   if (!basis || basis.version !== 1) return false;
   const deliveryCurrent = basis.deliveryDigest !== null && basis.deliveryDigest !== undefined
     ? basis.deliveryDigest === (item.delivery?.digest ?? null)
-    : (basis.deliveryGeneration ?? 0) === 0 && (item.deliveryGeneration ?? 0) <= 1;
+    : (basis.deliveryGeneration ?? 0) === 0
+      ? (item.deliveryGeneration ?? 0) <= 1
+      : (basis.deliveryGeneration ?? 0) === (item.deliveryGeneration ?? 0);
   return deliveryCurrent && basis.owner === item.owner && basis.claimedAt === item.claimedAt
     && basis.revision === (item.revision ?? null) && basis.headSha === (item.ci?.headSha ?? null);
 }
@@ -421,7 +425,7 @@ export function claimReviewForm(item) {
     " <input name=\"summary\" required maxlength=\"2000\" autocomplete=\"off\">",
     "</label>",
     "<span class=\"form-hint\">", uiText("board.review.summary.placeholder"), "</span>",
-    "<button type=\"submit\" class=\"button secondary\">", uiText("board.review.submit"), "</button>",
+    `<button type="submit" class="button secondary" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: uiText("board.review.submit"), item: item.title || item.id }))}">`, uiText("board.review.submit"), "</button>",
     "</form>"
   ].join("");
 }
@@ -548,7 +552,7 @@ export function claimDeliverForm(item) {
         "</select>", "</label>");
     });
   }
-  parts.push("<button type=\"submit\" class=\"button primary\">", uiText("board.action.deliver"), "</button>", "</form>");
+  parts.push(`<button type="submit" class="button primary" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: uiText("board.action.deliver"), item: item.title || item.id }))}">`, uiText("board.action.deliver"), "</button>", "</form>");
   return parts.join("");
 }
 
@@ -655,6 +659,27 @@ function reviewLabel(review, item) {
 // list read; the omitted count is disclosed rather than silently dropped.
 // Composed like claimReviewForm — array pieces, each literal a complete tag
 // or a lone catalog string — so the i18n harness sees no new hardcoded copy.
+// #5378: one Thread link per claim card. The thread is read on open from
+// GET …/work-claims/{id}/thread (same visibility as the claim read).
+export function claimThreadHtml(thread, statusKey = "board.thread.empty") {
+  const entries = Array.isArray(thread?.entries) ? thread.entries : [];
+  if (!entries.length) return `<li>${escapeHtml(uiText(statusKey))}</li>`;
+  return entries.map(entry => {
+    const detail = [entry.kind, entry.action, entry.ciState, entry.verdict, entry.pullRequest?.url, entry.note]
+      .filter(value => typeof value === "string" && value).join(" · ");
+    const kind = escapeHtml(entry.kind ?? "");
+    const at = escapeHtml(entry.at ?? "");
+    return uiText("board.thread.entry", { kind, at, detail: escapeHtml(detail) });
+  }).join("");
+}
+
+function claimThreadDisclosure(item) {
+  const id = escapeHtml(item.id);
+  const label = escapeHtml(uiText("board.thread.summary"));
+  const summary = uiText("board.thread.disclosureSummary", { id, label });
+  return `<details class="claim-thread">${summary}<ol class="claim-thread-entries" aria-live="polite"></ol></details>`;
+}
+
 function claimRecordHtml(item, members) {
   const parts = [];
   const section = (labelKey, body) => ["<p class=\"claim-record-label\">", uiText(labelKey), "</p>", body].join("");
@@ -709,6 +734,20 @@ function claimRecordHtml(item, members) {
   return [`<details class="claim-record" data-claim-record="${escapeHtml(item.id)}"><summary>`, uiText("board.record.summary"), "</summary>", parts.join(""), "</details>"].join("");
 }
 
+function overlapChip(item) {
+  const overlap = item?.overlap;
+  const shared = [];
+  if (Array.isArray(overlap?.files)) shared.push(...overlap.files);
+  if (Array.isArray(overlap?.symbols)) for (const name of overlap.symbols) shared.push(`${name}()`);
+  if (!overlap || shared.length === 0) return "";
+  const other = (Array.isArray(overlap.with) ? overlap.with : []).map(entry => entry?.label || entry?.id).filter(Boolean).join(", ");
+  return uiText("board.overlap.html", {
+    label: escapeHtml(overlap.duplicate ? uiText("board.overlap.duplicate") : uiText("board.overlap.chip")),
+    withLine: uiText("board.overlap.with", { other: escapeHtml(other) }),
+    sharedLine: uiText("board.overlap.shared", { shared: escapeHtml(shared.join(", ")) })
+  });
+}
+
 function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
@@ -750,14 +789,18 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     const reference = claimReference(id, byId, workItems, `claim-dependency:${item.id}:${index}`, now);
     return `<li>${target?.state === "done" ? "Prerequisite" : "Waiting for"} ${reference} · ${escapeHtml(status)}</li>`;
   }).join("");
-  const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
+  // F-U1A3-1: the accessible name carries the item's identity, following
+  // the link-PR input ("Pull request URL for ${item.title}") and reassign
+  // select ("Reassign ${item.title}") patterns below — bare verbs left a
+  // screen-reader user with ten indistinguishable "Claim" buttons.
+  const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: label, item: item.title || item.id }))}">${label}</button>`;
   const actions = [];
   if (item.workItemId) {
     const work = workItems?.[item.workItemId];
     actions.push(workLink(item, workItems, `work-acceptance:${item.id}`, work ? workStatus(work, now).label : item.title || item.id));
   }
   if (canLinkPullRequest(item, viewer, now)) {
-    actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
+    actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: "Link PR", item: item.title || item.id }))}">Link PR</button></form>`);
   }
   // VERIFY step: the board used to render no review control at all — "What
   // needs me › Review" only scrolled to the card (dead end). Eligible
@@ -803,7 +846,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     actions.push(button("release", "Release", "secondary"));
     const options = Object.values(members ?? {}).filter(member => member && member.active !== false && member.id !== ownerId)
       .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberName(members, member.id))}</option>`).join("");
-    if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit" class="button secondary">Move</button></form>`);
+    if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit" class="button secondary" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: "Move", item: item.title || item.id }))}">Move</button></form>`);
   }
   // Claim lifecycle: close (holder or claim manager) and cancel (creator of
   // an unclaimed item, or its holder) retire open work without delivery.
@@ -815,7 +858,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id, { claimRecord: true });
   const record = claimRecordHtml(item, members);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${overlapChip(item)}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}${claimThreadDisclosure(item)}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
@@ -865,6 +908,22 @@ export function pendingOutcome(action, title) {
   if (action === "sweep") return uiText("board.action.pending.sweep");
   const key = PENDING_OUTCOME_KEYS[action];
   return key ? uiText(key, { title }) : "";
+}
+
+// Failure narration for a board action. An error with an HTTP status came
+// back from the server and carries a humanised message worth showing. A
+// transport failure (fetch TypeError: no status) has an UNCONFIRMED outcome
+// — the request may or may not have committed — so the copy must say that,
+// never leak the raw "Failed to fetch". `refreshed` says what the board did
+// about it: true (reloaded, state is current), false (reload failed), or
+// "kept" (a form submit: no reload, so the user's entries survive for an
+// in-place retry; the claim itself must be checked before resubmitting).
+export function boardActionErrorNote(error, refreshed = true) {
+  if (error?.status) return error.message || "Could not update the claim.";
+  if (refreshed === "kept") return uiText("board.action.error.unconfirmed.kept");
+  return refreshed
+    ? uiText("board.action.error.unconfirmed.refreshed")
+    : uiText("board.action.error.unconfirmed.unrefreshed");
 }
 
 function filterBarHtml(filter = {}) {
@@ -1106,7 +1165,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
   }
 
-  async function act(run, focus, reconcile = null, unconfirmed = "Could not confirm the PR link. Refresh the board before trying again.") {
+  async function act(run, focus, reconcile = null, unconfirmed = "Could not confirm the PR link. Refresh the board before trying again.", { keepFormOnError = false } = {}) {
     const owned = context();
     if (!owned || loadedContext !== owned || mutating) return;
     const mine = ++operation;
@@ -1133,10 +1192,23 @@ export function installWorkBoard({ client, getState, getSession }) {
         if (actionFlight === pending && context() === owned) {
           note(refreshed ? reconcile(error) : unconfirmed);
         }
-      } else {
+      } else if (error?.status) {
         pendingFocus = null;
         pendingStatus = "";
-        note(error?.message || "Could not update the claim.");
+        note(boardActionErrorNote(error));
+      } else if (keepFormOnError) {
+        // Form submit: a refresh would repaint the card and destroy the
+        // user's entries. Keep the form; the copy says the outcome is
+        // unconfirmed and the entries survived.
+        pendingFocus = null;
+        pendingStatus = "";
+        note(boardActionErrorNote(error, "kept"));
+      } else {
+        // Transport failure on a button action: the outcome is unconfirmed,
+        // so refresh before narrating — the board must show the claim's true
+        // state behind the message, as the reconcile path does for PR links.
+        const refreshed = await load({ force: true, focus: { key: focus?.key ?? null, id: focus?.id ?? null } });
+        if (actionFlight === pending && context() === owned) note(boardActionErrorNote(error, refreshed));
       }
     } finally {
       if (actionFlight === pending) { actionFlight = null; mutating = false; }
@@ -1190,6 +1262,16 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!button || !root.contains(button)) return;
     const id = button.dataset.claimId;
     const action = button.dataset.claimAction;
+    if (action === "thread") {
+      const details = button.parentElement;
+      const list = details?.querySelector(".claim-thread-entries");
+      if (!details || details.open || !list) return; // closing, or nothing to fill
+      list.innerHTML = claimThreadHtml(null, "board.thread.loading");
+      client.request([client.path("/work-claims"), encodeURIComponent(id), "thread"].join("/"))
+        .then(thread => { list.innerHTML = claimThreadHtml(thread); })
+        .catch(() => { list.innerHTML = claimThreadHtml(null, "board.thread.failed"); });
+      return;
+    }
     const focus = { key: button.dataset.focusKey ?? null, id: id ?? null, status: outcome(action, id), pending: pendingOutcome(action, titleOf(id)) };
     if (action === "sweep") {
       flyButton(button, () => client.request(client.path("/work-claims/sweep"), { method: "POST", data: {} }), focus);
@@ -1264,7 +1346,7 @@ export function installWorkBoard({ client, getState, getSession }) {
   function flySubmit(form, run, focus, reconcile = null, unconfirmed = undefined) {
     const submit = form.querySelector("button[type=submit]");
     if (submit) { submit.disabled = true; submit.setAttribute("aria-busy", "true"); }
-    act(run, focus, reconcile, unconfirmed).finally(() => {
+    act(run, focus, reconcile, unconfirmed, { keepFormOnError: true }).finally(() => {
       if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); }
     });
   }

@@ -1,0 +1,110 @@
+{
+  "sourceCommit": "a6c57d88b",
+  "sourceComposition": {
+    "root": "5af74279e",
+    "serverCommits": [
+      "e22e16d5f",
+      "b2fa9371c",
+      "a6c57d88b"
+    ],
+    "queueCommits": [
+      "2afd0282469966f244ef3bf26fbc53158862d4dd",
+      "eded1e87c"
+    ],
+    "doNotAdoptMerge": "feed85a90"
+  },
+  "checks": {
+    "causalBefore": {
+      "tests": 5,
+      "pass": 0,
+      "fail": 5,
+      "note": "Exact root5af source with new helper copied only to satisfy test import; collector wiring unchanged."
+    },
+    "normalizedAndFreshStart": {
+      "tests": 6,
+      "pass": 6,
+      "fail": 0
+    },
+    "realHttpCompactResume": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0
+    },
+    "runtimePreflight": {
+      "tests": 2,
+      "pass": 2,
+      "fail": 0
+    },
+    "eslint": {
+      "errors": 0,
+      "inheritedLegacyWarnings": 3
+    }
+  },
+  "benchmark": {
+    "fixture": "synthetic30messages1000chars",
+    "baseline": {
+      "requests": 2,
+      "responseBytes": 34112
+    },
+    "firstUsefulDiscovery": {
+      "requests": 5,
+      "responseBytes": 7863,
+      "attentionPages": 2
+    },
+    "completeAttentionEnumeration": {
+      "requests": 20,
+      "responseBytes": 29860,
+      "resumeCalls": 4
+    },
+    "conditionalRepeat": {
+      "requests": 4,
+      "responseBytes": 4905,
+      "attentionPages": 1
+    }
+  },
+  "limitations": [
+    "No Native/physical SQL cost qualification claimed for this adapter.",
+    "Source change or process restart invalidates opaque cursor with typed409; restart read required.",
+    "Global attention is explicitly incomplete: ambient routing and legacy board presentation omitted.",
+    "Whole identity-seat pointer enumeration remains inherited.",
+    "Completed hidden private tails may be reexamined on later polling; no optimal total-cost claim.",
+    "RequestRuns.apply409 is separate active queue lane.",
+    "Legacy myClaims fixtures encounter retired legacy work authority; not silently waived.",
+    "Prior composed88 run86passed2failed: stale complete assertion now corrected and individually green; RequestRuns remains unresolved."
+  ],
+  "sourceHashes": {
+    "server/current-needs-me.mjs": "fcb17056afaf8cbb6be558f7cc2ca377b779bda32f2de7dc63643f5edd26f7b0",
+    "server/needs-me.mjs": "6e1170aa5fb1ca3c63fcb82264f7f8724dff2c411a072cfa0b9b251fa8a99563",
+    "server/current-native-inbox.mjs": "27bb011d3400b58ed444c1aebae0922e54d622eb821c166f74f372251bef5aed",
+    "client/grok-host.mjs": "311f3faa37f7d05312f78e35893942baffabab30f99a6ad07dc0bcf2a66d6c1a",
+    "tests/normalized-needs-me.test.mjs": "d3382cb0386be5ff219e5d17359738bbd6eb1b572d1559740efea941b4b94e13",
+    "tests/agent-resume.test.js": "d785c7e789ac5ee677df50b5794c5b04a445d78b9e35bdaa92d06d273de9e6dc"
+  },
+  "logs": [
+    {
+      "name": "normalized-needs-me-before.log",
+      "sha256": "abec544253d7ace0097895e054936acff2f0ca6c7baa74174dd86e7d69059dbd",
+      "bytes": 10587
+    },
+    {
+      "name": "normalized-needs-me-final.log",
+      "sha256": "7f3659fe6c2f023775173160a13009a142bf11b4d932b5cc36a9591d3c400256",
+      "bytes": 4789
+    },
+    {
+      "name": "normalized-needs-me-compact-complete.log",
+      "sha256": "0480584ead160e2ae1bca79bec231aa0972c24e7eeffddde07a5975f8cffe3b8",
+      "bytes": 1782
+    },
+    {
+      "name": "normalized-needs-me-package-freeze.log",
+      "sha256": "8d471d7f86a7cfbc0ec80d1082cc86811e2eff314628ca7057ad48966fab3510",
+      "bytes": 295
+    },
+    {
+      "name": "normalized-needs-me-lint-freeze.log",
+      "sha256": "a7d9b7b6d095c7acc2c1706dedfa492e48b7f13a74b9c9779e8c00f9a2196f8d",
+      "bytes": 729
+    }
+  ]
+}

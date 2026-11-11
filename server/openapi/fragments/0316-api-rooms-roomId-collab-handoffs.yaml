@@ -1,0 +1,49 @@
+  /api/rooms/{roomId}/collab/handoffs:
+    post:
+      summary: Journal a room handoff to a named agent
+      description: >-
+        Room-token write (CSRF + rate limit). Wraps the durable inbox handoff
+        journal for room callers: the account scope resolves from the
+        caller's account session, then the caller's member_accounts binding,
+        then the room owner's account binding — otherwise 409
+        handoff_no_account_scope. The handoff API itself is account-session
+        only, so the route hands the journal an explicit accountId.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, to]
+              properties:
+                threadId: { type: string }
+                to: { type: object, description: "{ kind: agent|human, id } recipient" }
+                summary: { type: string, maxLength: 2000 }
+                openQuestions: { type: array, items: { type: string } }
+                pendingActions: { type: array, items: { type: string } }
+                excerpt: { type: string, maxLength: 500 }
+                subject: { type: string, maxLength: 200 }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ duplicate: false, handoff: { handoffId, accountId, threadId, status: open, ... } }" }
+        '200': { description: "{ duplicate: true, handoff } (an open handoff for the thread already exists)" }
+        '409': { description: handoff_no_account_scope or invalid_handoff_transition }
+        '422': { description: invalid_handoff }
+    get:
+      summary: List room handoffs for the resolved account scope
+      description: >-
+        Room-token read. Same account-scope resolution as the POST; handoffs
+        newest first, optionally filtered with `?status=` to one of open,
+        accepted, completed, released.
+      security:
+        - roomToken: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, accepted, completed, released] }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ handoffs: [{ handoffId, threadId, status, fromAgent, toAgent, createdAt, packet, history }] }" }
+        '409': { description: handoff_no_account_scope }

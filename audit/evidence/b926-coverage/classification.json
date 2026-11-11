@@ -1,0 +1,28 @@
+{
+  "source": "b9265e5fea35818b3095243169169e7f1adaeaad",
+  "run": 41816001805,
+  "coverageJob": 126526799141,
+  "result": {
+    "tests": 15972,
+    "pass": 15954,
+    "fail": 1,
+    "skipped": 17
+  },
+  "failingCase": "tests/runtime-package.test.js:411 verified offline archive runs the actual Native durable restore qualification",
+  "exactError": "ENOENT: no such file or directory, lstat '/home/runner/work/project-room/project-room/cloudflare/node_modules'",
+  "failureLocation": "tests/runtime-package.test.js:427 realpathSync",
+  "gateMessage": "coverage gate: test suite failed (exit 1); not evaluating thresholds",
+  "classification": "Missing coverage-job dependency setup; Native subprocess never reached; no threshold/timeout/OOM finding",
+  "introductionCommit": "a293caaa21de5818363e1327de0ed6dfde976c07",
+  "currentMain": {
+    "head": "825d615a99a87f8e03d267a67fae952519425191",
+    "run": 41818509770,
+    "conclusion": "success",
+    "coverage": "skipped",
+    "testAndWorkflowDiffFromB926": "none"
+  },
+  "nextAction": "Reuse unit-job pinned pnpm10 + Cloudflare cache + frozen-lockfile ignore-scripts install in coverage; preserve actual Native proof and thresholds",
+  "otherJobs": "unit/cloudflare/contract/lint/friend-agent and5browser shards pass; browser3 known repaired failure; aggregators not distinct failures",
+  "limits": "Read-only; no new tests/source edits; current runtime defect not demonstrated; no repair logic causal failure shown",
+  "logSha256": "ab9cbd02d0c094eaf14aaebfbec7064a2c23c40f8cd5c4b56ef521554bf23b29"
+}

@@ -1,8 +1,9 @@
+import { CODEX_RUNTIME_FAILURE_EXITS } from './codex-stdio.mjs';
 import { existsSync, lstatSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { WatchJournal } from "./watch-journal.mjs";
 
-const phases = new Set(["watching_room", "assistant_not_selected", "protocol_qualified", "running", "settled", "recovery_pending", "retrying_room", "stopped"]);
+const phases = new Set(["watching_room", "assistant_not_selected", "protocol_qualified", "running", "settled", "recovery_pending", "report_reconciliation_pending", "retrying_room", "stopped"]);
 const credentials = new Set(["unknown", "present", "login_required", "not_required"]);
 const privatePath = (path, directory = false) => {
   const stat = lstatSync(path);
@@ -24,6 +25,7 @@ function readRecord(path) {
     phase: value.phase, protocol: value.protocol, credentials: value.credentials, modelExecution: "not_tested" };
   for (const key of ["origin", "roomId", "memberId", "runId"])
     if (typeof value[key] === "string" && value[key].length <= 256) result[key] = value[key];
+  if (typeof value.failureCode === "string" && Object.hasOwn(CODEX_RUNTIME_FAILURE_EXITS, value.failureCode)) result.failureCode = value.failureCode;
   return result;
 }
 
@@ -60,6 +62,8 @@ export function createCodexStatusWriter(directory, connection, { onError = () =>
       if (!["host_status", "host_readiness"].includes(event.type)) return;
       if (event.type === "host_status" && phases.has(event.status)) {
         record.phase = event.status;
+        if (typeof event.failureCode === "string" && Object.hasOwn(CODEX_RUNTIME_FAILURE_EXITS, event.failureCode)) record.failureCode = event.failureCode;
+        if (event.status === "protocol_qualified" && record.failureCode !== "login_required") delete record.failureCode;
         if (event.status === "protocol_qualified") record.protocol = "qualified";
         if (event.status === "recovery_pending") record.protocol = "unverified";
         if (typeof event.runId === "string" && event.runId.length <= 128) record.runId = event.runId;
@@ -67,6 +71,7 @@ export function createCodexStatusWriter(directory, connection, { onError = () =>
       }
       if (event.type === "host_readiness" && credentials.has(event.credentials)) {
         record.credentials = event.credentials; record.protocol = "qualified";
+        if (["present", "not_required"].includes(event.credentials)) delete record.failureCode;
       }
       write();
     },
@@ -85,6 +90,7 @@ export function readCodexHostStatus(journal, { now = Date.now(), freshMs = 15000
     const held = ["held", "stop_requested"].includes(control.state);
     const age = record ? now - Date.parse(record.updatedAt) : Infinity;
     const fresh = held && record?.sessionId === watcher.ownerIdentity() && age >= -5000 && age <= freshMs;
+    if (held && !fresh && record) delete record.failureCode;
     return { ...(record ?? { schemaVersion: 1, modelExecution: "not_tested" }),
       phase: !held ? "stopped" : fresh ? record.phase : "unknown",
       processState: control.state, fresh, stopRequested: control.state === "stop_requested",

@@ -4,7 +4,7 @@
 //
 //   node scripts/prod-deploy-smoke.mjs --sha <40-hex> \
 //     [--origin https://room.trydemigod.com] [--entry https://www.getdasha.com/room] \
-//     [--wait-ms 300000] \
+//     [--wait-ms 420000] \
 //     [--agent-card-public-key <base64>] [--agent-card-key-id <id>] \
 //     [--agent-card-agent-id <id>] [--agent-card-fetches 10] \
 //     [--agent-card-wait-ms 90000]
@@ -18,7 +18,8 @@
 //
 // Waits until /api/version and /api/version/worker report --sha on both the
 // canonical host and the public entry (edge propagation takes a few seconds),
-// then requires /api/health status "ok", /api/ready status "ready", and HTTP
+// then waits within the SAME deadline for valid stale jobs to converge,
+// while serving readiness stays good, and validates health liveness and its job summary, /api/ready status "ready", and HTTP
 // 200 for /terms, /privacy and / on both doors. Prints one JSON report;
 // exits 1 on any failure.
 // Without --sha it skips the revision wait (used after a rollback, where the
@@ -63,7 +64,7 @@ const opt = (name, fallback = "") => {
 const sha = opt("sha");
 const origin = opt("origin", "https://room.trydemigod.com").replace(/\/$/, "");
 const entry = opt("entry", "https://www.getdasha.com/room").replace(/\/$/, "");
-const waitMs = Number(opt("wait-ms", "300000"));
+const waitMs = Number(opt("wait-ms", "420000"));
 // Test seams (#1524): the deploy pipeline never sets these, so production
 // always verifies against the pinned key with the full fetch count. Tests
 // inject their own keypair through these knobs — they cannot sign for the
@@ -84,19 +85,141 @@ if (sha && !/^[0-9a-f]{40}$/.test(sha)) {
 
 // Cloudflare's bot rules treat a bare client differently from a browser.
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 project-room-deploy-smoke";
-const get = async (url, accept = "application/json") => {
+const get = async (url, accept = "application/json", deadline = null) => {
   const started = Date.now();
   try {
-    const res = await fetch(url, { headers: { "user-agent": UA, accept }, redirect: "follow", signal: AbortSignal.timeout(15000) });
+    const res = await fetch(url, { headers: { "user-agent": UA, accept }, redirect: "follow", signal: AbortSignal.timeout(deadline === null ? 15000 : Math.max(1, Math.min(15000, deadline - Date.now()))) });
     const text = await res.text();
     let json = null;
     try { json = JSON.parse(text); } catch {}
     return { status: res.status, json, ms: Date.now() - started };
   } catch (error) {
-    return { status: 0, json: null, ms: Date.now() - started, error: String(error?.message ?? error) };
+    return { status: 0, json: null, ms: Date.now() - started, error: String(error?.message ?? error), errorKind: error?.name === "TimeoutError" ? "fetch_timeout" : "fetch_error" };
   }
 };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Only fixed classifications and bounded numbers belong in deployment artifacts.
+// Never retain arbitrary response fields, exception messages, or headers here.
+export function readinessDetail(result) {
+  const choose = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
+  const number = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+  const probe = result.json?.do;
+  const detail = {
+    status: result.status,
+    body: choose(result.json?.status, ["ready", "degraded"], null),
+    emailVerification: choose(result.json?.emailVerification, ["enforced", "relaxed-no-mailer"], "unknown"),
+    emailVerificationScope: choose(result.json?.emailVerificationScope, ["durable-object", "worker"], "unknown"),
+    do: { status: choose(probe?.status, ["ok", "timeout", "error"], "unknown") },
+  };
+  if (number(result.ms)) detail.elapsedMs = result.ms;
+  for (const key of ["ms", "timeoutMs"]) if (number(probe?.[key])) detail.do[key] = probe[key];
+  if (Number.isInteger(probe?.statusCode) && probe.statusCode >= 100 && probe.statusCode <= 599) detail.do.statusCode = probe.statusCode;
+  if (result.status === 0) detail.transport = choose(result.errorKind, ["fetch_timeout", "fetch_error"], "fetch_error");
+  return detail;
+}
+
+// Keep operational waits distinct from failed safety work. This follows the
+// external probe's required/failed/stale checks, but admits only the known
+// recoverable GitHub rate-limit wait and also verifies the summary contract.
+export function deploymentHealth(health, jobResponse, now = Date.now()) {
+  const states = ["ok", "degraded", "stale", "failing", "disabled"];
+  const names = new Set(["native-mcp-events", "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs", "retention", "integrity", "public-read-model", "public-work-reseed", "escrow-epochs", "room-backup", "patrol", "project-map", "store-growth"]);
+  const body = health.json, view = jobResponse.json;
+  const result = { pass: false, status: health.status, body: ["ok", "degraded"].includes(body?.status) ? body.status : "unknown", healthJobsStatus: ["ok", "degraded", "stale", "failing", "timeout", "error"].includes(body?.jobs?.status) ? body.jobs.status : "unknown", jobsStatus: ["ok", "degraded", "stale", "failing"].includes(view?.status) ? view.status : "unknown", reason: "invalid_health", degradedJobs: [] };
+  const fail = reason => ({ ...result, reason });
+  if (health.status !== 200 || !body || typeof body !== "object") return result;
+  if (![200, 503].includes(jobResponse.status) || view?.schema !== "room.job-health/1" || !Array.isArray(view.jobs) || !view.jobs.length || view.jobs.length > 100) return fail("invalid_jobs");
+  const generated = Date.parse(view.generatedAt);
+  if (!Number.isFinite(generated) || generated > now + 5000 || now - generated > 60000) return fail("stale_snapshot");
+  const seen = new Set();
+  for (const job of view.jobs) {
+    if (!job || typeof job.name !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(job.name) || seen.has(job.name)
+      || !states.includes(job.status) || typeof job.required !== "boolean" || typeof job.stale !== "boolean"
+      || !Number.isSafeInteger(job.consecutiveFailures) || job.consecutiveFailures < 0) return fail("invalid_jobs");
+    seen.add(job.name);
+  }
+  const safeNumber = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+  result.degradedJobs = view.jobs.filter(job => job.status === "stale" || job.stale || job.status === "failing" || job.consecutiveFailures > 0).map(job => ({
+    name: names.has(job.name) ? job.name : "job", status: job.status,
+    reason: job.consecutiveFailures > 0 || job.status === "failing" ? "job_failing" : "job_stale",
+    ageSeconds: safeNumber(job.secondsSinceSuccess) ? job.secondsSinceSuccess : null,
+    staleAfterSeconds: safeNumber(job.staleAfterSeconds) ? job.staleAfterSeconds : null,
+  }));
+  const backup = view.jobs.find(job => job.name === "room-backup");
+  if (!backup || backup.required !== true) return fail("required_backup_missing");
+  if (view.jobs.some(job => job.required && job.status !== "ok")) return fail("required_job_unhealthy");
+  const active = view.jobs.filter(job => job.status !== "disabled");
+  if (active.some(job => job.status === "failing" || job.consecutiveFailures > 0)) return fail("job_failing");
+  if (active.some(job => job.status === "stale" || job.stale)) {
+    const staleJobs = active.filter(job => job.status === "stale" || job.stale);
+    const coherent = active.every(job => (job.status === "stale") === job.stale
+      && (job.status !== "degraded" || job.degraded === "github_rate_limited" && job.lastSummary?.rateLimited === true)
+      && (job.status !== "ok" || job.degraded == null && job.lastSummary?.rateLimited !== true)
+      && (job.status !== "stale" || job.degraded == null)
+      && job.lastErrorCurrent !== true)
+      && staleJobs.every(job => (job.secondsSinceSuccess === null || safeNumber(job.secondsSinceSuccess))
+        && safeNumber(job.staleAfterSeconds) && job.staleAfterSeconds > 0
+        && (job.secondsSinceSuccess === null || job.secondsSinceSuccess > job.staleAfterSeconds))
+      && view.status === "stale" && jobResponse.status === 503
+      && body.liveness === "ok" && body.status === "degraded" && body.jobs?.status === "stale";
+    return { ...fail("job_stale"), retryableStale: coherent };
+  }
+  const degraded = active.filter(job => job.status === "degraded");
+  if (degraded.some(job => job.required || job.degraded !== "github_rate_limited" || job.lastSummary?.rateLimited !== true)) return fail("unsupported_degradation");
+  if (active.some(job => job.status === "ok" && (job.degraded != null || job.lastSummary?.rateLimited === true))) return fail("inconsistent_jobs");
+  const expected = degraded.length ? "degraded" : "ok";
+  if (view.status !== expected || jobResponse.status !== 200) return fail("inconsistent_jobs");
+  // Older rollback targets have neither field. A partial new envelope cannot
+  // use that compatibility path, and legacy liveness never masks bad jobs.
+  const legacy = !Object.hasOwn(body, "liveness") && !Object.hasOwn(body, "jobs");
+  if (legacy ? body.status !== "ok" : body.liveness !== "ok" || body.jobs?.status !== expected || body.status !== expected) return fail("inconsistent_health");
+  return { ...result, pass: true, reason: "verified", legacy, degradedJobs: degraded.map(job => ({ name: names.has(job.name) ? job.name : "job", reason: "github_rate_limited" })) };
+}
+
+// These endpoints take independent snapshots. Re-read only when both complete
+// snapshots are internally valid and disagree across an ok/rate-limit transition.
+// Required-job failures and internally lying or unknown envelopes never retry.
+export async function readDeploymentHealth(readHealth, readJobs, now = () => Date.now()) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const health = await readHealth(), jobs = await readJobs();
+    const result = deploymentHealth(health, jobs, now());
+    const summary = health.json;
+    const transition = result.reason === "inconsistent_health" && summary?.liveness === "ok"
+      && ["ok", "degraded"].includes(summary.status) && summary.jobs?.status === summary.status
+      && ["ok", "degraded"].includes(jobs.json?.status) && summary.status !== jobs.json.status;
+    if (!transition || attempt === 3) return { ...result, attempts: attempt };
+  }
+}
+
+// Both doors share the original source-convergence deadline. Only a valid
+// optional stale-job observation may wait; every round rechecks serving readiness
+// and the complete health pair. No stale view is accepted as healthy.
+export async function convergeDeploymentHealth({ doors, readHealth, readJobs, readReady,
+  deadline, now = () => Date.now(), sleepFn = sleep, pollMs = 10000 }) {
+  let rounds = 0;
+  for (;;) {
+    const observations = await Promise.all(doors.map(async door => ({
+      door,
+      health: await readDeploymentHealth(() => readHealth(door, rounds ? deadline : null),
+        () => readJobs(door, rounds ? deadline : null), now),
+      ready: await readReady(door, rounds ? deadline : null),
+    })));
+    rounds++;
+    if (rounds > 1 && now() > deadline) {
+      return { observations: observations.map(row => ({ ...row, health: { ...row.health, pass: false, reason: "convergence_deadline" } })), rounds };
+    }
+    const ready = observations.every(row => row.ready.status === 200 && row.ready.json?.status === "ready"
+      && row.ready.json?.emailVerification === "enforced" && row.ready.json?.emailVerificationScope === "durable-object");
+    const pending = observations.some(row => !row.health.pass);
+    const retryable = observations.every(row => row.health.pass || row.health.retryableStale === true);
+    if (!ready || !pending || !retryable || now() >= deadline) return { observations, rounds };
+    await sleepFn(Math.min(pollMs, Math.max(0, deadline - now())));
+    // Do not start another request at the deadline, or spend a fresh budget
+    // after version propagation consumed the deployment window.
+    if (now() >= deadline) return { observations, rounds };
+  }
+}
 
 // Deploy-time consistency check for one served agent card (#1524). Returns
 // the list of failures; an empty list means the card is signed, binds the
@@ -186,9 +309,10 @@ export async function checkAgentCardDoor({
   let streak = 0;
   let attempt = 0;
   let staleFetches = 0;
+  let onlyVerifiedStale = true;
   const pending = [];
   const done = (failures, converged) => {
-    if (stats) Object.assign(stats, { attempts: attempt, staleFetches, converged, elapsedMs: now() - started });
+    if (stats) Object.assign(stats, { attempts: attempt, staleFetches, converged, elapsedMs: now() - started, retryKind: !converged && staleFetches > 0 && onlyVerifiedStale ? "verified-stale-card" : null });
     return failures;
   };
   for (;;) {
@@ -216,6 +340,11 @@ export async function checkAgentCardDoor({
         return done([], true);
       }
     } else {
+      const oldRevision = r.json?.signedRevision;
+      const verifiedStale = r.status === 200 && /^[0-9a-f]{40}$/.test(oldRevision ?? "")
+        && oldRevision !== expectedRevision && !target
+        && checkAgentCard({ card: r.json, expectedRevision: oldRevision, publicKey, keyId, agentId }).length === 0;
+      onlyVerifiedStale &&= verifiedStale;
       const labelled = failures.map(f => `fetch #${attempt}: ${f}`);
       // The target build itself served a bad card: no amount of waiting fixes it.
       if (target) return done(labelled, false);
@@ -237,24 +366,28 @@ async function main() {
     if (!pass) report.ok = false;
   };
 
+  const deadline = Date.now() + Math.max(0, Number.isFinite(waitMs) ? waitMs : 0);
   if (sha) {
     const doors = [`${origin}/api/version`, `${origin}/api/version/worker`, `${entry}/api/version`, `${entry}/api/version/worker`];
-    const deadline = Date.now() + waitMs;
     const last = {};
+    const statuses = {};
     for (;;) {
-      const results = await Promise.all(doors.map(get));
-      results.forEach((r, i) => { last[doors[i]] = r.json?.sourceRevision ?? `http ${r.status}`; });
-      if (doors.every(d => last[d] === sha) || Date.now() > deadline) break;
-      await sleep(10000);
+      const results = await Promise.all(doors.map(url => get(url)));
+      results.forEach((r, i) => { last[doors[i]] = r.json?.sourceRevision ?? `http ${r.status}`; statuses[doors[i]] = r.status; });
+      if (doors.every(d => statuses[d] === 200 && last[d] === sha) || Date.now() >= deadline) break;
+      await sleep(Math.min(10000, Math.max(0, deadline - Date.now())));
     }
-    for (const d of doors) record(`version ${d}`, last[d] === sha, { got: last[d] });
+    for (const d of doors) record(`version ${d}`, statuses[d] === 200 && last[d] === sha, { got: last[d], status: statuses[d] });
   }
 
-  for (const door of [origin, entry]) {
-    const health = await get(`${door}/api/health`);
-    record(`health ${door}/api/health`, health.status === 200 && health.json?.status === "ok", { status: health.status, body: health.json?.status ?? null });
-    const ready = await get(`${door}/api/ready`);
-    record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready" && ready.json?.emailVerification === "enforced" && ready.json?.emailVerificationScope === "durable-object", { status: ready.status, body: ready.json?.status ?? null, emailVerification: ready.json?.emailVerification ?? "unknown", emailVerificationScope: ready.json?.emailVerificationScope ?? "unknown" });
+  const healthConvergence = await convergeDeploymentHealth({ doors: [origin, entry], deadline,
+    readHealth: (door, until) => get(`${door}/api/health`, "application/json", until),
+    readJobs: (door, until) => get(`${door}/api/health/jobs`, "application/json", until),
+    readReady: (door, until) => get(`${door}/api/ready`, "application/json", until),
+  });
+  for (const { door, health: healthCheck, ready } of healthConvergence.observations) {
+    record(`health ${door}/api/health`, healthCheck.pass, { ...healthCheck, convergenceRounds: healthConvergence.rounds });
+    record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready" && ready.json?.emailVerification === "enforced" && ready.json?.emailVerificationScope === "durable-object", readinessDetail(ready));
     for (const page of ["/terms", "/privacy", "/"]) {
       const r = await get(`${door}${page}`, "text/html");
       record(`page ${door}${page}`, r.status === 200, { status: r.status });

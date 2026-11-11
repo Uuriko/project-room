@@ -1,0 +1,36 @@
+name: private-state-platform
+on:
+  pull_request:
+    paths:
+      - 'room-acp/**'
+      - 'client/agent-connection.mjs'
+      - 'client/setup-journal.mjs'
+      - 'tests/private-state-platform.test.mjs'
+      - 'tests/room-acp-import-identity.test.js'
+      - 'tests/room-acp-fixture.mjs'
+      - '.github/workflows/private-state-platform.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: private-state-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  private-state:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Native private-state and interrupted-save qualification
+        run: node --test tests/private-state-platform.test.mjs
+      - name: Existing-identity CLI import and retry against real local HTTP
+        run: node --test --test-name-pattern="CLI imports its existing identity|final save failure retains" tests/room-acp-import-identity.test.js

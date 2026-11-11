@@ -10,6 +10,7 @@ import { AccessRequests } from "../server/access-requests.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
 import { seedStarter } from "../server/starter-room.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // A gate for one bug class, found three times in one day.
 //
@@ -113,6 +114,8 @@ function sweep() {
   step(T.MESSAGE_POSTED, "producer", { messageId: "chat-2", body: "an ordinary message while a request is open" });
   step(T.MESSAGE_EDITED, "producer", { messageId: "chat-2", body: "edited while a request is open", expectedMessageRevision: 0 });
   step(T.MESSAGE_DELETED, "producer", { messageId: "chat-2", expectedMessageRevision: 1, reason: "tidy" });
+  // The recipient reports progress (non-terminal, revision unchanged) before the asker cancels.
+  step(T.REPLY_REQUEST_PROGRESSED, "producer", () => ({ requestMessageId: "req-1", expectedRequestRevision: state().replyRequests?.["req-1"]?.revision ?? 0, progress: "needs_input", note: "Which environment?" }));
   step(T.REPLY_REQUEST_CANCELLED, "owner", () => ({ requestMessageId: "req-1", expectedRequestRevision: state().replyRequests?.["req-1"]?.revision ?? 0, reason: "never mind" }));
 
   step(T.WORK_ACCEPTED, "producer", () => ({ workItemId: W, expectedRevision: item().revision }));
@@ -220,12 +223,8 @@ function sweep() {
   try {
     const left = fixture.store.identities.create("Sweep bond left");
     const right = fixture.store.identities.create("Sweep bond right");
-    fixture.store.identities.link(fixture.keys.owner, "commons", {
-      identityId: left.identityId, displayName: "Sweep bond left", permissions: ["accept_work"]
-    });
-    fixture.store.identities.link(fixture.keys.owner, "commons", {
-      identityId: right.identityId, displayName: "Sweep bond right", permissions: ["accept_work"]
-    });
+    linkWithProof(fixture.store, fixture.keys.owner, "commons", left, { displayName: "Sweep bond left", permissions: ["accept_work"] });
+    linkWithProof(fixture.store, fixture.keys.owner, "commons", right, { displayName: "Sweep bond right", permissions: ["accept_work"] });
     // Graduated autonomy tiers: linked agent identities enroll at t1_readonly;
     // promote them so the sweep exercises the bond command surface.
     for (const identity of [left, right])
@@ -342,6 +341,9 @@ test("the event surface has not grown without this sweep noticing", () => {
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
   //
+  // room.development_access_set is Muse-only, so the ordinary-room sweep
+  // cannot emit it. tests/muse-development-access.test.js enables it, mints
+  // and redeems a co-owner link, then runs auditRecovery on the resulting store.
   // claim.renewed is not exercised here: it needs an active claim plus the
   // holder's public progress message posted after that claim. The sweep does
   // not acquire one. The reducer's validation is covered by
@@ -351,6 +353,11 @@ test("the event surface has not grown without this sweep noticing", () => {
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
   // agent_invite.minted is exercised above via an owner-level invite mint (it is not a command).
   // dm.consent_changed is exercised on a real RoomStore in tests/dm-consent-events.test.js.
-  assert.equal(Object.values(T).length, 67,
+  // member.merged and pair.requested/approved/denied are not exercised here:
+  // they need an agent-pairing flow and two live agent members. They are
+  // covered by tests/pairing-flow.test.js and tests/pairing-reconnect.test.js.
+  // member.sponsor_transferred requires explicit account sponsorship consent;
+  // tests/agent-sponsor-transfer.test.mjs exercises that event and auditRecovery.
+  assert.equal(Object.values(T).length, 74,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

@@ -66,14 +66,15 @@ test("every additive schema step in the full pass is part of the warm-wake stamp
 const SOURCE_PINS = {
   "ensureIdentitySecretSchema@2": "751798e9c7c60b6f",
   "ensureIdentityCapacitySchema@1": "33e15d3c51616945",
-  "ensureIdentityLinkCodeSchema@1": "2e027731951257ac",
+  "ensureIdentityLinkCodeSchema@2": "d937964b3cb47781",
   "ensureAutonomyTiersSchema@1": "10220d71e7134ef8",
   "ensureOperatorActionsSchema@1": "766e8f9fed79c6e6",
   "ensureGrantsSchema@1": "fe4b311a64923973",
   "ensureSpendGrantsSchema@3": "0f3f6dab2ae7d25b",
   "ensureAccountProfileSchema@1": "3fb6bfb33febc621",
   "ensureVerifiedEmailSchema@1": "a8321ba9d34e6ad4",
-  "ensureAttachmentSchema@1": "3189ca5ebea7bf33"
+  "ensureAttachmentSchema@1": "3189ca5ebea7bf33",
+  "ensureMentionLateAckSchema@1": "25f6c41e7ff55f49"
 };
 
 test("each additive ensure helper's source is pinned to its stamp label", () => {
@@ -148,6 +149,30 @@ test("a room stamped by the pre-receipts deploy converges the rotation-receipts 
         .run("ai_probe", "h", "Stamp Probe", NOW);
       woken.db.prepare("INSERT INTO agent_identity_rotation_receipts(identity_id, request_id, pre_hash, pre_fallback_hash, pre_legacy_hash, created_at) VALUES(?,?,?,?,?,?)")
         .run("ai_probe", "req-1", "h", null, null, NOW);
+    } finally { woken.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("retention indexes converge on a deferred warm wake without changing delivery history", () => {
+  const dir = mkdtempSync(join(tmpdir(), "retention-index-stamp-"));
+  const filename = join(dir, "room.sqlite");
+  const names = ["web_fetch_log_retention", "web_research_log_retention", "agent_webhook_deliveries_retention"];
+  try {
+    const first = new RoomStore(filename);
+    first.db.prepare(`INSERT INTO agent_webhook_deliveries
+      (delivery_id,idempotency_key,subscription_id,agent_id,event_type,payload_json,signature,state,attempts,next_attempt_at,created_at,updated_at)
+      VALUES ('retained','retained','sub','agent','message.posted','{}','synthetic','pending',0,0,0,0)`).run();
+    const stamp = first.db.prepare("SELECT stamp FROM room_schema_stamp WHERE singleton=1").get().stamp;
+    for (const name of names) first.db.exec(`DROP INDEX ${name}`);
+    first.db.prepare("UPDATE room_schema_stamp SET stamp=? WHERE singleton=1").run("pre-retention-indexes");
+    const count = first.db.prepare("SELECT COUNT(*) AS n FROM agent_webhook_deliveries").get().n;
+    first.close();
+    const woken = new RoomStore(filename, { integrity: "deferred" });
+    try {
+      const present = woken.db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => row.name);
+      for (const name of names) assert.ok(present.includes(name), name);
+      assert.equal(woken.db.prepare("SELECT stamp FROM room_schema_stamp WHERE singleton=1").get().stamp, stamp);
+      assert.equal(woken.db.prepare("SELECT COUNT(*) AS n FROM agent_webhook_deliveries").get().n, count);
     } finally { woken.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

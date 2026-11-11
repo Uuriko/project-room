@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } f
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { browserPlan, parseShard } from "../scripts/browser-shards.mjs";
+import { browserPlan, parseShard, verifyBrowserShards } from "../scripts/browser-shards.mjs";
 import { canonicalBrowserScript } from "../scripts/browser-suites.mjs";
 
 // Real Node tests, real wrapper and real CLI gate: covers omission/duplication,
@@ -112,4 +112,42 @@ test("browser shard plan is balanced on measured runtimes: full timing coverage,
     const share = shard.estimatedMs / total;
     assert.ok(share <= 0.30, `browser shard ${shard.index} holds ${(100 * share).toFixed(1)}% of measured runtime (cap 30%)`);
   }
+});
+
+test("an affected plan may leave a shard empty when its receipt lists the same files", () => {
+  const script = canonicalBrowserScript();
+  const plan = browserPlan(script, { only: browserPlan(script).files.slice(0, 2) });
+  assert.ok(plan.shards.some(shard => shard.files.length === 0));
+  const identity = { matrixResult: "success", revision: "rev", runId: "run", runAttempt: "1" };
+  const receipts = plan.shards.map(shard => ({
+    index: shard.index, total: 6, files: shard.files, planHash: plan.planHash,
+    status: 0, signal: null, revision: "rev", runId: "run", runAttempt: "1",
+  }));
+  assert.equal(verifyBrowserShards(plan, receipts, identity).shards, 6);
+  receipts[0] = { ...receipts[0], files: ["scripts/not-in-the-plan.mjs"] };
+  assert.throws(() => verifyBrowserShards(plan, receipts, identity), /mismatched evidence/);
+});
+
+test("affected CLI persists omitted coverage before an empty shard returns", t => {
+  const dir = mkdtempSync(join(tmpdir(), "browser-selection-cli-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, "scripts"));
+  for (const name of ["browser-ci.mjs", "browser-shards.mjs", "browser-ci-durations.json"]) cpSync(join("scripts", name), join(dir, "scripts", name));
+  const script = "node --test scripts/selected.mjs scripts/omitted.mjs";
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { "test:browser": script } }));
+  const plan = browserPlan(script, { only: ["scripts/selected.mjs"] });
+  const empty = plan.shards.find(row => row.files.length === 0);
+  assert.ok(empty);
+  const selected = [{ test: "scripts/selected.mjs", via: "changed", ms: 1 }];
+  const omitted = [{ test: "scripts/omitted.mjs", via: "imports src/app.js", ms: 90000, reason: "budget" }];
+  const selection = { coverage: "affected", changed: ["src/app.js"], budgetMs: 600000, selected, omitted, plan };
+  writeFileSync(join(dir, "scripts/ci-affected.mjs"), `export const affectedBrowserFiles = () => (${JSON.stringify(selection)});`);
+  const run = spawnSync(process.execPath, ["scripts/browser-ci.mjs", `--shard=${empty.index}/6`], {
+    cwd: dir, env: { ...process.env, CI_BROWSER_SCOPE: "affected", BASE_SHA: "base-revision", GITHUB_SHA: "head-revision", GITHUB_RUN_ATTEMPT: "1" }, encoding: "utf8", timeout: 30000
+  });
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const report = JSON.parse(readFileSync(join(dir, `test-results/browser-selection-${empty.index}-of-6-attempt-1.json`), "utf8"));
+  assert.equal(report.scope, "affected"); assert.equal(report.base, "base-revision"); assert.equal(report.revision, "head-revision");
+  assert.deepEqual(report.selected, selected); assert.deepEqual(report.omitted, omitted);
+  assert.equal(report.budgetMs, 600000); assert.equal(Object.hasOwn(report, "status"), false);
 });

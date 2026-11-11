@@ -66,7 +66,11 @@ test("default: receipts stay public for everyone (backward compatible)", async t
   const feed = await raw(origin, "/api/public/receipts");
   assert.equal(feed.status, 200);
   assert.ok(JSON.parse(feed.text).receipts.some(receipt => receipt.id === PWR));
-  assert.equal((await raw(origin, `/receipts/${PWR}`)).status, 200);
+  const page = await raw(origin, `/receipts/${PWR}`);
+  assert.equal(page.status, 200);
+  const resultLink = /href="([^"]+)"[^>]*>Download result<\/a>/.exec(page.text)?.[1];
+  assert.equal(resultLink, `/api/public-work/receipts/${PWR}/artifact`);
+  assert.equal((await raw(origin, resultLink)).text, "note");
   assert.equal((await raw(origin, `/receipts/${PWR}.json`)).status, 200);
   assert.ok((await raw(origin, "/sitemap.xml")).text.includes(`/receipts/${PWR}`));
 });
@@ -104,11 +108,14 @@ test("owner flips receipts private; non-owner mutation is refused", async t => {
 test("private receipts: anonymous 403/404, members still read; flipping back restores", async t => {
   const { origin, ownerKey, adaKey } = await serve(t);
   assert.equal((await raw(origin, `/api/public-work/receipts/${PWR}`)).status, 200);
+  const page = await raw(origin, `/receipts/${PWR}`);
+  const resultLink = /href="([^"]+)"[^>]*>Download result<\/a>/.exec(page.text)?.[1];
+  assert.ok(resultLink, "public page supplies the result link before privacy changes");
   assert.equal((await setVisibility(origin, ownerKey, false)).status, 200);
   const anonRead = await raw(origin, `/api/public-work/receipts/${PWR}`);
   assert.equal(anonRead.status, 403);
   assert.equal(JSON.parse(anonRead.text).error.code, "receipts_private");
-  assert.equal((await raw(origin, `/api/public-work/receipts/${PWR}/artifact`)).status, 403);
+  assert.equal((await raw(origin, resultLink)).status, 403, "a previously copied link respects the current setting");
   const memberRead = await raw(origin, `/api/public-work/receipts/${PWR}`, {
     headers: { authorization: `Bearer ${adaKey}` },
   });
