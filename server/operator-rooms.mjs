@@ -14,12 +14,13 @@
 //
 // Export scrub (MF-7): event bodies are walked with scrubEventTokens
 // (server/room-export.mjs), a recursive scrub over parsed event JSON for
-// exactly three token shapes (pri_…, rak_…, ga1.…). The marker travels
+// the product's own token shapes (pri_…, rak_…, ga1.…) plus the common
+// credential shapes and credential-named keys named there (L08-C5). The marker travels
 // out-of-band — the X-Room-Export-Scrub response header and
 // counts.scrubbed in the audit row — never as an in-band JSONL line, which
 // would break the one-{sequence,event}-per-line contract. The export is
-// still as sensitive as the room itself; the scrub is a narrow mitigation
-// for this product's own token shapes, not a redaction of the export.
+// still as sensitive as the room itself; the scrub is a mitigation for
+// known credential shapes, not a redaction of the export.
 
 import { ServiceError } from "./service-error.mjs";
 import { validId } from "../src/events.js";

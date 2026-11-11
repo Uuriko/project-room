@@ -32,6 +32,8 @@ import {
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
 import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
+import { DM_FOLLOW_UP_TYPES, dmEventVisibility } from "./dm-event-visibility.mjs";
+import { selectedMessageRecord } from "./message-repository.mjs";
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
@@ -1350,6 +1352,23 @@ export class AgentPluginStore {
       .run(JSON.stringify(sub.deliveries), subscriptionId);
   }
 
+  // Message/request follow-ups carry no toMemberId, but are as private as their
+  // opening message. Reuse the read-path audience rule at enqueue AND send:
+  // older releases may already have queued an unauthorized payload.
+  requestEventVisible(roomId, memberId, event) {
+    if (!DM_FOLLOW_UP_TYPES.has(event?.type)) return true;
+    const id = event.data?.messageId ?? event.data?.requestMessageId;
+    if (!roomId || !memberId || typeof id !== "string" || !id || id.length > 128) return false;
+    try {
+      const message = selectedMessageRecord(this.store, roomId, id, true);
+      if (!message) return false;
+      return dmEventVisibility(memberId, [message])(event);
+    } catch {
+      // Missing/unreadable authority never permits a private delivery.
+      return false;
+    }
+  }
+
   // RC-2026-09-19-064: fan out a persisted room event to every enabled
   // subscription whose event filter matches. RC-2026-09-24 fanout scope:
   // delivery is scoped to room membership — only subscriptions whose
@@ -1405,6 +1424,7 @@ export class AgentPluginStore {
       if (event?.type === "message.posted" && event?.data?.toMemberId) {
         if (event.actorId !== memberId && event.data.toMemberId !== memberId) continue;
       }
+      if (!this.requestEventVisible(roomId, memberId, event)) continue;
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
         { eventType: event.type, eventId: event.id, roomId,
           data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: memberId }) });
@@ -1580,8 +1600,15 @@ export class AgentPluginStore {
     // (identity_links first, guest_members fallback) — the same one the
     // fan-out uses (#3777) — so a trial seat's queued delivery is not
     // stranded by an identity_links-only re-check (#3881, F-2 dispatch leg).
-    if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id, now)) return skip();
+    const memberId = row.room_id ? memberIdForWakeIdentity(this.db, row.room_id, row.agent_id, now) : null;
+    if (row.room_id && !memberId) return skip();
     const payload = JSON.parse(row.payload_json);
+    if (!this.requestEventVisible(row.room_id, memberId,
+      { type: row.event_type, data: payload?.data })) {
+      const changed = this.mutate(() => this.markDeadLetter(row.delivery_id,
+        "request audience unavailable or excludes subscriber", now, null, claimExpiresAt));
+      return changed ? "deadLettered" : "skipped";
+    }
     const issuedAt = now;
     // payload?.data: a stored payload that parses to a non-object (or an
     // object without an object data) reaches signDelivery's own check

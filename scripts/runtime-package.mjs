@@ -72,7 +72,7 @@ optional.push("server/public-work-settlement.mjs"); // First Shift settlement ra
 optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outside-agents.mjs", "scripts/outside-agents.mjs");
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
-optional.push("server/request-states.mjs"); // request lifecycle states (flag ROOM_REQUEST_STATES; imported by server/reply-requests.mjs; pure)
+optional.push("server/request-states.mjs"); // request lifecycle states (on by default, ROOM_REQUEST_STATES=0 off; imported by server/reply-requests.mjs; pure)
 optional.push("server/experiments.mjs", "server/growth-experiments.mjs"); // EXP-1 (#5982) flagged experiment helpers (imported by server/mcp-full-profile.mjs); main missed registering them
 optional.push("server/git-remote.mjs", "server/routes/git-remote.mjs"); // ROOM_GIT_REMOTE phase 0 helpers + status route (flag off = 404; route module imported by server/routes/table.mjs)
 optional.push("server/room-owner.mjs"); // owner lookup without the member census (bounty escrow)
@@ -348,7 +348,7 @@ optional.push("connectors/muse.md"); // Muse custom-connector brief (served at /
 optional.push("server/account-login-methods.mjs"); // Multi-method login model (imported by server/store.mjs)
 optional.push("server/account-deletion.mjs"); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs; imports the src planner below)
 optional.push("server/operator-auth.mjs", "server/operator-actions.mjs", "server/purge-registry.mjs", "server/operator-purge.mjs", "server/operator-room-purge.mjs", "server/operator-status.mjs", "server/operator-parity-diagnostics.mjs", "server/operator-legacy-message-repair.mjs", "server/operator-routes.mjs", "server/operator-projection-repair.mjs", "server/operator-rooms.mjs", "server/operator-write-grant-census.mjs"); // CP-ADMIN-0: operator auth, purge, and status (imported by server/http.mjs and server/store.mjs); projection repair and operator-rooms (MGMT-PANEL Slice 1) imported by server/operator-routes.mjs; operator-room-purge (MGMT-PANEL Slice 2 panel wrapper) imported by server/operator-routes.mjs
-optional.push("server/attention-claim.mjs", "server/wake-ack.mjs", "server/wake-ack-hook.mjs"); // #6016 attention lease (needs-me) and #6017 wake auto-ack: runtime imports
+optional.push("server/attention-claim.mjs"); // #6016 attention lease (needs-me). Recipient acknowledgement is explicit.
 optional.push("server/operator-legacy-session-repair.mjs", "server/legacy-session-replay.mjs"); // Explicit bounded historical reconciliation, imported by operator-legacy-message-repair.mjs.
 optional.push("src/account-deletion.mjs"); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
 optional.push("server/account-passkeys.mjs"); // Passkey auth wiring (slice 5; imported by server/http.mjs)

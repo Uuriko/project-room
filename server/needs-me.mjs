@@ -36,7 +36,6 @@ import { nextWorkStep } from "../src/workflow.js";
 import {ownMember} from "../src/events.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { filterClaimedNeedsMe } from "./attention-claim.mjs";
-import { autoAckDeliveredAsks } from "./wake-ack-hook.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { availableBoardRowsInRoom } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, currentReviewOf, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
@@ -1304,12 +1303,9 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     if (native[heldRoom] === undefined) delete holds[heldRoom];
   }
   if (Object.keys(holds).length) cursor.held = holds;
-  // L1: returning a direct_ask from needs-me is delivery for poll agents.
-  // Gate on claimSec>0 so ordinary GET /api/needs-me stays pure (tests + browsers);
-  // MCP room_needs_me already passes claimSec=45 and gets auto-ack with the lease.
-  if (effectiveClaimSec > 0) {
-    try { autoAckDeliveredAsks(store, { items: claimedItems, memberByRoom }); } catch { /* never fail the read */ }
-  }
+  // A delivery lease prevents duplicate handlers; it is not a recipient
+  // disposition. Only explicit reply_request.progressed records ACK/work.
+  // In particular, a lost response must leave an undispositioned ask open.
   const claimMeta = claim.leaseSec > 0 ? { claims: { leased: claim.leased, suppressed: claim.suppressed, leaseSec: claim.leaseSec } } : {};
   return stampNeedsMe({ identityId: identity.identityId, ...claimMeta, items: claimedItems, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, complete: !hasMore, status: hasMore ? 'incomplete' : 'complete', ...(hasMore ? { nextRead: { tool: 'room_needs_me', arguments: { ...(scopedRoom ? { roomId: scopedRoom } : {}), since: cursor } }, guidance: "INCOMPLETE: this is a partial page, not an empty answer. Pass the returned cursor back unchanged as since until complete:true before concluding nothing needs you." } : {}), ...(nativeCoverage.length?{contractVersion:2,nativeCoverage}:{}),
     scan: { scannedRows: scan.scannedRows, scannedBytes: scan.scannedBytes, exhausted: scan.exhausted, replies: scan.replies, mentions: scan.mentions, rowBudgets: { replies: REPLY_SCAN_ROW_BUDGET, mentions: MENTION_SCAN_ROW_BUDGET }, byteBudgets: { replies: REPLY_SCAN_BYTE_BUDGET, mentions: MENTION_SCAN_BYTE_BUDGET }, ...(scan.exhausted ? { continuation: "pass the returned cursor back unchanged; the scan resumes at the first unscanned sequence" } : {}) } });

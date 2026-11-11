@@ -5,7 +5,7 @@ import {initialRoom} from '../server/bootstrap.mjs';
 import {event} from '../src/events.js';
 import {auditRecovery} from '../server/recovery.mjs';
 import {deriveRequestState} from '../server/request-states.mjs';
-import {buildReplyCommand, validReplyArguments, replyTools} from '../client/reply-actions.mjs';
+import {buildReplyCommand, validReplyArguments, replyTools, validateReplyRead} from '../client/reply-actions.mjs';
 
 // The recipient of a formal request can say where it stands, so the asker
 // sees acknowledged / working / needs_input / error without polling chat.
@@ -17,7 +17,7 @@ function fixture(t, representation) {
   const keys = Object.fromEntries(['owner', 'asker', 'helper', 'other'].map(id => [id, s.issueAccessKey('commons', id)]));
   const cmd = (who, id, type, data) => s.command(keys[who], 'commons', {id, type, data});
   cmd('asker', 'ask', 'message.posted', {messageId: 'ask', toMemberId: 'helper', requestKind: 'reply', body: 'Can you check the deploy?'});
-  const list = who => s.replyRequests.list(keys[who], 'commons', {direction: 'both', status: 'all'}).requests.find(r => r.id === 'ask');
+  const list = who => s.replyRequests.list(keys[who], 'commons', {direction: 'both', status: 'all', states: true}).requests.find(r => r.id === 'ask');
   const progress = (who, id, extra) => cmd(who, id, 'reply_request.progressed', {requestMessageId: 'ask', expectedRequestRevision: 0, ...extra});
   return {s, keys, cmd, list, progress};
 }
@@ -80,4 +80,43 @@ test('room_progress_request is not marked destructive', () => {
   const tool = replyTools.find(entry => entry.name === 'room_progress_request');
   assert.equal(tool.annotations.destructiveHint, false);
   assert.equal(tool.annotations.readOnlyHint, false);
+});
+
+// Regression: installed clients check a listed request against an exact key
+// set. A progress report used to add a key they refuse, so the ask became
+// unreadable through every local client the moment its recipient spoke.
+for (const representation of [null, 'normalized-current-v1']) test(`a progressed ask stays readable through the client (${representation ?? 'legacy'})`, t => {
+  const {s, keys, progress} = fixture(t, representation);
+  const read = (who, extra = {}) => {
+    const args = {direction: 'both', status: 'open'};
+    return validateReplyRead(s.replyRequests.list(keys[who], 'commons', {...args, ...extra}), {name: 'room_list_requests', args, roomId: 'commons'})
+      .requests.find(r => r.id === 'ask');
+  };
+  assert.deepEqual(read('asker').lifecycle, undefined, 'default shape carries no state');
+  const pending = read('asker', {states: true});
+  assert.equal(pending.lifecycle.state, 'pending');
+  assert.equal('progress' in pending, false);
+  progress('helper', 'p1', {progress: 'working', note: 'on it'});
+  for (const who of ['asker', 'helper']) {
+    const plain = read(who);
+    assert.equal('progress' in plain, false, 'default shape is unchanged by a progress report');
+    assert.equal('lifecycle' in plain, false);
+    const stateful = read(who, {states: true});
+    assert.deepEqual([stateful.progress.state, stateful.progress.note], ['working', 'on it']);
+    assert.deepEqual([stateful.lifecycle.state, stateful.lifecycle.unresponsive], ['active', false]);
+  }
+  assert.throws(() => s.replyRequests.list(keys.asker, 'commons', {states: 'yes'}), /states/);
+});
+
+test('the client still refuses an unknown key or a malformed state on a listed request', t => {
+  const {s, keys, progress} = fixture(t);
+  progress('helper', 'p1', {progress: 'working'});
+  const args = {direction: 'both', status: 'open'};
+  const result = () => s.replyRequests.list(keys.asker, 'commons', {...args, states: true});
+  const check = mutate => { const value = result(); mutate(value.requests[0]); return () => validateReplyRead(value, {name: 'room_list_requests', args, roomId: 'commons'}); };
+  assert.doesNotThrow(check(() => {}));
+  assert.throws(check(r => { r.surprise = 1; }), /does not match/);
+  assert.throws(check(r => { r.progress.state = 'done'; }), /does not match/);
+  assert.throws(check(r => { r.lifecycle.state = 'sleeping'; }), /does not match/);
+  assert.throws(check(r => { r.lifecycle.extra = true; }), /does not match/);
 });

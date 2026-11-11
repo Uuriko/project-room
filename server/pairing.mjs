@@ -6,7 +6,7 @@ import { assertMessageWrite, recordMessageWrite } from './write-integrity.mjs';
 // codes (authorization_pending, slow_down, access_denied, expired_token).
 import { createHash, createPublicKey, randomBytes, randomUUID, scryptSync, timingSafeEqual, verify } from "node:crypto";
 import { ServiceError, PILOT_LIMITS } from "./store.mjs";
-import { agentAccessProfiles } from "./agent-connections.mjs";
+import { agentProfilePermissions, isAgentProfile } from "./agent-connections.mjs";
 import { isValidPublicKey } from "./agent-card-signing.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import {
@@ -435,9 +435,9 @@ export class Pairing {
 
   decide(token, roomId, { pairId = null, userCode = null, decision, reconnect = false, profile = "contribute" } = {}, binding = null) {
     if (!["approve", "deny"].includes(decision)) fail(422, "invalid_pair", "decision must be approve or deny");
-    if (!agentAccessProfiles[profile]) fail(422, "invalid_pair", "profile must be guest, member, chat, contribute, review, or collaborate");
+    if (!isAgentProfile(profile)) fail(422, "invalid_pair", "profile must be guest, agent_member (alias member), chat, contribute, review, or collaborate");
     const auth = this.#approver(token, roomId, binding);
-    const permissions = [...agentAccessProfiles[profile]];
+    const permissions = [...agentProfilePermissions(profile)];
     if (permissions.some(permission => NEVER_GRANT.includes(permission))) fail(403, "access_denied", "That grant is not available on a pair");
     try {
       return this.#decideLocked(auth, roomId, { pairId, userCode, decision, reconnect, profile, permissions, binding, token });
@@ -501,7 +501,7 @@ export class Pairing {
   #admit(pairId, { actorId, token = null, binding = null, profile = "contribute", reconnect = false, permissions = null }) {
     const row = this.db.prepare("SELECT * FROM pairs WHERE pair_id=?").get(pairId);
     const roomId = row.room_id;
-    const grants = permissions ?? [...agentAccessProfiles[profile]];
+    const grants = permissions ?? [...agentProfilePermissions(profile)];
     const keyHit = row.public_key ? this.resolveKey(roomId, row.public_key) : null;
     const reconnectId = (keyHit?.memberId && (keyHit.active || token) ? keyHit.memberId : null)
       || (reconnect ? row.duplicate_member_id : null);

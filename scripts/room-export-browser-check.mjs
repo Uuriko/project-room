@@ -20,7 +20,9 @@ async function setup(t, { account = false } = {}) {
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce", acceptDownloads: true }), errors = [], outside = [], exports = [];
+  // These checks observe and inject network responses with page.route. A
+  // controlling service worker bypasses those routes, including the 429 below.
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce", acceptDownloads: true, serviceWorkers: "block" }), errors = [], outside = [], exports = [];
   page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
   await page.route("**/*", route => {
     if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); }
@@ -70,7 +72,12 @@ test("in account mode the export request carries the session binding a plain lin
 
 test("a failed export leaves the room usable and says so at the control", { timeout: 30000 }, async t => {
   const { page } = await setup(t);
-  await page.route("**/api/rooms/commons/export**", route => route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }) }));
+  let injected429 = 0;
+  t.after(() => assert.equal(injected429, 1, "the export request reached the injected rate-limit response"));
+  await page.route("**/api/rooms/commons/export**", route => {
+    injected429 += 1;
+    return route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }) });
+  });
   await openSettings(page, "record-panel");
   await page.locator("#record-export-html").click();
   await page.getByText("Export is rate limited; try again in a minute.", { exact: true }).waitFor();
