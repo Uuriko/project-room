@@ -35,7 +35,7 @@ const compare = (older, reference) => {
 test('equal independently captured data is not permission to reopen; all application tables are compared', async t => {
   const f = await fixture(t), reference = await f.capture(), report = compare(f.older, reference);
   assert.equal(report.status, 'no_stored_differences');
-  assert.equal(report.tables.length, 216, 'review every added application table before changing the census');
+  assert.equal(report.tables.length, 217, 'review every added application table before changing the census');
   for (const table of ['current_room_records', 'current_room_record_proofs', 'current_room_head',
     'current_room_writer_permit', 'current_restore_admission', 'current_restore_audit_scratch']) {
     assert.ok(delta(report, table), `schema45 table ${table} participates in literal capture comparison`);
