@@ -169,6 +169,49 @@ export const ALLOWLIST = [
     // log prefix inside a template literal; the value is an interpolation
     // (a findings count), not a credential.
 
+  // #5689 rebase (2026-11-10): identifier-component key names newly widen generic-secret, which
+  // flags these existing lines on main. Each entry pins the exact finding span and was read by hand:
+  // test/check fixture placeholders (fixture-*, synthetic-*, dummy-*, *-0123456789), env var / header
+  // NAMES, user-facing copy, SQL text, and code expressions. None is a real credential.
+  /EXPORT_TOKEN = "export-token-value-0123456789"/,
+  /RESTORE_TOKEN = "restore-token-value-0123456789"/,
+  /SHARED_TOKEN = "one-value-in-both-secrets-0123456789"/,
+  /LEGACY_TOKEN = "legacy-backup-token-value-0123456789"/,
+  /restoreToken='synthetic-redaction-restore-1101-000000'/,
+  /access_token: 'fixture-access'/,
+  /refresh_token: 'fixture-refresh'/,
+  /ROOM_GOOGLE_CLIENT_SECRET: 'synthetic-google-client-secret'/,
+  /'X-Telegram-Bot-Api-Secret-Token': 'not-the-configured-secret-0123'/,
+  /clientSecret: 'dummy-github-fixture-secret'/,
+  /clientSecret: 'fixture-secret'/,
+  /clientSecret = "dummy-google-fixture-secret"/,
+  /WEBHOOK_SECRET = "fixture-webhook-secret-0123456789"/,
+  /TELEGRAM_BOT_TOKEN: "123456789:AAFakeFakeFakeFakeFakeFakeFakeFakeFa"/,
+  /TELEGRAM_WEBHOOK_SECRET: WEBHOOK_SECRET/,
+  /storedSecret: "older-fixture-secret-9876543210"/,
+  /oldPassword = 'synthetic-old-password'/,
+  /newPassword = 'synthetic-new-password'/,
+  /SECRET_DM = `qa2-private-dm-\$\{stamp\}`;/,
+  /slotToken: "recovery-slot"/,
+  /refreshToken: 'invented-recovery-token'/,
+  /password-reset-code:v1\\0\$\{account\?\.accountId/,
+  /"secret":"<saved-identity-secret>"/,
+  /fencing_token=\?`\)\.run\(agentId,/,
+  /"identity-secret": "Authorization:/,
+  /secret" : "identitySecret"/,
+  /LISTENER_TOKEN_HEADER = 'x-room-listener-token'/,
+  /joinToken: row\.join_mode/,
+  /tokenStart:0,depth:0,string:false,escape:false,messageIndex:0,kind:'/,
+  /TOKEN_SOURCE = "\(\?:pri_\|rak_\|ga1\\\\\.\)\[A-Za-z0-9_-\]\{8,\}"/,
+  /webhookSecretHeader = "x-telegram-bot-api-secret-token"/,
+  /TOKEN_DERIVATION_CONTEXT = 'herdr-bridge-v1:'/,
+  /token_hash=\?`\)\.get\(tokenHash\)\)/,
+  /initialPasswordReset = initialAuthLink\.kind/,
+  /"new-password" : "current-password"/,
+  /passwordMode = mode\.dataset\.passwordMode/,
+  /passwordRecovery = error\.status/,
+  /"password-signup" : "password-login"/,
+  /TOKEN_KEY = "roomOperatorToken"/,
 ];
 
 
