@@ -1,0 +1,70 @@
+name: autoland
+
+# Opt-in squash-merge for open, non-draft PRs labeled `autoland` when the
+# head's latest checks are all green and mergeable_state is CLEAN. After
+# merges, reuses deploy-prod.yml, which already smokes production and
+# recovers to the previous prod SHA on failure, and posts a Room receipt
+# when ROOM_RECEIPT_TOKEN is set. Runbook: docs/RELEASE-MERGE-GATE.md.
+#
+# Secrets (names only):
+#   LANDING_TOKEN      required to merge. A user or GitHub App installation
+#                      token, so the push starts test, schema-gate, and the
+#                      deploy-prod workflow_run hook. GITHUB_TOKEN merges
+#                      would not start those workflows.
+#   ROOM_RECEIPT_TOKEN optional. One-line merge and deploy-dispatch
+#                      receipts to the release room (same secret deploy-prod
+#                      already uses). If unset, the job summary records the
+#                      lines and names the missing secret.
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List eligible PRs without merging or deploying"
+        required: false
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: [test, schema-gate]
+    types: [completed]
+  pull_request_target:
+    types: [labeled, synchronize, ready_for_review, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  actions: read
+
+# One land-and-dispatch at a time. Never cancel a merge that has started.
+concurrency:
+  group: autoland
+  cancel-in-progress: false
+
+jobs:
+  land:
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.draft == false &&
+       contains(github.event.pull_request.labels.*.name, 'autoland'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Always the default branch. Never check out a pull request head;
+          # pull_request_target and workflow_run both have access to secrets.
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Autoland eligible PRs
+        env:
+          GH_TOKEN: ${{ secrets.LANDING_TOKEN }}
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+          PROD_ORIGIN: https://room.trydemigod.com
+          RECEIPT_ROOM: room-fafdae79cf8c
+        run: node scripts/autoland.mjs
