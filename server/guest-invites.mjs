@@ -13,8 +13,7 @@
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { createHash, randomBytes } from "node:crypto";
-import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { applyEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
 import { verifyCardSignature } from "./agent-card-signing.mjs";
 import {
   GUEST_AGENT_TOKEN_PREFIX,
@@ -425,7 +424,7 @@ export class GuestInvites {
     });
     let state;
     try {
-      state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
     const saved = saveGuestEvent(this.store, roomId, room, state, incoming);
     this.store.agentConnections.revokeMember(roomId, member.id);
@@ -481,7 +480,7 @@ export class GuestInvites {
     });
     let state;
     try {
-      state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
     const saved = saveGuestEvent(this.store, roomId, room, state, incoming);
     // Rebind the seat to the redeeming invite; the tier is owner-set and
@@ -691,7 +690,7 @@ export class GuestInvites {
         });
         let state;
         try {
-          state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+          state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
         } catch (error) { fail(422, "command_rejected", error.message); }
         room = saveGuestEvent(this.store, roomId, room, state, incoming);
         this.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES(?,?,?,?,?,?)")

@@ -27,9 +27,8 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { event, EVENT_TYPES as T, memberCan, memberOwnerId, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
+import { applyEvent, event, EVENT_TYPES as T, memberCan, memberOwnerId, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles, agentProfileName, isAgentProfile, AGENT_PROFILE_ALIASES } from "./agent-connections.mjs";
 import { seedNewAgentPolicy } from "./agent-talk-policy.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
@@ -331,7 +330,7 @@ const reactivateLinkedMember = (invites, row, member, identityId, { requestId, r
     },
   });
   let state;
-  try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+  try { state = compactState(applyEvent(room.state, incoming)); }
   catch (error) { fail(409, "invite_rejected", error.message); }
   saveInviteEvent(store, row.room_id, room, context, state, incoming);
   // Same side effect as a command-issued member.access_changed.
@@ -649,7 +648,7 @@ export class AgentInvites {
       });
       let state;
       refuseArchivedWrite(room.state);
-      try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+      try { state = compactState(applyEvent(room.state, incoming)); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       saveInviteEvent(this.store, row.room_id, room, context, state, incoming);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
@@ -734,7 +733,7 @@ export class AgentInvites {
           // under the room's default history setting, like a human link guest.
           ...(historyGuest ? { historyGuest: true } : {}),
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
-      const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      const state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       saveInviteEvent(this.store,roomId,room,context,state,incoming);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identity.identityId, identity.identityId, now);

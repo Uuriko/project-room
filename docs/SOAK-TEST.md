@@ -100,7 +100,7 @@ It takes ~2 minutes (three real server boots).
 ## Limitations
 
 - Load is synthetic GET traffic on public endpoints (`/api/health`,
-  `/.well-known/agent-card.json`, `/growth/health`, `/`); it exercises the
+  `/.well-known/agent-card.json`, `/`); it exercises the
   HTTP stack, routing, and store reads, not authenticated write paths.
 - The 15-minute CI version cannot catch leaks slower than ~25 MB / 15 min;
   the 24 h run is the real leak detector.

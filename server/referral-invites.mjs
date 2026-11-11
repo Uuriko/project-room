@@ -40,8 +40,7 @@ import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
-import { canInviteMembers, event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
+import { applyEvent, canInviteMembers, event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -476,7 +475,7 @@ export class ReferralInvites {
         },
       });
       let state;
-      try { state = compactState(applyEventWithGrowth(room.state, added, growthCollector).state); }
+      try { state = compactState(applyEvent(room.state, added)); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = this.store.storedProjection(roomId, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");

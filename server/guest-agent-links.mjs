@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { EVENT_TYPES as T, event } from "../src/events.js";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { applyEvent, EVENT_TYPES as T, event } from "../src/events.js";
 // Read at call time (store.mjs imports this module): one source for capacity.
 import { PILOT_LIMITS } from "./store.mjs";
 import { currentInviteContext, prepareCurrentWrite, withCurrentServingWriter } from "./current-room-repository.mjs";
@@ -199,7 +198,7 @@ export class GuestAgentLinks {
       });
       let state;
       try {
-        state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+        state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       } catch (error) {
         fail(422, "command_rejected", error.message);
       }
