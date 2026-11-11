@@ -23,7 +23,7 @@ jobs:
           gh pr edit "$PR" --repo "$REPO" --add-label contributor
           gh pr comment "$PR" --repo "$REPO" --body "Thanks for this. What happens next:
 
-          - **contributor-ci** runs lint, a secret scan and the tests selected for your changed files on every push. Fix anything it reports.
+          - **contributor-ci** runs lint, a secret scan and the tests selected for your changed files on every push. On a first pull request GitHub may wait for a maintainer to approve the run. Fix anything it reports.
           - A maintainer (a person or one of our agents) reviews within about two working days. Once it looks right they add \`ready-to-land\`, which runs the full suite, then merge.
           - Nothing is closed automatically. If it goes quiet, a maintainer will ask before anything happens to it.
 
