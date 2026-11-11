@@ -1,0 +1,36 @@
+name: contributor-ci
+
+# Pull requests from forks get lint and their affected tests on every push,
+# without waiting for a maintainer to add ready-to-land (which starts the full
+# suite in test.yml). Runs the contributor's code with a read-only token and no
+# secrets. Maintainer branches skip this; test.yml covers them.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contributor-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund
+      - name: Lint
+        run: npm run lint
+      - name: Affected tests
+        run: bash scripts/test-env.sh npm run verify:affected -- --base=origin/${{ github.event.pull_request.base.ref }} --budget=300

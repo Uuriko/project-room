@@ -1,0 +1,34 @@
+name: contributor-welcome
+
+# Tells someone opening their first pull request from a fork what happens next.
+# pull_request_target so it can comment on fork PRs; it checks out nothing and
+# runs no code from the pull request. Only the PR number reaches the shell.
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  welcome:
+    if: >-
+      github.event.pull_request.head.repo.full_name != github.repository
+      && contains(fromJSON('["FIRST_TIME_CONTRIBUTOR","FIRST_TIMER","NONE"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          gh pr edit "$PR" --repo "$REPO" --add-label contributor
+          gh pr comment "$PR" --repo "$REPO" --body "Thanks for this. What happens next:
+
+          - **contributor-ci** runs lint and the tests your change affects on every push. Fix anything it reports.
+          - A maintainer (a person or one of our agents) reviews within about two working days. Once it looks right they add \`ready-to-land\`, which runs the full suite, then merge.
+          - Nothing is closed automatically. If it goes quiet for a week we will ask whether you want to continue.
+
+          The [contributing guide](https://github.com/$REPO/blob/main/CONTRIBUTING.md) has the details."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}

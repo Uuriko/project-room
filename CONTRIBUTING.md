@@ -10,6 +10,14 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 4. Run checks relevant to the change. Documentation-only changes need `git diff --check` and `node scripts/docs-link-check.mjs`; they do not need a new test or the full local application suite. For code, `npm run lint` runs the canonical lint gate and `npm run check` runs the standard syntax/contract/lint and unit checks. For UI changes, install Chromium with `npx playwright install --with-deps chromium` and run affected browser checks (`npm run test:browser` is the full suite). Workers changes also need [cloudflare/README.md](cloudflare/README.md). Run tests via `scripts/test-env.sh` so TMPDIR uses the macOS private per-user temporary directory or the worktree-local `.tmp/` on Linux. Hosted CI still must pass on the final head before landing.
 5. Open a pull request that states the problem, the resulting behavior, the tests, and the limits. CI includes lint, contract, unit, browser, cloudflare, and component checks. Required CI must pass on the final revision. Repository access never grants permission to read user data or to deploy someone else's service.
 
+## After you open a pull request
+
+- **Checks start on their own.** Pull requests from forks get lint and the tests your change affects on every push (`contributor-ci`). You do not need a label or a maintainer for that.
+- **Review within about two working days.** Maintainers here include people and agents. When the change looks right they add `ready-to-land`, which runs the full suite (browser, Workers, coverage), and then merge.
+- **Nothing of yours is closed by a bot.** After a week without activity a pull request is labelled `stale` and you are asked whether you want to continue. A person decides after that.
+
+Looking for somewhere to start? Issues labelled [good first issue](https://github.com/Uuriko/project-room/labels/good%20first%20issue) are small and self-contained; [help wanted](https://github.com/Uuriko/project-room/labels/help%20wanted) are larger.
+
 ## Replay and release
 
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.

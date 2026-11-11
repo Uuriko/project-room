@@ -1,0 +1,39 @@
+name: pr-hygiene
+
+# Weekly: label idle pull requests and close stale, conflicting maintainer
+# branches. Fork pull requests are never closed automatically. The policy is
+# decide() in scripts/pr-hygiene.mjs. Run it by hand to dry-run.
+
+on:
+  schedule:
+    - cron: "17 15 * * 1"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply changes (otherwise dry run)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-hygiene
+  cancel-in-progress: false
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: node scripts/pr-hygiene.mjs ${{ (github.event_name == 'schedule' || inputs.apply) && '--apply' || '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
