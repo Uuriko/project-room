@@ -20,10 +20,12 @@ const PATTERNS = [
   // explicit case classes (no /i flag) so camelCase boundaries stay
   // visible to the affix alternatives. An optional quote wraps the key so
   // JSON forms ("password": "...") match like assignment forms. An UNQUOTED
-  // value starting with "/" is a regex literal or a path, so the value side
-  // refuses it; a QUOTED value is always scanned, including one that begins
-  // with "/" (a quoted credential is not a path because of its first char).
-  { id: "generic-secret", label: "secret assignment", regex: /(?<![A-Za-z0-9_-])["']?(?:(?:[A-Za-z0-9]+[_-])*(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Tt][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*|(?:[a-z0-9]+|[A-Z][a-z0-9]*)(?:[A-Z][a-z0-9]*)*(?:[S][Ee][Cc][Rr][Ee][Tt]|[P][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[P][Aa][Ss][Ss][Ww][Dd]|[P][Ww][Dd]|[T][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*)["']?\s*[:=]\s*(?:["'][^"'\s]{12,}["']?|(?!\/[^\s"']*\/[gimsuyd]*[;,)\]}]*(?:\s|$))[^"'\s]{12,})/ },
+  // value that is a regex literal (/.../flags) is exempt ONLY in a proven code
+  // context (isCodeRegexLiteral: a declaration keyword before the key, or a code
+  // terminator after the literal). A dotenv-style `password=/abc.../` has neither
+  // and stays detected. A QUOTED value is always scanned, including one that
+  // begins with "/" (a quoted credential is not a path because of its first char).
+  { id: "generic-secret", label: "secret assignment", regex: /(?<![A-Za-z0-9_-])["']?(?:(?:[A-Za-z0-9]+[_-])*(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Tt][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*|(?:[a-z0-9]+|[A-Z][a-z0-9]*)(?:[A-Z][a-z0-9]*)*(?:[S][Ee][Cc][Rr][Ee][Tt]|[P][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[P][Aa][Ss][Ss][Ww][Dd]|[P][Ww][Dd]|[T][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*)["']?\s*[:=]\s*(?:["'][^"'\s]{12,}["']?|[^"'\s]{12,})/ },
   { id: "private-key", label: "private key block", regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
   { id: "bearer-token", label: "bearer token", regex: /\bbearer\s+[A-Za-z0-9\-_.~+/]{20,}=*/i },
   { id: "slack-token", label: "Slack token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
@@ -62,6 +64,19 @@ const redact = value => value.length <= 8 ? "****" : `${value.slice(0, 2)}…${v
 // Match spans of a regex over one line. The regex is recompiled with the
 // global flag on a fresh object so a caller-supplied stateful regex (stale
 // lastIndex) can neither skip matches nor loop forever on empty matches.
+// A regex-literal value is exempt only when the line is provably code, not config.
+const CODE_DECLARATION_PREFIX = /\b(?:const|let|var|export|static|readonly|public|private|protected)\b\s*(?:[A-Za-z0-9_$]+\s*){0,2}$/;
+function isCodeRegexLiteral(line, start, end) {
+  const m = /^["']?[A-Za-z0-9_$-]+["']?(\s*[:=]\s*)(\/\S*?)([;,)\]}]*)$/.exec(line.slice(start, end));
+  if (!m) return false;
+  const [, operator, literal, terminator] = m;
+  if (!/^\/\S*\/[dgimsuvy]*$/.test(literal)) return false;
+  if (CODE_DECLARATION_PREFIX.test(line.slice(0, start))) return true;
+  // No declaration keyword: a code terminator counts only with code-style spacing
+  // (`key: /re/,` or `key = /re/;`). Tight dotenv form `key=/x/;` stays detected.
+  return terminator.length > 0 && /\s$/.test(operator);
+}
+
 function matchSpans(line, regex) {
   const spans = [];
   const flags = regex.flags.includes("g") ? regex.flags : `${regex.flags}g`;
@@ -109,6 +124,7 @@ export function scanLines(lines, { allowlist, safeEntropyTokens } = {}) {
     // must not hide a later secret of the same rule on this line.
     for (const pattern of PATTERNS) {
       for (const [start, end] of matchSpans(line, pattern.regex)) {
+        if (pattern.id === "generic-secret" && isCodeRegexLiteral(line, start, end)) continue;
         if (findingAllowed(allowlist, line, start, end)) continue;
         findings.push(Object.freeze({ line: lineNo, rule: pattern.id, label: pattern.label,
           preview: redact(line.slice(start, end)) }));

@@ -107,7 +107,12 @@ test("an unquoted slash-leading dotenv password is detected; regex-literal shape
   assert.ok(scanText(`password=/${a}`, opts).some(f => f.rule === "generic-secret"), "tree scan flags password=/...");
   assert.ok(scanText(`PASSWORD=/${a}/${a}`, opts).some(f => f.rule === "generic-secret"), "multi-segment value flags");
   assert.ok(REVIEW_SCAN_ADDED([{ path: ".env", line: 1, text: `password=/${a}` }], []).length > 0, "PR-diff gate flags it too");
-  for (const literal of [`const tokenPattern = /${a}${a}/g;`, `token = /${a}\\d+/gi,`, `secretRe = /^${a}$/;`]) {
+  // seq4471 (Codex): regex-SHAPED dotenv values are still credentials; only proven code context is exempt.
+  for (const dotenv of [`password=/${a}/`, `PASSWORD=/${a}/g`, `password=/${a}/;`, `password: /${a}/`]) {
+    assert.ok(scanText(dotenv, opts).some(f => f.rule === "generic-secret"), `dotenv-shaped value flags: ${dotenv}`);
+    assert.ok(REVIEW_SCAN_ADDED([{ path: ".env", line: 1, text: dotenv }], []).length > 0, `PR-diff gate flags: ${dotenv}`);
+  }
+  for (const literal of [`const tokenPattern = /${a}${a}/g;`, `token = /${a}\\d+/gi,`, `secretRe = /^${a}$/;`, `export const SECRET_RE = /${a}/u`, `  tokenPattern: /${a}x/g,`]) {
     assert.equal(scanText(literal, opts).filter(f => f.rule === "generic-secret").length, 0, `regex literal stays exempt: ${literal}`);
   }
 });
