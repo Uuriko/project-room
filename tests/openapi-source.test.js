@@ -19,3 +19,12 @@ test("fragments render a valid OpenAPI document the route gate accepts", () => {
   assert.ok(Object.keys(doc.paths).length > 20);
   assert.deepEqual(openApiGateProblems(root), []);
 });
+
+// Regeneration must not erase already-published OAuth or receipt contracts.
+test("rendered fragments retain OAuth authorization and bounty-lot receipts", () => {
+  const doc = parse(renderOpenApi(root));
+  assert.ok(doc.paths["/oauth/authorize"]?.get);
+  assert.ok(doc.paths["/oauth/authorize"]?.post);
+  const source = doc.paths["/api/public/receipts"].get.responses["200"].content["application/json"].schema.properties.receipts.items.properties.source;
+  assert.ok(source.enum.includes("bounty-lot"));
+});
