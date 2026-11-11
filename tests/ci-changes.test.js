@@ -5,7 +5,6 @@ import { classifyChanges } from "../scripts/ci-changes.mjs";
 test("coverage runs when measured source modules change", () => {
   assert.equal(classifyChanges(["server/store.mjs"]).coverage, true);
   assert.equal(classifyChanges(["src/board-ui.js"]).coverage, true);
-  assert.equal(classifyChanges(["machine/test/machine.test.mjs"]).coverage, true);
 });
 
 test("coverage runs when test files change (they feed the measurement)", () => {

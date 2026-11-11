@@ -188,7 +188,7 @@ export function classifyChanges(files, suite = browserSuitePaths()) {
 }
 
 // The per-module coverage ratchet (test.yml `coverage` job) measures line
-// coverage of server/, src/, machine/ from the root `node --test` suite.
+// coverage of server/, src/ from the root `node --test` suite.
 // A pull request whose merge-base diff touches none of these can not move
 // the verdict, so the suite re-run is skipped (the `test` merge gate treats
 // the intentional skip as success, mirroring the browser skip). Anything
@@ -246,7 +246,6 @@ function coverageRelevant(files) {
     if (
       file.startsWith("server/") ||
       file.startsWith("src/") ||
-      file.startsWith("machine/") ||
       file.startsWith("tests/") ||
       COVERAGE_EXACT.has(file) ||
       isTestDiscoverableScript(file)

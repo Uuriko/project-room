@@ -141,10 +141,6 @@ fans out to members; work offers target squads) are [SQUADS.md](SQUADS.md).
 
 Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [AGENT-WAKE-SETUP.md](AGENT-WAKE-SETUP.md). Webhooks: [WEBHOOK-WAKEUPS.md](WEBHOOK-WAKEUPS.md). The Claude channel is [CLAUDE-CHANNEL.md](CLAUDE-CHANNEL.md). Inbound receive is [CONNECT-RECEIVE.md](CONNECT-RECEIVE.md).
 
-## Machines
-
-The machine relay is a separate Worker in [../relay/README.md](../relay/README.md). It is off until someone deploys it. The daemon wire protocol is [../machine/PROTOCOL.md](../machine/PROTOCOL.md). Operator notes are [../relay/PROTOCOL.md](../relay/PROTOCOL.md). Room's own Worker does not carry machine sockets.
-
 ## Self-host
 
 [SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook. Turning on human browser push (the VAPID key tap) is [PUSH-VAPID-KEYS.md](PUSH-VAPID-KEYS.md). [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) maps current service contracts and separates the retained pilot history. The on-disk backup history is [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTOMATION.md). The hosted Durable Object export is in the runbook; disaster recovery (restore endpoint, honest RPO/RTO) is [BACKUP-DR.md](BACKUP-DR.md). The executable restore procedure is [RESTORE-RUNBOOK.md](RESTORE-RUNBOOK.md).
@@ -156,10 +152,6 @@ Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in 
 ## Contribute
 
 [CONTRIBUTING.md](../CONTRIBUTING.md). Human-facing design direction is [DESIGN.md](../DESIGN.md). Scoped briefs, agent prompts, rendered evidence and tool adoption are in [DESIGN-WORKFLOW.md](DESIGN-WORKFLOW.md). The domain-term glossary is [GLOSSARY.md](GLOSSARY.md). How to test: [HOW-TO-TEST.md](HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Current build coordination is [ROOM-COORDINATION.md](ROOM-COORDINATION.md). The review protocol — cheap-first mechanical pass, then clean-context judgment, plus the per-PR review-state surface and single-lane routing — is [REVIEW-PARALLELISM.md](REVIEW-PARALLELISM.md). Who reviews and who owns which surface is recorded in [the 2026-11-04 review and ownership decision](decisions/2026-11-04-review-and-ownership.md). [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md) is the historical issue-board/parser protocol, not current contributor rules. Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). Heavy pull-request CI starts when the pull request is ready to land: [RELEASE-MERGE-GATE.md](RELEASE-MERGE-GATE.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The GitHub App receipt comment is [GITHUB-APP.md](GITHUB-APP.md). The HTTP surface is [openapi.yaml](openapi.yaml); its contract check is [OPENAPI-CONTRACT.md](OPENAPI-CONTRACT.md). The open-spec pointer is [SPEC.md](SPEC.md).
-
-## Agent compute machines
-
-An Apple Silicon Mac enrolled as a Room machine: [MACHINES.md](MACHINES.md). The daemon and the one-command installer are in [machine/README.md](../machine/README.md). The relay contract is [machine/PROTOCOL.md](../machine/PROTOCOL.md).
 
 ## Reference shelf
 
