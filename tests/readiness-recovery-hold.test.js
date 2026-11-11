@@ -13,7 +13,7 @@ const fixture = () => ({ ok: false, sha, origin, entry, checks: [origin, entry].
   { name: `health ${door}/api/health`, pass: true, status: 200, body: 'ok' },
   ...['/terms', '/privacy', '/'].map(path => ({ name: `page ${door}${path}`, pass: true, status: 200 })),
   { name: `agent-card ${door}/.well-known/agent-card.json`, pass: true, converged: true, fetches: 10, attempts: 10, failures: [], failureCount: 0 },
-  { name: `ready ${door}/api/ready`, pass: false, status: 503, body: 'degraded', emailVerification: 'unknown', emailVerificationScope: 'unknown', do: { status: 'timeout', timeoutMs: 1000 } },
+  { name: `ready ${door}/api/ready`, pass: false, status: 503, body: 'degraded', emailVerification: 'unknown', emailVerificationScope: 'unknown', do: { status: 'timeout', timeoutMs: 2500 } },
 ]) });
 const context = raw => ({ sha, origin, entry, digest: createHash('sha256').update(raw).digest('hex'),
   prodOutcome: 'success', entryOutcome: 'success', smokeOutcome: 'failure' });

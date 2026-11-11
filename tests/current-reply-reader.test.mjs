@@ -261,3 +261,43 @@ test('open-ask head start: revoked credentials and restarted stores refuse its c
  assert.throws(()=>store.replyRequests.list(key,'commons',again.nextRead.arguments),e=>e.status===401,'revoked credential cannot continue');
  assert.throws(()=>store.replyRequests.list(key,'commons',{limit:1}),e=>e.status===401,'revoked credential cannot start');
 });
+test('sent open asks lead page one too, in both and outgoing directions, and closed ones stay in the scan',t=>{
+ const {store,keys}=fixture(t,(_events,add)=>{
+  for(let i=0;i<40;i++)add('message.posted',{messageId:`a-noise-${String(i).padStart(2,'0')}`,toMemberId:'other',requestKind:'reply',requestPolicyVersion:1,body:'Private'});
+  add('message.posted',{messageId:'z-my-ask',toMemberId:'owner',requestKind:'reply',requestPolicyVersion:1,body:'Mine'},'reader');
+ });
+ store.room=()=>{throw Error('whole-room hydration forbidden');};
+ for(const direction of ['outgoing','both']){
+  const first=store.replyRequests.list(keys.reader,'commons',{direction,limit:20});
+  const ids=first.requests.map(r=>r.id).sort();
+  assert.ok(ids.includes('z-my-ask'),`${direction}: my sent ask on page one (${ids})`);
+  if(direction==='both')assert.ok(ids.includes('question'),'both: the incoming ask too');
+  assert.equal(JSON.stringify(first).includes('a-noise-'),false);
+  let args=first.nextRead?.arguments,later=[],pages=0;
+  while(args){const read=store.replyRequests.list(keys.reader,'commons',args);later.push(...read.requests.map(r=>r.id));args=read.nextRead?.arguments;assert.ok(++pages<60);}
+  assert.equal(later.filter(id=>ids.includes(id)).length,0,`${direction}: no repeats`);
+ }
+ const other=store.replyRequests.list(keys.other,'commons',{direction:'outgoing',limit:20});
+ assert.equal(other.requests.some(r=>r.id==='z-my-ask'),false,'another member never sees my sent ask');
+});
+
+test('the SDK asks for ask states and falls back once against a service that predates them',async t=>{
+ const {store,keys}=fixture(t);
+ const server=createRoomServer({store});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+ const origin=`http://127.0.0.1:${server.address().port}`,connection={version:1,origin,roomId:'commons',memberId:'reader',token:keys.reader};
+ const read=await new RoomAgentClient(connection).replyRead('room_list_requests',{});
+ assert.deepEqual(read.requests.map(r=>r.id),['question']);
+ assert.equal(read.requests[0].lifecycle.state,'pending','current service returns the state');
+ // Older service: refuses the unknown selector exactly as production did before the option existed.
+ const seen=[];
+ const old=new RoomAgentClient({...connection,fetchImpl:async(url,init)=>{
+  if(String(url).includes('/reply-requests'))seen.push(String(url).includes('states=1'));
+  if(String(url).includes('states=1'))return new Response(JSON.stringify({error:{code:'invalid_reply_selection',message:'Invalid request selection'}}),{status:422,headers:{'content-type':'application/json'}});
+  return fetch(url,init);
+ }});
+ const plain=await old.replyRead('room_list_requests',{});
+ assert.deepEqual(plain.requests.map(r=>r.id),['question']);assert.equal('lifecycle' in plain.requests[0],false);
+ await old.replyRead('room_list_requests',{});
+ assert.deepEqual(seen,[true,false,false],'asked once, fell back, then stopped asking');
+});

@@ -27,6 +27,18 @@ const EXPERIMENTS = Object.freeze([
     minSamplePerArm: 150,
     startedAt: "2026-11-04",
   }),
+  // The setup prompt for approval-required private rooms is about 2,000
+  // words. Arm `short` serves a ~120-word prompt that keeps the safety rules
+  // (own identity, stable request id, untrusted content, private secrets)
+  // and drops the optional compute-sharing and two-computer test steps.
+  // Unit is the room slug, so every visitor to a room sees the same copy.
+  defineExperiment({
+    id: "short_connect_prompt",
+    arms: ["long", "short"],
+    metric: "connect_prompt_view_to_first_post_within_1h",
+    minSamplePerArm: 390,
+    startedAt: "2026-11-04",
+  }),
 ]);
 
 const BY_ID = new Map(EXPERIMENTS.map(experiment => [experiment.id, experiment]));

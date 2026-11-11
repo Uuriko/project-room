@@ -195,6 +195,11 @@ test('mixed native reads require every category while full grants read the real 
   const pack = await f.rpc('tools/call', { name: 'room_activation_pack', arguments: {} });
   assert.notEqual(pack.body.result?.isError, true, JSON.stringify(pack.body));
   assert.equal(pack.body.result.structuredContent.room.slug, 'commons');
+  const brief = await f.rpc('tools/call', { name: 'room_activation_pack', arguments: { view: 'brief' } });
+  assert.notEqual(brief.body.result?.isError, true, JSON.stringify(brief.body));
+  assert.equal(brief.body.result.structuredContent.view, 'brief');
+  assert.equal(brief.body.result.structuredContent.room.slug, 'commons');
+  assert.deepEqual(brief.body.result.structuredContent.you.permissions, pack.body.result.structuredContent.members.find(member => member.id === brief.body.result.structuredContent.you.memberId).permissions);
   assert.equal(pack.body.result.structuredContent.orientation.purpose, f.store.room('commons').state.room.charter?.purpose ?? f.store.room('commons').state.room.purpose ?? '');
 });
 
@@ -202,7 +207,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 28, 'audit every advertised native tool, including acquire/release/renew, bounded attention wait, own catch-up marker and cancelling your own ask');
+  assert.equal(tools.length, 30, 'audit every advertised native tool, including acquire/release/renew, bounded attention wait, own catch-up marker, cancelling your own ask, reporting ask progress and needs-me');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -575,4 +580,24 @@ test('OAuth agents can cancel their own open request, and only their own', async
   const refused = await f.rpc('tools/call', { name: 'room_cancel_request', arguments: { roomId: 'commons', requestMessageId: 'owner-ask', expectedRequestRevision: 0, reason: 'Not mine' } });
   assert.equal(refused.body.result?.isError, true, 'a recipient cannot cancel the asker\'s request');
   assert.equal(f.store.room('commons').state.replyRequests['owner-ask'].status, 'open');
+});
+
+for (const normalized of [false, true]) test(`OAuth agents can call room_needs_me for their own room (${normalized ? 'current' : 'legacy'})`, async t => {
+  const f = await setup(t, { normalized });
+  const listed = await f.rpc('tools/list', {});
+  assert.ok(listed.body.result.tools.some(tool => tool.name === 'room_needs_me'), 'chat:read + work:read grants list room_needs_me');
+  f.store.command(f.ownerKey, 'commons', { id: 'owner-ask-nm', type: 'message.posted', data: { messageId: 'owner-ask-nm', toMemberId: 'friend-dot', requestKind: 'reply', body: 'Please review the plan' } });
+  let since, found = [], pages = 0;
+  do {
+    const read = await f.rpc('tools/call', { name: 'room_needs_me', arguments: since === undefined ? {} : { since } });
+    assert.notEqual(read.body.result?.isError, true, JSON.stringify(read.body).slice(0, 400));
+    const value = read.body.result.structuredContent;
+    found.push(...value.items.map(item => item.id));
+    assert.ok(value.items.every(item => item.roomId === 'commons'), 'only the grant room');
+    since = value.hasMore ? value.cursor : undefined;
+    assert.ok(++pages < 20);
+  } while (since !== undefined);
+  assert.ok(found.includes('owner-ask-nm'), `the owner's formal ask is found: ${found}`);
+  const other = await f.rpc('tools/call', { name: 'room_needs_me', arguments: { roomId: 'someone-elses-room' } });
+  assert.equal(other.body.result?.isError ?? Boolean(other.body.error), true, 'a different room is refused');
 });

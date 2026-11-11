@@ -43,7 +43,9 @@ export function confirmsWorkProposal(receipt, command, roomId, memberId) {
     && typeof receipt.duplicate === "boolean" && validId(entry?.id)
     && entry.type === T.WORK_PROPOSED && command?.type === T.WORK_PROPOSED
     && entry.roomId === roomId && entry.actorId === memberId
-    && data && Object.keys(data).length === Object.keys(command.data).length
+    // The server may add writeGrantPolicyVersion at admission; it is never in the command.
+    && data && Object.keys(data).filter(key => key !== "writeGrantPolicyVersion" || Object.hasOwn(command.data, key)).length === Object.keys(command.data).length
+    && (data.writeGrantPolicyVersion === undefined || Object.hasOwn(command.data, "writeGrantPolicyVersion") || data.writeGrantPolicyVersion === 1)
     && Object.keys(command.data).every(key => Object.hasOwn(data, key) && data[key] === command.data[key]);
 }
 
@@ -187,7 +189,7 @@ export function workActions(item, member, now = Date.now()) {
   const actions = [], own = item.accountableMemberId === member.id;
   const can = permission => member.permissions.includes(permission);
   const claim = activeClaim(item, now) && item.claim.holderId === member.id;
-  const writable = item.mode === "read" || (claim && can("write_external"));
+  const writable = item.mode === "read" || (claim && (can("write_external") || (Boolean(item.externalWriteGrantBy) && item.externalWriteGrantFor === member.id)));
   if (own && item.state === S.PROPOSED && can("accept_work")) actions.push(["accept", "Accept"]);
   if (own && [S.ACCEPTED, S.WORKING, S.BLOCKED].includes(item.state) && item.mode === "write" && !activeClaim(item, now) && mayWriteBoardClaims(member)) actions.push(["claim", "Record write scope"]);
   if (own && item.state === S.ACCEPTED && can("accept_work") && writable) actions.push(["start", "Start"]);

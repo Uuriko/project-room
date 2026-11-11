@@ -66,6 +66,44 @@ test('authenticated modern Events subscribe -> atomic permitted wake -> signed c
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
   assert.equal((await f.rpc('events/list')).status, 401);
 });
+test('reconnecting recovers saved requests by reading, not by replaying callbacks', async t => {
+  const f = await fixture(t);
+  const call = async (name, args = {}) => {
+    const response = await f.rpc('tools/call', { name, arguments: args });
+    assert.notEqual(response.result?.isError, true, JSON.stringify(response));
+    assert.ok(response.result?.structuredContent, JSON.stringify(response));
+    return response.result.structuredContent;
+  };
+  const ask = id => f.store.command(f.owner, 'commons', { id, type: 'message.posted', data: {
+    messageId: id, body: 'Please review the saved handoff.', toMemberId: f.grant.member_id, requestKind: 'reply'
+  } });
+  ask('before-subscription');
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox').get().n, 0);
+  const before = await call('room_check_access');
+  assert.equal(before.nativeMonitoring.state, 'not_subscribed');
+  assert.match(before.nativeMonitoring.next, /room_list_requests.*direction=incoming.*status=open/);
+  assert.match(before.nativeMonitoring.next, /do not replay earlier requests/);
+  const catalog = await f.rpc('events/list');
+  assert.match(catalog.result.events[0].description, /room_list_requests.*direction=incoming.*status=open/);
+  assert.ok((await f.subscribe()).result.id);
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 0, 'connecting must not imply replay or execution');
+  const during = await call('room_check_access');
+  assert.equal(during.nativeMonitoring.execution, 'not_verified');
+  assert.match(during.nativeMonitoring.next, /do not replay earlier requests/);
+  const pending = await call('room_list_requests', { direction: 'incoming', status: 'open' });
+  assert.ok(pending.requests.some(item => item.id === 'before-subscription'));
+  const selected = await call('room_read_request', { requestMessageId: 'before-subscription' });
+  assert.equal(selected.request.status, 'open');
+  assert.equal(selected.page.hasMore, false);
+  assert.ok(selected.current.answerBasis, 'saved request can be answered after a complete selected read');
+  ask('after-subscription');
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 1);
+  assert.equal(JSON.parse(f.deliveries[0].body).data.messageId, 'after-subscription');
+  assert.equal((await call('room_read_request', { requestMessageId: 'before-subscription' })).request.status, 'open',
+    'reading and callback delivery do not answer a request');
+});
 test('native work assignment needs no desktop host registration and unsubscribe stops delivery', async t => {
   const f = await fixture(t); const sub = await f.subscribe(); assert.ok(sub.result.id);
   assert.equal(f.store.agentHeartbeats.statusOf(f.grant.identity_id).hosts.length, 0);
@@ -330,4 +368,7 @@ test('bearer tool access does not imply OAuth monitoring or inspect other connec
   assert.equal(access.nativeMonitoring.scope, 'current_connection');
   assert.equal(access.nativeMonitoring.execution, 'not_verified');
   assert.equal(Object.hasOwn(access.nativeMonitoring, 'activeSubscriptions'), false);
+  assert.match(access.nativeMonitoring.next, /room_list_requests.*direction=incoming.*status=open/);
+  assert.match(access.nativeMonitoring.next, /do not replay earlier requests/);
+  assert.match(access.nativeMonitoring.next, /do not resend saved requests/);
 });

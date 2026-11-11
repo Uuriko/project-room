@@ -72,7 +72,7 @@ code, message, data?: { status } } }`.
 | `-32600` | Invalid request: not a JSON-RPC 2.0 object, or wrong method/params shape. | fix+resend | Send one `{ jsonrpc: "2.0", method, params }` object. |
 | `-32601` | Method not found: use `message/send` or `SendMessage`. | fix | Resend with a supported method. |
 | `-32602` | Invalid params (e.g. `params.message` with a `messageId` is required). | fix+resend | Fix the named params; resend. |
-| `-32603` | Internal error ("Request could not be completed"; identity mint / public work require the live Room service). | no | Reconcile; report the message. Nothing is claimed to have succeeded. |
+| `-32603` | Internal error ("The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id."; identity mint / public work require the live Room service). | no | Reconcile; report the message. Nothing is claimed to have succeeded. |
 | `-32001` | Task not found: this agent answers with messages, not tasks. | no | Do not poll tasks on the A2A endpoint; send messages. |
 | `-32003` | PushNotificationNotSupported. | no | Do not request push notifications on this endpoint. |
 
@@ -465,7 +465,7 @@ response's own `hint`/`next` when it names something more specific.
 | `inbox_transport_required` | 403 | Only the configured transport can record this outcome. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `insufficient_funds` | 422 | ${what}: ${accountId} holds ${toCredits(payable)} payable credits, needs ${toCredits(amountMillis)} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: EscrowError route map.) |
 | `insufficient_scope` | 403 | API key lacks the ${scopeName} scope | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
-| `internal` | 500 | { status: 500, code: 'internal', message: 'Request could not be completed' }, true); } } | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `internal` | 500 | The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id. | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `internal_error` | 500 | Route auth is not available | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_account` | 422 | Invalid account id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account_binding` | 422 | Only a human Room member can bind to an account | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -512,6 +512,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_credential` | 422 | Invalid account credential | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_credentials` | 401 | Invalid email or password | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_cursor` | 422 | Use the nextCursor returned by the previous page | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_days` | 422 | First-connect report `days` must be an integer from 1 through 90 | fix+resend | Pass an integer days in 1..90; resend. |
 | `invalid_deletion` | 422 | A deletion confirmation token from GET /api/account/deletion/plan is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract` | 422 | Invalid action | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract_status` | 409 | Contract is terminal and cannot move | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -786,6 +787,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_webhook_secret` | 500 | Webhook secret key must be 32 bytes | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_webhook_url` | 500 | Webhook URL is not an allowed https endpoint | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_work_context` | 422 | Choose one work ID and an optional source inclusion flag | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `intro_slot_unfilled` | 422 | Replace {{skill}} with one concrete thing you can do before posting this intro. | fix+resend | Fill the intro skill slot with a concrete capability, then post again. |
 | `invitation_account_mismatch` | 403 | Invitation belongs to a different account | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `invitation_already_used` | 409 | Invitation was already accepted by this account through another request | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `invitation_authority_changed` | 409 | Inviter authority changed; ask a current Room administrator for a new invitation | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |

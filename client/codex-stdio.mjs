@@ -83,7 +83,11 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
       "-c", `mcp_servers.project_room_mac.tools.mac_input.approval_mode=${JSON.stringify(settings.macTools.inputApproval ?? "prompt")}`
     ] : [])];
   const child = spawn(settings.command, args, { cwd: settings.cwd, detached: true, shell: false,
-    env: { HOME: privateHome, CODEX_HOME: settings.codexHome, PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin", LANG: "en_US.UTF-8" },
+    // /usr/local/bin (the Intel Homebrew prefix) is appended last, after the
+    // existing segments, so every tool that resolves today keeps resolving
+    // identically and only tools found nowhere else gain resolution — the
+    // native host already includes it (LocalRoomHost.swift PATH).
+    env: { HOME: privateHome, CODEX_HOME: settings.codexHome, PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin", LANG: "en_US.UTF-8" },
     stdio: ["pipe", "pipe", "pipe"] });
   const pending = new Map(), listeners = new Set(), threads = new Set(allowedThreadIds);
   let nextId = 1, buffer = "", closed = false, initialization, cleanup;

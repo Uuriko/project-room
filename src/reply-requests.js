@@ -1,6 +1,8 @@
 import { currentRecordReplyCount,currentRecordReplyOwner } from './current-record-context.js';
 // Shared request semantics. Deliberately independent of events, storage and UI.
 export const REPLY_CANCELLED = "reply_request.cancelled";
+export const REPLY_PROGRESSED = "reply_request.progressed";
+export const REPLY_PROGRESS_STATES = Object.freeze(["acknowledged", "working", "needs_input", "error"]);
 export const REPLY_POLICY_VERSION = 1;
 export const MAX_REPLY_REQUESTS = 500;
 // Keep a worst-case escaped answer plus its envelope inside one 64 KiB
@@ -214,6 +216,28 @@ export function recordReplyPost(state, incoming, mode) {
     const requestId = replyContextOwners(state).get(messageId), request = requestId && state.replyRequests[requestId];
     if (request?.status === "open") Object.assign(request, { contextEventId: incoming.id, contextMessageId: messageId });
   }
+}
+
+// The recipient says where an open request stands, so the asker stops polling
+// chat. Not terminal: the request stays open and its revision is unchanged,
+// so a later answer still uses the revision it read. needs_input and error
+// mark a stop; acknowledged or working clears it.
+export function progressReplyRequest(state, incoming) {
+  const data = incoming.data, actor = state.members[incoming.actorId];
+  requireValid(Object.keys(data).every(key => ["requestMessageId", "expectedRequestRevision", "progress", "note"].includes(key))
+    && ["requestMessageId", "expectedRequestRevision", "progress"].every(key => Object.hasOwn(data, key)), "Unexpected reply progress fields");
+  const request = replyRequest(state, data.requestMessageId);
+  requireValid(actor && actor.active !== false, "Inactive reply request actor");
+  requireValid(incoming.actorId === request.recipientId, "Only the recipient may report progress on a request");
+  requireValid(REPLY_PROGRESS_STATES.includes(data.progress), "Progress must be acknowledged, working, needs_input or error");
+  requireValid(data.note === undefined || text(data.note) && data.note.length <= 1000, "Progress note must be 1..1000 characters");
+  openRevision(request, data.expectedRequestRevision);
+  const at = incoming.at;
+  Object.assign(request, { acknowledgedAt: request.acknowledgedAt ?? at, lastActivityAt: at,
+    progressState: data.progress, progressNote: data.note ?? null, progressEventId: incoming.id });
+  if (data.progress === "needs_input") request.needsInputAt = at;
+  else if (data.progress === "error") request.errorAt = at;
+  else { delete request.needsInputAt; delete request.errorAt; }
 }
 
 export function cancelReplyRequest(state, incoming) {

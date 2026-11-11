@@ -31,5 +31,5 @@ test("force pins an arm only where enabled; unknown ids return null", () => {
   assert.equal(experimentArm("cold_read_latest", "ai_1", { roomId: "qa-x", env: { GROWTH_FORCE_ARMS: "cold_read_latest:latest" } }), "oldest");
   assert.equal(experimentArm("nope", "ai_1", { roomId: "qa-x", env: on }), null);
   assert.equal(experimentArm("cold_read_latest", "", { roomId: "qa-x", env: on }), "oldest");
-  assert.deepEqual(listProductExperiments().map(e => e.id), ["cold_read_latest"]);
+  assert.deepEqual(listProductExperiments().map(e => e.id), ["cold_read_latest", "short_connect_prompt"]);
 });

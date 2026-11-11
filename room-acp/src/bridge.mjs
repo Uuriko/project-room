@@ -1,3 +1,4 @@
+import { StageObserver } from './stage-observer.mjs';
 // The bridge loop: lease the room's wake queue, long-poll for mentions,
 // run each thread's turn on the local ACP agent, post the reply in the
 // thread, then ack the wakes. Wakes are acked after the reply posts or a
@@ -125,7 +126,8 @@ function ordinaryTurn(recorder, stopReason) {
 }
 
 export class Bridge {
-  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null }) {
+  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null, observeStage = null }) {
+    this.stageObserver = new StageObserver({observe: observeStage});
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.controller = new AbortController();
     this.room = new RoomClient({ signal:this.controller.signal, apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
@@ -300,16 +302,21 @@ export class Bridge {
   }
 
   async threadRoot(messageId, {selection = false} = {}) {
-    let selected = await this.readThread(messageId, {selected:true});
+    const selected = await this.#rootFromSelection(await this.readThread(messageId, {selected:true}));
+    return selection ? selected : selected.thread;
+  }
+
+  async #rootFromSelection(selected) {
     for (let hops = 0; selected.thread.replyToId && hops < 5; hops++) {
       if (selected.replyRequest?.recipientId === this.connection.memberId) break;
       selected = await this.readThread(selected.thread.replyToId, {selected:true});
     }
-    return selection ? selected : selected.thread;
+    return selected;
   }
 
   // Route one wake signal into the queue, or ack it as not for us.
   async accept(signal, {priority = false} = {}) {
+    this.stageObserver.received([signal.signalId]);
     if (this.seen.has(signal.signalId)) return;
     this.seen.add(signal.signalId);
     try {
@@ -319,7 +326,9 @@ export class Bridge {
       const message = selected.thread;
       // Routing does not authorize execution. The queued turn checks all
       // actual stored request authors against a fresh selected authority read.
-      const rootSelection = message.replyToId ? await this.threadRoot(message.id, {selection:true}) : selected;
+      // Reuse only this routing read; execution still refreshes author authority,
+      // listener fencing and complete formal request context independently.
+      const rootSelection = message.replyToId ? await this.#rootFromSelection(selected) : selected;
       const root = rootSelection.thread;
       // An "@agent allow" answer to a pending permission ask is not a new turn.
       if (this.permissions?.isPending(root.id) && decisionOf(message.body)) { await this.ack([signal.signalId]); return; }
@@ -443,7 +452,10 @@ export class Bridge {
         // pre-execution record. Claim receipts keep their existing default.
         const saved = this.chatReceipts.begin(item.signalId, {phase:'queued', threadKey,
           signalIds:[item.signalId], messageIds:[item.messageId], wakes:[{author:item.author, body:item.body}]});
-        if (saved.fresh) fresh.push({ ...saved, item });
+        if (saved.fresh) {
+          if (this.chatReceipts.dir) this.stageObserver.mark([item.signalId], 'durable_queued', saved.receipt.requestId);
+          fresh.push({ ...saved, item });
+        }
         else {
           const groupKey = saved.receipt.phase === "linked" ? saved.receipt.groupKey : saved.key;
           if (!replay.has(groupKey)) replay.set(groupKey, []);
@@ -580,7 +592,9 @@ export class Bridge {
         throw error;
       }
     }
+    this.stageObserver.mark(receipt.signalIds, 'session_preparing', receipt.requestId);
     const {sessionId, created} = await this.host.session(receipt.threadKey);
+    this.stageObserver.mark(receipt.signalIds, 'session_ready', receipt.requestId);
     if (formal) {
       // Session startup may wait while the requester cancels or adds context.
       // Only the fresh complete request can authorize and prepare this turn.
@@ -599,7 +613,9 @@ export class Bridge {
     this.chatReceipts.save(key, started);
     let body, formalDelivery, formalPending, formalDraft, silent = false;
     try {
-      const {recorder, stopReason} = await this.host.prompt(receipt.threadKey, prompt, {sessionId});
+      const {recorder, stopReason} = await this.host.prompt(receipt.threadKey, prompt, {sessionId,
+        onDispatched: () => this.stageObserver.mark(receipt.signalIds, 'prompt_dispatch_attempt', receipt.requestId),
+        onFirstOutput: kind => this.stageObserver.mark(receipt.signalIds, 'first_observable_output', receipt.requestId, kind)});
       this.stats.turns++;
       if (formal) {
         const delivery = prepareFormalDelivery(formal, recorder.text, stopReason);
@@ -626,6 +642,7 @@ export class Bridge {
     this.chatReceipts.save(key, silent ? {...result, phase:'discarded', disposition:'silent'}
       : {...result, phase:'result', body, ordinaryChat:!formal, ...(formalDelivery ? {formalDelivery} : {}),
         ...(formalPending ? {formalPending} : {}), ...(formalDraft ? {formalDraft} : {})});
+    if (!silent && this.chatReceipts.dir) this.stageObserver.mark(receipt.signalIds, 'durable_result_saved', receipt.requestId);
   }
 
   // One addressed local reservation per existing seat/thread. This is not a
@@ -725,6 +742,7 @@ export class Bridge {
         const { body: _body, formalDelivery:_delivery, ...delivered } = receipt;
         receipt = { ...delivered, phase: "posted" };
         this.chatReceipts.save(key, receipt);
+        this.stageObserver.mark(receipt.signalIds, 'reply_posted', receipt.requestId);
       }
       await this.ack(receipt.signalIds);
     } catch (error) {
@@ -759,6 +777,7 @@ export class Bridge {
     }
     // A bounded head peek is not a completion frontier. Keep the oldest cursor
     // independent; only its original traversal accounts for the entire journal.
+    this.stageObserver.received((recent.pendingWakes ?? []).map(wake => wake.signalId));
     for (const signal of recent.pendingWakes ?? []) {
       if (this.controller.signal.aborted) return;
       // Select only the newest eligible ordinary root. Seen, parked, formal,
@@ -787,6 +806,7 @@ export class Bridge {
       if (!(await this.pacePoll())) return;
       const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: page === 0 && cursor === null ? this.waitMs : 0, signal: this.controller.signal, cursor });
       const wakes = value?.pendingWakes ?? [];
+      this.stageObserver.received(wakes.map(wake => wake.signalId));
       for (const signal of wakes) {
         if (this.controller.signal.aborted) break;
         await this.accept(signal);

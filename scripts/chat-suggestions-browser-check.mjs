@@ -21,7 +21,8 @@ for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mob
       f.store.close(); rmSync(f.directory, { recursive: true, force: true });
     });
     const say = (key, body) => f.store.command(f.keys[key], "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: crypto.randomUUID(), body } });
-    const page = await browser.newPage({ viewport, reducedMotion: "reduce" }), errors = [];
+    // Keep the held command visible to page.route rather than the service worker.
+    const page = await browser.newPage({ viewport, reducedMotion: "reduce", serviceWorkers: "block" }), errors = [];
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.locator("#auth-panel").waitFor({ state: "visible" });

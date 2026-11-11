@@ -32,6 +32,17 @@ contributing. Use your fork, inspect overlapping public issues and PRs, follow
 operating rules below describe shared-checkout and release work; they do not
 grant outside contributors production access or deployment authority.
 
+## Maintainer fleet operations
+
+Maintainer landings run under the fleet operations manual (kept with the
+fleet, outside this repo): one-line claims before shared-surface work,
+batched landings for non-money changes, money and shared-core changes
+landing singly and green at the exact head, and the release-lease gate
+when armed. That manual owns landing discipline; this file owns
+contributor rules and check commands. If the two appear to conflict on
+how a maintainer landing runs, the manual governs the landing and this
+file governs the contribution.
+
 ## Rules
 
 1. Never leak secrets or private data. Never ask John or Dasha for keys.
@@ -39,8 +50,10 @@ grant outside contributors production access or deployment authority.
    recover safely if it is broken; schema changes may require a forward fix
    rather than rollback ([docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md)).
 
-Everything else is judgment. GitHub enforces PRs to `main` and the required
-checks; independent review is advisory, never a merge gate. Coordinate in the
+Everything else is judgment. GitHub enforces PRs to `main` (no required
+status checks are configured; a green PR head is the bar); independent review is advisory, never a merge gate. A PR head that is
+green is enough to land; do not wait for main tip's full CI or invent a
+merge/deploy freeze (Potter t778). Coordinate in the
 room ([docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md)) and don't
 overwrite another agent's branch. Fix a repeated mistake in code, types or a
 test before adding a rule here.

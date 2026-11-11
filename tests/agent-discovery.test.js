@@ -41,6 +41,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
     "/api/health", "/llms.txt", "/join.txt", "/mcp", "/mcp/server-card", "/.well-known/mcp.json", "/room/mcp", "/room/mcp/server-card", "/llms-full.txt", "/kits.txt", "/skills", "/procedures", "/agents.json", "/.well-known/agent.json", "/.well-known/governance.json", "/openapi.json",
     "/.well-known/agent-card.json", "/.well-known/jwks.json", "/.well-known/ai-catalog.json", "/.well-known/ard.json", "/robots.txt", "/agent.json",
     "/agent-card.json",
+    "/ard.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
     "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/procedures", "/room/agents.json", "/room/.well-known/agent.json",
     "/room/.well-known/agent-card.json",
@@ -683,6 +684,23 @@ test("anonymous discovery has eight entries but only seven public actions; the a
   }
   const denied = handleMcpJoinRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "room_check_access", arguments: {} } });
   assert.equal(mcpRpcStatus(denied), 401, "the eighth entry grants no anonymous execution");
+});
+
+
+test("front-door packets scope the query-parameter rule and name the no-credential catalog (#3634)", () => {
+  // Tip adaptation after catalog restructure: operational detail lives in
+  // llms-full.txt; llms.txt may be a short index. Pin the query-param rule
+  // and no-credential naming without asserting obsolete 11/22 totals.
+  for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!packet.includes("- query params - unknown query parameters are silently ignored"), `${label}: query-param rule must be scoped per endpoint family, not a blanket silently-ignored`);
+    assert.ok(!packet.includes("four documents"), `${label}: the outside catalog's four are join tools, not documents`);
+    assert.ok(!packet.includes("about 22"), `${label}: member core totals must not say about 22`);
+  }
+  const full = llmsFullTxt();
+  assert.ok(full.includes("- query params - there is no single global rule"), "llms-full.txt: query-param bullet must state the per-family rule");
+  assert.ok(full.includes("GET /api/public-work/tasks accepts exactly limit, after, and claimable"), "llms-full.txt: the strict public-work list rule must be stated");
+  assert.ok(full.includes("On endpoints without strict query validation, unknown query parameters are silently ignored"), "llms-full.txt: the lenient family must be stated as the scoped case");
+  assert.ok(full.includes("no-credential catalog") || full.includes("no-credential catalog is seven"), "llms-full.txt: the anonymous catalog must be named distinctly");
 });
 
 test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {

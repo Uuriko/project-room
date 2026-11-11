@@ -72,13 +72,27 @@ function archivedConversationRows(store,roomId,{viewerId,channelId,peerMemberId,
 // tombstones arrive together. SQLite filters DMs before paging; JS only parses
 // bounded selected rows. Certified rooms use indexed records; rooms still
 // replaying (or changed since certification) retain the projection fallback.
-export function readConversation(store, token, roomId, { limit = 50, cursor = null, since = null, messageId = null, channelId = null, peerMemberId = null,
-  expectedSessionBinding = null } = {}) {
+export function readConversation(store, token, roomId, options = {}) {
+  return readConversationSelection(store, token, roomId, options);
+}
+
+// Only the addressed routing projection omits mention resolution, whose result
+// it never returns. Public conversation reads retain their addressing contract.
+function readConversationSelection(store, token, roomId, { limit = 50, cursor = null, since = null, messageId = null, channelId = null, peerMemberId = null,
+  expectedSessionBinding = null } = {}, resolveAddressing = true) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
     || [cursor, since, messageId].filter(value => value !== null).length > 1
     || messageId !== null && !validId(messageId)
     || channelId !== null && !validId(channelId)
     || peerMemberId !== null && (!validId(peerMemberId) || channelId !== null)) fail(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
+  // A conversation page is a reserved read: each delivered message costs
+  // ~5-6 record units of proof load (index refill, witness record + receipt,
+  // message row), so a validated page of up to 100 cannot fit the generic
+  // 200-record context — it tripped mid-page and returned ~15 messages.
+  // Reserve 1024 records like the other wide readers (current-search,
+  // snapshot-window); the shared 256 KiB byte ceiling in charge() is
+  // unchanged, and a page that still exhausts it returns a partial page
+  // with a continuation instead of refusing.
   return store.readTransaction(() => withCurrentReadContext(store.db,roomId,() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const current = isCurrentRoom(store.db,roomId);
@@ -185,7 +199,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     // notification with the same canonical names/ambiguity rules as delivery.
     // This is observed context, not execution permission; page reads do no
     // extra mention work and an implicit reply needs no roster/alias lookup.
-    const addressing = messageId === null ? null : { explicitlyMentioned: false };
+    const addressing = messageId === null || !resolveAddressing ? null : { explicitlyMentioned: false };
     if (addressing && typeof messages[0]?.body === "string" && messages[0].body.includes("@")) {
       // Mention resolution needs fresh membership, not hydrated conversation or work history.
       const message = messages[0], members = store.roomAuthority(roomId).members;
@@ -210,7 +224,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       nextCursor, checkpoint, messageBytes: bytes,
       ...(currentPage ? {sourceWindow:{examined:currentPage.examined,complete:currentPage.complete}} : {})
     });
-  }));
+  }, {maxRecords: 1024}));
 }
 
 // Directory metadata only: never hydrate bodies or infer other people's pairs.
@@ -302,7 +316,7 @@ function readCurrentDirectDirectory(store,token,roomId,{limit,cursor,expectedSes
 export function readMessageContext(store, token, roomId, messageId, expectedSessionBinding = null) {
   return store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const selected = readConversation(store, token, roomId, {messageId, expectedSessionBinding});
+    const selected = readConversationSelection(store, token, roomId, {messageId, expectedSessionBinding}, false);
     const message = selected.messages[0];
     if (!message) fail(404, 'message_not_found', 'Message not found');
     const request = isCurrentRoom(store.db, roomId)

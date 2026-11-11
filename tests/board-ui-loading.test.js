@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sanitizeHtml from "sanitize-html";
-import { boardHtml, boardSkeletonHtml, pendingOutcome, installWorkBoard } from "../src/board-ui.js";
+import { boardHtml, boardSkeletonHtml, pendingOutcome, boardActionErrorNote, installWorkBoard } from "../src/board-ui.js";
 
 const NOW = Date.now();
 const viewer = { id: "u1", manage: false, owner: false, write: true };
@@ -425,4 +425,30 @@ test("deploy chip: a missing sha, no status, or a held (stale) read stays unknow
     { live: "unstamped", main: SHA_B, behind: null }, { live: SHA_A, main: SHA_B, behind: null, stale: true, heldUntil: "2026-10-11T01:00:00Z" }]) {
     assert.equal(liveChip(status), "Deploy status unknown", JSON.stringify(status));
   }
+});
+
+// --- boardActionErrorNote: a transport failure is an unconfirmed outcome ---
+// Regression for #3596: act() used to note(error.message) verbatim, which for
+// a fetch TypeError is the raw browser string "Failed to fetch".
+
+test("boardActionErrorNote passes server errors through with their message", () => {
+  const conflict = Object.assign(new Error("The claim changed since it was read"), { status: 409, code: "claim_changed" });
+  assert.equal(boardActionErrorNote(conflict), "The claim changed since it was read");
+  const bare = Object.assign(new Error(""), { status: 500 });
+  assert.equal(boardActionErrorNote(bare), "Could not update the claim.");
+});
+
+test("boardActionErrorNote never leaks the raw transport message", () => {
+  const transport = new TypeError("Failed to fetch");
+  for (const refreshed of [true, false]) {
+    const note = boardActionErrorNote(transport, refreshed);
+    assert.ok(!note.includes("Failed to fetch"), note);
+    assert.match(note, /could not be confirmed/);
+  }
+  assert.match(boardActionErrorNote(transport, true), /board was refreshed/);
+  assert.match(boardActionErrorNote(transport, false), /could not be refreshed/);
+  assert.match(boardActionErrorNote(transport, "kept"), /entries were kept/);
+  assert.ok(!boardActionErrorNote(transport, "kept").includes("refreshed"), "kept copy must not claim a refresh happened");
+  assert.equal(boardActionErrorNote(transport), boardActionErrorNote(transport, true), "refreshed is the default");
+  assert.equal(boardActionErrorNote(undefined), boardActionErrorNote(transport), "a missing error reads as transport failure");
 });

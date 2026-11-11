@@ -1,7 +1,7 @@
 // Original independent reply-history predicates shared by full and durable recovery.
 import {isDeepStrictEqual} from 'node:util';
 import {validId,MAX_MESSAGE_BODY_CHARS} from '../src/events.js';
-import {prepareReplyPost,recordReplyPost,cancelReplyRequest,REPLY_CANCELLED} from '../src/reply-requests.js';
+import {prepareReplyPost,recordReplyPost,cancelReplyRequest,REPLY_CANCELLED,progressReplyRequest,REPLY_PROGRESSED} from '../src/reply-requests.js';
 const check = condition => { if (!condition) throw new Error("Reply request history requires operator reconciliation"); };
 const messageFields = ["id", "authorId", "body", "workItemId", "replyToId", "toMemberId", "createdAt"];
 export const exactReplyAuditMessage = message => Object.fromEntries(messageFields.map(key => [key, message[key]]));
@@ -107,5 +107,6 @@ export function advanceReplyRequestAudit(projected, row, {posts,ids}) {
       message.body = null; // A tombstone keeps who and when, never the text.
     }
     if (e.type === REPLY_CANCELLED) cancelReplyRequest(projected, e);
+    if (e.type === REPLY_PROGRESSED) progressReplyRequest(projected, e);
 }
 

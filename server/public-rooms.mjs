@@ -9,7 +9,8 @@ import { createHash } from "node:crypto";
 // exception: it reads nothing at all — curated static content only.
 import { escapeHtml } from "./html-escape.mjs";
 import { RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
-import { roomSetupPrompt } from "../src/room-setup-prompt.js";
+import { roomSetupPrompt, roomSetupPromptShort } from "../src/room-setup-prompt.js";
+import { experimentArm } from "./experiments.mjs";
 import { CONTENT_TRUST } from "./content-trust.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { PUBLIC_PAGE_LASTMOD } from "./public-search.mjs";
@@ -189,6 +190,8 @@ export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN, wo
         ? `Join ${origin}/r/${slug}. Read ${origin}/r/${slug}.json. With an existing identity-wide Room connection, call room_join with roomId ${slug}; otherwise follow agentJoin.joinRequest using your own saved identity. Reuse this agent’s identity and a stable request ID; never use another agent’s credentials. Ordinary read/chat admission is immediate, without an invitation code or owner approval. Verify your membership and read the activation pack for the next useful work. Joining does not require installing a host or sharing a computer. Request any additional work permissions separately when needed.`
         : join.mode === "request"
         ? `Help me join ${origin}/r/${slug}. Read ${origin}/r/${slug}.json and ${origin}/llms.txt. Reuse this agent’s saved identity; if none exists, follow the documented first-connection path. Request read/chat access to ${slug} using the documented access-request flow and a stable request ID. Wait for the room owner’s approval, then check the exact room and your membership before offering help. Keep credentials private. Joining does not share this computer or start a background listener.`
+        : experimentArm("short_connect_prompt", slug, { roomId: slug }) === "short"
+        ? roomSetupPromptShort(`${origin}/r/${slug}`)
         : roomSetupPrompt(`${origin}/r/${slug}`),
       roomPage: `/r/${slug}`,
       preview: `/r/${slug}.json`,

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readinessRetry, pollReadiness } from '../scripts/prod-smoke-retry.mjs';
 const options = { sha: 'a'.repeat(40), origin: 'https://canonical.example', entry: 'https://entry.example/room' };
-const timeout = { status: 'degraded', do: { status: 'timeout', timeoutMs: 1000 } };
+const timeout = { status: 'degraded', do: { status: 'timeout', timeoutMs: 2500 } };
 const ready = { status: 'ready', do: { status: 'ok' }, emailVerification: 'enforced', emailVerificationScope: 'durable-object' };
 const fixture = () => ({ ok: false, ...options, checks: [options.origin, options.entry].flatMap(door => [
   ...['/api/version', '/api/version/worker'].map(path => ({ name: `version ${door}${path}`, pass: true, status: 200, got: options.sha })),
@@ -94,8 +94,9 @@ test('actual CLI permits strict retry only after ready observations and preserve
 
 
 test('real Worker timeout body and explicit unknown markers remain retryable, never relaxed policy', async () => {
-  const { healthLivenessResponse } = await import('../cloudflare/health-probe.mjs');
-  const body = await healthLivenessResponse(new Request(options.origin + '/api/ready'), { readiness: 'timeout', elapsedMs: 1000, timeoutMs: 1000 }).json();
+  const { healthLivenessResponse, HEALTH_PROBE_TIMEOUT_MS } = await import('../cloudflare/health-probe.mjs');
+  // The body the deployed Worker actually emits on a probe timeout.
+  const body = await healthLivenessResponse(new Request(options.origin + '/api/ready'), { readiness: 'timeout', elapsedMs: HEALTH_PROBE_TIMEOUT_MS, timeoutMs: HEALTH_PROBE_TIMEOUT_MS }).json();
   for (const response of [body, { ...body, emailVerification: 'unknown', emailVerificationScope: 'unknown' }]) {
     const h = harness(); let readyCalls = 0; const normal = h.deps.fetchImpl;
     h.deps.fetchImpl = (url, init) => {

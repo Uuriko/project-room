@@ -1,6 +1,6 @@
 # Project Room total backlog
 
-Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
+Archived 2026-10-24. This capture is evidence, not the execution queue. The live fed queue is [BACKLOG.md](../../../BACKLOG.md). Active scope: [six-outcome delivery plan](../../../docs/FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not a promise to build every entry.
 
 Captured 2026-10-18; local baseline d3ae60e0. **773 accountable entries**: 288 execution/reconciliation tasks, 34 idea experiments, 48 historical native acceptance checks, 208 issue reconciliations, and 195 PR reconciliations. These counts overlap in underlying scope; they are not a count of distinct defects.
 
@@ -94,7 +94,7 @@ owners and source-bound evidence, and preserve rejected alternatives.
 4. Attach owner, dependencies, implementation status, exact revision and acceptance evidence as each item is triaged. The current JSON deliberately does not fabricate unknown owners or dependency graphs.
 5. Distinguish proposal, required work, locally qualified, integrated, deployed and verified. A closed issue, merged PR or green unrelated test is not sufficient completion evidence.
 6. Refresh moving inventories and compare changes. Require a disposition for every source obligation; report unread sources, orphaned tasks and unmet acceptance conditions.
-7. Select execution through the [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). B00–B09 are historical package mappings, not a competing mandatory sequence. Reconcile newly discovered obligations into the retained outcomes with dependency, acceptance and supersession evidence; do not erase prior work.
+7. Select execution through the [six-outcome delivery plan](../../../docs/FOCUSED-DELIVERY-PLAN.md). B00–B09 are historical package mappings, not a competing mandatory sequence. Reconcile newly discovered obligations into the retained outcomes with dependency, acceptance and supersession evidence; do not erase prior work.
 8. Complete a task only with evidence; retain superseded/cancelled IDs and the linked replacement or explicit decision.
 
 ## Coverage and limitations
@@ -1083,10 +1083,10 @@ Each row is a required reconciliation task, not an instruction to implement dupl
 
 ## Machine-readable inventory
 
-- [Canonical task inventory](backlog/project-room-total-backlog.json)
-- [Captured issue metadata](backlog/github-open-issues-2026-10-18.json)
-- [Captured PR metadata](backlog/github-open-prs-2026-10-18.json)
-- [Execution packages](BUILD-TO-COMPLETION-PLAN.md)
-- [Original delivery ledger](DELIVERY-LEDGER.md)
+- [Canonical task inventory](../../../docs/backlog/project-room-total-backlog.json)
+- [Captured issue metadata](../../../docs/backlog/github-open-issues-2026-10-18.json)
+- [Captured PR metadata](../../../docs/backlog/github-open-prs-2026-10-18.json)
+- [Execution packages](../../../docs/BUILD-TO-COMPLETION-PLAN.md)
+- [Original delivery ledger](../../../docs/DELIVERY-LEDGER.md)
 
 No generated checkbox is checked by default. Unknown implementation state remains unknown until reconciled.

@@ -40,10 +40,11 @@ export function onPath(bin, env = process.env) {
   return null;
 }
 
-// Split a user-supplied command line on whitespace, honoring double quotes.
+// Split a user-supplied command line on whitespace, honoring double and
+// single quotes (a single-quoted --agent-cmd path may contain spaces).
 export function splitCommand(text) {
   const parts = [];
-  for (const match of String(text).matchAll(/"([^"]*)"|(\S+)/g)) parts.push(match[1] ?? match[2]);
+  for (const match of String(text).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) parts.push(match[1] ?? match[2] ?? match[3]);
   if (!parts.length) throw new Error("empty agent command");
   return { command: parts[0], args: parts.slice(1) };
 }

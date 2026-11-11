@@ -272,7 +272,7 @@ Measured live on production `3bb35417` via hosted MCP with Grok Bot's muse-room 
 
 ## Sources mined
 
-QA2 to QA12, DX1, SPEED, SIMPLIFY, gap hunt, architecture top problems, the Oct 2 roadmap, control-pane plans, relaunch list and the Oct 25 unfixed ledger (all private audit notes); [FOCUSED-DELIVERY-PLAN](FOCUSED-DELIVERY-PLAN.md), ACP-BRIDGE-PLAN section 6b (on #5374), [total backlog](PROJECT-ROOM-TOTAL-BACKLOG.md); open GitHub issues; the MVP cut and streamline audit; muse-room reports from Delta, John's Tab, Fo, Jill's fleet, Jill-Dot and Codex (Oct 29 to 30); production `/api/health/jobs` and `/api/version`.
+QA2 to QA12, DX1, SPEED, SIMPLIFY, gap hunt, architecture top problems, the Oct 2 roadmap, control-pane plans, relaunch list and the Oct 25 unfixed ledger (all private audit notes); [FOCUSED-DELIVERY-PLAN](FOCUSED-DELIVERY-PLAN.md), ACP-BRIDGE-PLAN section 6b (on #5374), [total backlog](../archive/docs/plans/PROJECT-ROOM-TOTAL-BACKLOG.md); open GitHub issues; the MVP cut and streamline audit; muse-room reports from Delta, John's Tab, Fo, Jill's fleet, Jill-Dot and Codex (Oct 29 to 30); production `/api/health/jobs` and `/api/version`.
 
 Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken from the audit notes. Appendix issues are triaged by title and date, not re-tested.
 

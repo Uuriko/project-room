@@ -401,6 +401,36 @@ test("decide deny with note:null is accepted like an omitted note (RC-2026-09-18
   assert.equal(denied.decisionNote, null);
 });
 
+test("plain approve persists the decider's note; an invalid note fails before any grant (issue #3378)", async t => {
+  const { store, requests, ownerToken, identity } = setup(t);
+  const second = store.identities.create("Second Agent");
+  requests.request("commons", {
+    identityId: second.identityId, displayName: "Second Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_approve_badnote"
+  }, second.secret);
+  // An over-long note 422s exactly as on deny, and the request stays
+  // pending — no member was linked by the failed decision.
+  assert.throws(() => requests.decide(ownerToken, "commons", "ar_approve_badnote",
+    { decision: "approve", note: "x".repeat(501) }),
+    err => err.status === 422 && err.code === "invalid_request");
+  assert.equal(requests.status("ar_approve_badnote", second.identityId).status, "pending");
+  // The same request approved without a note records a null decision note.
+  const clean = requests.decide(ownerToken, "commons", "ar_approve_badnote", { decision: "approve" });
+  assert.equal(clean.status, "approved");
+  assert.equal(clean.decisionNote, null);
+  // Approve with a note: the decide response and the requester's status
+  // poll both surface it (trimmed, as on deny).
+  requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_approve_note"
+  }, identity.secret);
+  const decided = requests.decide(ownerToken, "commons", "ar_approve_note",
+    { decision: "approve", note: "  Welcome aboard.  " });
+  assert.equal(decided.status, "approved");
+  assert.equal(decided.decisionNote, "Welcome aboard.");
+  assert.equal(requests.status("ar_approve_note", identity.identityId).decisionNote, "Welcome aboard.");
+});
+
 // Self-serve admission (RC-2026-09-29-3603): rooms with an auto-approve rule
 // admit matching requests inline, with no human in the loop.
 

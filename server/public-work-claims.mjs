@@ -54,6 +54,12 @@ const filesOf = input => {
   return [...new Set(files)].sort();
 };
 const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
+// Short Latin, Greek and Cyrillic skill acronyms should not match incidental substrings
+// (e.g. `ui` inside `guide`). Longer preferences retain substring matching.
+const matchesPreference = (text, value) => {
+  if (!/^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{N}]{1,2}$/u.test(value)) return text.includes(value);
+  return text.split(/[^\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{N}_]+/u).includes(value);
+};
 
 // #3530: the standard public-work starter set — the newcomer tasks an
 // operator first seeded on the public board (the pw-garden round of
@@ -259,18 +265,23 @@ export class PublicWorkClaims {
   // match() opts out: its `after` cursor is an offer_id-order scan position
   // with its own documented continuation semantics, so it passes
   // claimableFirst: false and keeps scanning in offer_id order.
-  list({ limit = 20, after = '', claimable = false, claimableFirst = true } = {}) {
+  // Optional roomId keeps first-connect (and other room-scoped callers) on
+  // work from the room the agent just joined, not the global board.
+  list({ limit = 20, after = '', claimable = false, claimableFirst = true, roomId = null } = {}) {
     check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
     check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
+    check(roomId == null || identifier(roomId), 'Invalid page');
     return this.store.readTransaction(() => {
       if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
         JOIN rooms r ON r.id=t.room_id WHERE o.status='published' AND r.archived_at IS NULL
-        AND o.version=t.terms_version AND (json_extract(o.terms,'$.reward.kind')='unpaid' OR (json_extract(o.terms,'$.reward.kind')='work_trade' AND json_extract(o.terms,'$.reward.unit')='credit')) ORDER BY t.offer_id`).all();
+        AND o.version=t.terms_version AND (json_extract(o.terms,'$.reward.kind')='unpaid' OR (json_extract(o.terms,'$.reward.kind')='work_trade' AND json_extract(o.terms,'$.reward.unit')='credit'))
+        AND (?1 IS NULL OR t.room_id=?1) ORDER BY t.offer_id`).all(roomId);
       // Claim state lives in the work-claims store and receipts, not in a
       // column SQL can order by, so packets are materialized before ordering.
       // Operator-unpublished rooms are dropped before materializing: their
       // packets (including submittedReceiptId) must never be built or served.
+      // roomId, when set, is applied in SQL above (joined-room-first).
       let tasks = rows.filter(row => !isUnpublished(this.db, 'room', row.room_id))
         .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
       const claimableCount = tasks.filter(task => task.claimable).length;
@@ -639,7 +650,7 @@ export class PublicWorkClaims {
             other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
         }).map(task => {
           const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();
-          const matched = [...new Set(preferences.filter(value => text.includes(value)))];
+          const matched = [...new Set(preferences.filter(value => matchesPreference(text, value)))];
           return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
         }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
         outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));

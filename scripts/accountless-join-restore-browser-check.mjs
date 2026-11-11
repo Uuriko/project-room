@@ -85,7 +85,8 @@ async function returningMember(t) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const browser = await chromium.launch({ headless: true, ...chromiumOptions });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true }); });
-  const page = await browser.newPage(); page.setDefaultTimeout(7000);
+  // page.route must own the throttled reads, not the app's service worker.
+  const page = await browser.newPage({ serviceWorkers: "block" }); page.setDefaultTimeout(7000);
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await signInFixture(page, fixture.keys.owner);
   return page;

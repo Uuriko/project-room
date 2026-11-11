@@ -9,7 +9,8 @@
 //
 // Everything is simulated in-process over loopback: no real network, no devices.
 // Guardrails respected throughout: <=99 agent members, <=3 streams per credential,
-// 100 open streams per server. Credential writes burst at 40; chat posts
+// 100 open streams per server, at most 50 of them in any one room. Credential
+// writes burst at 40; chat posts
 // still stop at the per-member flood of 30.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -270,15 +271,18 @@ test("connection-pool exhaustion: stream pool rejects gracefully and recovers", 
     assert.equal(overCredential.status, 429);
     assert.equal(overCredential.code, "stream_limit");
     overCredential.socket.destroy();
-    // global cap: 33 more members x 3 streams; the pool holds exactly 100
+    // per-room share (R-16.5): 33 more members x 3 streams are attempted, but
+    // one room holds at most 50 of the 100-stream server pool, so other rooms
+    // can never be starved by this room alone (cross-room case:
+    // tests/stream-pool-per-room.test.js).
     let ok = 0, rejected = 0;
     for (let m = 1; m < 34; m++) for (let s = 0; s < 3; s++) {
       const r = await openRawStream(origin, room.agents[m].key, after);
       if (r.status === 200) { ok++; sockets.push(r.socket); }
       else { assert.equal(r.status, 429); assert.equal(r.code, "stream_limit"); r.socket.destroy(); rejected++; }
     }
-    assert.equal(ok + 3, 100, "pool holds exactly 100 streams");
-    assert.equal(rejected, 2, "attempts past the cap are rejected, not hung");
+    assert.equal(ok + 3, 50, "one room holds at most its 50-stream share of the pool");
+    assert.equal(rejected, 52, "attempts past the share are rejected, not hung");
     // the room keeps serving reads while the pool is full
     const probe = clientFor({ origin, memberId: room.agents[0].memberId, key: room.agents[0].key });
     await probe.presence();

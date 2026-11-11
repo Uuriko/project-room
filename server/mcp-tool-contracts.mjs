@@ -54,6 +54,10 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_join_kits: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static kits document" },
   room_join_prompt: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static door prompt document" },
   room_mcp_snippet: { access: `read, ${STATIC}`, cost: READ, rest: "none, static host config snippets" },
+  // Public-profile only: served by livePublicMcpTools, never on full, so
+  // the full-only ratchet could not see it. The handler is the same
+  // anonymous mint as its REST twin (budgets and proof-of-work included).
+  room_identity_mint: { access: `write, ${STATIC}`, cost: "one write, starts no AI; returns a one-time identity secret shown once; anonymous budgets apply and repeated mints may require proof-of-work", rest: "POST /api/agent-identities" },
   room_search_actions: { access: `read, ${ANY}; lists only actions this identity may call`, cost: READ, rest: "none; REST discovery is docs/openapi.yaml" },
   room_run_action: { access: "same as the wrapped action", cost: "same as the wrapped action", rest: "the wrapped action's own REST twin" },
   room_list_work: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims" },
@@ -98,6 +102,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_renew_claim: { access: `write, Board writer holding the active claim; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (claim.renewed)` },
   room_request_history: { access: `read, room member`, cost: READ, rest: "GET /api/rooms/{roomId}/reply-history" },
   room_cancel_request: { access: `write, room member who asked, or the human room owner; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (reply_request.cancelled)` },
+  room_progress_request: { access: `write, room member the request is addressed to; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (reply_request.progressed)` },
   room_request_reply: { access: `write, room member; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (message.posted)` },
   room_resolve_blocker: { access: `write, room member with assigned accept_work; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.blocker_resolved)` },
   room_select_help_offer: { access: `write, the accountable member of the task; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.help_offer_updated)` },

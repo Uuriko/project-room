@@ -1999,8 +1999,15 @@ function syncWorkForm() {
   const writing = $("#work-mode-select").value === "write";
   syncWorkPolicy();
   const reviewing = $("#require-verification").checked;
-  const assignable = active.filter(member => [...WORK_PERMISSIONS, ...(writing ? ["write_external"] : [])]
-    .every(permission => member.permissions.includes(permission)));
+  // Option D (item-scoped implied grant): when the proposing session member
+  // is the room owner or holds write_external, their write-mode proposal
+  // carries a one-item grant for the accountable member, so the assignee
+  // needs only the work permissions — the stamp, not the room-wide bit.
+  const proposerStamps = session.member.id === state.room.ownerId
+    || (state.members[session.member.id]?.permissions ?? []).includes("write_external");
+  const assignable = active.filter(member => WORK_PERMISSIONS
+    .every(permission => member.permissions.includes(permission))
+    && (!writing || member.permissions.includes("write_external") || proposerStamps));
   selectOptions("#assignee-select", assignable, "Choose assignee");
   const waiting = active.filter(member => member.kind === "agent" && !assignable.includes(member));
   if ($("#assignee-hint")) {

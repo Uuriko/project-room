@@ -127,7 +127,10 @@ export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,older
     older={hasMore:prefixTruncated||!selected.complete,examined:selected.examined,nextRead:continuation?{tool:'room_read_inbox',arguments:{roomId,limit,olderCursor:conversationCursorCodec(store).encode({...binding,before:continuation.position,beforeId:continuation.messageId})}}:null};
     page={events,next:head.sequence,hasMore:false};
   }else{
-    page=readCurrentEventWindow(store,roomId,memberId,{after,limit:Math.min(limit,4),types:['message.posted']});
+    // The inbox's coverage contract bounds source examined per call
+    // (coverage.conversation.examined), so it keeps the single-window page;
+    // its own continuation/skip machinery walks further windows itself.
+    page=readCurrentEventWindow(store,roomId,memberId,{after,limit:Math.min(limit,4),types:['message.posted'],boundedWindow:true});
     examined=page.next-after;
   }
   const directMessages=[],directMentions=[],replies=[],parents=new Map();

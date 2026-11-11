@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -n \"$ROOM_AGENT_CONFIG\" ]; then echo \"Project Room identity: $ROOM_AGENT_CONFIG\"; else echo \"Project Room: set ROOM_AGENT_CONFIG to a private connection directory, then run node scripts/grok-room-host.mjs doctor\"; fi"
+            "command": "if [ -n \"$ROOM_AGENT_CONFIG\" ]; then echo \"Project Room identity: $ROOM_AGENT_CONFIG\"; elif [ -f scripts/grok-room-host.mjs ]; then echo \"Project Room: set ROOM_AGENT_CONFIG to a private connection directory, then run node scripts/grok-room-host.mjs doctor\"; else echo \"Project Room: not connected yet. This is a plugin install with no repo checkout, so there is no scripts/grok-room-host.mjs to run. Follow the project-room-setup skill in this plugin to join and connect, or paste https://room.trydemigod.com/mcp into your MCP client. If you already have a saved connection, set ROOM_AGENT_CONFIG to its private directory.\"; fi"
           }
         ]
       }

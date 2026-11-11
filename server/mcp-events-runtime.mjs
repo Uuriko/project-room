@@ -8,17 +8,24 @@ import { createMcpEventSubscriptions } from './mcp-event-subscriptions.mjs';
 import { authorizeMcpOAuthDescriptor } from './mcp-oauth.mjs';
 import { isWorkersRuntime } from './ip-blocklist.mjs';
 import { canonicalNativeMentionPolicyContext } from './native-mention-context.mjs';
+import { isCurrentRoom, readCurrentWakePolicyState } from './current-room-repository.mjs';
 
-// A native event subscription is an explicit opt-in independent of desktop
-// host registration. Workers deliberately has no automatic egress fallback.
-export function createMcpEventsRuntime({ store, accountProvider, inviteProvider, resource, transport, dnsResolvers, externalScheduler = false }) {
-  if (!resource || (isWorkersRuntime() && (!transport || !externalScheduler))) return null;
-  const authorize = descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider, inviteProvider, resource, descriptor });
-  const authorizeEvent = (descriptor, { event, context }) => store.transaction(() => {
+// Fresh policy for one native event delivery. Exported for direct tests of
+// the legacy and normalized room paths.
+export function authorizeNativeEvent(store, descriptor, { event, context }) {
+  return store.transaction(() => {
     if (!context || typeof context.actorId !== 'string' || !['mention', 'squad-mention', 'dm', 'work', 'board'].includes(context.kind)) return false;
     if (store.wakeQueue?.pauseStatus(descriptor.roomId, descriptor.memberId)
       || store.agentHeartbeats?.pausedRoomsOf(descriptor.identityId).some(row => row.roomId === descriptor.roomId)) return false;
-    const state = canonicalNativeMentionPolicyContext(store, descriptor, event, context) ?? store.room(descriptor.roomId).state;
+    // Normalized rooms refuse the whole-room read; their policy comes from a
+    // bounded selected read of exactly the records the checks below use.
+    const state = canonicalNativeMentionPolicyContext(store, descriptor, event, context)
+      ?? (isCurrentRoom(store.db, descriptor.roomId)
+        ? readCurrentWakePolicyState(store, descriptor.roomId, [context.actorId, descriptor.memberId], {
+          workItemId: context.kind === 'work' ? context.workItemId : null,
+          messageId: ['mention', 'squad-mention', 'dm'].includes(context.kind) ? event?.data?.messageId ?? null : null })
+        : store.room(descriptor.roomId).state);
+    if (!state) return false;
     const actor = state.members[context.actorId], target = state.members[descriptor.memberId];
     if (!actor || actor.active === false || !target || target.active === false || context.actorId === descriptor.memberId || state.room.archivedAt
       || firstBlockedWakeTarget(state, context.actorId, [descriptor.memberId]) || mutedEvent(state, descriptor.memberId, { actorId: context.actorId })) return false;
@@ -33,6 +40,14 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
     }
     return mayWake(store.db, state, descriptor.roomId, context.actorId, descriptor.memberId);
   });
+}
+
+// A native event subscription is an explicit opt-in independent of desktop
+// host registration. Workers deliberately has no automatic egress fallback.
+export function createMcpEventsRuntime({ store, accountProvider, inviteProvider, resource, transport, dnsResolvers, externalScheduler = false }) {
+  if (!resource || (isWorkersRuntime() && (!transport || !externalScheduler))) return null;
+  const authorize = descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider, inviteProvider, resource, descriptor });
+  const authorizeEvent = (descriptor, input) => authorizeNativeEvent(store, descriptor, input);
   const manager = createMcpEventSubscriptions({ store, authorize, authorizeEvent, transport, dnsResolvers });
   const emit = ({ roomId, memberId, identityId, messageId, eventId = messageId, actorId, kind, workItemId, workRevision, workClaimId, claimBasis }) => {
     if (!memberId && identityId) memberId = store.db.prepare('SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?').get(roomId, identityId)?.member_id;
@@ -50,7 +65,7 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
       if (message.method === 'events/list') {
         if (args.cursor !== undefined && args.cursor !== null) throw Object.assign(new Error('No event catalog pagination'), { code: -32602 });
         return result({ events: [{ name: 'room.requested', delivery: ['webhook'],
-          payloadSchema: { type: 'object', properties: { roomId: { type: 'string' }, memberId: { type: 'string' }, messageId: { type: 'string' }, requestId: { type: 'string' } }, required: ['roomId', 'memberId'], additionalProperties: false }, description: 'A permitted mention, direct request, or work transition needs this agent. Fetch current Room state before acting; this notification is only a pointer.' + (transport?.configurationPending ? ' Callback delivery is pending operator verification: subscriptions currently return callback_origin_not_allowed; provide only the returned origin to the operator, never the callback path or signing secret.' : ''),
+          payloadSchema: { type: 'object', properties: { roomId: { type: 'string' }, memberId: { type: 'string' }, messageId: { type: 'string' }, requestId: { type: 'string' } }, required: ['roomId', 'memberId'], additionalProperties: false }, description: 'A permitted mention, direct request, or work transition needs this agent. Fetch current Room state before acting; this notification is only a pointer. Subscriptions cover future events, not earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room and follow every nextRead. Finish each selected room_read_request before responding with its current answerBasis; do not resend saved requests.' + (transport?.configurationPending ? ' Callback delivery is pending operator verification: subscriptions currently return callback_origin_not_allowed; provide only the returned origin to the operator, never the callback path or signing secret.' : ''),
           inputSchema: { type: 'object', properties: { roomId: { type: 'string', const: descriptor.roomId }, memberId: { type: 'string', const: descriptor.memberId } }, required: ['roomId', 'memberId'], additionalProperties: false } }], ttlMs: 0, cacheScope: 'private' });
       }
       if (message.method === 'events/subscribe') return result(await manager.subscribe({ ...args, principal: descriptor }));

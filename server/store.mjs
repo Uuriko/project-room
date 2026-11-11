@@ -8,6 +8,9 @@ import {ensureDefaultChannelState} from '../src/default-channel-state.js';
 import {readCurrentEventWindow,currentEventRedactionMessages} from './current-room-events.mjs';
 import { assertRestoreAdmitted, restorePending, verifyRestoreControl } from './restore-admission.mjs';
 import {readCurrentWorkListing} from './current-work-list.mjs';
+import { isUnfilledIntroBody } from './first-connect-task.mjs';
+import {attentionWaitStatus} from './attention-wait.mjs';
+import { WRITE_GRANT_POLICY_VERSION } from '../src/work-reducers.js';
 import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget } from './current-room-repository.mjs';
 import {bindReplayAppend} from './replay-cutover.mjs';
 import { savedHistoricalReplayCheckpoint } from './historical-replay-contract.mjs';
@@ -765,6 +768,7 @@ const shapes = {
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
+  [T.REPLY_REQUEST_PROGRESSED]: "requestMessageId expectedRequestRevision progress note",
   [T.POLL_VOTED]: "messageId option active",
   ...PIN_COMMAND_SHAPES,
   [T.CHANNEL_CREATED]: "channelId name",
@@ -780,7 +784,7 @@ const shapes = {
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
   [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer attempt evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId segments signedEvidence`,
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
-  [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll`,
+  [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll toMemberId`,
   [T.WORK_HALT_CLEARED]: "memberId haltEventId note",
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt pullRequests blocks`,
   [T.CLAIM_RELEASED]: work,
@@ -3690,6 +3694,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Work history and text-result provenance select one work item's events;
     // without this they scan and JSON-parse every event in the room.
     this.db.exec("CREATE INDEX IF NOT EXISTS events_room_work ON events(room_id, json_extract(body, '$.data.workItemId'), sequence)");
+    // Presence: when each member last acted in the room, one index probe per
+    // member instead of scanning the log (see lastActedAt).
+    this.db.exec("CREATE INDEX IF NOT EXISTS events_room_actor ON events(room_id, json_extract(body, '$.actorId'), sequence)");
+  }
+  // When this member last appended anything to the room (ISO), or null. Uses
+  // only the actor index; where an open deferred it, answers null rather than scan.
+  lastActedAt(roomId, memberId) {
+    if (this._actorIndexReady !== true) {
+      this._actorIndexReady = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='events_room_actor'").get()) || undefined;
+      if (!this._actorIndexReady) return null;
+    }
+    let row;
+    try {
+      this._lastActedStatement ??= this.db.prepare("SELECT json_extract(body,'$.at') AS at FROM events INDEXED BY events_room_actor WHERE room_id=? AND json_extract(body,'$.actorId')=? ORDER BY sequence DESC LIMIT 1");
+      row = this._lastActedStatement.get(roomId, memberId);
+    } catch {
+      // The index went away after it was observed: re-check next time, never scan.
+      this._actorIndexReady = undefined; this._lastActedStatement = undefined;
+      return null;
+    }
+    return typeof row?.at === "string" ? row.at : null;
   }
   roomsNeedingProvenanceReplay() {
     const ids = this.db.prepare(`
@@ -4179,9 +4204,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const current = currentRoomOwnerAuthority(this.db, roomId);
     return current ? current.ownerId : this.roomAuthority(roomId)?.ownerId;
   }
-  roomAuthority(roomId, { includeHistory = false, memberId = null } = {}) {
+  roomAuthority(roomId, { includeHistory = false, memberId = null, activeOnly = false } = {}) {
     if(!this._restoreOpening)assertRestoreAdmitted(this.db);
-    const current = currentRoomAuthority(this.db, roomId, { memberId });
+    const current = currentRoomAuthority(this.db, roomId, { memberId, activeOnly });
     if (current) return { sequence: current.sequence, ownerId: current.ownerId, members: current.members,
       ...(includeHistory ? {historyVisibility: current.historyVisibility, historyDefaultsVersion: current.historyDefaultsVersion} : {}) };
     // History policy travels in the same validated prefix as membership. This
@@ -5666,7 +5691,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
               budgetEnforced: true, reason: "budget_exceeded", limit: wire,
               ...(request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
-              ...(request.rounds !== undefined ? { rounds: request.rounds } : {}) } }, expectedSessionBinding);
+              ...(request.rounds !== undefined ? { rounds: request.rounds } : {}),
+              ...(request.spendCents !== undefined ? { spendCents: request.spendCents } : {}) } }, expectedSessionBinding);
         } catch {
           // The 409 below still carries the reason; the worker's next
           // heartbeat completes the stop.
@@ -5806,12 +5832,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // so watching reads false there).
   currentPresenceMembers(roomId,watcherMemberIds){
     return withCurrentReadContext(this.db,roomId,()=>{
-      const {members,ownerId}=this.roomAuthority(roomId),watching=new Set(watcherMemberIds??[]);
+      // W3200 R-01: presence serves the ACTIVE roster only, so it reads the
+      // active-only authority — the total-record census bricked presence in
+      // churn-heavy rooms past 101 total records at <=100 active members.
+      const {members,ownerId}=this.roomAuthority(roomId,{activeOnly:true}),watching=new Set(watcherMemberIds??[]);
       return Object.values(members).filter(m=>m.active!==false).map(m=>{
         const link=m.kind==='agent'?this.db.prepare('SELECT identity_id FROM identity_links WHERE room_id=? AND member_id=?').get(roomId,m.id):null;
         const host=link?this.agentHeartbeats.statusWindow(link.identity_id):null,observed=host&&host.status!=='unregistered'&&Number.isFinite(host.lastSeenAt)&&host.lastSeenAt<=this.now();
         const isWatching=watching.has(m.id),liveHost=observed&&host.status==='online';
-        return{memberId:m.id,displayName:m.displayName,kind:m.kind,watching:isWatching,lastSeenAt:observed?host.lastSeenAt:null,statusMessage:m.statusMessage??null,presence:host?{status:host.status,lastSeenAt:observed?host.lastSeenAt:null,basis:observed?'host':'registration',sourceWindow:host.sourceWindow}:null,
+        return{memberId:m.id,displayName:m.displayName,kind:m.kind,watching:isWatching,lastSeenAt:observed?host.lastSeenAt:null,lastActedAt:this.lastActedAt(roomId,m.id),...(m.kind==='agent'?{courier:attentionWaitStatus(this,roomId,m.id)}:{}),statusMessage:m.statusMessage??null,presence:host?{status:host.status,lastSeenAt:observed?host.lastSeenAt:null,basis:observed?'host':'registration',sourceWindow:host.sourceWindow}:null,
           state:isWatching||liveHost?'listening':'unknown',isOwner:m.id===ownerId,scopes:[...m.permissions],ownerIdentityId:link?.identity_id??null,coverage:{execution:'not-evaluated',heldWork:'not-evaluated',queuedWakes:'not-evaluated'}};
       }).sort((a,b)=>a.memberId.localeCompare(b.memberId,'en'));
     },{maxRecords:512});
@@ -7156,6 +7185,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return withCurrentServingWriter(this.db,roomId,() => {
       // Exact replays of commands committed before the pause returned above.
       refusePausedAgentWrite(this, roomId, auth.member, command);
+      // Admission only (replay never reaches here): the first-connect intro
+      // must not be posted with its {{skill}} slot unfilled.
+      if ((command.type === T.MESSAGE_POSTED || command.type === T.DM_POSTED) && isUnfilledIntroBody(command.data?.body))
+        fail(422, "intro_slot_unfilled", "Replace {{skill}} with one concrete thing you can do before posting this intro.");
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
       if (this.roomFlood.consume(roomId, auth.member.id, command.type)) {
@@ -7353,6 +7386,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             ...(requestMode === "respond" ? { answerCredential: auth.kind === "session" && auth.credentialScope === "account-session"
               && auth.account && auth.member.kind === "human" ? "account_session" : "room_credential" } : {}) }
           : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
+          // Server-derived: new proposals are admitted under the item-scoped
+          // write grant policy (#5960); proposals recorded before it carry no
+          // version and replay without a grant.
+          : command.type === T.WORK_PROPOSED ? { ...command.data, writeGrantPolicyVersion: WRITE_GRANT_POLICY_VERSION }
           : command.data
       });
       // Observed transport only, never a runner/capability or ownership claim.
@@ -7909,7 +7946,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // against a direct @mention of the same author in the reply body;
       // humans keep their existing attention paths.
       const replyDmTarget = typeof data.toMemberId === "string" ? data.toMemberId : "";
-      if (!replyDmTarget) {
+      // Human follow-ups still need attention. An agent's ordinary answer or
+      // acknowledgment is not another request: only its explicit @tags below
+      // create new mention obligations, avoiding reply/acknowledgment loops.
+      const replySender = state?.members?.[senderMemberId];
+      if (!replyDmTarget && replySender?.kind !== "agent") {
         const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
         const authorId = repliedTo?.authorId ?? "";
         const author = authorId ? (state?.members ?? {})[authorId] : null;
