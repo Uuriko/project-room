@@ -23,7 +23,7 @@ const PATTERNS = [
   // value starting with "/" is a regex literal or a path, so the value side
   // refuses it; a QUOTED value is always scanned, including one that begins
   // with "/" (a quoted credential is not a path because of its first char).
-  { id: "generic-secret", label: "secret assignment", regex: /(?<![A-Za-z0-9_-])["']?(?:(?:[A-Za-z0-9]+[_-])*(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Tt][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*|(?:[a-z0-9]+|[A-Z][a-z0-9]*)(?:[A-Z][a-z0-9]*)*(?:[S][Ee][Cc][Rr][Ee][Tt]|[P][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[P][Aa][Ss][Ss][Ww][Dd]|[P][Ww][Dd]|[T][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*)["']?\s*[:=]\s*(?:["'][^"'\s]{12,}["']?|(?!\/)[^"'\s]{12,})/ },
+  { id: "generic-secret", label: "secret assignment", regex: /(?<![A-Za-z0-9_-])["']?(?:(?:[A-Za-z0-9]+[_-])*(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Tt][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*|(?:[a-z0-9]+|[A-Z][a-z0-9]*)(?:[A-Z][a-z0-9]*)*(?:[S][Ee][Cc][Rr][Ee][Tt]|[P][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[P][Aa][Ss][Ss][Ww][Dd]|[P][Ww][Dd]|[T][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*)["']?\s*[:=]\s*(?:["'][^"'\s]{12,}["']?|(?!\/[^\s"']*\/[gimsuyd]*[;,)\]}]*(?:\s|$))[^"'\s]{12,})/ },
   { id: "private-key", label: "private key block", regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
   { id: "bearer-token", label: "bearer token", regex: /\bbearer\s+[A-Za-z0-9\-_.~+/]{20,}=*/i },
   { id: "slack-token", label: "Slack token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },

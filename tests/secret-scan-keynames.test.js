@@ -97,3 +97,17 @@ test("a credential-bearing https URL assigned to a token/secret key is still det
   const found = scanText(`token = "https://user:${a}@test.invalid/";`, { allowlist: REVIEW_ALLOWLIST, safeEntropyTokens: REVIEW_SAFE });
   assert.ok(found.length > 0, "URL carrying a credential flags");
 });
+
+// Review repro from seq4457 (Codex, 2026-11-10): an UNQUOTED slash-leading value is a valid
+// dotenv password. Only a regex-literal shape (/…/flags) is exempt, not every '/'-led value.
+import { scanAddedUnits as REVIEW_SCAN_ADDED } from "../scripts/secret-scan-diff.mjs";
+test("an unquoted slash-leading dotenv password is detected; regex-literal shapes are not", () => {
+  const a = "a".repeat(16);
+  const opts = { allowlist: REVIEW_ALLOWLIST, safeEntropyTokens: REVIEW_SAFE };
+  assert.ok(scanText(`password=/${a}`, opts).some(f => f.rule === "generic-secret"), "tree scan flags password=/...");
+  assert.ok(scanText(`PASSWORD=/${a}/${a}`, opts).some(f => f.rule === "generic-secret"), "multi-segment value flags");
+  assert.ok(REVIEW_SCAN_ADDED([{ path: ".env", line: 1, text: `password=/${a}` }], []).length > 0, "PR-diff gate flags it too");
+  for (const literal of [`const tokenPattern = /${a}${a}/g;`, `token = /${a}\\d+/gi,`, `secretRe = /^${a}$/;`]) {
+    assert.equal(scanText(literal, opts).filter(f => f.rule === "generic-secret").length, 0, `regex literal stays exempt: ${literal}`);
+  }
+});
