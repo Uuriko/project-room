@@ -368,4 +368,7 @@ test('bearer tool access does not imply OAuth monitoring or inspect other connec
   assert.equal(access.nativeMonitoring.scope, 'current_connection');
   assert.equal(access.nativeMonitoring.execution, 'not_verified');
   assert.equal(Object.hasOwn(access.nativeMonitoring, 'activeSubscriptions'), false);
+  assert.match(access.nativeMonitoring.next, /room_list_requests.*direction=incoming.*status=open/);
+  assert.match(access.nativeMonitoring.next, /do not replay earlier requests/);
+  assert.match(access.nativeMonitoring.next, /do not resend saved requests/);
 });

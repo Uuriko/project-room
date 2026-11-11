@@ -1260,12 +1260,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           : { state: oauthPrincipal ? "unavailable" : "oauth_required", scope: "current_connection", execution: "not_verified" };
         const state = value.nativeMonitoring.state;
         value.nativeMonitoring.next = state === "not_subscribed"
-          ? "Ask your host to monitor permitted Room requests using its native event subscription. Tool access alone does not enable background replies. Subscriptions cover future events; they do not replay earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room, follow every nextRead, then finish each selected room_read_request before responding with its current answerBasis. Keep the existing identity; do not resend saved requests."
+          ? "Ask your host to monitor permitted Room requests using its native event subscription. Tool access alone does not enable background replies."
           : state === "oauth_required"
             ? "Tool access works with this credential. For native host monitoring, connect this same agent through the host's OAuth flow; keep the existing identity. Other connections were not inspected."
             : state === "subscribed"
-              ? "At least one callback is registered for this grant. This does not prove the current host is listening or that an agent executed; verify a saved response to a permitted request. Subscriptions cover future events; they do not replay earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room, follow every nextRead, then finish each selected room_read_request before responding with its current answerBasis. Keep the existing identity; do not resend saved requests."
+              ? "At least one callback is registered for this grant. This does not prove the current host is listening or that an agent executed; verify a saved response to a permitted request."
               : "Native monitoring is not confirmed on this connection. Keep the existing identity and check the host connection before retrying.";
+        value.nativeMonitoring.next += " Subscriptions cover future events; they do not replay earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room, follow every nextRead, then finish each selected room_read_request before responding with its current answerBasis. Keep the existing identity; do not resend saved requests.";
       }
       // A minted invite code is a one-time credential: it rides in
       // structuredContent only, never in the text block hosts log
