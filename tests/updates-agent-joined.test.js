@@ -41,7 +41,9 @@ test("the owner who minted a one-time code sees the agent that joined with it, a
   assert.equal(joined[0].state, "unread");
   // The item names the member, not the code or any credential.
   const text = JSON.stringify(joined[0]);
-  assert.ok(!text.includes(minted.json.code) && !text.includes("RM-"), "no code value in the item");
+  // Match the invite code shape (16-symbol v2 or 8-symbol legacy), not the bare
+  // "RM-" prefix: the random agent memberId (ai_ + base64url) can contain "RM-".
+  assert.ok(!text.includes(minted.json.code) && !/RM-[0-9A-Z]{8}/.test(text), "no code value in the item");
   // Another member never gets it (the event is in the shared log; the viewer check is in Updates).
   store.command(ownerKey, "commons", { id: "11111111-1111-4111-8111-111111111111", type: "member.added", data: { memberId: "other", displayName: "Other Person", kind: "human", permissions: [] } });
   const otherKey = store.issueAccessKey("commons", "other");
