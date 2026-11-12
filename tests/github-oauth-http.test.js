@@ -394,10 +394,10 @@ test("HTML GitHub sign-in never lands on an archived room", async t => {
   f.store.db.prepare("INSERT INTO member_accounts (room_id, member_id, account_id, origin) VALUES ('a-archived', 'githubber', ?, 'human')")
     .run(accountId);
   let html = await htmlLanding();
-  assert.match(html, /\?room=commons/);
+  assert.match(html, /\?room=commons&amp;github=signed-in/);
   assert.doesNotMatch(html, /a-archived/);
   f.store.command(f.keys.owner, "commons", { id: "archive-commons", type: T.EVENT_TYPES.ROOM_ARCHIVED, data: {} });
   html = await htmlLanding();
-  assert.match(html, /\?account=1/, "archived-only memberships land on the account home");
+  assert.match(html, /\?account=1&amp;github=signed-in/, "archived-only memberships land on the account home");
   assert.doesNotMatch(html, /\?room=/);
 });

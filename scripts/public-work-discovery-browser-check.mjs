@@ -6,6 +6,8 @@ import AxeBuilder from '@axe-core/playwright';
 import {RoomStore} from '../server/store.mjs';
 import {initialRoom} from '../server/bootstrap.mjs';
 import {createRoomServer} from '../server/http.mjs';
+import {readCurrentWorkItem} from '../server/current-room-repository.mjs';
+import {textVersion} from '../server/text-results.mjs';
 
 for(const width of [390,1280])test('published task discovery and keyboard paging at '+width,{timeout:60000},async t=>{
  const store=new RoomStore(':memory:'),roomId='public-work-room';store.initialize(initialRoom(roomId),{representation:'normalized-current-v1'});
@@ -13,7 +15,7 @@ for(const width of [390,1280])test('published task discovery and keyboard paging
  send('page','room.public_page_set',{enabled:true});
  for(let n=0;n<7;n++){
   send('task-'+n,'work.proposed',{workItemId:'task-'+n,title:n===0?'Review agent onboarding':'Task '+n,
-   definitionOfDone:n===0?'Check keyboard setup and save a useful result.\nLiteral <task markup>\n'+ 'unbroken'.repeat(70):'Save a useful result '+n,accountableMemberId:'owner'});
+   definitionOfDone:n===0?'Check keyboard setup and save a useful result.\nLiteral <task markup>\n'+ 'unbroken'.repeat(70):'Save a useful result '+n,accountableMemberId:'owner',mode:'read',ownerDecisionRequired:false,independentVerificationRequired:false});
   send('publish-'+n,'work.public_set',{workItemId:'task-'+n,enabled:true});
  }
  send('private','work.proposed',{workItemId:'private',title:'PRIVATE TASK',definitionOfDone:'PRIVATE INSTRUCTIONS',accountableMemberId:'owner'});
@@ -30,12 +32,10 @@ for(const width of [390,1280])test('published task discovery and keyboard paging
  await taskLink.click();await page.waitForURL(origin+'/r/'+roomId+'?workId=task-0');
  assert.equal(await page.locator('h1').innerText(),'Review agent onboarding');
  assert.doesNotMatch(await page.locator('main').innerText(),/PRIVATE TASK|PRIVATE INSTRUCTIONS/);
- await page.getByText('Use an agent',{exact:true}).click();
  await page.evaluate(()=>{navigator.clipboard.writeText=async text=>{window.copiedTask=text;};});
  await page.getByRole('button',{name:'Copy for agent',exact:true}).click();
  assert.match(await page.evaluate(()=>window.copiedTask),/workId=task-0/);
  assert.match(await page.evaluate(()=>window.copiedTask),/Do not assume this published task is unassigned/);
- await page.getByText('Share task',{exact:true}).click();
  await page.getByRole('button',{name:'Copy link',exact:true}).click();
  assert.match(await page.evaluate(()=>window.copiedTask),/\/r\/public-work-room\?workId=task-0$/);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
@@ -46,8 +46,18 @@ for(const width of [390,1280])test('published task discovery and keyboard paging
  await page.getByRole('button',{name:'Copy link',exact:true}).click();
  assert.equal(await page.locator('#task-link-status').innerText(),'Copy the selected link.');
  assert.equal(await page.locator('#task-link').evaluate(el=>el.selectionEnd-el.selectionStart),await page.locator('#task-link').evaluate(el=>el.value.length));
+ await page.evaluate(()=>{navigator.clipboard.writeText=()=>new Promise(()=>{});});
+ await page.getByRole('button',{name:'Copy link',exact:true}).click();
+ await page.getByRole('link',{name:'Open in project',exact:true}).focus();
+ await page.getByText('Copy the link under Task link.',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('link',{name:'Open in project',exact:true}).evaluate(el=>el===document.activeElement),true);
+ await page.getByRole('button',{name:'Copy for agent',exact:true}).click();
+ await page.getByRole('link',{name:'Open in project',exact:true}).focus();
+ await page.getByText('Copy the prompt under View task prompt, then paste it into your agent.',{exact:true}).waitFor();
  const json=await (await fetch(origin+'/r/'+roomId+'.json?workId=task-0')).json();
  assert.equal(json.schema,'project-room-public-task/1');assert.equal(json.task.id,'task-0');assert.equal(json.executionGranted,false);
+ assert.equal(json.connection.humanHref,'/?room=public-work-room&request=public-work-room#pr-record/work/task-0');
+ assert.equal(await page.getByRole('link',{name:'Open in project',exact:true}).getAttribute('href'),json.connection.humanHref);
  assert.equal((await fetch(origin+'/r/'+roomId+'.json?workId=private')).status,404);
  assert.equal((await fetch(origin+'/r/'+roomId+'.json?workId=task-0&workId=task-1')).status,422);
  assert.equal((await fetch(origin+'/r/'+roomId+'.json?workId=task-0&workAfter=x')).status,422);
@@ -62,4 +72,16 @@ for(const width of [390,1280])test('published task discovery and keyboard paging
  const expired=await page.goto(origin+'/r/'+roomId+'?workAfter=expired');assert.equal(expired.status(),422);
  const reload=page.getByRole('link',{name:'Reload public tasks',exact:true});await reload.focus();await page.keyboard.press('Enter');await page.waitForURL(origin+'/r/'+roomId);
  assert.equal(await page.locator('.public-tasks li').count(),4);
+ const mutate=(id,type,data={})=>send(id,type,{workItemId:'task-0',expectedRevision:readCurrentWorkItem(store.db,roomId,'task-0').revision,...data});
+ mutate('accept','work.accepted');mutate('start','work.started');
+ const body='PRIVATE RESULT TEXT',posted=send('result','message.posted',{messageId:'result',workItemId:'task-0',body});
+ mutate('complete','work.completed',{evidenceKind:'room_text',evidenceMessageId:'result',evidenceMessageEventId:posted.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null,producerId:'owner',summary:'PRIVATE SUMMARY',nextAction:'PRIVATE NEXT'});
+ await page.goto(origin+'/r/'+roomId+'?workId=task-0');
+ assert.equal(await page.locator('.meta').innerText(),'Marked complete');
+ assert.match(await page.locator('main').innerText(),/Result details are not published here/);
+ assert.doesNotMatch(await page.locator('main').innerText(),/PRIVATE RESULT|PRIVATE SUMMARY|PRIVATE NEXT/);
+ const completed=await (await fetch(origin+'/r/'+roomId+'.json?workId=task-0')).json();
+ assert.equal(completed.task.state,'completed');assert.equal(completed.result.verificationProvided,false);
+ assert.match(completed.agentPrompt,/do not repeat the work/);
+ await page.screenshot({path:'/tmp/pr-public-work-1103/completed-task-'+width+'.png',fullPage:true});
 });

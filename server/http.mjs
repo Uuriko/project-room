@@ -1743,7 +1743,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const firstRoom = store.db.prepare(`SELECT m.room_id FROM member_accounts m LEFT JOIN rooms r ON r.id=m.room_id
             WHERE m.account_id=? AND r.archived_at IS NULL ORDER BY m.room_id LIMIT 1`)
             .get(accountId);
-          return firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1";
+          return firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}&github=signed-in` : "/?account=1&github=signed-in";
         };
         try {
           if (url.searchParams.getAll("state").length > 1 || url.searchParams.getAll("code").length > 1) {
