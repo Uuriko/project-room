@@ -161,7 +161,7 @@ test("pruneStaleWakes clears stale mention/dm doorbells across agents; obligatio
 });
 
 test("a heartbeat settles stale mention/dm doorbells the same way poll does", t => {
-  const { f, clock, hb, agentId, enqueue, pending } = setup(t);
+  const { f, clock, agentId, enqueue, pending } = setup(t);
   enqueue("mention", "hb-old"); enqueue("ask", "hb-ask");
   clock.advance(WAKE_STALE_PRUNE_MS + 1000);
   enqueue("mention", "hb-fresh");
