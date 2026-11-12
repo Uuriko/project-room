@@ -102,3 +102,10 @@ therefore resolves the pending age without erasing an earlier wrong-runtime repl
 responses while `wrongRuntime` counts affected handoffs. Repeated evidence hashes
 within one handoff are rejected to prevent counting one response twice. Scalar
 input remains supported. No automatic correlation from conversation prose occurs.
+
+`deadlineEvaluable` includes useful responses resolved before their deadline as
+well as pending requests whose deadline has arrived. It is a resolved-or-expired
+operational denominator, **not a matured fixed-window success-rate denominator**.
+Wrong-runtime evidence and unresolved attribution are independent: a handoff can
+have both a known wrong-runtime reply and a later unattributed response. The latter
+remains an unknown outcome until an evidenced intended-runtime useful reply exists.

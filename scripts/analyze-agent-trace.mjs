@@ -113,7 +113,7 @@ export function analyzeHandoffs({ nowMs, clockId, records } = {}) {
       runtimeMatch:accepted?.runtimeMatch??responses[0]?.runtimeMatch??null,wrongRuntime,wrongRuntimeCount,
       recoveredAfterWrongRuntime:useful && responses.some(v=>v.wrongRuntime && v.responseAtMs<accepted.responseAtMs),
       useful, usefulResponseMs, pendingAgeMs, deadlineBreached,
-      outcomeUnknown:!useful && !wrongRuntime && (!responses.length || responses.some(v=>v.outcomeUnknown)),
+      outcomeUnknown:!useful && (!responses.length || responses.some(v=>v.outcomeUnknown)),
       telemetryMissing:!responses.length || responses.some(v=>v.telemetryMissing) };
     samples.push(sample);
     const key=JSON.stringify([sample.fromRuntime,sample.toRuntime,sample.context]);

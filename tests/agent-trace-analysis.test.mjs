@@ -121,3 +121,14 @@ test('response arrays select earliest useful time regardless of ingestion order 
   assert.equal(evaluate([{...r,responses}]).samples[0].usefulResponseMs,20);
   assert.equal(evaluate([{...r,responses:[responses[0],responses[0]]}]).invalidRecords,1);
 });
+test('wrong-runtime evidence does not hide a later unattributed response', () => {
+  const r=handoff();for(const k of ['responseRuntime','responseAtMs','useful','responseEvidenceHash'])delete r[k];
+  const result=evaluate([{...r,responses:[
+    {responseRuntime:'other-acp',responseAtMs:110,useful:true,responseEvidenceHash:'c'.repeat(64)},
+    {responseRuntime:null,responseAtMs:120,useful:true,responseEvidenceHash:'d'.repeat(64)}]}]);
+  assert.deepEqual(result.samples[0].responses.map(v=>v.outcomeUnknown),[false,true]);
+  assert.equal(result.directions[0].wrongRuntime,1);
+  assert.equal(result.directions[0].unknownOutcomes,1);
+  assert.equal(result.directions[0].missingTelemetry,1);
+  assert.equal(result.directions[0].awaitingUseful,1);
+});
