@@ -35,7 +35,7 @@ export const MCP_TOOL_META = Object.freeze([
   // catalog can take and finish a Board task (harness 2026-11-03: 0/10 on main).
   ...(boardClaimToolsOn() ? [
     { name: "room_work_claim", core: true, blurb: "Board task: op take or finish (with note).", focus: ["work"] }] : []),
-  { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns newest messages; view:digest retains directed/reply context and groups other headlines, same cursor. Pass roomId, or omit it with a room-pinned key.", focus: ["conversation"] },
+  { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns newest messages; view:digest retains directed/reply context and groups other headlines, same cursor. To catch up after time away, prefer room_digest (since your last sequence) over re-reading history. Pass roomId, or omit it with a room-pinned key.", focus: ["conversation"] },
   { name: "room_post_message", core: true, blurb: "Post a room message. Optional replyToId.", focus: ["common"] },
   { name: "room_reply", core: true, blurb: "Reply under a room message. Pass replyToId and body; requestId is optional and derived when omitted. Ordinary replies do not close formal requests.", focus: ["common"] },
   { name: "room_list_requests", core: true, blurb: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.", focus: ["common"] },
@@ -78,6 +78,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_read_work_discussion", focus: ["work", "review"] },
   { name: "room_post_draft", focus: ["work"] },
   { name: "room_read_inbox", focus: ["conversation"] },
+  { name: "room_digest", focus: ["conversation", "common"] },
   { name: "room_wait_for_attention", focus: ["conversation", "automation"] },
   { name: "room_link_work_claim_pr", focus: ["work"] },
   { name: "room_begin_work", focus: ["work"] },
