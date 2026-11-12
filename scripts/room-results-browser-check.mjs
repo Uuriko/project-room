@@ -48,8 +48,9 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true });
-  const p = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
+  const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
     isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
+  const p = await context.newPage();
   p.setDefaultTimeout(8000);
   await p.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   const errors = [], outside = [], writes = [];

@@ -19,7 +19,8 @@ test('continuation uses the selected authenticated work and requires refresh whe
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const page = await browser.newPage({ serviceWorkers: 'block' }); const errors = []; page.on('pageerror', e => errors.push(e.message));
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page, f.keys.owner);
   await openSearch(page); await page.locator('#message-search').fill('Test: prepare an agenda');
   await page.locator('#search-list [data-open-work="test-handoff"]').click();
