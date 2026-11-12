@@ -421,11 +421,14 @@ test('refresh after expiry ends at actionable sign-in', {timeout:60000}, async t
   const initial=(await page.locator('#auth-error').innerText()).trim();
   const reconnect=page.getByRole('button',{name:'Reconnect',exact:true});
   assert.equal(initial,uiText("room.session_changed_reconnect"));
+  assert.equal(await page.locator('#auth-error').evaluate(node => node.classList.contains('error')), false);
   assert.equal(await reconnect.isVisible(),true);
   assert.equal(await reconnect.isEnabled(),true);
   await page.waitForFunction(()=>document.activeElement?.id==='auth-reconnect');
   await reconnect.click();
   await page.waitForFunction(()=>document.querySelector('#connection-status').textContent.includes('sign in required'),null,{timeout:10000});
+  assert.equal((await page.locator('#auth-error').innerText()).trim(), uiText('room.reconnect_sign_in'));
+  assert.equal(await reconnect.isVisible(), false, 'a signed-out retry should offer sign-in instead of a dead-end reconnect');
   assert.equal((await f.session(page)).authenticated,false);
   await page.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').waitFor({state:'visible'});
 });

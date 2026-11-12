@@ -775,7 +775,7 @@ const client = new RoomClient({
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
       : preserveScopedBackup ? uiText("room.session_changed_reconnect")
         : switchedAccount ? uiText("room.session_changed_recovery")
-        : "Session ended; private drafts were cleared.", true);
+        : "Session ended; private drafts were cleared.", !preserveScopedBackup);
     $("#auth-reconnect").hidden = !preserveScopedBackup;
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
@@ -4615,7 +4615,8 @@ $("#refresh-button").addEventListener("click", async () => {
     if (!roomId && client.session) return;
     if (!roomId) {
       const signedOut = [401, 403].includes(error.status);
-      setFormStatus($("#auth-error"), signedOut ? "" : unreachableRoomMessage(error), true);
+      setFormStatus($("#auth-error"), signedOut ? uiText("room.reconnect_sign_in") : unreachableRoomMessage(error), !signedOut);
+      if (signedOut) { $("#auth-reconnect").hidden = true; focusSignin(); }
       showServiceOutage(!signedOut);
       setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
       return;
