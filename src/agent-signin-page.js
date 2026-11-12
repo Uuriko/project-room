@@ -19,7 +19,10 @@ const ui = createAgentSigninUI({
     if (enterBox) enterBox.hidden = false;
     location.assign(roomTarget);
   },
-  showFirstRun: false
+  showFirstRun: false,
+  // Do not silently choose a room when the entry URL carries a destination.
+  // The legacy page does not yet resolve or validate these destinations.
+  autoSelectSingleRoom: !location.search && !location.hash
 });
 ui.mount(document.getElementById("agent-signin-ui"));
 // Keep initial keyboard navigation at the page start so the skip link is

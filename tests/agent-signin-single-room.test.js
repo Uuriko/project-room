@@ -8,7 +8,7 @@ test("agent sign-in skips only an unambiguous room choice and can retry", async 
   globalThis.FormData = class { constructor(form) { this.form = form; } entries() { return Object.entries(this.form.values); } };
   t.after(() => Object.assign(globalThis, previous));
 
-  async function run(rooms, sessionStatus = 200) {
+  async function run(rooms, sessionStatus = 200, autoSelectSingleRoom = true) {
     const calls = [];
     const listeners = {};
     const form = { dataset: { agentForm: "credentials" }, values: { identityId: "ai_test", secret: "pri_test" } };
@@ -23,7 +23,7 @@ test("agent sign-in skips only an unambiguous room choice and can retry", async 
         ? { ok: true, json: async () => ({ displayName: "Agent", rooms }) }
         : { ok: sessionStatus === 200, status: sessionStatus, json: async () => ({}) };
     };
-    createAgentSigninUI({ onSignedIn() { signedIn = true; } }).mount(container);
+    createAgentSigninUI({ onSignedIn() { signedIn = true; }, autoSelectSingleRoom }).mount(container);
     await listeners.submit({ target: form, preventDefault() {} });
     return { calls, html: container.innerHTML, signedIn };
   }
@@ -38,6 +38,10 @@ test("agent sign-in skips only an unambiguous room choice and can retry", async 
   assert.match(multiple.html, /data-room-id="one"/);
   assert.match(multiple.html, /data-room-id="two"/);
   assert.equal(multiple.signedIn, false);
+
+  const explicitDestination = await run([{ roomId: "one", title: "One" }], 200, false);
+  assert.equal(explicitDestination.calls.length, 1, "a destination-bearing entry does not silently select a room");
+  assert.match(explicitDestination.html, /data-room-id="one"/);
 
   const failure = await run([{ roomId: "one", title: "One" }], 503);
   assert.equal(failure.signedIn, false);

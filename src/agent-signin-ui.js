@@ -20,7 +20,7 @@ import { escapeHtml } from "./html-escape.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 import { submitIdentityMint } from "./account-client.js";
 
-export function createAgentSigninUI({ onSignedIn, firstRunActions, showFirstRun = true }) {
+export function createAgentSigninUI({ onSignedIn, firstRunActions, showFirstRun = true, autoSelectSingleRoom = true }) {
   let container = null;
   let phase = "credentials"; // or "rooms" | "create" | "created" | "make-room"
   let identityId = "";
@@ -291,7 +291,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions, showFirstRun 
         phase = "rooms";
         // A sole membership is already an unambiguous room choice. Keep the
         // picker as the retry path if establishing the session fails.
-        if (rooms.length === 1) await startSession(identityId, rooms[0].roomId, secret);
+        if (autoSelectSingleRoom && rooms.length === 1) await startSession(identityId, rooms[0].roomId, secret);
       });
       return;
     }
