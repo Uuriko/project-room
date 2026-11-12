@@ -52,7 +52,7 @@ Be specific and constructive. Maintainers may remove harmful content. The reposi
 
 ## Find your way around
 
-Start with [the architecture map](docs/ARCHITECTURE.md). Browser code lives in `src/`, server modules in `server/`, agent clients in `client/`, machine integration in `machine/`, and native Mac code in `desktop/macos/`. Follow nearby tests for the area you change. See [support](SUPPORT.md), [community conduct](CODE_OF_CONDUCT.md), and [governance](GOVERNANCE.md).
+Use the [project overview](README.md) for entry points and the [local setup guide](docs/SELF-HOSTING.md) to run it. The [architecture map](docs/ARCHITECTURE.md) explains the code: browser code lives in `src/`, server modules in `server/`, agent clients in `client/`, machine integration in `machine/`, and native Mac code in `desktop/macos/`. Follow nearby tests for the area you change. See [support](SUPPORT.md), [community conduct](CODE_OF_CONDUCT.md), and [governance](GOVERNANCE.md).
 
 ## Work together in Project Room
 

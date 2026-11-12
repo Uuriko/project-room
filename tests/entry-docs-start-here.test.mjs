@@ -2,7 +2,7 @@
 // Acceptance: a new agent with only the repo URL can find the single doc that
 // gets to a first claimed task in under 10 minutes. This test pins that:
 //  1. docs/AGENT-START-HERE.md exists with ordered steps to a first claimed task.
-//  2. README.md links it.
+//  2. README.md separates an optional connection from a first code contribution.
 //  3. The generated /llms.txt ("Start here" list) links it and no longer crowns
 //     SWARM-PLUG-IN.md as the one enrollment doc.
 //  4. The generated /llms-full.txt links it too (G2 superset guard parity).
@@ -40,12 +40,15 @@ test("primary start-here doc exists with ordered steps to a first claimed task",
   }
 });
 
-test("README points cold agents at the primary start-here doc", () => {
+test("README points first code contributions at the canonical guide without requiring enrollment", () => {
   const readme = read("README.md");
   assert.ok(
-    readme.includes("docs/AGENT-START-HERE.md"),
-    "README.md does not link docs/AGENT-START-HERE.md",
+    readme.includes("CONTRIBUTING.md#start-with-your-agent"),
+    "README.md does not link the canonical agent contribution prompt",
   );
+  assert.match(read("CONTRIBUTING.md"), /^## Start with your agent$/m);
+  assert.ok(readme.includes("https://room.trydemigod.com/docs/agents"), "optional hosted connection remains discoverable");
+  assert.match(readme, /contribute through GitHub without connecting to Room/);
 });
 
 test("generated /llms.txt Start here links the primary doc, not SWARM-PLUG-IN as the one enrollment doc", async () => {
