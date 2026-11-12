@@ -35,7 +35,7 @@ import { verifyCurrentRoomSchema, invalidateCurrentRoomSchema, restoredCurrentFo
 import { createHash, timingSafeEqual, randomUUID } from "node:crypto";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
-import { verifyRestoredTableCounts, restoreSourceSchemaVersion, restoreLegacyWriteProofs, withRestoreTableRows, ensureNativeAgentRestoreSchema, cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
+import { verifyRestoredTableCounts, restoreSourceSchemaVersion, restoreLegacyWriteProofs, withRestoreTableRows, ensureNativeAgentRestoreSchema, cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, createSkippedTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey, writeKvBackup } from "../cloudflare/room-backup.mjs";
 
@@ -289,6 +289,7 @@ function createNdjsonPreparse({retainRows=true}={}) {
   const byTable = new Map();
   const skippedTables = {};
   const digests = createTableDigests();
+  const skippedDigests = createSkippedTableDigests();
   let watermark = null;
   let trailer = null;
   const writeLine = line => {
@@ -314,6 +315,7 @@ function createNdjsonPreparse({retainRows=true}={}) {
     // below decides what lands — the digest set and the skip set are
     // disjoint by construction (CONTENT_DIGEST_SKIPPED_TABLES).
     digests.add(record.table, record.row);
+    skippedDigests.add(record.table, record.row);
     // Cloudflare-internal storage tables are the target DO's own business;
     // they are never room data and must not cross between Durable Objects.
     // Skipped rows are counted and reported, never silently dropped (#3325).
@@ -331,7 +333,7 @@ function createNdjsonPreparse({retainRows=true}={}) {
   const finish = () => {
   if (!watermark || watermark.version !== 1 || !Number.isSafeInteger(watermark.events))
     throw new Error("Export is missing its watermark");
-  return { watermark, byTable, trailer, skippedTables, tableDigests: digests.finish() };
+  return { watermark, byTable, trailer, skippedTables, tableDigests: digests.finish(), skippedTableDigests: skippedDigests.finish() };
   };
   return {writeLine,finish};
 }
@@ -395,10 +397,10 @@ function topologicalTableOrder(names, deps) {
 // stored projections were written by older code.
 export function replayNdjsonInto(ndjson, store, { audit = "strict", sourceSchemaVersion = null, resume = false, staged = false } = {}) {
   if(typeof resume!=="boolean")throw Error("resume must be boolean");
-  if(resume||staged){const parsed=parseNdjsonExport(ndjson);if(staged&&!resume&&!supportsSealedRestoreSource(parsed.watermark?.sourceSchemaVersion))return replayNdjsonInto(ndjson,store,{audit,sourceSchemaVersion,resume,staged:false});requireResumeSource(parsed.watermark,parsed.trailer,contentVerificationLevel(parsed.trailer,parsed.tableDigests));verifyTrailer(parsed.trailer,parsed.byTable);const session=createBackupReplaySession(store,{audit,sourceSchemaVersion,resume,staged});try{session.writeText(ndjson);return session.finish({sourceSha256:sha256Hex(ndjson)});}catch(error){session.abort();throw error;}}
+  if(resume||staged){const parsed=parseNdjsonExport(ndjson);if(staged&&!resume&&!supportsSealedRestoreSource(parsed.watermark?.sourceSchemaVersion))return replayNdjsonInto(ndjson,store,{audit,sourceSchemaVersion,resume,staged:false});requireResumeSource(parsed.watermark,parsed.trailer,contentVerificationLevel(parsed.trailer,parsed.tableDigests,parsed.skippedTableDigests));verifyTrailer(parsed.trailer,parsed.byTable);const session=createBackupReplaySession(store,{audit,sourceSchemaVersion,resume,staged});try{session.writeText(ndjson);return session.finish({sourceSha256:sha256Hex(ndjson)});}catch(error){session.abort();throw error;}}
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (!store?.db) throw new Error("Restore needs an open store");
-  const { watermark, byTable, trailer, skippedTables, tableDigests } = parseNdjsonExport(ndjson);
+  const { watermark, byTable, trailer, skippedTables, tableDigests, skippedTableDigests } = parseNdjsonExport(ndjson);
   restoreSourceSchemaVersion(watermark, sourceSchemaVersion);
   // Torn export (a write landed mid-stream): refuse before touching the store.
   if (trailer) verifyTrailer(trailer, byTable);
@@ -475,7 +477,7 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict", sourceSchema
       // the load — the load's per-cell refusals are the more specific
       // errors and fire first; a well-formed tamper (the #3325 probe) is
       // refused here and the whole replay rolls back.
-      const contentVerification = contentVerificationLevel(trailer, tableDigests);
+      const contentVerification = contentVerificationLevel(trailer, tableDigests, skippedTableDigests);
       // Report mode: the recovery audit's refusal becomes the result's
       // audit qualification instead of a failed restore — the data lands,
       // the drift is enumerated, and `verified` never stands unqualified.
@@ -532,6 +534,7 @@ export function createBackupReplaySession(store, { audit = "strict", sourceSchem
   let receivedBytes=0,byteCarry='';
   const eventTuples = [];
   const digests = createTableDigests();
+  const skippedDigests = createSkippedTableDigests();
   const counts = new Map();
   const unlandedEmpty = new Map();
   const knownColumns = new Map();
@@ -704,6 +707,7 @@ export function createBackupReplaySession(store, { audit = "strict", sourceSchem
     // #3325: digest each loadable row as it streams past, before the skip
     // branch — finish() pins the whole stream against the trailer.
     digests.add(record.table, record.row);
+    skippedDigests.add(record.table, record.row);
     if (record.table.startsWith("_cf_") || RESTORE_SKIP_TABLES.has(record.table)
       || record.table === CLAIM_PERMIT_TABLE || REPLAY_SKIPPED_TABLES.includes(record.table)) {
       skippedTables[record.table] = (skippedTables[record.table] ?? 0) + 1;
@@ -813,7 +817,7 @@ export function createBackupReplaySession(store, { audit = "strict", sourceSchem
       if (trailer) verifyTrailer(trailer, new Map([["events", eventTuples]]));
       // #3325: the trailer's table digests pin the non-event rows the same
       // way; a mismatch aborts and wipes the replay like any other failure.
-      const contentVerification = contentVerificationLevel(trailer, digests.finish());
+      const contentVerification = contentVerificationLevel(trailer, digests.finish(), skippedDigests.finish());
       if(staged&&supportsSealedRestoreSource(watermark.sourceSchemaVersion)){
         requireResumeSource(watermark,trailer,contentVerification);
         if(!/^[0-9a-f]{64}$/.test(sourceSha256??''))throw Error('Staged restore requires its complete original source SHA');
@@ -972,7 +976,7 @@ async function readRestoreIngress(request,{kv,hashOnly=false,sourceSchemaVersion
     accept(prefix);yield encoder.encode(prefix);prefix="";
     for(;;){const part=await chunks.next();if(part.done)break;accept(part.value);yield encoder.encode(part.value);}
     if(carry)parser.writeLine(carry);const parsed=parser.finish();restoreSourceSchemaVersion(parsed.watermark,sourceSchemaVersion);
-    requireResumeSource(parsed.watermark,parsed.trailer,contentVerificationLevel(parsed.trailer,parsed.tableDigests));verifyTrailer(parsed.trailer,parsed.byTable);
+    requireResumeSource(parsed.watermark,parsed.trailer,contentVerificationLevel(parsed.trailer,parsed.tableDigests,parsed.skippedTableDigests));verifyTrailer(parsed.trailer,parsed.byTable);
   }catch(error){validationError=error;throw error;}finally{await chunks.return?.();}}
   const key="room-restore-sources/"+randomUUID()+".ndjson",written=[];
   const cleanup=async()=>{if(typeof kv.delete!=="function")return;await Promise.allSettled(written.map(part=>kv.delete(part)));};

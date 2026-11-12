@@ -358,21 +358,73 @@ export function tableDigestsOf(byTable) {
   return digests.finish();
 }
 
+// The inverse of createTableDigests: digests ONLY the tables the content
+// digest skips. A backup exported before a table joined the skip set (the
+// emissary tables at #1402, the six #4975 tables) carries a trailer pin over
+// that table's rows, while every current digest computation skips it — so
+// the pin had nothing to verify against and the restore refused a sound
+// backup. Feeding the export's skipped-table rows through this digester
+// gives contentVerificationLevel a separate, old-pin-only digest to check
+// the pin against. This changes verification only: replay disposition is
+// untouched and skipped tables are still never loaded.
+export function createSkippedTableDigests() {
+  const tables = new Map();
+  return {
+    add(table, row) {
+      if (!contentDigestSkipped(table)) return;
+      let entry = tables.get(table);
+      if (!entry) {
+        entry = { hash: createHash("sha256"), rows: 0 };
+        tables.set(table, entry);
+      }
+      entry.hash.update(`${JSON.stringify(row)}\n`);
+      entry.rows += 1;
+    },
+    finish() {
+      const out = {};
+      for (const [table, entry] of tables) out[table] = { rows: entry.rows, sha256: entry.hash.digest("hex") };
+      return out;
+    }
+  };
+}
+
+export function skippedTableDigestsOf(byTable) {
+  const digests = createSkippedTableDigests();
+  for (const [table, rows] of byTable) for (const row of rows) digests.add(table, row);
+  return digests.finish();
+}
+
 // The restore's content-verification level for a parsed export, named so a
 // weaker legacy export never reports the same bare "verified" as a fully
 // pinned one: "full" (trailer v2 table digests verified), "events-only"
 // (trailer v1: only the event log is pinned), "watermark-only" (no
 // trailer at all). Throws when a pinned digest disagrees with the rows the
 // export actually holds — the tamper/corruption case.
-export function contentVerificationLevel(trailer, computed) {
+export function contentVerificationLevel(trailer, computed, skippedComputed = null) {
   if (!trailer) return "watermark-only";
   if (!trailer.tables) return "events-only";
   for (const [table, expected] of Object.entries(trailer.tables)) {
     const actual = computed[table];
-    if (!actual)
-      throw new Error(`Export trailer pins table ${table} but the export holds no rows for it`);
-    if (actual.rows !== expected.rows || actual.sha256 !== expected.sha256)
-      throw new Error(`Export table digest does not match for ${table}: the backup's ${table} rows differ from the rows the exporter pinned (tampered or corrupted backup). Re-take the backup.`);
+    if (actual) {
+      if (actual.rows !== expected.rows || actual.sha256 !== expected.sha256)
+        throw new Error(`Export table digest does not match for ${table}: the backup's ${table} rows differ from the rows the exporter pinned (tampered or corrupted backup). Re-take the backup.`);
+      continue;
+    }
+    // Old-pin compatibility: a legacy trailer can pin a table every current
+    // restore path skips (it joined CONTENT_DIGEST_SKIPPED_TABLES after the
+    // backup was taken). The pin is honoured against the separate skipped-
+    // table digest computed over the rows the export still holds — the rows
+    // are verified, then still skipped by replay. A skipped-table pin with
+    // no matching skipped digest, or with a digest that disagrees, refuses
+    // exactly like any other pin: tampering with a retired table's rows is
+    // still tampering.
+    const skipped = skippedComputed?.[table];
+    if (skipped) {
+      if (skipped.rows !== expected.rows || skipped.sha256 !== expected.sha256)
+        throw new Error(`Export table digest does not match for ${table}: the backup's ${table} rows differ from the rows the exporter pinned (tampered or corrupted backup). Re-take the backup.`);
+      continue;
+    }
+    throw new Error(`Export trailer pins table ${table} but the export holds no rows for it`);
   }
   for (const table of Object.keys(computed))
     if (!Object.hasOwn(trailer.tables, table))
@@ -692,6 +744,10 @@ export function replayNdjson(ndjson, filename, { audit = "strict", retainTables 
   // the other post-load checks.
   const trailerState = trailer ? (verifyTrailer(trailer, byTable), "verified") : "absent";
   const computedDigests = tableDigestsOf(byTable);
+  // Computed now, before the skip loop below deletes the skipped tables
+  // from byTable: a legacy trailer pin over a skipped table verifies
+  // against these digests at the post-load check.
+  const skippedDigests = skippedTableDigestsOf(byTable);
   const directory = dirname(filename);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
@@ -762,7 +818,7 @@ export function replayNdjson(ndjson, filename, { audit = "strict", retainTables 
     // and must fire first. A tampered row whose cells are all well-formed
     // (the #3325 probe) loads cleanly and is refused here, before the
     // audits and before verified is ever returned.
-    const contentVerification = contentVerificationLevel(trailer, computedDigests);
+    const contentVerification = contentVerificationLevel(trailer, computedDigests, skippedDigests);
     verifyRestoredTableCounts(store.db, byTable);
     const writeProofs = restoreLegacyWriteProofs(store, watermark, sourceSchemaVersion);
     let recovery = null, invitations = {}, auditResult = { ok: true };
