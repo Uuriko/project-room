@@ -558,6 +558,7 @@ export class Bridge {
     const selected = await this.readThread(receipt.threadKey, {selected:true});
     let formal = selected.replyRequest?.recipientId === this.connection.memberId
       ? await readCompleteRequest(this.room, receipt.threadKey) : null;
+    if (formal?.current?.runtimeAccess && !formal.current.runtimeAccess.authorized) return;
     if (formal && (formal.request.status !== 'open' || formal.current?.actions?.answer !== true)) {
       this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
     }
@@ -599,6 +600,7 @@ export class Bridge {
       // Session startup may wait while the requester cancels or adds context.
       // Only the fresh complete request can authorize and prepare this turn.
       formal = await readCompleteRequest(this.room, receipt.threadKey);
+      if (formal.current?.runtimeAccess && !formal.current.runtimeAccess.authorized) return;
       if (formal.request.status !== 'open' || formal.current?.actions?.answer !== true) {
         this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
       }

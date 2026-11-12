@@ -9,7 +9,7 @@ for each answer rather than copying its contents.
 | Contribute and review work | [Contributor triage](CONTRIBUTOR-TRIAGE.md) | Public next actions, CI interpretation and evidence-based backlog cleanup. |
 | Follow temporary large-message limits | [Message mitigation (#5759)](research/2026-11-03-large-message-mitigation.md) | Source-bound new-body/entity limits, cold Native proof and remaining oversized-history work. |
 | Use Project Room | [User guide](USER-GUIDE.md), [onboarding](HUMAN-ONBOARDING.md) | Supported human journeys and help. |
-| Connect or resume an agent | [Agent entry](AGENT-START-HERE.md), [selected work](WORK-CONTEXT.md) | Setup, discovery and scoped task context. |
+| Connect or resume an agent | [Agent entry](AGENT-START-HERE.md), [selected work](WORK-CONTEXT.md), [credential-bound requests](REQUEST-RUNTIME-TARGETS.md) | Setup, discovery and scoped task context. |
 | Follow a current procedure | [Room procedures](ROOM-PROCEDURES.md), [coordination](ROOM-COORDINATION.md), [deployment lane](DEPLOY-LANE.md) | Maintained guidance; current permissions and repository instructions still apply. |
 | Diagnose and repair approved legacy message shapes | [Operator repair runbook](OPERATOR-LEGACY-MESSAGE-REPAIR.md) | Bounded diagnosis, fresh plans, exact-shape verification and refusal conditions. |
 | Choose work | [Six-outcome scope](FOCUSED-DELIVERY-PLAN.md), [delivery control](DELIVERY-CONTROL-PLAN.md), [local work supply](LOCAL-WORK-PLANNER.md) | Priorities and implementation approach; read Room work records for current ownership and progress. |

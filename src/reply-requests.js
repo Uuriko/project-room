@@ -17,7 +17,7 @@ export const MAX_REPLY_RESPONSE_COMMAND_BYTES = 65536;
 // (access key, identity secret, API key, agent session) is "room_credential".
 // Responses recorded before the stamp carry none; nothing is inferred for them.
 export const ANSWER_CREDENTIALS = Object.freeze(["account_session", "room_credential"]);
-export const REPLY_FIELDS = Object.freeze(["requestKind", "responseToRequestId", "expectedRequestRevision", "responseOutcome", "contextEventId", "contextSequence"]);
+export const REPLY_FIELDS = Object.freeze(["requestKind", "targetRuntimeKeyId", "responseToRequestId", "expectedRequestRevision", "responseOutcome", "contextEventId", "contextSequence"]);
 const own = (value, key) => Object.hasOwn(value, key);
 const id = value => typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value)
   && !["constructor", "prototype", "__proto__"].includes(value);
@@ -125,10 +125,10 @@ export function replyPostMode(data) {
   requireValid(id(data.messageId) && bodyKept, "Reply requests require an explicit message and text");
   requireValid(!["packetId", "basisRevision", "allowOlderBasis"].some(key => own(data, key)), "Reply requests cannot include proposal fields");
   if (own(data, "requestKind")) {
-    requireValid(fields.length === 1 && data.requestKind === "reply" && id(data.toMemberId), "Invalid reply request fields");
+    requireValid((fields.length === 1 || fields.length === 2 && id(data.targetRuntimeKeyId)) && data.requestKind === "reply" && id(data.toMemberId), "Invalid reply request fields");
     return "open";
   }
-  requireValid(fields.length === REPLY_FIELDS.length - 1 && id(data.responseToRequestId)
+  requireValid(!own(data, "targetRuntimeKeyId") && fields.length === REPLY_FIELDS.length - 2 && id(data.responseToRequestId)
     && revision(data.expectedRequestRevision) && ["answered", "declined"].includes(data.responseOutcome)
     && id(data.contextEventId) && Number.isSafeInteger(data.contextSequence) && data.contextSequence > 0,
   "Invalid reply response fields");
@@ -199,7 +199,7 @@ export function recordReplyPost(state, incoming, mode) {
     state.replyRequests ??= {};
     state.replyRequests[messageId] = {
       id: messageId, openingEventId: incoming.id, requesterId: incoming.actorId,
-      recipientId: data.toMemberId, workItemId: data.workItemId || null,
+      recipientId: data.toMemberId, ...(own(data, "targetRuntimeKeyId") ? { targetRuntimeKeyId: data.targetRuntimeKeyId } : {}), workItemId: data.workItemId || null,
       status: "open", revision: 0, createdAt: incoming.at,
       contextEventId: incoming.id, contextMessageId: messageId,
       terminalEventId: null, terminalActorId: null, closedAt: null,
