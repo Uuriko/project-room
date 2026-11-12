@@ -5,13 +5,30 @@ export const MAX_BODY_CHARS = 6000;
 export const TRAILER_LINES = 10;
 
 export class TurnRecorder {
-  constructor() { this.text = ""; this.tools = new Map(); this.plan = []; }
+  constructor() { this.text = ""; this.tools = new Map(); this.plan = []; this.messageIds = new Set(); this.lastMessageId = null; this.lastMessageText = ""; this.messageBoundariesValid = true; }
+  // ACP message IDs distinguish commentary from the final response without
+  // scraping JSON out of prose. Missing/interleaved/over-budget IDs retain the
+  // strict whole-turn fallback used by adapters without message boundaries.
+  get formalText() { return this.messageBoundariesValid && this.lastMessageId !== null ? this.lastMessageText : this.text; }
+  recordText(update) {
+    const text = update.content.text;
+    if (typeof text !== "string") { this.messageBoundariesValid = false; this.text += String(text); return; }
+    this.text += text;
+    const id = update.messageId;
+    if (typeof id !== "string" || !id.trim() || id.length > 1024) { this.messageBoundariesValid = false; return; }
+    if (!this.messageBoundariesValid) return;
+    if (id !== this.lastMessageId) {
+      if (this.messageIds.has(id) || this.messageIds.size >= 256) { this.messageBoundariesValid = false; return; }
+      this.messageIds.add(id); this.lastMessageId = id; this.lastMessageText = "";
+    }
+    this.lastMessageText += text;
+  }
   update(update) {
     switch (update?.sessionUpdate) {
       // Structured adapter notices can contain private local configuration paths.
       // They are diagnostics, never Room replies or saved reply receipts.
       case "notice": break;
-      case "agent_message_chunk": if (update.content?.type === "text") this.text += update.content.text; break;
+      case "agent_message_chunk": if (update.content?.type === "text") this.recordText(update); break;
       case "tool_call": this.tools.set(update.toolCallId, { title: update.title ?? update.kind ?? "tool", status: update.status ?? "pending" }); break;
       case "tool_call_update": {
         const tool = this.tools.get(update.toolCallId) ?? { title: update.title ?? "tool", status: "pending" };
