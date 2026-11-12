@@ -17,6 +17,7 @@ assert.ok(showStart >= 0 && showEnd > showStart);
 
 function harness(text = "") {
   const status = { textContent: text, hidden: !text };
+  const docsCalls = [];
   const context = {
     ROOM_ACCESS_NOTICE, state: null, session: null, roomGeneration: -1,
     activeWorkNavigationId: null, client: { generation: 1 },
@@ -25,11 +26,12 @@ function harness(text = "") {
     snapshotAuditView: null, nativeEventsWindow: null,
     recordLoading: null, recordLoadFailed: false, partialWorkSnapshot: false,
     inspectedWorkRecord: null,
+    docsUi: { reset() { docsCalls.push("reset"); }, sync() { docsCalls.push("sync"); } },
   };
   vm.createContext(context);
   vm.runInContext(`${source.slice(showStart, showEnd)}\nthis.accept = ({${acceptedSnapshot}}).onSnapshot;`, context);
   const accept = roomId => context.accept({ state: { room: { id: roomId }, messages: [] } }, { roomId, member: { id: roomId + "-owner" } });
-  return { status, context, accept, deny: () => context.showRoomAccessNotice() };
+  return { status, context, accept, docsCalls, deny: () => context.showRoomAccessNotice() };
 }
 
 test("denied deep link stays visible until an authorized room snapshot arrives", () => {
@@ -41,6 +43,7 @@ test("denied deep link stays visible until an authorized room snapshot arrives",
   assert.equal(h.context.session.roomId, "account-b-room");
   assert.equal(h.status.hidden, true);
   assert.equal(h.status.textContent, "");
+  assert.deepEqual(h.docsCalls, ["sync"]);
 });
 
 test("returning to account A clears its stale denial without suppressing a later denial", () => {
@@ -48,6 +51,7 @@ test("returning to account A clears its stale denial without suppressing a later
   h.accept("account-b-room");
   h.deny();
   h.accept("account-a-room");
+  assert.deepEqual(h.docsCalls, ["sync", "reset", "sync"], "new room identity clears the old docs panel before syncing");
   assert.equal(h.status.hidden, true);
   h.deny();
   assert.equal(h.status.hidden, false);

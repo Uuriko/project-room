@@ -13,11 +13,12 @@ test('real room-cookie browser session reads normalized selected native work abs
 const source=readFileSync(new URL('../src/app.js',import.meta.url),'utf8');
 function harness({held={}}={}){
  const calls=[],card={querySelector:()=>({open:false})},ctx={structuredClone,calls,card,partialWorkSnapshot:true,inspectedWorkRecord:null,state:{room:{id:'commons'},members:{owner:{id:'owner',active:true}},workItems:held},session:{roomId:'commons',member:{id:'owner'}},client:{generation:1,workContext:async id=>{calls.push(['read',id]);return {roomId:'commons',viewerId:'owner',work:{id,title:'Full title',definitionOfDone:'Complete selected definition',revision:1},viewerSessionBinding:'bound'};},ownsResponse:()=>true},busy:false,activeWorkNavigationId:null,activeWorkNavigation:null,workNavigationEpoch:1,location:{href:'http://localhost/#pr-record/work/late'},CSS:{escape:x=>x},SOURCE_UNAVAILABLE_NOTICE:'unavailable'};
+ ctx.acquisitionSyncs=0;ctx.syncAcquisitionControls=()=>{ctx.acquisitionSyncs++;};
  vm.createContext(ctx);const start=source.indexOf('// JDOT-COH-NAV begin\nfunction revealWork('),end=source.indexOf('function workNavigationContext()',start);assert.ok(start>=0&&end>start);
  vm.runInContext(`var revealClaimRecord=id=>calls.push(['legacy-board',id]);var workRecord=()=>card;var revealWorkTimeline=id=>{calls.push(['mount',id]);return card;};var focusRecord=()=>{};var syncWorkReturnControl=()=>{};var notice=text=>calls.push(['notice',text]);var workNavigationContext=()=>session&&state?client.generation+'|'+session.roomId+'|'+session.member.id:null;${source.slice(start,end)}this.reveal=revealWork;`,ctx);return ctx;
 }
 test('normalized missing native id reads and mounts the selected record instead of opening a legacy claim board',async()=>{
- const h=harness();await h.reveal('late',true);assert.deepEqual(h.calls.map(x=>Array.from(x)),[['read','late'],['mount','late']]);assert.equal(h.state.workItems.late.definitionOfDone,'Complete selected definition');
+ const h=harness();await h.reveal('late',true);assert.deepEqual(h.calls.map(x=>Array.from(x)),[['read','late'],['mount','late']]);assert.equal(h.state.workItems.late.definitionOfDone,'Complete selected definition');assert.equal(h.acquisitionSyncs,1);
 });
 test('normalized held thin summary also needs full selected details before rendering',async()=>{
  const h=harness({held:{late:{id:'late',title:'Summary',revision:1}}});await h.reveal('late',true);assert.equal(h.calls[0][0],'read');assert.equal(h.state.workItems.late.definitionOfDone,'Complete selected definition');
@@ -27,12 +28,14 @@ test('late selected work never mounts after navigation, snapshot replacement, or
   const h=harness();let resolve;h.client.workContext=()=>new Promise(done=>resolve=done);const pending=h.reveal('late',true);change(h);
   resolve({roomId:'commons',viewerId:'owner',work:{id:'late',title:'Late private work',definitionOfDone:'Must not mount',revision:1}});await pending;
   assert.equal(h.state.workItems.late,undefined);assert.equal(h.calls.some(([kind])=>kind==='mount'||kind==='notice'),false);
+  assert.equal(h.acquisitionSyncs,0,'stale work cannot refresh public task controls');
  }
 });
 test('mismatched and unavailable selected responses preserve summaries without a legacy fallback',async()=>{
  for(const value of [null,{roomId:'elsewhere',viewerId:'owner',work:{id:'late',title:'Wrong',definitionOfDone:'No',revision:1}},{roomId:'commons',viewerId:'intruder',work:{id:'late',title:'Wrong',definitionOfDone:'No',revision:1}},{roomId:'commons',viewerId:'owner',work:{id:'other',title:'Wrong',definitionOfDone:'No',revision:1}},{roomId:'commons',viewerId:'owner',work:{id:'late',title:'Thin',revision:1}}]){
   const h=harness({held:{late:{id:'late',title:'Held summary',revision:1}}});h.client.workContext=async()=>value;await h.reveal('late',true);
   assert.equal(h.state.workItems.late.title,'Held summary');assert.equal(h.calls.some(([kind])=>kind==='mount'||kind==='legacy-board'),false);assert.equal(h.calls.at(-1)[0],'notice');
+  assert.equal(h.acquisitionSyncs,0,'rejected work cannot refresh public task controls');
  }
 });
 test('a selected response older than the already held summary cannot replace it',async()=>{
