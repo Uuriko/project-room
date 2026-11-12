@@ -331,11 +331,20 @@ function contentDigestSkipped(table) {
   return table.startsWith("_cf_") || CONTENT_DIGEST_SKIPPED_TABLES.includes(table);
 }
 
-export function createTableDigests() {
+export function createTableDigests({ verifyRetired4975Pins = false } = {}) {
   const tables = new Map();
   return {
     add(table, row) {
-      if (contentDigestSkipped(table)) return;
+      // Digest disposition is separate from replay disposition for the six
+      // #4975-retired tables. The current exporter never pins them (they are
+      // in CONTENT_DIGEST_SKIPPED_TABLES via REPLAY_SKIPPED_TABLES, and no
+      // restore path loads their rows). But a legacy backup taken before
+      // #4975 DOES pin them in its trailer, and that pin is the only tamper
+      // evidence for those rows: restore-side digest builders pass
+      // verifyRetired4975Pins so the old pin can be checked against the
+      // rows actually in the stream, while replay still skips the rows.
+      if (contentDigestSkipped(table)
+        && !(verifyRetired4975Pins && RETIRED_4975_TABLES.includes(table))) return;
       let entry = tables.get(table);
       if (!entry) {
         entry = { hash: createHash("sha256"), rows: 0 };
@@ -353,7 +362,10 @@ export function createTableDigests() {
 }
 
 export function tableDigestsOf(byTable) {
-  const digests = createTableDigests();
+  // Restore-side only (replayNdjson's post-load verification): a parsed
+  // legacy export's retired-table rows must be digested so their old
+  // trailer pin can be verified, even though the rows never load.
+  const digests = createTableDigests({ verifyRetired4975Pins: true });
   for (const [table, rows] of byTable) for (const row of rows) digests.add(table, row);
   return digests.finish();
 }
@@ -375,7 +387,13 @@ export function contentVerificationLevel(trailer, computed) {
       throw new Error(`Export table digest does not match for ${table}: the backup's ${table} rows differ from the rows the exporter pinned (tampered or corrupted backup). Re-take the backup.`);
   }
   for (const table of Object.keys(computed))
-    if (!Object.hasOwn(trailer.tables, table))
+    // The #4975-retired tables are the one exemption: restore-side computed
+    // digests carry them solely so a legacy trailer pin (checked in the
+    // loop above) can be verified. A post-#4975 trailer legitimately does
+    // not pin them, and their rows are replay-skipped either way, so an
+    // unpinned retired-table digest is not an unpinned loadable table.
+    // Every other unpinned computed table still refuses.
+    if (!Object.hasOwn(trailer.tables, table) && !RETIRED_4975_TABLES.includes(table))
       throw new Error(`Export holds rows for table ${table} that its trailer does not pin`);
   return "full";
 }
@@ -594,13 +612,22 @@ function insertOrder(names) {
 // fresh-target existence check. Upgraded databases that still carry the
 // tables themselves are admitted by RETIRED_4975_TABLES in
 // server/writer-fence.mjs (allowed, never required; nothing is dropped).
+// The six tables retired by PR #4975, as a named closed set. This list is
+// the replay/digest disposition for them; server/writer-fence.mjs carries
+// the same six names in its own RETIRED_4975_TABLES for the inventory
+// gates (it cannot import this module — room-export.mjs already imports
+// from writer-fence.mjs). The two lists must stay identical.
+export const RETIRED_4975_TABLES = Object.freeze([
+  "board_vtwo_claims", "board_vtwo_events", "board_vtwo_idempotency",
+  "board_vtwo_mirror", "analytics_firsts", "guest_link_exchanges"
+]);
+
 export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit", "current_room_writer_permit", "current_restore_admission", "current_restore_audit_scratch",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
   "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures",
-  "board_vtwo_claims", "board_vtwo_events", "board_vtwo_idempotency",
-  "board_vtwo_mirror", "analytics_firsts", "guest_link_exchanges"
+  ...RETIRED_4975_TABLES
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
