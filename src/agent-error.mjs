@@ -603,6 +603,7 @@ const AX_NAMED_RECOVERIES = {
   collision_lock_expired: ["The draft lock expired. Acquire it again before editing.", "Acquire the draft lock again, then continue editing."],
   collision_lock_held: ["Another member is already drafting on this thread. Wait for them to finish or release the lock.", "Wait for the current drafter to release the lock, then acquire it."],
   confirm_used: ["This confirmation was already used — it cannot be used again. Start a fresh confirmation if the action is still needed.", "Start a fresh confirmation; do not reuse this one."],
+  doc_rev_conflict: ["Someone else saved this doc since you read it. Nothing was written.", "Read the doc again, merge your change into the current body, and write with its rev as baseRev."],
   conflicting_inbox_observation: ["A conflicting observation was already recorded for this item. Reconcile against the recorded state; do not overwrite it.", "Read the recorded observation and reconcile; do not submit a conflicting one."],
   conflicting_reply_observation: ["A conflicting observation was already recorded for this item. Reconcile against the recorded state; do not overwrite it.", "Read the recorded observation and reconcile; do not submit a conflicting one."],
   conflicting_reply_update_acknowledgment: ["A conflicting acknowledgment was already recorded for this update. Reconcile against the recorded state; do not overwrite it.", "Read the recorded acknowledgment and reconcile; do not submit a conflicting one."],

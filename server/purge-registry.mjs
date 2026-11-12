@@ -21,6 +21,7 @@ function freezeVia(via) {
 }
 
 const ROWS = [
+  ...["room_docs", "room_doc_revisions"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   ...['current_room_records','current_room_record_proofs','current_room_head'].map(table=>({table,key:'room_id',action:'delete',match:{room:['room_id']}})),
   {table:'message_replay_units',key:'room_id',action:'delete',optional:true,match:{room:['room_id']}},
   {table:'current_room_writer_permit',key:'room_id',action:'retain',reason:'Target-wide closed writer singleton is an admission control, not room-owned data.',match:{room:['room_id']}},

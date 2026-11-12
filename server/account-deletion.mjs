@@ -57,7 +57,7 @@ export const RETENTION_POLICY = Object.freeze({
     + "blocks deletion until ownership is transferred.",
   purged: Object.freeze([
     Object.freeze({ category: "account_admission_requests", description: "Account-bound admission request rows, including private account linkage and request notes, are deleted. Request events already shared with room members follow the existing room-history retention policy." }),
-    Object.freeze({ category: "personal_room_content", description: "Messages and files in personal rooms this account solely owns are purged, and those rooms are archived." }),
+    Object.freeze({ category: "personal_room_content", description: "Messages, documents and files in personal rooms this account solely owns are purged, and those rooms are archived." }),
     Object.freeze({ category: "credentials", description: "Account access keys (account_credentials) are deleted; outstanding keys stop working immediately." }),
     Object.freeze({ category: "sessions", description: "Browser account-session slots (account_session_slots) are deleted; every signed-in browser session ends." }),
     Object.freeze({ category: "login_methods", description: "All linked sign-in methods are deleted: password verifiers, magic codes, and recovery codes." }),
@@ -286,6 +286,9 @@ export function classifyOwnedRooms(store, accountId) {
       toMemberId: null,
       messages: loaded.messageCount ?? (Array.isArray(state.messages) ? state.messages.length : 0),
       files: fileCount(store, membership.roomId),
+      documents: tableExists(store.db, "room_docs")
+        ? store.db.prepare("SELECT count(*) AS count, COALESCE(sum(rev),0) AS revisions FROM room_docs WHERE room_id=?").get(membership.roomId)
+        : { count: 0, revisions: 0 },
     };
     if (ownerMemberId !== membership.memberId) {
       retained.push(entry);
@@ -473,7 +476,7 @@ function archiveCurrentPersonalRoom(store,room) {
 // Events are redacted, then the projection is rebuilt so recovery matches.
 function archivePersonalRoom(store, room) {
   // Public activity summaries and retry responses can contain room text too.
-  for (const table of ["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices", "room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
+  for (const table of ["room_docs", "room_doc_revisions", "project_maps", "project_map_queue", "project_map_pulls", "project_map_notices", "room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
     if (store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))
       store.db.prepare(`DELETE FROM ${table} WHERE room_id=?`).run(room.id);
   }

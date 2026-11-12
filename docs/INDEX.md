@@ -184,3 +184,5 @@ Earlier implementation and release plans retain their original evidence:
 [release acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), and
 [cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
 Reconcile d[+11111 bytes at .content[1].resource.text]
+
+[Room documents HTTP preview](ROOM-DOCS.md) — bounded live document listing, revisions, and qualification limits.

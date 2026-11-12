@@ -1,3 +1,4 @@
+import { writeDoc, getDoc } from "../server/room-docs.mjs";
 import {legacyAccountRoom} from './helpers/legacy-account-room.mjs';
 import {isCurrentRoom,readCurrentRoomForAudit} from '../server/current-room-repository.mjs';
 const forensicRoom=(store,roomId)=>isCurrentRoom(store.db,roomId)?store.readTransaction(()=>readCurrentRoomForAudit(store,roomId)):store.room(roomId);
@@ -74,6 +75,7 @@ for (const entityProjection of [false, true]) test(`a solely owned personal room
   const ctx = await deletionAccount(t, 1);
   const roomId = "solo-notes";
   const { key } = createRoom(ctx, roomId, "personal", "Solo notes", {legacy:true});
+  writeDoc(ctx.f.store, { roomId, docId: "private-notes", title: "Private", body: "personal document", baseRev: 0, author: "owner" });
   ctx.f.store.command(key, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "secret-note", body: SECRET } });
   ctx.f.store.roomAttachments.stage(key, roomId, {
     id: "secret-file", filename: "secret.txt", mediaType: "text/plain",
@@ -113,6 +115,8 @@ for (const entityProjection of [false, true]) test(`a solely owned personal room
   const receipt = await res.json();
   assert.ok(receipt.receipt.retained.some(row => row.category === "audit"));
 
+  assert.equal(getDoc(ctx.f.store.db, { roomId, docId: "private-notes" }), null);
+  assert.equal(getDoc(ctx.f.store.db, { roomId, docId: "private-notes", rev: 1 }), null);
   const room = forensicRoom(ctx.f.store,roomId);
   assert.equal(typeof room.state.room.archivedAt, "string");
   assert.equal(room.state.messages.find(message => message.id === "secret-note").body, null);
@@ -258,4 +262,17 @@ test("account deletion also purges archived message rows that are no longer in t
   const rows = db.prepare("SELECT message_id, body, record_json FROM messages WHERE room_id=?").all(roomId);
   assert.ok(rows.length > 0);
   for (const row of rows) assert.equal(`${row.body}${row.record_json}`.includes(SECRET), false, `${row.message_id} keeps no secret text`);
+});
+
+test("a document update invalidates an earlier account deletion confirmation", async t => {
+  const ctx = await deletionAccount(t, "document-race");
+  const roomId = "doc-confirmation";
+  createRoom(ctx, roomId, "personal", "Document confirmation");
+  writeDoc(ctx.f.store, { roomId, docId: "spec", title: "Spec", body: "one", baseRev: 0, author: "owner" });
+  const planned = await (await get(ctx.origin, "/api/account/deletion/plan", ctx.creds.cookie)).json();
+  writeDoc(ctx.f.store, { roomId, docId: "spec", title: "Spec", body: "two", baseRev: 1, author: "owner" });
+  const res = await authedPost(ctx.origin, "/api/account/delete", { confirmationToken: planned.confirmationToken }, ctx.creds);
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error.code, "plan_changed");
+  assert.equal(getDoc(ctx.f.store.db, { roomId, docId: "spec" }).body, "two");
 });
