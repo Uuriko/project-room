@@ -1,7 +1,26 @@
 import { hasSessionHint } from "./browser-session.js";
 import { uiText } from "./strings.js";
+import { clipboard } from "./clipboard.js";
 // Static imports must finish before the readable fallback yields to startup.
 import "./entry-started.js";
+
+const agentPrompt = document.getElementById("entry-agent-prompt");
+const agentCopy = document.getElementById("entry-agent-copy");
+const agentCopyStatus = document.getElementById("entry-agent-copy-status");
+if (agentPrompt && agentCopy && agentCopyStatus) {
+  // A pasted prompt must return to the installation the person actually opened.
+  if (location.protocol === "https:" || location.protocol === "http:") {
+    agentPrompt.value = agentPrompt.value.replaceAll("https://room.trydemigod.com", location.origin);
+  }
+  clipboard.subscribe(() => { agentCopy.disabled = clipboard.busy; });
+  agentCopy.addEventListener("click", async () => {
+    if (clipboard.busy) return;
+    const result = await clipboard.copy(agentPrompt.value);
+    agentCopyStatus.textContent = result === "copied" ? "Copied." : result === "pending" ? "Copy is still in progress." : "Select and copy the text.";
+    agentCopyStatus.classList.add("visible");
+    if (result === "failed") { agentPrompt.focus(); agentPrompt.select(); }
+  });
+}
 
 let flight = null, dispose = () => {};
 const resumeKey = "project-room:signin-entry:v1";
