@@ -1,6 +1,7 @@
 import { hasSessionHint } from "./browser-session.js";
 import { uiText } from "./strings.js";
 import { clipboard } from "./clipboard.js";
+import { agentEntryDestination } from "./entry-destination.js";
 // Static imports must finish before the readable fallback yields to startup.
 import "./entry-started.js";
 
@@ -11,6 +12,7 @@ if (agentPrompt && agentCopy && agentCopyStatus) {
   // A pasted prompt must return to the installation the person actually opened.
   if (location.protocol === "https:" || location.protocol === "http:") {
     agentPrompt.value = agentPrompt.value.replaceAll("https://room.trydemigod.com", location.origin);
+    agentPrompt.value += agentEntryDestination(location);
   }
   clipboard.subscribe(() => { agentCopy.disabled = clipboard.busy; });
   agentCopy.addEventListener("click", async () => {

@@ -77,6 +77,14 @@ test('bundled default doors reach minimal auth and inherit invitation, legacy, a
       assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),text);
       assert.doesNotMatch(await page.locator('body').innerText(),/A shared place|Conversations, shared work|New here\?|Have an invite\?|Paste a prompt/);
     }
+    // The copy must carry a selected task without leaking unrelated URL data.
+    await page.goto(origin + '/?room=qa&token=DO_NOT_COPY#pr-record/work/item-1');
+    await page.locator('#auth-panel').waitFor({state:'visible'});
+    const taskPrompt = await page.locator('#entry-agent-prompt').inputValue();
+    assert.ok(taskPrompt.includes(origin + '/?room=qa#pr-record/work/item-1'));
+    assert.ok(!taskPrompt.includes('DO_NOT_COPY'));
+    await page.getByRole('button',{name:'Copy agent instructions',exact:true}).click();
+    assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),taskPrompt);
     // Observe the browser's first destination before app routing handles each
     // fragment. Fragments never reach the HTTP server or the Worker Request.
     for (const hash of ['#join/'+'A'.repeat(43)+'/work/item-1','#invite/'+'B'.repeat(43),'#code/abc-def-ghj','#room/qa-room','#join/']) {
