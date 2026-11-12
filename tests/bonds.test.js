@@ -82,25 +82,12 @@ async function eventsOf(origin, roomId, secret) {
   return (await res.json()).events.map(row => row.event);
 }
 
-test("propose, accept, peer DM, revoke, then send is refused", async t => {
+test("explicit bond: propose, accept, peer DM, revoke, then send is refused", async t => {
   const { origin, roomId, owner, friend, stranger, command } = await roomOf(t);
   const roomChat = await command(owner.secret, "message.posted", {
     messageId: randomUUID(), body: "room chat does not need a bond"
   });
   assert.equal(roomChat.status, 201);
-
-  const early = await jsonOf(await command(owner.secret, "dm.posted", {
-    to: friend.identityId, messageId: randomUUID(), body: "too soon"
-  }));
-  assert.equal(early.status, 403);
-  assert.equal(early.body.error.code, "no_bond");
-  assert.match(early.body.error.message, /bond\.propose \{ to \}/);
-  assert.doesNotMatch(early.body.error.message, /\{ to, scopes \}/);
-  assert.match(early.body.hint, /bond\.propose \{ to \}/);
-  assert.doesNotMatch(early.body.hint, /scopes/);
-  const proposeStep = early.body.next.find(step => typeof step.command === "string");
-  assert.match(proposeStep.command, /bond\.propose \{ to \}/);
-  assert.doesNotMatch(proposeStep.command, /scopes/);
 
   const proposed = await jsonOf(await command(owner.secret, "bond.propose", {
     to: friend.identityId, note: "pair up", scopes: ["peer.wake", "peer.dm", "peer.card"]
@@ -109,13 +96,6 @@ test("propose, accept, peer DM, revoke, then send is refused", async t => {
   assert.equal(proposed.body.event.type, "bond.proposed");
   const bondId = proposed.body.event.data.bondId;
   assert.deepEqual(proposed.body.event.data.scopes, ["peer.wake", "peer.card", "peer.dm"]);
-
-  const pending = await jsonOf(await command(owner.secret, "dm.posted", {
-    to: friend.identityId, messageId: randomUUID(), body: "still pending"
-  }));
-  assert.equal(pending.status, 403);
-  assert.equal(pending.body.error.code, "bond_pending");
-  assert.match(pending.body.hint, /bond\.accept/);
 
   const selfAccept = await jsonOf(await command(owner.secret, "bond.accept", { bondId }));
   assert.equal(selfAccept.status, 403);
@@ -189,6 +169,79 @@ test("propose, accept, peer DM, revoke, then send is refused", async t => {
   assert.match(after.body.hint, /bond\.propose/);
   const still = await jsonOf(await get(origin, `/api/rooms/${roomId}/peer-dms/${encodeURIComponent(threadId)}`, owner.secret));
   assert.equal(still.body.messages.length, 2);
+});
+
+test("room co-members DM without a bond; revoke, scope and membership still block", async t => {
+  const { origin, roomId, owner, friend, stranger, command, fixture } = await roomOf(t);
+  const outsider = fixture.store.identities.create("not in this room");
+
+  // No propose, no accept: one command reaches the peer.
+  const first = await jsonOf(await command(owner.secret, "dm.posted", {
+    to: friend.identityId, messageId: randomUUID(), body: "no bond needed"
+  }));
+  assert.equal(first.status, 201);
+  assert.equal(first.body.event.type, "dm.posted");
+  const reply = await jsonOf(await command(friend.secret, "dm.posted", {
+    to: owner.identityId, messageId: randomUUID(), body: "got it"
+  }));
+  assert.equal(reply.status, 201);
+  assert.equal(reply.body.event.data.threadId, first.body.event.data.threadId);
+
+  // Recipient sees it; a third member does not.
+  const friendInbox = await jsonOf(await get(origin, `/api/rooms/${roomId}/agent-inbox`, friend.secret));
+  assert.equal(friendInbox.body.peerMessages.some(message => message.body === "no bond needed"), true);
+  const strangerEvents = await eventsOf(origin, roomId, stranger.secret);
+  assert.equal(strangerEvents.some(event => event.type === "dm.posted"), false);
+
+  // The silent bond is peer.dm only: no wake, card or context grants.
+  const list = await jsonOf(await command(owner.secret, "bond.list", {}));
+  const bond = list.body.bonds.find(row => [row.agentAId, row.agentBId].includes(friend.identityId));
+  assert.equal(bond.state, "active");
+  assert.deepEqual(bond.acceptedScopes, ["peer.dm"]);
+
+  // Revoke is a real block: the recipient said no.
+  const revoked = await jsonOf(await command(friend.secret, "bond.revoke", { bondId: bond.id }));
+  assert.equal(revoked.status, 201);
+  const blocked = await jsonOf(await command(owner.secret, "dm.posted", {
+    to: friend.identityId, messageId: randomUUID(), body: "after block"
+  }));
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.body.error.code, "bond_revoked");
+
+  // A pending proposal does not gate DMs, and the pending proposal's wider
+  // scopes are not granted by co-membership.
+  const proposed = await jsonOf(await command(owner.secret, "bond.propose", {
+    to: stranger.identityId, scopes: ["peer.wake", "peer.dm"]
+  }));
+  assert.equal(proposed.status, 201);
+  const viaPending = await jsonOf(await command(owner.secret, "dm.posted", {
+    to: stranger.identityId, messageId: randomUUID(), body: "while pending"
+  }));
+  assert.equal(viaPending.status, 201);
+  const after = await jsonOf(await command(owner.secret, "bond.list", {}));
+  const strangerBond = after.body.bonds.find(row => [row.agentAId, row.agentBId].includes(stranger.identityId));
+  assert.equal(strangerBond.state, "active");
+  assert.deepEqual(strangerBond.acceptedScopes, ["peer.dm"]);
+
+  // Not a member of this room: same 404 as before.
+  const outside = await jsonOf(await command(owner.secret, "dm.posted", {
+    to: outsider.identityId, messageId: randomUUID(), body: "who are you"
+  }));
+  assert.equal(outside.status, 404);
+  assert.equal(outside.body.error.code, "peer_not_found");
+});
+
+test("an active bond that omits peer.dm still refuses DMs", async t => {
+  const { owner, friend, command } = await roomOf(t);
+  const proposed = await jsonOf(await command(owner.secret, "bond.propose", { to: friend.identityId, scopes: ["peer.card"] }));
+  const bondId = proposed.body.event.data.bondId;
+  const accepted = await jsonOf(await command(friend.secret, "bond.accept", { bondId }));
+  assert.equal(accepted.status, 201);
+  const dm = await jsonOf(await command(owner.secret, "dm.posted", {
+    to: friend.identityId, messageId: randomUUID(), body: "scope check"
+  }));
+  assert.equal(dm.status, 403);
+  assert.equal(dm.body.error.code, "scope_denied");
 });
 
 test("idempotent propose and idempotent peer thread", async t => {
