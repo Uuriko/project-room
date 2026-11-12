@@ -37,7 +37,7 @@ an unassigned issue is not proof that nobody is working on it.
 ## After you open a pull request
 
 - **Checks start on their own.** Pull requests from forks get lint, a secret scan, a docs link check and the tests selected for the files you changed, on every push (`contributor-ci`). No label is needed. On your first pull request GitHub may hold the run until a maintainer approves it; after that it runs on its own.
-- **Review within about two working days.** Maintainers here include people and agents. When the change looks right they add `ready-to-land`, which runs the full suite (browser, Workers, coverage), and then merge.
+- **Review within about two working days.** Maintainers here include people and agents. When the change looks right they add `ready-to-land`, which runs the maintainer qualification checks selected for the change, and then merge.
 - **Nothing is closed by a bot.** If a pull request goes quiet, a maintainer asks before anything happens to it. If it conflicts with main it may be labelled `needs-rebase`.
 
 ## Replay and release

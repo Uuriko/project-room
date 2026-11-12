@@ -56,8 +56,9 @@ The label gate is on the pull-request jobs in:
 
 ## autoland
 
-The `autoland` label is opt-in permission to squash-merge. It is not applied
-automatically. `.github/workflows/autoland.yml` squash-merges an open,
+The `autoland` label opts in to squash-merging and then dispatching production
+deployment through `deploy-prod.yml`, even when `ROOM_AUTO_DEPLOY` is unset.
+It is not applied automatically. `.github/workflows/autoland.yml` squash-merges an open,
 non-draft pull request only when all of these hold:
 
 - The PR carries the `autoland` label and targets `main`.
