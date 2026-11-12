@@ -104,3 +104,5 @@ test("room_digest validates its arguments and keeps room membership", async t =>
   assert.equal((await call(origin, "room_digest", { roomId: "priv" }, eve.secret)).isError, true, "non-members cannot read it");
   assert.equal((await call(origin, "room_digest", { roomId: "priv", since: 999999 }, ada.secret)).isError, true, "a cursor ahead of history is refused");
 });
+
+// ci: retrigger after an unrelated browser-shard timeout (entry-simplification startup at 390).
