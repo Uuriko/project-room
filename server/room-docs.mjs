@@ -16,14 +16,23 @@ const ensure = db => db.exec(`CREATE TABLE IF NOT EXISTS room_docs (room_id TEXT
 const out = r => ({ docId: r.doc_id, title: r.title, body: r.body, rev: r.rev, updatedBy: r.updated_by ?? r.author,
   updatedAt: new Date(r.updated_at ?? r.at).toISOString() });
 
-export function listDocs(db, { roomId }) {
-  ensure(db);
-  return db.prepare("SELECT doc_id, title, rev, updated_by, updated_at FROM room_docs WHERE room_id = ? ORDER BY updated_at DESC, doc_id LIMIT 500")
-    .all(roomId).map(r => ({ docId: r.doc_id, title: r.title, rev: r.rev, updatedBy: r.updated_by, updatedAt: new Date(r.updated_at).toISOString() }));
+// Reads never create schema. Lazy initialization belongs to the first write.
+const hasTable = (db, name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+
+// Stable keyset order: editing a document cannot move it behind the cursor.
+// This is a live traversal, not a snapshot; restart to see new ids <= after.
+export function listDocs(db, { roomId, limit = 100, after = "" }) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500 || (after !== "" && !DOC_ID.test(after))) throw new TypeError("Invalid document page");
+  const rows = hasTable(db, "room_docs")
+    ? db.prepare("SELECT doc_id, title, rev, updated_by, updated_at FROM room_docs WHERE room_id = ? AND doc_id > ? ORDER BY doc_id LIMIT ?")
+      .all(roomId, after, limit + 1) : [];
+  const hasMore = rows.length > limit;
+  const docs = rows.slice(0, limit).map(r => ({ docId: r.doc_id, title: r.title, rev: r.rev, updatedBy: r.updated_by, updatedAt: new Date(r.updated_at).toISOString() }));
+  return { docs, hasMore, nextAfter: hasMore ? docs.at(-1).docId : null };
 }
 
 export function getDoc(db, { roomId, docId, rev = null }) {
-  ensure(db);
+  if (!hasTable(db, rev === null ? "room_docs" : "room_doc_revisions")) return null;
   const r = rev === null
     ? db.prepare("SELECT * FROM room_docs WHERE room_id = ? AND doc_id = ?").get(roomId, docId)
     : db.prepare("SELECT * FROM room_doc_revisions WHERE room_id = ? AND doc_id = ? AND rev = ?").get(roomId, docId, rev);

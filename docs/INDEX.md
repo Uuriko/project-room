@@ -302,3 +302,6 @@ These records describe tested revisions and do not establish current deployment 
 - [Private operator inbox skip aggregates](research/2026-11-03-inbox-skip-diagnostics.md) — fixed per-database counters, unchanged reader bytes, Native cadence and incomplete broad-run limit.
 
 - [Bounded newest wake discovery](research/2026-11-03-newest-wake-window.md): fresh-message discovery, independent recovery progress and bounded source admission.
+
+[Room documents HTTP preview](ROOM-DOCS.md) — flagged room-scoped documents,
+live bounded list continuation, revision conflict contract and qualification limits.

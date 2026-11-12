@@ -18954,11 +18954,15 @@ paths:
       x-room-permission: member
       operationId: getRoomDocs
       summary: List room docs (ROOM_DOCS=1 only)
-      description: Titles, revs and authors of the room's markdown docs, newest first, without bodies. 404 while the flag is off.
+      description: Metadata only, ascending docId. Live traversal, not a snapshot; restart to discover newly created ids before the cursor. Returns docs, hasMore and nextAfter (null at end). 404 while the flag is off.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: after, in: query, description: Plain positional document id from nextAfter, schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,63}$' } }
       responses:
-        '200': { description: Docs listed }
+        '200': { description: Docs page with hasMore and nextAfter }
+        '403': { description: no_access or insufficient_scope }
+        '422': { description: invalid_query }
         '401': { description: unauthenticated }
         '404': { description: not_found (flag off) }
   /api/rooms/{roomId}/docs/{docId}:
