@@ -26,6 +26,15 @@
 #auth-panel #agent-signin-button { font-size: var(--text-sm); }
 #auth-panel #terms-notice { line-height: 1.5; }
 #auth-panel #terms-notice a { display: inline-block; min-height: 24px; }
+@media (min-width: 900px) {
+  #auth-panel.auth-panel { width: min(100% - 4rem, 58rem); max-width: 58rem; display: grid; grid-template-columns: 1.2fr 1fr; column-gap: 3rem; align-items: start; }
+  #auth-panel .signin-logo, #auth-panel #auth-title { grid-column: 1 / -1; }
+  #signin-entry-routes { grid-column: 1; grid-row: 3; }
+  #signin-methods { grid-column: 2; grid-row: 3; }
+  #auth-error, #auth-link-error, #auth-room-hint, #auth-reconnect, #email-auth-step { grid-column: 1 / -1; }
+  #email-auth-step { width: min(100%, 25rem); margin-inline: auto; }
+  #entry-agent-prompt { height: 20rem; }
+}
 @media (max-height: 600px) {
   #auth-panel.auth-panel { margin-top: var(--space-3); }
   #auth-panel .signin-logo { width: 36px; height: 36px; }
