@@ -24,6 +24,9 @@ test('work CLI traverses bounded native pages without writes and rejects stale c
   assert.equal(executed.page.hasMore, true); assert.equal(executed.cli.complete, false);
   assert.equal(command.stdout.includes(identity.secret), false);
   const calls = [], outputs = [], io = { connection: async () => conn, out: s => outputs.push(s), fetchImpl: (url, options) => { calls.push(options?.method ?? 'GET'); return fetch(url, options); } };
+  await workCommand([], io);
+  const defaults = JSON.parse(outputs.pop());
+  assert.equal(defaults.focus, 'needs_me'); assert.equal(typeof defaults.cli.complete, 'boolean');
   await workCommand(['--focus', 'all', '--limit', '1'], io);
   const first = JSON.parse(outputs.pop());
   assert.equal(first.page.limit, 1); assert.equal(first.page.hasMore, true); assert.equal(first.work.length, 1);
