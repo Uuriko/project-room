@@ -16,6 +16,7 @@ for(const width of [390,1280])for(const theme of ['dark','light'])test('public e
  assert.equal(await page.locator('#entry-agent-prompt').isVisible(),true);
  await page.goto(origin+'/docs/agents/paste');assert.match(await page.locator('h1').innerText(),/Connect your agent/);
  const copy=page.locator('[data-copy-prompt="agent-paste-prompt-1"]');await copy.waitFor({state:'visible'});
+ assert.ok((await page.locator('#agent-paste-prompt-1').inputValue()).includes(origin+'/mcp'), 'ordinary prompt targets this installation');
  await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{globalThis.copiedPrompt=text;}}}));
  await copy.focus();await page.keyboard.press('Enter');await page.locator('#agent-paste-prompt-1-status').filter({hasText:'Copied.'}).waitFor();
  assert.equal(await page.evaluate(()=>globalThis.copiedPrompt),await page.locator('#agent-paste-prompt-1').inputValue());
@@ -32,5 +33,6 @@ for(const width of [390,1280])for(const theme of ['dark','light'])test('public e
  mkdirSync('/tmp/pr-public-entry-1102',{recursive:true});await page.screenshot({path:'/tmp/pr-public-entry-1102/watch-'+width+'-'+theme+'.png',fullPage:true});
  await page.getByRole('link',{name:'Connect an agent',exact:true}).focus();await page.keyboard.press('Enter');await page.waitForURL('**/docs/agents/paste?room=project-room-lobby');await page.getByRole('heading',{name:'Connect to the public lobby'}).waitFor();
  assert.match(await page.locator('#agent-paste-prompt-1').inputValue(),/join project-room-lobby rather than switching to another saved project/);
- const nojs=await browser.newContext({javaScriptEnabled:false,viewport:{width,height:900}}),nojsPage=await nojs.newPage();await nojsPage.goto(origin+'/docs/agents/paste?room=project-room-lobby');assert.match(await nojsPage.locator('#agent-paste-prompt-1').inputValue(),/join project-room-lobby rather than switching to another saved project/);await nojs.close();await page.locator('[data-copy-prompt="agent-paste-prompt-1"]').waitFor({state:'visible'});assert.equal(errors.length,0,errors.join(' | '));
+ assert.ok((await page.locator('#agent-paste-prompt-1').inputValue()).includes(origin+'/mcp'), 'lobby prompt targets this installation with JavaScript');
+ const nojs=await browser.newContext({javaScriptEnabled:false,viewport:{width,height:900}}),nojsPage=await nojs.newPage();await nojsPage.goto(origin+'/docs/agents/paste?room=project-room-lobby');assert.match(await nojsPage.locator('#agent-paste-prompt-1').inputValue(),/join project-room-lobby rather than switching to another saved project/);assert.ok((await nojsPage.locator('#agent-paste-prompt-1').inputValue()).includes(origin+'/mcp'), 'lobby prompt targets this installation without JavaScript');await nojs.close();await page.locator('[data-copy-prompt="agent-paste-prompt-1"]').waitFor({state:'visible'});assert.equal(errors.length,0,errors.join(' | '));
 });
