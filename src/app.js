@@ -5079,17 +5079,11 @@ $("#message-to-select").addEventListener("keydown", event => {
   $("#message-input").focus();
 });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
-function syncComposerHint() {
-  const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
-  const input = $("#message-input");
-  input.title = hint;
-  input.setAttribute("aria-description", hint);
-  const caption = $("#composer-hint");
-  if (caption) caption.textContent = hint;
-  input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
+function syncComposerKeyboard() {
+  $("#message-input").enterKeyHint = touchKeyboard.matches ? "enter" : "send";
 }
-touchKeyboard.addEventListener("change", syncComposerHint);
-syncComposerHint();
+touchKeyboard.addEventListener("change", syncComposerKeyboard);
+syncComposerKeyboard();
 $("#message-input").addEventListener("keydown", e => {
   const list = $("#mention-list"), open = list && !list.hidden;
   const matches = open ? mentionChoices() : [];
@@ -7768,16 +7762,11 @@ $("#friend-dm-form").addEventListener("submit", async event => {
 // The DM compose mirrors the room composer: Enter sends on desktop keyboards
 // (Shift+Enter for a new line), while touch keyboards keep Return as a new
 // line and get a "send" return key plus the matching hint.
-function syncFriendDmHint() {
-  const input = $("#friend-dm-input"), caption = $("#friend-dm-hint");
-  const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
-  input.title = hint;
-  input.setAttribute("aria-description", hint);
-  if (caption) caption.textContent = hint;
-  input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
+function syncFriendDmKeyboard() {
+  $("#friend-dm-input").enterKeyHint = touchKeyboard.matches ? "enter" : "send";
 }
-touchKeyboard.addEventListener("change", syncFriendDmHint);
-syncFriendDmHint();
+touchKeyboard.addEventListener("change", syncFriendDmKeyboard);
+syncFriendDmKeyboard();
 $("#friend-dm-input").addEventListener("keydown", e => {
   // Composition, key repeat, and touch Return must never accidentally submit —
   // the shared sendsOnEnter gate carries the same rules as the room composer.
