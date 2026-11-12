@@ -2645,7 +2645,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         let page;
         try {
           if (url.searchParams.getAll('workAfter').length > 1) reject(422, 'invalid_feed_cursor', 'Invalid public task page; reload the room');
-          page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin(), workAfter:url.searchParams.get('workAfter') ?? '' });
+          if (url.searchParams.getAll('workId').length > 1 || url.searchParams.has('workId') && url.searchParams.has('workAfter')) reject(422, 'invalid_public_work', 'Choose one public task');
+          page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin(), workAfter:url.searchParams.get('workAfter') ?? '', ...(url.searchParams.has('workId') ? {workId:url.searchParams.get('workId')} : {}) });
         } catch (error) {
           if (error?.code !== 'invalid_feed_cursor' || roomPage[2] || !acceptPrefersHtml(req.headers.accept)) throw error;
           return sendPage(422, publicTaskPageExpired(roomPage[1]), null, `/r/${roomPage[1]}`, 'no-store');
