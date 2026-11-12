@@ -1210,45 +1210,58 @@ export class AgentHeartbeats {
       check(cursor !== null, 422, "invalid_wake_poll", "ack=cursor needs the cursor of the last page you handled");
       through = parseWakeCursor(cursor, [1, agentId, roomId, hostId]);
     }
-    const at = this.now(), staleBefore = at - WAKE_STALE_PRUNE_MS;
-    const held = JSON.stringify(this.pausedRoomsOf(agentId).map(p => p.roomId));
-    let rows;
+    try { this.ensureListenerSchema(); } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return Object.freeze({ acknowledged: Object.freeze([]) });
+    }
+    // Select, lease check and UPDATE share one write lock, so a lease taken
+    // or changed between them cannot let a stale prune or cursor ack through.
     try {
-      this.ensureListenerSchema();
-      if (ackThrough) {
-        // Same rule as ackWakes: a live listener lease owns the queue, so an
-        // ack-by-cursor from anyone else is refused rather than silently
-        // dropping signals the listener has not handled.
-        const holders = this.db.prepare(`SELECT fencing_token AS fencingToken FROM agent_wake_listener_leases
-          WHERE agent_id=? AND (? IS NULL OR room_key=?) AND lease_expires_at>?`).all(agentId, roomId, roomId ?? "", at);
-        if (holders.some(holder => holder.fencingToken !== fencingToken)) fail(409, "listener_fenced",
-          "a live listener lease holds this agent's wake queue — poll with its listener token to ack by cursor");
-      }
-      rows = this.db.prepare(`SELECT s.signal_id AS signalId, s.kind AS kind, s.room_id AS roomId FROM agent_wake_signals s
-        WHERE s.agent_id=? AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id=?)
-          AND (s.room_id IS NULL OR s.room_id NOT IN (SELECT value FROM json_each(?)))
-          AND NOT EXISTS (SELECT 1 FROM agent_wake_signal_claims c WHERE c.signal_id=s.signal_id)
-          AND ((s.kind IN ('mention','dm') AND s.created_at<?)
-            OR (? IS NOT NULL AND (s.created_at<? OR (s.created_at=? AND s.signal_id<=?))))
-        ORDER BY s.created_at, s.signal_id LIMIT ?`)
-        .all(agentId, roomId, roomId, held, staleBefore, through?.createdAt ?? null, through?.createdAt ?? 0,
-          through?.createdAt ?? 0, through?.signalId ?? "", SETTLE_LIMIT);
+      return this.store.transaction(() => {
+        const at = this.now(), staleBefore = at - WAKE_STALE_PRUNE_MS;
+        const held = JSON.stringify(this.pausedRoomsOf(agentId).map(p => p.roomId));
+        // Only doorbell kinds (mention, dm) are ever settled here, by cursor or
+        // by age: ask, assignment, bond and land signals are obligations and
+        // leave the queue only through an explicit ack by signal id.
+        let rows = this.db.prepare(`SELECT s.signal_id AS signalId, s.kind AS kind, s.room_id AS roomId FROM agent_wake_signals s
+          WHERE s.agent_id=? AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id=?)
+            AND (s.room_id IS NULL OR s.room_id NOT IN (SELECT value FROM json_each(?)))
+            AND NOT EXISTS (SELECT 1 FROM agent_wake_signal_claims c WHERE c.signal_id=s.signal_id)
+            AND s.kind IN ('mention','dm')
+            AND (s.created_at<?
+              OR (? IS NOT NULL AND (s.created_at<? OR (s.created_at=? AND s.signal_id<=?))))
+          ORDER BY s.created_at, s.signal_id LIMIT ?`)
+          .all(agentId, roomId, roomId, held, staleBefore, through?.createdAt ?? null, through?.createdAt ?? 0,
+            through?.createdAt ?? 0, through?.signalId ?? "", SETTLE_LIMIT);
+        if (rows.length === 0) return Object.freeze({ acknowledged: Object.freeze([]) });
+        // A live listener lease owns the signals of its room. Check the rooms
+        // of the signals actually selected (not the call's roomId, and not
+        // unrelated rooms): an ack by cursor from a different token is
+        // refused, and the age-based prune simply leaves those rows pending,
+        // so a plain poll never deletes what the listener has not handled.
+        const leases = new Map(this.db.prepare(`SELECT room_key AS roomKey, fencing_token AS fencingToken FROM agent_wake_listener_leases
+          WHERE agent_id=? AND lease_expires_at>?`).all(agentId, at).map(row => [row.roomKey, row.fencingToken]));
+        const foreign = row => leases.has(row.roomId ?? "") && leases.get(row.roomId ?? "") !== fencingToken;
+        if (rows.some(foreign)) {
+          if (ackThrough) fail(409, "listener_fenced",
+            "a live listener lease holds this agent's wake queue — poll with its listener token to ack by cursor");
+          rows = rows.filter(row => !foreign(row));
+          if (rows.length === 0) return Object.freeze({ acknowledged: Object.freeze([]) });
+        }
+        const stmt = this.db.prepare("UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND signal_id=? AND delivered_at IS NULL");
+        const acknowledged = [];
+        for (const row of rows) {
+          if (stmt.run(at, agentId, row.signalId).changes === 0) continue;
+          acknowledged.push(row.signalId);
+          recordWakeEvent(this.db, { at, roomId: row.roomId, store: "signals", event: "acked", door, kind: row.kind, subjectId: agentId });
+        }
+        this.clearWakeBudgetMarks(agentId, acknowledged);
+        return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
+      });
     } catch (error) {
       if (!isMissingTable(error)) throw error;
       return Object.freeze({ acknowledged: Object.freeze([]) });
     }
-    if (rows.length === 0) return Object.freeze({ acknowledged: Object.freeze([]) });
-    return this.store.transaction(() => {
-      const stmt = this.db.prepare("UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND signal_id=? AND delivered_at IS NULL");
-      const acknowledged = [];
-      for (const row of rows) {
-        if (stmt.run(at, agentId, row.signalId).changes === 0) continue;
-        acknowledged.push(row.signalId);
-        recordWakeEvent(this.db, { at, roomId: row.roomId, store: "signals", event: "acked", door, kind: row.kind, subjectId: agentId });
-      }
-      this.clearWakeBudgetMarks(agentId, acknowledged);
-      return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
-    });
   }
 
   // RC-2026-09-28-3602: room-hosted wake poll — a synchronous, durable,
