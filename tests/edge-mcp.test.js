@@ -28,8 +28,8 @@ async function edge(request) {
   return edgeAnonymousMcpResponse(request, url);
 }
 
-async function assertParity(t, message, headers = {}) {
-  const request = post(message, headers);
+async function assertParity(t, message, headers = {}, path = "/mcp") {
+  const request = post(message, headers, path);
   const response = await edge(request.clone());
   assert.ok(response, `edge must answer ${message.method}`);
   const expected = await dispatchRoomMcp(message, { mcpUrl: roomMcpUrlForHost(new URL(request.url)) });
@@ -42,11 +42,11 @@ async function assertParity(t, message, headers = {}) {
   return response;
 }
 
-test("anonymous tools/list, initialize and ping are answered at the edge, byte-identical to dispatch", async t => {
+test("anonymous tools/list, discovery initialize and ping are answered at the edge, byte-identical to dispatch", async t => {
   await assertParity(t, rpc("tools/list"));
   await assertParity(t, rpc("initialize", {
     protocolVersion: "2026-07-28", capabilities: {}, clientInfo: { name: "edge-test", version: "1" },
-  }));
+  }), {}, "/mcp?auth=discovery");
   await assertParity(t, rpc("ping"));
   await assertParity(t, rpc("tools/list", { cursor: "nope" })); // the no-cursor error reply is pure too
   await assertParity(t, rpc("server/discover"));
@@ -142,5 +142,20 @@ test("edge answers stop at the per-IP MCP bound and fall through to the DO for i
   for (let i = 0; i < EDGE_MCP_RATE_MAX; i++) assert.ok(await edge(ping("203.0.113.7")), `request ${i + 1} answered at the edge`);
   assert.equal(await edge(ping("203.0.113.7")), null, "over the bound falls through to the DO");
   assert.ok(await edge(ping("203.0.113.8")), "another IP has its own bucket");
+  resetEdgeMcpRate();
+});
+
+test("anonymous initialize on the default route falls through to the DO for its OAuth challenge", async () => {
+  resetEdgeMcpRate();
+  // writeRoomMcpNode answers 401 + WWW-Authenticate resource_metadata here when
+  // OAuth is configured; the edge must not answer 200 first (deploy-drift probe).
+  for (const protocolVersion of ["2025-03-26", "2026-07-28"]) {
+    const message = rpc("initialize", { protocolVersion, capabilities: {}, clientInfo: { name: "edge-test", version: "1" } });
+    for (const headers of [{}, { authorization: "Bearer" }, { authorization: "Bearer " }]) {
+      assert.equal(await edge(post(message, headers)), null, `${protocolVersion} ${JSON.stringify(headers)}`);
+    }
+    assert.ok(await edge(post(message, {}, "/mcp?auth=discovery")), `${protocolVersion}: explicit discovery stays at the edge`);
+  }
+  assert.ok(await edge(post(rpc("tools/list"))), "tools/list stays at the edge");
   resetEdgeMcpRate();
 });
