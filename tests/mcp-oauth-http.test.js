@@ -1,3 +1,9 @@
+import { event as roomEvent } from "../src/events.js";
+import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
+import { createOAuthProvider } from "../server/oauth-provider.mjs";
+import { validateMcpOAuthBinding } from "../server/mcp-oauth.mjs";
+import { withCurrentReadContext, chargeCurrentReadBudget, withCurrentRoomWriter } from "../server/current-room-repository.mjs";
+import { issueSpendGrant, remainingSpendCents } from "../server/spend-grants.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -24,11 +30,18 @@ const origin = 'https://room.example';
 const resource = origin + '/mcp';
 const verifier = 'v'.repeat(43);
 const challenge = createHash('sha256').update(verifier).digest('base64url');
-async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', clock, normalized=false} = {}) {
+async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', clock, normalized=false, historyVisibility, scopes='rooms:read chat:read chat:write work:read work:write'} = {}) {
   let store = new RoomStore(database);
   if(clock)store.now=clock;
-  store.initialize(initialRoom(), normalized ? {representation: 'normalized-current-v1'} : {});
+  const initial=initialRoom();
+  if(historyVisibility)initial.push(roomEvent({roomId:'commons',actorId:'owner',type:'room.history_visibility_set',data:{historyVisibility}}));
+  store.initialize(initial, normalized ? {representation: 'normalized-current-v1'} : {});
   const ownerKey = store.issueAccessKey('commons', 'owner');
+  if(historyVisibility) {
+    store.command(ownerKey,'commons',{id:'old-public-post',type:'message.posted',data:{messageId:'old-public-post',body:'Before the agent joined'}});
+    store.roomAttachments.stage(ownerKey,'commons',{id:'old-public-file',filename:'old.txt',mediaType:'text/plain',data:'b2xk'});
+    store.roomAttachments.commit(ownerKey,'commons',{id:'old-public-file',messageId:'old-public-post'});
+  }
   const ownerSession = store.createSession(ownerKey);
   const accountId = store.db.prepare("SELECT account_id FROM member_accounts WHERE member_id='owner'").get().account_id;
   const accountKey = store.issueAccountAccessKey(accountId);
@@ -51,7 +64,7 @@ async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', 
   let base = `http://127.0.0.1:${server.address().port}`;
   const consent = (changes = {}) => fetch(base + '/oauth/authorize', { method: 'POST', redirect: 'manual',
     headers: { 'Content-Type': 'application/json', Cookie: `__Host-account_session=${slot.token}`, Origin: origin, 'X-CSRF-Token': session.csrf },
-    body: JSON.stringify({ decision: 'allow', client_id: client.clientId, redirect_uri: client.redirectUris[0], scope: 'rooms:read chat:read chat:write work:read work:write',
+    body: JSON.stringify({ decision: 'allow', client_id: client.clientId, redirect_uri: client.redirectUris[0], scope: scopes,
       code_challenge: challenge, code_challenge_method: 'S256', resource, agent_binding: JSON.stringify(binding), ...changes }) });
   const exchange = body => fetch(base + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
   const authorized = await consent();
@@ -600,4 +613,180 @@ for (const normalized of [false, true]) test(`OAuth agents can call room_needs_m
   assert.ok(found.includes('owner-ask-nm'), `the owner's formal ask is found: ${found}`);
   const other = await f.rpc('tools/call', { name: 'room_needs_me', arguments: { roomId: 'someone-elses-room' } });
   assert.equal(other.body.result?.isError ?? Boolean(other.body.error), true, 'a different room is refused');
+});
+
+// Exercise the real OAuth consent, discovery and dispatch boundaries. Scope
+// checks alone cannot prove the existing paid and visibility guards still run.
+test('explicit file consent exposes four tools and old grants retain no file access', async t => {
+  const old = await setup(t);
+  const names = ['room_put_file', 'room_commit_file', 'room_get_file', 'room_list_files'];
+  const listed = await old.rpc('tools/list');
+  for (const name of names) {
+    assert.ok(!listed.body.result.tools.some(tool => tool.name === name));
+    const denied = await old.rpc('tools/call', {name, arguments: {id:'file'}});
+    assert.ok(denied.body.error || denied.body.result?.isError, name);
+  }
+  const f = await setup(t, {normalized:true, scopes:'rooms:read chat:read chat:write files:read files:write'});
+  const tools = (await f.rpc('tools/list')).body.result.tools;
+  for (const name of names) assert.ok(tools.some(tool => tool.name === name), name);
+  assert.ok(!tools.some(tool => tool.name === 'room_discard_file'));
+  const screen = await fetch(f.base + '/oauth/authorize?' + new URLSearchParams({client_id:CLIENT.clientId,redirect_uri:CLIENT.redirectUris[0],connection:'account',scope:'files:read files:write',state:'files',code_challenge:challenge,code_challenge_method:'S256',resource}), {headers:{Cookie:f.cookie}});
+  assert.equal(screen.status,200);
+  const consentText = await screen.text();
+  for (const name of names) assert.ok(consentText.includes(name),name);
+  assert.match(consentText,/5 room-cents/);
+  const file = {id:'file',filename:'note.txt',mediaType:'text/plain',data:Buffer.from('review bytes').toString('base64')};
+  const unpaid = await f.rpc('tools/call',{name:'room_put_file',arguments:file});
+  assert.equal(unpaid.body.result?.isError,true,JSON.stringify(unpaid.body));
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM room_attachments').get().n,0);
+});
+test('file reads require chat read and commit requires chat write even with file consent', async t => {
+  const f = await setup(t,{scopes:'rooms:read files:read files:write'});
+  const tools = (await f.rpc('tools/list')).body.result.tools;
+  assert.ok(tools.some(tool=>tool.name==='room_put_file'));
+  for (const name of ['room_get_file','room_list_files','room_commit_file','room_discard_file']) {
+    assert.ok(!tools.some(tool=>tool.name===name),name);
+    const result=await f.rpc('tools/call',{name,arguments:{id:'file',messageId:'message'}});
+    assert.ok(result.body.error||result.body.result?.isError,name);
+  }
+});
+
+test('OAuth file lifecycle preserves paid retries, uploader ownership, reviewer hashes, expiry, tier and revocation', async t => {
+  const f=await setup(t,{normalized:true,historyVisibility:'since_join',scopes:'rooms:read chat:read chat:write files:read files:write'});
+  // Synthetic, local spend permission only; never contact a hosted Room.
+  issueSpendGrant(f.store.db,'commons','friend-dot',{grantedBy:'owner',capCents:'100',perTxCapCents:'5'});
+  const call=async(name,args={})=>{
+    const r=await f.rpc('tools/call',{name,arguments:args});
+    return r.body.error ? {isError:true,error:r.body.error} : r.body.result;
+  };
+  assert.equal((await call('room_get_file',{id:'old-public-file'})).structuredContent.status,404);
+  assert.equal((await call('room_list_files',{messageIds:['old-public-post']})).structuredContent.status,404);
+  const observed=[];
+  for(const name of ['get','list']) {
+    const original=f.store.roomAttachments[name].bind(f.store.roomAttachments);
+    f.store.roomAttachments[name]=(...args)=>withCurrentReadContext(f.store.db,'commons',b=>{
+      const value=original(...args);observed.push({name,get records(){return b.records;},get bytes(){return b.bytes;}});return value;
+    });
+  }
+  const bytes=Buffer.from('identical reviewer evidence'),file={id:'evidence',filename:'evidence.txt',mediaType:'text/plain',data:bytes.toString('base64')};
+  const staged=await call('room_put_file',file);
+  assert.equal(staged.structuredContent.status,'staged',JSON.stringify(staged));
+  const balance=remainingSpendCents(f.store.db,'commons','friend-dot');
+  assert.equal((await call('room_put_file',file)).structuredContent.duplicate,true);
+  assert.equal(remainingSpendCents(f.store.db,'commons','friend-dot'),balance);
+  assert.equal((await call('room_put_file',{...file,data:'YQ=='})).isError,true);
+  assert.throws(()=>f.store.roomAttachments.get(f.ownerKey,'commons',file.id),e=>e.status===404);
+  assert.throws(()=>f.store.roomAttachments.commit(f.ownerKey,'commons',{id:file.id,messageId:'missing'}),e=>e.status===403);
+  assert.equal((await call('room_get_file',{roomId:'other-room',id:file.id})).isError,true);
+  await call('room_post_message',{id:'post-evidence',messageId:'evidence-message',body:'Review this file'});
+  const committed=await call('room_commit_file',{id:file.id,messageId:'evidence-message'});
+  assert.equal(committed.structuredContent.status,'committed',JSON.stringify(committed));
+  assert.equal((await call('room_commit_file',{id:file.id,messageId:'evidence-message'})).structuredContent.duplicate,true);
+  assert.equal((await call('room_commit_file',{id:file.id,messageId:'different-message'})).isError,true);
+  const download=await call('room_get_file',{id:file.id});
+  assert.ok(download.structuredContent?.attachment,JSON.stringify(download));
+  const fetched=download.structuredContent.attachment;
+  const reviewer=f.store.roomAttachments.get(f.ownerKey,'commons',file.id).attachment;
+  const digest=createHash('sha256').update(bytes).digest('hex');
+  assert.equal(fetched.sha256,digest);assert.equal(reviewer.sha256,digest);
+  assert.equal(fetched.data,file.data);assert.equal(reviewer.data,file.data);
+  const listed=await call('room_list_files',{messageIds:['evidence-message']});
+  assert.equal(listed.structuredContent.files[0].sha256,digest);
+  const selected=['evidence-message'];
+  for(let i=0;i<7;i++) {
+    const id='selected-'+i;selected.push(id);
+    await call('room_post_message',{id,messageId:id,body:'Selected file '+i});
+    await call('room_put_file',{...file,id});
+    await call('room_commit_file',{id,messageId:id});
+  }
+  await call('room_put_file',{...file,id:'ninth-file'});
+  await call('room_commit_file',{id:'ninth-file',messageId:'evidence-message'});
+  const eight=await call('room_list_files',{messageIds:selected});
+  assert.ok(!eight.isError,JSON.stringify(eight));
+  assert.equal(eight.structuredContent.coverage.messageIds.length,8);
+  assert.equal(eight.structuredContent.files.length,8);
+  assert.equal(eight.structuredContent.page.hasMore,true);
+  const last=await call('room_list_files',{messageIds:selected,cursor:eight.structuredContent.page.nextCursor});
+  assert.equal(last.structuredContent.files.length,1);
+  assert.equal(last.structuredContent.page.hasMore,false);
+  assert.ok(observed.every(x=>x.records<=512&&x.bytes<=256*1024),JSON.stringify(observed));
+  const beforeGrowth=observed.at(-2);
+  for(let i=0;i<20;i++) {
+    f.store.command(f.ownerKey,'commons',{id:'unrelated-member-'+i,type:'member.added',data:{memberId:'unrelated-'+i,displayName:'Unrelated '+i,kind:'human',permissions:[]}});
+    f.store.command(f.ownerKey,'commons',{id:'unrelated-post-'+i,type:'message.posted',data:{messageId:'unrelated-post-'+i,body:'Unrelated history '+i}});
+  }
+  const grown=await call('room_list_files',{messageIds:selected});
+  assert.ok(!grown.isError,JSON.stringify(grown));
+  assert.ok(observed.at(-1).records<=beforeGrowth.records+2,'unselected members/history must not cause proportional source reads');
+  assert.ok(observed.at(-1).bytes<=beforeGrowth.bytes+1024);
+  t.diagnostic('OAuth file read reservations: '+JSON.stringify(observed));
+  // A nested caller's stricter reservation must survive OAuth dispatch, and
+  // refusal must not poison the next independent request.
+  const provider=createOAuthProvider({db:f.store.db,clock:()=>f.store.now(),isBindingActive:(id,binding)=>Boolean(validateMcpOAuthBinding(f.store,id,binding))});
+  const handler=createHostedRoomMcp(f.store,{oauthProvider:provider,oauthResource:resource});
+  const fileRequest={jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'room_get_file',arguments:{id:file.id}}};
+  for(const overflow of [false,true]) {
+    let pending,context;
+    f.store.transaction(()=>withCurrentReadContext(f.store.db,'commons',b=>{
+      context=b;if(overflow)chargeCurrentReadBudget(b,256*1024-128,0);
+      pending=handler(fileRequest,{authorization:'Bearer '+f.tokens.access_token});
+    }));
+    const refused=await pending.catch(error=>({error:{code:error.code}}));
+    assert.equal(refused.error?.code,overflow ? -32001 : 'current_room_context_unavailable',JSON.stringify(refused));
+    assert.equal(context.maxRecords,200);
+    assert.equal((await call('room_get_file',{id:file.id})).structuredContent.attachment.sha256,digest);
+  }
+  const ownerFile={...file,id:'owner-staged'};
+  f.store.roomAttachments.stage(f.ownerKey,'commons',ownerFile);
+  assert.equal((await call('room_get_file',{id:ownerFile.id})).isError,true);
+  assert.equal((await call('room_commit_file',{id:ownerFile.id,messageId:'evidence-message'})).isError,true);
+  // A committed DM file remains private even though file scopes were granted.
+  f.store.command(f.ownerKey,'commons',{id:'add-peer',type:'member.added',data:{memberId:'peer',displayName:'Peer',kind:'human',permissions:[]}});
+  f.store.command(f.ownerKey,'commons',{id:'owner-dm',type:'message.posted',data:{messageId:'private-message',toMemberId:'peer',body:'Private file'}});
+  f.store.roomAttachments.commit(f.ownerKey,'commons',{id:ownerFile.id,messageId:'private-message'});
+  assert.equal((await call('room_get_file',{id:ownerFile.id})).isError,true);
+  assert.equal((await call('room_list_files',{messageIds:['private-message']})).isError,true);
+  await call('room_put_file',{...file,id:'expire-me'});
+  const now=f.store.now();
+  f.store.transaction(()=>f.store.roomAttachments.expire('commons',now+86400001));
+  assert.equal((await call('room_get_file',{id:'expire-me'})).isError,true);
+  assert.equal((await call('room_commit_file',{id:'expire-me',messageId:'evidence-message'})).isError,true);
+  setTier(f.store.db,'commons','friend-dot','t1_readonly',{updatedBy:'owner',nowMs:now});
+  assert.equal((await call('room_put_file',{...file,id:'readonly'})).isError,true);
+  assert.equal((await call('room_commit_file',{id:file.id,messageId:'evidence-message'})).isError,true);
+  assert.equal((await call('room_get_file',{id:file.id})).structuredContent.attachment.sha256,digest);
+  f.store.transaction(()=>withCurrentRoomWriter(f.store.db,'commons',()=>f.store.db.prepare('DELETE FROM messages WHERE room_id=? AND message_id=?').run('commons','evidence-message')));
+  for(const [name,args] of [['room_get_file',{id:file.id}],['room_list_files',{messageIds:['evidence-message']}]]) {
+    const corrupt=await call(name,args);assert.equal(corrupt.isError,true);
+    assert.equal(corrupt.structuredContent?.attachment,undefined);
+    assert.equal(corrupt.structuredContent?.files,undefined);
+    assert.ok(!JSON.stringify(corrupt).includes(file.data));
+  }
+  const revoked=await fetch(f.base+'/oauth/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:f.tokens.refresh_token})});
+  assert.equal(revoked.status,200);
+  assert.equal((await f.rpc('tools/call',{name:'room_get_file',arguments:{id:file.id}})).response.status,401);
+});
+
+test('OAuth work paging continues empty filtered pages and rejects stale cursors', async t => {
+  const f=await setup(t,{normalized:true});
+  for(let i=0;i<7;i++) f.store.command(f.ownerKey,'commons',{id:'propose-'+i,type:'work.proposed',data:{workItemId:'work-'+i,title:'Work '+i,definitionOfDone:'Done',accountableMemberId:'friend-dot'}});
+  const read=async args=>(await f.rpc('tools/call',{name:'room_list_work',arguments:args})).body.result;
+  const first=await read({focus:'results',limit:2});
+  assert.ok(!first.isError,JSON.stringify(first));
+  assert.deepEqual(first.structuredContent.work,[]);
+  assert.equal(first.structuredContent.page.hasMore,true);
+  assert.equal(first.structuredContent.page.nextRead.arguments.cursor,first.structuredContent.page.nextCursor);
+  let page=first.structuredContent,pages=1;
+  while(page.page.hasMore) {
+    assert.ok(pages++<10,'continuation terminates');
+    const next=await read(page.page.nextRead.arguments);
+    assert.ok(!next.isError,JSON.stringify(next));page=next.structuredContent;
+  }
+  assert.equal(page.page.nextCursor,null);assert.equal(pages,4);
+  const all=await read({limit:2});
+  assert.equal(all.structuredContent.work.length,2);
+  f.store.command(f.ownerKey,'commons',{id:'change-observation',type:'message.posted',data:{messageId:'change-observation',body:'Changed observation'}});
+  const stale=await read(all.structuredContent.page.nextRead.arguments);
+  assert.equal(stale.isError,true);
+  assert.equal(stale.structuredContent.code,'stale_work_cursor');
 });

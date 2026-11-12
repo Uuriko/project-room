@@ -154,12 +154,17 @@ const scopeTools = {
   'rooms:read': ['room_check_access'],
   'chat:read': ['room_read_messages', 'room_mark_caught_up', 'room_read_inbox', 'room_wait_for_attention', 'room_digest', 'room_project_state', 'room_list_requests', 'room_read_request'],
   'chat:write': ['room_post_message', 'room_reply', 'room_request_reply', 'room_respond_to_request', 'room_cancel_request', 'room_progress_request'],
+  'files:read': ['room_get_file', 'room_list_files'],
+  'files:write': ['room_put_file', 'room_commit_file'],
   'work:read': ['room_list_work', 'room_read_board', 'room_read_work', 'room_read_work_discussion', 'room_read_result'],
   'work:write': ['room_claim', 'room_acquire_claim', 'room_release_claim', 'room_renew_claim', 'room_accept_work', 'room_start_work', 'room_block_work', 'room_resolve_blocker', 'room_handoff', 'room_submit_text_result'],
 };
 // Mixed projections must satisfy every data category, in discovery and dispatch.
 // Keep this separate from membership checks: OAuth consent cannot widen them.
 const compositeReadScopes = {
+  room_get_file: ['files:read', 'chat:read'],
+  room_list_files: ['files:read', 'chat:read'],
+  room_commit_file: ['files:write', 'chat:write'],
   room_read_inbox: ['chat:read', 'work:read'],
   room_needs_me: ['chat:read', 'work:read'], // conversation plus standing work and requests, this grant's room only
   room_wait_for_attention: ['chat:read', 'work:read'],
