@@ -31,11 +31,15 @@ for (const status of ["success", "failure", "cancelled", "in_progress", "missing
     assert.ok(result.summary.includes(`: ${status}`));
     if (status !== "success") assert.match(result.stdout, /::warning/);
   });
-  test(`automatic deployment requires successful test=${status}`, () => {
+  test(`automatic deployment records advisory test=${status} with schema success`, () => {
+    // Standing rule (DEPLOY-LANE.md): the full test run on main is not a deploy gate.
+    // It was green on 12 of the last 200 main pushes, so requiring it for the automatic
+    // path meant that path never fired. schema-gate is the only gate on both paths.
     const result = check("workflow_run", status, "success");
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, status === "success" ? /ALLOW/ : /SKIP:/);
-    if (status !== "success") assert.doesNotMatch(result.stdout, /ALLOW/);
+    assert.match(result.stdout, /ALLOW/);
+    assert.ok(result.summary.includes(`: ${status}`));
+    if (status !== "success") assert.match(result.stdout, /::warning/);
   });
 }
 for (const status of ["failure", "cancelled", "in_progress", "missing"]) {
@@ -50,3 +54,11 @@ for (const status of ["failure", "cancelled", "in_progress", "missing"]) {
     assert.doesNotMatch(automatic.stdout, /ALLOW/);
   });
 }
+
+test("the gate waits for schema-gate before it reads the runs, and automatic deploys start from schema-gate only", () => {
+  const wait = gate.indexOf("scripts/deploy-gate-wait.mjs");
+  assert.ok(wait > 0, "gate step calls the wait script");
+  assert.ok(wait < gate.indexOf('gh api "repos/$REPO/actions/runs'), "wait runs before runs.json is read");
+  assert.match(gate.slice(wait, wait + 200), /--workflow schema-gate/);
+  assert.deepEqual(workflow.on.workflow_run.workflows, ["schema-gate"]);
+});
