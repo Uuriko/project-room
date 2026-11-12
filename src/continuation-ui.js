@@ -3,7 +3,7 @@ import { createWorkContinuation, workContinuationMarkdown } from './work-continu
 import { clipboard } from './clipboard.js';
 
 // Only an authenticated selected-work read is projected. No writes or new store.
-export function installContinuation({ client, getState }) {
+export function installContinuation({ client, getState, getPortableTarget }) {
   const $ = id => document.getElementById(id), dialog = $('continuation-dialog');
   let entry = null, epoch = 0, copying = false;
   const owns = ticket => Boolean(ticket && entry === ticket && ticket.epoch === epoch && dialog.open
@@ -42,14 +42,14 @@ export function installContinuation({ client, getState }) {
     } catch (error) { if (owns(ticket)) setStatus(error.message || 'Could not load work. Try again.'); }
     finally { if (owns(ticket)) { ticket.loading = false; controls(); } }
   }
-  document.addEventListener('click', event => {
-    const button = event.target.closest('[data-continue-work]');
-    if (!button || dialog.open || !client.session || !client.ownsAccountSession()) return;
-    const state = getState(), workId = button.dataset.continueWork;
+  function open(target) {
+    if (!target || dialog.open || !client.session || !client.ownsAccountSession()) return;
+    const state = getState(), { workId, opener } = target;
     if (state?.room?.id !== client.session.roomId || !Object.hasOwn(state.workItems, workId)) return;
-    entry = { epoch: ++epoch, generation: client.generation, session: client.session, workId, opener: button, loading: false, basis: null };
+    entry = { epoch: ++epoch, generation: client.generation, session: client.session, workId, opener, loading: false, basis: null };
     dialog.showModal(); controls(); void refresh(entry);
-  });
+  }
+  $('portable-to-continuation').addEventListener('click', () => open(getPortableTarget()));
   $('continuation-close').addEventListener('click', close);
   dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
   $('continuation-refresh').addEventListener('click', () => { void refresh(entry); });
