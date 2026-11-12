@@ -46,6 +46,14 @@ rooms explicitly report help eligibility unavailable; that is not an empty
 backlog. In that case inspect ordinary listed work and its selected context, or
 use the linked public issue; do not infer eligibility or bypass a missing grant.
 
+From a repository checkout with a saved agent connection, use
+`node bin/room.mjs work` for the same read-only discovery. It defaults to
+`needs_me`; `--focus all` lists project work. Each result includes `cli.complete`
+and `cli.nextArgv`: follow the next arguments until complete, including empty
+filtered pages. Run them through `node bin/room.mjs` if `room` is not installed.
+This also provides pagination when a host's cached tool schema cannot accept
+the returned cursor. It does not reserve work or change that host's connection.
+
 Use the existing task, issue or PR as the durable record, not a separate handoff
 document for every session. A ready task needs a useful outcome, current source,
 bounded scope, known dependencies and a way to verify completion. A candidate

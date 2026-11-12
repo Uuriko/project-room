@@ -48,6 +48,9 @@ test('work CLI traverses bounded native pages without writes and rejects stale c
   assert.equal(executed.page.hasMore, true); assert.equal(executed.cli.complete, false);
   assert.equal(command.stdout.includes(identity.secret), false);
   const calls = [], outputs = [], io = { connection: async () => conn, out: s => outputs.push(s), fetchImpl: (url, options) => { calls.push(options?.method ?? 'GET'); return fetch(url, options); } };
+  await workCommand([], io);
+  const defaults = JSON.parse(outputs.pop());
+  assert.equal(defaults.focus, 'needs_me'); assert.equal(typeof defaults.cli.complete, 'boolean');
   await workCommand(['--focus', 'all', '--limit', '1'], io);
   const first = JSON.parse(outputs.pop());
   assert.equal(first.page.limit, 1); assert.equal(first.page.hasMore, true); assert.equal(first.work.length, 1);
@@ -59,6 +62,11 @@ test('work CLI traverses bounded native pages without writes and rejects stale c
   await workCommand(first.cli.nextArgv.slice(2), io);
   const second = JSON.parse(outputs.pop());
   assert.notEqual(second.work[0].id, first.work[0].id);
+  await workCommand(['--focus', 'all', '--limit', '100'], io);
+  const capped = JSON.parse(outputs.pop());
+  assert.equal(capped.page.limit, 4); assert.equal(capped.cli.nextArgv[5], '100');
+  await workCommand(capped.cli.nextArgv.slice(2), io);
+  assert.equal(JSON.parse(outputs.pop()).cli.complete, true);
   await workCommand(['--focus', 'results', '--limit', '4'], io);
   const empty = JSON.parse(outputs.pop());
   assert.deepEqual(empty.work, []); assert.equal(empty.cli.complete, false, 'empty filtered page can still have more sources');
