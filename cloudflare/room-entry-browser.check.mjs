@@ -86,8 +86,10 @@ test('bundled default doors reach minimal auth and inherit invitation, legacy, a
     const taskPrompt = await page.locator('#entry-agent-prompt').inputValue();
     assert.ok(taskPrompt.includes(origin + '/?room=qa#pr-record/work/item-1'));
     assert.ok(!taskPrompt.includes('DO_NOT_COPY'));
+    await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{globalThis.copiedEntryPrompt=text;}}}));
     await page.getByRole('button',{name:'Copy agent instructions',exact:true}).click();
-    assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),taskPrompt);
+    await page.waitForFunction(() => globalThis.copiedEntryPrompt === globalThis.document.querySelector('#entry-agent-prompt').value);
+    assert.equal(await page.evaluate(()=>globalThis.copiedEntryPrompt),taskPrompt);
     // Observe the browser's first destination before app routing handles each
     // fragment. Fragments never reach the HTTP server or the Worker Request.
     for (const hash of ['#join/'+'A'.repeat(43)+'/work/item-1','#invite/'+'B'.repeat(43),'#code/abc-def-ghj','#room/qa-room','#join/']) {
