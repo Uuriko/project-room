@@ -618,7 +618,7 @@ export function ensureNativeAgentRestoreSchema(db, names) {
   if (["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_host_disconnects"].some(table => names.has(table))) db.exec(wakeListenerLeaseSchema);
   if (names.has("agent_wake_room_activity")) db.exec(wakeRoomActivitySchema);
   if (names.has("integrity_failures")) db.exec(INTEGRITY_FAILURES_SCHEMA);
-  if (["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks"].some(table => names.has(table))) db.exec(PATROL_SCHEMA);
+  if (["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks", "patrol_rotation"].some(table => names.has(table))) db.exec(PATROL_SCHEMA);
   if (PROJECT_MAP_TABLES.some(table => names.has(table))) db.exec(PROJECT_MAP_SCHEMA);
   if (names.has("projection_shape_upgrades")) db.exec(PROJECTION_SHAPE_UPGRADES_SCHEMA);
   if (OAUTH_PROVIDER_TABLES.some(table => table.startsWith("oauth_provider_") && names.has(table))) ensureOAuthProviderSchema(db);
