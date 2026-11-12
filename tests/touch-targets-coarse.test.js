@@ -132,3 +132,17 @@ test("checkbox inputs keep their intentional 20px size (exempt from the floor)",
   assert.ok(m, ".check input rule missing");
   assert.ok(/min-height\s*:\s*20px/.test(m[1]), ".check input should keep min-height: 20px");
 });
+
+// Design pass 2026-11-12: the suggestion chips, sidebar rows and message work
+// links measured 36/40/14px on a phone because their base rules sit later in
+// the file than the first coarse block. The last coarse block must name them,
+// and must come after every base rule for the same selector.
+for (const selector of [".suggestion-chip", ".suggestion-dismiss", ".channel", ".work-link"]) {
+  test(`final coarse block floors ${selector} after its last base rule`, () => {
+    const lastCoarseStart = css.lastIndexOf("@media (pointer: coarse)");
+    const lastBase = css.lastIndexOf(`\n${selector} {`, lastCoarseStart);
+    assert.ok(lastBase >= 0, `${selector} base rule missing before the final coarse block`);
+    const block = css.slice(lastCoarseStart);
+    assert.ok(block.includes(selector), `${selector} missing from the final coarse block`);
+  });
+}
