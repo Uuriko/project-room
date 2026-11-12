@@ -6723,7 +6723,7 @@ function resultRow(item) {
   const open = !external
     ? `<button type="button" data-read-result="${esc(item.id)}" data-focus-key="result:${esc(item.id)}">${title}</button>`
     : `<a href="${safeUrl(item.receipt.evidenceUrl)}" target="_blank" rel="noreferrer noopener" data-focus-key="result:${esc(item.id)}">${title} ↗</a>`;
-  return `<article class="result-row" data-result-work-id="${esc(item.id)}">${open}<p>${esc(summary.slice(0, 200).join(""))}${summary.length > 200 ? "…" : ""}</p><div class="result-meta"><span>${result.status === "approved" ? "Approved" : "Completed"}${external ? " · External evidence" : ""}</span><button type="button" class="text-button" data-result-work="${esc(item.id)}">Work details</button></div></article>`;
+  return `<li class="result-row" data-result-work-id="${esc(item.id)}">${open}<p>${esc(summary.slice(0, 200).join(""))}${summary.length > 200 ? "…" : ""}</p><div class="result-meta"><span>${result.status === "approved" ? "Approved" : "Completed"}${external ? " · External evidence" : ""}</span><button type="button" class="text-button" data-result-work="${esc(item.id)}">Work details</button></div></li>`;
 }
 const { clear: clearResultComparison, sync: syncResultComparisons, load: loadResultComparison } =
   createResultComparison({ client, getState: () => state, esc });

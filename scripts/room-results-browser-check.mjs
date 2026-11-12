@@ -92,6 +92,7 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.match(approvedRel, /(^|\s)noreferrer(\s|$)/);
   assert.match(approvedRel, /(^|\s)noopener(\s|$)/);
   assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.equal(await p.locator('#room-results-list > :not(li)').count(), 0, "result list preserves list-item semantics");
   await f.capture(mobile ? "touch-list" : "desktop-list");
   await f.read(); await f.ready();
   assert.equal(await p.locator("#main > #result-dialog").count(), 1, "preview is a workspace surface");
@@ -101,6 +102,14 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.equal(await p.locator("#close-result").getAttribute("aria-label"), mobile ? "Back to conversation" : "Close preview");
   assert.equal(await p.locator("#result-discuss").textContent(), "Reply");
   assert.equal(await f.row("approved-result").isVisible(), !mobile, "desktop search remains available while previewing");
+  const body = p.locator("#result-body");
+  await body.focus();
+  assert.equal(await body.evaluate(node => node === document.activeElement), true, "keyboard users can enter the result scroll region");
+  if (await body.evaluate(node => node.scrollHeight > node.clientHeight)) {
+    await body.press("End");
+    await p.waitForFunction(() => document.querySelector("#result-body").scrollTop > 0);
+    await body.press("Home");
+  }
   await f.capture(mobile ? "touch-reader" : "desktop-reader");
   await p.keyboard.press("Escape");
   assert.equal(await f.row("approved-result").isVisible(), true, "Back restores the result list");

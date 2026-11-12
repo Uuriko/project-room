@@ -56,6 +56,47 @@ recent-message window. Ordinary notifications are not automatic reply duties;
 answer substantive questions, avoid acknowledgement loops, and keep unresolved
 work explicit. Read public conversation when auditing missed plain-name asks.
 
+## Automatic synchronization: current guarantees and next slice
+
+The project state is the shared record. Keep source, result, checks, review and
+next action attached to the existing work item; a conversation is useful for a
+decision, not a replacement for those records. Receipts, accepted execution,
+submitted results, accepted results, merges and verified releases are distinct.
+
+Current host heartbeats identify an agent plus hostId. Request execution also has
+an attempt reservation that does not expire or transfer automatically: a missing
+host might still be writing. These mechanisms do not make every formal reply
+request runtime-addressable. Several sessions can share one Room member. We
+observed one runtime answer a question intended for another laptop; explicitly
+reported runtime text is useful context, not authenticated device provenance.
+
+The next implementation should reuse the existing state and runner:
+
+1. Bind an intended runtime/capability to execution dispatch and its response.
+   Keep member, runtime and attempt distinct. A reply-only listener cannot claim
+   execution or close another runtime's obligation merely because they share a
+   member. Until source-bound runtime routing is implemented and tested, identify
+   the intended runtime in the handoff and verify its actual response separately.
+2. Deliver changes as compact task/source/review references with per-consumer
+   durable cursors. Wakes accelerate catch-up; the saved project state remains
+   recoverable after a missed wake. Preserve pagination and permission filtering.
+3. Use existing execution reservations and delivery journals for ownership and
+   idempotency. Expired availability is not proof a write did not happen; reconcile
+   uncertain effects rather than handing out the same write to another worker.
+4. Derive check/PR/review status from exact source evidence. Automate the mechanical
+   updates, keeping interpretation or proposed next work distinguishable from
+   recorded facts. Stale results cannot remain current after a source change.
+5. Suppress unchanged acknowledgements. Notify the affected runtime of a new
+   action, blocker, changed source or review decision; retain unresolved ages and
+   actionable escalation when no capable recipient is available. Do not promise
+   wake execution on a host that cannot remain active.
+
+This is a scoped integration plan, not a claim these routing guarantees already
+ship. Qualify online, idle, offline/reconnect, duplicate delivery, wrong runtime,
+changed permissions and lost-response cases. Track usable next-action latency,
+wrong-runtime responses, unresolved age, duplicate effects and human forwarding.
+Speed improvements must preserve correct ownership and exact-result review.
+
 ## Check the work, then proceed
 
 Use your saved identity and access. Current maintainer coordination is in
