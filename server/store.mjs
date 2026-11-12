@@ -4870,7 +4870,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const now = this.now();
       if (expiresAt <= now || expiresAt > now + 30 * 86400000) fail(422, "invalid_expiry", "Invitations expire within 30 days");
       if (issuer.member.revision !== expectedIssuerMemberRevision) fail(409, "stale_member_revision", "Issuer membership changed; review the invitation again");
-      const room = currentInviteContext(this,roomId,{memberIds:[issuer.member.id,intendedMemberId],census:true})?.room ?? this.room(roomId);
+      const selfLeftCandidateId = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, intendedAccountId)?.member_id;
+      const room = currentInviteContext(this,roomId,{memberIds:[issuer.member.id,intendedMemberId,selfLeftCandidateId],census:'active'})?.room ?? this.room(roomId);
       if (issuer.member.id !== room.state.room.ownerId && permissions.some(permission => !issuer.member.permissions.includes(permission))) {
         fail(403, "access_denied", "A membership administrator cannot offer authority they do not hold");
       }
@@ -4909,7 +4910,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const row = this.db.prepare("SELECT i.*,r.projection FROM membership_invitations i JOIN rooms r ON r.id=i.room_id WHERE i.token_hash=?").get(hash(token));
       if (!row) fail(404, "invitation_unavailable", "Invitation is unavailable");
       this.verifyInvitationRecord(row.id);
-      const room = currentInviteContext(this,row.room_id,{memberIds:[row.issuer_member_id,row.intended_member_id],census:true})?.room.state ?? JSON.parse(row.projection);
+      const room = currentInviteContext(this,row.room_id,{memberIds:[row.issuer_member_id,row.intended_member_id],census:'active'})?.room.state ?? JSON.parse(row.projection);
       let status = invitationStatus(row, this.now());
       if (status === "pending") {
         const issuerAccount = row.issuer_account_id === null ? null
@@ -5052,7 +5053,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (row.revision !== expectedRevision) fail(409, "stale_invitation_revision", "Invitation changed; preview it again");
       const now = this.now();
       if (now >= row.expires_at) fail(410, "invitation_expired", "Invitation expired");
-      const context = currentInviteContext(this,row.room_id,{memberIds:[row.issuer_member_id,row.intended_member_id],census:true});
+      const selfLeftCandidateId = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(row.room_id, row.intended_account_id)?.member_id;
+      const context = currentInviteContext(this,row.room_id,{memberIds:[row.issuer_member_id,row.intended_member_id,selfLeftCandidateId],census:'active'});
       const room = context?.room ?? this.room(row.room_id);
       const issuerAccount = row.issuer_account_id === null ? null
         : this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);

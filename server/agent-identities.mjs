@@ -801,7 +801,7 @@ export class AgentIdentities {
       // identity_conflict ("Member id is already taken"). memberOf reads own
       // properties only; a name that exists solely on the prototype is a
       // reserved name and is refused with a clean 422 here.
-      const roomMembers = (currentInviteContext(this.store, roomId, { census: true })?.room.state.members
+      const roomMembers = (currentInviteContext(this.store, roomId, { memberIds: [resolvedMemberId], census: 'active' })?.room.state.members
         ?? this.store.roomAuthority(roomId).members) ?? {};
       if (!Object.hasOwn(roomMembers, resolvedMemberId) && resolvedMemberId in roomMembers)
         fail(422, "invalid_identity", "memberId is a reserved name");
