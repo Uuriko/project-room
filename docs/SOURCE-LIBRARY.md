@@ -84,5 +84,6 @@ library adds rationale, vendored/adapted code, rejected alternatives and usage.
 
 Measure trials that become useful integrations, time from discovery to verified
 use, unused imports, stale pinned versions and update effort. Do not optimize
-for links collected or lines copied. Start by finishing the two Buzz trials
-before collecting dozens more candidates.
+for links collected or lines copied. The initial Buzz trials are bounded work,
+not a requirement that the product remain a wiki or collaboration application.
+Compare broader opportunities using [agent utility trials](AGENT-UTILITY-TRIALS.md).
