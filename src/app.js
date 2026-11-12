@@ -356,6 +356,7 @@ let agentConnectionsUI = null;
 let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
+let docsUi = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let partialWorkSnapshot = false, inspectedWorkRecord = null;
 // JDOT-COH-NAV begin
@@ -518,6 +519,7 @@ const client = new RoomClient({
     partialWorkSnapshot = snapshot.snapshotVersion === 2;
     inspectedWorkRecord = null;
     state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
+    if (session && (session.roomId !== identity.roomId || session.member?.id !== identity.member?.id)) docsUi?.reset();
     session = identity;
     // A successful room snapshot supersedes a denied deep link from an
     // earlier room/account. Keep unrelated account failures visible.
@@ -637,6 +639,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     partialWorkSnapshot = false; inspectedWorkRecord = null;
+    docsUi?.reset();
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
@@ -8540,8 +8543,12 @@ const ready = (async () => {
 }
 // --- end W board ---
 
+docsUi = installRoomDocs({client, getState: () => state, getSession: () => session});
 return ready;
 }
 
 // Cached HTML from before the entry split still names this module directly.
 if (document.querySelector('script[type="module"][src$="/src/app.js"]')) startApp();
+
+// Experimental room documents UI; uses the same authenticated RoomClient as the room.
+import { installRoomDocs } from "./room-docs-ui.js";
