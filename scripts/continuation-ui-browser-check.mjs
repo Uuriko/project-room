@@ -56,3 +56,32 @@ test('continuation uses the selected authenticated work and requires refresh whe
   assert.equal(await page.locator('#continuation-preview').inputValue(), '', 'closed session never restores the held private read');
   assert.deepEqual(errors, []);
 });
+
+test('continuation invalidates an observed viewer access change without a work revision change', { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  let browser;
+  t.after(async () => {
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  const page = await browser.newPage();
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page, f.keys.guest);
+  await openSearch(page); await page.locator('#message-search').fill('Test: prepare an agenda');
+  await page.locator('#search-list [data-open-work="test-handoff"]').click();
+  const card = page.locator('[data-work-record-id="test-handoff"]');
+  await card.locator('.work-details > summary').click();
+  await card.getByRole('button', { name: 'Continue with an agent', exact: true }).click();
+  await page.locator('#continuation-copy:enabled').waitFor();
+  const member = f.store.snapshot(f.keys.owner, 'commons').state.members.guest;
+  f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: 'guest', expectedMemberRevision: member.revision, active: true, permissions: ['accept_work'] } });
+  await page.getByText('Your access changed. Refresh before copying.', { exact: true }).waitFor();
+  assert.equal(await page.locator('#continuation-copy').isDisabled(), true);
+  await page.locator('#continuation-refresh').click();
+  await page.locator('#continuation-copy:enabled').waitFor();
+  assert.match(await page.locator('#continuation-preview').inputValue(), /"accept_work"/);
+  assert.match(await page.locator('#continuation-preview').inputValue(), /"workRevision": 0/);
+});
