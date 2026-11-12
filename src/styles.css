@@ -1773,7 +1773,7 @@ body:has(#main:not([hidden])) .site-footer { display: none; }
 .signin-more[open] > summary::after { content: " −"; }
 .signin-more > summary::-webkit-details-marker { display: none; }
 .signin-more > a, .signin-more > button { display: block; margin: .25rem auto; min-height: 44px; padding: .6rem; font-size: var(--text-sm); }
-#signin-entry-routes { margin-top: .6rem; }
+#signin-entry-routes { margin: .6rem 0 1rem; }
 #signin-entry-routes #agent-signin-button { justify-self: center; color: var(--muted); text-decoration: none; font-weight: 400; }
 #signin-entry-routes #join-code-link { justify-self: center; display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-sm); text-decoration: none; }
 [data-signin-form="password"] > .signin-more, #signup-password-hint { grid-column: 1 / -1; }
