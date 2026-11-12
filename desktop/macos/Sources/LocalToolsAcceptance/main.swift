@@ -101,6 +101,11 @@ final class LocalToolsTests {
             LocalHostReadiness.notice(host: base.merging(changes) { _, new in new }, local: state ?? local, connection: connection)
         }
         expectEqual(notice([:]), nil)
+        let recovering = base.merging(["phase": "recovery_pending"]) { _, new in new }
+        expectEqual(LocalHostReadiness.conversationNotice(host: recovering), "This Mac’s agent is reconciling earlier work. Open My Mac for status.")
+        expectEqual(LocalHostReadiness.notice(host: recovering, local: local, connection: connection), "This Mac’s agent is reconciling earlier work.")
+        let reporting = base.merging(["phase": "report_reconciliation_pending"]) { _, new in new }
+        expectEqual(LocalHostReadiness.notice(host: reporting, local: local, connection: connection), "This Mac’s agent saved a result and is waiting to report it to the room.")
         let unselected = base.merging(["phase": "assistant_not_selected"]) { _, new in new }
         expectEqual(LocalHostReadiness.conversationNotice(host: unselected), "This Mac’s agent is not selected for its room. Ask a room administrator to select it using Connect in room settings.")
         // Basic conversation remains available with no computer tool grant.
