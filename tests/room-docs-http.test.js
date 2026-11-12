@@ -78,3 +78,17 @@ test("real HTTP traverses 501 documents without silent truncation or update reor
   assert.deepEqual(other.data.docs, []);
   for (const query of ["limit=0", "limit=501", "limit=no", "after=BAD", "limit=1&limit=2", "unknown=x"]) assert.equal((await call(`/api/rooms/docs-a/docs?${query}`, owner.secret)).status, 422, query);
 });
+
+test("archived room documents remain readable but create and update are refused", async t => {
+  const { store, call, owner } = await fixture(t);
+  const path = "/api/rooms/docs-a/docs/spec";
+  assert.equal((await call(path, owner.secret, { title: "Spec", body: "retained", baseRev: 0 })).status, 201);
+  const archived = await call("/api/rooms/docs-a/commands", owner.secret, { id: "archive-docs-room", type: "room.archived", data: {} });
+  assert.equal(archived.status, 201);
+  for (const [selected, baseRev] of [[path, 1], ["/api/rooms/docs-a/docs/new", 0]]) {
+    const denied = await call(selected, owner.secret, { title: "Bad", body: "no", baseRev });
+    assert.equal(denied.status, 409); assert.equal(denied.data.error.code, "room_archived");
+  }
+  assert.equal((await call(path, owner.secret)).data.doc.rev, 1);
+  assert.equal(store.db.prepare("SELECT count(*) n FROM room_doc_revisions WHERE room_id=?").get("docs-a").n, 1);
+});

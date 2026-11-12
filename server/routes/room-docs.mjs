@@ -9,7 +9,7 @@ function authed(ctx, { write }) {
   const selected = ctx.roomCredentials(ctx.req, ctx.url);
   const fence = selected.mode === "account" ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
   const check = auth => {
-    if (!auth?.member?.id) ctx.reject(401, "unauthenticated", "Room membership required");
+    if (!auth?.member?.id || auth.member.active === false) ctx.reject(401, "unauthenticated", "Room membership required");
     if (selected.bearer && auth.credentialScope !== "room") ctx.reject(403, "access_denied", "Bearer account sessions are not accepted");
     const need = write ? ["rooms:write", "rooms:*"] : ["rooms:read", "rooms:write", "rooms:*"];
     if (auth.kind === "api-key" && !(auth.apiKeyScopes ?? []).some(scope => need.includes(scope))) {

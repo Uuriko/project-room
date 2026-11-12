@@ -1,3 +1,4 @@
+import { ServiceError } from "./service-error.mjs";
 // Room docs (Linear parity: Docs). OFF unless ROOM_DOCS=1.
 // Markdown documents with slug ids, shared by every room member, with full
 // revision history. Writes carry baseRev (0 to create); a write against a
@@ -44,6 +45,7 @@ export function getDoc(db, { roomId, docId, rev = null }) {
 // write and its revision row land together or not at all.
 export function writeDoc(store, { roomId, docId, title, body, baseRev, author, now = Date.now() }) {
   const db = store.db;
+  if (db.prepare("SELECT archived_at FROM rooms WHERE id=?").get(roomId)?.archived_at != null) throw new ServiceError(409, "room_archived", "This room is archived; documents are read only");
   ensure(db);
   const conflict = store.transaction(() => {
     const cur = db.prepare("SELECT rev FROM room_docs WHERE room_id = ? AND doc_id = ?").get(roomId, docId);

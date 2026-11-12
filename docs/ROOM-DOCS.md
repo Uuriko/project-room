@@ -42,3 +42,15 @@ back to code without these tables' restore/purge registrations is not qualified:
 retain a compatible reader/restore build and a verified backup. Disabling the
 flag hides the API but does not delete documents. Existing maintainer wiki pages
 and repository maps remain separate data/permission domains.
+
+Ownership and retention: documents are room-owned shared records, not the
+personal workspace of their latest author. Any active room member may edit;
+there is no additional posting permission in this preview. API-key write scope
+and current membership are rechecked after reading the request body. Archived
+rooms permit reads but refuse creates/updates with `409 room_archived`.
+Unlinking a member revokes their access, not other members' access to room records.
+Personal-room account deletion and room purge erase document bodies/history.
+In a retained shared room, author member ids and document/history text remain
+room records; this patch does not redact mentions or offer per-author erasure.
+The shared-record retention policy needs explicit product/privacy review before
+enabling the feature; it must not be described as complete account erasure.
