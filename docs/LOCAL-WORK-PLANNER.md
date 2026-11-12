@@ -32,6 +32,60 @@ No automatic cache reuse, claims, scheduler, listener or GitHub status is create
 Dispatch through the existing runner/native process tools after obtaining the
 required ownership; this command is the deterministic payload, not a second runner.
 
+### Deliver a deterministic result through an existing request
+
+The existing request runner accepts a locally configured verification host:
+
+```json
+{
+  "kind": "local-verification",
+  "binding": {
+    "origin": "https://room.trydemigod.com",
+    "roomId": "your-room",
+    "memberId": "existing-member",
+    "requestMessageId": "existing-request",
+    "requestRevision": 0
+  },
+  "verification": {
+    "checkout": "/absolute/clean/checkout",
+    "expectedHead": "<40-character-head-sha>",
+    "baseSha": "<40-character-base-sha>",
+    "recipe": "affected-unit",
+    "timeoutMs": 1800000
+  }
+}
+```
+
+Keep this configuration local. Reuse the saved connection via `ROOM_AGENT_CONFIG`
+(the private connection directory); do not copy credentials into the recipe.
+Use the actual request revision from its complete selected context:
+
+```sh
+node scripts/run-room-request.mjs --check /absolute/recipe.json
+node scripts/run-room-request.mjs existing-request /absolute/private-journal.sqlite /absolute/recipe.json
+```
+
+`--check` validates configuration and platform support, not source readiness or
+Room permission. The payload checks the clean source immediately before running.
+The host pins origin, room, member, request ID and revision; message bodies cannot
+select code or override its recipe. This mode is one-shot: `--auto` is refused.
+Only macOS/Linux process-group cancellation is supported. The existing runner
+owns the service claim, heartbeat and durable response journal. `runPlannedRequest`
+can use the same host as its configured `execute` function; bind the selected job
+revision to `verification.expectedHead` in local operator configuration.
+
+The reply includes status, source/base, selection hash/count, platform, timing and
+local receipt ID/digest. Logs, local checkout paths and raw test errors stay local.
+A failed check is an answered request requiring investigation; it does not mark
+linked work complete. A temporary delivery failure retries the saved response
+without invoking the recipe again. Interruptions preserve local evidence, but an
+aborted runner may retain an unknown attempt requiring reconciliation. Retain
+both the journal and receipt; never delete them to force an unchanged rerun.
+
+Qualification includes an actual Room fixture service, SQLite journal, real Node
+test subprocess, failed checks, delivery failure/recovery, and the existing CLI.
+This is not proof of unattended production dispatch or an idle session wake.
+
 `node scripts/plan-local-work.mjs snapshot.json` ranks an operator-supplied
 snapshot and emits an advisory plan. It does not discover devices, claim work,
 start models, execute shell commands, or enable background operation.

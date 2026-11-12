@@ -37,26 +37,34 @@ export function affectedPlan({checkout, baseSha, env}) {
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module','-e',code,baseSha],
     {cwd:checkout,env,encoding:'utf8',timeout:60000,maxBuffer:8*1024*1024}));
 }
-export async function executeUnits({checkout, baseSha, env, logPath, timeoutMs}) {
+export async function executeUnits({checkout, baseSha, env, logPath, timeoutMs, signal}) {
   if (platform() === 'win32') throw Error('process_group_cancellation_not_supported');
+  signal?.throwIfAborted();
   const fd = openSync(logPath, 'wx', 0o600);
   try {
     return await new Promise(resolveResult => {
       const child = spawn(process.execPath, ['scripts/unit-ci.mjs','--affected',`--base=${baseSha}`],
         {cwd:checkout,env,detached:true,stdio:['ignore',fd,fd]});
-      let timedOut = false;
-      const timer = setTimeout(() => {timedOut = true; try {process.kill(-child.pid, 'SIGKILL');} catch {}}, timeoutMs);
-      child.once('error', () => {clearTimeout(timer); resolveResult({status:null, signal:null, spawnFailed:true, timedOut:false});});
-      child.once('close', (status, signal) => {clearTimeout(timer); resolveResult({status,signal,timedOut});});
+      let timedOut = false, cancelled = false;
+      const kill = () => {try {process.kill(-child.pid, 'SIGKILL');} catch {}};
+      const abort = () => {cancelled = true; kill();};
+      const timer = setTimeout(() => {timedOut = true; kill();}, timeoutMs);
+      const cleanup = () => {clearTimeout(timer); signal?.removeEventListener('abort',abort);};
+      signal?.addEventListener('abort',abort,{once:true});
+      if (signal?.aborted) abort();
+      child.once('error', () => {cleanup(); resolveResult({status:null, signal:null, spawnFailed:true, timedOut:false,cancelled});});
+      child.once('close', (status, childSignal) => {cleanup(); resolveResult({status,signal:childSignal,timedOut,cancelled});});
     });
   } finally {closeSync(fd);}
 }
 
 export async function verifyLocal(options, {plan = affectedPlan, execute = executeUnits} = {}) {
-  const {checkout, expectedHead, baseSha, recipe, timeoutMs = 1800000} = options;
-  if (Object.keys(options).some(key => !['checkout','expectedHead','baseSha','recipe','timeoutMs'].includes(key))
+  const {checkout, expectedHead, baseSha, recipe, timeoutMs = 1800000, signal} = options;
+  if (Object.keys(options).some(key => !['checkout','expectedHead','baseSha','recipe','timeoutMs','signal'].includes(key))
     || typeof checkout !== 'string' || !isAbsolute(checkout) || !sha(expectedHead) || !sha(baseSha)
+    || (signal !== undefined && !(signal instanceof AbortSignal))
     || recipe !== 'affected-unit' || !Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 1800000) throw Error('invalid_local_verification_request');
+  signal?.throwIfAborted();
   const cwd = realpathSync(checkout);
   if (realpathSync(git(cwd, ['rev-parse','--show-toplevel'])) !== cwd) throw Error('checkout_must_be_repository_root');
   source(cwd, expectedHead);
@@ -78,14 +86,16 @@ export async function verifyLocal(options, {plan = affectedPlan, execute = execu
       || !/^[A-Za-z0-9_./-]+$/.test(file) || file.startsWith('/') || file.split('/').includes('..'))) throw Error('invalid_affected_plan');
     const planHash = hash(files.join('\n'));
     source(cwd,expectedHead);
+    signal?.throwIfAborted();
     const startedAt = new Date().toISOString();
     const artifactNames = [`unit-affected-attempt-${runId}.json`, `unit-junit-affected-attempt-${runId}.xml`];
     const unitPath = join(cwd,'test-results',artifactNames[0]);
     if (existsSync(unitPath)) throw Error('run_artifact_already_exists');
     let execution, reason = null;
-    try {execution = await execute({checkout:cwd,baseSha,env:{...env,GITHUB_SHA:expectedHead,GITHUB_RUN_ID:runId,GITHUB_RUN_ATTEMPT:runId},logPath:join(dir,'process.log'),timeoutMs});}
+    try {execution = await execute({checkout:cwd,baseSha,env:{...env,GITHUB_SHA:expectedHead,GITHUB_RUN_ID:runId,GITHUB_RUN_ATTEMPT:runId},logPath:join(dir,'process.log'),timeoutMs,signal});}
     catch {execution = {status:null,signal:null}; reason = 'execution_unconfirmed';}
-    if (execution.timedOut) reason = 'timeout';
+    if (signal?.aborted || execution.cancelled) reason = 'cancelled';
+    else if (execution.timedOut) reason = 'timeout';
     else if (execution.spawnFailed) reason = 'spawn_failed';
     else if (execution.signal) reason = 'signal';
     try {source(cwd,expectedHead);} catch {reason = 'source_changed';}
