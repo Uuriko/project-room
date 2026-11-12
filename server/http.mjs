@@ -1,7 +1,7 @@
 import { connectFunnelEnabled, createConnectFunnel } from "./connect-funnel.mjs";
 import {createAccountAgentEnrollment} from './account-agent-enrollment.mjs';
 import { writeStoreRoute } from "./store-pages.mjs";
-import {renderLobbyAgentPastePage} from './agent-paste-copy.mjs';
+import {renderAgentPasteOrigin, renderLobbyAgentPastePage} from './agent-paste-copy.mjs';
 import {currentReturnBriefMessages} from './current-return-brief.mjs';
 import { readAccountRoomRow } from './room-lifecycle.mjs';
 import {isCurrentRoom} from './current-room-repository.mjs';
@@ -2693,7 +2693,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
-        if(canonical==='/docs/agents/paste'&&url.searchParams.get('room')==='project-room-lobby')data=Buffer.from(renderLobbyAgentPastePage(data.toString('utf8')));
+        if (canonical === '/docs/agents/paste') {
+          let html = data.toString('utf8');
+          if (url.searchParams.get('room') === 'project-room-lobby') html = renderLobbyAgentPastePage(html);
+          data = Buffer.from(renderAgentPasteOrigin(html, expectedOrigin()));
+        }
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
         if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicSearchPageCsp(canonical, expectedOrigin()));
         // JDOT-PUBLIC-CSP-RUM end
