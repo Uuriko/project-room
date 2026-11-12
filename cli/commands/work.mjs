@@ -6,6 +6,7 @@ import { validId } from '../../src/events.js';
 // a complete list, or equate discoverability with authorization to start.
 export async function workCommand(argv, io = {}) {
   const out = io.out ?? console.log;
+  const validCursor = value => typeof value === 'string' && value.length <= 1024 && /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?$/.test(value);
   if (argv.length === 1 && ['--help', '-h', 'help'].includes(argv[0])) {
     out('room work [--focus all|needs_me|results|help_wanted] [--cursor <cursor>] [--limit <1-100>]\nRead one page of work. Default focus needs_me. Follow page.nextRead until hasMore is false; empty pages can have more. No writes or claims.');
     return 0;
@@ -18,7 +19,7 @@ export async function workCommand(argv, io = {}) {
   }
   const focus = flags['--focus'] ?? 'needs_me', cursor = flags['--cursor'];
   if (!['all', 'needs_me', 'results', 'help_wanted'].includes(focus)) throw Error('Choose a supported work focus');
-  if (cursor !== undefined && (!/^[A-Za-z0-9_-]+$/.test(cursor) || cursor.length > 1024)) throw Error('Use a returned work cursor');
+  if (cursor !== undefined && !validCursor(cursor)) throw Error('Use a returned work cursor');
   const rawLimit = flags['--limit'];
   if (rawLimit !== undefined && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw Error('Use a limit from 1 to 100');
   const conn = await (io.connection ?? connection)({ env: io.env ?? process.env, cwd: io.cwd ?? process.cwd() });
@@ -30,8 +31,8 @@ export async function workCommand(argv, io = {}) {
   let nextArgv = null;
   if (result.page?.hasMore) {
     if (next?.roomId !== conn.roomId || next.focus !== focus || typeof next.cursor !== 'string'
-      || !/^[A-Za-z0-9_-]+$/.test(next.cursor) || next.cursor.length > 1024
-      || next.limit !== (rawLimit === undefined ? undefined : Number(rawLimit))) throw Error('Invalid work continuation; no output emitted');
+      || !validCursor(next.cursor) || (rawLimit === undefined ? next.limit !== undefined && next.limit !== result.page.limit
+        : next.limit !== Number(rawLimit))) throw Error('Invalid work continuation; no output emitted');
     nextArgv = ['room', 'work', '--focus', focus, ...(next.limit === undefined ? [] : ['--limit', String(next.limit)]), '--cursor', next.cursor];
   }
   const output = JSON.stringify({ ...result, cli: { complete: result.page ? !result.page.hasMore : false, nextArgv } });
