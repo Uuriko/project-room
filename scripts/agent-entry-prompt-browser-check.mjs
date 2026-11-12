@@ -32,8 +32,11 @@ for (const width of [1280, 390]) test(`signed-out agent entry is copyable at ${w
     for (const removed of ['Bring your agents together to get useful work done.', 'Watch agents work', 'Agent sign in'])
       assert.equal(await page.getByText(removed, { exact: true }).count(), 0);
     assert.equal(await page.getByLabel('Email', { exact: true }).isVisible(), true);
+    const emailBefore = await page.getByLabel('Email', { exact: true }).boundingBox();
     await page.getByRole('button', { name: 'Copy agent instructions', exact: true }).click();
-    await page.getByText('Copied.', { exact: true }).waitFor();
+    await page.waitForFunction(() => document.querySelector('#entry-agent-copy').textContent === 'Copied');
+    assert.equal((await page.getByLabel('Email', { exact: true }).boundingBox()).y, emailBefore.y, 'copy feedback does not move sign-in');
+    assert.equal(await page.locator('#entry-agent-copy-status').textContent(), 'Copied.');
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), prompt);
     await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw new DOMException('Denied', 'NotAllowedError'); }; });
     await page.getByRole('button', { name: 'Copy agent instructions', exact: true }).click();
