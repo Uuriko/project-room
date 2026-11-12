@@ -1,3 +1,4 @@
+import { requestRuntimeAccess } from './request-runtime-target.mjs';
 import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
 import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
 import {validId} from '../src/events.js';
@@ -47,7 +48,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    if(eventCache.has(sequence))return eventCache.get(sequence);
    const scalar=db.prepare('SELECT id,length(CAST(body AS BLOB)) AS bytes FROM events WHERE room_id=? AND sequence=?').get(roomId,sequence);
    if(!scalar||!validId(scalar.id)||scalar.bytes>131072)changed();chargeCurrentReadBudget(b,scalar.bytes+128);
-   const row=db.prepare("SELECT sequence,id,json_extract(body,'$.id') AS eventId,json_extract(body,'$.roomId') AS roomId,json_type(body,'$.data') AS dataType,json_extract(body,'$.type') AS type,json_extract(body,'$.actorId') AS actorId,json_extract(body,'$.at') AS at,json_extract(body,'$.data.messageId') AS messageId,json_extract(body,'$.data.requestMessageId') AS requestMessageId,json_extract(body,'$.data.responseToRequestId') AS responseToRequestId,json_extract(body,'$.data.reason') AS reason FROM events WHERE room_id=? AND sequence=?").get(roomId,sequence);
+   const row=db.prepare("SELECT sequence,id,json_extract(body,'$.id') AS eventId,json_extract(body,'$.roomId') AS roomId,json_type(body,'$.data') AS dataType,json_extract(body,'$.type') AS type,json_extract(body,'$.actorId') AS actorId,json_extract(body,'$.at') AS at,json_extract(body,'$.data.targetRuntimeKeyId') AS targetRuntimeKeyId,json_extract(body,'$.data.messageId') AS messageId,json_extract(body,'$.data.requestMessageId') AS requestMessageId,json_extract(body,'$.data.responseToRequestId') AS responseToRequestId,json_extract(body,'$.data.reason') AS reason FROM events WHERE room_id=? AND sequence=?").get(roomId,sequence);
    if(row.id!==row.eventId||row.roomId!==roomId||typeof row.type!=='string'||!row.type||!validId(row.actorId)||typeof row.at!=='string'||!Number.isFinite(Date.parse(row.at))||row.dataType!=='object')changed();eventCache.set(sequence,row);return row;
   };
   const created=eventAt(1);if(created.type!=='room.created')changed();
@@ -169,7 +170,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   const opening=loadMessage(request.id),context=loadMessage(request.contextMessageId);
   if(!opening||!context)changed();
   const openingEvent=eventAt(opening.row.seq),contextEvent=eventAt(context.row.seq);
-  if(openingEvent.type!=='message.posted'||openingEvent.id!==request.openingEventId||openingEvent.messageId!==request.id||opening.value.authorId!==request.requesterId||opening.value.toMemberId!==request.recipientId||openingEvent.actorId!==opening.value.authorId||openingEvent.at!==opening.value.createdAt||opening.value.createdAt!==request.createdAt||contextEvent.type!=='message.posted'||contextEvent.id!==request.contextEventId||contextEvent.messageId!==request.contextMessageId||contextEvent.actorId!==context.value.authorId||contextEvent.at!==context.value.createdAt)changed();
+  if((openingEvent.targetRuntimeKeyId??null)!==(request.targetRuntimeKeyId??null)||openingEvent.type!=='message.posted'||openingEvent.id!==request.openingEventId||openingEvent.messageId!==request.id||opening.value.authorId!==request.requesterId||opening.value.toMemberId!==request.recipientId||openingEvent.actorId!==opening.value.authorId||openingEvent.at!==opening.value.createdAt||opening.value.createdAt!==request.createdAt||contextEvent.type!=='message.posted'||contextEvent.id!==request.contextEventId||contextEvent.messageId!==request.contextMessageId||contextEvent.actorId!==context.value.authorId||contextEvent.at!==context.value.createdAt)changed();
   if(!visible(context.value,auth.member.id,floor))fail('reply_context_unavailable','Latest request context is outside the visible conversation; ask for a new request');
   evaluatedThrough=Math.max(opening.row.seq,context.row.seq);
   if(ownerOf(context.value.id)?.id!==request.id)changed();
@@ -250,11 +251,12 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   const requester=memberAt(request.requesterId),recipient=memberAt(request.recipientId),room=readCurrentRecord(db,roomId,'metadata','room',b);
   const denied=store.dmConsents.deniedDirection(roomId,auth.member.id,auth.member.id===request.requesterId?request.recipientId:request.requesterId);
   const canReply=!denied&&requester?.active===true&&recipient?.active===true;
-  const answerBasis = request.status === 'open' && auth.member.id === request.recipientId && canReply && !hasMore && context.row.seq <= horizon ? {expectedRequestRevision: request.revision, contextEventId: contextEvent.id, contextSequence: context.row.seq} : null;
+  const runtimeAccess = requestRuntimeAccess(store, roomId, request, auth);
+  const answerBasis = (!runtimeAccess || runtimeAccess.authorized) && request.status === 'open' && auth.member.id === request.recipientId && canReply && !hasMore && context.row.seq <= horizon ? {expectedRequestRevision: request.revision, contextEventId: contextEvent.id, contextSequence: context.row.seq} : null;
   const instructions=charterContext(room),work=request.workItemId?readCurrentWorkItem(db,roomId,request.workItemId):null;
   return stampReplyRead({...base,evaluatedThrough,selection:{direction:null,requestMessageId},request:structuredClone(request),roomCreatedEventId:created.id,sourceWindow:{complete:!hasMore,consistency:'frozen-conversation-current-preparation'},page:{cursor:args.cursor??null,checkpoint:null,items,rowBytes,limit,hasMore,nextCursor,completedCheckpoint:null,nextRead},nextRead,
    ...shape.responseTemplates(roomId,auth.member.id,request,answerBasis),
-   current:{evaluatedThrough,requesterAvailable:requester?.active===true,recipientAvailable:recipient?.active===true,contextEventId:contextEvent.id,contextSequence:context.row.seq,answerBasis,actions:{reply:canReply,answer:Boolean(answerBasis),decline:Boolean(answerBasis),cancel:request.status==='open'&&(auth.member.id===request.requesterId||auth.member.kind==='human'&&auth.member.id===room.ownerId)},blockedBy:denied?[denied]:[],workItemId:request.workItemId,instructionsRevision:room.charter?.revision??0},
+   current:{...(runtimeAccess ? {runtimeAccess} : {}),evaluatedThrough,requesterAvailable:requester?.active===true,recipientAvailable:recipient?.active===true,contextEventId:contextEvent.id,contextSequence:context.row.seq,answerBasis,actions:{reply:canReply,answer:Boolean(answerBasis),decline:Boolean(answerBasis),cancel:request.status==='open'&&(auth.member.id===request.requesterId||auth.member.kind==='human'&&auth.member.id===room.ownerId)},blockedBy:denied?[denied]:[],workItemId:request.workItemId,instructionsRevision:room.charter?.revision??0},
    preparation:{version:1,evaluatedThrough,room:{id:room.id,title:room.title,purpose:instructions.charter?.purpose??room.purpose??''},instructions,previousExchanges,work:work?currentWorkRecord(work):null,omitted:['other_work','other_messages','private_inbox','external_resources'],externalExecution:false}},auth.member.id);
  },{maxRecords:512}));
 }

@@ -1,3 +1,4 @@
+import { requireRequestRuntime } from './request-runtime-target.mjs';
 import {readCurrentReturnBrief} from './current-return-brief.mjs';
 import {inboxNext} from './inbox-next.mjs';
 import {readCurrentSearch} from './current-search.mjs';
@@ -7173,6 +7174,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
+      if (requestMode === "open") requireRequestRuntime(this, roomId,
+        { recipientId: command.data.toMemberId, targetRuntimeKeyId: command.data.targetRuntimeKeyId }, auth, { opening: true });
+      if (requestMode === "respond" || command.type === T.REPLY_REQUEST_PROGRESSED)
+        requireRequestRuntime(this, roomId, room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId], auth);
       const endingRequest = (requestMode === "respond" || command.type === T.REPLY_REQUEST_CANCELLED)
         && room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId]?.status === "open";
       const endingHelp = command.type === T.WORK_HELP_UPDATED && command.data.status === "withdrawn"

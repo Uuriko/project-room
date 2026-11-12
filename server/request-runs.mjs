@@ -1,3 +1,4 @@
+import { requireRequestRuntime } from './request-runtime-target.mjs';
 import { validId } from "../src/events.js";
 import { messageInHistory } from "./history-visibility.mjs";
 import {isCurrentRoom,withCurrentReadContext,readCurrentHead,readCurrentRecord,readCurrentMessage,CURRENT_REQUEST_OPENING_PREDICATE} from './current-room-repository.mjs';
@@ -23,8 +24,8 @@ function currentRunContext(store, roomId, ids, viewerId, recipientOnly = false) 
         fail('request_run_changed', 'Request proof requires reconciliation');
       // Bind request metadata to the independently protected opening message.
       const opening = readCurrentMessage(store.db, roomId, id, b);
-      const event = opening && store.db.prepare(`SELECT id,json_extract(body,'$.actorId') AS requester,json_extract(body,'$.data.toMemberId') AS recipient,json_extract(body,'$.data.messageId') AS messageId,json_extract(body,'$.at') AS at FROM events WHERE room_id=? AND sequence=? AND ${CURRENT_REQUEST_OPENING_PREDICATE}`).get(roomId, opening.row.seq);
-      if (!opening || event?.id !== request.openingEventId || event.requester !== request.requesterId || event.recipient !== request.recipientId || event.messageId !== id || event.at !== request.createdAt || opening.value.authorId !== request.requesterId
+      const event = opening && store.db.prepare(`SELECT id,json_extract(body,'$.actorId') AS requester,json_extract(body,'$.data.toMemberId') AS recipient,json_extract(body,'$.data.targetRuntimeKeyId') AS targetRuntimeKeyId,json_extract(body,'$.data.messageId') AS messageId,json_extract(body,'$.at') AS at FROM events WHERE room_id=? AND sequence=? AND ${CURRENT_REQUEST_OPENING_PREDICATE}`).get(roomId, opening.row.seq);
+      if (!opening || (event?.targetRuntimeKeyId ?? null) !== (request.targetRuntimeKeyId ?? null) || event?.id !== request.openingEventId || event.requester !== request.requesterId || event.recipient !== request.recipientId || event.messageId !== id || event.at !== request.createdAt || opening.value.authorId !== request.requesterId
         || opening.value.toMemberId !== request.recipientId || opening.value.createdAt !== request.createdAt)
         fail('request_run_changed', 'Request opening requires reconciliation');
       replyRequests[id] = request;
@@ -117,6 +118,7 @@ export class RequestRuns {
       const request = state.replyRequests?.[input.requestMessageId];
       if (auth.member.kind !== "agent" || !request || request.recipientId !== auth.member.id)
         fail("request_run_denied", "Only the addressed agent may report its host", 403);
+      requireRequestRuntime(this.store, roomId, request, auth);
       const row = this.store.db.prepare("SELECT * FROM request_runs WHERE room_id=? AND opening_id=?").get(roomId, request.openingEventId);
       if (row && row.attempt_id !== input.attemptId) fail("request_run_owned", "Another host owns this request; reconcile that host");
       if (input.action === "claim" || input.action === "working") {

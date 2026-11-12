@@ -1,3 +1,4 @@
+import { requestRuntimeAccess } from './request-runtime-target.mjs';
 import {readCurrentReplies} from './current-reply-reader.mjs';
 import {isCurrentRoom} from './current-room-repository.mjs';
 import { messageRepository } from "./message-repository.mjs";
@@ -247,7 +248,8 @@ export class ReplyRequests {
         if (contextMessage?.toMemberId && contextMessage.authorId !== auth.member.id && contextMessage.toMemberId !== auth.member.id)
           fail("reply_context_unavailable", "Latest request context is private to another exchange; ask the requester for a visible clarification", 409);
         const open = request.status === "open", recipient = auth.member.id === request.recipientId;
-        const answerBasis = open && recipient && !hasMore && context.sequence <= horizonSequence
+        const runtimeAccess = requestRuntimeAccess(this.store, roomId, request, auth);
+        const answerBasis = (!runtimeAccess || runtimeAccess.authorized) && open && recipient && !hasMore && context.sequence <= horizonSequence
           ? { expectedRequestRevision: request.revision, contextEventId: context.id, contextSequence: context.sequence } : null;
         // These are incomplete templates, never submitted automatically. Only the
         // selected recipient's complete, current context can populate fixed inputs.
@@ -268,7 +270,7 @@ export class ReplyRequests {
         };
         Object.assign(result, { request: structuredClone(request), current: { evaluatedThrough: room.sequence,
           requesterAvailable: state.members[request.requesterId]?.active === true, recipientAvailable: state.members[request.recipientId]?.active === true,
-          contextEventId: context.id, contextSequence: context.sequence, answerBasis,
+          contextEventId: context.id, contextSequence: context.sequence, answerBasis, ...(runtimeAccess ? { runtimeAccess } : {}),
           actions: { reply: true, answer: Boolean(answerBasis), decline: Boolean(answerBasis),
             cancel: open && (auth.member.id === request.requesterId || auth.member.kind === "human" && auth.member.id === state.room.ownerId) },
           workItemId: request.workItemId, instructionsRevision: state.room.charter?.revision ?? 0 } });

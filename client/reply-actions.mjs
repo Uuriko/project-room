@@ -25,7 +25,7 @@ const definitions = [
   ["room_request_history", "/reply-history", "Read an anchored incoming/outgoing request history, including requests answered between polls. Follow nextCursor; retain completedCheckpoint only after draining the window. Never mix cursor/checkpoint or silently reset on changed history/identity. Reading does not acknowledge anything.",
     { direction, cursor: token, checkpoint: token, limit }, []],
   ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. Does not start a model or grant permission." + retry,
-    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["toMemberId", "body"]],
+    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, toMemberId: id, body: text, workItemId: id, replyToId: id, targetRuntimeKeyId: { ...id, description: "Optional dedicated recipient-owned API key ID scoped to exactly this room; binds execution and terminal response to that credential holder, not a device." } }, ["toMemberId", "body"]],
   ["room_reply", null, "Post an ordinary clarification under a message. This does not answer or close a reply request, even when addressed to someone." + retry,
     { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
@@ -186,10 +186,18 @@ const listedRequestKeys = request => {
 };
 function validRequest(request) {
   return request && ["id", "openingEventId", "requesterId", "recipientId", "contextEventId"].every(key => validId(request[key]))
+    && (!Object.hasOwn(request, "targetRuntimeKeyId") || validId(request.targetRuntimeKeyId))
     && request.requesterId !== request.recipientId && nullableId(request.workItemId)
     && ["open", "answered", "declined", "cancelled"].includes(request.status) && request.revision === (request.status === "open" ? 0 : 1)
     && date(request.createdAt) && (request.status === "open" ? request.terminalEventId === null && request.closedAt === null
       : validId(request.terminalEventId) && date(request.closedAt));
+}
+function validateRuntimeAccess(request, current) {
+  if (!Object.hasOwn(request, 'targetRuntimeKeyId')) { assert(current.runtimeAccess === undefined); return true; }
+  const access = current.runtimeAccess;
+  assert(keys(access, ['targetRuntimeKeyId','eligible','authorized']) && access.targetRuntimeKeyId === request.targetRuntimeKeyId
+    && typeof access.eligible === 'boolean' && typeof access.authorized === 'boolean' && (!access.authorized || access.eligible));
+  return access.authorized;
 }
 export function validateReplyRead(result, { name, args, roomId }) {
   if (result?.contractVersion === 2) return validateCurrentReplyRead(result, { name, args, roomId });
@@ -315,7 +323,7 @@ export function validateReplyRead(result, { name, args, roomId }) {
     const stamped = Object.hasOwn(request ?? {}, "answerCredential");
     assert(!stamped || ["answered", "declined"].includes(request.status) && ANSWER_CREDENTIALS.includes(request.answerCredential));
     assert(keys(request, [...requestFields, "contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason",
-      ...(stamped ? ["answerCredential"] : [])])
+      ...(stamped ? ["answerCredential"] : []), ...(Object.hasOwn(request ?? {}, "targetRuntimeKeyId") ? ["targetRuntimeKeyId"] : [])])
       && validRequest(request) && request.id === requestMessageId && validId(request.contextMessageId)
       && current?.evaluatedThrough === result.evaluatedThrough && current.contextEventId === request.contextEventId
       && integer(current.contextSequence) && current.contextSequence > 0 && current.contextSequence <= result.evaluatedThrough
@@ -348,7 +356,8 @@ export function validateReplyRead(result, { name, args, roomId }) {
     assert(request.status === "open" ? request.terminalActorId === null && request.responseMessageId === null && request.responseContextSequence === null && request.reason === null
       : request.status === "cancelled" ? validId(request.terminalActorId) && request.responseMessageId === null && request.responseContextSequence === null && body(request.reason)
         : request.terminalActorId === request.recipientId && validId(request.responseMessageId) && request.responseContextSequence === current.contextSequence && request.reason === null);
-    const expected = !page.hasMore && request.status === "open" && request.recipientId === result.viewerId && current.contextSequence <= page.horizonSequence;
+    const runtimeAllowed = validateRuntimeAccess(request, current);
+    const expected = runtimeAllowed && !page.hasMore && request.status === "open" && request.recipientId === result.viewerId && current.contextSequence <= page.horizonSequence;
     assert(current.actions.answer === expected && current.actions.decline === expected);
     if (expected) assert(keys(current.answerBasis, ["expectedRequestRevision", "contextEventId", "contextSequence"])
       && current.answerBasis.expectedRequestRevision === request.revision && current.answerBasis.contextEventId === current.contextEventId
@@ -452,7 +461,7 @@ function validateCurrentReplyRead(result,{name,args,roomId}) {
     &&result.sourceWindow.consistency==='frozen-conversation-current-preparation'
     &&page.checkpoint===null&&page.completedCheckpoint===null&&Array.isArray(page.items)&&page.items.length<=Math.min(page.limit,8));
   const request=result.request,current=result.current;
-  assert(keys(request,[...requestFields,'contextMessageId','terminalActorId','responseMessageId','responseContextSequence','reason',...(Object.hasOwn(request??{},'answerCredential')?['answerCredential']:[])])&&validRequest(request)&&request.id===args.requestMessageId&&validId(request.contextMessageId)
+  assert(keys(request,[...requestFields,'contextMessageId','terminalActorId','responseMessageId','responseContextSequence','reason',...(Object.hasOwn(request??{},'answerCredential')?['answerCredential']:[]),...(Object.hasOwn(request??{},'targetRuntimeKeyId')?['targetRuntimeKeyId']:[])])&&validRequest(request)&&request.id===args.requestMessageId&&validId(request.contextMessageId)
     &&[request.requesterId,request.recipientId].includes(result.viewerId)
     &&current?.evaluatedThrough===result.evaluatedThrough&&current.contextEventId===request.contextEventId
     &&integer(current.contextSequence)&&current.contextSequence>0&&current.contextSequence<=result.evaluatedThrough
@@ -483,7 +492,8 @@ function validateCurrentReplyRead(result,{name,args,roomId}) {
     sequence=row.sequence;ids.add(row.eventId);
   }
   assert(page.rowBytes===bytes&&bytes<=65536);
-  const expected=!page.hasMore&&request.status==='open'&&request.recipientId===result.viewerId&&current.actions.reply;
+  const runtimeAllowed=validateRuntimeAccess(request,current);
+  const expected=runtimeAllowed&&!page.hasMore&&request.status==='open'&&request.recipientId===result.viewerId&&current.actions.reply;
   // A clarification arriving after the frozen horizon can make a completed
   // page non-actionable. A basis may be absent; it may never contradict fields.
   assert(current.actions.answer===Boolean(current.answerBasis)&&current.actions.decline===Boolean(current.answerBasis));

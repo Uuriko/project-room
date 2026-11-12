@@ -32,12 +32,12 @@ async function fixture(t, options = {}) {
   };
   t.after(async () => {await close(); rmSync(home, {recursive:true, force:true});});
   const apiBase = `http://127.0.0.1:${server.address().port}`;
-  const counts = {prompts:0, sent:[]}, logs = [];
+  const counts = {sessions:0, prompts:0, sent:[]}, logs = [];
   const connection = {apiBase, roomId:'commons', memberId:'worker', identityId:seeded.identityId,
     credential:seeded.token, hostId:'formal-fixture'};
   const make = (fetchImpl = fetch) => new Bridge({connection, env:{ROOM_ACP_HOME:home}, fetchImpl,
     log:line => logs.push(line), host:{
-      session:async () => ({sessionId:'synthetic', created:true}),
+      session:async () => { counts.sessions++; return {sessionId:'synthetic', created:true}; },
       prompt:async (_key, prompt) => {
         counts.prompts++; counts.prompt = prompt;
         return {recorder:{text:options.text ?? JSON.stringify({outcome:'answered', body:'Useful verified answer'}), tools:new Map()},
@@ -389,4 +389,22 @@ test('follow-up preparation accepts the larger exact answer in previous exchange
   assert.equal(follow.preparation.previousExchanges[0].messages.find(m=>m.id===answered.request.responseMessageId).body,body);
   validateReplyRead(follow,{name:'room_read_request',args:{requestMessageId:'follow-long-answer'},roomId:'commons'});
   assert.equal(follow.request.status,'open');
+});
+
+
+test('ACP leaves runtime-targeted requests queued without host session, prompt, response or ACK under another same-member key', async t => {
+  const f=await fixture(t), bridge=f.make(); await f.ready(bridge);
+  const key=f.store.agentPlugin.issueApiKey({identityId:f.seeded.identityId,
+    scopes:['rooms:read','rooms:write','mcp:room:commons']});
+  f.store.command(f.seeded.owner,'commons',{id:'targeted-event',type:'message.posted',data:{
+    messageId:'targeted',body:'Only the intended credential holder should respond',toMemberId:'worker',requestKind:'reply',targetRuntimeKeyId:key.keyId}});
+  let acknowledgements=0;bridge.ack=async()=>{acknowledgements++;};
+  const wake={...f.wake,signalId:'runtime-target-wake',messageId:'targeted'};
+  await bridge.turn('targeted',[wake]);
+  await bridge.turn('targeted',[wake]);
+  assert.equal(f.counts.sessions,0);assert.equal(f.counts.prompts,0);assert.equal(acknowledgements,0);
+  const read=await f.read(bridge,'targeted');
+  assert.equal(read.request.status,'open');assert.equal(read.current.runtimeAccess.authorized,false);
+  const receipts=readdirSync(join(f.home,'chat-turns')).map(file=>JSON.parse(readFileSync(join(f.home,'chat-turns',file),'utf8')));
+  assert.ok(receipts.some(receipt=>receipt.threadKey==='targeted'&&receipt.phase==='queued'));
 });
