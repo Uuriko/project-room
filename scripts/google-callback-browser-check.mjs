@@ -10,6 +10,7 @@ import { createMagicLinkMailer } from '../server/magic-links.mjs';
 import { openMagicSignin } from './signin-browser-journey.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { GITHUB_SCOPES } from '../server/github-oauth.mjs';
+import { randomUUID } from 'node:crypto';
 
 for (const link of [false, true]) test(`Google ${link ? 'link' : 'sign-in'} returns from a committed cross-site account chooser with Strict cookies`, { timeout: 30000 }, async t => {
   const f = createAcceptanceFixture(), auth = googleAuth();
@@ -127,7 +128,7 @@ test('GitHub cross-site callback returns to the selected task instead of the acc
   f.store.initialize(initialRoom('a-other','other-owner'));
   f.store.bindHumanAccount('a-other','other-owner',accountId);
   let providerCalls=0;
-  const githubAuth={clientId:'Iv1.fixtureclientid0000',clientSecret:'fixture-never-real',fetchImpl:async url=>{
+  const githubAuth={clientId:'Iv1.fixtureclientid0000',clientSecret:randomUUID(),fetchImpl:async url=>{
     providerCalls++;
     if(url==='https://github.com/login/oauth/access_token') return Response.json({access_token:'gho_fixture',token_type:'bearer',scope:GITHUB_SCOPES});
     if(url==='https://api.github.com/user') return Response.json({id:424243,login:'task-fixture'});
