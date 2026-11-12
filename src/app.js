@@ -1,5 +1,5 @@
 import { createDirectConversationWindow, createMessageSelection, createConversationDirectory } from "./direct-conversation-window.js";
-import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
+import { stashGoogleRoom, consumeGoogleRoom, stashOAuthTask, consumeOAuthTask } from "./google-room-return.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
@@ -55,7 +55,7 @@ import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-nav
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, selectedTaskFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -285,7 +285,7 @@ try {
     : start === "invite-agent"
       ? { kind: "invite-agent", agent: acqUrl.searchParams.get("agent") || "" }
       : acqUrl.searchParams.has("request")
-        ? { kind: "request", roomId: acqUrl.searchParams.get("request") || "" }
+        ? { kind: "request", roomId: acqUrl.searchParams.get("request") || "", task: selectedTaskFromLocation(acqUrl) }
         : null;
   if (intent) {
     window.sessionStorage.setItem(ACQUISITION_KEY, JSON.stringify(intent));
@@ -328,6 +328,7 @@ redirectAgentInvite(initialInvitationFragment);
 // sessionStorage only for the round-trip (cleared on dialog close/accept and
 // consumed one-shot at boot); merely previewing an invitation never stores it.
 function stashInviteForOAuth() {
+  stashOAuthTask({ search: location.search, hash: location.hash });
   if (invitation.secret) stashPendingInvite(window.sessionStorage, invitation.secret);
   // [QA-Join]: the #join/ share-link fragment is dropped by the OAuth
   // round-trip exactly like #invite/. Stash the live address-bar token (put
@@ -609,7 +610,11 @@ const client = new RoomClient({
       if (!location.hash) restoreResultSelection();
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
-    if (firstSnapshot) revealLocationHash();
+    if (firstSnapshot) {
+      const acquisition = readAcquisition();
+      if (acquisition?.kind === "request" && acquisition.roomId === state.room.id) clearAcquisition();
+      revealLocationHash();
+    }
     else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
     retryPendingHashReveal();
     resumeConfirmedWorkNavigation();
@@ -952,7 +957,7 @@ const signinUI = createAuthSigninUI({
     const roomId = selectedRoomFromLocation();
     if (roomId) destination.searchParams.set("room", roomId);
     else if (accountHomeFromLocation()) destination.searchParams.set("account", "1");
-    destination.hash = invitation.secret ? `#invite/${invitation.secret}` : (shareLinksUI?.pendingFragment() || "");
+    destination.hash = invitation.secret ? `#invite/${invitation.secret}` : (shareLinksUI?.pendingFragment() || selectedTaskFromLocation(location)?.hash || "");
     return `${destination.pathname}${destination.search}${destination.hash}`;
   },
   onSignInUncertain: async (options) => {
@@ -6326,7 +6331,8 @@ async function runAcquisitionIntent() {
       if (ref) query.set("ref", ref);
       const qs = query.toString();
       const door = location.pathname.startsWith("/room/") ? "/room" : "";
-      location.assign(`${door}/join${qs ? `?${qs}` : ""}`);
+      const task = selectedTaskFromLocation({search: `?room=${encodeURIComponent(roomId)}`, hash: intent.task?.hash});
+      location.assign(`${door}/join${qs ? `?${qs}` : ""}${task && task.roomId === intent.task?.roomId ? task.hash : ""}`);
       return;
     }
     if (intent.kind === "template") {
@@ -8312,6 +8318,16 @@ const ready = (async () => {
   try { consentReturn = validatedOAuthReturn(sessionStorage.getItem(oauthReturnKey)); } catch { /* Ordinary navigation remains available. */ }
   const returnParams = new URLSearchParams(location.search);
   const providerReturned = returnParams.get("google") === "signed-in" || returnParams.get("github") === "signed-in";
+  if (providerReturned) {
+    const task = consumeOAuthTask();
+    if (task && !consentReturn && !initialJoinFragment && !initialInvitationFragment) {
+      const destination = new URL(location.href);
+      destination.searchParams.set("room", task.roomId);
+      destination.searchParams.delete("account");
+      destination.hash = task.hash;
+      history.replaceState(history.state, "", destination.pathname + destination.search + destination.hash);
+    }
+  }
   if (returnParams.get("oauth") !== "login" && consentReturn
     && (validatedDesktopConsent(consentReturn) || providerReturned)) {
     const account = await ensureAccountSession();
@@ -8352,7 +8368,7 @@ const ready = (async () => {
     const account = await ensureAccountSession();
     const explicitRoom = consumeGoogleRoom();
     const remembered = account?.authenticated ? readMemberRoom(account.account.id)?.roomId : null;
-    const target = explicitRoom || remembered || selectedRoomFromLocation();
+    const target = selectedTaskFromLocation(location)?.roomId || explicitRoom || remembered || selectedRoomFromLocation();
     const next = new URL(location.href);
     next.searchParams.delete("google");
     if (target) { next.searchParams.set("room", target); next.searchParams.delete("account"); }

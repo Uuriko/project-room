@@ -45,7 +45,7 @@ for (const [label, size] of SIZES) test(`signed human approval opens room with s
   const f=await setup(t),page=await f.open(size);
   await page.goto(f.origin);
   if (!size.isMobile) {
-    await page.goto(`${f.origin}/join`);
+    await page.goto(`${f.origin}/join?room=commons#pr-record/work/test-handoff`);
     await page.locator('#join-request > summary').click();
     await page.locator('#join-request-room').fill('commons');
     await page.locator('#join-request-name').fill('Human admission audit');
@@ -66,7 +66,7 @@ for (const [label, size] of SIZES) test(`signed human approval opens room with s
   assert.equal(verified.status(),200);
   const account=(await f.session(page)).account;
   assert.ok(account?.id);
-  await page.goto(`${f.origin}/join`);
+  await page.goto(`${f.origin}/join?room=commons#pr-record/work/test-handoff`);
   await page.locator('#join-request > summary').click();
   await page.locator('#join-request-room').fill(`${f.origin}/?room=commons`);
   await page.locator('#join-request-name').fill('Human admission audit');
@@ -115,7 +115,7 @@ for (const [label, size] of SIZES) test(`signed human approval opens room with s
   await visualEvidence.captureDesignEvidence?.(owner, {id:`human-admission-owner-${size.isMobile ? "phone" : "desktop"}`,title:"Owner reviews human request",fixture:"Verified synthetic human account, real server admission",testName:t.name,component:"human admission"});
   const approved=owner.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname.includes('access-requests'));
   await card.getByRole('button',{name:/^Approve/}).click();assert.ok((await approved).ok());
-  await page.waitForURL(url => url.hash === '#room/commons', {timeout:15000});
+  await page.waitForURL(url => url.searchParams.get('room') === 'commons' && url.hash === '#pr-record/work/test-handoff', {timeout:15000});
   await page.locator('#main').waitFor({state:'visible'});
   assert.equal((await f.session(page)).account.id,account.id);
   const memberships=f.store.db.prepare('SELECT room_id,member_id FROM member_accounts WHERE account_id=?').all(account.id);

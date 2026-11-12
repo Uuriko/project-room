@@ -17,6 +17,7 @@ import { AccountClient } from "./client.js";
 import { submitGeneralAccessRequest, approvedAccountRequestRoom, readHumanAccessRequest, retireHumanAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
 import { readAccessRequest } from "./invite-context.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
+import { selectedTaskFromLocation } from "./room-deep-link.js";
 
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
 
@@ -139,6 +140,8 @@ export function serviceApiBase(pathname) {
 export function roomEntryHref(roomId, locationLike = globalThis.location) {
   const origin = String(locationLike?.origin ?? "").replace(/\/$/, "");
   const door = String(locationLike?.pathname ?? "").startsWith("/room/") ? "/room" : "";
+  const task = selectedTaskFromLocation(locationLike);
+  if (task?.roomId === roomId) return `${origin}${door}/?room=${encodeURIComponent(roomId)}${task.hash}`;
   return `${origin}${door}/#room/${encodeURIComponent(roomId)}`;
 }
 
