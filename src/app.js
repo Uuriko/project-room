@@ -8382,7 +8382,7 @@ const ready = (async () => {
     // cookie before the account gate, or a fresh joiner is stranded at the
     // sign-in panel despite holding a working session. A cookie for a
     // different room is dropped and the account flow decides as before.
-    if (requestedRoom && !accountHomeFromLocation() && !googleReturned) {
+    if (requestedRoom && !accountHomeFromLocation() && !providerReturned) {
       try {
         const joined = await restoreAtStartup();
         if (joined?.roomId === requestedRoom) return;

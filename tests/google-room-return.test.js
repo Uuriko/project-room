@@ -32,3 +32,14 @@ test("OAuth task return is room-bound, one-shot, tab-local and expires", () => {
     stashOAuthTask(location, s, 1); stashOAuthTask(bad, s, 2); assert.equal(consumeOAuthTask(s, 3), null);
   }
 });
+test("a blocked browser storage getter cannot abort OAuth return", () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, get() { throw new Error('SecurityError'); } });
+  try {
+    assert.doesNotThrow(() => stashOAuthTask({search:'?room=commons',hash:'#pr-record/work/task-1'}));
+    assert.equal(consumeOAuthTask(),null);
+  } finally {
+    if (original) Object.defineProperty(globalThis,'sessionStorage',original);
+    else delete globalThis.sessionStorage;
+  }
+});

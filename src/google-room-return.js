@@ -23,15 +23,17 @@ export function consumeGoogleRoom(storage, now = Date.now()) {
 }
 
 const taskKey = "project-room:oauth-task-return:v1";
-export function stashOAuthTask(locationLike, storage = globalThis.sessionStorage, now = Date.now()) {
+export function stashOAuthTask(locationLike, storage, now = Date.now()) {
   try {
+    storage ??= globalThis.sessionStorage;
     storage.removeItem(taskKey);
     const task = selectedTaskFromLocation(locationLike);
     if (task) storage.setItem(taskKey, JSON.stringify({ ...task, at: now }));
   } catch { /* Navigation remains usable when storage is disabled. */ }
 }
-export function consumeOAuthTask(storage = globalThis.sessionStorage, now = Date.now()) {
+export function consumeOAuthTask(storage, now = Date.now()) {
   try {
+    storage ??= globalThis.sessionStorage;
     const raw = storage.getItem(taskKey);
     storage.removeItem(taskKey);
     const value = JSON.parse(raw);
