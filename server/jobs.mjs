@@ -108,13 +108,15 @@ function webhookDueAt(store) {
   return row?.due == null ? null : Number(row.due);
 }
 
-// A missed dm/mention wake is due even when no delivery row exists yet.
+// A missed dm/mention wake is due even when no delivery row exists yet, and so
+// is a delivered mention past its deadline that nobody has acknowledged.
 // An armed flag with nothing waiting stays null so the job stays idle.
 function webhookNextDue(store) {
   const webhook = webhookDueAt(store);
   const missed = missedWakeDueAt(store);
   const rewake = store.agentPlugin?.nextRewakeAt?.() ?? null;
-  const pending = [webhook, missed, rewake].filter(value => value != null);
+  const mention = store.nextMentionSweepAt?.() ?? null;
+  const pending = [webhook, missed, rewake, mention].filter(value => value != null);
   return pending.length ? Math.min(...pending) : null;
 }
 
@@ -456,6 +458,8 @@ export const JOBS = Object.freeze([
     disabledReason: () => "No webhook delivery is waiting",
     nextDueAt: store => webhookNextDue(store),
     async run(store, ctx) {
+      try { store.sweepExpiredMentions?.(); }
+      catch (error) { console.error(`mention re-wake sweep failed: ${error?.message ?? "failed"}`); }
       try { store.agentPlugin?.sweepRewakes?.(); }
       catch (error) { console.error(`wake adapter re-wake failed: ${error?.message ?? "failed"}`); }
       const drained = ctx.room?.drainWebhookDeliveries

@@ -169,6 +169,7 @@ export const mentionStateSchema = `
     FROM mention_states WHERE state IN ('acknowledged','responded');
   CREATE INDEX IF NOT EXISTS mention_states_member ON mention_states(room_id,mentioned_member_id,state);
   CREATE INDEX IF NOT EXISTS mention_states_message ON mention_states(room_id,message_event_id);
+  CREATE INDEX IF NOT EXISTS mention_states_due ON mention_states(state,timeout_at);
   CREATE TABLE IF NOT EXISTS room_mention_settings (
     room_id TEXT PRIMARY KEY REFERENCES rooms(id),
     timeout_ms INTEGER NOT NULL,
