@@ -41,6 +41,121 @@ not prove comprehension, and functional tests alone do not approve the design.
 Keep or reject the integrated result using the existing scorecard, not feature
 count, task volume, device utilization or an agent's taste score.
 
+### Concept audit: what actually deserves to exist
+
+Start with a person's unfinished job, not a room, agent team or software factory.
+The proposed job is: **get a worthwhile change completed, understand whether to
+trust it, and let the next contributor continue without reconstructing history**.
+This is a testable choice of job, not established customer demand. A solo user
+with one agent must be able to benefit; multiple agents are an optional execution
+arrangement. Other project types remain possible, but adding audiences before
+one workflow works makes the result harder to evaluate.
+
+Current evidence is narrower than our ambition:
+
+| Observation | What it supports | What it does not establish |
+| --- | --- | --- |
+| Local human-account journey captures at PR6143 head 3da3047ad repeat the task title across search, results and work; a return control overlaps message context | The current hierarchy needs structural improvement, even though the captured states have no serious automated accessibility findings | Which replacement people understand or prefer |
+| Eighty existing identity-boundary checks, one explicit credential-conversion check and four real human-account browser cases passed locally | Human account and agent principal boundaries can be exercised independently of appearance | Exhaustive security, production behavior or a good human interface |
+| A laptop-targeted request received a cloud-session response before the intended laptop replied | Shared member identity alone cannot establish runtime delivery | That faster server writes solve host activation or execution |
+| Nine synthetic continuation inputs exist, with zero recorded participant episodes | We have repeatable technical probes ready | Demand, retention, willingness to pay or superiority over incumbents |
+
+The captures and local trial records are private evidence artifacts, not files to
+publish into the repository. Preserve their source revision in any comparison.
+Passing checks protect working behavior; they do not settle the product choice.
+
+### Three distinct product bets
+
+1. **GitHub companion.** Attach current context, acceptance evidence and a
+   resumable next action to existing issues and PRs. Contributors keep their
+   agents and normal tools. This has the smallest adoption requirement and is
+   the first control to test. Its weakness is becoming a redundant summary bot:
+   reject it if a concise issue template and repository guidance work as well.
+2. **Project and review workspace.** Give people a well-designed view of current
+   work, results and decisions, with conversation attached to the relevant work.
+   Give agents compact structured access to the same authorized state. This is
+   the leading integrated candidate because it addresses both continuity and
+   human judgment. Its weakness is asking a team to adopt another destination:
+   reject it if additional navigation offsets the saved effort.
+3. **Execution service.** Own durable dispatch, interruption recovery and
+   heterogeneous local/cloud execution. It could complete jobs existing hosts
+   cannot finish reliably. It also has the greatest credential, isolation,
+   availability and operational burden. Expand it only for a demonstrated job
+   the first two options cannot serve; keeping laptops busy is insufficient.
+
+These are competing investments, not three new modules to build simultaneously.
+Knowledge, design tools and reusable upstream code earn investment by improving
+the chosen job. A generic wiki, marketplace, social network or orchestration
+platform is not an automatic consequence of having related components.
+
+### Deletion and simplification candidates
+
+| Current assumption or mechanism | Simpler candidate to evaluate | Preserve |
+| --- | --- | --- |
+| Conversation must be the home for all projects | Project work and decisions as the human home; conversation in context | Existing links, attribution, drafts and history |
+| Joining Room precedes contribution | Public task/result link and GitHub-only contribution; connect when it unlocks an action | Explicit authorization and private-source boundaries |
+| More agents and occupied devices mean progress | One agent by default; bounded parallel work only when interfaces and resources permit | Useful independent review and deterministic checks |
+| Every update needs another message | Update the linked task/result/check state; notify for a decision, failure or meaningful change | Direct messages as an option and inspectable history |
+| A universal assistant voice is necessary | Show the responsible person or agent and the actual artifact | Clear ownership; no invented consensus or activity |
+| Docs should copy every source | Keep project decisions and procedures where useful; reference authoritative GitHub and external revisions | Searchable current context, provenance and access control |
+| Human UI mirrors every backend capability | Few primary actions with progressive detail and stable task navigation | Fast complete agent tools and accessible human controls |
+
+These are audit candidates, not permission to delete live records, remove
+security boundaries, or break published integrations. Remove a mechanism when
+its replacement serves the same needed job with less total effort.
+
+### Smallest complete workflow to compare
+
+Use one real bounded change through this sequence:
+
+1. **Find:** open the project or shared task and identify the intended outcome,
+   current source, acceptance condition and authority. No chat archaeology.
+2. **Start:** a permitted contributor claims the scope. Existing scripts enforce
+   revision/permission/conflict rules; the contributor resolves ambiguous goals.
+3. **Produce:** their preferred agent or human creates the change in an isolated
+   workspace. Ordinary tools run deterministic checks and attach exact-source
+   results. An unavailable worker stays unavailable, not implicitly working.
+4. **Review:** a non-author sees the artifact, change, evidence, uncertainty and
+   available decision together. Design changes include rendered states and a
+   human usability judgment, not merely passing code checks.
+5. **Deliver:** existing authorized merge/deploy machinery records the actual
+   released revision and verification. Submission, acceptance and production
+   remain separate facts; unknown external effects require reconciliation.
+6. **Continue:** the next session retrieves current work and the next useful
+   allowed action, with relevant decisions and source links. A conversation or
+   handoff prompt is generated only when useful, not another mandatory form.
+
+Compare the existing GitHub-and-agent path, the GitHub companion, and one
+coherent task-led human prototype on matched content. Do not implement a broad
+navigation migration before observing the prototype. Begin with a contributor
+and a returning reviewer; repeat across independent people and tasks before
+making comparative claims. John is arranging outside participants; none have
+completed a recorded episode yet.
+
+Use the existing scorecard and offline episode recorder. Include setup, failures,
+review, recovery and removal of the integration. Keep only a candidate that
+reduces elapsed time or total human effort without lowering accepted completion
+or violating guardrails. A small pilot can reject obvious friction; it cannot
+establish a reliable population effect. If Room adds no benefit over the simpler
+control, narrow it to the useful integration or stop that direction.
+
+### Competitive implications, not performance claims
+
+[Linear's agent platform](https://linear.app/docs/agents-in-linear) already
+supports issue delegation, mentions, scoped installations and versioned Markdown
+guidance. None of those capabilities alone differentiates Room. Its documentation
+does not establish a response-time baseline for our intended runtime pairs.
+[Buzz's successor app](https://github.com/block/buzz-app) is a relevant open-source
+implementation to inspect, not evidence that adopting its code produces demand.
+Any reused slice needs a pinned source, license review, concrete acceptance test
+and an update/removal path in the existing source library.
+
+The defensible opportunity to test is less reconstruction and manual forwarding,
+clearer human decisions, and reliable continuation across existing agents and
+tools. We must demonstrate that on completed work. Faster messaging, more tools,
+a large wiki and polished screenshots are supporting mechanisms, not the value
+proposition by themselves.
+
 ## Product promise to test
 
 Give an existing agent a capability it lacks, let it produce a useful result

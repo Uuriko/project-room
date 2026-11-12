@@ -18,12 +18,13 @@ this path is now [archived](archive/docs/history/DESIGN-2026-09-20.md).
 
 ## Where this comes from
 
-This file carries forward the direction we already had. It doesn't replace
-it.
+This records the existing direction so changes can be evaluated against it.
+John's November 12 concept audit reopens the interaction choices; historical
+adoption is not evidence that a choice should survive.
 - [archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt](archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt):
   "A conversation with your friends and one helpful assistant, where projects
   get done without everyone having to manage the machinery behind the
-  assistant." Its five design rules still hold:
+  assistant." Its five original design rules were:
   - One room, one main conversation, one assistant voice.
   - Ordinary language is the primary control surface.
   - Work appears inside the conversation and expands only when needed.
@@ -31,6 +32,9 @@ it.
     coordination quiet.
   - Shared context never erases who asked, who agreed or who can authorize an
     action.
+  Chat as home, a single assistant voice and conversation-contained work are
+  now hypotheses to compare, not constraints on alternatives. Attribution,
+  consent and authorization remain required through any replacement.
   The same plan says to keep the implementation sophisticated and the
   interface small.
 - `src/design-tokens.js`: one design system (dark charcoal, Inter, indigo)
@@ -43,8 +47,8 @@ The anti-slop filter joins as checks on top of this direction. Adopted
 
 ## Product vocabulary
 
-Use familiar project language. The product name stays **Project Room**; a **room**
-is the space for one project. **Work** contains individual **tasks**. **Docs** holds
+Use familiar project language. The current product name is **Project Room**; a **room**
+is the current space for one project. **Work** contains individual **tasks**. **Docs** holds
 shared project documents. **Checks** are repeatable procedures; a **run** is one
 attempt. **Results** contain the outcome and evidence; **review** is the decision
 about the submitted work. A **worker** executes configured jobs on a **device**.
@@ -139,8 +143,9 @@ screenshot alone does not establish a successful migration.
 
 ## Copy
 
-- Use plain words, one per action. It's "Log in" everywhere. "Agent sign in"
-  is the one named exception.
+- Use plain words, one per action. It's "Log in" for human authentication.
+  Agent connection uses the copyable prompt; do not restore an "Agent sign in"
+  button merely to match an old naming rule.
 - Never invent numbers, testimonials, customers, or claims. Show a real count
   from real data, or show nothing.
 - Money wording must agree with itself on every surface. If payment isn't
