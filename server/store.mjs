@@ -14,7 +14,7 @@ import { WRITE_GRANT_POLICY_VERSION } from '../src/work-reducers.js';
 import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget } from './current-room-repository.mjs';
 import {bindReplayAppend} from './replay-cutover.mjs';
 import { savedHistoricalReplayCheckpoint } from './historical-replay-contract.mjs';
-import { bootstrapLegacyWriteProofs, configureWriteIntegrity, beginWriteProofFrame, endWriteProofFrame, publishProjectionWrites, projectionDigest, projectionContentHash, servingContentProof, servingProofDrift, assertProjectionWrite, assertMessageWrite, recordMessageWrite, withVerifiedRoomReconstruction } from './write-integrity.mjs';
+import { bootstrapLegacyWriteProofs, configureWriteIntegrity, beginWriteProofFrame, endWriteProofFrame, publishProjectionWrites, projectionDigest, projectionContentHash, projectionContentHashV2, servingContentProof, servingProofDrift, assertProjectionWrite, assertMessageWrite, recordMessageWrite, withVerifiedRoomReconstruction } from './write-integrity.mjs';
 const OPERATOR_QA_ARCHIVE = Symbol("operator QA room archive");
 const OPERATOR_LIFECYCLE_ARCHIVE = Symbol("operator lifecycle archive on owner behalf");
 import { authenticateMcpOAuthRequest } from './mcp-oauth.mjs';
@@ -1125,7 +1125,9 @@ const INTEGRITY_ROOM_HASH_COLUMN = "ALTER TABLE integrity_room_state ADD COLUMN 
 const INTEGRITY_SNAPSHOT_WATERMARK_COLUMN = "ALTER TABLE integrity_snapshot ADD COLUMN covered_event_rowid INTEGER";
 // L05-C1: the integrity checksum covers projection CONTENT. A room's
 // content hash binds its id, its sequence and the exact stored projection
-// bytes; the snapshot's digest is a hash over the per-room hashes in id
+// bytes (since the v3 ranged composition: via the projection's digest and
+// per-range digests over its canonical rows — see write-integrity.mjs);
+// the snapshot's digest is a hash over the per-room hashes in id
 // order, so the incremental path can rebuild it from the state table when
 // individual rooms move, and any same-length in-place mutation of a
 // projection changes the digest even though every count and byte length
@@ -1137,27 +1139,48 @@ function integrityContentDigest(roomHashes) {
   for (const row of roomHashes) digest.update(row.id).update("\0").update(row.hash).update("\n");
   return digest.digest("hex");
 }
-// Snapshot text shapes: the current "v2" shape appends the content digest
-// to the six legacy counts. A pre-cure snapshot is exactly those six
-// counts and carries NO digest: it is parsed as "legacy" and never
-// trusted as a content baseline (see verifyRoomIntegrity's transition
-// rule). Anything else is "invalid" and likewise untrusted.
+// Snapshot text shapes: the current "v3" shape appends the content digest
+// to the six legacy counts, exactly as the previous "v2" shape did — what
+// changed in v3 is the per-room hash DEFINITION the digest composes (the
+// ranged composition in write-integrity.mjs), not the snapshot layout.
+// A "v2" snapshot therefore parses with its counts and digest intact but
+// is a previous-definition baseline: it can still be checked for drift
+// (against the v2 definition) yet can never match or certify under v3 —
+// it transitions explicitly in verifyRoomIntegrity, exactly as the
+// pre-cure six-count "legacy" shape did for v2. A pre-cure snapshot is
+// exactly those six counts and carries NO digest: it is parsed as
+// "legacy" and never trusted as a content baseline. Anything else is
+// "invalid" and likewise untrusted.
 function parseIntegritySnapshot(text) {
   if (typeof text !== "string" || text === "") return null;
-  if (text.startsWith("v2:")) {
+  if (text.startsWith("v3:") || text.startsWith("v2:")) {
+    const format = text.slice(0, 2);
     const parts = text.slice(3).split(":");
     if (parts.length !== 7) return { format: "invalid", counts: null, contentHash: null, text };
     const counts = parts.slice(0, 6).map(Number);
     if (counts.some(part => !Number.isSafeInteger(part)) || !/^[0-9a-f]{64}$/.test(parts[6])) {
       return { format: "invalid", counts: null, contentHash: null, text };
     }
-    return { format: "v2", counts, contentHash: parts[6], text };
+    return { format, counts, contentHash: parts[6], text };
   }
   const parts = text.split(":").map(Number);
   if (parts.length === 6 && parts.every(part => Number.isSafeInteger(part))) {
     return { format: "legacy", counts: parts, contentHash: null, text };
   }
   return { format: "invalid", counts: null, contentHash: null, text };
+}
+// A remembered per-room hash was computed under the definition its
+// snapshot format names. Baseline comparisons (drift, reconciliation)
+// must recompute under THAT definition: comparing a v2 baseline hash
+// against the v3 composition would manufacture drift on every room and
+// make the explicit transition unadoptable, while comparing a v3
+// baseline under v2 would miss real drift. Only the transition scan
+// reads a v2 baseline this way; once it adopts, every remembered hash
+// is v3 and this resolves to the current definition.
+function baselineContentHash(db, snapshotFormat, roomId, sequence, projection) {
+  return snapshotFormat === "v2"
+    ? projectionContentHashV2(db, roomId, sequence, projection)
+    : projectionContentHash(db, roomId, sequence, projection);
 }
 // #3896: consecutive verifyRoomIntegrity calls in which the deferred
 // batch may complete zero steps before the batch is run FIRST instead.
@@ -2760,7 +2783,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!current) { this.clearIntegrityFailure("projection_content", row.recordId); continue; }
       const stored = this.db.prepare("SELECT sequence, projection_hash AS hash,metadata_hash FROM integrity_room_state WHERE room_id=?").get(row.recordId);
       const sameBaseline=stored?.hash && stored.sequence===current.sequence
-        && projectionContentHash(this.db,row.recordId,current.sequence,current.projection)===stored.hash;
+        && baselineContentHash(this.db, parseIntegritySnapshot(this.readIntegritySnapshot())?.format, row.recordId, current.sequence, current.projection)===stored.hash;
       // A valid edit elsewhere may have advanced the head after corruption.
       // Canonical metadata binds membership; every payload still needs its
       // independent proof. Never retire a lost/empty baseline or an unproved
@@ -2782,10 +2805,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   driftedProjectionRooms() {
     this.ensureIntegrityRoomState();
     return this.readTransaction(() => {
+      // The remembered hashes carry the definition of the snapshot that
+      // recorded them (v3 normally; v2 during the transition scan, which
+      // is the one caller that runs this leg against a v2 baseline).
+      const snapshotFormat = parseIntegritySnapshot(this.readIntegritySnapshot())?.format;
       const stored = new Map(this.db.prepare("SELECT room_id AS id, sequence, projection_hash AS hash FROM integrity_room_state").all().map(row => [row.id, row]));
       return this.db.prepare("SELECT id, sequence, projection FROM rooms").all()
         .filter(row => servingProofDrift(this.db,row.id,row.projection) || stored.get(row.id)?.hash && stored.get(row.id).sequence === row.sequence
-          && projectionContentHash(this.db, row.id, row.sequence, row.projection) !== stored.get(row.id).hash)
+          && baselineContentHash(this.db, snapshotFormat, row.id, row.sequence, row.projection) !== stored.get(row.id).hash)
         .map(row => row.id);
     });
   }
@@ -2809,7 +2836,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // when the snapshot covers exactly the current room set: the
       // snapshot's room count must match the current one too, and a
       // room the snapshot does not cover belongs to the full check.
-      if (!snapshot || snapshot.format !== "v2" || stateCount !== roomCount || snapshot.counts[0] !== roomCount) return { ok: false };
+      if (!snapshot || snapshot.format !== "v3" || stateCount !== roomCount || snapshot.counts[0] !== roomCount) return { ok: false };
       const parts = snapshot.counts;
       const sweepAfter = this.db.prepare("SELECT sweep_after FROM integrity_job_cursor WHERE singleton=1").get()?.sweep_after ?? "";
       const sweepSql = "SELECT id, sequence, LENGTH(projection) AS bytes, projection FROM rooms";
@@ -2872,7 +2899,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // the full check decides.
       const storedHashes = this.db.prepare("SELECT room_id AS id, projection_hash AS hash FROM integrity_room_state ORDER BY room_id").all();
       if (storedHashes.some(row => !row.hash)) return { ok: false };
-      const text = ["v2", parts[0], sequences, projectionBytes, invitations, journal.entries, journal.sequences, integrityContentDigest(storedHashes)].join(":");
+      const text = ["v3", parts[0], sequences, projectionBytes, invitations, journal.entries, journal.sequences, integrityContentDigest(storedHashes)].join(":");
       if (changed.length && text === snapshotText) return { ok: false };
       if (!changed.length && text !== snapshotText) return { ok: false };
       if (text !== snapshotText) {
@@ -2899,7 +2926,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const contentHash = integrityContentDigest(projections.map(row => ({ id: row.id, hash: projectionContentHash(this.db, row.id, row.sequence, row.projection) })));
       const invitations = this.db.prepare("SELECT COUNT(*) AS invitations FROM membership_invitations").get();
       const journal = this.db.prepare("SELECT COUNT(*) AS entries, COALESCE(SUM(sequence), 0) AS sequences FROM membership_invitation_journal").get();
-      const text = ["v2", rooms.rooms, rooms.sequences, rooms.projectionBytes, invitations.invitations, journal.entries, journal.sequences, contentHash].join(":");
+      const text = ["v3", rooms.rooms, rooms.sequences, rooms.projectionBytes, invitations.invitations, journal.entries, journal.sequences, contentHash].join(":");
       return { text, rooms: rooms.rooms, sequences: rooms.sequences, projectionBytes: rooms.projectionBytes, invitations: invitations.invitations, journalEntries: journal.entries, journalSequences: journal.sequences, contentHash };
     });
   }
@@ -2969,32 +2996,37 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const before = this.integrityChecksum();
     const snapshotText = this.readIntegritySnapshot();
     const snapshot = parseIntegritySnapshot(snapshotText);
-    if (snapshot?.format === "v2" && snapshotText === before.text) {
+    if (snapshot?.format === "v3" && snapshotText === before.text) {
       await yieldBetween();
       if (Date.now() > deadline) return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1, failures: this.integrityFailures() });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
       deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
       return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred, failures: deferred.failures });
     }
-    // L05-C1 baseline transition: a snapshot recorded before the content
-    // digest existed (the six-count legacy shape, or an unparseable one)
-    // carries no content baseline, so it can never certify or match. The
-    // first post-cure scan runs the full audit below; if that audit is
-    // clean it writes a v2 digest baseline, but the transition scan
-    // itself reports verified:0 with baselineUpgraded:1 — the new
-    // baseline is adopted explicitly, never silently as a verification
-    // (the rebaseline trap the L05 probe exploited). A store with no
-    // snapshot at all is a first baseline, not a transition, and keeps
-    // the historical verified:1 on a clean audit.
-    // Dot review of #5506: a v2 snapshot is only as trustworthy as its
+    // L05-C1 baseline transition, carried to v3 exactly (P1 §3.2): a
+    // snapshot recorded before the current content-hash definition —
+    // the six-count legacy shape, an unparseable one, or a v2 snapshot
+    // whose per-room hashes are v2-definition — can never certify or
+    // match under v3. The first v3 scan runs the full audit below; if
+    // that audit is clean it writes a v3 digest baseline, but the
+    // transition scan itself reports verified:0 with baselineUpgraded:1
+    // — the new baseline is adopted explicitly, never silently as a
+    // verification (the rebaseline trap the L05 probe exploited). Drift
+    // is still judged against the OLD baseline during the transition
+    // (driftedProjectionRooms recomputes under the v2 definition for a
+    // v2 snapshot), so a drifted room blocks adoption exactly as before;
+    // the hash definition alone never manufactures or erases a verdict.
+    // A store with no snapshot at all is a first baseline, not a
+    // transition, and keeps the historical verified:1 on a clean audit.
+    // Dot review of #5506: a v3 snapshot is only as trustworthy as its
     // per-room hashes. A remembered row whose hash is NULL leaves that
     // room with no content baseline at all, so the scan is a transition
     // for the store exactly like a legacy snapshot: it may adopt a
     // digest explicitly (baselineUpgraded) but it must not certify.
-    const hashlessRoomState = snapshot?.format === "v2"
+    const hashlessRoomState = snapshot?.format === "v3"
       && Boolean(this.db.prepare("SELECT 1 FROM integrity_room_state WHERE projection_hash IS NULL LIMIT 1").get());
-    const untrustedBaseline = (snapshot !== null && snapshot.format !== "v2") || hashlessRoomState;
-    // Dot round-2 review of #5506: a v2 snapshot whose per-room row for
+    const untrustedBaseline = (snapshot !== null && snapshot.format !== "v3") || hashlessRoomState;
+    // Dot round-2 review of #5506: a v3 snapshot whose per-room row for
     // a room is missing entirely, or whose hash is an empty string, has
     // no baseline the scan can trust for that room — an empty string is
     // a value no writer in this codebase produces, and the state table
@@ -3010,7 +3042,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Initializers and validated imports seed their own room proof in the
     // creating transaction. Missing proof is never evidence of a new room:
     // rowids can be reused after purge, and event times are caller data.
-    const unverifiableRooms = snapshot?.format === "v2"
+    const unverifiableRooms = snapshot?.format === "v3"
       ? this.db.prepare(`SELECT r.id FROM rooms r LEFT JOIN integrity_room_state s ON s.room_id=r.id
           WHERE s.room_id IS NULL OR s.projection_hash='' ORDER BY r.id`).all().map(row=>row.id)
       : [];
@@ -3118,7 +3150,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // later tick fails the same way until the bytes are repaired or
       // the room's history is replaced through importEvents (which
       // refreshes the room's baseline from the replayed log).
-      drifted = snapshot?.format === "v2" ? this.driftedProjectionRooms() : [];
+      drifted = snapshot?.format === "v3" || snapshot?.format === "v2" ? this.driftedProjectionRooms() : [];
       for (const roomId of drifted) {
         this.recordIntegrityFailure("projection_content", roomId,
           new Error("Projection content does not match its integrity baseline"));
@@ -3136,9 +3168,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
     }
-    // A clean audit over an untrusted (digest-less) baseline establishes
-    // the v2 baseline above but does not certify it: verified stays 0 and
-    // the transition is named on the result as baselineUpgraded.
+    // A clean audit over an untrusted (digest-less or previous-definition)
+    // baseline establishes the v3 baseline above but does not certify it:
+    // verified stays 0 and the transition is named on the result as
+    // baselineUpgraded.
     const verified = outstanding.length || blockedDrift.length || untrustedBaseline ? 0 : 1;
     const baselineUpgraded = untrustedBaseline && !outstanding.length && !blockedDrift.length ? { baselineUpgraded: 1 } : {};
     const contentDrift = blockedDrift.length ? { contentDrift: 1 } : {};

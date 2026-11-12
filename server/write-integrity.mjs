@@ -78,56 +78,104 @@ export function recordMessageWrite(db,roomId,messageId) {
   const row=db.prepare(`SELECT ${MESSAGE_PROOF_SELECT} FROM messages WHERE room_id=? AND message_id=?`).get(roomId,messageId);
   if (row) db.prepare('UPDATE messages SET entity_hash=? WHERE room_id=? AND message_id=?').run(messageProofHash(row),roomId,messageId);
 }
-// One traversal can validate independent write proofs and reproduce the exact
-// existing v2 content digest. Streaming bounds memory, not total scan CPU.
-function scanServingContent(db,roomId,sequence,projection,{verify,hashContent}) {
-  const hash=hashContent ? createHash('sha256').update(roomId).update('\0').update(String(sequence)).update('\0').update(projection ?? '') : null;
+// One traversal can validate independent write proofs and reproduce a
+// content digest. Streaming bounds memory, not total scan CPU.
+//
+// Two digest definitions exist, by snapshot format:
+//  - v2 (legacy, reproduced exactly): one sha256 stream over the room id,
+//    the sequence, the raw projection text, then the canonical message and
+//    work row streams, each row length-prefixed.
+//  - v3 (current, P1 §3.2): a composition of per-range digests. The row
+//    streams are walked in the same order and framed exactly as v2, but
+//    rows are grouped into ranges of CONTENT_HASH_RANGE_ROWS; each range's
+//    digest is the sha256 stream over that range's framed rows, and the
+//    room hash is a digest over (room id, sequence, projection digest,
+//    range digests in order). A scan can therefore bank per-range digests
+//    durably and resume or compose without re-reading earlier ranges
+//    (the seam the chunked scanner and its checkpoint build on).
+// The verify (drift) leg does not depend on either digest definition:
+// metadata, message and work write proofs are checked identically, so a
+// baseline-definition transition never changes a drift verdict.
+export const CONTENT_HASH_RANGE_ROWS = 200;
+function framedRowUpdate(hash,text) {
+  hash.update(String(Buffer.byteLength(text))).update(':').update(text);
+}
+export function contentRangeDigest(texts) {
+  const hash=createHash('sha256').update('content-range-v3\0');
+  for(const text of texts) framedRowUpdate(hash,text);
+  return hash.digest('hex');
+}
+export function composeContentHash(roomId,sequence,projDigest,rangeDigests) {
+  const hash=createHash('sha256').update('content-hash-v3\0');
+  hash.update(roomId).update('\0').update(String(sequence)).update('\0').update(projDigest);
+  for(const digest of rangeDigests) hash.update('\0').update(digest);
+  return hash.digest('hex');
+}
+function scanServingContent(db,roomId,sequence,projection,{verify,hashContent,definition='v3'}) {
+  const legacy=hashContent && definition==='v2'
+    ? createHash('sha256').update(roomId).update('\0').update(String(sequence)).update('\0').update(projection ?? '') : null;
+  const rangeDigests=hashContent && definition==='v3' ? [] : null;
+  let rangeTexts=rangeDigests ? [] : null;
+  const takeRowText=text=>{
+    if(legacy) framedRowUpdate(legacy,text);
+    if(rangeTexts) {
+      rangeTexts.push(text);
+      if(rangeTexts.length>=CONTENT_HASH_RANGE_ROWS) { rangeDigests.push(contentRangeDigest(rangeTexts)); rangeTexts=[]; }
+    }
+  };
   const state=JSON.parse(projection);
   let drift=false;
   if(verify) {
     const proof=db.prepare('SELECT metadata_hash FROM integrity_room_state WHERE room_id=?').get(roomId);
     drift=Boolean(proof?.metadata_hash && proof.metadata_hash!==projectionDigest(projection));
-    if(drift && !hash)return {drift};
+    if(drift && !hashContent)return {drift};
   }
   if(hasMessageAuthority(state)) {
-    hash?.update('\0canonical-messages-v1\0');
+    legacy?.update('\0canonical-messages-v1\0');
     const archive=state.messagesArchive,retained=new Set(archive?.retainedIds ?? []);
     let count=0,visible=0;
     for(const row of db.prepare(`SELECT ${MESSAGE_PROOF_SELECT},entity_hash FROM messages WHERE room_id=? ORDER BY message_id`).iterate(roomId)) {
-      if(verify && !messageProofMatches(row)){drift=true;if(!hash)return {drift};}
-      if(hash) {
-        const text=JSON.stringify(MESSAGE_PROOF_FIELDS.map(key=>row[key]));
-        hash.update(String(Buffer.byteLength(text))).update(':').update(text);
-      }
+      if(verify && !messageProofMatches(row)){drift=true;if(!hashContent)return {drift};}
+      if(hashContent) takeRowText(JSON.stringify(MESSAGE_PROOF_FIELDS.map(key=>row[key])));
       count++;
       if(!archive || row.seq>archive.throughSeq || retained.has(row.message_id))visible++;
     }
     if(verify && (visible!==state.messageAuthority.count || count!==state.messageAuthority.count+(archive?.count ?? 0)))drift=true;
-    if(drift && !hash)return {drift};
+    if(drift && !hashContent)return {drift};
   }
   const references=state.workItems ?? {};
   if(Object.values(references).some(record=>record?._workEntity===1)) {
-    hash?.update('\0canonical-work-v1\0');
+    legacy?.update('\0canonical-work-v1\0');
     const seen=new Set();
     for(const row of db.prepare('SELECT work_id,revision,digest,body FROM work_entities WHERE room_id=? ORDER BY work_id').iterate(roomId)) {
-      if(hash) {
-        const text=JSON.stringify(Object.values(row));
-        hash.update(String(Buffer.byteLength(text))).update(':').update(text);
-      }
+      if(hashContent) takeRowText(JSON.stringify(Object.values(row)));
       const reference=references[row.work_id];
       if(!verify || reference?._workEntity!==1)continue;
       seen.add(row.work_id);
-      if(reference.digest!==row.digest || reference.revision!==row.revision || projectionDigest(row.body)!==row.digest){drift=true;if(!hash)return {drift};}
+      if(reference.digest!==row.digest || reference.revision!==row.revision || projectionDigest(row.body)!==row.digest){drift=true;if(!hashContent)return {drift};}
     }
     if(verify && Object.entries(references).some(([id,record])=>record?._workEntity===1&&!seen.has(id)))drift=true;
   }
-  return {drift,...(hash ? {hash:hash.digest('hex')} : {})};
+  if(!hashContent) return {drift};
+  if(legacy) return {drift,hash:legacy.digest('hex')};
+  if(rangeTexts.length) rangeDigests.push(contentRangeDigest(rangeTexts));
+  return {drift,hash:composeContentHash(roomId,sequence,projectionDigest(projection ?? ''),rangeDigests),rangeDigests};
 }
 export function projectionContentHash(db,roomId,sequence,projection) {
-  return scanServingContent(db,roomId,sequence,projection,{verify:false,hashContent:true}).hash;
+  return scanServingContent(db,roomId,sequence,projection,{verify:false,hashContent:true,definition:'v3'}).hash;
+}
+export function projectionContentHashV3(db,roomId,sequence,projection) {
+  return projectionContentHash(db,roomId,sequence,projection);
+}
+// The exact pre-v3 stream, retained so a v2 baseline can still be checked
+// for drift during the explicit v2 -> v3 transition (and only there): a
+// stored v2 hash compared against a v3 hash would read as drift on every
+// room and the transition could never adopt.
+export function projectionContentHashV2(db,roomId,sequence,projection) {
+  return scanServingContent(db,roomId,sequence,projection,{verify:false,hashContent:true,definition:'v2'}).hash;
 }
 export function servingContentProof(db,roomId,sequence,projection) {
-  return scanServingContent(db,roomId,sequence,projection,{verify:protocols.has(db),hashContent:true});
+  return scanServingContent(db,roomId,sequence,projection,{verify:protocols.has(db),hashContent:true,definition:'v3'});
 }
 export function servingProofDrift(db,roomId,projection) {
   return protocols.has(db) && scanServingContent(db,roomId,null,projection,{verify:true,hashContent:false}).drift;
@@ -150,8 +198,12 @@ export function bootstrapLegacyWriteProofs(db) {
     }
     // A current metadata proof already covers legitimate writes after an
     // older historical baseline. Consult that baseline only when bootstrapping.
+    // A stored baseline may carry either digest definition (a v2 baseline
+    // not yet transitioned, or a v3 one): matching its own definition is
+    // what proves the bytes, never a cross-definition comparison.
     if (proof?.projection_hash && (proof.sequence !== row.sequence
-      || projectionContentHash(db,row.id,row.sequence,row.projection) !== proof.projection_hash))
+      || (projectionContentHash(db,row.id,row.sequence,row.projection) !== proof.projection_hash
+        && projectionContentHashV2(db,row.id,row.sequence,row.projection) !== proof.projection_hash)))
       throw Error('projection_corrupt: legacy content does not match its baseline');
     insert.run(row.id,row.sequence,row.bytes);
     update.run(hash,row.id);
