@@ -920,6 +920,20 @@ export const JOBS = Object.freeze([
     }
   }),
   defineJob({
+    name: "wake-stale-prune",
+    cadenceMs: HOUR_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // #6161's 24h mention/DM prune used to run only on GET /api/agent-wakes/poll,
+    // and only when the identity already had a registered host. Pull-only
+    // members (and anyone who only heartbeats) never hit that path, so stale
+    // doorbells piled up to the 50-signal cap. This job applies the same
+    // settleWakes rules (no obligations, pauses, or claimed signals) whether
+    // or not anyone is polling.
+    enabled(_env, store) { return store ? store.agentHeartbeats.staleWakesPending() : true; },
+    disabledReason: () => "No mention/DM wake signals are older than 24 hours",
+    run(store) { return store.agentHeartbeats.pruneStaleWakes(); }
+  }),
+  defineJob({
     name: "patrol",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),

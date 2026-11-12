@@ -25,6 +25,11 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
     hostId = scopedKeyHostId(auth, data.hostId);
   }
   const scopedNow = roomKey || auth.scopedKey === true;
+  // #6161's 24h prune originally ran only on the poll door. Most hosts
+  // (and pull-only members) read the queue from a heartbeat; prune here
+  // so a stale pile cannot hide new work on this path either. settleWakes
+  // is idempotent and skips obligations, pauses, and claimed signals.
+  store.agentHeartbeats.settleWakes({ agentId: auth.identityId, door: "heartbeat" });
   const result = store.agentHeartbeats.heartbeat({
     agentId: auth.identityId, hostId, mode: data.mode,
     wakeUrl: data.wakeUrl ?? null,
