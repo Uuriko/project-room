@@ -24,7 +24,22 @@ test('continuation uses the selected authenticated work and requires refresh whe
   await page.locator('#search-list [data-open-work="test-handoff"]').click();
   const card = page.locator('[data-work-record-id="test-handoff"]');
   await card.locator('.work-details > summary').click();
-  await card.getByRole('button', { name: 'Continue with an agent', exact: true }).click();
+  assert.equal(await card.getByRole('button', { name: 'Use my AI', exact: true }).count(), 1);
+  assert.equal(await card.getByRole('button', { name: 'Continue with an agent', exact: true }).count(), 0);
+  await card.getByRole('button', { name: 'Use my AI', exact: true }).click();
+  await page.locator('#portable-add-result').click();
+  await page.locator('#portable-result').fill('Unsent draft remains private');
+  await page.locator('#portable-close').click();
+  await card.getByRole('button', { name: 'Use my AI', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue with current work', exact: true }).click();
+  await page.locator('#continuation-copy:enabled').waitFor();
+  await page.locator('#continuation-close').click();
+  await card.getByRole('button', { name: 'Use my AI', exact: true }).click();
+  await page.locator('#portable-add-result').click();
+  assert.equal(await page.locator('#portable-result').inputValue(), 'Unsent draft remains private');
+  await page.locator('#portable-result').fill(''); await page.locator('#portable-close').click();
+  await card.getByRole('button', { name: 'Use my AI', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue with current work', exact: true }).click();
   await page.locator('#continuation-copy:enabled').waitFor();
   const first = await page.locator('#continuation-preview').inputValue();
   assert.match(first, /# Work continuation/); assert.match(first, /Test: prepare an agenda/);
@@ -48,7 +63,8 @@ test('continuation uses the selected authenticated work and requires refresh whe
   const readFinished = new Promise(resolve => { finishedRead = resolve; });
   const heldRead = new Promise(resolve => { releaseRead = resolve; });
   await page.route('**/work-context?*', async route => { const response = await route.fetch(); receivedRead(); await heldRead; await route.fulfill({ response }); finishedRead(); });
-  await card.getByRole('button', { name: 'Continue with an agent', exact: true }).click();
+  await card.getByRole('button', { name: 'Use my AI', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue with current work', exact: true }).click();
   await readStarted; await page.locator('#continuation-close').click();
   await page.locator('#session-menu-button').click(); await clickChrome(page, '#signout-button');
   await page.locator('#auth-panel').waitFor({ state: 'visible' }); releaseRead(); await readFinished;
@@ -73,7 +89,8 @@ test('continuation invalidates an observed viewer access change without a work r
   await page.locator('#search-list [data-open-work="test-handoff"]').click();
   const card = page.locator('[data-work-record-id="test-handoff"]');
   await card.locator('.work-details > summary').click();
-  await card.getByRole('button', { name: 'Continue with an agent', exact: true }).click();
+  await card.getByRole('button', { name: 'Use my AI', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue with current work', exact: true }).click();
   await page.locator('#continuation-copy:enabled').waitFor();
   const member = f.store.snapshot(f.keys.owner, 'commons').state.members.guest;
   f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
