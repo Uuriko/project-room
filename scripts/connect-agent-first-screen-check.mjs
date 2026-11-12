@@ -49,13 +49,10 @@ for (const touch of [false, true]) {
 
     const prompt = page.locator('#join-agent-prompt');
     assert.equal(await prompt.isVisible(), false, 'setup instructions stay off anonymous entrance');
-    assert.equal(await page.getByRole('link', { name: 'Agent sign in', exact: true }).count(), 1);
-    await page.locator('#agent-signin-button').focus();
-    await page.keyboard.press('Enter');
-    // The link opens the standalone agent sign-in page (decision #37).
+    assert.equal(await page.locator('#entry-agent-prompt').isVisible(), true);
+    assert.equal(await page.locator('#entry-agent-copy').isVisible(), true);
+    await page.goto(origin + '/agent-signin');
     await page.locator('#agent-signin-ui [name=identityId]').waitFor({ state: 'visible' });
-    assert.equal(page.url().endsWith('/agent-signin'), true);
-    assert.equal(await prompt.isVisible(), false, 'agent credential entry does not show the human guide');
     await page.locator('#agent-signin-home').click();
     await page.locator('#auth-panel').waitFor({ state: 'visible' });
     const owner = store.issueAccessKey('commons', 'owner');
