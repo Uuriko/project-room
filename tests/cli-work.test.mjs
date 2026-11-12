@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
+import { legacyAgentRoom } from './helpers/legacy-agent-room.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { workCommand } from '../cli/commands/work.mjs';
 import { execFile } from 'node:child_process';
@@ -34,6 +35,11 @@ test('work CLI traverses bounded native pages without writes and rejects stale c
   await workCommand(first.cli.nextArgv.slice(2), io);
   const second = JSON.parse(outputs.pop());
   assert.notEqual(second.work[0].id, first.work[0].id);
+  await workCommand(['--focus', 'all', '--limit', '100'], io);
+  const capped = JSON.parse(outputs.pop());
+  assert.equal(capped.page.limit, 4); assert.equal(capped.cli.nextArgv[5], '100');
+  await workCommand(capped.cli.nextArgv.slice(2), io);
+  assert.equal(JSON.parse(outputs.pop()).cli.complete, true);
   await workCommand(['--focus', 'results', '--limit', '4'], io);
   const empty = JSON.parse(outputs.pop());
   assert.deepEqual(empty.work, []); assert.equal(empty.cli.complete, false, 'empty filtered page can still have more sources');
@@ -53,4 +59,19 @@ test('work CLI rejects invalid options before loading credentials', async () => 
     await assert.rejects(() => workCommand(args, io));
   assert.equal(calls, 0);
   await assert.rejects(() => workCommand([], { connection: async () => ({}) }), /member ID is required/);
+});
+
+test('work CLI keeps the legacy source page and its continuation usable', async t => {
+  const store = new RoomStore(':memory:'), identity = store.identities.create('Legacy agent');
+  legacyAgentRoom(store, identity, { roomId: 'legacy-work', title: 'Legacy', purpose: 'Test', kind: 'personal', displayName: 'Agent' });
+  for (let i = 0; i < 2; i++) store.command(identity.secret, 'legacy-work', { id: crypto.randomUUID(), type: 'work.proposed',
+    data: { workItemId: `legacy-${i}`, title: `Legacy ${i}`, definitionOfDone: 'Produce a result', mode: 'read', accountableMemberId: identity.identityId } });
+  const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const conn = { origin: `http://127.0.0.1:${server.address().port}`, roomId: 'legacy-work', memberId: identity.identityId, secret: identity.secret };
+  let text = ''; const io = { connection: async () => conn, out: value => { text = value; } };
+  await workCommand(['--focus', 'all', '--limit', '1'], io);
+  const first = JSON.parse(text); assert.equal(first.cli.complete, false);
+  await workCommand(first.cli.nextArgv.slice(2), io);
+  const second = JSON.parse(text); assert.equal(second.cli.complete, true); assert.notEqual(first.work[0].id, second.work[0].id);
 });
