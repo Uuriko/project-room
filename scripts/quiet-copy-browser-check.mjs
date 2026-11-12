@@ -75,9 +75,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator(".connection-bar").isVisible(), true);
     assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#draft-hint").count(), 0);
-    const hint = await page.locator("#message-input").getAttribute("aria-description");
-    assert.match(hint, /Enter to send|Return for a new line/);
-    assert.equal(await page.locator("#message-input").getAttribute("title"), hint);
+    assert.equal(await page.locator("#composer-hint").count(), 0);
     await page.locator("#skip-link").focus(); await page.keyboard.press("Enter");
     assert.equal(await page.evaluate(() => document.activeElement.id), "conversation-title");
     await page.screenshot({ path: `test-results/quiet-copy-${label}-room.png`, fullPage: true });
