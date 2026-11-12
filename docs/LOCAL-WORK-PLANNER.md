@@ -1,10 +1,19 @@
-# Local work supply
+# Local checks and workers
+
+A **check** is a repeatable procedure, such as affected unit tests. A **run** is
+one attempt to execute it. A **worker** is the configured process doing the work;
+a **device** is the machine it runs on. The **result** records the outcome and
+evidence. Review remains a separate judgment about the submitted work.
+
+Configuration calls a check procedure a `recipe`; the existing `local-verification`
+host kind and `receipt.json` filename remain technical contracts. These names do
+not imply independent verification, hosted CI, or a running background worker.
 
 The objective is useful verified results per available device-hour. CPU occupancy
 is not a success metric. If no valuable eligible work exists, report the gap and
 wait for new evidence rather than repeat an unchanged test or invent filler.
 
-## One-shot deterministic verification
+## Run local checks
 
 An authorized local process can run affected unit checks without an agent loop:
 
@@ -32,7 +41,7 @@ No automatic cache reuse, claims, scheduler, listener or GitHub status is create
 Dispatch through the existing runner/native process tools after obtaining the
 required ownership; this command is the deterministic payload, not a second runner.
 
-### Deliver a deterministic result through an existing request
+### Record a check result in an existing request
 
 The existing request runner accepts a locally configured verification host:
 
@@ -90,7 +99,7 @@ This is not proof of unattended production dispatch or an idle session wake.
 snapshot and emits an advisory plan. It does not discover devices, claim work,
 start models, execute shell commands, or enable background operation.
 
-## Work supply loop
+## Select and assign useful work
 
 1. Discover bounded candidates from changed PR heads, newly failed CI jobs,
    unresolved MVP acceptance checks and explicitly selected maintenance work.
@@ -150,7 +159,7 @@ Current implementation covers planning, selected-PR discovery and an adapter to
 the existing atomic request runner. Production host configuration and two-device
 execution qualification remain; no always-on execution is claimed.
 
-## Live supply and dispatch adapter
+## Discover work and start a selected run
 
 `node scripts/discover-local-work.mjs /absolute/policies.json` reads selected PRs
 through the operator's existing `gh` connection. Each policy includes

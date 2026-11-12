@@ -61,7 +61,7 @@ test('real planned request executes actual checks, records a compact result, and
   assert.equal(result.status,'delivered');assert.equal(result.hostExecuted,true);
   const context=await f.client.replyContext('verify');assert.equal(context.request.status,'answered');
   const response=JSON.parse(f.db.prepare('SELECT response FROM request_runs').get().response);
-  assert.match(response.body,/Local verification: passed/);assert.match(response.body,new RegExp(f.project.options.expectedHead));
+  assert.match(response.body,/Local checks: passed/);assert.match(response.body,new RegExp(f.project.options.expectedHead));
   assert.doesNotMatch(response.body,new RegExp(f.project.checkout));assert.match(response.body,/not full CI/);
   assert.equal(f.receipts().length,1);assert.equal(f.receipts()[0].status,'passed');
   await runPlannedRequest(f.input);assert.equal(f.receipts().length,1,'saved result cannot execute a second recipe');
@@ -69,7 +69,7 @@ test('real planned request executes actual checks, records a compact result, and
 test('actual failed check is delivered as an investigation result without exposing its logs', {skip:process.platform==='win32'},async t=>{
   const f=await setup(t,{failing:true});await runPlannedRequest(f.input);
   const response=JSON.parse(f.db.prepare('SELECT response FROM request_runs').get().response);
-  assert.match(response.body,/Local verification: failed/);assert.match(response.body,/Investigation required/);
+  assert.match(response.body,/Local checks: failed/);assert.match(response.body,/Investigation required/);
   assert.doesNotMatch(response.body,/PRIVATE_TEST_OUTPUT/);assert.equal(f.receipts()[0].status,'failed');
 });
 test('temporary delivery failure recovers the stored outcome without repeating the actual checks', {skip:process.platform==='win32'},async t=>{

@@ -41,6 +41,25 @@ it.
 The anti-slop filter joins as checks on top of this direction. Adopted
 2026-10-09 as an Instinct-3 product decision (muse-room 8634).
 
+## Product vocabulary
+
+Use familiar project language. The product name stays **Project Room**; a **room**
+is the space for one project. **Work** contains individual **tasks**. **Docs** holds
+shared project documents. **Checks** are repeatable procedures; a **run** is one
+attempt. **Results** contain the outcome and evidence; **review** is the decision
+about the submitted work. A **worker** executes configured jobs on a **device**.
+An agent is a participant, not a synonym for a device or every running process.
+
+Keep the workspace small: these are nouns, not a request for eight navigation
+items. Put runs and check results under their task or PR. Keep scheduling, leases,
+journals, dispatch and receipt formats in diagnostics and technical references.
+Use “receipt” when naming the existing record format, not as a substitute for
+“result” everywhere. Preserve published tool names and stored field names unless
+there is a concrete compatibility-safe reason to change them. Avoid parallel
+labels such as help wanted, work supply, cockpit, factory or mission control for
+the normal project workflow. Let speed, useful work and durable results provide
+the product's character.
+
 ## The test
 
 A non-technical friend has an invite link and a phone. Within 30 seconds they
@@ -60,17 +79,12 @@ human-facing change against that.
   sit behind it, visible on demand. Room speaks when addressed (@Room) or when
   someone continues its recorded conversation. John removed the separate Ask
   Room mode on Oct 19; the address stays visible in the draft. Silence is valid.
-- **Connect before login.** John's November agent-first MVP direction makes
-  connecting an existing agent and watching the explicitly published lobby
-  available before account sign-in. Keep those two entry actions clear and
-  retain the compact login below them. An open room does not publish its
-  existing history; public viewing requires separate owner publication.
-  The compact form retains logo and name,
-  Google, Email, Password, Log in, Create account and Agent sign in. Signup
-  switches in place; recovery opens only when asked. Saved sessions enter the
-  room directly. Proof, claims, protocols, and diagnostics stay out of login.
-  `tests/landing-hero.test.mjs` and the public-entry browser checks cover this
-  entry contract. Connection help does not require a new Room account.
+- **Connect before login.** Show one copyable agent-connection prompt with its
+  Copy action, alongside compact human sign-in. Reuse an existing identity and
+  connection, verify access to the intended room, and explain host approval only
+  when required. Do not add a watch button, a separate agent sign-in button, or a
+  descriptive slogan to the sign-in screen. Keep the standalone agent route for
+  existing links. Public visibility and permission to join remain separate.
 - **Shared things are visible by default.** An ask, its additions, and its
   controls never sit behind a collapsed toggle. If no human saw it, it
   doesn't exist.

@@ -29,17 +29,17 @@ export function createLocalVerificationHost({binding, verification}) {
     // No test logs, local paths, environment values or arbitrary errors are posted.
     // This is a result for a formal request, not a work completion or CI approval.
     return {body:[
-      `Local verification: ${receipt.status}.`,
-      `Recipe: ${receipt.recipe}`,
-      `Source: ${receipt.source.head}`,
+      `Local checks: ${receipt.status}.`,
+      'Check: Affected unit tests',
+      `Commit: ${receipt.source.head}`,
       `Comparison base: ${receipt.source.base}`,
       `Selected test files: ${receipt.plan.files.length}; plan SHA-256: ${receipt.plan.sha256}`,
       `Environment: ${receipt.environment.node}; ${receipt.environment.platform}; ${receipt.environment.arch}`,
       `Started: ${receipt.startedAt}; finished: ${receipt.finishedAt}`,
       `Exit code: ${receipt.exitCode ?? 'unknown'}; reason: ${receipt.reason ?? 'none'}`,
-      `Local receipt: ${receipt.runId}; SHA-256: ${digest}`,
-      'Affected checks only. Local host-reported evidence; not full CI, independent review, or deployment approval.',
-      receipt.status === 'passed' ? 'No execution exception detected.' : 'Investigation required; do not retry unchanged automatically.'
+      `Run record: ${receipt.runId}; SHA-256: ${digest}`,
+      'Affected unit tests only. Result reported by this worker; not full CI, independent review, or deployment approval.',
+      receipt.status === 'passed' ? 'Selected checks passed.' : 'Investigation required; do not retry unchanged automatically.'
     ].join('\n')};
   };
 }

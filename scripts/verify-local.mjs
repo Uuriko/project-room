@@ -118,7 +118,8 @@ export async function verifyLocal(options, {plan = affectedPlan, execute = execu
     const status = reason || execution.timedOut || execution.spawnFailed || execution.signal ? 'invalid' : execution.status === 0 ? 'passed' : 'failed';
     receipt = {schema:'project-room-local-verification/1',runId,provenance:'local',hostedCI:false,recipe,
       source:{head:expectedHead,base:baseSha,packageLockSha256:lockHash},plan:{files,sha256:planHash},
-      environment:{node:process.version,platform:platform(),arch:arch(),i18nAllowGrowth:env.I18N_ALLOW_GROWTH === '1'},
+      environment: {node: process.version, platform: platform(), arch: arch(),
+        i18nAllowGrowth: env.I18N_ALLOW_GROWTH === '1'},
       startedAt,finishedAt:new Date().toISOString(),status,reason:reason ?? (execution.timedOut ? 'timeout' : execution.spawnFailed ? 'spawn_failed' : execution.signal ? 'signal' : null),
       exitCode:execution.status,signal:execution.signal,artifacts,
       limitations:['Affected tests only; not full CI.','Local self-reported evidence; no remote trust or cache reuse.','Clean source checked before and after; dependencies and transient concurrent edits are not attested.']};
