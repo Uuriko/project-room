@@ -18,19 +18,27 @@ export function analyzeAgentTrace(events) {
   for (const e of events) {
     if (!e || e.schemaVersion !== 1 || !/^[a-z][a-z0-9_-]{0,31}$/.test(e.adapter ?? '') ||
         !/^[a-f0-9-]{36}$/.test(e.segmentId ?? '') || !/^[a-f0-9]{64}$/.test(e.signalHash ?? '') ||
-        !stages.includes(e.stage) || !Number.isFinite(e.elapsedMs) || e.elapsedMs < 0) {
+        !stages.includes(e.stage) || !Number.isFinite(e.elapsedMs) || e.elapsedMs < 0 ||
+        (e.operationHash !== undefined && !/^[a-f0-9]{64}$/.test(e.operationHash)) ||
+        (e.outputKind !== undefined && (e.stage !== 'first_observable_output' || !['text', 'tool'].includes(e.outputKind)))) {
       invalidEvents++; continue;
     }
     const key = JSON.stringify([e.adapter, e.segmentId, e.signalHash]);
-    if (!groups.has(key)) groups.set(key, { adapter: e.adapter, segmentId: e.segmentId, signalHash: e.signalHash, seen: new Map(), conflicts: new Set(), duplicates: 0 });
+    if (!groups.has(key)) groups.set(key, { adapter: e.adapter, segmentId: e.segmentId, signalHash: e.signalHash, seen: new Map(), metadata: new Map(), operations: new Set(), conflicts: new Set(), duplicates: 0 });
     const g = groups.get(key);
+    if (e.operationHash) g.operations.add(e.operationHash);
+    const metadata = JSON.stringify([e.elapsedMs, e.operationHash ?? null, e.outputKind ?? null, e.observedAt ?? null]);
     if (g.seen.has(e.stage)) {
-      if (g.seen.get(e.stage) !== e.elapsedMs) g.conflicts.add(e.stage);
+      if (g.metadata.get(e.stage) !== metadata) g.conflicts.add(e.stage);
       else g.duplicates++;
-    } else g.seen.set(e.stage, e.elapsedMs);
+    } else {
+      g.seen.set(e.stage, e.elapsedMs);
+      g.metadata.set(e.stage, metadata);
+    }
   }
   const traces = [...groups.values()].map(g => {
     const errors = [...g.conflicts].map(s => `conflicting_stage:${s}`);
+    if (g.operations.size > 1) errors.push('conflicting_operations');
     let previous = -1;
     for (const s of stages) {
       if (!g.seen.has(s)) continue;

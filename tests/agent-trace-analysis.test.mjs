@@ -46,3 +46,16 @@ test('reject malformed metadata and never export arbitrary fields', () => {
   assert.equal(r.invalidEvents, 3);
   assert.doesNotMatch(JSON.stringify(r), /secret-value|do not export/);
 });
+test('different receipt operations cannot form one successful interval', () => {
+  const rows = trace().map(e => ({ ...e, operationHash: (e.stage === 'first_observable_output' ? 'b' : 'a').repeat(64) }));
+  const r = analyzeAgentTrace(rows);
+  assert.equal(r.traces[0].durations.dispatchToOutputMs, null);
+  assert.ok(r.traces[0].errors.includes('conflicting_operations'));
+});
+test('same timestamp with conflicting semantic metadata is not an identical duplicate', () => {
+  const rows = trace(); const output = rows.find(e => e.stage === 'first_observable_output');
+  const r = analyzeAgentTrace([...rows, { ...output, outputKind: 'text' }, { ...output, outputKind: 'tool' }]);
+  assert.equal(r.traces[0].valid, false);
+  assert.equal(r.traces[0].duplicateObservations, 0);
+  assert.equal(analyzeAgentTrace([{ ...rows[0], operationHash: 'invalid' }]).invalidEvents, 1);
+});

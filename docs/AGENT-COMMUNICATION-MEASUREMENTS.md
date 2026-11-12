@@ -13,8 +13,8 @@ observations and invalid event counts. Missing intervals are `null`. Exit 1 mean
 invalid metadata or a conflicting/nonmonotonic trace; exit 2 means unreadable
 input or invalid invocation. The command does not write, send, ACK or retry work.
 
-Reordered file entries are harmless; conflicting duplicate stages invalidate the
-trace. Identical duplicate observations are counted, not interpreted as duplicate
+Reordered file entries are harmless; conflicting duplicate stages or receipt
+operation hashes invalidate the trace. Identical duplicate observations are counted, not interpreted as duplicate
 execution. Process restarts remain separate even when they concern the same task.
 Wall timestamps are not subtracted. Output excludes arbitrary payload fields.
 
