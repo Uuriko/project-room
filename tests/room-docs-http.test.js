@@ -1,3 +1,5 @@
+import { setTier } from "../server/autonomy-tiers.mjs";
+import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
@@ -91,4 +93,31 @@ test("archived room documents remain readable but create and update are refused"
   }
   assert.equal((await call(path, owner.secret)).data.doc.rev, 1);
   assert.equal(store.db.prepare("SELECT count(*) n FROM room_doc_revisions WHERE room_id=?").get("docs-a").n, 1);
+});
+
+test("full autonomy elsewhere cannot authorize HTTP or MCP docs writes in a readonly target room", async t => {
+  const { store, call, owner, stranger } = await fixture(t);
+  const members = {};
+  for (const roomId of ["docs-a", "docs-b"]) {
+    const requestId = "join-" + roomId;
+    assert.equal((await call("/api/access-requests", stranger.secret, { roomId, identityId: stranger.identityId, displayName: "Peer", requestedPermissions: ["accept_work"], note: null, requestId })).status, 201);
+    const admitted = await call(`/api/rooms/${roomId}/access-requests/${requestId}/decide`, owner.secret, { decision: "approve", permissions: ["accept_work"], note: null });
+    assert.equal(admitted.status, 200); members[roomId] = admitted.data.memberId;
+  }
+  setTier(store.db, "docs-a", members["docs-a"], "t1_readonly");
+  setTier(store.db, "docs-b", members["docs-b"], "t2_standard");
+  const original = { title: "Spec", body: "original", baseRev: 0 };
+  assert.equal((await call("/api/rooms/docs-a/docs/spec", owner.secret, original)).status, 201);
+  assert.equal((await call("/api/rooms/docs-b/docs/spec", stranger.secret, original)).status, 201);
+  assert.equal((await call("/api/rooms/docs-a/docs/spec", stranger.secret)).status, 200);
+  const mcp = createHostedRoomMcp(store, { roomDocsEnabled: true });
+  for (const [docId, baseRev] of [["new", 0], ["spec", 1]]) {
+    const payload = { title: "Denied", body: "must not land", baseRev };
+    const denied = await call(`/api/rooms/docs-a/docs/${docId}`, stranger.secret, payload);
+    assert.equal(denied.status, 403); assert.equal(denied.data.error.code, "agent_readonly");
+    const reply = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "room_write_doc", arguments: { roomId: "docs-a", docId, ...payload } } }, { authorization: `Bearer ${stranger.secret}` });
+    assert.equal(reply.result.isError, true); assert.equal(reply.result.structuredContent.code, "agent_readonly");
+  }
+  assert.equal(store.db.prepare("SELECT count(*) n FROM room_doc_revisions WHERE room_id=?").get("docs-a").n, 1);
+  assert.equal((await call("/api/rooms/docs-a/docs/spec", owner.secret)).data.doc.body, "original");
 });

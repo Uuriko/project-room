@@ -1,3 +1,4 @@
+import { enforceAutonomyTierForAction } from "../autonomy-tiers.mjs";
 // Room docs routes. OFF unless ROOM_DOCS=1. See server/room-docs.mjs.
 // GET  /api/rooms/{roomId}/docs            list (no bodies)
 // GET  /api/rooms/{roomId}/docs/{docId}    one doc; ?rev=n for a past revision
@@ -11,6 +12,11 @@ function authed(ctx, { write }) {
   const check = auth => {
     if (!auth?.member?.id || auth.member.active === false) ctx.reject(401, "unauthenticated", "Room membership required");
     if (selected.bearer && auth.credentialScope !== "room") ctx.reject(403, "access_denied", "Bearer account sessions are not accepted");
+    // Catalog visibility may span rooms; authority belongs to this target.
+    // check() runs again after reading the body, using fresh membership/tier.
+    if (write) enforceAutonomyTierForAction({ db: ctx.store.db, roomId,
+      state: { room: { ownerId: ctx.store.roomOwnerId(roomId) } },
+      actor: auth.member, action: "write room documents", fail: ctx.reject });
     const need = write ? ["rooms:write", "rooms:*"] : ["rooms:read", "rooms:write", "rooms:*"];
     if (auth.kind === "api-key" && !(auth.apiKeyScopes ?? []).some(scope => need.includes(scope))) {
       ctx.reject(403, "insufficient_scope", `API key lacks ${write ? "rooms:write" : "rooms:read"}`);
