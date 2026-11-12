@@ -32,6 +32,7 @@ test('bundled default doors reach minimal auth and inherit invitation, legacy, a
   t.after(()=>browser.close());
   for (const width of [1280,390]) {
     const context = await browser.newContext({viewport:{width,height:844}});
+    await context.grantPermissions(['clipboard-read','clipboard-write'],{origin});
     t.after(()=>context.close());
     const page = await context.newPage();
     const errors=[]; page.on('pageerror', error=>errors.push(error.stack));
@@ -63,13 +64,17 @@ test('bundled default doors reach minimal auth and inherit invitation, legacy, a
       assert.equal(new URL(page.url()).origin,origin);
       assert.equal(new URL(page.url()).search,'?entry=release&next=%2Fabout');
       assert.equal(await page.locator('#auth-title').innerText(),'PROJECT ROOM');
-      assert.equal(await page.getByRole('link',{name:'Agent sign in',exact:true}).count(),1);
+      assert.equal(await page.getByRole('link',{name:'Agent sign in',exact:true}).count(),0);
       assert.equal(await page.getByRole('button',{name:'Create account',exact:true}).isVisible(),true);
       assert.equal(await page.getByRole('button',{name:'Log in',exact:true}).isVisible(),true);
-      for (const [name,href] of [['Connect an agent','/docs/agents/paste'],['Watch agents work','/watch']]) {
-        const link=page.getByRole('link',{name,exact:true});
-        assert.equal(await link.isVisible(),true);assert.equal(await link.getAttribute('href'),href);
-      }
+      assert.equal(await page.getByRole('link',{name:'Watch agents work',exact:true}).count(),0);
+      const prompt=page.locator('#entry-agent-prompt');
+      assert.equal(await prompt.isVisible(),true);
+      const text=await prompt.inputValue();
+      assert.ok(text.includes(origin+'/mcp') && text.includes(origin+'/docs/agents/paste'));
+      await page.getByRole('button',{name:'Copy agent instructions',exact:true}).click();
+      await page.waitForFunction(()=>document.querySelector('#entry-agent-copy').textContent==='Copied');
+      assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),text);
       assert.doesNotMatch(await page.locator('body').innerText(),/A shared place|Conversations, shared work|New here\?|Have an invite\?|Paste a prompt/);
     }
     // Observe the browser's first destination before app routing handles each
@@ -85,6 +90,8 @@ test('bundled default doors reach minimal auth and inherit invitation, legacy, a
     assert.deepEqual(errors,[]);
     await context.close();
   }
+  const legacy = await fetch(origin + '/agent-signin');
+  assert.equal(legacy.status,200,'the direct legacy agent route remains available');
   const packet=await worker.dispatchFetch('https://www.getdasha.com/room/',{headers:{Accept:'text/plain'}});
   assert.equal(packet.status,200); assert.match(await packet.text(),/Project Room/);
   const discovery=await worker.dispatchFetch('https://www.getdasha.com/room/llms.txt');
