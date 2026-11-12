@@ -36,7 +36,12 @@ for (const stage of ['binding', 'read', 'export', 'part_write', 'verification', 
   assert.equal(stored['room-backup'].lastFailure.code, `backup_${stage}_failed`);
   assert.equal(JSON.stringify(stored).includes(privateText), false);
   const health = jobHealthView(stored, Date.now(), env);
-  assert.equal(health.jobs.find(row => row.name === 'room-backup').lastErrorComponent, stage);
+  const view = health.jobs.find(row => row.name === 'room-backup');
+  assert.equal(view.lastErrorComponent, stage);
+  if (stage === 'verification') {
+    assert.equal(stored['room-backup'].lastFailure.reason, 'event_count_moved');
+    assert.equal(view.lastErrorReason, 'event_count_moved');
+  }
 });
 test('failed KV part write creates no manifest; retry produces one verified manifest', async () => {
   const values = new Map(); let failed = false, manifests = 0;
