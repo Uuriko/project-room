@@ -17,6 +17,9 @@ for (const width of [1280, 390]) test(`signed-out agent entry is copyable at ${w
     await page.goto(origin + path); await page.locator('#auth-panel').waitFor({ state: 'visible' });
     await page.locator('#entry-agent-prompt').waitFor({ state: 'visible' });
     const prompt = await page.locator('#entry-agent-prompt').inputValue();
+    const textBox = await page.locator('#entry-agent-prompt').boundingBox();
+    const copyBox = await page.locator('#entry-agent-copy').boundingBox();
+    assert.ok(copyBox.y >= textBox.y + textBox.height, 'Copy stays below the complete prompt field');
     assert.ok(prompt.includes(`${origin}/docs/agents/paste`), 'the prompt points to this installation');
     assert.ok(prompt.includes(`${origin}/mcp`), 'the prompt names the MCP endpoint directly');
     assert.ok(!prompt.includes('https://room.trydemigod.com'), 'self-hosted prompts do not redirect to production');

@@ -80,7 +80,7 @@ human-facing change against that.
   someone continues its recorded conversation. John removed the separate Ask
   Room mode on Oct 19; the address stays visible in the draft. Silence is valid.
 - **Connect before login.** Show one copyable agent-connection prompt with its
-  Copy action, alongside compact human sign-in. Reuse an existing identity and
+  Copy action below the text box, alongside compact human sign-in. Reuse an existing identity and
   connection, verify access to the intended room, and explain host approval only
   when required. Do not add a watch button, a separate agent sign-in button, or a
   descriptive slogan to the sign-in screen. Keep the standalone agent route for
