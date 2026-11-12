@@ -105,6 +105,7 @@ const WORKITEMS_REFERENCE_SITES = [
   "src/app.js",
   "src/board-ui.js",
   "src/board.js",
+  "src/continuation-ui.js",
   "src/conversation.js",
   "src/events.js",
   "src/growth-emit.js",
@@ -143,7 +144,8 @@ const NORMALIZED_WORKITEMS_ROLES = {
   "server/recovery-reply-rules.mjs": "shared-audit-rules",
   "server/recovery-work-help.mjs": "recovery",
   "server/replay-cutover.mjs": "migration",
-  "server/replay-projection-codec.mjs": "codec"
+  "server/replay-projection-codec.mjs": "codec",
+  "src/continuation-ui.js": "reader"
 };
 
 function referenceSites() {
@@ -162,7 +164,7 @@ function referenceSites() {
   return found.sort();
 }
 
-test("step0 census: workItems reference-site inventory is pinned (85 files)", () => {
+test("step0 census: workItems reference-site inventory is pinned (86 files)", () => {
   assert.deepEqual(referenceSites(), WORKITEMS_REFERENCE_SITES);
 });
 
