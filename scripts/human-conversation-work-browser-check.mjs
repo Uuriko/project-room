@@ -27,9 +27,8 @@ test("agent conversation retains full work records and result controls", { timeo
   await page.locator('[name="identityId"]').fill(identity.identityId);
   await page.locator('[name="secret"]').fill(identity.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
-  await page.getByRole("button", { name: f.store.room("commons").state.room.title, exact: true }).click();
-  await page.locator('#agent-first-run [data-step="dismiss"]').click();
-  await page.locator("#agent-signin-enter-link").click();
+  // A single authorized room now enters directly after session validation.
+  await page.waitForURL(url => url.pathname === "/" && url.searchParams.get("room") === "commons");
   await page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await page.locator("#message-list [data-work-record-id]").count(), 4);
   await page.locator('[data-work-record-id="native-result"] [data-read-result]').click();
