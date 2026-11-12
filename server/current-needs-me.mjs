@@ -32,6 +32,33 @@ function readPage(store,secret,roomId,{cursor,after,freshWindow=500,expectedMode
  }
  if(expectedMode!==undefined&&state.mode!==expectedMode||cursor!==undefined&&state.mode==='catch_up'&&after!==undefined&&state.minimum!==Math.min(after,binding.sequence))fail();
  const items=[];let examined=0,conversationComplete=state.conversationDone,workComplete=state.workDone,visibleThrough=0;
+ // Formal asks before chat. A one-page reader otherwise sees replies and
+ // never reaches an open request, which is how asks stay unanswered for weeks.
+ if(!state.workDone){
+  let workPages=0;
+  while (!state.workDone && workPages < MAX_NEEDS_ME_WORK_PAGES) {
+   workPages++;
+   const itemsBefore=items.length;
+   const page=store.currentWorkListing(secret,roomId,{focus:'needs_me',limit:1,expectedSessionBinding,...(state.workCursor?{cursor:state.workCursor}:{})});
+   for(const item of page.work)items.push({kind:'work',roomId,seq:item.revision,id:item.id,summary:clip(item.title),next:{...item.nextRead,arguments:{roomId,...item.nextRead.arguments}}});
+   for(const request of page.replyRequests??[]){
+    const opened=store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
+     const value=readCurrentRecord(store.db,roomId,'replyRequests',request.id);chargeCurrentReadBudget(b,256);
+     const seq=store.db.prepare('SELECT sequence FROM events WHERE room_id=? AND id=?').get(roomId,value.openingEventId)?.sequence;
+     return {seq,createdAt:value.createdAt};
+    }));
+    if(!Number.isSafeInteger(opened.seq))throw Error('current_room_corrupt: request opening is missing');
+    const openedMs=Date.parse(opened.createdAt);
+    items.push({kind:'direct_ask',roomId,seq:opened.seq,id:request.id,summary:clip(`Reply requested by ${request.requesterId}`),...(Number.isFinite(openedMs)?{ageMs:Math.max(0,store.now()-openedMs)}:{}),next:{...request.nextRead,arguments:{roomId,...request.nextRead.arguments}}});
+   }
+   state.workCursor=page.page.nextCursor;state.workDone=!page.page.hasMore;workComplete=state.workDone;visibleThrough=page.evaluatedThrough;
+   const addedAsk=(page.replyRequests??[]).length>0;
+   // One work row can share the page. Keep walking while formal asks remain,
+   // up to the existing page bound, so later asks are not left off page 1.
+   if(addedAsk)continue;
+   if(items.length>itemsBefore)break;
+  }
+ }
  if(!state.conversationDone){
   const inbox=readCurrentNativeInbox(store,secret,roomId,state.mode==='recent'?{limit:4,expectedSessionBinding,...(state.older?{olderCursor:state.older}:{})}:{limit:4,after:state.after,expectedSessionBinding});
   for(const [kind,rows]of [['mention',inbox.directMentions],['dm',inbox.directMessages],['reply',inbox.replies]])for(const row of rows){
@@ -47,34 +74,6 @@ function readPage(store,secret,roomId,{cursor,after,freshWindow=500,expectedMode
    state.conversationDone=!inbox.older.hasMore||source?.before<=state.minimum;
   }else{state.after=inbox.cursor.after;state.conversationDone=!inbox.cursor.hasMore;}
   conversationComplete=state.conversationDone;
- }
- if(!state.workDone){
-  // Drain filtered work pages inside this one needs-me page: the listing
-  // filters after paginating at limit 1, so a non-attention candidate can
-  // eat a whole page while addressed work waits behind it. Reuse the same
-  // cursor machinery, viewer-scoped summary reader, and next-step filter
-  // per iteration — no new source, no new visibility, no budget raise.
-  // Bounded at MAX_NEEDS_ME_WORK_PAGES; hitting the bound with work left
-  // returns an honest incomplete page (see the complete field), never a
-  // forced complete.
-  let workPages=0;
-  while (!state.workDone && workPages < MAX_NEEDS_ME_WORK_PAGES) {
-   workPages++;
-   const itemsBefore=items.length;
-   const page=store.currentWorkListing(secret,roomId,{focus:'needs_me',limit:1,expectedSessionBinding,...(state.workCursor?{cursor:state.workCursor}:{})});
-   for(const item of page.work)items.push({kind:'work',roomId,seq:item.revision,id:item.id,summary:clip(item.title),next:{...item.nextRead,arguments:{roomId,...item.nextRead.arguments}}});
-   for(const request of page.replyRequests??[]){
-    const seq=store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
-     const value=readCurrentRecord(store.db,roomId,'replyRequests',request.id);chargeCurrentReadBudget(b,256);
-     return store.db.prepare('SELECT sequence FROM events WHERE room_id=? AND id=?').get(roomId,value.openingEventId)?.sequence;
-    }));
-    if(!Number.isSafeInteger(seq))throw Error('current_room_corrupt: request opening is missing');
-    items.push({kind:'direct_ask',roomId,seq,id:request.id,summary:clip(`Reply requested by ${request.requesterId}`),next:{...request.nextRead,arguments:{roomId,...request.nextRead.arguments}}});
-   }
-   state.workCursor=page.page.nextCursor;state.workDone=!page.page.hasMore;workComplete=state.workDone;visibleThrough=page.evaluatedThrough;
-   // Stop as soon as this page has yielded a standing obligation.
-   if(items.length>itemsBefore)break;
-  }
  }
  const complete=state.conversationDone&&state.workDone;
  if(complete&&!visibleThrough)visibleThrough=withCurrentReadContext(store.db,roomId,()=>currentVisibleHorizon(store,roomId,binding.memberId,binding.sequence));
