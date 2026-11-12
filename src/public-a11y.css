@@ -53,3 +53,11 @@ h1.join-brand { text-align: center; margin: 0 0 1.5rem; font-size: 1rem; font-we
 
 /* The Advanced browser join disclosure is a touch and keyboard action. */
 #join-browser-alternative > summary { box-sizing: border-box; min-height: 44px; padding-block: .5rem; cursor: pointer; }
+/* Standalone agent sign-in is a fallback for saved credentials. */
+#agent-signin-ui .auth-divider { justify-content: flex-start; margin: 0 0 1rem; color: inherit; font-size: 1.25rem; font-weight: 650; }
+#agent-signin-ui .auth-divider::before, #agent-signin-ui .auth-divider::after { content: none; }
+#agent-signin-ui form { display: grid; gap: .75rem; }
+#agent-signin-ui form label { display: grid; gap: .35rem; }
+#agent-signin-ui form .button.primary { width: 100%; }
+#agent-signin-ui form .text-button { justify-self: start; }
+#agent-signin-ui form .form-hint { margin: 0; }

@@ -20,7 +20,7 @@ import { escapeHtml } from "./html-escape.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 import { submitIdentityMint } from "./account-client.js";
 
-export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
+export function createAgentSigninUI({ onSignedIn, firstRunActions, showFirstRun = true }) {
   let container = null;
   let phase = "credentials"; // or "rooms" | "create" | "created" | "make-room"
   let identityId = "";
@@ -186,7 +186,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
     // Clear credentials from memory the moment the session exists.
     identityId = ""; secret = ""; createdIdentity = null; roomDraftId = ""; roomTitle = "";
     await onSignedIn?.(session);
-    try { mountAgentFirstRun({ actions: firstRunActions }); }
+    try { if (showFirstRun) mountAgentFirstRun({ actions: firstRunActions }); }
     catch { /* orientation is optional; never break sign-in */ }
   }
 
@@ -289,6 +289,9 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
         displayName = result.displayName || identityId;
         rooms = result.rooms || [];
         phase = "rooms";
+        // A sole membership is already an unambiguous room choice. Keep the
+        // picker as the retry path if establishing the session fails.
+        if (rooms.length === 1) await startSession(identityId, rooms[0].roomId, secret);
       });
       return;
     }

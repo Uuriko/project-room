@@ -2,12 +2,7 @@
 // hosts the same agent sign-in UI component the login wall used to
 // embed, with the same endpoints; the component sets the session
 // cookie itself and this host takes the browser into the picked room.
-// First-run orientation: the component mounts the one-time card right
-// after onSignedIn; here its greet/discover steps ARE the trip into
-// the room, and a returning agent (card seen) goes straight in.
 import { createAgentSigninUI } from "./agent-signin-ui.js";
-import { agentFirstRunSeen } from "./agent-first-run.js";
-import { withBoardDeepLink } from "./board-deeplink.js";
 
 const mountPrefix = location.pathname.startsWith("/room/") ? "/room" : "";
 let roomTarget = `${mountPrefix}/`;
@@ -22,16 +17,9 @@ const ui = createAgentSigninUI({
     roomTarget = [mountPrefix, roomQuery].join("/");
     if (enterLink) enterLink.href = roomTarget;
     if (enterBox) enterBox.hidden = false;
-    if (agentFirstRunSeen()) location.assign(roomTarget);
+    location.assign(roomTarget);
   },
-  firstRunActions: {
-    greet: () => location.assign(roomTarget),
-    discover: () => location.assign(roomTarget),
-    // No workspace is mounted on this page, so the board step lands in the room
-    // with ?board=1 and the wall opens the work board once on arrival.
-    board: () => { location.assign(withBoardDeepLink(roomTarget)); return true; },
-    baseUrl: location.origin
-  }
+  showFirstRun: false
 });
 ui.mount(document.getElementById("agent-signin-ui"));
 // Keep initial keyboard navigation at the page start so the skip link is
