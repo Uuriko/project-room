@@ -4,6 +4,34 @@ The objective is useful verified results per available device-hour. CPU occupanc
 is not a success metric. If no valuable eligible work exists, report the gap and
 wait for new evidence rather than repeat an unchanged test or invent filler.
 
+## One-shot deterministic verification
+
+An authorized local process can run affected unit checks without an agent loop:
+
+```sh
+node scripts/verify-local.mjs --checkout /absolute/clean/checkout --head <40-character-head-sha> --base <40-character-base-sha> --recipe affected-unit
+```
+
+This reuses `ci-affected.mjs` and `unit-ci.mjs`. It requires a clean repository
+root (including untracked files), serializes jobs per checkout, and checks the
+source again after execution. The default timeout is 30 minutes; process-group
+cancellation currently supports macOS/Linux, not Windows. Existing unknown
+reservations must be reconciled manually; the command never steals them.
+
+The command prints the status and an atomic receipt path under the checkout's
+Git directory. Receipts retain source/base, lockfile and test-plan hashes,
+Node/platform/architecture, timing, exit status and copied artifact hashes.
+Output stays local and may contain test data; no credentials are deliberately
+forwarded to the child, and no artifacts are uploaded. Existing PATH/HOME are
+retained for local tooling. This is not a sandbox: run only authorized source.
+
+`passed` means the affected selection passed on this machine, not full CI or
+hosted approval. Missing evidence, changed source and interrupted execution are
+invalid. Dependencies and transient edits between source checks are not attested.
+No automatic cache reuse, claims, scheduler, listener or GitHub status is created.
+Dispatch through the existing runner/native process tools after obtaining the
+required ownership; this command is the deterministic payload, not a second runner.
+
 `node scripts/plan-local-work.mjs snapshot.json` ranks an operator-supplied
 snapshot and emits an advisory plan. It does not discover devices, claim work,
 start models, execute shell commands, or enable background operation.
