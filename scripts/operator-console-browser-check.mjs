@@ -64,7 +64,12 @@ async function connect(page, origin, token = TOKEN) {
 async function planLeftover(page) {
   await page.locator("#op-find-room-id").fill("qa9-");
   await page.locator("#op-find-form button[type=submit]").click();
-  await page.locator("#op-find-results li", { hasText: "qa9-console-leftover" }).getByRole("button", { name: /Add room qa9-console-leftover/ }).click();
+  await page.locator("#op-find-results li", { hasText: "qa9-console-leftover" }).waitFor();
+  // WCAG 2.5.3 label in name: each button's accessible name contains its visible text.
+  const mismatched = await page.locator("#op-find-results button").evaluateAll(buttons =>
+    buttons.filter(button => !(button.getAttribute("aria-label") ?? button.textContent).includes(button.textContent.trim())).map(button => button.getAttribute("aria-label")));
+  assert.deepEqual(mismatched, [], "accessible names contain the visible button text");
+  await page.locator("#op-find-results li", { hasText: "qa9-console-leftover" }).getByRole("button", { name: "Add to plan: room qa9-console-leftover", exact: true }).click();
   await page.locator("#op-reason").fill("Remove console QA leftover");
   await page.locator("#op-plan-button").click();
   await page.locator("#op-plan").waitFor({ state: "visible" });
