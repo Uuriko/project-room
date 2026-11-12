@@ -8,6 +8,10 @@ const agentPrompt = document.getElementById("entry-agent-prompt");
 const agentCopy = document.getElementById("entry-agent-copy");
 const agentCopyStatus = document.getElementById("entry-agent-copy-status");
 if (agentPrompt && agentCopy && agentCopyStatus) {
+  // A pasted prompt must return to the installation the person actually opened.
+  if (location.protocol === "https:" || location.protocol === "http:") {
+    agentPrompt.value = agentPrompt.value.replaceAll("https://room.trydemigod.com", location.origin);
+  }
   clipboard.subscribe(() => { agentCopy.disabled = clipboard.busy; });
   agentCopy.addEventListener("click", async () => {
     if (clipboard.busy) return;
