@@ -43,7 +43,7 @@ test("GET / keeps product education out of the minimal sign-in entry", async t =
   assert.match(html,/<h1 id="auth-title"[^>]*>PROJECT ROOM<\/h1>/);
   assert.ok(!html.includes('id="auth-hero"'));
   const auth = html.match(/<section id="auth-panel"[\s\S]*?<\/section>/)[0];
-  assert.equal((auth.match(/id="agent-signin-button"/g) ?? []).length, 1);
+  assert.equal((auth.match(/id="entry-agent-prompt"/g) ?? []).length, 1);
   assert.ok(!/href="(?:\/about|\/agents\.json|[^"]*#join-agent)/.test(auth), "education stays outside sign-in");
 });
 
