@@ -102,3 +102,22 @@ test('no freeform body, source or arbitrary fields escape handoff evaluation', (
   assert.equal(r.directions[0].deadlineEvaluable,2);
   assert.equal(r.directions[0].deadlineBreaches,1);
 });
+test('later intended correction recovers the handoff while preserving every response time', () => {
+  const r=handoff(); for(const k of ['responseRuntime','responseAtMs','useful','responseEvidenceHash'])delete r[k];
+  const result=analyzeAgentTrace([], {nowMs:120000,clockId:'room-server',records:[{...r,openedAtMs:0,responses:[
+    {responseRuntime:'other-acp',responseAtMs:29064,useful:true,responseEvidenceHash:'c'.repeat(64)},
+    {responseRuntime:'acp-mac',responseAtMs:99207,useful:true,responseEvidenceHash:'d'.repeat(64)}]}]}).handoffs;
+  const sample=result.samples[0];
+  assert.equal(sample.wrongRuntimeCount,1);assert.equal(sample.useful,true);
+  assert.equal(sample.usefulResponseMs,99207);assert.equal(sample.pendingAgeMs,null);
+  assert.equal(sample.recoveredAfterWrongRuntime,true);
+  assert.deepEqual(sample.responses.map(r=>r.responseMs),[29064,99207]);
+  assert.equal(evaluate([{...r,responses:[],responseAtMs:null}]).invalidRecords,1);
+});
+test('response arrays select earliest useful time regardless of ingestion order and reject repeated evidence', () => {
+  const r=handoff();for(const k of ['responseRuntime','responseAtMs','useful','responseEvidenceHash'])delete r[k];
+  const responses=[{responseRuntime:'acp-mac',responseAtMs:160,useful:true,responseEvidenceHash:'c'.repeat(64)},
+    {responseRuntime:'acp-mac',responseAtMs:120,useful:true,responseEvidenceHash:'d'.repeat(64)}];
+  assert.equal(evaluate([{...r,responses}]).samples[0].usefulResponseMs,20);
+  assert.equal(evaluate([{...r,responses:[responses[0],responses[0]]}]).invalidRecords,1);
+});

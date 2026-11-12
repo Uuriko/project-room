@@ -91,3 +91,14 @@ convenient observation. Preserve unanswered records in each snapshot.
 Deadlines are explicit proposed/configured targets, not measured industry
 benchmarks. No default timeout or implicit promise is introduced. Existing stage
 latencies remain process-local and are not spliced across restart segments.
+
+For multiple replies to one handoff, replace all four scalar response fields with
+`responses: [{responseAtMs, responseRuntime, useful, responseEvidenceHash}, ...]`.
+Do not mix scalar and array forms, even with null scalar fields. The evaluator
+retains each response's elapsed time, runtime match and usefulness and selects the
+earliest evidenced useful reply from the intended runtime. A later correction
+therefore resolves the pending age without erasing an earlier wrong-runtime reply.
+`recoveredAfterWrongRuntime` marks that sequence; `wrongRuntimeResponses` counts
+responses while `wrongRuntime` counts affected handoffs. Repeated evidence hashes
+within one handoff are rejected to prevent counting one response twice. Scalar
+input remains supported. No automatic correlation from conversation prose occurs.

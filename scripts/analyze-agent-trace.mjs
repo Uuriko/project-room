@@ -74,28 +74,47 @@ export function analyzeHandoffs({ nowMs, clockId, records } = {}) {
   let invalidRecords = 0;
   const samples = [];
   for (const r of records) {
+    const fields=['responseRuntime','responseAtMs','useful','responseEvidenceHash'];
+    const arrayForm=r && Object.hasOwn(r,'responses');
+    const rawResponses=arrayForm?r.responses:[r];
     if (!r || !hash(r.handoffHash) || duplicates.has(r.handoffHash) || r.clockId !== clockId ||
       !time(r.openedAtMs) || r.openedAtMs > nowMs ||
       ![r.fromRuntime, r.toRuntime, r.context].every(v => v == null || label(v)) ||
-      (r.responseRuntime != null && !label(r.responseRuntime)) ||
-      (r.responseAtMs != null && (!time(r.responseAtMs) || r.responseAtMs < r.openedAtMs || r.responseAtMs > nowMs)) ||
       (r.deadlineMs != null && (!time(r.deadlineMs) || r.deadlineMs === 0)) ||
-      (r.useful != null && typeof r.useful !== 'boolean') ||
-      (r.responseEvidenceHash != null && !hash(r.responseEvidenceHash))) { invalidRecords++; continue; }
-    const responseObserved = r.responseAtMs != null;
-    const runtimeMatch = r.toRuntime && r.responseRuntime ? r.toRuntime === r.responseRuntime : null;
-    const useful = responseObserved && runtimeMatch === true && r.useful === true && hash(r.responseEvidenceHash);
-    const wrongRuntime = responseObserved && runtimeMatch === false;
-    const pendingAgeMs = useful ? null : nowMs - r.openedAtMs;
-    const usefulResponseMs = useful ? r.responseAtMs - r.openedAtMs : null;
+      (arrayForm && fields.some(f=>Object.hasOwn(r,f))) || !Array.isArray(rawResponses) ||
+      rawResponses.some(v=>!v || typeof v!=='object' || Array.isArray(v) ||
+        (v.responseRuntime != null && !label(v.responseRuntime)) ||
+        (v.responseAtMs != null && (!time(v.responseAtMs) || v.responseAtMs < r.openedAtMs || v.responseAtMs > nowMs)) ||
+        (v.useful != null && typeof v.useful !== 'boolean') ||
+        (v.responseEvidenceHash != null && !hash(v.responseEvidenceHash)))) { invalidRecords++; continue; }
+    const responses=rawResponses.map(v=>{
+      const observed=v.responseAtMs!=null;
+      const runtimeMatch=r.toRuntime && v.responseRuntime ? r.toRuntime===v.responseRuntime:null;
+      return {responseRuntime:v.responseRuntime??null,responseAtMs:v.responseAtMs??null,
+        responseEvidenceHash:v.responseEvidenceHash??null,responseMs:observed?v.responseAtMs-r.openedAtMs:null,
+        runtimeMatch,wrongRuntime:observed && runtimeMatch===false,
+        useful:observed && runtimeMatch===true && v.useful===true && hash(v.responseEvidenceHash),
+        outcomeUnknown:!observed || runtimeMatch===null || v.useful==null || !v.responseEvidenceHash,
+        telemetryMissing:!observed || !v.responseRuntime || !r.toRuntime || v.useful==null || !v.responseEvidenceHash};
+    });
+    const evidence=responses.map(v=>v.responseEvidenceHash).filter(Boolean);
+    if(new Set(evidence).size!==evidence.length){invalidRecords++;continue;}
+    const accepted=responses.filter(v=>v.useful).sort((a,b)=>a.responseAtMs-b.responseAtMs)[0];
+    const useful=Boolean(accepted),wrongRuntimeCount=responses.filter(v=>v.wrongRuntime).length;
+    const responseObserved=responses.some(v=>v.responseAtMs!==null);
+    const wrongRuntime=wrongRuntimeCount>0;
+    const pendingAgeMs=useful?null:nowMs-r.openedAtMs;
+    const usefulResponseMs=accepted?.responseMs??null;
     const deadlineBreached = r.deadlineMs == null ? null
       : useful ? usefulResponseMs > r.deadlineMs
         : pendingAgeMs >= r.deadlineMs ? true : null;
     const sample = { handoffHash:r.handoffHash, fromRuntime:r.fromRuntime ?? null, toRuntime:r.toRuntime ?? null,
-      context:r.context ?? null, responseRuntime:r.responseRuntime ?? null, responseObserved,
-      runtimeMatch, wrongRuntime, useful, usefulResponseMs, pendingAgeMs, deadlineBreached,
-      outcomeUnknown:!useful && !wrongRuntime && !(responseObserved && r.useful === false),
-      telemetryMissing:!responseObserved || !r.responseRuntime || !r.toRuntime || r.useful == null || !r.responseEvidenceHash };
+      context:r.context ?? null, responses, responseRuntime:accepted?.responseRuntime??responses[0]?.responseRuntime??null,responseObserved,
+      runtimeMatch:accepted?.runtimeMatch??responses[0]?.runtimeMatch??null,wrongRuntime,wrongRuntimeCount,
+      recoveredAfterWrongRuntime:useful && responses.some(v=>v.wrongRuntime && v.responseAtMs<accepted.responseAtMs),
+      useful, usefulResponseMs, pendingAgeMs, deadlineBreached,
+      outcomeUnknown:!useful && !wrongRuntime && (!responses.length || responses.some(v=>v.outcomeUnknown)),
+      telemetryMissing:!responses.length || responses.some(v=>v.telemetryMissing) };
     samples.push(sample);
     const key=JSON.stringify([sample.fromRuntime,sample.toRuntime,sample.context]);
     if (!grouped.has(key)) grouped.set(key, { fromRuntime:sample.fromRuntime,toRuntime:sample.toRuntime,context:sample.context,samples:[] });
@@ -106,6 +125,8 @@ export function analyzeHandoffs({ nowMs, clockId, records } = {}) {
     const ages=g.samples.filter(s=>s.pendingAgeMs!==null).map(s=>s.pendingAgeMs);
     return { fromRuntime:g.fromRuntime,toRuntime:g.toRuntime,context:g.context,total:g.samples.length,
       useful:g.samples.filter(s=>s.useful).length,wrongRuntime:g.samples.filter(s=>s.wrongRuntime).length,
+      wrongRuntimeResponses:g.samples.reduce((n,s)=>n+s.wrongRuntimeCount,0),
+      recoveredAfterWrongRuntime:g.samples.filter(s=>s.recoveredAfterWrongRuntime).length,
       awaitingUseful:g.samples.filter(s=>!s.useful).length,unknownOutcomes:g.samples.filter(s=>s.outcomeUnknown).length,
       missingTelemetry:g.samples.filter(s=>s.telemetryMissing).length,
       deadlineEvaluable:g.samples.filter(s=>s.deadlineBreached!==null).length,
