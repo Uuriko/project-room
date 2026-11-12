@@ -1,0 +1,34 @@
+  /api/rooms/{roomId}/projection:
+    get:
+      summary: Scoped room projection — a named slice of the room snapshot
+      description: >-
+        Returns only the room classes named in the required `fields`
+        query parameter (a comma-separated list drawn from summary, room,
+        members, channels, messages, work, audit, pins, bonds), cut from
+        the same viewer-filtered, redacted, windowed snapshot the room
+        read serves — there is no separate visibility path. `summary` is
+        a derived slice: the room record plus per-class counts, with no
+        message bodies or member records. The response names the classes
+        it returns in `returnedClasses` and every class present in the
+        snapshot that was not requested in `omittedClasses`, so a reader
+        can prove the slice is complete for what it asked. An unknown,
+        duplicated, or missing field refuses the whole read with
+        invalid_snapshot_view; a partial slice is never served. The
+        messages class carries the shared window (`messagesWindow`,
+        `messagesPage`); older history still pages through
+        GET /api/rooms/{roomId}/messages. The room class also carries the
+        snapshot `charter`. This read is wire-scoped only: the server
+        still materialises the windowed snapshot before cutting the
+        slice, so it avoids sending the unrequested classes, not loading
+        them. Example: GET /api/rooms/{roomId}/projection with the
+        fields parameter set to summary, or to members,work.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: fields
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: "{ projectionVersion, roomId, sequence, fields, returnedClasses, omittedClasses, summary?, state, charter?, messagesWindow?, messagesPage?, cursor, catchUpCursor, viewerId, ... }" }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_snapshot_view }
