@@ -40,6 +40,16 @@ export function backupFailureDetail(error) {
 async function backupStep(stage, action) {
   try { return await action(); } catch { throw backupFailure(stage); }
 }
+// Starts the room's export. A store too large for the one-turn snapshot
+// refuses before writing anything (see exportNdjsonConsistentStream); that
+// is reported with a bounded reason token and never as a torn export.
+async function startExport(room) {
+  try { return await room.exportRoomNdjson(); }
+  catch (error) {
+    const tooLarge = String(error?.message ?? error).includes("backup_snapshot_too_large");
+    throw backupFailure("export", undefined, tooLarge ? "snapshot_too_large" : null);
+  }
+}
 async function* exportChunks(body) {
   try { yield* byteChunks(body); } catch { throw backupFailure('export'); }
 }
@@ -336,12 +346,12 @@ export async function writeDailyBackup(env, room, now = new Date()) {
   const key = backupObjectKey(now);
   if (bucket) {
     if (verifiedR2Backup(await backupStep("read", () => bucket.head(key)))) return { skipped: "exists", key };
-    const body = await backupStep("export", () => room.exportRoomNdjson());
+    const body = await startExport(room);
     await writeR2Backup(bucket, key, body);
     return { wrote: key };
   }
   if (currentManifest(await backupStep("read", () => kv.get(key)))) return { skipped: "exists", key, target: "kv" };
-  const body = await backupStep("export", () => room.exportRoomNdjson());
+  const body = await startExport(room);
   const manifest = await writeKvBackup(kv, key, body, { now: new Date(now).getTime() });
   return { wrote: key, target: "kv", parts: manifest.parts.length, bytes: manifest.bytes };
 }

@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { exportNdjsonLines, exportTrailer, exportNdjsonStream, exportNdjsonText, exportNdjsonConsistentStream, materializeExportParts, BACKUP_EXPORT_PARTS_TABLE, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
-import { backupTarget, writeDailyBackup, writeKvBackup, verificationReasonToken } from "../cloudflare/room-backup.mjs";
+import { exportNdjsonLines, exportTrailer, exportNdjsonStream, exportNdjsonText, exportNdjsonConsistentStream, materializeExportParts, BACKUP_EXPORT_PARTS_TABLE, BACKUP_SNAPSHOT_MAX_BYTES, BACKUP_SNAPSHOT_TOO_LARGE, storeDatabaseBytes, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
+import { backupTarget, writeDailyBackup, writeKvBackup, verificationReasonToken, backupFailureDetail } from "../cloudflare/room-backup.mjs";
 import { assembleKvBackup, summarizeRoom } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -717,4 +717,25 @@ test("verificationReasonToken maps torn-export messages to public health tokens"
   assert.equal(verificationReasonToken("event count moved: the trailer counts 10 but the export holds 11 events"), "trailer_count_mismatch");
   assert.equal(verificationReasonToken("event log changed during the export (same count, different rows)"), "event_hash_changed");
   assert.equal(verificationReasonToken(""), null);
+});
+
+test("a store over the snapshot cap refuses before staging anything and fails the job with a bounded reason", async t => {
+  const { store } = openStore(t, 3);
+  assert.ok(storeDatabaseBytes(store.db) > 0, "the fixture reports a size");
+  assert.ok(BACKUP_SNAPSHOT_MAX_BYTES >= 32 * 1024 * 1024 && BACKUP_SNAPSHOT_MAX_BYTES <= 256 * 1024 * 1024);
+  assert.throws(() => exportNdjsonConsistentStream(store, { maxSnapshotBytes: 1 }), new RegExp(BACKUP_SNAPSHOT_TOO_LARGE));
+  const staging = store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(BACKUP_EXPORT_PARTS_TABLE);
+  assert.equal(staging, undefined, "the refusal writes no staging table, so no one-turn copy ran");
+  // Under the cap the same store still exports and verifies as before.
+  const text = await new Response(exportNdjsonConsistentStream(store, { maxSnapshotBytes: 1 << 30 })).text();
+  assert.match(text, /"kind":"trailer"/);
+
+  const kv = fakeKv();
+  const when = new Date(Date.UTC(2026, 9, 8, 9));
+  const stale = { exportRoomNdjson: () => exportNdjsonConsistentStream(store, { maxSnapshotBytes: 1 }) };
+  let failure;
+  try { await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, stale, when); } catch (error) { failure = error; }
+  assert.ok(failure, "the job still fails: a refused snapshot is never a successful backup");
+  assert.deepEqual(backupFailureDetail(failure), { code: "backup_export_failed", component: "export", errorClass: "backup_failure", reason: "snapshot_too_large" });
+  assert.equal(await kv.get("room-backups/2026-10-08.ndjson"), null, "no manifest is written");
 });

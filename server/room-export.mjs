@@ -504,7 +504,32 @@ export function exportNdjsonStream(db) {
   });
 }
 
+// The one-turn snapshot above copies every row into staging inside a single
+// write transaction. That is only safe while the whole store fits comfortably
+// in one Durable Object turn. Past this size (the 12:00Z 2026-11-12 retry on a
+// ~360 MB store sat uncommitted for 19+ minutes and stalled the object), the
+// export refuses to start, before writing any staging row, so the cron retry
+// fails fast instead of wedging the room. This does not weaken verification:
+// no manifest is written, the room-backup job stays failing, and health says so.
+export const BACKUP_SNAPSHOT_MAX_BYTES = 96 * 1024 * 1024;
+export const BACKUP_SNAPSHOT_TOO_LARGE = "backup_snapshot_too_large";
+
+export function storeDatabaseBytes(db) {
+  try {
+    // Workers exposes the complete SQLite size directly; page PRAGMAs are
+    // unsupported there (see measureStoreGrowth in server/jobs.mjs).
+    const native = db.storage?.sql?.databaseSize;
+    if (Number.isSafeInteger(native) && native >= 0) return native;
+    const count = Number(db.prepare("PRAGMA page_count").get()?.page_count);
+    const size = Number(db.prepare("PRAGMA page_size").get()?.page_size);
+    if (Number.isFinite(count) && Number.isFinite(size)) return count * size;
+  } catch { /* unknown size: do not block on it */ }
+  return 0;
+}
+
 export function exportNdjsonConsistentStream(store, options) {
+  const maxBytes = options?.maxSnapshotBytes ?? BACKUP_SNAPSHOT_MAX_BYTES;
+  if (storeDatabaseBytes(store.db) > maxBytes) throw new Error(BACKUP_SNAPSHOT_TOO_LARGE);
   store.transaction(() => materializeExportParts(store.db, options));
   return streamMaterializedExportParts(store.db, store);
 }
