@@ -5384,6 +5384,7 @@ function revealPeopleChrome() {
 }
 function roomActionEntries() {
   return [
+    ...(activeWorkNavigationId && state.workItems?.[activeWorkNavigationId] ? [{ id: "continue-selected-work", label: "Continue selected task with an agent", words: "continuation handoff copy selected work", always: true }] : []),
     { id: "write", label: requestMode ? "Open composer" : $("#message-input").value ? "Continue writing" : "Write a message", words: "compose chat draft reply", target: "#message-input" },
     { id: "search", label: "Search room", words: "find messages work", target: "#message-search", always: true },
     { id: "mentions", label: "Mentions", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true, always: true },
@@ -5540,7 +5541,12 @@ function chooseRoomAction(id) {
   if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
   const entry = roomActionEntries().find(value => value.id === id);
   if (!entry) { renderRoomActions(); $("#room-actions-query").focus(); return; }
+  const opener = roomActionsContext.opener;
   closeRoomActions(false);
+  if (id === "continue-selected-work") {
+    if (!activeWorkNavigationId || !continuationUI?.open(activeWorkNavigationId, opener)) notice("That task is no longer available. Open it and try again.", true);
+    return;
+  }
   if (updatesUi.openAction(id)) return;
   if (id === "how-invite") {
     const button = $("#invite-people-button");

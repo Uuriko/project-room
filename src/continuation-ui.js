@@ -42,13 +42,17 @@ export function installContinuation({ client, getState }) {
     } catch (error) { if (owns(ticket)) setStatus(error.message || 'Could not load work. Try again.'); }
     finally { if (owns(ticket)) { ticket.loading = false; controls(); } }
   }
+  function open(workId, opener) {
+    if (dialog.open || !client.session || !client.ownsAccountSession()) return false;
+    const state = getState();
+    if (state?.room?.id !== client.session.roomId || !Object.hasOwn(state.workItems, workId)) return false;
+    entry = { epoch: ++epoch, generation: client.generation, session: client.session, workId, opener, loading: false, basis: null };
+    dialog.showModal(); controls(); void refresh(entry);
+    return true;
+  }
   document.addEventListener('click', event => {
     const button = event.target.closest('[data-continue-work]');
-    if (!button || dialog.open || !client.session || !client.ownsAccountSession()) return;
-    const state = getState(), workId = button.dataset.continueWork;
-    if (state?.room?.id !== client.session.roomId || !Object.hasOwn(state.workItems, workId)) return;
-    entry = { epoch: ++epoch, generation: client.generation, session: client.session, workId, opener: button, loading: false, basis: null };
-    dialog.showModal(); controls(); void refresh(entry);
+    if (button) open(button.dataset.continueWork, button);
   });
   $('continuation-close').addEventListener('click', close);
   dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
@@ -67,5 +71,5 @@ export function installContinuation({ client, getState }) {
     } finally { copying = false; controls(); }
   });
   clipboard.subscribe(controls);
-  return { reset, sync() { if (entry && !owns(entry)) reset(); else controls(); } };
+  return { open, reset, sync() { if (entry && !owns(entry)) reset(); else controls(); } };
 }
