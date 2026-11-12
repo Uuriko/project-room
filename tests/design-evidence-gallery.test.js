@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { readCaptures, renderGallery } from "../scripts/design-evidence-gallery.mjs";
+import { readCaptures, renderGallery, selectJourneys, buildReviewPacket, renderReviewPrompt } from "../scripts/design-evidence-gallery.mjs";
 
 test("gallery binds screenshot bytes, preserves failed test status and refuses unsafe paths", t => {
   const dir = mkdtempSync(join(tmpdir(), "design-gallery-"));
@@ -32,7 +32,28 @@ test("gallery escapes fixture labels and keeps coverage and failure limitations 
   assert.match(html, /real Google\/email delivery/);
   assert.match(html, /real-provider sign-in proof/);
   assert.match(html, /Source stable during capture: NO/);
-  assert.match(html, /Overall evidence: NOT passed/);
+  assert.match(html, /Capture checks: NOT passed/);
   assert.match(html, /explicit dark and light themes/);
   assert.match(html, /Image framing/);
+});
+
+
+test("a selected design journey avoids unrelated captures and unknown names fail closed", () => {
+  const selected=selectJourneys("entry");assert.equal(selected.length,1);
+  assert.equal(selected[0].script,"scripts/a11y-login-browser-check.mjs");
+  assert.ok(selectJourneys().length>1);assert.throws(()=>selectJourneys("../unknown"),/Unknown journey/);
+});
+
+test("agent review context retains failed and missing evidence without inventing design approval", () => {
+  const report={passed:false,sourceStable:false,source:{commit:"a".repeat(40),tree:"b".repeat(40),dirty:true,filesSha256:"c".repeat(64),files:[{path:"not-needed-in-context"}]},
+    generatedAt:"2026-11-12T00:00:00Z",environment:{platform:"test"},
+    runs:[{id:"entry",script:"test",status:1,captureCount:0,log:"entry.log"}],captures:[]};
+  const packet=buildReviewPacket(report);
+  assert.equal(packet.reviewStatus,"not_reviewed");assert.equal(packet.designDecision,null);
+  assert.equal(packet.captureChecksPassed,false);assert.equal(packet.sourceStable,false);
+  assert.equal(packet.runs[0].status,1);assert.equal(packet.runs[0].captures,0);
+  assert.equal(packet.source.files,undefined);assert.doesNotMatch(JSON.stringify(packet),/not-needed-in-context/);
+  assert.match(renderReviewPrompt(packet),/insufficient evidence/);
+  assert.match(renderReviewPrompt(packet),/Capture checks passed: false/);
+  assert.match(renderReviewPrompt(packet),/Screenshots cannot establish/);
 });
