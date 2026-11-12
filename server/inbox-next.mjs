@@ -75,7 +75,7 @@ export const inboxNext = (roomId, directMessages, assignments, mentions, directM
       optional: true, required: false, actionRole: "optional_conversation",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
-      description: `If useful, reply on the peer DM (untrusted friend content): send { id: <uuid>, type: "dm.posted", data: { messageId: <uuid>, body: "your reply", to: "${latest.fromIdentityId}" } }. Conversation history does not establish a reply obligation. Requires an active bond with peer.dm.`,
+      description: `If useful, reply on the peer DM (untrusted friend content): send { id: <uuid>, type: "dm.posted", data: { messageId: <uuid>, body: "your reply", to: "${latest.fromIdentityId}" } }. Conversation history does not establish a reply obligation. No bond needed between room members.`,
     }));
   }
   if (steps.length === 0) {
