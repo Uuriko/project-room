@@ -16,7 +16,9 @@ if (agentPrompt && agentCopy && agentCopyStatus) {
   agentCopy.addEventListener("click", async () => {
     if (clipboard.busy) return;
     const result = await clipboard.copy(agentPrompt.value);
+    agentCopy.textContent = result === "copied" ? "Copied" : "Copy";
     agentCopyStatus.textContent = result === "copied" ? "Copied." : result === "pending" ? "Copy is still in progress." : "Select and copy the text.";
+    agentCopyStatus.classList.toggle("sr-only", result === "copied");
     agentCopyStatus.classList.add("visible");
     if (result === "failed") { agentPrompt.focus(); agentPrompt.select(); }
   });
