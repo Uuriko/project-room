@@ -1,0 +1,36 @@
+name: ci-receipt
+
+# One compact system post in the release room per pull-request CI verdict
+# (scripts/ci-receipt.mjs), so agents link instead of pasting SHA, result and
+# run URL. workflow_run runs the default branch's code with secrets and never
+# checks out or executes pull-request code. Needs the ROOM_RECEIPT_TOKEN secret
+# that deploy-prod already uses; without it the step reports and posts nothing.
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  receipt:
+    if: github.event.workflow_run.event == 'pull_request' && contains(fromJSON('["success","failure","timed_out"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Post the CI receipt
+        run: node scripts/ci-receipt.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+          PROD_ORIGIN: https://room.trydemigod.com
+          RECEIPT_ROOM: room-fafdae79cf8c
