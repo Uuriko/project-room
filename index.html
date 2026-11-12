@@ -702,6 +702,7 @@
         <label id="portable-progress-label" class="form-hint" hidden><input id="portable-progress" type="checkbox"> Include progress and handoff</label>
         <label for="packet-preview" class="sr-only">Prompt to copy</label>
         <textarea id="packet-preview" rows="10" readonly spellcheck="false" aria-describedby="portable-sharing"></textarea>
+        <p id="packet-changed" class="form-status" role="status" hidden>Work changed. Refresh the prompt before copying. <button id="packet-refresh" class="button ghost" type="button">Refresh prompt</button></p>
         <p id="portable-sharing" class="form-hint">Review before sharing with your AI. Copying doesn’t start work.</p>
         <div class="portable-actions"><button id="packet-copy" class="button primary" type="button">Copy</button><button id="portable-add-result" class="button secondary" type="button">Paste AI draft</button></div>
       </section>
