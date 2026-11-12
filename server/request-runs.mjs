@@ -1,4 +1,4 @@
-import { validId } from "../src/events.js";
+import { validId, isRoomArchived } from "../src/events.js";
 import { messageInHistory } from "./history-visibility.mjs";
 import {isCurrentRoom,withCurrentReadContext,readCurrentHead,readCurrentRecord,readCurrentMessage,CURRENT_REQUEST_OPENING_PREDICATE} from './current-room-repository.mjs';
 
@@ -119,12 +119,21 @@ export class RequestRuns {
         fail("request_run_denied", "Only the addressed agent may report its host", 403);
       const row = this.store.db.prepare("SELECT * FROM request_runs WHERE room_id=? AND opening_id=?").get(roomId, request.openingEventId);
       if (row && row.attempt_id !== input.attemptId) fail("request_run_owned", "Another host owns this request; reconcile that host");
+      // G8 (T3-L10f-C3): the archived-room freeze at this module's write
+      // entry, in the refuseArchivedWrite shape (409 room_archived). Only
+      // claim/working checked archivedAt before, and with the wrong code;
+      // result_ready, needs_attention and delivered updated request_runs
+      // rows in archived rooms. request_runs writes are direct SQL and
+      // never pass through a #5502 choke point (registry/escrow/credential/
+      // collab/project-map/invite), so the guard lives here. Reads (list)
+      // stay open.
+      if (isRoomArchived(state)) fail("room_archived", "This room is archived: reading and export stay available, nothing new is recorded");
       if (input.action === "claim" || input.action === "working") {
         const floor = current ? context.floor : this.store.historyFloor(roomId, auth.member.id, context.sequence);
         if (!messageInHistory({ id: request.id, createdAt: request.createdAt }, floor))
           fail("request_run_changed", "Request is outside your visible history; reconcile the original attempt");
         this.store.dmConsents.requireDmAllowed(roomId, auth.member.id, request.requesterId);
-        if (request.status !== "open" || state.room.archivedAt || state.members[request.requesterId]?.active !== true
+        if (request.status !== "open" || state.members[request.requesterId]?.active !== true
           || this.store.wakeQueue.pauseStatus(roomId, auth.member.id)
           || request.revision !== input.expectedRequestRevision || request.contextEventId !== input.contextEventId)
           fail("request_run_changed", "Request changed, paused or closed; inspect the original attempt");
