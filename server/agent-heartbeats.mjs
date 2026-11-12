@@ -43,6 +43,11 @@ export const HEARTBEAT_STALE_AFTER_MS = 180000;
 // live listener from an idle agent whose queue merely looks empty.
 export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_PENDING_WAKES = 50;
+// Zulip event_queue style hygiene on the poll door: chat-kind signals this old
+// are garbage-collected, and an explicit ack=cursor poll acknowledges what the
+// client says it already has. Bounded per call.
+export const WAKE_STALE_PRUNE_MS = 24 * 60 * 60 * 1000;
+const SETTLE_LIMIT = 200;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const HOST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 // Push wake path (RC-2026-09-24-203): token bounds, delivery timeout, and
@@ -163,6 +168,18 @@ export const wakeRoomActivitySchema = `
 export const SCOPED_LISTENER_HOST_PATTERN = /^(?:rk_[a-f0-9]{64}|ak_[a-f0-9]{32})_/;
 export const isScopedListenerHostId = hostId =>
   typeof hostId === "string" && SCOPED_LISTENER_HOST_PATTERN.test(hostId);
+// A wake cursor is [orderTag, agentId, roomId, hostId, createdAt, signalId],
+// bound to the scope it was issued for.
+function parseWakeCursor(cursor, scope) {
+  try {
+    if (typeof cursor !== "string" || cursor.length > 1024) throw new Error();
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString());
+    if (!Array.isArray(value) || value.length !== 6 || JSON.stringify(value.slice(0, 4)) !== JSON.stringify(scope)
+      || !Number.isSafeInteger(value[4]) || value[4] < 0 || typeof value[5] !== "string" || value[5].length > 128) throw new Error();
+    return { createdAt: value[4], signalId: value[5] };
+  } catch { check(false, 422, "invalid_wake_cursor", "Wake cursor does not match this scope"); }
+}
+
 const WAKE_SIGNAL_FENCED_CODE = "wake_signal_fenced";
 const WAKE_SIGNAL_FENCED_MESSAGE = "one or more signals are claimed by another listener — claim them again, then ack with the claiming fencing token";
 
@@ -1126,15 +1143,7 @@ export class AgentHeartbeats {
     const newest = order === "newest", direction = newest ? -1 : 1;
     const scope = [newest ? 2 : 1, agentId, roomId, hostId];
     let after = null;
-    if (cursor !== null) {
-      try {
-        if (typeof cursor !== "string" || cursor.length > 1024) throw new Error();
-        const value = JSON.parse(Buffer.from(cursor, "base64url").toString());
-        if (!Array.isArray(value) || value.length !== 6 || JSON.stringify(value.slice(0, 4)) !== JSON.stringify(scope)
-          || !Number.isSafeInteger(value[4]) || value[4] < 0 || typeof value[5] !== "string" || value[5].length > 128) throw new Error();
-        after = { createdAt: value[4], signalId: value[5] };
-      } catch { check(false, 422, "invalid_wake_cursor", "Wake cursor does not match this scope"); }
-    }
+    if (cursor !== null) after = parseWakeCursor(cursor, scope);
     const probe = limit + 1;
     const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
     const bounded = boundedWakeDeliveryActive(this.db);
@@ -1180,6 +1189,65 @@ export class AgentHeartbeats {
       signals: Object.freeze(page),
       more,
       nextCursor: continuation ? Buffer.from(JSON.stringify([...scope, continuation.createdAt, continuation.signalId])).toString("base64url") : null,
+    });
+  }
+
+  // Queue hygiene for the poll door (Zulip event_queue style), so a pile of
+  // already-handled signals cannot hide new work:
+  //   * ackThrough: the client passes the cursor of the last page it has
+  //     handled and every pending message signal at or before that position
+  //     (same agent and room scope) is acknowledged. Opt-in, oldest order only.
+  //   * stale prune: pending mention/dm signals older than WAKE_STALE_PRUNE_MS
+  //     are acknowledged. The mention or DM itself stays in needs-me and the
+  //     inbox; only the redundant doorbell goes.
+  // Never touches obligation kinds (ask, assignment, bond, land), signals in a
+  // paused room, signals another listener has claimed, or work signals.
+  // Bounded (SETTLE_LIMIT) and idempotent: a second call finds nothing.
+  settleWakes({ agentId, roomId = null, hostId = null, cursor = null, ackThrough = false, fencingToken = null, door = "poll" }) {
+    checkAgentId(agentId);
+    let through = null;
+    if (ackThrough) {
+      check(cursor !== null, 422, "invalid_wake_poll", "ack=cursor needs the cursor of the last page you handled");
+      through = parseWakeCursor(cursor, [1, agentId, roomId, hostId]);
+    }
+    const at = this.now(), staleBefore = at - WAKE_STALE_PRUNE_MS;
+    const held = JSON.stringify(this.pausedRoomsOf(agentId).map(p => p.roomId));
+    let rows;
+    try {
+      this.ensureListenerSchema();
+      if (ackThrough) {
+        // Same rule as ackWakes: a live listener lease owns the queue, so an
+        // ack-by-cursor from anyone else is refused rather than silently
+        // dropping signals the listener has not handled.
+        const holders = this.db.prepare(`SELECT fencing_token AS fencingToken FROM agent_wake_listener_leases
+          WHERE agent_id=? AND (? IS NULL OR room_key=?) AND lease_expires_at>?`).all(agentId, roomId, roomId ?? "", at);
+        if (holders.some(holder => holder.fencingToken !== fencingToken)) fail(409, "listener_fenced",
+          "a live listener lease holds this agent's wake queue — poll with its listener token to ack by cursor");
+      }
+      rows = this.db.prepare(`SELECT s.signal_id AS signalId, s.kind AS kind, s.room_id AS roomId FROM agent_wake_signals s
+        WHERE s.agent_id=? AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id=?)
+          AND (s.room_id IS NULL OR s.room_id NOT IN (SELECT value FROM json_each(?)))
+          AND NOT EXISTS (SELECT 1 FROM agent_wake_signal_claims c WHERE c.signal_id=s.signal_id)
+          AND ((s.kind IN ('mention','dm') AND s.created_at<?)
+            OR (? IS NOT NULL AND (s.created_at<? OR (s.created_at=? AND s.signal_id<=?))))
+        ORDER BY s.created_at, s.signal_id LIMIT ?`)
+        .all(agentId, roomId, roomId, held, staleBefore, through?.createdAt ?? null, through?.createdAt ?? 0,
+          through?.createdAt ?? 0, through?.signalId ?? "", SETTLE_LIMIT);
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return Object.freeze({ acknowledged: Object.freeze([]) });
+    }
+    if (rows.length === 0) return Object.freeze({ acknowledged: Object.freeze([]) });
+    return this.store.transaction(() => {
+      const stmt = this.db.prepare("UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND signal_id=? AND delivered_at IS NULL");
+      const acknowledged = [];
+      for (const row of rows) {
+        if (stmt.run(at, agentId, row.signalId).changes === 0) continue;
+        acknowledged.push(row.signalId);
+        recordWakeEvent(this.db, { at, roomId: row.roomId, store: "signals", event: "acked", door, kind: row.kind, subjectId: agentId });
+      }
+      this.clearWakeBudgetMarks(agentId, acknowledged);
+      return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
     });
   }
 

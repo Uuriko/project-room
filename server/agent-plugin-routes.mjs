@@ -1075,6 +1075,16 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       // notePoll gets waiterHostId — the REGISTERED host id (room-key
       // credentials register under the prefixed form) — so WorkWakes
       // consent matching sees the same host heartbeat() reports for.
+      // Queue hygiene before the read: stale chat signals are pruned always,
+      // and ack=cursor acknowledges everything up to the cursor (opt-in).
+      const ackRaw = url.searchParams.getAll("ack");
+      if (ackRaw.length > 1 || ackRaw.length === 1 && ackRaw[0] !== "cursor")
+        reject(422, "invalid_wake_poll", "ack must be omitted or exactly 'cursor'");
+      if (ackRaw.length === 1 && order !== "oldest") reject(422, "invalid_wake_poll", "ack=cursor applies to the oldest-first queue only");
+      if (store.agentHeartbeats.statusOf(auth.identityId).hosts.length > 0) {
+        store.agentHeartbeats.settleWakes({ agentId: auth.identityId, roomId, hostId: waiterHostId, cursor, ackThrough: ackRaw.length === 1,
+          fencingToken: typeof req.headers[LISTENER_TOKEN_HEADER] === "string" ? req.headers[LISTENER_TOKEN_HEADER] : null });
+      }
       const immediate = store.agentHeartbeats.notePoll({ agentId: auth.identityId, roomId, hostId: waiterHostId, cursor, order });
       if (!immediate.registered) reject(404, "agent_not_registered",
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
