@@ -9,7 +9,6 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { jobByName, jobEnabled, jobNextDue } from "../server/jobs.mjs";
 import { createTestClock } from "./helpers/test-clock.mjs";
 
 function setup(t) {
@@ -30,10 +29,9 @@ function setup(t) {
 const say = (f, key, data) => f.store.command(key, "commons", { id: randomUUID(), type: "message.posted", data });
 const eventIdOf = (f, messageId) => f.store.db.prepare("SELECT id FROM events WHERE room_id='commons' AND json_extract(body,'$.data.messageId')=?").get(messageId).id;
 const setDeadline = (f, messageId, at) => f.store.db.prepare("UPDATE mention_states SET timeout_at=? WHERE room_id='commons' AND message_event_id=?").run(at, eventIdOf(f, messageId));
-const mentionWakes = (f, identityId) => f.store.agentHeartbeats.pendingWakes(identityId).filter(row => row.kind === "mention");
+const _mentionWakes = (f, identityId) => f.store.agentHeartbeats.pendingWakes(identityId).filter(row => row.kind === "mention");
 
 
-const rewakes = (f, identityId) => mentionWakes(f, identityId).filter(row => row.messageId.startsWith("rewake:"));
 
 
 import {createWakeAdapters} from '../server/wake-adapters.mjs';
