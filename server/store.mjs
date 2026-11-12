@@ -479,6 +479,10 @@ function ensureAccountProfileSchema(db) {
   // member_accounts INSERT (application-level, not a trigger — D1 trigger
   // DDL inside the upgrade transaction breaks the v8→v35 rollback gate).
 }
+// Zero-drop re-wake: rows re-woken per room per flip call, and the delay before a
+// failed re-wake is retried.
+const MENTION_REWAKE_BATCH = 50;
+const MENTION_REWAKE_RETRY_MS = 5 * 60 * 1000;
 const DISPLAY_NAME_LIMIT = 64;
 const AVATAR_URL_LIMIT = 2048;
 const normalizeDisplayName = value => {
@@ -8005,26 +8009,44 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!expired) return 0;
     const run = () => {
       // Zero-drop, tier 1: a mention nobody has even acknowledged by its
-      // deadline gets one fresh wake signal. Selected before the flip so each
-      // row is re-woken exactly once (the flip makes it terminal). Bounded.
+      // deadline gets one fresh wake signal. Oldest deadline first, bounded to
+      // MENTION_REWAKE_BATCH per call. Only the rows actually selected are made
+      // terminal: anything beyond the batch stays delivered and due, so the
+      // next sweep tick (or read) continues instead of silently dropping it.
       const unseen = this.db.prepare(
         `SELECT message_event_id AS eventId, mentioned_member_id AS memberId FROM mention_states
-         WHERE room_id=? AND state='delivered' AND timeout_at<=? LIMIT 50`).all(roomId, nowMs);
+         WHERE room_id=? AND state='delivered' AND timeout_at<=? ORDER BY timeout_at, message_event_id, mentioned_member_id LIMIT ?`)
+        .all(roomId, nowMs, MENTION_REWAKE_BATCH);
       // Preserve facts from legacy acknowledged rows without inventing their
       // original acknowledgement time.
       this.db.prepare(`INSERT OR IGNORE INTO mention_observations
         (room_id,message_event_id,mentioned_member_id,acknowledged)
         SELECT room_id,message_event_id,mentioned_member_id,1 FROM mention_states
         WHERE room_id=? AND state='acknowledged' AND timeout_at<=?`).run(roomId, nowMs);
-      const flipped = this.db.prepare(
+      let changes = this.db.prepare(
         `UPDATE mention_states SET state='timed_out', decided_at=?
-         WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=?`
-      ).run(nowMs, roomId, nowMs);
+         WHERE room_id=? AND state='acknowledged' AND timeout_at<=?`
+      ).run(nowMs, roomId, nowMs).changes;
+      const settle = this.db.prepare(
+        `UPDATE mention_states SET state='timed_out', decided_at=?
+         WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state='delivered' AND timeout_at<=?`);
+      const retryLater = this.db.prepare(
+        `UPDATE mention_states SET timeout_at=?
+         WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state='delivered' AND timeout_at<=?`);
       for (const row of unseen) {
         try { this.rewakeTimedOutMention(roomId, row.eventId, row.memberId); }
-        catch { /* a failed re-wake never blocks the flip or the read that triggered it */ }
+        catch {
+          // A failed re-wake never blocks the read that triggered it, but the
+          // mention is NOT made terminal: it stays delivered with its deadline
+          // pushed back, so it is retried (the coalescing key makes a retry
+          // idempotent) without one poisoned row pinning the front of every
+          // sweep batch.
+          retryLater.run(nowMs + MENTION_REWAKE_RETRY_MS, roomId, row.eventId, row.memberId, nowMs);
+          continue;
+        }
+        changes += settle.run(nowMs, roomId, row.eventId, row.memberId, nowMs).changes;
       }
-      return flipped;
+      return { changes };
     };
     return this.db.isTransaction ? run().changes : this.transaction(run).changes;
   }
@@ -8037,19 +8059,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // nothing and cannot re-wake twice. Bounded: at most `limit` rooms per tick;
   // anything left stays due, so the next tick continues.
   sweepExpiredMentions({ limit = 20, nowMs = this.now() } = {}) {
+    const cap = Math.max(1, Math.min(limit, 100));
     let rooms;
     try {
-      rooms = this.db.prepare(
-        `SELECT DISTINCT room_id AS roomId FROM mention_states
-         WHERE state='delivered' AND timeout_at<=? ORDER BY room_id LIMIT ?`).all(nowMs, Math.max(1, Math.min(limit, 100)));
+      // Oldest deadline first on the (state, timeout_at) index, scanning a
+      // bounded number of due rows: no DISTINCT over the whole due set, and a
+      // room that keeps failing is backed off below so it cannot pin the front.
+      rooms = [...new Set(this.db.prepare(
+        `SELECT room_id AS roomId FROM mention_states
+         WHERE state='delivered' AND timeout_at<=? ORDER BY timeout_at, room_id LIMIT ?`).all(nowMs, cap * 5).map(row => row.roomId))].slice(0, cap);
     } catch (error) {
       if (!/no such table/i.test(error?.message ?? "")) throw error;
       return { rooms: 0, flipped: 0 };
     }
     let flipped = 0;
-    for (const { roomId } of rooms) {
+    for (const roomId of rooms) {
       try { flipped += this.flipExpiredMentions(roomId, nowMs) || 0; }
-      catch { /* one bad room never stops the sweep; its rows stay due for the next tick */ }
+      catch {
+        // One bad room never stops the sweep, and never starves later rooms:
+        // its due rows are pushed back so the next tick selects other rooms.
+        try {
+          this.db.prepare(`UPDATE mention_states SET timeout_at=? WHERE room_id=? AND state='delivered' AND timeout_at<=?`)
+            .run(nowMs + MENTION_REWAKE_RETRY_MS, roomId, nowMs);
+        } catch { /* best effort; the next tick retries */ }
+      }
     }
     return { rooms: rooms.length, flipped };
   }
