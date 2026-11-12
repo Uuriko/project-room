@@ -63,6 +63,13 @@ exports and caches, not just the full-document route. Authorization is checked
 before retrieving or indexing protected content. Cached copies are invalidated
 when membership changes; previously disclosed data cannot be “unread.”
 
+Document writes must obey the room's archived state and the same current member
+standing rules as ordinary content writes. A credential's write scope alone is
+not member authority. Recheck authorization after receiving an asynchronous
+request body. Personal-room purge and shared-room author erasure are separate
+cases: shared revision retention/redaction policy is an unresolved activation
+decision, not satisfied merely by deleting a personal room.
+
 Use existing credentials outside command arguments. Structured errors distinguish
 not found, denied, conflict, unavailable and partial coverage. Text inside a
 document is content, never a grant to execute commands or change permissions.
@@ -158,6 +165,7 @@ Acceptance uses identical fixtures through tools, CLI, keyboard and computer use
 | Two writers edit the same base | One accepted update, one explicit conflict; both drafts recoverable. |
 | Traverse 501 documents | Complete unique traversal with explicit end; live versus snapshot semantics documented. |
 | Access changes | No forbidden title, snippet, count, backlink or history disclosure; stale caches tested. |
+| Archive or suspend during an edit | Write refused with unchanged revision, including a change while the request body is arriving. |
 | Rename or move a document | Existing stable links still resolve; source ownership remains clear. |
 | Interrupt a save | No false success or duplicate document; result reconciled before retry. |
 | Source changes or disappears | Staleness/access failure visible; no silent overwrite or unsupported freshness claim. |
