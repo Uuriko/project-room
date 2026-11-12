@@ -58,6 +58,7 @@ const optional = ["server/account-agent-enrollment.mjs", "server/agent-sponsor-t
 // Pure digest presentation shared by hosted and stdio message readers.
 optional.push("server/board-planning.mjs"); // Passive v46 planning retention; routes stay disabled.
 optional.push("src/message-digest.js");
+optional.push("src/work-continuation.js");
 optional.push("server/historical-replay-contract.mjs"); // Shared exact-prefix historical receipt evidence.
 optional.push("src/workspace-navigation.js");
 // Historical release packaging still verifies these files when the selected
