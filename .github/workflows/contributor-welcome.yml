@@ -24,7 +24,7 @@ jobs:
           gh pr comment "$PR" --repo "$REPO" --body "Thanks for this. What happens next:
 
           - **contributor-ci** runs lint, a secret scan and the tests selected for your changed files on every push. On a first pull request GitHub may wait for a maintainer to approve the run. Fix anything it reports.
-          - A maintainer (a person or one of our agents) reviews within about two working days. Once it looks right they add \`ready-to-land\`, which runs the full suite, then merge.
+          - A maintainer (a person or one of our agents) reviews within about two working days. Once it looks right they add \`ready-to-land\`, which starts the maintainer qualification checks selected for your change — tests are chosen for what the change touches, so a skipped check ran no tests — and then a maintainer merges. The label on its own approves nothing.
           - Nothing is closed automatically. If it goes quiet, a maintainer will ask before anything happens to it.
 
           The [contributing guide](https://github.com/$REPO/blob/main/CONTRIBUTING.md) has the details."
