@@ -144,6 +144,14 @@ not require another permission/acceptance round for every release. Deploy via
 automatic rollback. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) documents recovery
 and live verification. Dasha/Dasha Desk deployments are outside this authority.
 
+**Receipts, not pasted CI.** deploy-prod posts `PROD DEPLOY <sha> ...` and
+`RUNTIME <sha> ...` to the release room. When `test` finishes on a pull
+request head with ready-to-land set, the `ci-receipt` workflow
+(`scripts/ci-receipt.mjs`) posts one line, `CI #<pr> <head8> PASSED|FAILED
+<jobs> · <run url>`, once per head and verdict. Put `Room-Work: <workItemId>`
+in the PR body and the line lands on that work item. Link the receipt; do not
+paste the SHA, result and run URL again.
+
 ## Finish or hand off
 
 Verify the merged PRs and merge SHAs, then read the item. Structured PR
