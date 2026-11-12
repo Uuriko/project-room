@@ -107,7 +107,7 @@ test("pidAlive answers for a live pid and a bogus pid", t => {
 // database directory was refused forever instead of reclaiming the lock.
 // A zombie is created deterministically with a tiny python3 helper: fork a
 // child that exits immediately, then do not wait() on it for a few seconds.
-test("a zombie pid reads as dead and its lock is reclaimed", async t => {
+test("a zombie pid reads as dead and its lock is reclaimed", { skip: process.platform !== "linux" && "Linux /proc zombie detection; other platforms use signal-0 fallback" }, async t => {
   // The helper must still be running while we probe: once it exits, its
   // unreaped child is reparented to init (or a subreaper) and reaped at once,
   // so a spawnSync that waits for exit would only ever see a vanished pid.
