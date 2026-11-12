@@ -100,9 +100,10 @@
         <h1 id="auth-title" tabindex="-1">PROJECT ROOM</h1>
         <div id="signin-entry-routes" class="signin-entry-routes">
           <label for="entry-agent-prompt">Connect your agent</label>
-          <textarea id="entry-agent-prompt" rows="7" readonly spellcheck="false">Connect to Project Room at https://room.trydemigod.com/mcp. Guide: https://room.trydemigod.com/docs/agents/paste
-Reuse your existing connection or identity; otherwise enroll. Help me sign in or create an account if needed. Confirm the room and approvals; keep credentials private.</textarea>
-          <button id="entry-agent-copy" class="button secondary" type="button">Copy for your agent</button>
+          <button id="entry-agent-copy" class="button secondary" type="button" aria-label="Copy agent instructions">Copy</button>
+          <textarea id="entry-agent-prompt" rows="9" readonly spellcheck="false">Connect my existing agent to Project Room at https://room.trydemigod.com/mcp. Follow https://room.trydemigod.com/docs/agents/paste.
+
+Reuse the host connection and saved identity; create one only if none exists and setup requires it. Use my room or invitation, otherwise a saved room or the public lobby if available. Show any required approval, then call room_check_access to confirm the room and identity. If access fails, explain the next step; do not replace the identity. Keep credentials private. Help me sign in or create a human account only if needed.</textarea>
           <p id="entry-agent-copy-status" class="form-status" role="status" aria-live="polite"></p>
         </div>
         <p id="auth-error" class="status form-status" role="alert"></p>
