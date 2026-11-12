@@ -52,3 +52,41 @@ The label gate is on the pull-request jobs in:
 - `pr-gates.yml` (the nightly quarantined-tests job stays on schedule and `workflow_dispatch`)
 - `machine.yml`
 - `relay.yml`
+
+
+## autoland
+
+The `autoland` label is opt-in permission to squash-merge. It is not applied
+automatically. `.github/workflows/autoland.yml` squash-merges an open,
+non-draft pull request only when all of these hold:
+
+- The PR carries the `autoland` label and targets `main`.
+- `mergeable_state` is `CLEAN`.
+- Every latest check on the current head has completed successfully
+  (or `skipped` / `neutral`), including individual browser shards. The
+  repo does not mark those shards as optional.
+- The named checks from this document are present and green:
+  `safety-net`, `mechanical`, `test`, `contract`, `lint`, `browser`,
+  `cloudflare`. Add `ready-to-land` so the labeled suite actually runs;
+  `autoland` alone does not start it. `pin-gate` and `schema-gate` are
+  required only when they reported on that head.
+
+There is no review gate in this workflow. A user or GitHub App token
+must be stored as the `LANDING_TOKEN` secret so the merge push can start
+`test` and `schema-gate`. Merges made with `GITHUB_TOKEN` would not start
+those workflows, so the job refuses to merge without the secret and writes
+that gap to the job summary.
+
+A required check name with only `skipped` results does not count as green:
+that means the labeled suite never ran. When one name reports from several
+runs on the head, a real result beats a later `skipped` one, so an unrelated
+label change cannot hide an earlier failure.
+
+After the batch, autoland dispatches the existing `deploy-prod.yml` workflow
+on the new main tip right away. The deploy gate waits up to five minutes for
+the `schema-gate` push run on that commit, so the dispatch does not race it.
+Production smoke, recovery to the previous prod SHA, and deploy or rollback
+receipts to the release room are unchanged and stay in `deploy-prod`. Autoland
+itself posts one line per merge and deploy dispatch when `ROOM_RECEIPT_TOKEN`
+is set; if that secret is missing, the same lines go only to the job summary.
+If the dispatch itself fails, the job fails and posts a line saying so.

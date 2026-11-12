@@ -27,23 +27,33 @@ export function classifyDoors({ sha, doRev, workerRev }) {
   return "other";
 }
 
+// Returns { rev, status }. A non-2xx answer keeps its HTTP status so "the door
+// answered 403" (a WAF or bot rule on the caller's network) is not reported the
+// same as "the door is on another revision". Dot's 403 on /api/version looked
+// like a stale prod SHA for exactly that reason.
 async function readDoor(origin, path, fetchImpl) {
   try {
     const res = await fetchImpl(`${origin}${path}`, {
       headers: { "User-Agent": "Mozilla/5.0 project-room-version-doors", "Cache-Control": "no-cache" },
       signal: AbortSignal.timeout(15000)
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { rev: null, status: res.status };
     const rev = (await res.json())?.sourceRevision;
-    return typeof rev === "string" && rev ? rev : null;
-  } catch { return null; }
+    return { rev: typeof rev === "string" && rev ? rev : null, status: res.status };
+  } catch { return { rev: null, status: 0 }; }
 }
 
 export async function readDoors(origin, fetchImpl = fetch) {
-  const [doRev, workerRev] = await Promise.all([
+  const [doDoor, workerDoor] = await Promise.all([
     readDoor(origin, DOORS.do, fetchImpl), readDoor(origin, DOORS.worker, fetchImpl)
   ]);
-  return { doRev, workerRev };
+  return { doRev: doDoor.rev, workerRev: workerDoor.rev, doStatus: doDoor.status, workerStatus: workerDoor.status };
+}
+
+// Names the cause when a door could not be read at all, so a blocked caller is not mistaken for drift.
+export function unreadableDoors({ doStatus, workerStatus }) {
+  const bad = [["DO door", doStatus], ["worker door", workerStatus]].filter(([, status]) => status !== 200 && status !== undefined);
+  return bad.map(([name, status]) => `${name}: ${status === 0 ? "no response" : `HTTP ${status}`}`);
 }
 
 // Poll until both doors report `sha` or the window closes; returns the last read.
@@ -69,7 +79,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exit(2);
   }
   const result = await waitDoors({ origin: origin.replace(/\/$/, ""), sha, waitMs: Number(opt("--wait-ms", 0)), pollMs: Number(opt("--poll-ms", 10000)) });
-  console.log(JSON.stringify({ sha, origin, ...result, label: result.state === "do-stale" ? "DO still on old revision" : result.state }));
+  const unreadable = unreadableDoors(result);
+  console.log(JSON.stringify({ sha, origin, ...result, label: result.state === "do-stale" ? "DO still on old revision" : result.state, ...(unreadable.length ? { unreadable } : {}) }));
+  if (unreadable.length) console.error(`Could not read ${unreadable.join("; ")}. A non-200 here is a blocked or failed read, not proof of which revision is live.`);
   if (result.state === "do-stale") console.error(`DO still on old revision: worker reports ${sha}, ${DOORS.do} reports ${result.doRev ?? "nothing"}`);
   process.exit(EXIT[result.state]);
 }

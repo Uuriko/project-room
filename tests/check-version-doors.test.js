@@ -69,3 +69,16 @@ test("workflows read both doors: gate skips on converged or do-stale, drift sett
   parse(drift);
   assert.match(drift, /--settle-ms 120000/);
 });
+
+test("a 403 on a door is reported as unreadable, not as another revision", async () => {
+  const { readDoors, unreadableDoors } = await import("../scripts/check-version-doors.mjs");
+  const fetchImpl = async url => url.endsWith("/api/version/worker")
+    ? new Response(JSON.stringify({ sourceRevision: "a".repeat(40) }), { status: 200 })
+    : new Response("blocked", { status: 403 });
+  const seen = await readDoors("https://example.test", fetchImpl);
+  assert.equal(seen.doRev, null);
+  assert.equal(seen.doStatus, 403);
+  assert.equal(seen.workerRev, "a".repeat(40));
+  assert.deepEqual(unreadableDoors(seen), ["DO door: HTTP 403"]);
+  assert.deepEqual(unreadableDoors({ doStatus: 200, workerStatus: 200 }), []);
+});

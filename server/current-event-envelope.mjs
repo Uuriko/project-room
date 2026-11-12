@@ -1,5 +1,5 @@
 import { MAX_MESSAGE_BODY_CHARS } from '../src/events.js';
-import { chargeCurrentReadBudget, remainingCurrentReadBytes } from './current-room-repository.mjs';
+import { chargeCurrentReadBudget, remainingCurrentReadBytes, CurrentReadBudgetExceeded } from './current-room-repository.mjs';
 import { ServiceError } from './service-error.mjs';
 
 export const CURRENT_EVENT_ENVELOPE_BYTES = 128 * 1024;
@@ -24,13 +24,18 @@ const selectEnvelope = `WITH source AS MATERIALIZED (${source}),
     (SELECT count(*) FROM json_each(body) WHERE key='data') AS dataKeys,
     (SELECT count(*) FROM json_each(body,'$.data') WHERE key='body') AS bodyKeys,
     json_type(body,'$.data.body') IN ('text','null') AS bodyTypeValid,
-    json_type(body,'$.data.redacted')='true' AS redactedBody FROM projected)
-  SELECT id,envelopeBytes,
-    CASE WHEN shapeValid=1 AND typeKeys=1 AND dataKeys=1
+    json_type(body,'$.data.redacted')='true' AS redactedBody FROM projected),
+  checked AS MATERIALIZED (SELECT id,envelope,envelopeBytes,
+    shapeValid=1 AND typeKeys=1 AND dataKeys=1
       AND envelopeBytes BETWEEN 2 AND ${CURRENT_EVENT_ENVELOPE_BYTES}
       AND ((isMessage=1 AND (bodyKeys=1 AND bodyTypeValid=1 OR bodyKeys=0 AND redactedBody=1))
         OR (isMessage=0 AND rawBytes<=${CURRENT_EVENT_ENVELOPE_BYTES}))
-      AND rawBytes=? AND envelopeBytes<=? THEN envelope END AS envelope FROM measured`;
+      AND rawBytes=? AS legal FROM measured)
+  -- envelopeBytes is only reported for a legal envelope, so a NULL envelope with
+  -- a number means "legal but it does not fit the remaining shared byte
+  -- allowance" and a NULL envelopeBytes means malformed.
+  SELECT id,CASE WHEN legal THEN envelopeBytes END AS envelopeBytes,
+    CASE WHEN legal AND envelopeBytes<=? THEN envelope END AS envelope FROM checked`;
 
 // The source scalar/prefix must be admitted by the caller before this point.
 // One query returns one immutable row in the caller's read transaction. Its
@@ -45,7 +50,10 @@ export function readCurrentEventEnvelope(db, roomId, row, budget) {
   const meta = db.prepare(selectEnvelope).get(roomId, row.sequence, row.bodyBytes, remainingCurrentReadBytes(budget));
   if (!meta || !Number.isSafeInteger(meta.envelopeBytes)
     || meta.envelopeBytes < 2 || meta.envelopeBytes > CURRENT_EVENT_ENVELOPE_BYTES) unavailable();
-  if (typeof meta.envelope !== 'string') unavailable();
+  // Legal but over the remaining shared byte allowance: the read budget is
+  // spent, which a multi-window page treats as "return what you already hold"
+  // rather than as a malformed source.
+  if (typeof meta.envelope !== 'string') throw new CurrentReadBudgetExceeded();
   chargeCurrentReadBudget(budget, meta.envelopeBytes, 0);
   let event;
   try { event = JSON.parse(meta.envelope); } catch { unavailable(); }

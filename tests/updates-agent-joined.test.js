@@ -10,6 +10,24 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
+// True when the item carries the minted code, or anything shaped like an invite
+// code outside the known public member id. The random member id (ai_ + base64url)
+// can itself contain "RM-" followed by code symbols, so it is excluded by value.
+function leaksInviteCode(item, code, memberId) {
+  const text = JSON.stringify(item);
+  return text.includes(code) || /RM-[0-9A-Z]{8}/.test(text.split(memberId).join(""));
+}
+
+test("the code-leak check ignores the member id but catches any code-shaped value", () => {
+  for (const memberId of ["ai_ARM-abcdefghijkl", "ai_RM-ABCDEFGHabcde"]) {
+    const item = { title: "Plug Bot joined with a one-time code", actor: memberId, sourceRef: { memberId } };
+    assert.equal(leaksInviteCode(item, "RM-0123456789ABCDEF", memberId), false, memberId);
+    for (const leaked of ["RM-0123456789ABCDEF", "RM-ABCD2345EFGH6789", "RM-ABCDEFGH"]) {
+      assert.equal(leaksInviteCode({ ...item, note: leaked }, "RM-0123456789ABCDEF", memberId), true, leaked);
+    }
+  }
+});
+
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-agent-joined-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
@@ -40,8 +58,9 @@ test("the owner who minted a one-time code sees the agent that joined with it, a
   assert.equal(joined[0].title, "Plug Bot joined with a one-time code");
   assert.equal(joined[0].state, "unread");
   // The item names the member, not the code or any credential.
-  const text = JSON.stringify(joined[0]);
-  assert.ok(!text.includes(minted.json.code) && !text.includes("RM-"), "no code value in the item");
+  assert.equal(joined[0].actor, redeemed.json.memberId);
+  assert.equal(joined[0].sourceRef.memberId, redeemed.json.memberId);
+  assert.equal(leaksInviteCode(joined[0], minted.json.code, redeemed.json.memberId), false, "no code value in the item");
   // Another member never gets it (the event is in the shared log; the viewer check is in Updates).
   store.command(ownerKey, "commons", { id: "11111111-1111-4111-8111-111111111111", type: "member.added", data: { memberId: "other", displayName: "Other Person", kind: "human", permissions: [] } });
   const otherKey = store.issueAccessKey("commons", "other");

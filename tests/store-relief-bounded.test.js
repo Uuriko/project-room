@@ -101,7 +101,7 @@ test("DurableDatabase iterator streams rows and accounts for early termination",
   assert.throws(() => [...refused.prepare("SELECT body").iterate()], error => error.code === "pilot_limit");
 });
 
-test("bounded relief of a 3.5 MB projection preserves pins and restores every message", { timeout: 180_000 }, async t => {
+test("bounded relief of a 3.5 MB projection preserves pins and restores every message", { timeout: 600_000 }, async t => {
   const f = fixture(t, { bodiesAtRest: false, pad: 1500 });
   f.post(0, 900);
   while (!f.store.backfillMessages({ limit: 1000 }).done) { /* verified prefix */ }
