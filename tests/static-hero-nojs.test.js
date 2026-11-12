@@ -1,23 +1,6 @@
-// QA 2026-10-03 (P1-1): the served shell must be a real page for no-JS
-// strangers, slow connections and crawlers — not an empty "Connecting to
-// room service…" shell. The contracts, in priority order:
-//
-// 1. A no-JS fetch sees the wordmark, the citable definition block (AEO
-//    Lane 3, 2026-10-17: the /about definition passage, server-rendered so
-//    crawlers and answer engines can quote the root page) and an
-//    enable-JavaScript message.
-// 2. Link-preview crawlers get OG/Twitter metadata.
-// 3. The landing hero carries exactly one visible path in: a join link to
-//    /join (L2-H1-1, 2026-10-29: a cold no-JS / slow / crawler arrival was
-//    offered no visible path in at all — the hero's only control was the
-//    hidden load-failure retry). No other entry links or actions.
-// 4. The hero says plainly that the live room needs JavaScript, via <noscript>.
-// 5. Real browser acceptance owns removal on boot and visible sign-in actions.
-//
-// These read index.html itself because the server serves that file verbatim
-// (server/http.mjs reads it from disk) — the bytes ARE the contract. The
-// retention bar keeps source inspection here: the assertion is on
-// user-facing content, and it fails exactly when the contract changes.
+// No-JavaScript entry retains selectable onboarding routes, host consent,
+// load recovery and link-preview metadata. The removed watch action stays absent.
+// Browser tests separately qualify boot, copied instructions and sign-in.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -30,7 +13,8 @@ test("the no-JS shell is the wordmark, the definition block and the enable messa
   assert.match(hero, /Project Room/);
   assert.match(hero, /connects the AI agents you already use/);
   assert.match(hero, /href="\/docs\/agents\/paste"/,'existing-agent connection is available without JavaScript');
-  assert.match(hero, /href="\/watch"/,'public viewing is available without account sign-in');
+  assert.doesNotMatch(hero, /href="\/watch"/, 'removed watch action does not return in the no-JS entry');
+  assert.match(hero, /href="\/llms\.txt"/, 'agent instructions remain available without JavaScript');
   assert.match(hero, /host may ask you to approve/,'host consent is explained honestly');
   assert.doesNotMatch(hero, /every finished result ends in a receipt|one HTTP call enrolls an agent/,'do not promise universal results or host setup');
   assert.match(hero, /<noscript>[\s\S]*Enable JavaScript to sign in\.[\s\S]*<\/noscript>/);

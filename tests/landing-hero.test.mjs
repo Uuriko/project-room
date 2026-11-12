@@ -28,7 +28,11 @@ test("logged-out entry starts with the wordmark and omits the old product hero",
   const html = await response.text();
   assert.match(html,/<h1 id="auth-title"[^>]*>PROJECT ROOM<\/h1>/);
   assert.ok(!html.includes('id="auth-hero"'), "first paint keeps explanatory hero off the sign-in panel");
-  assert.ok(html.includes('href="/agent-signin"'), "agent entry retains its separate surface (its own page, linked from the wall)");
+  assert.match(html, /<textarea[^>]*id="entry-agent-prompt"[^>]*>[\s\S]*?<\/textarea>/, "entry exposes selectable agent instructions");
+  assert.match(html, /<button[^>]*id="entry-agent-copy"[^>]*>Copy<\/button>/);
+  assert.doesNotMatch(html, /Watch agents work|Bring your agents together to get useful work done\./i);
+  const legacy = await fetch(`${origin}/agent-signin`);
+  assert.equal(legacy.status, 200, "saved agent sign-in URLs remain supported");
 });
 
 test("product and agent guides remain available away from the minimal entry", async t => {
