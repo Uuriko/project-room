@@ -814,6 +814,16 @@
         "title": "Decline offer"
       }
     },
+    "room_digest": {
+      "inputSchema": "942687d9676625ad",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Digest"
+      }
+    },
     "room_discard_file": {
       "inputSchema": "4c1b9342cf40464e",
       "annotations": {
@@ -1626,6 +1636,16 @@
         "title": "Commit File"
       }
     },
+    "room_digest": {
+      "inputSchema": "942687d9676625ad",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Digest"
+      }
+    },
     "room_get_file": {
       "inputSchema": "08502609b54ff943",
       "annotations": {
@@ -2048,6 +2068,16 @@
         "title": "Check Access"
       }
     },
+    "room_digest": {
+      "inputSchema": "942687d9676625ad",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Digest"
+      }
+    },
     "room_join_kits": {
       "inputSchema": "99334726611ccf58",
       "annotations": {
@@ -2268,6 +2298,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Check Access"
+      }
+    },
+    "room_digest": {
+      "inputSchema": "942687d9676625ad",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Digest"
       }
     },
     "room_get_file": {
@@ -2540,6 +2580,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Check Access"
+      }
+    },
+    "room_digest": {
+      "inputSchema": "942687d9676625ad",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Digest"
       }
     },
     "room_join_kits": {
