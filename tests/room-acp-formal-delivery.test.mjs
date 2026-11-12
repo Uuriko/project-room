@@ -1,3 +1,5 @@
+import {createMcpEventSubscriptions} from '../server/mcp-event-subscriptions.mjs';
+import {STALE_AFTER_MS} from '../server/request-states.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync, rmSync} from 'node:fs';
@@ -389,4 +391,75 @@ test('follow-up preparation accepts the larger exact answer in previous exchange
   assert.equal(follow.preparation.previousExchanges[0].messages.find(m=>m.id===answered.request.responseMessageId).body,body);
   validateReplyRead(follow,{name:'room_read_request',args:{requestMessageId:'follow-long-answer'},roomId:'commons'});
   assert.equal(follow.request.status,'open');
+});
+
+
+test('accepted callback without execution leaves the original request stale until reconnect answers once', async t => {
+  const start = Date.now();
+  t.mock.timers.enable({apis: ['Date'], now: start});
+  const f = await fixture(t), reader = f.make();
+  t.after(() => reader.stop());
+  const before = await f.read(reader);
+  const sequence = f.store.db.prepare('SELECT sequence FROM rooms WHERE id=?').get('commons').sequence;
+  let callbacks = 0;
+  const principal = {principalType:'invited-agent', familyId:'synthetic-callback-family',
+    scopes:['chat:read','chat:write'], resource:'https://room.example/mcp', roomId:'commons',
+    identityId:f.seeded.identityId, memberId:'worker'};
+  const subscriptions = createMcpEventSubscriptions({store:f.store, authorize:async () => true,
+    dnsResolvers:{lookup:async () => [{address:'8.8.8.8',family:4}]},
+    // Fake transport accepts the doorbell but deliberately starts no receiver.
+    transport:async (_url, _addresses, request) => {
+      const body = JSON.parse(request.body);
+      if (body.type === 'verification') return {status:200,text:async () => JSON.stringify({challenge:body.challenge})};
+      callbacks++;
+      assert.equal(body.data.messageId, 'dm');
+      return {status:200,text:async () => '{}'};
+    }});
+  await subscriptions.subscribe({principal,name:'room.requested',arguments:{roomId:'commons',memberId:'worker'},
+    delivery:{mode:'webhook',url:'https://callback.example/events',secret:'whsec_'+Buffer.alloc(32,7).toString('base64')}});
+  const pointer = {roomId:'commons',memberId:'worker',requestId:'dm',messageId:'dm',eventId:before.request.openingEventId};
+  assert.equal(subscriptions.enqueueRequested(pointer), 1);
+  assert.equal((await subscriptions.drain())[0].classification, 'delivered');
+  assert.equal(callbacks, 1);
+  assert.equal((await subscriptions.status(principal)).execution, 'not_verified');
+  assert.equal(f.counts.prompts, 0);
+  assert.equal(f.store.db.prepare('SELECT sequence FROM rooms WHERE id=?').get('commons').sequence, sequence);
+
+  t.mock.timers.setTime(start + STALE_AFTER_MS + 1000);
+  const open = [];
+  let cursor, pages = 0;
+  do {
+    assert.ok(++pages <= 10, 'request traversal must terminate');
+    const page = await reader.room.request('/api/rooms/commons/reply-requests?direction=incoming&status=open&states=1&limit=1'+(cursor?'&cursor='+encodeURIComponent(cursor):''));
+    open.push(...page.requests);
+    cursor = page.page.nextCursor;
+    assert.equal(Boolean(cursor), page.page.hasMore);
+  } while (cursor);
+  const pending = open.filter(request => request.id === 'dm');
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].status, 'open');
+  assert.equal(pending[0].lifecycle.state, 'stale');
+  assert.equal(pending[0].lifecycle.unresponsive, true);
+  assert.ok(Date.now() - Date.parse(pending[0].createdAt) > STALE_AFTER_MS);
+  assert.equal((await f.read(reader)).request.revision, before.request.revision);
+  assert.equal(f.counts.prompts, 0, 'callback acceptance and catch-up reads cannot execute the agent');
+
+  // Reconnect uses the existing request and its current formal response recipe.
+  const receiver = f.make(); t.after(() => receiver.stop());
+  await f.ready(receiver);
+  await receiver.turn('dm', [f.wake]);
+  const answered = await f.read(receiver);
+  assert.equal(answered.request.id, before.request.id);
+  assert.equal(answered.request.openingEventId, before.request.openingEventId);
+  assert.equal(answered.request.status, 'answered');
+  assert.equal(answered.page.items.filter(item => item.kind === 'answered').length, 1);
+  assert.equal(f.counts.prompts, 1);
+  const completedSequence = f.store.db.prepare('SELECT sequence FROM rooms WHERE id=?').get('commons').sequence;
+  assert.equal(completedSequence, sequence + 1, 'only the formal answer adds an event; no replacement request');
+  await receiver.turn('dm', [f.wake]);
+  assert.equal(f.counts.prompts, 1, 'redelivery does not execute again');
+  assert.equal(f.store.db.prepare('SELECT sequence FROM rooms WHERE id=?').get('commons').sequence, completedSequence);
+  assert.equal(subscriptions.enqueueRequested(pointer), 0);
+  await subscriptions.drain();
+  assert.equal(callbacks, 1);
 });
