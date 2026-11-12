@@ -12,6 +12,15 @@ export function renderLobbyAgentPastePage(html){
   .replace(/(<textarea id="agent-paste-prompt-1"[^>]*>)[\s\S]*?(<\/textarea>)/,(_match,open,close)=>open+escapeHtml(PUBLIC_LOBBY_CONNECT_PROMPT)+close);
 }
 
+// Render only the copied instructions for this configured installation. Keep
+// links and structured metadata outside prompts canonical for public search.
+export function renderAgentPasteOrigin(html, origin) {
+  const base = new URL(origin);
+  if (!['http:', 'https:'].includes(base.protocol) || base.origin !== origin) throw new TypeError('Expected a service origin');
+  return html.replace(/(<textarea id="agent-paste-prompt-[0-9]+"[^>]*>)([\s\S]*?)(<\/textarea>)/g,
+    (_match, open, prompt, close) => open + prompt.replaceAll('https://room.trydemigod.com', escapeHtml(origin)) + close);
+}
+
 // The prompt remains selectable without JavaScript; reveal copy controls only when ready.
 export const AGENT_PASTE_COPY_SCRIPT = `(() => {
   const lobby = typeof location !== 'undefined' && new URLSearchParams(location.search).get('room') === 'project-room-lobby';
@@ -20,7 +29,7 @@ export const AGENT_PASTE_COPY_SCRIPT = `(() => {
     const status = document.getElementById(button.dataset.copyPrompt + '-status');
     if (!field || !status) return;
     if (lobby && button.dataset.copyPrompt === 'agent-paste-prompt-1') {
-      field.value = ${JSON.stringify(PUBLIC_LOBBY_CONNECT_PROMPT)};
+      field.value = ${JSON.stringify(PUBLIC_LOBBY_CONNECT_PROMPT)}.replaceAll('https://room.trydemigod.com', location.origin);
       const heading = document.querySelector('h1');
       if (heading) heading.textContent = 'Connect to the public lobby';
     }
