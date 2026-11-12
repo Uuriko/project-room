@@ -123,6 +123,11 @@ export async function edgeAnonymousMcpResponse(request, url) {
     return null; // malformed body: the DO boundary owns it (see header)
   }
   if (!message || typeof message !== "object" || Array.isArray(message)) return null;
+  // The authenticated entry point challenges at initialization (401 plus
+  // WWW-Authenticate resource_metadata) so hosted clients start OAuth. That
+  // decision belongs to the DO's HTTP door (writeRoomMcpNode), which knows the
+  // configured OAuth metadata. Only explicit ?auth=discovery initializes here.
+  if (message.method === "initialize" && url.searchParams.get("auth") !== "discovery") return null;
   // Store-backed anonymous calls stay with the DO, exactly as
   // dispatchRoomMcp routes them to the hosted room profile.
   if (message?.method === "tools/call"
