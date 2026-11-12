@@ -5,11 +5,11 @@ export function installRoomDocs({ client, getState, getSession }) {
   const open = document.querySelector('#room-docs-open'), dialog = document.querySelector('#room-docs-dialog');
   const root = document.querySelector('#room-docs-root'), navigation = document.querySelector('#room-docs-navigation');
   let owner = null, generation = 0, drafts = new Map(), current = null, next = null, docs = [];
-  const recoveryKey='project-room:doc-drafts:v1';
-  function persist(s) { const scope=draftRecoveryScope(s); if(!scope)return false;try { sessionStorage.setItem(recoveryKey,JSON.stringify({scope,expires:Date.now()+12*60*60*1000,entries:[...drafts]}));return true; } catch { return false; } }
-  function recover(s) { const scope=draftRecoveryScope(s);if(!scope)return new Map();try { const raw=sessionStorage.getItem(recoveryKey);if(!raw||raw.length>1100000)return new Map();const saved=JSON.parse(raw);if(saved.scope!==scope||!Number.isFinite(saved.expires)||saved.expires<=Date.now()||saved.expires>Date.now()+12*60*60*1000||!Array.isArray(saved.entries))return new Map();return new Map(saved.entries.filter(x=>Array.isArray(x)&&typeof x[0]==='string'&&/^[a-z0-9][a-z0-9-]{0,63}$/.test(x[0])&&x[1]&&typeof x[1].title==='string'&&x[1].title.length<=200&&typeof x[1].body==='string'&&x[1].body.length<=50000&&Number.isSafeInteger(x[1].baseRev)&&x[1].baseRev>=0).slice(-20));}catch{return new Map()} }
-  function clearRecovery(s){if(!draftRecoveryScope(s))return;try{const saved=JSON.parse(sessionStorage.getItem(recoveryKey)||'null');if(saved?.scope===draftRecoveryScope(s))sessionStorage.removeItem(recoveryKey)}catch{}}
-
+  const recoveryKey='project-room:doc-drafts:v2';
+  function records() { try { const raw=sessionStorage.getItem(recoveryKey);if(!raw)return {};if(raw.length>1100000){sessionStorage.removeItem(recoveryKey);return {}}const data=JSON.parse(raw);if(!data||typeof data!=="object"||Array.isArray(data)){sessionStorage.removeItem(recoveryKey);return {}}const valid=Object.fromEntries(Object.entries(data).filter(([,v])=>v&&Number.isFinite(v.expires)&&v.expires>Date.now()&&v.expires<=Date.now()+12*60*60*1000&&Array.isArray(v.entries)).slice(-20));if(Object.keys(valid).length!==Object.keys(data).length){if(Object.keys(valid).length)sessionStorage.setItem(recoveryKey,JSON.stringify(valid));else sessionStorage.removeItem(recoveryKey)}return valid; }catch{try{sessionStorage.removeItem(recoveryKey)}catch{}return {}} }
+  function persist(s) {const scope=draftRecoveryScope(s);if(!scope)return false;try{const data=records();if(drafts.size)data[scope]={expires:Date.now()+12*60*60*1000,entries:[...drafts].slice(-20)};else delete data[scope];const value=JSON.stringify(data);if(value.length>1100000)return false;sessionStorage.setItem(recoveryKey,value);return true}catch{return false}}
+  function recover(s) {const scope=draftRecoveryScope(s);if(!scope)return new Map();const entries=records()[scope]?.entries||[];return new Map(entries.filter(x=>Array.isArray(x)&&typeof x[0]==='string'&&/^[a-z0-9][a-z0-9-]{0,63}$/.test(x[0])&&x[1]&&typeof x[1].title==='string'&&x[1].title.length<=200&&typeof x[1].body==='string'&&x[1].body.length<=50000&&Number.isSafeInteger(x[1].baseRev)&&x[1].baseRev>=0).slice(-20))}
+  function clearRecovery(){try{sessionStorage.removeItem(recoveryKey);sessionStorage.removeItem('project-room:doc-drafts:v1')}catch{}}
   const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function owns(s) { return !!s && s === owner && s === getSession() && s === client.session && getState()?.room?.id === s.roomId && client.ownsAccountSession(); }
   function path(s, id = '') { return `/api/rooms/${encodeURIComponent(s.roomId)}/docs${id ? '/'+encodeURIComponent(id) : ''}`; }
@@ -36,7 +36,7 @@ export function installRoomDocs({ client, getState, getSession }) {
     if (owner !== s) { owner=s; drafts=recover(s); current=null; docs=[]; next=null; }
     ++generation; render(); if (!dialog.open) dialog.showModal(); void list(s);
   });
-  function reset({clear=false}={}){generation++;if(clear)clearRecovery(owner);owner=null;drafts.clear();current=null;docs=[];next=null;root.replaceChildren();navigation.hidden=true;if(dialog.open)dialog.close();}
+  function reset({clear=false}={}){generation++;if(clear)clearRecovery();owner=null;drafts.clear();current=null;docs=[];next=null;root.replaceChildren();navigation.hidden=true;if(dialog.open)dialog.close();}
   async function sync(){const s=getSession(),ticket=client.generation;if(!s||s!==client.session||getState()?.room?.id!==s.roomId){navigation.hidden=true;return;}try{await client.request(path(s)+'?limit=1',{fresh:true});if(getSession()===s&&client.session===s&&client.generation===ticket)navigation.hidden=false;}catch{if(getSession()===s&&client.generation===ticket)navigation.hidden=true;}}
   document.querySelector('#room-docs-close').addEventListener('click',()=>dialog.close());
   root.addEventListener('input', e => {
