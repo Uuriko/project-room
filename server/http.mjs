@@ -1589,7 +1589,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
               rotateSlot: true, renewBrowserSession: true });
           setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-          const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
+          // Archived rooms are read-only history: never land a sign-in there.
+          const firstRoom = store.db.prepare(`SELECT m.room_id FROM member_accounts m LEFT JOIN rooms r ON r.id=m.room_id
+            WHERE m.account_id=? AND r.archived_at IS NULL ORDER BY m.room_id LIMIT 1`)
             .get(linked.accountId);
           // A fresh account has no rooms yet: land on the account home, where
           // the room list, invite redemption, and "New room" creation live.
@@ -1736,7 +1738,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end(bytes);
         };
         const githubLanding = accountId => {
-          const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
+          // Same rule as the Google callback: never land on an archived room.
+          const firstRoom = store.db.prepare(`SELECT m.room_id FROM member_accounts m LEFT JOIN rooms r ON r.id=m.room_id
+            WHERE m.account_id=? AND r.archived_at IS NULL ORDER BY m.room_id LIMIT 1`)
             .get(accountId);
           return firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1";
         };
