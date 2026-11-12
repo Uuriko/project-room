@@ -33,19 +33,20 @@ all content into a new database is not a prerequisite for unified navigation.
 
 ## Shared operation contract
 
-These are proposed operation names, not commands available today. Add their
-schemas to the existing action discovery and CLI help when implemented; do not
-build a competing tool catalog. Discovery must reflect feature availability.
+The implementation deliberately uses a smaller surface than the original proposal.
+The CLI always returns JSON; it needs no separate `--json` mode. MCP integration
+is being composed and is not a production availability claim.
 
-| Intent | Tool operation | CLI shape | UI operation |
-| --- | --- | --- | --- |
-| Orient | `docs.index` | `room docs list --json` | Open Docs, see entry links and metadata |
-| Find | `docs.search` | `room docs search QUERY --json` | Search, then choose a result |
-| Read | `docs.read` | `room docs read ID --rev REV` | Direct page or revision link |
-| Create | `docs.create` | `room docs create --file PATH` | New document |
-| Update | `docs.update` | `room docs update ID --base-rev REV --file PATH` | Edit, Save, verify saved revision |
-| Inspect history | `docs.history` | `room docs history ID --json` | Revision history |
-| Link source | `docs.source` | `room docs source ID --json` | Source and freshness detail |
+| Intent | CLI | Backend |
+| --- | --- | --- |
+| List | `room docs list [--limit N] [--after ID]` | Bounded metadata and continuation |
+| Read current or historical revision | `room docs read ID [--rev REV]` | Current room authorization |
+| Create or update | `room docs write ID --title TITLE --file PATH --base-rev REV` | Revision 0 creates; a current revision updates |
+
+Separate create/update/history commands, full-text search, backlinks and automatic
+GitHub synchronization are deferred. Existing selected-revision reads cover the
+history needed for this slice. Do not add a new command or control unless a real
+task needs it. See [the trial outcome measures](AGENT-UTILITY-TRIALS.md#measurement-and-decisions).
 
 Stable document IDs are independent of titles; a title edit must not break links.
 List/search returns bounded metadata and explicit continuation, not every body.
@@ -66,9 +67,10 @@ when membership changes; previously disclosed data cannot be “unread.”
 Document writes must obey the room's archived state and the same current member
 standing rules as ordinary content writes. A credential's write scope alone is
 not member authority. Recheck authorization after receiving an asynchronous
-request body. Personal-room purge and shared-room author erasure are separate
-cases: shared revision retention/redaction policy is an unresolved activation
-decision, not satisfied merely by deleting a personal room.
+request body. Personal-room purge and shared-room retention are separate cases. Retention
+policy 1.9 explicitly retains shared document bodies, revisions and author member
+IDs for remaining members; deleting an account revokes its access. Personal-room
+purge removes documents and history. This is not per-author shared-text erasure.
 
 Use existing credentials outside command arguments. Structured errors distinguish
 not found, denied, conflict, unavailable and partial coverage. Text inside a
