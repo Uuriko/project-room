@@ -347,6 +347,7 @@ test("brief keeps its byte budget with maximum-length ids, without cutting ids o
   assert.equal(brief.contentTrust, pack.contentTrust);
   assert.equal(brief.full, `${room}/activation-pack`, "the full link is never cut");
   assert.equal(brief.next.method, "GET");
+  assert.equal(brief.next.tool, "room_list_work", "even a reduced brief points to addressed work");
   assert.ok(brief.next.endpoint.startsWith(room), "next is a real route in this room");
   if (brief.room?.slug) assert.equal(brief.room.slug, roomSlug, "ids are never cut");
   if (brief.you) assert.equal(brief.you.memberId, id("me-"));
