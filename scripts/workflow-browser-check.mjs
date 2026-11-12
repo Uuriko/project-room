@@ -142,7 +142,13 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#assignee-select").selectOption("producer");
     await page.locator("#work-options > summary").click();
     await page.locator("#work-mode-select").selectOption("write");
-    assert.equal(await page.locator("#assignee-select").evaluate(select => select.checkValidity()), false);
+    // Option D (#5960): the owner proposing a write item carries a one-item
+    // write grant for the accountable member, so a producer with only the work
+    // permissions is a valid assignee. An agent without the work permissions
+    // stays out of the list and is named in the hint instead.
+    assert.equal(await page.locator("#assignee-select").evaluate(select => select.checkValidity()), true);
+    assert.equal(await page.locator('#assignee-select option[value="reviewer"]').count(), 0);
+    assert.match(await page.locator("#assignee-hint").textContent(), /Test reviewer can't take work yet/);
     await page.locator("#assignee-select").selectOption("owner");
     assert.equal(await page.locator("#assignee-select").evaluate(select => select.checkValidity()), true);
     assert.equal(await page.locator('#verifier-select option[value="owner"]:not([disabled])').count(), 0);
