@@ -914,7 +914,7 @@ export const JOBS = Object.freeze([
       try { return await writeDailyBackup(ctx.env, ctx.room); }
       catch (error) {
         const failureDetail = backupFailureDetail(error);
-        console.error(`[room-backup] ${failureDetail.code}`);
+        console.error(`[room-backup] ${failureDetail.code}${failureDetail.reason ? `:${failureDetail.reason}` : ""}`);
         return { errors: 1, failureDetail };
       }
     }

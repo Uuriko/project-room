@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { exportNdjsonLines, exportTrailer, exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
-import { backupTarget, writeDailyBackup, writeKvBackup } from "../cloudflare/room-backup.mjs";
+import { exportNdjsonLines, exportTrailer, exportNdjsonStream, exportNdjsonText, exportNdjsonConsistentStream, materializeExportParts, BACKUP_EXPORT_PARTS_TABLE, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
+import { backupTarget, writeDailyBackup, writeKvBackup, verificationReasonToken } from "../cloudflare/room-backup.mjs";
 import { assembleKvBackup, summarizeRoom } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -661,4 +661,60 @@ for (const rejected of [false, true]) test(`restore CLI reports cleanup failure 
     assert.match(stderr, /destination was promoted/);
     assert.doesNotMatch(stderr, /destination was not promoted/);
   }
+});
+
+
+// A mid-export write the way the tear tests inject one: a raw event row,
+// not store.command (which authenticates and is sensitive to concurrent
+// tests sharing process-wide request context).
+function insertPhantom(store, messageId, body) {
+  const seq = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence + 1;
+  store.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES ('commons', ?, ?, ?)")
+    .run(seq, crypto.randomUUID(), JSON.stringify({ id: crypto.randomUUID(), type: T.MESSAGE_POSTED, roomId: "commons", actorId: "owner", at: new Date().toISOString(), data: { messageId, body } }));
+  store.db.prepare("UPDATE rooms SET sequence=? WHERE id='commons'").run(seq);
+}
+
+test("exportNdjsonStream is a frozen snapshot: a write after the stream is created does not appear", async t => {
+  const { store } = openStore(t, 2);
+  const stream = exportNdjsonStream(store.db);
+  insertPhantom(store, "after-freeze", "must not appear");
+  const text = await new Response(stream).text();
+  assert.equal(text.includes("after-freeze"), false);
+  assert.equal(exportNdjsonText(store.db).includes("after-freeze"), true, "the live store did receive the write");
+  const kv = fakeKv();
+  const wrote = await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, { exportRoomNdjson: () => exportNdjsonStream(openStore(t, 2).store.db) }, new Date(Date.UTC(2026, 9, 2)));
+  assert.equal(wrote.wrote, "room-backups/2026-10-02.ndjson");
+});
+
+test("a materialized consistent export excludes its staging table and ignores later writes", t => {
+  const { store } = openStore(t, 3);
+  const parts = store.transaction(() => materializeExportParts(store.db, { partBytes: 200 }));
+  assert.ok(parts >= 1);
+  assert.equal([...exportNdjsonLines(store.db)].join("").includes(BACKUP_EXPORT_PARTS_TABLE), false, "the staging table is never exported");
+  insertPhantom(store, "post-materialize", "late");
+  const rows = store.db.prepare(`SELECT bytes FROM "${BACKUP_EXPORT_PARTS_TABLE}" ORDER BY part_index`).all();
+  const snapshot = Buffer.concat(rows.map(row => Buffer.from(row.bytes))).toString();
+  assert.equal(snapshot.includes("post-materialize"), false);
+  assert.equal(exportNdjsonText(store.db).includes("post-materialize"), true);
+});
+
+test("exportNdjsonConsistentStream snapshots, streams, and clears the staging table", async t => {
+  const { store } = openStore(t, 4);
+  const stream = exportNdjsonConsistentStream(store, { partBytes: 300 });
+  insertPhantom(store, "too-late", "late");
+  const text = await new Response(stream).text();
+  assert.equal(text.includes("too-late"), false);
+  assert.equal(store.db.prepare(`SELECT count(*) AS n FROM "${BACKUP_EXPORT_PARTS_TABLE}"`).get().n, 0, "parts are cleared after the stream ends");
+  const kv = fakeKv();
+  const when = new Date(Date.UTC(2026, 9, 8, 9));
+  const wrote = await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, { exportRoomNdjson: () => exportNdjsonConsistentStream(openStore(t, 3).store, { partBytes: 400 }) }, when);
+  assert.equal(wrote.target, "kv");
+  assert.ok(wrote.wrote);
+});
+
+test("verificationReasonToken maps torn-export messages to public health tokens", () => {
+  assert.equal(verificationReasonToken("event count moved 10 -> 11 mid-export"), "event_count_moved");
+  assert.equal(verificationReasonToken("event count moved: the trailer counts 10 but the export holds 11 events"), "trailer_count_mismatch");
+  assert.equal(verificationReasonToken("event log changed during the export (same count, different rows)"), "event_hash_changed");
+  assert.equal(verificationReasonToken(""), null);
 });
