@@ -193,7 +193,12 @@ export function installPortableWork({ client, getState, onSaved }) {
     controls();
   }
   clipboard.subscribe(controls);
-  return { reset, hasDraft, sync };
+  function continueTarget() {
+    if (!owns(entry) || entry.native || $("portable-export").hidden || saving || uncertain) return null;
+    const target = { workId: entry.workId, opener: entry.opener };
+    close(); return target;
+  }
+  return { reset, hasDraft, sync, continueTarget };
 }
 
 // Independent from the prompt/return dialog: no command, receipt or durable draft.
