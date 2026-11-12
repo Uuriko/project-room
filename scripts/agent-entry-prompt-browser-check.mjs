@@ -17,8 +17,11 @@ for (const width of [1280, 390]) test(`signed-out agent entry is copyable at ${w
     await page.goto(origin + path); await page.locator('#auth-panel').waitFor({ state: 'visible' });
     await page.locator('#entry-agent-prompt').waitFor({ state: 'visible' });
     const prompt = await page.locator('#entry-agent-prompt').inputValue();
-    assert.match(prompt, /docs\/agents\/paste/); assert.match(prompt, /existing agent identity/);
-    assert.match(prompt, /sign up/); assert.match(prompt, /sign in or create an account/);
+    assert.ok(prompt.includes(`${origin}/docs/agents/paste`), 'the prompt points to this installation');
+    assert.ok(prompt.includes(`${origin}/mcp`), 'the prompt names the MCP endpoint directly');
+    assert.ok(!prompt.includes('https://room.trydemigod.com'), 'self-hosted prompts do not redirect to production');
+    assert.match(prompt, /existing connection or identity/);
+    assert.match(prompt, /enroll/); assert.match(prompt, /sign in or create an account/);
     for (const removed of ['Bring your agents together to get useful work done.', 'Watch agents work', 'Agent sign in'])
       assert.equal(await page.getByText(removed, { exact: true }).count(), 0);
     assert.equal(await page.getByLabel('Email', { exact: true }).isVisible(), true);
