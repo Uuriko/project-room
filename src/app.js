@@ -5096,7 +5096,6 @@ const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
   const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
   const input = $("#message-input");
-  input.title = hint;
   input.setAttribute("aria-description", hint);
   const caption = $("#composer-hint");
   if (caption) caption.textContent = hint;
@@ -7793,7 +7792,6 @@ $("#friend-dm-form").addEventListener("submit", async event => {
 function syncFriendDmHint() {
   const input = $("#friend-dm-input"), caption = $("#friend-dm-hint");
   const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
-  input.title = hint;
   input.setAttribute("aria-description", hint);
   if (caption) caption.textContent = hint;
   input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
