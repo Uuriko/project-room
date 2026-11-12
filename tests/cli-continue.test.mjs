@@ -6,6 +6,8 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { continueCommand } from '../cli/commands/continue.mjs';
 import { createWorkBrief } from '../client/work-brief.mjs';
 import { createWorkContinuation, workContinuationMarkdown } from '../src/work-continuation.js';
+import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
+import { rmSync } from 'node:fs';
 
 test('continuation reads authenticated selected work without writes; revocation denies export',async t=>{
  const store=new RoomStore(':memory:');store.initialize(initialRoom());
@@ -47,4 +49,18 @@ test('invalid CLI input fails before connection resolution',async()=>{
  await assert.rejects(()=>continueCommand(['one','--write'],io),/Use room continue/);
  await assert.rejects(()=>continueCommand(['../escape'],io),/Use room continue/);
  assert.equal(connected,false);
+});
+
+test('saved agent identity cannot be substituted by a different accepted credential',async t=>{
+ const f=createAcceptanceFixture(),server=createRoomServer({store:f.store});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+ const base={origin:`http://127.0.0.1:${server.address().port}`,roomId:'commons',memberId:'producer'};
+ let output=[];
+ const io={connection:async()=>({...base,secret:f.keys.producer}),out:s=>output.push(s)};
+ await continueCommand(['test-handoff'],io);
+ assert.equal(JSON.parse(output[0]).scope.viewerId,'producer');
+ output=[];
+ await assert.rejects(()=>continueCommand(['test-handoff'],{...io,connection:async()=>({...base,secret:f.keys.owner})}),/configured agent|identity|member/i);
+ assert.deepEqual(output,[],'a mismatched identity never produces continuation text');
 });
