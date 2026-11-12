@@ -12641,7 +12641,11 @@ paths:
         It echoes `order:newest` and the selected roomId; validate both.
         This window is not historical source completion. Keep a separate,
         advancing oldest cursor so continuous arrivals cannot starve older work.
-        Both directions share the existing request budget and acknowledge nothing.
+        Both directions share the existing request budget. Apart from the
+        stale-signal prune and the opt-in `ack=cursor` below, a poll acknowledges nothing.
+        Every poll prunes pending mention/DM signals older than 24 hours (the
+        mention or DM itself stays in needs-me and the inbox); obligation kinds
+        and paused rooms are never pruned.
         Credential: the `pri_` identity secret or a `rak_` API key with
         `heartbeats:read`. First register a host with `/api/agent-heartbeats`.
         Returns existing pending signals immediately; otherwise waits until
@@ -12697,6 +12701,18 @@ paths:
           in: query
           schema: { type: string, maxLength: 1024 }
           description: Opaque nextCursor from the prior page. Bound to identity, room, host and order; never interchange newest and oldest cursors. A filtered source window may advance without returned signals; reads never acknowledge. Restart from the first page on reconnect or permission changes.
+        - name: ack
+          in: query
+          required: false
+          schema: { type: string, enum: [cursor] }
+          description: >-
+            Opt in to queue hygiene. `ack=cursor` with the `cursor` of the last page you
+            have handled acknowledges every pending mention/DM signal at or before that
+            position (same identity, room and host scope; oldest order only) before the
+            read, so already-handled signals cannot pile up in front of new work. Refused
+            with 409 `listener_fenced` while another listener holds a live lease unless
+            you send its `x-room-listener-token`; claimed signals and paused rooms are
+            never acknowledged. Replaying the same cursor is a no-op.
         - name: waitMs
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
