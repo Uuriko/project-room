@@ -4,6 +4,7 @@ import {RoomStore} from '../server/store.mjs';
 import {createRoomServer} from '../server/http.mjs';
 import {initialRoom} from '../server/bootstrap.mjs';
 import {linkWithProof} from './helpers/link-with-proof.mjs';
+import {callHostedStdioTool} from '../server/mcp-full-profile.mjs';
 import {validateReplyRead} from '../client/reply-actions.mjs';
 
 function fixture(t, current) {
@@ -90,4 +91,22 @@ test('another recipient identity cannot be named as this member runtime and targ
   assert.throws(()=>f.s.command(f.token(expiring),'commons',f.response(q)),e=>e.status===401||e.code==='request_runtime_denied');
   assert.throws(()=>f.s.requestRuns.apply(f.token(f.other),'commons',{requestMessageId:q.event.data.messageId,attemptId:'expired-target-takeover',action:'claim',expectedRequestRevision:0,contextEventId:q.event.id}),e=>e.code==='request_runtime_denied');
   assert.equal(f.read(f.token(f.other),q.event.data.messageId).request.status,'open');
+});
+
+
+test('hosted MCP request tool preserves target and exposes actionable scoped-key refusal and success',async t=>{
+  const f=fixture(t,true);
+  const opened=await callHostedStdioTool(f.s,f.owner,'room_request_reply',{roomId:'commons',requestId:'mcp-runtime-request',toMemberId:'worker',body:'Verify the bounded change',targetRuntimeKeyId:f.intended.keyId});
+  assert.equal(opened.isError,false);
+  const id=opened.value.requestMessageId;
+  const wrong=await callHostedStdioTool(f.s,f.token(f.other),'room_read_request',{roomId:'commons',requestMessageId:id});
+  assert.equal(wrong.isError,false);assert.equal(wrong.value.request.targetRuntimeKeyId,f.intended.keyId);
+  assert.equal(wrong.value.current.runtimeAccess.authorized,false);assert.equal(wrong.value.current.answerBasis,null);
+  const right=await callHostedStdioTool(f.s,f.token(f.intended),'room_read_request',{roomId:'commons',requestMessageId:id});
+  assert.equal(right.isError,false);assert.equal(right.value.current.runtimeAccess.authorized,true);
+  const answered=await callHostedStdioTool(f.s,f.token(f.intended),'room_respond_to_request',{
+    roomId:'commons',requestId:'mcp-runtime-answer',responseToRequestId:id,...right.value.current.answerBasis,
+    responseOutcome:'answered',toMemberId:'owner',workItemId:null,body:'Verified this result'});
+  assert.equal(answered.isError,false);assert.equal(answered.value.status,'recorded');
+  assert.equal(f.read(f.token(f.intended),id).request.status,'answered');
 });

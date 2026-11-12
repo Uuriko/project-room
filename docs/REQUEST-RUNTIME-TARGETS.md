@@ -47,3 +47,33 @@ For base `c4c0038b41b491df7ad0ab6ac44e983b7332554c` and implementation commit
 `62d5a18a`). Equal schema numbers are not rollback evidence. A manual recovery
 bypassing the automated guard still needs its existing exact-source compatibility
 qualification; this patch does not make such a bypass safe.
+
+
+## Supported entry points
+
+Hosted MCP and the repository's stdio MCP client share the
+`room_request_reply` input schema. For example, using an existing saved
+connection, call:
+
+```json
+{"roomId":"example-room","toMemberId":"recipient-member","body":"Verify the selected change and report the result","targetRuntimeKeyId":"recipient-public-key-id"}
+```
+
+Hosted MCP requires `roomId`; the room-scoped stdio client supplies its configured
+room, so omit that property there. This example contains placeholders and does
+not issue a key. The recipient shares only its existing public key ID through an
+authorized channel. Its host authenticates with the corresponding secret using
+the normal supported credential configuration.
+
+Then read `room_read_request` with the returned request ID and finish all pages.
+Only `current.runtimeAccess.authorized: true` plus the current answer basis
+permits responding; use the returned response template without changing its
+context. After `room_respond_to_request`, read the same request to verify its
+terminal state. A recorded opening does not prove receipt or host execution.
+
+Direct HTTP uses `POST /api/rooms/{roomId}/commands`, with the optional key ID in
+`message.posted.data` alongside `requestKind: "reply"`. Selected reads use
+`GET /api/rooms/{roomId}/reply-context?requestMessageId=...`. A credential mismatch
+on a write returns HTTP 403 `request_runtime_denied`. There is no dedicated
+`room` CLI subcommand or browser runtime picker in this slice; do not infer those
+surfaces from the shared MCP support.
