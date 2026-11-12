@@ -32,7 +32,9 @@ const docIdOf = ctx => {
 
 export async function getRoomDocs(ctx) {
   const { roomId } = authed(ctx, { write: false });
-  if ([...ctx.url.searchParams.keys()].some(key => !["limit", "after"].includes(key) || ctx.url.searchParams.getAll(key).length !== 1)) ctx.reject(422, "invalid_query", "Only one limit and after parameter are accepted");
+  if ([...ctx.url.searchParams.keys()].some(key => !["limit", "after", "auth"].includes(key) || ctx.url.searchParams.getAll(key).length !== 1)) ctx.reject(422, "invalid_query", "Only one limit, after and auth parameter are accepted");
+  const authMode = ctx.url.searchParams.get("auth");
+  if (authMode !== null && !["room", "account"].includes(authMode)) ctx.reject(422, "invalid_auth_mode", "Invalid Room authentication mode");
   const limitRaw = ctx.url.searchParams.get("limit");
   const limit = limitRaw === null ? 100 : Number(limitRaw);
   const after = ctx.url.searchParams.get("after") ?? "";
@@ -75,7 +77,7 @@ const params = names => ({ type: "object", required: names, properties: Object.f
 const EXEMPT = "exempt:flagged preview; MCP doc tools follow once the HTTP shape settles";
 export const ROOM_DOC_ROUTES = Object.freeze([
   Object.freeze({ id: "room-docs-list", method: "GET", path: "/api/rooms/{roomId}/docs", auth: "room", capability: null, scope: "room",
-    handler: getRoomDocs, parity: EXEMPT, schema: { params: params(["roomId"]), query: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 500, default: 100 }, after: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } } }, response: { type: "object" } }, events: [] }),
+    handler: getRoomDocs, parity: EXEMPT, schema: { params: params(["roomId"]), query: { type: "object", properties: { auth: { type: "string", enum: ["room", "account"] }, limit: { type: "integer", minimum: 1, maximum: 500, default: 100 }, after: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } } }, response: { type: "object" } }, events: [] }),
   Object.freeze({ id: "room-docs-get", method: "GET", path: "/api/rooms/{roomId}/docs/{docId}", auth: "room", capability: null, scope: "room",
     handler: getRoomDoc, parity: EXEMPT, schema: { params: params(["roomId", "docId"]), response: { type: "object" } }, events: [] }),
   Object.freeze({ id: "room-docs-write", method: "POST", path: "/api/rooms/{roomId}/docs/{docId}", auth: "room", capability: null, scope: "room",
