@@ -308,6 +308,46 @@ test("postDelivery dead-letters redirect loops past the hop cap", async () => {
   assert.equal(fetched, MAX_REDIRECT_HOPS + 1);
 });
 
+test("postDelivery strips credential headers on cross-origin redirects, keeps them same-origin", async () => {
+  const credHeaders = { "Content-Type": "application/json",
+    "X-Room-Notification-Token": "fake-room-token", Authorization: "Bearer fake-credential" };
+  const run = async location => {
+    const seen = [];
+    const result = await postDelivery(postArgs({
+      url: "https://hooks.example.test/agent",
+      headers: { ...credHeaders },
+      fetchImpl: async (url, opts) => {
+        seen.push({ url, headers: opts.headers });
+        if (seen.length === 1) {
+          return { status: 302, headers: { get: name => (name === "location" ? location : null) }, text: async () => "" };
+        }
+        return { status: 200, headers: { get: () => null }, text: async () => "ok" };
+      },
+    }));
+    return { result, seen };
+  };
+  // Cross-origin 302: both credential headers stripped, other headers kept.
+  const cross = await run("https://other.example.test/collect");
+  assert.equal(cross.result.ok, true);
+  assert.equal(cross.seen[0].headers.Authorization, "Bearer fake-credential");
+  assert.equal(cross.seen[1].headers.Authorization, undefined);
+  assert.equal(cross.seen[1].headers["X-Room-Notification-Token"], undefined);
+  assert.equal(cross.seen[1].headers["Content-Type"], "application/json");
+  // Same-origin 302 and relative redirect: both headers kept.
+  for (const location of ["https://hooks.example.test/other", "/relative"]) {
+    const same = await run(location);
+    assert.equal(same.result.ok, true, location);
+    assert.equal(same.seen[1].headers.Authorization, "Bearer fake-credential", location);
+    assert.equal(same.seen[1].headers["X-Room-Notification-Token"], "fake-room-token", location);
+  }
+  // Subdomain and port changes are different origins: stripped.
+  for (const location of ["https://sub.hooks.example.test/collect", "https://hooks.example.test:8443/collect"]) {
+    const changed = await run(location);
+    assert.equal(changed.seen[1].headers.Authorization, undefined, location);
+    assert.equal(changed.seen[1].headers["X-Room-Notification-Token"], undefined, location);
+  }
+});
+
 test("postDelivery sends redirect: manual so fetch never follows on its own", async () => {
   const seen = [];
   await postDelivery(postArgs({
