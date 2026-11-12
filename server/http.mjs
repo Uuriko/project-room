@@ -805,6 +805,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   store.nativeMcpEventsEnabled = Boolean(nativeEvents);
   if (nativeEvents) store.enqueueNativeMcpEvent = nativeEvents.emit;
   const hostedRoomMcp = createHostedRoomMcp(store, {
+    roomDocsEnabled,
     nativeHandler: nativeEvents?.handler,
     nativeStatus: nativeEvents?.status,
     agentRooms, oauthProvider: oauthResource ? oauthProvider : null, inviteOAuthProvider: inviteOAuth?.provider, oauthResource,
@@ -1897,6 +1898,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 409, { error: "agent_connection_required", error_description: "Join the room as yourself, then create your own connected agent before authorizing it" });
         const scopeLabels = {
           "rooms:read": "See your rooms",
+          "docs:write": "Create and edit room documents",
           "chat:read": "Read messages",
           "chat:write": "Post messages",
           "work:read": "See work items",

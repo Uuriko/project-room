@@ -12,6 +12,7 @@ export const OAUTH_SCOPES = Object.freeze([
   "work:read",
   "work:write",
   "members:invite",
+  "docs:write",
 ]);
 
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;

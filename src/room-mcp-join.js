@@ -37,6 +37,8 @@ export const ROOM_MCP_SERVER_VERSION = "0.1.0";
 export const MCP_TOOL_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
 export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
+  "room_docs",
+  "room_write_doc",
   "room_wait_for_attention",
   "room_check_access",
   "room_needs_me",

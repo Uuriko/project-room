@@ -24,7 +24,7 @@ const origin = 'https://room.example';
 const resource = origin + '/mcp';
 const verifier = 'v'.repeat(43);
 const challenge = createHash('sha256').update(verifier).digest('base64url');
-async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', clock, normalized=false} = {}) {
+async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', clock, normalized=false, roomDocsEnabled=false} = {}) {
   let store = new RoomStore(database);
   if(clock)store.now=clock;
   store.initialize(initialRoom(), normalized ? {representation: 'normalized-current-v1'} : {});
@@ -45,7 +45,7 @@ async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', 
   }
   setTier(store.db, 'commons', 'friend-dot', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   const binding = { resource, roomId: 'commons', memberId: 'friend-dot', identityId: identity.identityId, humanMemberId: 'owner', identityEpoch: mcpOAuthIdentityEpoch(store, identity.identityId), ...(legacyOwned ? {principalType:'account-owned-agent',accountEpoch:String(store.db.prepare('SELECT auth_epoch FROM accounts WHERE id=?').get(accountId).auth_epoch)} : {}) };
-  let server = createRoomServer({ store, origin, mcpOAuthClients: [client] });
+  let server = createRoomServer({ store, origin, mcpOAuthClients: [client], roomDocsEnabled });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   let base = `http://127.0.0.1:${server.address().port}`;
@@ -69,7 +69,7 @@ async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', 
   const restart = async () => {
     server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));store.close();
     store=new RoomStore(database);if(clock)store.now=clock;
-    server=createRoomServer({store,origin,mcpOAuthClients:[client]});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));base=`http://127.0.0.1:${server.address().port}`;
+    server=createRoomServer({store,origin,mcpOAuthClients:[client],roomDocsEnabled});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));base=`http://127.0.0.1:${server.address().port}`;
   };
   return { get store(){return store;}, restart, ownerKey, identity, binding, accountId, get base(){return base;}, consent, exchange, tokens, rpc, cookie: `__Host-account_session=${slot.token}` };
 }
@@ -600,4 +600,27 @@ for (const normalized of [false, true]) test(`OAuth agents can call room_needs_m
   assert.ok(found.includes('owner-ask-nm'), `the owner's formal ask is found: ${found}`);
   const other = await f.rpc('tools/call', { name: 'room_needs_me', arguments: { roomId: 'someone-elses-room' } });
   assert.equal(other.body.result?.isError ?? Boolean(other.body.error), true, 'a different room is refused');
+});
+
+
+test('Docs OAuth requires explicit new consent; old grants stay read-only', async t => {
+  const f = await setup(t, {roomDocsEnabled: true});
+  const args = {roomId: 'commons', docId: 'runbook', title: 'Runbook', body: 'one', baseRev: 0};
+  const denied = await f.rpc('tools/call', {name: 'room_write_doc', arguments: args});
+  assert.ok(denied.body.error || denied.body.result?.isError, JSON.stringify(denied.body));
+  const listed = await f.rpc('tools/list');
+  assert.ok(listed.body.result.tools.some(tool => tool.name === 'room_docs'));
+  assert.ok(!listed.body.result.tools.some(tool => tool.name === 'room_write_doc'));
+  const consent = await f.consent({scope: 'rooms:read docs:write'});
+  assert.equal(consent.status, 302, await consent.clone().text());
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const tokenResponse = await f.exchange({grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource});
+  assert.equal(tokenResponse.status, 200);
+  const token = (await tokenResponse.json()).access_token;
+  const made = await f.rpc('tools/call', {name: 'room_write_doc', arguments: args}, token);
+  assert.equal(made.body.result.structuredContent.doc.rev, 1, JSON.stringify(made.body));
+  const read = await f.rpc('tools/call', {name: 'room_docs', arguments: {roomId: 'commons', docId: 'runbook'}});
+  assert.equal(read.body.result.structuredContent.doc.body, 'one');
+  const chat = await f.rpc('tools/call', {name: 'room_post_message', arguments: {roomId: 'commons', body: 'not granted'}}, token);
+  assert.ok(chat.body.error || chat.body.result?.isError, JSON.stringify(chat.body));
 });
