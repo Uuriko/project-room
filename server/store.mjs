@@ -8029,6 +8029,43 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.db.isTransaction ? run().changes : this.transaction(run).changes;
   }
 
+  // Zero-drop, tier 1b: the scheduled half of the re-wake. flipExpiredMentions
+  // is lazy (it runs on a room read, ack, reply or mention list), so a room
+  // nobody reads past the deadline would never re-wake. The jobs registry calls
+  // this on its existing cadence. Reuses the #6147 path unchanged: the flip
+  // makes each row terminal, so a second sweep (or a concurrent read) finds
+  // nothing and cannot re-wake twice. Bounded: at most `limit` rooms per tick;
+  // anything left stays due, so the next tick continues.
+  sweepExpiredMentions({ limit = 20, nowMs = this.now() } = {}) {
+    let rooms;
+    try {
+      rooms = this.db.prepare(
+        `SELECT DISTINCT room_id AS roomId FROM mention_states
+         WHERE state='delivered' AND timeout_at<=? ORDER BY room_id LIMIT ?`).all(nowMs, Math.max(1, Math.min(limit, 100)));
+    } catch (error) {
+      if (!/no such table/i.test(error?.message ?? "")) throw error;
+      return { rooms: 0, flipped: 0 };
+    }
+    let flipped = 0;
+    for (const { roomId } of rooms) {
+      try { flipped += this.flipExpiredMentions(roomId, nowMs) || 0; }
+      catch { /* one bad room never stops the sweep; its rows stay due for the next tick */ }
+    }
+    return { rooms: rooms.length, flipped };
+  }
+
+  // Earliest deadline among mentions nobody has acknowledged, or null when
+  // none is waiting, so an idle room's job stays disabled.
+  nextMentionSweepAt() {
+    try {
+      const row = this.db.prepare("SELECT MIN(timeout_at) AS due FROM mention_states WHERE state='delivered'").get();
+      return row?.due == null ? null : Number(row.due);
+    } catch (error) {
+      if (!/no such table/i.test(error?.message ?? "")) throw error;
+      return null;
+    }
+  }
+
   // Zero-drop, tier 1 (re-wake): one fresh wake signal for a mention that was
   // delivered but never acknowledged before its deadline. The coalescing key
   // is distinct from the original signal's (rewake:<eventId>), so a listener
