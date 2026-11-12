@@ -134,6 +134,7 @@ optional.push("server/invite-share.mjs"); // ROOM_INVITE_SHARE teammate paste li
 optional.push("server/showcase-page.mjs"); // ROOM_SHOWCASE example room page (imported by server/routes/table.mjs; imports public-search.mjs and connect-snippets.mjs)
 optional.push("server/connect-funnel.mjs"); // ROOM_CONNECT_FUNNEL aggregate connect metrics (imported by server/http.mjs; node:crypto only)
 optional.push("server/one-click-connect.mjs"); // ROOM_ONE_CLICK_CONNECT install links for /download (imported by server/download-page.mjs; imports connect-snippets.mjs)
+optional.push("server/room-docs.mjs", "server/routes/room-docs.mjs");
 optional.push("server/notify-prefs.mjs"); // notification prefs + quiet hours (imported by server/inbox.mjs and server/inbox-import-guards.mjs; pure, no imports of its own)
 optional.push("server/thread-mutes.mjs"); // per-thread mutes (imported by server/store.mjs; pure, no imports of its own)
 optional.push("server/human-push.mjs"); // human browser push, mentions and DMs (imported by server/store.mjs)

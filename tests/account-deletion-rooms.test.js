@@ -1,3 +1,4 @@
+import { writeDoc, getDoc } from "../server/room-docs.mjs";
 import {legacyAccountRoom} from './helpers/legacy-account-room.mjs';
 import {isCurrentRoom,readCurrentRoomForAudit} from '../server/current-room-repository.mjs';
 const forensicRoom=(store,roomId)=>isCurrentRoom(store.db,roomId)?store.readTransaction(()=>readCurrentRoomForAudit(store,roomId)):store.room(roomId);
@@ -15,7 +16,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 async function startServer(t, f) {
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ store: f.store, roomDocsEnabled: true });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams(); server.closeAllConnections();
@@ -74,6 +75,7 @@ for (const entityProjection of [false, true]) test(`a solely owned personal room
   const ctx = await deletionAccount(t, 1);
   const roomId = "solo-notes";
   const { key } = createRoom(ctx, roomId, "personal", "Solo notes", {legacy:true});
+  writeDoc(ctx.f.store, { roomId, docId: "private-notes", title: "Private", body: "personal document", baseRev: 0, author: "owner" });
   ctx.f.store.command(key, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "secret-note", body: SECRET } });
   ctx.f.store.roomAttachments.stage(key, roomId, {
     id: "secret-file", filename: "secret.txt", mediaType: "text/plain",
@@ -113,6 +115,8 @@ for (const entityProjection of [false, true]) test(`a solely owned personal room
   const receipt = await res.json();
   assert.ok(receipt.receipt.retained.some(row => row.category === "audit"));
 
+  assert.equal(getDoc(ctx.f.store.db, { roomId, docId: "private-notes" }), null);
+  assert.equal(getDoc(ctx.f.store.db, { roomId, docId: "private-notes", rev: 1 }), null);
   const room = forensicRoom(ctx.f.store,roomId);
   assert.equal(typeof room.state.room.archivedAt, "string");
   assert.equal(room.state.messages.find(message => message.id === "secret-note").body, null);
@@ -140,10 +144,17 @@ for (const entityProjection of [false, true]) test(`a solely owned personal room
 
 test("a shared room with another owner transfers and the account is deleted", async t => {
   const ctx = await deletionAccount(t, 2);
+  const policyResponse = await get(ctx.origin, "/api/account/retention", ctx.creds.cookie);
+  assert.equal(policyResponse.status, 200);
+  const policy = await policyResponse.json();
+  assert.match(JSON.stringify(policy), /document bodies/);
+  assert.match(JSON.stringify(policy), /room-member author ids/);
   const roomId = "shared-with-partner";
   const { send } = createRoom(ctx, roomId, "organization", "Shared project");
   send(T.MEMBER_ADDED, { memberId: "partner", displayName: "Partner", kind: "human", permissions: ["accept_work"] });
   send(T.MESSAGE_POSTED, { messageId: "kept-note", body: "keep-this-history" });
+  writeDoc(ctx.f.store, { roomId, docId: "shared-spec", title: "Shared", body: "shared first", baseRev: 0, author: "owner" });
+  writeDoc(ctx.f.store, { roomId, docId: "shared-spec", title: "Shared", body: "shared second", baseRev: 1, author: "owner" });
   const partnerId = "partner-account";
   ctx.f.store.createAccount(partnerId);
   ctx.f.store.bindHumanAccount(roomId, "partner", partnerId);
@@ -160,6 +171,15 @@ test("a shared room with another owner transfers and the account is deleted", as
   assert.equal(ctx.f.store.account(ctx.accountId).active, false);
   assert.equal(ctx.f.store.db.prepare("SELECT count(*) AS n FROM member_accounts WHERE account_id=?").get(ctx.accountId).n, 0);
   assert.equal(ctx.f.store.accountForMember(roomId, "partner").id, partnerId);
+  assert.equal(getDoc(ctx.f.store.db, { roomId, docId: "shared-spec" }).body, "shared second");
+  const historical = getDoc(ctx.f.store.db, { roomId, docId: "shared-spec", rev: 1 });
+  assert.equal(historical.body, "shared first"); assert.equal(historical.updatedBy, "owner");
+  const partnerKey = ctx.f.store.issueAccessKey(roomId, "partner");
+  const retained = await fetch(ctx.origin + `/api/rooms/${roomId}/docs/shared-spec?rev=1`, { headers: { Authorization: `Bearer ${partnerKey}` } });
+  assert.equal(retained.status, 200); assert.equal((await retained.json()).doc.body, "shared first");
+  const departed = await fetch(ctx.origin + `/api/rooms/${roomId}/docs?auth=account`, { headers: { Cookie: ctx.creds.cookie, "X-Session-Binding": ctx.binding } });
+  assert.equal(departed.status, 401);
+
 });
 
 test("the sole owner of a shared room with other members is refused and listed", async t => {
@@ -258,4 +278,30 @@ test("account deletion also purges archived message rows that are no longer in t
   const rows = db.prepare("SELECT message_id, body, record_json FROM messages WHERE room_id=?").all(roomId);
   assert.ok(rows.length > 0);
   for (const row of rows) assert.equal(`${row.body}${row.record_json}`.includes(SECRET), false, `${row.message_id} keeps no secret text`);
+});
+
+test("a document update invalidates an earlier account deletion confirmation", async t => {
+  const ctx = await deletionAccount(t, "document-race");
+  const roomId = "doc-confirmation";
+  createRoom(ctx, roomId, "personal", "Document confirmation");
+  writeDoc(ctx.f.store, { roomId, docId: "spec", title: "Spec", body: "one", baseRev: 0, author: "owner" });
+  const planned = await (await get(ctx.origin, "/api/account/deletion/plan", ctx.creds.cookie)).json();
+  writeDoc(ctx.f.store, { roomId, docId: "spec", title: "Spec", body: "two", baseRev: 1, author: "owner" });
+  const res = await authedPost(ctx.origin, "/api/account/delete", { confirmationToken: planned.confirmationToken }, ctx.creds);
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error.code, "plan_changed");
+  assert.equal(getDoc(ctx.f.store.db, { roomId, docId: "spec" }).body, "two");
+});
+
+test("document lists accept the common account auth selector with current session binding", async t => {
+  const ctx = await deletionAccount(t, "docs-account-selector");
+  const roomId = "docs-account-selector";
+  createRoom(ctx, roomId, "personal", "Account docs");
+  writeDoc(ctx.f.store, { roomId, docId: "spec", title: "Spec", body: "private", baseRev: 0, author: "owner" });
+  const read = query => fetch(ctx.origin + `/api/rooms/${roomId}/docs?${query}`, { headers: { Cookie: ctx.creds.cookie, "X-Session-Binding": ctx.binding } });
+  const listed = await read("auth=account&limit=1");
+  assert.equal(listed.status, 200); assert.deepEqual((await listed.json()).docs.map(doc => doc.docId), ["spec"]);
+  assert.equal((await read("auth=account&auth=room")).status, 422);
+  assert.equal((await read("auth=invalid")).status, 422);
+  assert.equal((await read("auth=account&unknown=x")).status, 422);
 });

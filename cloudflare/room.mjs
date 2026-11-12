@@ -240,6 +240,7 @@ export class ProjectRoom extends DurableObject {
       mcpEventExternalScheduler: true,
       jobHealth: () => this.jobHealthSnapshot,
       publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === '1',
+      roomDocsEnabled: env.ROOM_DOCS === '1',
       push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,

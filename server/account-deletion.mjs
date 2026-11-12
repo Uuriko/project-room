@@ -37,7 +37,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.8.0",
+  version: "1.9.0",
   summary: "Account deletion purges the account's sign-in credentials, "
     + "sessions, room memberships, connected Gmail data, private inbox content "
     + "(imported messages, drafts, read state), connected email data, derived "
@@ -47,17 +47,17 @@ export const RETENTION_POLICY = Object.freeze({
     + "room, and any member permission a grant conferred is stripped. Guest invites, share links, "
     + "membership invitations, and agent and referral invites issued by the account are revoked, and agent "
     + "connections the account sponsored are disconnected. Personal rooms this account solely owns are archived "
-    + "and their messages and files are purged. Security audit rows, inbox/email "
+    + "and their messages, documents (including revisions), and files are purged. Security audit rows, inbox/email "
     + "command receipts, abuse "
     + "reports, operator unpublish records, bounty payment journal "
     + "entries, and "
     + "the deactivated account tombstone are retained under legal hold; "
-    + "room history already shared with other members is room-owned and is "
+    + "room history already shared with other members, including document bodies, revisions and room-member author ids, is room-owned and is "
     + "not rewritten. A shared room with other members and no other owner "
     + "blocks deletion until ownership is transferred.",
   purged: Object.freeze([
     Object.freeze({ category: "account_admission_requests", description: "Account-bound admission request rows, including private account linkage and request notes, are deleted. Request events already shared with room members follow the existing room-history retention policy." }),
-    Object.freeze({ category: "personal_room_content", description: "Messages and files in personal rooms this account solely owns are purged, and those rooms are archived." }),
+    Object.freeze({ category: "personal_room_content", description: "Messages, documents and files in personal rooms this account solely owns are purged, and those rooms are archived." }),
     Object.freeze({ category: "credentials", description: "Account access keys (account_credentials) are deleted; outstanding keys stop working immediately." }),
     Object.freeze({ category: "sessions", description: "Browser account-session slots (account_session_slots) are deleted; every signed-in browser session ends." }),
     Object.freeze({ category: "login_methods", description: "All linked sign-in methods are deleted: password verifiers, magic codes, and recovery codes." }),
@@ -83,7 +83,7 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "abuse_reports", reason: "public_abuse_reports rows are retained as safety evidence under the same legal hold; deleting them would destroy abuse investigations." }),
     Object.freeze({ category: "unpublish_records", reason: "public_unpublish rows are the live unpublish state consulted by the public read model; deleting them would re-expose unpublished content." }),
     Object.freeze({ category: "profile_tombstone", reason: "The account id remains as a deactivated tombstone (active=0, profile scrubbed) so retained audit rows stay attributable. It can never sign in again." }),
-    Object.freeze({ category: "room_history", reason: "Room events already shared with other members (messages, work history) are room-owned history and are not rewritten when another owner remains; only the member binding is removed. Sole ownership of a shared room blocks deletion until that ownership is transferred." }),
+    Object.freeze({ category: "room_history", reason: "Room records already shared with other members (messages, work history, document bodies and revisions with room-member author ids) are room-owned history and are not rewritten when another owner remains; only the member binding is removed. Sole ownership of a shared room blocks deletion until that ownership is transferred." }),
     Object.freeze({ category: "bounty_journal", reason: "bounty_journal entries are the room's tamper-evident payment ledger (#3550): every entry is one leg of a two-account movement, hash-chained to the account's other entries and cited by counterparties' signed receipts. Deleting one account's legs would orphan the counterparty legs, break the hash chain and the conservation audit, and void those receipts. Entries stay in place, attributed only to the deactivated account tombstone — profile scrubbed, credentials and memberships purged — like the retained audit rows." }),
   ]),
 });
@@ -286,6 +286,9 @@ export function classifyOwnedRooms(store, accountId) {
       toMemberId: null,
       messages: loaded.messageCount ?? (Array.isArray(state.messages) ? state.messages.length : 0),
       files: fileCount(store, membership.roomId),
+      documents: tableExists(store.db, "room_docs")
+        ? store.db.prepare("SELECT count(*) AS count, COALESCE(sum(rev),0) AS revisions FROM room_docs WHERE room_id=?").get(membership.roomId)
+        : { count: 0, revisions: 0 },
     };
     if (ownerMemberId !== membership.memberId) {
       retained.push(entry);
@@ -473,7 +476,7 @@ function archiveCurrentPersonalRoom(store,room) {
 // Events are redacted, then the projection is rebuilt so recovery matches.
 function archivePersonalRoom(store, room) {
   // Public activity summaries and retry responses can contain room text too.
-  for (const table of ["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices", "room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
+  for (const table of ["room_docs", "room_doc_revisions", "project_maps", "project_map_queue", "project_map_pulls", "project_map_notices", "room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
     if (store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))
       store.db.prepare(`DELETE FROM ${table} WHERE room_id=?`).run(room.id);
   }

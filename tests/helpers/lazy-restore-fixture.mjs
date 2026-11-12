@@ -1,14 +1,17 @@
+import { writeDoc } from "../../server/room-docs.mjs";
 import { initialRoom } from '../../server/bootstrap.mjs';
 import { wakeListenerLeaseSchema, wakeRoomActivitySchema } from '../../server/agent-heartbeats.mjs';
 import { PATROL_SCHEMA } from '../../server/patrol.mjs';
 import { PROJECT_MAP_SCHEMA } from '../../server/project-map-store.mjs';
 import { PROJECTION_SHAPE_UPGRADES_SCHEMA } from '../../server/legacy-message-shape.mjs';
-export const lazyRestoreTables = ['agent_wake_listener_leases','agent_wake_signal_claims','agent_host_disconnects','agent_wake_room_activity',
+export const lazyRestoreTables = ['room_docs','room_doc_revisions','agent_wake_listener_leases','agent_wake_signal_claims','agent_host_disconnects','agent_wake_room_activity',
   'integrity_failures','patrol_cursor','patrol_claims','patrol_messages','patrol_findings','patrol_blocks',
   'project_maps','project_map_queue','project_map_pulls','project_map_notices','projection_shape_upgrades'];
 export function seedLazyRestoreStore(store) {
   store.initialize(initialRoom('commons'));
   const db=store.db;
+  writeDoc(store, { roomId: 'commons', docId: 'restore-doc', title: 'Restore', body: 'revision one', baseRev: 0, author: 'owner', now: 1 });
+  writeDoc(store, { roomId: 'commons', docId: 'restore-doc', title: 'Restore', body: 'revision two', baseRev: 1, author: 'owner', now: 2 });
   db.exec(wakeListenerLeaseSchema);db.exec(wakeRoomActivitySchema);db.exec(PATROL_SCHEMA);db.exec(PROJECT_MAP_SCHEMA);db.exec(PROJECTION_SHAPE_UPGRADES_SCHEMA);
   store.recordIntegrityFailure('messages_parity','commons',new Error('messages parity failed for commons: fixture'));
   db.exec(`
