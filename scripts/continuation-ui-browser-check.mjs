@@ -19,6 +19,7 @@ test('continuation uses the selected authenticated work and requires refresh whe
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ serviceWorkers: 'block' }); const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `http://127.0.0.1:${server.address().port}` });
   await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page, f.keys.owner);
   await openSearch(page); await page.locator('#message-search').fill('Test: prepare an agenda');
   await page.locator('#search-list [data-open-work="test-handoff"]').click();
@@ -29,6 +30,8 @@ test('continuation uses the selected authenticated work and requires refresh whe
   const first = await page.locator('#continuation-preview').inputValue();
   assert.match(first, /# Work continuation/); assert.match(first, /Test: prepare an agenda/);
   assert.doesNotMatch(first, /viewerSessionBinding|accountAccessKey|Please prepare an agenda/);
+  await page.locator('#continuation-copy').click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), first, 'compact preview copies the complete continuation');
   f.store.command(f.keys.producer, 'commons', { id: crypto.randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId: 'test-handoff', expectedRevision: 0 } });
   await page.getByText('Work changed. Refresh before copying.', { exact: true }).waitFor();
   assert.equal(await page.locator('#continuation-copy').isDisabled(), true);
