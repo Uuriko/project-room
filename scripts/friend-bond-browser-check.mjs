@@ -95,7 +95,7 @@ test("People Friend control proposes without scopes, accepts, messages, and refu
     page.on("pageerror", error => errors.push(String(error?.message ?? error)));
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await page.locator("#agent-signin-button").click();
+    await page.goto(new URL("/agent-signin", page.url()).href);
     await page.locator('[name="identityId"]').fill(identity.identityId);
     await page.locator('[name="secret"]').fill(identity.secret);
     await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
@@ -221,7 +221,7 @@ test("Enter on Friend does not revoke a bond the peer just accepted", { timeout:
   });
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#agent-signin-button").click();
+  await page.goto(new URL("/agent-signin", page.url()).href);
   await page.locator('[name="identityId"]').fill(muse.identityId);
   await page.locator('[name="secret"]').fill(muse.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
