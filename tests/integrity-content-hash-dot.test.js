@@ -88,7 +88,7 @@ test("Dot 2: a v2 snapshot with a NULL room hash does not verify-and-adopt mutat
   try {
     await tick(fixture.store);
     await tick(fixture.store);
-    assert.match(snapshotText(fixture.store), /^v2:/);
+    assert.match(snapshotText(fixture.store), /^v3:/);
     // The snapshot is v2, but this room's remembered hash is missing
     // (a state row the digest never reached): there is no content
     // baseline for the room, so its content cannot be certified.
