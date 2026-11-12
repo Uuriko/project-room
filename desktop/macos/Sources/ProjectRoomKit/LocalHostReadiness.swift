@@ -17,7 +17,7 @@ public enum LocalHostReadiness {
 
     /// Conversation does not require local computer permissions. Keep its
     /// readiness independent from optional tools and never imply model success.
-    public static func conversationNotice(host: [String: Any]) -> String? {
+    public static func conversationNotice(host: [String: Any], inMyMac: Bool = false) -> String? {
         guard host["configured"] as? Bool == true else { return "Set up this Mac’s agent to work from Conversation." }
         if host["stopping"] as? Bool == true { return "This Mac’s agent is stopping. Wait before starting it again." }
         guard host["running"] as? Bool == true else {
@@ -30,8 +30,8 @@ public enum LocalHostReadiness {
         switch host["phase"] as? String {
         case "assistant_not_selected": return "This Mac’s agent is not selected for its room. Ask a room administrator to select it using Connect in room settings."
         case "retrying_room": return "This Mac’s agent is reconnecting to its room. Check the connection in My Mac."
-        case "recovery_pending": return "This Mac’s agent is reconciling earlier work. Open My Mac for status."
-        case "report_reconciliation_pending": return "This Mac’s agent saved a result and is waiting to report it to the room. Open My Mac for status."
+        case "recovery_pending": return inMyMac ? "This Mac’s agent is reconciling earlier work." : "This Mac’s agent is reconciling earlier work. Open My Mac for status."
+        case "report_reconciliation_pending": return inMyMac ? "This Mac’s agent saved a result and is waiting to report it to the room." : "This Mac’s agent saved a result and is waiting to report it to the room. Open My Mac for status."
         case "stopped": return "This Mac’s agent is stopping. Wait before starting it again."
         case "running", "watching_room", "protocol_qualified", "settled": break
         default: return "This Mac’s agent is checking its connection and sign-in."
@@ -43,7 +43,7 @@ public enum LocalHostReadiness {
     }
 
     public static func notice(host: [String: Any], local: [String: Any], connection: String) -> String? {
-        if let blocker = conversationNotice(host: host) { return blocker }
+        if let blocker = conversationNotice(host: host, inMyMac: true) { return blocker }
         let tools = host["macTools"] as? [String: String] ?? [:]
         switch tools["mode"] {
         case "none": return "For computer tasks, stop this agent and connect Mac tools in My Mac."
