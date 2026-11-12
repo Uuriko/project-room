@@ -163,7 +163,14 @@ export function claimUpdateText(event, members) {
   if (data.action === "reassigned") return `${name} reassigned ${title}`;
   if (data.action === "pr_merged") return `${name} merged ${title}`;
   if (data.action === "pr_closed") return `${name} closed the pull request on ${title}`;
-  if (data.action === "state_changed") return `${name} marked ${title} ${String(data.claimState ?? "").replaceAll("_", " ")}`;
+  // A mirrored work update may leave the claim in the same state (for
+  // example, when a reviewer checks an already-delivered result). The event
+  // does not contain the prior state, so do not attribute a state transition
+  // to its actor. The mirrored board state can also differ from the visible
+  // work state, so keep the activity line to the fact that changed.
+  if (data.action === "state_changed") {
+    return `${name} updated ${title}`;
+  }
   return `${name} updated ${title}`;
 }
 

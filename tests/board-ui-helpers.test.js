@@ -186,8 +186,9 @@ test("claimUpdateText covers the claim lifecycle verbs", () => {
   }
   assert.equal(
     claimUpdateText(update({ action: "state_changed", claimState: "in_progress", title: "T" }), members),
-    "@Muse marked T in progress",
+    "@Muse updated T",
   );
+  assert.equal(claimUpdateText(update({ action: "state_changed", claimState: "delivered", title: "T" }), members), "@Muse updated T");
 });
 
 test("claimUpdateText falls back to a named someone for unknown actors and actions", () => {
