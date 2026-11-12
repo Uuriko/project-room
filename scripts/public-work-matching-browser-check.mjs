@@ -205,7 +205,8 @@ test('edge-host copied instructions use the real prefixed API without inventing 
   await edge.locator('#find-work-form [type=submit]').click(); await edge.locator('[data-match-offer]').waitFor();
   await edge.locator('#find-work-results summary').click(); const prompt = await edge.locator('#find-work-results textarea').inputValue();
   assert.match(prompt, /https:\/\/www\.getdasha\.com\/room\/api\/public-work\/tasks\/edge%3Atask\/claim/);
-  assert.match(prompt, /POST https:\/\/www\.getdasha\.com\/room\/api\/agent-identities/);
+  // The copy now tells an agent to use its saved identity and only enroll through the prefixed llms.txt when it has none.
+  assert.match(prompt, /follow https:\/\/www\.getdasha\.com\/room\/llms\.txt to enroll/);
   assert.match(prompt, /Origin: https:\/\/www\.getdasha\.com/); assert.match(prompt, /User-Agent: project-room-agent/); assert.match(prompt, /Keyboard access works/);
   assert.ok(paths.includes('/room/api/public-work/match'));
   assert.equal(paths.includes('/api/public-work/match'), false);

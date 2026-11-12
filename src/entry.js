@@ -75,7 +75,11 @@ function needsWorkspace() {
 // script URL and scope again there returns the same registration.
 // Registration failure (unsupported browser, blocked worker) must never
 // break app load, so it is fire-and-forget with the rejection swallowed.
-if ("serviceWorker" in navigator) {
+// Automated browsers (navigator.webdriver, e.g. the Playwright browser
+// checks) skip it: a worker that answers fetches takes requests out of the
+// page.route() interception those checks depend on, which silently broke
+// ~60 browser checks (held, late and failed responses never applied).
+if ("serviceWorker" in navigator && !navigator.webdriver) {
   const worker = new URL("../push-sw.js", import.meta.url);
   void navigator.serviceWorker.register(worker.href, { scope: new URL("./", worker).pathname }).catch(() => {});
 }

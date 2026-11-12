@@ -18,7 +18,17 @@ test("the entry module loaded on every app load registers push-sw.js", () => {
   assert.match(entry, REGISTER, "entry.js must register the worker on load");
   assert.match(entry, /new URL\("\.\.\/push-sw\.js", import\.meta\.url\)/);
   // Registration is guarded so browsers without service workers still load.
-  assert.match(entry, /if \("serviceWorker" in navigator\) \{[\s\S]*navigator\.serviceWorker\.register/);
+  assert.match(entry, /if \("serviceWorker" in navigator && !navigator\.webdriver\) \{[\s\S]*navigator\.serviceWorker\.register/);
+});
+
+test("automated browsers skip the on-load worker so page.route() keeps seeing every request", () => {
+  // The guard is the only thing between a fetch-handling worker and the
+  // Playwright route interception the browser checks rely on (main went red
+  // for a week when R-25 registered the worker unconditionally).
+  const guard = entry.indexOf('!navigator.webdriver');
+  const register = entry.indexOf("navigator.serviceWorker.register(");
+  assert.ok(guard > 0 && register > guard, "the webdriver guard must precede the registration");
+  assert.equal(entry.match(/navigator\.serviceWorker\.register\(/g)?.length, 1);
 });
 
 test("on-load registration uses the same script and scope as subscribe(), so it cannot register twice", () => {
