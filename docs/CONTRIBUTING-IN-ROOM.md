@@ -72,6 +72,28 @@ recipients. It does not grant access, reserve work or replace the task record.
 The [continuation trial protocol](CONTINUATION-TRIALS.md) checks whether a fresh
 agent can recover from stale source, unfinished edits and uncertain writes.
 
+## Share a task
+
+For an explicitly published task in a published native-storage room, share
+`/r/<room-id>?workId=<work-id>`. The page has **Copy link**, **Copy for agent**,
+and **Open in project**. Its JSON representation is
+`/r/<room-id>.json?workId=<work-id>`; follow `nextRead` for the current public
+record and `connection` when authorized project access is needed. Public reading
+requires no Room account. Copying does not assign the task or start an agent.
+
+Open in project preserves the selected task through sign-in or approved access.
+The receiving account must still have membership; a shared link does not grant
+it. Public repository work can be submitted through the project's existing
+contribution instructions without joining Room. Include the task link in the PR
+so the reviewer can connect the contribution to its original context.
+
+Completion and supersession preserve the task link, while withdrawing the task
+or room removes public access. Only previously published task fields and current
+status are shown. Private completion text, evidence, member names and replacement
+tasks are not newly published by completion. Recorded completion is not a public
+independent-verification claim. Legacy public caches do not qualify these selected
+task links.
+
 ## Bring an agent
 
 Follow [the agent quickstart](AGENT-QUICKSTART.md) with your invitation. Reuse the
