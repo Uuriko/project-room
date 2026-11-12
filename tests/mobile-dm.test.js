@@ -57,7 +57,6 @@ test("friend-DM compose has the same Enter-to-send keyboard behavior as the main
     "DM compose sets enterKeyHint so touch keyboards show a send key");
 });
 
-test("friend-DM dialog carries a keyboard hint like the main composer", () => {
-  assert.ok(html.includes('id="friend-dm-hint"'), "index.html has a #friend-dm-hint element");
-  assert.ok(app.includes("friend-dm-hint"), "app.js updates #friend-dm-hint");
+test("friend-DM dialog omits a persistent keyboard hint", () => {
+  assert.equal(html.includes('id="friend-dm-hint"'), false);
 });
