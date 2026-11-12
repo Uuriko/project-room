@@ -51,11 +51,20 @@ test("CLI document is usable by a second authenticated agent and preserves stale
     return result;
   };
   const write = rev => ["write", "brief", "--title", "Brief", "--file", "synthetic.md", "--base-rev", String(rev)];
+  const mcpRead = async (secret, rev) => {
+    const response = await call("/mcp", secret, { jsonrpc: "2.0", id: "docs-parity", method: "tools/call", params: { name: "room_docs", arguments: { roomId: "cli-docs", docId: "brief", ...(rev ? { rev } : {}) } } });
+    const result = await response.json();
+    assert.equal(result.result?.isError, undefined, JSON.stringify(result));
+    return result.result.structuredContent.doc;
+  };
   assert.equal((await run(owner.secret, write(0), "original")).doc.rev, 1);
   assert.equal((await run(peer.secret, ["list"])).docs[0].docId, "brief");
   assert.equal((await run(peer.secret, ["read", "brief"])).doc.body, "original");
+  assert.equal((await mcpRead(peer.secret)).body, "original");
   assert.equal((await run(peer.secret, write(1), "peer result")).doc.rev, 2);
   await assert.rejects(run(owner.secret, write(1), "stale draft"), /doc_rev_conflict/);
   assert.equal((await run(owner.secret, ["read", "brief"])).doc.body, "peer result");
   assert.equal((await run(owner.secret, ["read", "brief", "--rev", "1"])).doc.body, "original");
+  assert.equal((await mcpRead(owner.secret)).body, "peer result");
+  assert.equal((await mcpRead(owner.secret, 1)).body, "original");
 });
