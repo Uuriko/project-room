@@ -79,9 +79,26 @@ export class WakeCoalescer {
       return Object.freeze({ send: false, coalesced: true });
     }
     const count = (entry?.pending ?? 0) + 1;
-    this.keys.set(k, { agentId, roomId: signal.roomId ?? null, sentAt: now, firstSentAt: now, pending: 0, rewakes: 0, read: false, lastSignal: signal });
+    // `prev` (one level) lets a send that never reached its durable journal be
+    // retracted: see retract(). Without it a failed journal write would still
+    // look "sent", and every retry inside the window would coalesce into a
+    // wake that never existed.
+    if (entry) entry.prev = null;
+    this.keys.set(k, { agentId, roomId: signal.roomId ?? null, sentAt: now, firstSentAt: now, pending: 0, rewakes: 0, read: false, lastSignal: signal,
+      sentSignalId: signal.signalId ?? null, prev: entry ?? null });
     this.evict();
     return Object.freeze({ send: true, count });
+  }
+  // The send that offer() approved for this signal did not become a durable
+  // journal row (the write threw). Put the key back as it was before that offer,
+  // so a retry is a fresh send rather than coalesced behind a wake that never
+  // happened. A no-op when a newer send already replaced the entry.
+  retract(agentId, roomId, signalId = null) {
+    const k = this.key(agentId, roomId);
+    const entry = this.keys.get(k);
+    if (!entry || entry.sentSignalId !== (signalId ?? null)) return false;
+    if (entry.prev) this.keys.set(k, entry.prev); else this.keys.delete(k);
+    return true;
   }
   // Explicit whole-room read/cursor advance: stop re-waking. Signal acks
   // use markAcknowledged so an old ack cannot clear a newer generation.

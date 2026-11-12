@@ -8062,12 +8062,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const cap = Math.max(1, Math.min(limit, 100));
     let rooms;
     try {
-      // Oldest deadline first on the (state, timeout_at) index, scanning a
-      // bounded number of due rows: no DISTINCT over the whole due set, and a
+      // Oldest deadline first, straight off the (state, timeout_at) index with no
+      // tie-break term: SQLite needs a temp B-tree (and walks every tied row) for
+      // any ORDER BY term the index cannot supply. Scans at most cap*5 rows: no DISTINCT over the whole due set, and a
       // room that keeps failing is backed off below so it cannot pin the front.
       rooms = [...new Set(this.db.prepare(
         `SELECT room_id AS roomId FROM mention_states
-         WHERE state='delivered' AND timeout_at<=? ORDER BY timeout_at, room_id LIMIT ?`).all(nowMs, cap * 5).map(row => row.roomId))].slice(0, cap);
+         WHERE state='delivered' AND timeout_at<=? ORDER BY timeout_at LIMIT ?`).all(nowMs, cap * 5).map(row => row.roomId))].slice(0, cap);
     } catch (error) {
       if (!/no such table/i.test(error?.message ?? "")) throw error;
       return { rooms: 0, flipped: 0 };
