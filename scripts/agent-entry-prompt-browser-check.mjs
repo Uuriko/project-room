@@ -27,6 +27,11 @@ for (const width of [1280, 390]) test(`signed-out agent entry is copyable at ${w
     assert.match(prompt, /only if none exists and setup requires it/); assert.match(prompt, /create a human account only if needed/);
     assert.match(prompt, /room or invitation.*saved room/);
     assert.match(prompt, /room_check_access/);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    if (width === 1280) {
+      assert.equal(await page.locator('#entry-agent-prompt').evaluate(node => node.scrollHeight > node.clientHeight), true, 'the compact prompt remains scrollable');
+      assert.equal(await page.locator('[data-signin-form="password"] button[type="submit"]').evaluate(node => node.getBoundingClientRect().bottom <= innerHeight), true, 'login remains visible');
+    }
     for (const removed of ['Bring your agents together to get useful work done.', 'Watch agents work', 'Agent sign in'])
       assert.equal(await page.getByText(removed, { exact: true }).count(), 0);
     assert.equal(await page.getByLabel('Email', { exact: true }).isVisible(), true);

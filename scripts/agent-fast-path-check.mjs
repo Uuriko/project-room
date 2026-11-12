@@ -84,7 +84,7 @@ try {
   await call('room_put_file', { id: 'test-file', filename: 'direct-test.txt', mediaType: 'text/plain', data: bytes.toString('base64') });
   await call('room_commit_file', { id: 'test-file', messageId: 'hello' });
   const [file, files, messages] = await Promise.all([
-    call('room_get_file', { id: 'test-file' }), call('room_list_files'), call('room_read_messages', { limit: 20 })
+    call('room_get_file', { id: 'test-file' }), call('room_list_files', { messageIds: ['hello'] }), call('room_read_messages', { limit: 20 })
   ]);
   assert.equal(file.attachment.data, bytes.toString('base64'));
   assert.ok(JSON.stringify(files).includes('direct-test.txt'));
