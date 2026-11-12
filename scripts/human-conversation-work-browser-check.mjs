@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -31,6 +32,7 @@ test("agent conversation retains full work records and result controls", { timeo
   await page.locator('#agent-first-run [data-step="dismiss"]').click();
   await page.locator("#agent-signin-enter-link").click();
   await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await page.locator("body.human-experience").count(), 0, "agent browser compatibility does not activate the human presentation");
   assert.equal(await page.locator("#message-list [data-work-record-id]").count(), 4);
   await page.locator('[data-work-record-id="native-result"] [data-read-result]').click();
   await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
@@ -104,3 +106,30 @@ for (const mobile of [false, true]) for (const theme of ["dark", "light"]) {
     assert.equal(Object.keys(f.state().workItems).length, 30, "navigation preserves all work records");
   });
 }
+
+
+for (const mobile of [false,true]) for (const theme of ["dark","light"]) test(`authenticated human account ${mobile ? "phone" : "desktop"} ${theme}: human presentation and selected work`, { timeout: 30000 }, async t => {
+  const f=createResultsFixture(),server=createRoomServer({store:f.store,streamInterval:40});
+  const humanAccount=f.store.ensureHumanAccountBinding("commons","owner");f.store.completeOnboarding(humanAccount.id);
+  const browser=await chromium.launch({headless:true});
+  t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();if(server.listening)await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const context=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1440,height:900},isMobile:mobile,hasTouch:mobile,reducedMotion:"reduce"});
+  const page=await context.newPage(),errors=[];
+  await page.addInitScript(value=>localStorage.setItem("project-room-theme",value),theme);
+  page.on("pageerror",error=>errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}/?account=1`);
+  const account=await signInFixture(page,f.store.issueAccountAccessKey(humanAccount.id));
+  assert.equal(account.authenticated,true);assert.equal(account.account.id,humanAccount.id);
+  await page.locator('[data-account-room="commons"]').click();
+  await page.locator("body.human-experience #main:not([hidden])").waitFor();
+  assert.equal(await page.locator("#message-list [data-work-record-id]").count(),0,"human conversation does not dump agent work controls");
+  await captureDesignEvidence(page,{id:`human-account-${mobile?"phone":"desktop"}-conversation`,title:"Human account conversation",fixture:"Disposable signed-in human account and synthetic results",testName:t.name,component:"human conversation"});
+  await openSearch(page);await page.locator("#message-search").fill("Test: prepare an agenda");
+  await page.locator('#search-list [data-open-work="test-handoff"]').click();
+  await page.locator('[data-work-record-id="test-handoff"]').waitFor();
+  await captureDesignEvidence(page,{id:`human-account-${mobile?"phone":"desktop"}-task`,title:"Human account selected task",fixture:"Disposable signed-in human account and synthetic selected task",testName:t.name,component:"human selected work"});
+  await page.locator("#work-navigation-return").click();
+  await page.waitForFunction(()=>!document.querySelector("#message-list [data-work-record-id]"));
+  assert.deepEqual(errors,[]);
+});

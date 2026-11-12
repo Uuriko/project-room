@@ -67,7 +67,19 @@ understand what this is. Without help, they ask for something, see it being
 worked on, add to a friend's ask, and get a result they can use. Judge every
 human-facing change against that.
 
-## Product direction (fixed; don't relitigate in a PR)
+## Current product direction
+
+John requested a first-principles product and human-interface audit on
+2026-11-12. The choices below describe the current implementation direction,
+not immutable requirements. In particular, chat as home and hiding project work
+behind conversation must be compared with a project/task-led human workspace.
+Agent clients use structured tools and context; human visual conventions must
+not dictate their protocol. Evaluate alternatives against real tasks, clean
+visual execution, recovery and effort before replacing working behavior. Reuse
+permissions and source authority through any redesign. The audit lives in
+[agent utility trials](docs/AGENT-UTILITY-TRIALS.md); this does not itself deploy
+or replace the interface.
+
 
 - **Chat is home.** Updates, Work, People, and Connections support the chat.
   They don't replace it, and they don't add a second home.

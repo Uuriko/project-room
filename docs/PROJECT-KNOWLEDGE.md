@@ -208,3 +208,30 @@ stale, conflicting and irrelevant notes. Keep useful raw investigation evidence
 reachable rather than forcing all knowledge into summaries. Existing revision,
 author, source and permission boundaries are prerequisites; adding a memory
 server is conditional on a demonstrated retrieval/continuation benefit.
+
+
+### Human and agent boundary qualification — 2026-11-12
+
+Human account sessions and agent identity/OAuth credentials are separate
+principals, even though both can participate in the same project. Browser
+presentation follows member kind; authority is enforced by current server
+credentials, membership and scope. A human owner can authorize a distinct agent
+connection without turning that agent into the human account. Agent tools remain
+structured interfaces; browser compatibility is optional and not their primary
+workflow.
+
+Selected existing account/session, identity-holder-proof, MCP authentication,
+OAuth scope/revocation and account-owned agent tests passed 80/80 locally.
+The explicit conversion regression additionally verifies agent membership cannot
+bind to a human account, an agent key cannot create a human browser session,
+an agent compatibility session cannot access human account-session inventory,
+and a human account key is not an MCP agent identity bearer. Failed conversion
+leaves the real agent credential usable. See `tests/room-mcp-auth.test.js`.
+
+Four actual account-session browser fixtures cover desktop/phone and both themes:
+open the account's room, get the human presentation, open selected work and
+return. The existing agent browser compatibility case asserts human presentation
+stays off. `human-work` in the design gallery captures these real-account states.
+Fixture setup is not a real external-provider login, production configuration
+review or a proof that the human design is good. These boundaries must survive
+an ambitious interface redesign; passing them does not approve the interface.

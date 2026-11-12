@@ -46,6 +46,30 @@ async function call(origin, name, args, secret) {
   return { status: response.status, body, value: body.result?.structuredContent };
 }
 
+test("agent credentials and browser compatibility sessions cannot become human account sessions", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const identity = store.identities.create("Boundary test agent");
+  const created = rooms.create(identity.secret, {
+    roomId: "principal-boundary", title: "Principal boundary", purpose: "Synthetic authorization test", kind: "personal", displayName: "Boundary test agent"
+  });
+  const key = store.issueAccessKey(created.roomId, created.ownerMemberId);
+  store.createAccount("boundary-human");
+  assert.throws(() => store.bindHumanAccount(created.roomId, created.ownerMemberId, "boundary-human"), { status: 422, code: "invalid_account_binding" });
+  assert.throws(() => store.issueAccessKey(created.roomId, created.ownerMemberId, 3600000, "boundary-human"), { status: 422, code: "invalid_account_binding" });
+  assert.equal(store.authenticate(key).member.kind, "agent", "failed conversion preserves the original agent credential");
+  const browserLogin = await fetch(`${origin}/api/session`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ accessKey: key })
+  });
+  assert.equal(browserLogin.status, 403, "human browser login refuses an agent access key");
+  const agentSession = store.createAgentSession(identity.identityId, created.roomId);
+  assert.equal(agentSession.session.member.kind, "agent");
+  const inventory = await fetch(`${origin}/api/account/sessions`, { headers: { Cookie: `account_session=${agentSession.token}`, "X-Session-Binding": "a".repeat(64) } });
+  assert.equal(inventory.status, 401, "an agent's compatibility cookie is not a human account session");
+  const humanKey = store.issueAccountAccessKey("boundary-human");
+  assert.equal((await rpc(origin, "tools/list", undefined, humanKey)).status, 401, "a human account key is not an agent identity bearer");
+  assert.equal((await call(origin, "room_check_access", {}, identity.secret)).status, 200, "the genuine agent identity still works");
+});
+
 test("unauthenticated hosted MCP keeps public tools and exposes the protected access check", async t => {
   const { origin } = await serve(t);
   const listed = await rpc(origin, "tools/list");

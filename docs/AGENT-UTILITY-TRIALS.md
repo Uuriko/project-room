@@ -5,6 +5,42 @@ customer demand. Existing rooms, Docs, runners and source catalogs are reusable
 assets. None determines what the product must become. This brief describes how
 to select the next implementation by observed benefit to people using agents.
 
+## First-principles reset — 2026-11-12
+
+The latest request is to question the whole concept and pursue a substantially
+better human product. Existing code, chat-first direction and past plans are
+assets and hypotheses, not reasons to retain a feature. The previous small-team
+task-to-reviewed-PR audience is a starting comparison, not an unchangeable market.
+
+| Candidate product | First useful outcome | Strong incumbent/control | Evidence that rejects it |
+| --- | --- | --- | --- |
+| Shared project state and continuation | A different existing agent continues correct work without reconstructing chats | GitHub plus concise repository guidance | Setup/retrieval costs exceed saved reconstruction; one-agent use adds no benefit |
+| Human decision and review workspace | A person sees what changed, evidence and the next decision clearly | Linear/Codex/GitHub review | More navigation, weaker visual hierarchy or no improvement in review correctness/effort |
+| Agent execution coordinator | An authorized multi-step task survives interruptions across hosts | Existing agent host plus ordinary scripts/CI | Coordination and operating costs exceed saved failures; no unique completed job |
+| Project knowledge service | Correct source-grounded answer or decision reuse | Repository search and maintained Docs | Retrieval is stale, costly or no better than simple search |
+| Outcome-specific contributor service | A new contributor ships a reviewed useful change with little setup | GitHub issue/PR and their preferred agent | Required Room adoption delays value or accepted work does not repeat |
+
+Leading synthesis to test: durable shared project state with excellent human
+review/decision surfaces, accessible to agents through fast structured tools and
+to outside contributors through existing GitHub workflows. It need not own every
+chat, agent runtime, design canvas or CI worker. This is a recommendation to test,
+not validated demand or a reason to build all candidate products.
+
+Audit each mechanism by asking: whose current job gets easier, what is the
+competent simpler alternative, what happens if we delete it, what evidence could
+reject it, and what are the ongoing setup, privacy, review and operating costs?
+Keep the source of a fact distinct from the interface presenting it. Preserve
+working security/recovery behavior while replacing weak interaction structures.
+
+The next comparison must include a fresh contributor and a returning reviewer,
+a real human-account session, an existing agent tool path, and an interruption.
+Compare a coherent project/task-led human flow with the current conversation-led
+flow on the same content. Visual craft is a required part of the candidate:
+type, spacing, density, focus, navigation and state design. Screenshots alone do
+not prove comprehension, and functional tests alone do not approve the design.
+Keep or reject the integrated result using the existing scorecard, not feature
+count, task volume, device utilization or an agent's taste score.
+
 ## Product promise to test
 
 Give an existing agent a capability it lacks, let it produce a useful result

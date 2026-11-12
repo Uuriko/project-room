@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 export const JOURNEYS = [
+  { id: "human-work", script: "scripts/human-conversation-work-browser-check.mjs", pattern: "^authenticated human account (phone|desktop) dark:", fixture: "Actual account-session fixture enters room and selected task" },
   { id: "results", script: "scripts/room-results-browser-check.mjs", pattern: "^results (touch|desktop): find, read and return", fixture: "Completed result discovery, exact text reader and return with retained draft" },
   { id: "continuation", script: "scripts/continuation-ui-browser-check.mjs", pattern: "^continuation uses the selected", fixture: "Selected current task and stale continuation recovery" },
   { id: "access", script: "scripts/access-preview-browser-check.mjs", pattern: "^request access at", fixture: "Human account admission request with injected first-response failure and real retry" },
@@ -191,7 +192,7 @@ export function generateGallery(output, { journey } = {}) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { values } = parseArgs({ options: { out: { type: "string" }, journey: {type: "string"}, baseline: {type: "string"}, candidate: {type: "string"}, help: { type: "boolean" } } });
-  if (values.help) console.log("node scripts/design-evidence-gallery.mjs --out /absolute/new-directory [--journey access|entry|signup|room-create|permissions|admission|results|continuation]\nOr: --baseline /old/gallery --candidate /new/gallery --out /new/comparison\nRuns existing selected local browser journeys or compares saved captures. No live service access or baseline refresh.");
+  if (values.help) console.log("node scripts/design-evidence-gallery.mjs --out /absolute/new-directory [--journey access|entry|signup|room-create|permissions|admission|results|continuation|human-work]\nOr: --baseline /old/gallery --candidate /new/gallery --out /new/comparison\nRuns existing selected local browser journeys or compares saved captures. No live service access or baseline refresh.");
   else if (!values.out) throw new Error("--out is required");
   else if (values.baseline || values.candidate) {
     if (!values.baseline || !values.candidate || values.journey) throw Error("Comparison needs --baseline and --candidate, without --journey");

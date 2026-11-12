@@ -104,7 +104,7 @@ node scripts/design-evidence-gallery.mjs --out test-results/design-review --jour
 ```
 
 The optional `--journey` selects `entry`, `access`, `signup`, `room-create`,
-`permissions`, `admission`, `results` or `continuation`. Omit it for the existing complete gallery. A selected
+`permissions`, `admission`, `results`, `continuation` or `human-work`. Omit it for the existing complete gallery. A selected
 journey avoids dumping unrelated screens into the agent's context.
 
 Use a new output directory for each run. Open `index.html` in that directory;

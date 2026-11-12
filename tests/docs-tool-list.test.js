@@ -139,7 +139,7 @@ test("skill files distinguish eight discovery entries from seven anonymous actio
   const live = livePublicMcpTools().map((t) => t.name);
   assert.ok(live.includes("room_identity_mint"), "live anonymous catalog includes room_identity_mint");
   for (const rel of ["skills/project-room/references/tools.md", "skills/ProjectRoom/SKILL.md",
-    "skills/project-room-host-router/hosts/hosted-mcp.md"]) {
+    ]) {
     const text = read(rel);
     const { count, names } = anonCatalogFromSkill(text, rel);
     assert.match(text, /first seven are anonymous public actions/i, `${rel}: execution count stays seven`);
@@ -156,4 +156,13 @@ test("ProjectRoom/SKILL.md core-profile sentence matches the live core profile",
   const m = text.match(/default `tools\/list` is the core profile[^:]*:([^\n.]+)\./);
   assert.ok(m, "ProjectRoom/SKILL.md states the default tools/list core profile");
   assertSetEqual(toolTokens(m[1]), core, "ProjectRoom/SKILL.md core profile == live CORE_MCP_TOOLS");
+});
+
+
+test("host router defers catalog counts to live discovery and preserves OAuth boundary",()=>{
+ const text=read("skills/project-room-host-router/hosts/hosted-mcp.md");
+ assert.match(text,/room_check_access[\s\S]*HTTP 401[\s\S]*OAuth/);
+ assert.match(text,/Listing a[\s\S]*tool grants no anonymous Room membership or authority/);
+ assert.match(text,/live tool list/);
+ assert.match(text,/docs\/agents\/paste\.md/);
 });
