@@ -8,7 +8,7 @@ Anyone whose GitHub account has **write** (or higher) on `Uuriko/project-room`. 
 
 ## Deployment checks
 
-Every deployment requires a commit on `main` and a successful `schema-gate` push run on that exact commit. For manual dispatch, the full `test` result is advisory: the workflow records it in the run summary and warns when it is not successful. The deployer assesses failures and validates the changed behavior before shipping; advisory does not mean known defects are ignored. Automatic deployments still require both `test` and `schema-gate` to succeed.
+Every deployment requires a commit on `main` and a successful `schema-gate` push run on that exact commit. The gate waits up to five minutes for that run to finish (it starts seconds after the merge and takes about 15 seconds) and refuses only if it ends red, cancelled or never appears. The full `test` result is advisory on both the manual and the automatic path: the workflow records it in the run summary and warns when it is not successful. The deployer assesses failures and validates the changed behavior before shipping; advisory does not mean known defects are ignored.
 
 Merging and deploying are separate decisions. Production need not be healthy
 before an unrelated, qualified change can merge. An incident may affect what is
@@ -28,7 +28,7 @@ what Potter declares in the release room, and they end when he lifts them.
    - `gh workflow run deploy-prod.yml -R Uuriko/project-room -f sha=<40-hex> -f reason="<why>"`; or
    - REST `POST /repos/Uuriko/project-room/actions/workflows/deploy-prod.yml/dispatches` with `{"ref":"main","inputs":{"sha":"<40-hex>"}}`.
 3. The run:
-   - refuses unless the commit is on `main` and `schema-gate` is green; records the advisory `test` result for manual dispatch and requires it green for automatic deployment;
+   - waits for, then refuses unless, the commit is on `main` and `schema-gate` is green; records the advisory `test` result;
    - records each live Worker version, independently observed `/api/version/worker` source revision, and code schema parsed from that exact Git blob (artifact `pre-deploy-<sha>` and the run summary);
    - pins `ROOM_BODIES_AT_REST=1` on both Workers while preserving other variables (`--var ROOM_BODIES_AT_REST:1` alongside `--keep-vars` in deploy-prod.yml; in force since 2026-10-07, eda439246 — the 2026-10-06 rollout's `=0` pin was superseded the next day after muse-room hit the projection cap with bodies stored inline);
    - deploys `project-room` with `wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1`;
@@ -109,7 +109,7 @@ variable. Verify the actual running source, not only a retained variable value.
 
 ### Optional auto-deploy
 
-When the repository variable `ROOM_AUTO_DEPLOY` is `1`, `deploy-prod` also runs after `test` or `schema-gate` completes on `main`. It deploys only the current main tip, only when both gates are green, and only if production does not already report that commit. The variable is unset by default.
+When the repository variable `ROOM_AUTO_DEPLOY` is `1`, `deploy-prod` also runs after `schema-gate` completes on `main`. It deploys only the current main tip, only when `schema-gate` is green, and only if production does not already report that commit. Smoke, recovery and the receipt are the same as for a manual run. The variable is unset by default.
 
 ### Deploy through an explicitly marked commit
 

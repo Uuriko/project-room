@@ -5,21 +5,25 @@ name: deploy-prod
 # specific operator box. Runbook: docs/DEPLOY-LANE.md.
 #
 # Triggers
-#   workflow_dispatch  sha = full 40-hex commit on main. The run refuses the
-#                      deploy unless the `schema-gate` push run succeeded.
-#                      The `test` result is advisory and recorded in the summary.
+#   workflow_dispatch  sha = full 40-hex commit on main. The run waits up to five
+#                      minutes for the `schema-gate` push run on that commit, then
+#                      refuses the deploy unless it succeeded. The `test` result is
+#                      advisory and recorded in the summary.
 #   onboarding gate    optional. When the repo variable ROOM_ONBOARDING_GATE is
 #                      "1", the `probe` job runs the onboarding probe against
 #                      staging at the same commit and blocks the deploy on a
 #                      regression (docs/ONBOARDING-PROBE.md). A dispatch can pass
 #                      probe_override with a reason; the reason goes into the
 #                      summary and the receipt. Unset by default.
-#   workflow_run       optional auto-deploy when `test` or `schema-gate`
-#                      finishes on main. Off unless the repo variable
-#                      ROOM_AUTO_DEPLOY is "1", or the merged commit title
-#                      begins with [deploy-production]. It deploys only the current
-#                      main tip, only when both gates are green, and only when
-#                      production is not already on that commit.
+#   workflow_run       optional auto-deploy when `schema-gate` finishes on main.
+#                      Off unless the repo variable ROOM_AUTO_DEPLOY is "1", or the
+#                      merged commit title begins with [deploy-production]. It
+#                      deploys only the current main tip, only when `schema-gate`
+#                      is green, and only when production is not already on that
+#                      commit. The full `test` result is advisory here exactly as
+#                      it is for a manual dispatch (standing rule, DEPLOY-LANE.md):
+#                      it was green on 12 of the last 200 main pushes, so requiring
+#                      it meant the automatic path could not fire.
 #
 # Steps: record the live prod and entry version ids (artifact), deploy the
 # canonical Worker (`wrangler deploy --env production --keep-vars`), then the
@@ -53,7 +57,7 @@ on:
         required: false
         type: string
   workflow_run:
-    workflows: [test, schema-gate]
+    workflows: [schema-gate]
     types: [completed]
     branches: [main]
 
@@ -124,14 +128,18 @@ jobs:
           git merge-base --is-ancestor "$SHA" origin/main || refuse "commit $SHA is not on main"
           TIP="$(git rev-parse origin/main)"
           if [ "$EVENT" != "workflow_dispatch" ] && [ "$SHA" != "$TIP" ]; then skip "auto: $SHA is no longer the main tip ($TIP)"; fi
+          # schema-gate starts seconds after the merge and takes about 15s. Wait for it
+          # to finish instead of refusing on a transient queued/in_progress state.
+          # The policy below still reads the final conclusion.
+          node scripts/deploy-gate-wait.mjs --repo "$REPO" --sha "$SHA" --workflow schema-gate --timeout-ms 300000 | tee -a "$GITHUB_STEP_SUMMARY" || true
           gh api "repos/$REPO/actions/runs?head_sha=$SHA&event=push&per_page=100" > runs.json
           for wf in test schema-gate; do
             CONCLUSION="$(jq -r --arg wf "$wf" '[.workflow_runs[] | select(.name == $wf)] | sort_by(.created_at) | last | if . == null then "missing" else (.conclusion // .status) end' runs.json)"
             echo "$wf on $SHA: $CONCLUSION"
             echo "$wf on $SHA: $CONCLUSION" >> "$GITHUB_STEP_SUMMARY"
-            if [ "$EVENT" = "workflow_dispatch" ] && [ "$wf" = "test" ]; then
+            if [ "$wf" = "test" ]; then
               if [ "$CONCLUSION" != "success" ]; then
-                echo "::warning title=Advisory test result::test is $CONCLUSION on $SHA; the manual deployer must assess relevant failures"
+                echo "::warning title=Advisory test result::test is $CONCLUSION on $SHA; the deployer (or the merged PR's own green head, for automatic deploys) must assess relevant failures"
               fi
               continue
             fi
@@ -158,7 +166,7 @@ jobs:
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "go=true" >> "$GITHUB_OUTPUT"
-          echo "Deploying $SHA (schema-gate green; test advisory for manual dispatch, required for automatic deployment)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploying $SHA (schema-gate green; test advisory)" >> "$GITHUB_STEP_SUMMARY"
 
   # --- ACT-5b onboarding gate (off unless vars.ROOM_ONBOARDING_GATE == '1') ---
   # Probes staging at the commit about to ship and fails on a >20% regression
