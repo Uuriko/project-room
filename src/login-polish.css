@@ -33,7 +33,6 @@
   #signin-methods { grid-column: 2; grid-row: 3; }
   #auth-error, #auth-link-error, #auth-room-hint, #auth-reconnect, #email-auth-step { grid-column: 1 / -1; }
   #email-auth-step { width: min(100%, 25rem); margin-inline: auto; }
-  #entry-agent-prompt { height: 20rem; }
 }
 @media (max-height: 600px) {
   #auth-panel.auth-panel { margin-top: var(--space-3); }
