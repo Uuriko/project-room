@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
@@ -27,10 +28,12 @@ test('continuation uses the selected authenticated work and requires refresh whe
   await card.getByRole('button', { name: 'Continue with an agent', exact: true }).click();
   await page.locator('#continuation-copy:enabled').waitFor();
   const first = await page.locator('#continuation-preview').inputValue();
+  await captureDesignEvidence(page, { id: "continuation-current", title: "Continue selected work", fixture: "Disposable authenticated task; no external execution", testName: t.name, component: "continuation preview" });
   assert.match(first, /# Work continuation/); assert.match(first, /Test: prepare an agenda/);
   assert.doesNotMatch(first, /viewerSessionBinding|accountAccessKey|Please prepare an agenda/);
   f.store.command(f.keys.producer, 'commons', { id: crypto.randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId: 'test-handoff', expectedRevision: 0 } });
   await page.getByText('Work changed. Refresh before copying.', { exact: true }).waitFor();
+  await captureDesignEvidence(page, { id: "continuation-stale", title: "Changed work requires refresh", fixture: "Disposable task changed after preview", testName: t.name, component: "continuation recovery" });
   assert.equal(await page.locator('#continuation-copy').isDisabled(), true);
   await page.locator('#continuation-refresh').click();
   await page.locator('#continuation-copy:enabled').waitFor();

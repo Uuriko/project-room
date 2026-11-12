@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 export const JOURNEYS = [
+  { id: "results", script: "scripts/room-results-browser-check.mjs", pattern: "^results (touch|desktop): find, read and return", fixture: "Completed result discovery, exact text reader and return with retained draft" },
+  { id: "continuation", script: "scripts/continuation-ui-browser-check.mjs", pattern: "^continuation uses the selected", fixture: "Selected current task and stale continuation recovery" },
   { id: "access", script: "scripts/access-preview-browser-check.mjs", pattern: "^request access at", fixture: "Human account admission request with injected first-response failure and real retry" },
   { id: "entry", script: "scripts/a11y-login-browser-check.mjs", pattern: "login/join entry points", fixture: "Disposable RoomStore and real agent invite" },
   { id: "signup", script: "scripts/auth-journeys-browser-check.mjs", pattern: "^signup, then verify", fixture: "Password signup with synthetic local email" },
@@ -126,7 +128,7 @@ export function generateGallery(output, { journey } = {}) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { values } = parseArgs({ options: { out: { type: "string" }, journey: {type: "string"}, help: { type: "boolean" } } });
-  if (values.help) console.log("node scripts/design-evidence-gallery.mjs --out /absolute/new-directory [--journey access|entry|signup|room-create|permissions|admission]\nRuns existing selected local browser journeys; writes index.html, manifest.json, screenshots and logs. No live service access or baseline refresh.");
+  if (values.help) console.log("node scripts/design-evidence-gallery.mjs --out /absolute/new-directory [--journey access|entry|signup|room-create|permissions|admission|results|continuation]\nRuns existing selected local browser journeys; writes index.html, manifest.json, screenshots and logs. No live service access or baseline refresh.");
   else if (!values.out) throw new Error("--out is required");
   else { const result = generateGallery(values.out, {journey:values.journey}); console.log(JSON.stringify({ passed: result.passed, captures: result.captures.length, output: resolve(values.out) })); if (!result.passed) process.exitCode = 1; }
 }

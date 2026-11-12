@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, ensureSidebarClosed, messageAction } from "./room-chrome.mjs";
 // Simulated people, real local browser. Fictional rooms; no outside services.
@@ -68,6 +69,7 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   const capture = async name => {
     mkdirSync("test-results/room-results-20260908", { recursive: true });
     await p.screenshot({ path: `test-results/room-results-20260908/${name}.png` });
+    await captureDesignEvidence(p, { id: name, title: name.endsWith("reader") ? "Read the selected result" : "Find a completed result", fixture: "Disposable results fixture; reviewed, unreviewed and native text results", testName: t.name, component: name.endsWith("reader") ? "result preview" : "result list" });
   };
   return { ...f, p, row, open, read, ready, capture };
 }

@@ -53,6 +53,68 @@ points to [Buzz 1.0](https://github.com/block/buzz-app); evaluate that successor
 before treating the older repository as its current architecture. That successor
 has not been source-qualified by this brief.
 
+## Active MVP trial — 2026-11-12
+
+Decision: find the smallest workflow that lets a small software team complete a
+bounded task to a reviewed PR and then resume useful work. Use the
+[active scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md#active-mvp-scorecard--2026-11-12)
+for the primary metrics, denominator and uncertainty rules. These are trials to
+run, not adoption results or a requirement for every contributor to fill a form.
+
+| Slice | Concrete procedure | Acceptance and diagnostic |
+| --- | --- | --- |
+| First useful action | Start from the same public task or GitHub issue in a fresh authorized host session. Let the contributor choose GitHub-only or connected Room entry. Observe the first wrong turn before offering help. | Finds the intended task and scope, identifies permission and ownership, and performs one useful allowed action. Record elapsed time and each manual rescue; connection alone is not success. |
+| Review clarity | Give a non-author the exact artifact and existing evidence, without the author's chat. Ask what changed, what is verified, what remains uncertain and which decision is available. Exercise the rendered result at desktop and phone sizes. | Correct artifact/review distinction and an actionable accept/change/insufficient-evidence decision. Record clarification requests and active review minutes. Keep automated checks separate from design acceptance. |
+| Continuation | Use the existing stale-source, unfinished-edit and unknown-write fixtures. Compare repository evidence, handwritten handoff and generated continuation with equal accessible source evidence in fresh sessions. | Correct next action, no invented test execution, preserved drafts and no replay of an uncertain write. Record reconstruction effort; do not reuse a participant's answers across arms. |
+| Routine checks | Execute the existing pinned local affected-unit recipe on a changed source that actually needs it. Independently inspect the run record and exact source; exercise timeout or changed-source refusal through existing tests. | A verified run or honest refusal, no model calls inside the deterministic check. Count failed attempts, setup and recovery; do not manufacture jobs to keep devices busy. |
+| Repeated value | After a project's first accepted real outcome, observe whether it completes a second meaningful outcome within seven days. Link existing task/result IDs. | Matured seven-day projects only in the denominator. Projects still inside the window remain pending. Do not substitute a second scripted fixture, invitation, hello or check rerun for repeat customer value. |
+
+Use two bounded task classes initially: a small bug fix and a small interface
+change. Compare the participant's existing GitHub-and-agent workflow against the
+Room-assisted path using matched scope, starting permissions, source and review
+rubric. First use and returning use are separate cohorts. Alternate order across
+participants; repeated exposure to the same task is a learning effect, not a clean
+comparison. A 30-minute episode deadline is a provisional pilot budget, not a
+claimed product performance target. Set it before the episode starts.
+
+The first worthwhile benefit to test is eliminating one avoidable manual rescue
+or clarification while preserving completion and review quality. With no baseline,
+this is a hypothesis. Keep raw observations and counterexamples; a few episodes
+do not establish superiority over GitHub, Linear or another agent workflow.
+Technical fixture results can reject a mechanism but cannot establish human
+usability, demand or retention. Record native-host connection gaps explicitly.
+
+### Run the existing evidence tools
+
+```sh
+# Generate one participant input. Keep evaluatorOnly fixture keys separate.
+node scripts/prepare-continuation-trial.mjs stale-source generated
+# Capture actual result discovery/reading and current/stale continuation views.
+node scripts/design-evidence-gallery.mjs --journey results --out /absolute/new-results-directory
+node scripts/design-evidence-gallery.mjs --journey continuation --out /absolute/new-continuation-directory
+# Summarize recorded episodes at an explicit reporting cutoff; no service writes.
+node scripts/summarize-outcome-trials.mjs /absolute/records.json 2026-11-12T12:00:00Z
+```
+
+The offline summary input is `{ "schemaVersion": 1, "episodes": [] }`. One
+started episode uses `outcomeId`, `taskClass`, `actorType`, `actorId`, `condition`
+(first-use/returning), `arm`, `sourceRevision`, `rubricRevision`, `startedAt`,
+`deadlineAt`, `status`, `humanMinutes`, `costUsd` and `guardrailFindings`.
+Measurements and findings are `null` when unobserved. An observed absence of
+findings is `[]`; it is not a universal safety claim. Supported statuses are
+running, accepted, failed, abandoned and cancelled. Accepted records also need
+`artifactRevision` and an `acceptance` with `at`, `reviewerId`, matching
+`artifactRevision` and matching `rubricRevision`. Set `independentReviewRequired`
+when the task requires it. `evidence` may link existing check/PR/task records.
+Use a distinct taskClass for synthetic trials and actual user tasks.
+
+The command rejects duplicate outcome IDs, stale review references, impossible
+observation windows and severe guardrail failures marked accepted. It preserves
+late acceptance, pending ages, immature early successes and measurement coverage.
+It does not infer task success, human effort, cost or safety from test durations.
+Maintain these compact records with the trial evidence; this is not a new product
+analytics service, participant questionnaire or automatic background schedule.
+
 ## First experiments
 
 Use the same task inputs, permissions, agent/model version and success rubric
