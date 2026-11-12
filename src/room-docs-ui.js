@@ -40,7 +40,7 @@ export function installRoomDocs({ client, getState, getSession }) {
     const s=owner;if(!owns(s))return;
     if(e.target.closest('[data-more]')) { await list(s,next); return; }
     const doc=e.target.closest('[data-doc]');if(doc){await read(s,doc.dataset.doc);return;}
-    if(e.target.closest('[data-new]')){ const id=prompt('Document ID (lowercase letters, numbers and hyphens)');if(!id)return;if(!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)){root.querySelector('[data-status]').textContent='Invalid document ID.';return;}current={docId:id,title:'New document',body:'',rev:0};drafts.set(id,{title:'New document',body:'',baseRev:0});render();return; }
+    if(e.target.closest('[data-new]')){const id='doc-'+crypto.randomUUID();current={docId:id,title:'New document',body:'',rev:0};drafts.set(id,{title:'',body:'',baseRev:0});render();root.querySelector('[data-title]').focus();return;}
     if(e.target.closest('[data-edit]')){root.querySelector('[data-editor]').hidden=false;root.querySelector('[data-body]').focus();return;}
     if(!e.target.closest('[data-save]')||!current)return;
     const d=current, submitted=drafts.get(d.docId)??{title:root.querySelector('[data-title]').value,body:root.querySelector('[data-body]').value,baseRev:d.rev};drafts.set(d.docId,submitted);
