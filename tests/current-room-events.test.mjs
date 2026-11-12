@@ -158,3 +158,27 @@ test('SSE drains hidden source windows and delivers current public text',async t
   await reader.cancel();assert.ok(text.includes('CURRENT-PUBLIC'));assert.equal(text.includes('PRIVATE-'),false);assert.equal(text.includes('unavailable'),false);
  }finally{clearTimeout(timeout);controller.abort();}
 });
+
+test('a read whose shared byte allowance runs out between windows returns the partial page instead of 409',t=>{
+ // Regression: with limit>16 the reader scans several 16-row windows under one
+ // 256KiB shared allowance. When the allowance ran out with a few hundred bytes
+ // still unspent, the next legal envelope no longer fit and was reported as a
+ // malformed source (409 current_room_context_unavailable) for the whole call,
+ // although earlier windows had already filled a valid page. Which cursors hit it
+ // depends on message sizes, so sweep every cursor over a fixed deterministic room.
+ const store=new RoomStore(':memory:');t.after(()=>store.close());const events=initialRoom();
+ const add=(type,data,actorId='owner')=>events.push(event({roomId:'commons',actorId,type,data}));
+ add('member.added',{memberId:'reader',displayName:'reader',kind:'agent',permissions:[]});
+ for(let i=0;i<200;i++)add('message.posted',{messageId:'m'+i,body:'q'.repeat(100+(i*37)%400)});
+ store.initialize(events,{representation:'normalized-current-v1'});
+ const key=store.issueAccessKey('commons','reader');
+ let partial=0;
+ for(let after=0;after<60;after++)for(const limit of [50,100]){
+  let page;
+  assert.doesNotThrow(()=>{page=store.eventsAfter(key,'commons',after,limit);},`after=${after} limit=${limit}`);
+  assert.ok(page.events.length>=1&&page.next>after&&page.hasMore===true);
+  assert.doesNotThrow(()=>store.redactionMessages('commons',page));
+  if(page.events.length<limit)partial++;
+ }
+ assert.ok(partial>0);
+});

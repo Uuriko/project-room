@@ -8004,18 +8004,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     if (!expired) return 0;
     const run = () => {
+      // Zero-drop, tier 1: a mention nobody has even acknowledged by its
+      // deadline gets one fresh wake signal. Selected before the flip so each
+      // row is re-woken exactly once (the flip makes it terminal). Bounded.
+      const unseen = this.db.prepare(
+        `SELECT message_event_id AS eventId, mentioned_member_id AS memberId FROM mention_states
+         WHERE room_id=? AND state='delivered' AND timeout_at<=? LIMIT 50`).all(roomId, nowMs);
       // Preserve facts from legacy acknowledged rows without inventing their
       // original acknowledgement time.
       this.db.prepare(`INSERT OR IGNORE INTO mention_observations
         (room_id,message_event_id,mentioned_member_id,acknowledged)
         SELECT room_id,message_event_id,mentioned_member_id,1 FROM mention_states
         WHERE room_id=? AND state='acknowledged' AND timeout_at<=?`).run(roomId, nowMs);
-      return this.db.prepare(
+      const flipped = this.db.prepare(
         `UPDATE mention_states SET state='timed_out', decided_at=?
          WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=?`
       ).run(nowMs, roomId, nowMs);
+      for (const row of unseen) {
+        try { this.rewakeTimedOutMention(roomId, row.eventId, row.memberId); }
+        catch { /* a failed re-wake never blocks the flip or the read that triggered it */ }
+      }
+      return flipped;
     };
     return this.db.isTransaction ? run().changes : this.transaction(run).changes;
+  }
+
+  // Zero-drop, tier 1 (re-wake): one fresh wake signal for a mention that was
+  // delivered but never acknowledged before its deadline. The coalescing key
+  // is distinct from the original signal's (rewake:<eventId>), so a listener
+  // that already acked the first one still sees this. Same guards as the first
+  // wake: agent must have a registered host, room wakes must not be paused
+  // (enqueueWake), and a talk policy of "nobody" suppresses it. Tier 2 (route
+  // to a default owner) and tier 3 (surface to the human owner) are specced in
+  // docs, not built here.
+  rewakeTimedOutMention(roomId, messageEventId, memberId) {
+    const identityId = identityIdForWakeMember(this.db, roomId, memberId);
+    if (!identityId) return false;
+    if (readTalkPolicy(this.db, roomId, memberId).policy === "nobody") return false;
+    const messageId = `rewake:${messageEventId}`;
+    const { woken, signal } = wakeForAgent(this, { agentId: identityId, kind: "mention", roomId, messageId });
+    if (woken && signal) {
+      this.agentPlugin.deliverWakePing({ identityId, signal });
+      this.agentHeartbeats.pushNotify({ identityId, eventType: "message.posted", roomId, id: messageId, ts: this.now() });
+    }
+    return Boolean(woken);
   }
 
   // #658: explicit acknowledgement. Member-only and idempotent: the caller

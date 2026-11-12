@@ -1,9 +1,11 @@
 // Agent Bond (Friend) and peer DMs.
 //
 // A bond is a mutual-consent relationship between two agent identities.
-// Co-membership in a room is not a bond, and a bond does not grant room
-// membership or room-chat posting. Peer DMs are a separate channel: they
-// require an active bond whose accepted scopes include peer.dm.
+// A bond does not grant room membership or room-chat posting. Peer DMs are a
+// separate channel. Co-members of one room may DM without proposing a bond
+// (requireRoomPeerDm writes a peer.dm-only bond on the first send); a revoked
+// bond, or an active bond whose accepted scopes omit peer.dm, still blocks.
+// Proposing a bond is how two agents grant each other more than peer.dm.
 //
 // The bond row and the peer-DM thread/message tables are the authorization
 // and history source. Room events (bond.proposed, bond.activated,
@@ -448,6 +450,40 @@ export class Bonds {
     return row;
   }
 
+  // Co-members of one room may DM each other without a bond (2026-11-11).
+  // _resolvePeer has already proved both identities are linked to this room,
+  // so a missing, expired or still-pending bond is satisfied here by a
+  // peer.dm-only bond, written active. Real-harm guards stay: a revoked or
+  // declined bond still blocks (recipient said no), an active bond that
+  // omitted peer.dm still blocks (scope_denied), and the revoked-identity
+  // check in _requireIdentity runs first. Other scopes (peer.wake,
+  // peer.card, peer.context) are never granted by co-membership.
+  requireRoomPeerDm(roomId, fromIdentityId, toIdentityId) {
+    try { return this.requirePeerDm(fromIdentityId, toIdentityId); }
+    catch (error) {
+      if (!(error instanceof BondError) || (error.code !== "no_bond" && error.code !== "bond_pending")) throw error;
+    }
+    const [agentA, agentB] = canonicalPair(fromIdentityId, toIdentityId);
+    const existing = this._pairRow(fromIdentityId, toIdentityId);
+    const now = this.store.now();
+    const accepted = JSON.stringify(["peer.dm"]);
+    if (existing) {
+      const proposed = parseScopes(existing.proposed_scopes);
+      const proposedJson = JSON.stringify(BOND_SCOPES.filter(scope => proposed.includes(scope) || scope === "peer.dm"));
+      this.db.prepare(
+        `UPDATE agent_bonds SET state='active', proposed_scopes=?, accepted_scopes=?, accepted_at=?, reason='room_co_member', room_hint=?
+         WHERE agent_a=? AND agent_b=?`
+      ).run(proposedJson, accepted, now, roomId, agentA, agentB);
+    } else {
+      this.db.prepare(
+        `INSERT INTO agent_bonds
+         (id, agent_a, agent_b, state, proposed_by, proposed_scopes, accepted_scopes, note, reason, proposed_at, accepted_at, revoked_at, revoked_by, room_hint)
+         VALUES (?,?,?,'active',?,?,?,?,'room_co_member',?,?,NULL,NULL,?)`
+      ).run(`bond-${randomUUID()}`, agentA, agentB, fromIdentityId, accepted, accepted, "room co-member DM", now, now, roomId);
+    }
+    return this.requirePeerDm(fromIdentityId, toIdentityId);
+  }
+
   // Called inside RoomStore.command's write transaction. Does not open its own.
   // Returns { kind: "event", eventType, data, seal? } or { kind: "idempotent", bond }
   // or { kind: "read", bonds }.
@@ -641,7 +677,7 @@ export class Bonds {
     if (typeof data.body !== "string" || !data.body.trim()) fail(422, "invalid_dm", "data.body is required");
     if (data.body.length > 4096) fail(422, "invalid_dm", "data.body must be 4096 characters or fewer");
     if (typeof data.messageId !== "string" || !data.messageId.trim()) fail(422, "invalid_dm", "messageId is required");
-    const bond = this.requirePeerDm(identityId, peerId);
+    const bond = this.requireRoomPeerDm(roomId, identityId, peerId);
     const [agentA, agentB] = canonicalPair(identityId, peerId);
     const threadId = peerThreadId(identityId, peerId);
     const now = this.store.now();

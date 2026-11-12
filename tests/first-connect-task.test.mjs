@@ -24,7 +24,7 @@ async function fixture(t){
   t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));store.close();rmSync(dir,{recursive:true,force:true});delete process.env.ROOM_FIRST_CONNECT_TASK;});
   const origin=`http://127.0.0.1:${server.address().port}`;
   const call=async(secret,args)=>{const r=await fetch(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${secret}`},body:JSON.stringify({jsonrpc:'2.0',id:'t',method:'tools/call',params:{name:'room_join',arguments:args}})});return (await r.json()).result?.structuredContent;};
-  return {store,roomId,call};
+  return {store,roomId,call,origin};
 }
 
 test('flag off by default: room_join result is unchanged (no firstTask)',async t=>{
@@ -156,4 +156,45 @@ test('first-connect report measures agent joins against the 10-minute window',as
   assert.deepEqual([live.joins-before.joins,live.success-before.success,live.pending-before.pending,live.byKind.post-before.byKind.post],[2,1,1,1]);
   assert.deepEqual([after.success-beforeLater.success,after.timeout-beforeLater.timeout,after.pending],[1,1,0]);
   assert.throws(()=>firstConnectReport(f.store.db,{days:0}),{code:'invalid_days'});
+});
+
+// f5931: a public-work claim writes no room event; the report reads the claim
+// stamp and attributes it to the claiming identity's join, for both the
+// joined-room starter and the public-board fallback.
+test('first-connect report counts the suggested public-work claim, joined room and public board',async t=>{
+  const f=await fixture(t);
+  const ownerMember=f.store.db.prepare("SELECT member_id AS m FROM identity_links WHERE room_id=?").get(f.roomId).m;
+  const offer=(roomId,ownerId,offerId)=>{
+    f.store.projectOffers.create(roomId,ownerId,{requestId:'create-'+offerId,offerId,reviewerMemberIds:[ownerId],terms:{kind:'task',title:'Starter '+offerId,summary:'Synthetic public work',acceptanceCriteria:['Return exact bytes'],repositoryUrl:'https://github.com/example/project',reward:{kind:'unpaid'},approvalPolicy:{mode:'agent'}}});
+    f.store.projectOffers.transition(roomId,ownerId,offerId,'publish',{requestId:'publish-'+offerId,expectedRevision:1});
+    f.store.publicWorkClaims.enable(roomId,ownerId,offerId,{requestId:'enable-'+offerId,expectedRevision:2,expectedTermsVersion:1,repositoryRef:'main',files:[offerId.replace(/\W/g,'-')+'.js']});
+  };
+  offer(f.roomId,ownerMember,'fc:starter');
+  // A second room with no public work: its joiner gets the public-board starter.
+  const host=f.store.identities.create('Board host');
+  new AgentRooms(f.store).create(host.secret,{roomId:'qa-empty',title:'Empty',purpose:'No tasks',starter:false,visibility:'private'});
+  f.store.command(host.secret,'qa-empty',{id:'pp',type:'room.public_page_set',data:{enabled:true}});
+  f.store.command(host.secret,'qa-empty',{id:'jl',type:'room.join_link_set',data:{enabled:true}});
+  const rpc=async(secret,name,args)=>{const r=await fetch(f.origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${secret}`},body:JSON.stringify({jsonrpc:'2.0',id:'t',method:'tools/call',params:{name,arguments:args}})});const body=await r.json();assert.ok(!body.error&&!body.result?.isError,JSON.stringify(body));return body.result.structuredContent;};
+  process.env.ROOM_FIRST_CONNECT_TASK='1';
+  const now=Date.now()+60_000,later=now+11*60_000;
+  const before=firstConnectReport(f.store.db,{now}),beforeLater=firstConnectReport(f.store.db,{now:later});
+  const roomAgent=f.store.identities.create('Room agent'),boardAgent=f.store.identities.create('Board agent');
+  const scopes=[];
+  for(const [who,roomId] of [[roomAgent,f.roomId],[boardAgent,'qa-empty']]){
+    const joined=await f.call(who.secret,{roomId});
+    const task=joined.firstTask;assert.equal(task?.taskId,'fc:starter',JSON.stringify(joined));scopes.push(task.scope);
+    if(who===roomAgent){
+      await rpc(who.secret,'public_work_claim',{taskId:task.taskId,requestId:'claim-'+who.identityId,expectedTermsVersion:1});
+      // The board agent's claim races the room agent's held lease: release it first.
+      const held=f.store.publicWorkClaims.read('fc:starter').claim;
+      await rpc(who.secret,'public_work_release',{taskId:task.taskId,requestId:'release-'+who.identityId,expectedTermsVersion:1,generation:held.generation});
+    } else await rpc(who.secret,'public_work_claim',{taskId:task.taskId,requestId:'claim-'+who.identityId,expectedTermsVersion:1});
+  }
+  assert.deepEqual(scopes,['joined_room','public_board']);
+  const live=firstConnectReport(f.store.db,{now}),after=firstConnectReport(f.store.db,{now:later});
+  assert.deepEqual([live.joins-before.joins,live.success-before.success,live.byKind.claim-before.byKind.claim,live.pending-before.pending],[2,2,2,0]);
+  assert.deepEqual([after.success-beforeLater.success,after.timeout-beforeLater.timeout],[2,0]);
+  // The host who created the empty room never claimed: no claim is borrowed from another identity.
+  assert.equal(after.joins-beforeLater.joins,2);
 });

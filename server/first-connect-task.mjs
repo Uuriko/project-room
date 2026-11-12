@@ -141,6 +141,38 @@ const POST_TYPES = ["message.posted", "dm.posted"];
 const CLAIM_TYPES = ["claim.acquired", "work.accepted", "work.started"];
 const REPORT_MAX_DAYS = 90;
 
+// A public-work claim writes no room event: the claim is a "claimed" stamp on
+// the public task's work claim (inline history in the encoded row's data, or the work_claim_history spill
+// for long histories), keyed by the claiming identity. Each claim is attributed
+// to that identity's latest agent join at or before it, through identity_links,
+// so a public-board claim counts for the room the agent just joined and never
+// for an unrelated room. Read only; duplicates are harmless (earliest action wins).
+function publicWorkClaims(db, since, joins, actions) {
+  const has = name => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+  if (!["public_work_tasks", "work_claims", "identity_links"].every(has)) return;
+  const stamps = `SELECT w.room_id AS ns, w.claim_id AS claimId, h.value AS stamp
+      FROM public_work_tasks t JOIN work_claims w ON w.room_id=t.namespace_key AND w.claim_id=t.offer_id, json_each(w.item_json, CASE WHEN json_type(w.item_json,'$.data.history')='array' THEN '$.data.history' ELSE '$.history' END) h`
+    + (has("work_claim_history") ? `
+      UNION ALL SELECT s.room_id, s.claim_id, s.stamp_json FROM public_work_tasks t
+      JOIN work_claim_history s ON s.room_id=t.namespace_key AND s.claim_id=t.offer_id` : "");
+  const claims = db.prepare(`SELECT json_extract(stamp,'$.agentId') AS identityId, json_extract(stamp,'$.at') AS at FROM (${stamps})
+    WHERE json_extract(stamp,'$.action')='claimed' AND json_extract(stamp,'$.at') >= ?`).all(since);
+  if (!claims.length) return;
+  const links = db.prepare("SELECT room_id AS roomId, member_id AS memberId FROM identity_links WHERE identity_id=?");
+  for (const claim of claims) {
+    const at = Date.parse(claim.at);
+    if (!Number.isFinite(at) || typeof claim.identityId !== "string") continue;
+    let best = null;
+    for (const link of links.all(claim.identityId)) {
+      const key = `${link.roomId}\0${link.memberId}`, joinedAt = joins.get(key);
+      if (Number.isFinite(joinedAt) && joinedAt <= at && (!best || joinedAt > best.joinedAt)) best = { key, joinedAt };
+    }
+    if (!best) continue;
+    if (!actions.has(best.key)) actions.set(best.key, []);
+    actions.get(best.key).push({ type: "claim", at, body: null });
+  }
+}
+
 /**
  * The 10-minute first-connect metric, measured from the recorded event log:
  * each agent member added in the window, and whether its first post (not the
@@ -172,6 +204,7 @@ export function firstConnectReport(db, { now = Date.now(), days = 14 } = {}) {
     if (!actions.has(key)) actions.set(key, []);
     actions.get(key).push({ type: CLAIM_TYPES.includes(row.type) ? "claim" : "post", at, body: row.text });
   }
+  publicWorkClaims(db, since, joins, actions);
   const minutes = [];
   const out = { windowMinutes: windowMs / 60000, days, joins: 0, success: 0, timeout: 0, pending: 0, byKind: { post: 0, claim: 0 } };
   for (const [key, joinedAt] of joins) {

@@ -10,6 +10,7 @@ import { request as httpRequest } from "node:http";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { GITHUB_START_PATH, GITHUB_CALLBACK_PATH, GITHUB_SCOPES, codeChallengeFor } from "../server/github-oauth.mjs";
+import * as T from "../src/events.js";
 
 const clientId = "Iv1.fixtureclientid0000";
 const clientSecret = "fixture-secret-never-real";
@@ -369,4 +370,34 @@ test("cookie GitHub start rejects cross-site or unconfirmed requests and retains
   const api = await fetch(origin + GITHUB_START_PATH, { headers: { Cookie: cookie, Origin: origin, 'X-CSRF-Token': slot.csrf }, redirect: 'manual' });
   assert.equal(api.status, 302);
   assert.equal(new URL(api.headers.get('location')).origin, 'https://github.com');
+});
+
+test("HTML GitHub sign-in never lands on an archived room", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { githubAuth: githubAuth() });
+  const htmlLanding = async () => {
+    const slot = f.store.createAccountSessionSlot();
+    const authorize = await beginFlow(origin, slot.token);
+    const res = await fetch(`${origin}${GITHUB_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-fixture`,
+      { redirect: "manual", headers: { Accept: "text/html" } });
+    assert.equal(res.status, 200);
+    return res.text();
+  };
+  await htmlLanding(); // provisions github:<id>
+  const accountId = `github:${userId}`;
+  f.store.command(f.keys.owner, "commons", { id: "github-member-1", type: T.EVENT_TYPES.MEMBER_ADDED,
+    data: { memberId: "githubber", displayName: "Githubber", kind: "human", permissions: [] } });
+  f.store.bindHumanAccount("commons", "githubber", accountId);
+  // "a-archived" sorts before "commons": archived history must not win.
+  f.store.db.prepare("INSERT INTO rooms (id, sequence, projection, archived_at) VALUES ('a-archived', 0, ?, ?)")
+    .run(JSON.stringify({ room: { ownerId: "owner", title: "Old" }, members: {} }), new Date(0).toISOString());
+  f.store.db.prepare("INSERT INTO member_accounts (room_id, member_id, account_id, origin) VALUES ('a-archived', 'githubber', ?, 'human')")
+    .run(accountId);
+  let html = await htmlLanding();
+  assert.match(html, /\?room=commons/);
+  assert.doesNotMatch(html, /a-archived/);
+  f.store.command(f.keys.owner, "commons", { id: "archive-commons", type: T.EVENT_TYPES.ROOM_ARCHIVED, data: {} });
+  html = await htmlLanding();
+  assert.match(html, /\?account=1/, "archived-only memberships land on the account home");
+  assert.doesNotMatch(html, /\?room=/);
 });
