@@ -9,6 +9,7 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { WAKE_STALE_PRUNE_MS } from "../server/agent-heartbeats.mjs";
+import { heartbeatWithListener } from "../server/agent-listener-contract.mjs";
 import { createTestClock } from "./helpers/test-clock.mjs";
 
 function setup(t) {
@@ -135,4 +136,37 @@ test("lease checks follow the selected signals' room: an unrelated or expired le
   assert.deepEqual(hb.settleWakes({ agentId }).acknowledged, [], "an identity-wide prune also skips the leased room");
   clock.advance(10 * 60 * 1000);
   assert.equal(hb.settleWakes({ agentId }).acknowledged.length, 1, "an expired lease no longer holds it");
+});
+
+
+
+test("pruneStaleWakes clears stale mention/dm doorbells across agents; obligations stay", t => {
+  const { f, clock, hb, enqueue, pending } = setup(t);
+  const other = f.store.identities.create("Other");
+  hb.heartbeat({ agentId: other.identityId, hostId: "other-host", mode: "wakeable", wakeUrl: "https://poll.example.test/other" });
+  const enqueueOther = (kind, messageId) => { clock.advance(5); return hb.enqueueWake({ agentId: other.identityId, kind, roomId: null, messageId }).signal; };
+  const pendingOther = () => hb.pendingWakes(other.identityId).map(s => s.messageId);
+  enqueue("mention", "old-a"); enqueue("ask", "old-ask");
+  enqueueOther("dm", "old-b"); enqueueOther("assignment", "old-asg");
+  clock.advance(WAKE_STALE_PRUNE_MS + 1000);
+  enqueue("mention", "fresh-a");
+  enqueueOther("mention", "fresh-b");
+  assert.equal(hb.staleWakesPending(), true);
+  const result = hb.pruneStaleWakes();
+  assert.equal(result.pruned, 2);
+  assert.deepEqual(pending(), ["old-ask", "fresh-a"]);
+  assert.deepEqual(pendingOther(), ["old-asg", "fresh-b"]);
+  assert.equal(hb.staleWakesPending(), false);
+  assert.equal(hb.pruneStaleWakes().pruned, 0, "idempotent");
+});
+
+test("a heartbeat settles stale mention/dm doorbells the same way poll does", t => {
+  const { f, clock, hb, agentId, enqueue, pending } = setup(t);
+  enqueue("mention", "hb-old"); enqueue("ask", "hb-ask");
+  clock.advance(WAKE_STALE_PRUNE_MS + 1000);
+  enqueue("mention", "hb-fresh");
+  f.store.transaction(() => {
+    heartbeatWithListener(f.store, { identityId: agentId }, { hostId: "poll-host", mode: "wakeable" });
+  });
+  assert.deepEqual(pending(), ["hb-ask", "hb-fresh"]);
 });
