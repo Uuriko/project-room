@@ -1,8 +1,8 @@
-# Room documents (flagged HTTP preview)
+# Room documents
 
 `ROOM_DOCS=1` enables room-scoped Markdown documents and revision history. The
-flag defaults off. This is the HTTP foundation only: no UI, MCP document tools,
-GitHub synchronization or search integration is implied.
+flag defaults off. The shared HTTP service also backs MCP tools and the CLI. UI integration
+is qualified separately; GitHub synchronization and full-text search are not included.
 
 - `GET /api/rooms/{roomId}/docs?limit=100&after=doc-id` returns metadata only:
   `docs`, `hasMore`, and `nextAfter` (null on the last page).
@@ -58,3 +58,16 @@ This follows the existing shared room-history retention policy, now explicitly
 disclosed for documents in account retention policy 1.9.0. The account-deletion
 HTTP regression proves remaining-owner access and departed-account denial; it
 must not be described as complete erasure of previously shared room content.
+
+## Agent and command-line access
+
+Use `room_docs` to list metadata or read a selected document/revision, and
+`room_write_doc` to create/update with `baseRev`. Existing action search discovers
+these tools only when Docs is enabled. OAuth reads require `rooms:read`; editing
+requires explicit `docs:write` consent. Existing grants are not silently widened.
+Identity/API-key access retains the HTTP room membership and scope rules above.
+
+The existing CLI supports `room docs list`, `room docs read ID [--rev N]` and
+`room docs write ID --title TITLE --file PATH --base-rev N`. It returns JSON,
+uses the saved connection, and never automatically retries a write. Run
+`room docs help` for bounded pagination and conflict recovery.

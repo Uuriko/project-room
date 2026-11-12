@@ -74,12 +74,11 @@ export async function postRoomDoc(ctx) {
 }
 
 const params = names => ({ type: "object", required: names, properties: Object.fromEntries(names.map(n => [n, { type: "string" }])) });
-const EXEMPT = "exempt:flagged preview; MCP doc tools follow once the HTTP shape settles";
 export const ROOM_DOC_ROUTES = Object.freeze([
   Object.freeze({ id: "room-docs-list", method: "GET", path: "/api/rooms/{roomId}/docs", auth: "room", capability: null, scope: "room",
-    handler: getRoomDocs, parity: EXEMPT, schema: { params: params(["roomId"]), query: { type: "object", properties: { auth: { type: "string", enum: ["room", "account"] }, limit: { type: "integer", minimum: 1, maximum: 500, default: 100 }, after: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } } }, response: { type: "object" } }, events: [] }),
+    handler: getRoomDocs, parity: "mcp:room_docs", schema: { params: params(["roomId"]), query: { type: "object", properties: { auth: { type: "string", enum: ["room", "account"] }, limit: { type: "integer", minimum: 1, maximum: 500, default: 100 }, after: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } } }, response: { type: "object" } }, events: [] }),
   Object.freeze({ id: "room-docs-get", method: "GET", path: "/api/rooms/{roomId}/docs/{docId}", auth: "room", capability: null, scope: "room",
-    handler: getRoomDoc, parity: EXEMPT, schema: { params: params(["roomId", "docId"]), response: { type: "object" } }, events: [] }),
+    handler: getRoomDoc, parity: "mcp:room_docs", schema: { params: params(["roomId", "docId"]), response: { type: "object" } }, events: [] }),
   Object.freeze({ id: "room-docs-write", method: "POST", path: "/api/rooms/{roomId}/docs/{docId}", auth: "room", capability: null, scope: "room",
-    handler: postRoomDoc, parity: EXEMPT, schema: { params: params(["roomId", "docId"]), body: { type: "object" }, response: { type: "object" } }, events: [] }),
+    handler: postRoomDoc, parity: "mcp:room_write_doc", schema: { params: params(["roomId", "docId"]), body: { type: "object" }, response: { type: "object" } }, events: [] }),
 ]);
