@@ -108,6 +108,7 @@
   "src/room-administration.js",
   "src/room-charter.js",
   "src/room-deep-link.js",
+  "src/room-docs-ui.js",
   "src/room-instructions.js",
   "src/room-layout.js",
   "src/room-mcp-join.js",

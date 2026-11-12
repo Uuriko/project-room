@@ -48,6 +48,7 @@ for (const script of ["project-room", "project-room-staging"]) {
     assert.ok(metadata.compatibility_flags.includes("nodejs_compat"));
     assert.equal(Object.hasOwn(metadata, "migrations"), false);
     assert.equal(vars.ROOM_PATROL_ENABLED, "0");
+    assert.equal(vars.ROOM_DOCS, "1");
     assert.equal(vars.ROOM_PROJECT_MAP_GRAPHIFY, "on");
     assert.equal(vars.ROOM_PROJECT_MAP_REPO, "Uuriko/project-room");
     if (script === "project-room") {
@@ -62,7 +63,7 @@ for (const script of ["project-room", "project-room-staging"]) {
       assert.deepEqual(room, { type: "durable_object_namespace", name: "ROOM", class_name: "ProjectRoom", script_name: "project-room" });
       assert.equal(metadata.limits.cpu_ms, 1000);
       // The entry door serves production traffic, so it reports production (QA5R G-1).
-      assert.deepEqual(vars, { ROOM_PATROL_ENABLED: "0", ROOM_ORIGIN: "https://room.trydemigod.com", ROOM_DEPLOYMENT: "production", ROOM_SERVICE_MODE: "cloudflare-production", ROOM_SECURITY_CONTACT: "potter@trydemigod.com", ROOM_PROJECT_MAP_GRAPHIFY: "on", ROOM_PROJECT_MAP_REPO: "Uuriko/project-room" });
+      assert.deepEqual(vars, { ROOM_DOCS: "1", ROOM_PATROL_ENABLED: "0", ROOM_ORIGIN: "https://room.trydemigod.com", ROOM_DEPLOYMENT: "production", ROOM_SERVICE_MODE: "cloudflare-production", ROOM_SECURITY_CONTACT: "potter@trydemigod.com", ROOM_PROJECT_MAP_GRAPHIFY: "on", ROOM_PROJECT_MAP_REPO: "Uuriko/project-room" });
     }
   });
 }
