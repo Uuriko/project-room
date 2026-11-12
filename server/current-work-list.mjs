@@ -169,7 +169,7 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
         work,...(focus==='needs_me'?{replyRequests,replyRequestsEvaluatedThrough:evaluatedThrough}:{}),
         workScope:'bounded_source_window',selection:{order:'id',...(addressed?{source:'addressed-role-indexes',examinedWorkKeys:source?.examinedKeys??0}:{}),examinedWork:items.length,examinedRequests:requests?.requests.length??0,
           matches:null,guidance:'Follow every page, including empty filtered pages. Counts describe examined sources, not all matches. Read selected work or request before acting.'},
-        page:{limit,totalWork:null,totalReplyRequests:null,hasMore,nextCursor,consistency:'restart_on_change',
+        page:{limit,...(args.limit!==undefined&&args.limit>limit?{limitRequested:args.limit,limitClamped:true,limitMax:limit,limitNote:`This storage format returns at most ${limit} items per page (the bounded read budget); limit is a maximum. Follow nextRead until hasMore is false.`}:{}),totalWork:null,totalReplyRequests:null,hasMore,nextCursor,consistency:'restart_on_change',
           nextRead:hasMore?{tool:'room_list_work',arguments:{roomId,focus,...(args.limit===undefined?{}:{limit:args.limit}),cursor:nextCursor}}:null}};
     },{maxRecords:512});
   });

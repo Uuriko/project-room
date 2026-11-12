@@ -29,3 +29,18 @@ test('Board list pages through every item in a 95-member room without a 409', t 
   assert.ok(Array.isArray(mcp.work) && mcp.work.length > 0);
   assert.equal(mcp.member.id, worker.identityId);
 });
+
+test('a limit above the per-page bound is reported as clamped, never silently', t => {
+  const f = canonicalNeedsMeRoom(t), {store, worker, roomId} = f;
+  for (let i = 0; i < 6; i++) f.propose('c' + i);
+  const page = store.currentWorkListing(worker.secret, roomId, {focus: 'all', limit: 100});
+  assert.equal(page.page.limit, 4);
+  assert.equal(page.page.limitRequested, 100);
+  assert.equal(page.page.limitClamped, true);
+  assert.equal(page.page.limitMax, 4);
+  assert.match(page.page.limitNote, /at most 4/);
+  assert.equal(page.page.nextRead.arguments.limit, 100, 'the follow-up read keeps the caller limit');
+  const small = store.currentWorkListing(worker.secret, roomId, {focus: 'all', limit: 3});
+  assert.equal(small.page.limitClamped, undefined, 'no clamp note when the request fit');
+  assert.equal(store.currentWorkListing(worker.secret, roomId, {focus: 'all'}).page.limitClamped, undefined);
+});
