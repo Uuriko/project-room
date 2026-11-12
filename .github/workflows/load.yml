@@ -1,0 +1,57 @@
+name: load
+
+# Near-full room write flood on the local Worker / Durable Object harness.
+# Pull requests run it when server/, cloudflare/, tests/load/, or this
+# workflow changes. Main pushes stay on the same paths. It is not part of
+# the required merge set (test, contract, lint, browser, cloudflare).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    paths:
+      - "server/**"
+      - "cloudflare/**"
+      - "tests/load/**"
+      - ".github/workflows/load.yml"
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "cloudflare/**"
+      - "tests/load/**"
+      - ".github/workflows/load.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  near-full-room:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10
+      - name: Install the Worker test harness
+        run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+      - name: Near-full room write flood
+        env:
+          LOAD_HARNESS: "1"
+          LOAD_REPORT_PATH: ${{ github.workspace }}/load-report.json
+          WRANGLER_SEND_METRICS: "false"
+        run: node --test --test-reporter=spec tests/load/near-full-room.test.js
+      - name: Upload load report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: load-report-${{ github.sha }}
+          path: load-report.json
+          if-no-files-found: ignore
