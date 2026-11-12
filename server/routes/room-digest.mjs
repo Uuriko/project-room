@@ -22,7 +22,7 @@ export function readRoomDigest(ctx) {
 
 export const ROOM_DIGEST_ROUTES = Object.freeze([
   Object.freeze({ id: "room-digest", method: "GET", path: "/api/rooms/{roomId}/digest",
-    parity: "exempt:HTTP agent client catch-up; MCP digest parity is not implemented",
+    parity: "mcp:room_digest",
     auth: "room", capability: null, scope: "room", handler: readRoomDigest,
     schema: {
       params: { type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } },
