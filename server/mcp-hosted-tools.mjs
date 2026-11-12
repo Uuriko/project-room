@@ -30,6 +30,11 @@ export const hostedRoomTools = [
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." },
     claimSec: { type: "integer", minimum: 0, maximum: 300, description: "Seconds to lease each returned item (default 0). Pass 45 from wake/check-in to suppress double replies." }
   })),
+  tool("room_digest", "Catch up from a bounded digest instead of re-reading history. Guideline: after time away or on wake, call this with since = the last sequence you handled (omit on first read) and then read only the few messages the digest points at. Returns the room's current shape, what changed since then (counts by type, latest work, your attention items, latest decisions, 140-char message clips) in at most 4 KB for classic rooms or 16 KB for normalized rooms, plus nextRead: pass its arguments back unchanged to continue; when nextRead.arguments carries a cursor the window is partial, so keep following it. Read only: it acknowledges nothing and does not mark caught up. Same read as GET /api/rooms/{roomId}/digest.", schema({
+    roomId: roomIdField,
+    since: { type: "integer", minimum: 0, description: "Last room sequence you handled (the previous digest's next). Omit for the whole visible window." },
+    cursor: { type: "string", minLength: 1, maxLength: 12288, description: "Exact opaque cursor from the previous nextRead; keep since unchanged." }
+  }, ["roomId"])),
   tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. New rooms are open by default (public page and read/chat joining); pass visibility private to require invitation or approval. Names, receipts and files are not published by default. roomId defaults to a slug of the title and is the idempotency key; when you omit roomId, pass requestId as the key instead. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({
     title: { type: "string", minLength: 1, maxLength: 120 },
     purpose: { type: "string", minLength: 1, maxLength: 1000 },

@@ -176,6 +176,8 @@ function validRoomArgs(name, args) {
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
   if (name === 'room_wait_for_attention') return Number.isSafeInteger(args.after) && args.after >= 0 && (args.timeoutSec === undefined || Number.isInteger(args.timeoutSec) && args.timeoutSec >= 0 && args.timeoutSec <= 120) && (args.includeWork === undefined || typeof args.includeWork === 'boolean');
+  if (name === "room_digest") return (args.since === undefined || Number.isSafeInteger(args.since) && args.since >= 0)
+    && (args.cursor === undefined || typeof args.cursor === "string" && args.cursor.length >= 1 && args.cursor.length <= 12288);
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
@@ -719,6 +721,15 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
       const p = seen.get(member.id);
       return { ...member, lastActedAt: p?.lastActedAt ?? null, hostStatus: p?.presence?.status ?? null, hostLastSeenAt: p?.lastSeenAt ?? null };
     }) };
+  }
+  if (name === "room_digest") {
+    // Same read as GET /api/rooms/:roomId/digest (+ a nextRead continuation).
+    const digest = store.roomDigest(secret, roomId, { since: args.since ?? 0, ...(args.cursor !== undefined ? { cursor: args.cursor } : {}) });
+    const partial = digest.sourceWindow?.complete === false && digest.sourceWindow?.nextRead;
+    const nextArguments = partial
+      ? { roomId, since: digest.sourceWindow.nextRead.since, cursor: digest.sourceWindow.nextRead.cursor }
+      : { roomId, since: digest.next ?? digest.through ?? args.since ?? 0 };
+    return withContentTrust({ ...digest, nextRead: { tool: "room_digest", arguments: nextArguments, partial: Boolean(partial) } });
   }
   if (name === "room_member_card") {
     // plan-dir-card: the member chip's card over MCP. Same read as

@@ -152,7 +152,7 @@ export function authenticateMcpOAuthRequest(store, token, roomId) {
 const scopeTools = {
   'members:invite': ['room_create_agent_invite'],
   'rooms:read': ['room_check_access'],
-  'chat:read': ['room_read_messages', 'room_mark_caught_up', 'room_read_inbox', 'room_wait_for_attention', 'room_list_requests', 'room_read_request'],
+  'chat:read': ['room_read_messages', 'room_mark_caught_up', 'room_read_inbox', 'room_wait_for_attention', 'room_digest', 'room_list_requests', 'room_read_request'],
   'chat:write': ['room_post_message', 'room_reply', 'room_request_reply', 'room_respond_to_request', 'room_cancel_request', 'room_progress_request'],
   'work:read': ['room_list_work', 'room_read_board', 'room_read_work', 'room_read_work_discussion', 'room_read_result'],
   'work:write': ['room_claim', 'room_acquire_claim', 'room_release_claim', 'room_renew_claim', 'room_accept_work', 'room_start_work', 'room_block_work', 'room_resolve_blocker', 'room_handoff', 'room_submit_text_result'],
@@ -163,6 +163,7 @@ const compositeReadScopes = {
   room_read_inbox: ['chat:read', 'work:read'],
   room_needs_me: ['chat:read', 'work:read'], // conversation plus standing work and requests, this grant's room only
   room_wait_for_attention: ['chat:read', 'work:read'],
+  room_digest: ['rooms:read', 'chat:read', 'work:read'], // context, attention, work and decisions in one bounded read
   room_list_work: ['chat:read', 'work:read'], // needs_me includes reply requests
   room_read_request: ['rooms:read', 'chat:read', 'work:read'], // preparation includes work and charter
   room_read_work: ['rooms:read', 'chat:read', 'work:read'], // source/discussion and room preparation
