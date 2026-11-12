@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadTree, messageBody, rng } from "./fixture.mjs";
 import { median } from "./stats.mjs";
+import { createRefusalCounter } from "./refusals.mjs";
 
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const root = resolve(arg("root", "."));
@@ -37,6 +38,7 @@ const result = { size: meta.size, sequence: meta.sequence, fixtureFailures: meta
 store.room(room); // warm the cache the way a live room is warm
 const random = rng(meta.seed + 1), times = [];
 let failed = 0;
+const refusals = createRefusalCounter();
 for (let i = 0; i < WRITES; i++) {
   clock += 15000;
   const command = { id: `bench-${i}`, type: T.MESSAGE_POSTED, data: { messageId: `bench-${i}`, body: messageBody(random, meta.size + i) } };
@@ -44,12 +46,13 @@ for (let i = 0; i < WRITES; i++) {
   try {
     store.command(meta.keys[i % meta.keys.length], room, command);
     times.push(performance.now() - t);
-  } catch { failed++; }
+  } catch (error) { failed++; refusals.record(error); }
 }
 const sorted = [...times].sort((a, b) => a - b);
 result.writeP50Ms = round(median(times));
 result.writeP95Ms = round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]);
 result.writeFailures = failed;
+result.writeRefusals = refusals.snapshot();
 result.writeAttempts = WRITES;
 result.writeSuccesses = times.length;
 
