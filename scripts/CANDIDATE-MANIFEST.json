@@ -143,7 +143,7 @@
     "src/member-display-names.js": "sha256:7679f106d20b4a8947555173895784952ce9aef858dfc2c2bab041ed4eaa794b",
     "src/message-reducers.js": "sha256:791da1859dee052ca98c3c4ddfa6f7173b5af73b4741fed9e2cdf34ad9578b44",
     "src/needs-attention.js": "sha256:7902b33312749f6e7a879935dd7f6c65ffe0eff1329b89ace7b9e88eba415550",
-    "src/operator-ui.js": "sha256:49a9e113e6d3dcf7eafc933d2c2016ea45fa1a28e2d75bb6480577b5521d481c",
+    "src/operator-ui.js": "sha256:bdc9aa10bc4073e8a9a9b1bc5bf9fa33cb0e3c5f84f7382c44326caf0d4df20e",
     "src/operator.css": "sha256:82342f24af01bec07b8e9e87035dd869c26db5a78fade40a45c38b2a3e88c02c",
     "src/owner-cockpit.js": "sha256:67c10a41040a4a38e93f5556d5cc134430cf9979e2c412d9ec3e419567dfbe1e",
     "src/owner-project-offers-ui.js": "sha256:ef13c2a66323b21c3b353a7d8c1157e200f6f3ae9c7b5b73735028413a798ea8",
