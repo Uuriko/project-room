@@ -95,3 +95,44 @@ test("HTTP poll: stale piles are pruned, ack=cursor works, bad values are reject
   assert.deepEqual(acked.body.pendingWakes.map(s => s.messageId), ["new-3", "new-4"]);
   assert.deepEqual(pending(), ["new-3", "new-4"]);
 });
+
+// Follow-up from the #6161 review (method-level reproductions by Dot): the
+// cursor must never settle obligation kinds, and the age prune must respect a
+// live lease on the signals' own room.
+test("ack=cursor leaves fresh obligation signals pending and settles only doorbell kinds", t => {
+  const { hb, agentId, enqueue, pending } = setup(t);
+  for (const kind of ["ask", "assignment", "bond", "land"]) enqueue(kind, kind);
+  enqueue("mention", "last"); enqueue("mention", "after");
+  const page = hb.pendingWakePage(agentId, { limit: 5 });
+  assert.equal(page.signals.length, 5);
+  const result = hb.settleWakes({ agentId, cursor: page.nextCursor, ackThrough: true });
+  assert.deepEqual(result.acknowledged.length, 1, "only the mention inside the cursor is settled");
+  assert.deepEqual(pending(), ["ask", "assignment", "bond", "land", "after"]);
+});
+
+test("the age prune never deletes signals under another listener's live lease (no token, wrong token); the holder's token prunes", t => {
+  const { clock, hb, agentId, enqueue, pending } = setup(t);
+  enqueue("mention", "old");
+  clock.advance(WAKE_STALE_PRUNE_MS + 1000);
+  const lease = hb.acquireListenerLease({ agentId, roomId: null, listenerId: "holder" });
+  assert.deepEqual(hb.settleWakes({ agentId }).acknowledged, [], "plain poll is non-consuming under a foreign lease");
+  assert.deepEqual(hb.settleWakes({ agentId, fencingToken: "wrong" }).acknowledged, []);
+  assert.deepEqual(pending(), ["old"]);
+  assert.equal(hb.settleWakes({ agentId, fencingToken: lease.fencingToken }).acknowledged.length, 1);
+  assert.deepEqual(pending(), []);
+});
+
+test("lease checks follow the selected signals' room: an unrelated or expired lease does not block, a same-room lease does", t => {
+  const { clock, hb, agentId } = setup(t);
+  const enqueueRoom = (roomId, messageId) => { clock.advance(5); return hb.enqueueWake({ agentId, kind: "mention", roomId, messageId }).signal; };
+  enqueueRoom("room-a", "a-old"); enqueueRoom("room-b", "b-old");
+  clock.advance(WAKE_STALE_PRUNE_MS + 1000);
+  hb.acquireListenerLease({ agentId, roomId: "room-b", listenerId: "holder-b" });
+  const pruned = hb.settleWakes({ agentId, roomId: "room-a" });
+  assert.equal(pruned.acknowledged.length, 1, "room-a is not covered by room-b's lease");
+  assert.deepEqual(hb.pendingWakes(agentId).map(s => s.messageId), ["b-old"]);
+  assert.deepEqual(hb.settleWakes({ agentId, roomId: "room-b" }).acknowledged, [], "room-b's own lease keeps its signal");
+  assert.deepEqual(hb.settleWakes({ agentId }).acknowledged, [], "an identity-wide prune also skips the leased room");
+  clock.advance(10 * 60 * 1000);
+  assert.equal(hb.settleWakes({ agentId }).acknowledged.length, 1, "an expired lease no longer holds it");
+});

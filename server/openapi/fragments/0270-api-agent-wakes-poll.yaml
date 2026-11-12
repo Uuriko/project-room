@@ -16,7 +16,9 @@
         stale-signal prune and the opt-in `ack=cursor` below, a poll acknowledges nothing.
         Every poll prunes pending mention/DM signals older than 24 hours (the
         mention or DM itself stays in needs-me and the inbox); obligation kinds
-        and paused rooms are never pruned.
+        and paused rooms are never pruned, and a signal in a room where another
+        listener holds a live lease is left pending unless you send its
+        `x-room-listener-token`.
         Credential: the `pri_` identity secret or a `rak_` API key with
         `heartbeats:read`. First register a host with `/api/agent-heartbeats`.
         Returns existing pending signals immediately; otherwise waits until
