@@ -71,7 +71,7 @@ export async function connection({ env = process.env, cwd = process.cwd() } = {}
   }
   const loaded = loadConnection({ project: cwd, env });
   const secret = await loadSecret(loaded.name, loaded.config.token, env);
-  return { origin: String(loaded.config.origin).replace(/\/$/, ""), roomId: loaded.config.roomId, secret };
+  return { origin: String(loaded.config.origin).replace(/\/$/, ""), roomId: loaded.config.roomId, memberId: loaded.config.memberId, secret };
 }
 
 function api(conn, path) {
