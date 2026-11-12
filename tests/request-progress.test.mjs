@@ -120,3 +120,52 @@ test('the client still refuses an unknown key or a malformed state on a listed r
   assert.throws(check(r => { r.lifecycle.state = 'sleeping'; }), /does not match/);
   assert.throws(check(r => { r.lifecycle.extra = true; }), /does not match/);
 });
+
+// Handoff stages: acknowledged is not accepted, accepted is not working, and neither is done.
+for (const representation of [null, 'normalized-current-v1']) test(`accepted/working/completed stages stay separate and gated (${representation ?? 'legacy'})`, t => {
+  const {s, keys, cmd, progress} = fixture(t, representation);
+  const read = who => {
+    const args = {direction: 'both', status: 'all'};
+    return validateReplyRead(s.replyRequests.list(keys[who], 'commons', {...args, states: true}), {name: 'room_list_requests', args, roomId: 'commons'})
+      .requests.find(r => r.id === 'ask');
+  };
+  progress('helper', 'a1', {progress: 'acknowledged'});
+  assert.equal(read('asker').lifecycle.stages, undefined, 'an acknowledgement alone carries no stage clocks');
+  progress('helper', 'w0', {progress: 'working'});
+  assert.equal(read('asker').lifecycle.stages, undefined, 'working without acceptance keeps the old shape');
+  progress('helper', 'ac', {progress: 'accepted', note: 'mine, done by 11:00'});
+  let r = read('asker');
+  assert.equal(r.progress.state, 'accepted');
+  assert.equal(r.lifecycle.state, 'active');
+  assert.deepEqual([r.lifecycle.stages.stage, r.lifecycle.stages.workingAt, r.lifecycle.stages.completedAt], ['accepted', null, null]);
+  const acceptedAt = r.lifecycle.stages.acceptedAt;
+  assert.ok(r.lifecycle.stages.receivedAt <= acceptedAt);
+  progress('helper', 'w1', {progress: 'working'});
+  progress('helper', 'ac2', {progress: 'accepted'});
+  r = read('asker');
+  assert.equal(r.lifecycle.stages.acceptedAt, acceptedAt, 'a restated acceptance never moves the clock');
+  assert.equal(r.lifecycle.stages.stage, 'working', 'the stage is the furthest one reached; a restated acceptance never moves it back');
+  assert.ok(r.lifecycle.stages.workingAt);
+  progress('helper', 'ni', {progress: 'needs_input', note: 'which env?'});
+  assert.equal(read('asker').lifecycle.stages.stage, 'needs_input');
+  cmd('helper', 'answer', 'message.posted', {messageId: 'answer', replyToId: 'ask', responseToRequestId: 'ask', expectedRequestRevision: 0, responseOutcome: 'answered',
+    toMemberId: 'asker', body: 'Done', ...contextOf(s, representation)});
+  r = read('asker');
+  assert.equal(r.lifecycle.state, 'complete');
+  assert.deepEqual([r.lifecycle.stages.stage, typeof r.lifecycle.stages.completedAt], ['completed', 'string']);
+  assert.ok(r.lifecycle.stages.workingAt && r.lifecycle.stages.acceptedAt, 'history survives completion');
+  assert.doesNotThrow(() => auditRecovery(s));
+});
+
+test('stages derive from the record and the client validates them strictly', () => {
+  const base = {status: 'open', createdAt: '2026-11-05T00:00:00.000Z', acknowledgedAt: '2026-11-05T00:00:02.000Z'};
+  const now = Date.parse('2026-11-05T00:05:00.000Z');
+  assert.equal('stages' in deriveRequestState(base, {now}), false);
+  const accepted = deriveRequestState({...base, acceptedAt: '2026-11-05T00:00:30.000Z', lastActivityAt: '2026-11-05T00:04:00.000Z'}, {now});
+  assert.deepEqual(accepted.stages, {stage: 'accepted', receivedAt: base.acknowledgedAt, acceptedAt: '2026-11-05T00:00:30.000Z', workingAt: null, completedAt: null});
+  assert.equal(deriveRequestState({...base, acceptedAt: base.acknowledgedAt, workingAt: base.acknowledgedAt, lastActivityAt: '2026-11-05T00:04:00.000Z'}, {now}).stages.stage, 'working');
+  assert.equal(deriveRequestState({...base, acceptedAt: base.acknowledgedAt}, {now: now + 3_600_000}).stages.stage, 'stale');
+  const args = {requestId: 'progress-1', requestMessageId: 'ask', expectedRequestRevision: 0, progress: 'accepted', note: 'mine'};
+  assert.equal(validReplyArguments('room_progress_request', args), true);
+  assert.equal(buildReplyCommand({roomId: 'commons', memberId: 'helper'}, 'room_progress_request', args).data.progress, 'accepted');
+});

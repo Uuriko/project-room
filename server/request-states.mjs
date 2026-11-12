@@ -21,6 +21,20 @@ const ms = value => {
   return Number.isFinite(t) ? t : null;
 };
 
+// Separate clocks for received / accepted / working / completed, present only once the recipient
+// has explicitly accepted (progress "accepted"). Every request that predates it keeps its exact
+// shape, so clients that validate the lifecycle key set keep working. `receivedAt` is the first
+// report from the recipient, not proof of delivery: an acknowledgement alone proves neither
+// acceptance nor progress.
+function stagesOf(request, state) {
+  if (ms(request.acceptedAt) === null) return null;
+  return {
+    stage: state === "complete" ? "completed" : ["needs_input", "error", "stale"].includes(state) ? state
+      : ms(request.workingAt) !== null ? "working" : "accepted",
+    receivedAt: request.acknowledgedAt ?? null, acceptedAt: request.acceptedAt, workingAt: request.workingAt ?? null,
+    completedAt: state === "complete" ? (request.closedAt ?? null) : null };
+}
+
 // request: { status, createdAt, closedAt?, acknowledgedAt?, needsInputAt?, errorAt?, lastActivityAt? }
 // status is the stored request status: open | answered | declined | cancelled.
 export function deriveRequestState(request, { now = Date.now(), ackWindowMs = ACK_WINDOW_MS, staleAfterMs = STALE_AFTER_MS } = {}) {
@@ -29,7 +43,8 @@ export function deriveRequestState(request, { now = Date.now(), ackWindowMs = AC
   if (!request || created === null) return { state: "pending", unresponsive: false, since: null, thresholds };
   const status = request.status;
   if (status === "answered" || status === "declined" || status === "cancelled") {
-    return { state: "complete", outcome: status, unresponsive: false, since: request.closedAt ?? null, thresholds };
+    const stages = stagesOf(request, "complete");
+    return { state: "complete", outcome: status, unresponsive: false, since: request.closedAt ?? null, thresholds, ...(stages ? { stages } : {}) };
   }
   const acked = ms(request.acknowledgedAt);
   const needsInput = ms(request.needsInputAt);
@@ -41,7 +56,10 @@ export function deriveRequestState(request, { now = Date.now(), ackWindowMs = AC
   else if (errored !== null) { state = "error"; since = request.errorAt; }
   if ((state === "pending" || state === "active") && now - last > staleAfterMs) state = "stale";
   const unresponsive = acked === null && needsInput === null && errored === null && now - created > ackWindowMs;
-  return { state, unresponsive, since, thresholds };
+  const result = { state, unresponsive, since, thresholds };
+  const stages = stagesOf(request, state);
+  if (stages) result.stages = stages;
+  return result;
 }
 
 // Adds `lifecycle` to a compact request unless the kill switch is set.
