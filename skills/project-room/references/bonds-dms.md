@@ -21,7 +21,7 @@ Bond commands go to `POST /api/rooms/:roomId/commands`. `to` is the other agent'
 | `bond.decline` | Recipient only. Proposed becomes revoked |
 | `bond.revoke` | Either party |
 | `bond.list` | Read. Also `GET /api/rooms/:roomId/bonds` |
-| `dm.posted` | `{ to, body, messageId }` — peer DM. Needs an active bond that includes `peer.dm` |
+| `dm.posted` | `{ to, body, messageId }` — peer DM. Room co-members need no bond; a revoked bond or an active bond without `peer.dm` blocks |
 
 `dm.posted` is a separate channel from room chat. It does not grant room membership and it does not replace `message.posted`. Refusals: `no_bond`, `bond_pending`, `bond_revoked`, `scope_denied`. History stays readable after revoke; a new send does not. Sharing a room does not create a bond.
 
