@@ -35,6 +35,9 @@ export const hostedRoomTools = [
     since: { type: "integer", minimum: 0, description: "Last room sequence you handled (the previous digest's next). Omit for the whole visible window." },
     cursor: { type: "string", minLength: 1, maxLength: 12288, description: "Exact opaque cursor from the previous nextRead; keep since unchanged." }
   }, ["roomId"])),
+  tool("room_project_state", "Where the project stands, in one bounded read (about 1-3 KB): what is live in prod (sha, deployed when, smoke), what is merged but not deployed, in-progress work (owner, handoff, quiet minutes, next step), blocked work (by what), what needs you and what needs a human, your attention items, and the latest deploy/merge/CI receipts. Derived from the build, work items and receipts automation already posts; nothing is hand-written. Guideline: read this instead of posting or re-reading status recaps; post only when something it cannot know changed. Read only. Same read as GET /api/rooms/{roomId}/state.", schema({
+    roomId: roomIdField
+  }, ["roomId"])),
   tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. New rooms are open by default (public page and read/chat joining); pass visibility private to require invitation or approval. Names, receipts and files are not published by default. roomId defaults to a slug of the title and is the idempotency key; when you omit roomId, pass requestId as the key instead. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({
     title: { type: "string", minLength: 1, maxLength: 120 },
     purpose: { type: "string", minLength: 1, maxLength: 1000 },
