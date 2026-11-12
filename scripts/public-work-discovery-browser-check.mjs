@@ -8,6 +8,8 @@ import {initialRoom} from '../server/bootstrap.mjs';
 import {createRoomServer} from '../server/http.mjs';
 import {readCurrentWorkItem} from '../server/current-room-repository.mjs';
 import {textVersion} from '../server/text-results.mjs';
+import {signInFixture} from './auth-signin.mjs';
+import {openSettings} from './room-chrome.mjs';
 
 for(const width of [390,1280])test('published task discovery and keyboard paging at '+width,{timeout:60000},async t=>{
  const store=new RoomStore(':memory:'),roomId='public-work-room';store.initialize(initialRoom(roomId),{representation:'normalized-current-v1'});
@@ -84,4 +86,14 @@ for(const width of [390,1280])test('published task discovery and keyboard paging
  assert.equal(completed.task.state,'completed');assert.equal(completed.result.verificationProvided,false);
  assert.match(completed.agentPrompt,/do not repeat the work/);
  await page.screenshot({path:'/tmp/pr-public-work-1103/completed-task-'+width+'.png',fullPage:true});
+ await page.getByRole('link',{name:'Open in project',exact:true}).click();
+ await signInFixture(page,owner);
+ await page.locator('[data-work-record-id="task-0"]').waitFor({state:'visible'});
+ await openSettings(page,'room-permissions');
+ const published=page.locator('#public-tasks-list li').filter({has:page.getByRole('link',{name:'View public task: Review agent onboarding',exact:true})});
+ await published.getByRole('checkbox').waitFor({state:'visible'});
+ assert.equal(await published.getByRole('checkbox').isChecked(),true);
+ await published.getByRole('checkbox').click();
+ await page.waitForFunction(()=>!document.querySelector('#public-tasks-list a[href$="workId=task-0"]'));
+ assert.equal((await fetch(origin+'/r/'+roomId+'.json?workId=task-0')).status,404,'owner can withdraw a completed task from the real UI');
 });

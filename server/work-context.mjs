@@ -43,6 +43,9 @@ const pick = (value, fields) => value == null ? null
 export function currentWorkRecord(item) {
   const work = pick(item, "id title definitionOfDone revision state mode sourceMessageId proposedById externalWriteGrantBy externalWriteGrantFor accountableMemberId verifierMemberId humanDecisionMakerId independentVerificationRequired ownerDecisionRequired supersededBy createdAt updatedAt");
   const session = sessionRecord(item);
+  // Owners need the current publication setting even when work is terminal.
+  // Keep publication bookkeeping out of the authenticated summary.
+  work.publicTask = { enabled: item.publicTask?.enabled === true };
   // Agent-facing reads report the displayed status, so finished work reads
   // done; the stored ledger value stays available as recordedStatus.
   work.status = presentedSessionStatus(item);

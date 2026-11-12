@@ -3476,6 +3476,7 @@ async function readSelectedWorkRecord(id, expandDetails) {
     // summary window and completeness metadata remain unchanged.
     inspectedWorkRecord = structuredClone(item);
     state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
+    syncAcquisitionControls();
     return revealWork(id, expandDetails);
   } catch (error) {
     if (current()) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
@@ -6180,8 +6181,8 @@ function syncAcquisitionControls() {
     tasksControl.hidden = !isOwner;
     const list = $("#public-tasks-list");
     if (isOwner && list) {
-      const open = Object.values(state.workItems ?? {}).filter(item => ["proposed", "accepted", "working", "blocked"].includes(item.state));
-      list.replaceChildren(...open.map(item => {
+      const publishable = Object.values(state.workItems ?? {}).filter(item => ["proposed", "accepted", "working", "blocked"].includes(item.state) || item.publicTask?.enabled === true);
+      list.replaceChildren(...publishable.map(item => {
         const li = document.createElement("li");
         const label = document.createElement("label");
         const box = document.createElement("input");
@@ -6191,6 +6192,13 @@ function syncAcquisitionControls() {
         box.addEventListener("change", () => sendAcquisition(T.WORK_PUBLIC_SET, { workItemId: item.id, enabled: box.checked }));
         label.append(box, document.createTextNode(" " + item.title));
         li.append(label);
+        if (item.publicTask?.enabled && state.room.publicPage?.enabled) {
+          const link = document.createElement("a");
+          link.href = `/r/${encodeURIComponent(state.room.id)}?workId=${encodeURIComponent(item.id)}`;
+          link.textContent = "View public task";
+          link.setAttribute("aria-label", `View public task: ${item.title}`);
+          li.append(document.createTextNode(" "), link);
+        }
         return li;
       }));
     }

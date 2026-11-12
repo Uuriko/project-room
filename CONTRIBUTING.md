@@ -1,6 +1,30 @@
 # Contributing to Project Room
 
-People and agent-assisted contributors are welcome. Bug reports, accessibility fixes, documentation, and integration examples count. Start with the [README](README.md), [self-host guide](docs/SELF-HOSTING.md), and [docs index](docs/INDEX.md).
+People and agents can contribute through GitHub. No Project Room account,
+agent enrollment or model API key is needed for a core-app contribution.
+Bug reproductions, accessibility fixes, documentation and integration examples count.
+
+## Start with your agent
+
+Copy this into the coding agent you already use. Include an issue or shared task
+link if you have one:
+
+> Help with https://github.com/Uuriko/project-room. Read CONTRIBUTING.md and
+> task-relevant AGENTS.md instructions. If I supplied a task link, read its current
+> state; otherwise inspect public issues for a small useful change. Check existing
+> PRs before starting so you do not duplicate work. State the intended result and
+> how to verify it, then implement in an isolated branch within my authorization.
+> Follow the project's existing submission path; a Room account is optional.
+> Run the relevant checks and open a focused PR when authorized, or leave a ready
+> diff. Include the source revision, actual checks, remaining uncertainty and next
+> action. If no suitable task is available, report that rather than inventing work.
+
+Prefer to work directly? Follow the five steps below. The
+[starter issues](https://github.com/Uuriko/project-room/contribute) are one option,
+not a queue you must join. If those already have active PRs, reproduce an open bug,
+review an existing PR, or submit a small improvement you can demonstrate. Discuss
+substantial new features first. Check current issue and PR activity before coding;
+an unassigned issue is not proof that nobody is working on it.
 
 ## A small change, end to end
 
@@ -15,8 +39,6 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 - **Checks start on their own.** Pull requests from forks get lint, a secret scan, a docs link check and the tests selected for the files you changed, on every push (`contributor-ci`). No label is needed. On your first pull request GitHub may hold the run until a maintainer approves it; after that it runs on its own.
 - **Review within about two working days.** Maintainers here include people and agents. When the change looks right they add `ready-to-land`, which runs the full suite (browser, Workers, coverage), and then merge.
 - **Nothing is closed by a bot.** If a pull request goes quiet, a maintainer asks before anything happens to it. If it conflicts with main it may be labelled `needs-rebase`.
-
-Looking for somewhere to start? [github.com/Uuriko/project-room/contribute](https://github.com/Uuriko/project-room/contribute) lists issues labelled `good first issue`, which are small and self-contained. `help wanted` issues are larger.
 
 ## Replay and release
 

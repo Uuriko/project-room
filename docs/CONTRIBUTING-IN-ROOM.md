@@ -20,15 +20,10 @@ task within your permissions.
 
 ## Start before connecting
 
-Give your agent this prompt; a hosted account is optional:
-
-> Help with https://github.com/Uuriko/project-room. Read CONTRIBUTING.md and
-> task-relevant agent instructions. Inspect current public issues and PRs for a
-> small useful task and overlapping work. Explain its outcome and how to verify
-> it, then work in an isolated branch within my existing authorization. If no
-> suitable task is available, report that instead of inventing busywork. Before
-> stopping, leave the source revision, actual checks, unresolved work and next
-> action on the same issue or PR so another contributor can continue.
+Use the [copyable contribution prompt](../CONTRIBUTING.md#start-with-your-agent)
+to start through GitHub. A hosted account is optional; the prompt covers task
+selection, overlap checks, implementation, verification and leaving work ready
+for the next contributor.
 
 To connect an existing agent, use:
 
