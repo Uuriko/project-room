@@ -61,10 +61,10 @@ export function effectiveMentionState({ state, timeoutAt }, nowMs) {
 // Exact ids take precedence over names. Display-name prefixes end at a
 // whitespace boundary ("Claude" in "Claude (Cowork)", not "Cl"), and only
 // resolve when unique across the active roster, including the sender.
-function mentionCandidates(members, identityNames) {
+function mentionCandidates(members, identityNames, includeInactive = false) {
   const candidates = [];
   for (const [memberId, member] of Object.entries(members ?? {})) {
-    if (!member || member.active === false) continue;
+    if (!member || (member.active === false && !includeInactive)) continue;
     [memberId, member.displayName, identityNames?.[memberId]].forEach((name, rank) => {
       if (typeof name !== "string" || !name.trim()) return;
       candidates.push({ memberId, lower: name.toLowerCase(), rank });
@@ -210,6 +210,24 @@ export function identityNamesForRoom(db, roomId) {
 // mention of Grok (parity with tokenContinues in inbox-agent-routing.mjs).
 const handleContinues = (text, end) => end < text.length && /[\p{L}\p{N}\p{M}_-]/u.test(text[end]);
 
+// "@Member 2 (codex-comm-pilot)" names one member and then qualifies it with a
+// parenthetical that names a DIFFERENT member (active or retired). Delivering
+// to the first label silently wakes the wrong agent (Dot got mail meant for
+// Codex), so a trailing "(label)" that exactly matches another member's id,
+// display name or identity name makes the handle unresolved: nobody is woken
+// and the poster gets an "ambiguous" warning naming both. The sender and
+// first-word prefixes never count as a conflicting qualifier.
+const QUALIFIER = /^[ \t]*\(\s*@?([^()\n]{1,64}?)\s*\)/;
+function conflictingQualifier(text, end, everyCandidate, targets, senderMemberId) {
+  const match = QUALIFIER.exec(text.slice(end, end + 96));
+  if (!match) return [];
+  const label = match[1].toLowerCase();
+  const others = new Set(everyCandidate
+    .filter(candidate => candidate.rank < 3 && candidate.lower === label)
+    .map(candidate => candidate.memberId));
+  return [...others].filter(id => id !== senderMemberId && !targets.includes(id));
+}
+
 // Resolve explicit @mentions using the longest complete label first, then
 // exact-id/name precedence and uniqueness. Never fall back from an ambiguous
 // longer label to a shorter recipient. Silent @_mentions, email addresses,
@@ -217,6 +235,7 @@ const handleContinues = (text, end) => end < text.length && /[\p{L}\p{N}\p{M}_-]
 export function resolveMentionTargetsInText(members, identityNames, text, senderMemberId) {
   if (typeof text !== "string" || text.length === 0 || text.length > MAX_MESSAGE_BODY_CHARS) return [];
   const candidates = mentionCandidates(members, identityNames);
+  const everyCandidate = mentionCandidates(members, identityNames, true);
   const lowerText = text.toLowerCase(), found = [];
   for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
     if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
@@ -231,6 +250,7 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
       if (candidate.lower.length === longest) matches.push(candidate);
     }
     const targets = uniqueTargets(matches, senderMemberId);
+    if (targets.length && conflictingQualifier(text, nameAt + longest, everyCandidate, targets, senderMemberId).length) continue;
     for (const target of targets) {
       if (!found.includes(target)) found.push(target);
     }
@@ -254,6 +274,7 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
 export function mentionTargetWarnings(members, identityNames, text, senderMemberId) {
   if (typeof text !== "string" || text.length === 0 || text.length > MAX_MESSAGE_BODY_CHARS) return [];
   const candidates = mentionCandidates(members, identityNames);
+  const everyCandidate = mentionCandidates(members, identityNames, true);
   const displayOf = memberId => {
     const name = members?.[memberId]?.displayName;
     return typeof name === "string" && name.trim() ? name : memberId;
@@ -285,7 +306,9 @@ export function mentionTargetWarnings(members, identityNames, text, senderMember
     const rank = Math.min(...matches.map(match => match.rank));
     const ids = [...new Set(matches.filter(match => match.rank === rank).map(match => match.memberId))];
     if (ids.length === 1 && ids[0] === senderMemberId) continue; // intentional self-silence
-    if (ids.length <= 1) continue; // exactly one recipient: delivery is unambiguous
+    const conflicting = ids.includes(senderMemberId) ? [] : conflictingQualifier(text, nameAt + longest, everyCandidate, ids, senderMemberId);
+    if (conflicting.length) ids.push(...conflicting); // "@A (B)": delivery is withheld, so warn
+    else if (ids.length <= 1) continue; // exactly one recipient: delivery is unambiguous
     const handle = text.slice(nameAt, nameAt + longest);
     const key = `ambiguous:${handle.toLowerCase()}`;
     if (seen.has(key)) continue;
