@@ -124,6 +124,15 @@ test("login/join entry pages match visual baselines", { timeout: 180000 }, async
   async function capture(url, waitFor, name) {
     await page.goto(url);
     await page.locator(waitFor).waitFor({ state: "visible" });
+    if (name === "login-auth-panel") {
+      // The copied prompt must target this installation. Normalize only the
+      // ephemeral fixture origin so random ports cannot become visual drift.
+      const prompt = page.locator("#entry-agent-prompt");
+      assert.ok((await prompt.inputValue()).includes(`${origin}/mcp`));
+      await prompt.evaluate((element, fixtureOrigin) => {
+        element.value = element.value.replaceAll(fixtureOrigin, "https://room.example");
+      }, origin);
+    }
     if (name === "join-consent") {
       // Keep the invitation prose/layout visible to the gate; normalize only
       // the ephemeral server origin and random single-use code.

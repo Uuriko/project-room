@@ -19,8 +19,10 @@ existing release lane. More features do not substitute for this completed path.
 Implementation checkpoint: PR6143 contains the Docs/continuation/shared-task
 foundation; PR6155 adds one-shot local checks. Both are candidates, not evidence
 of production availability. The other desktop owns sign-in simplification;
-Jill's worker owns bounded discovery and its parent owns generic wake/connection
-qualification. Coordinate these existing lanes instead of starting replacements.
+The bounded-discovery assignment is still proposed and unaccepted; its executing
+runtime must be confirmed before editing that lane. Generic wake/connection
+qualification is a separate lane. Coordinate actual claims rather than inferring
+execution from a shared member identity. The current release hold remains in force.
 
 Local checks may reduce agent supervision immediately. Automatic job discovery,
 trusted device enrollment, unattended pickup, broader check recipes and cache
@@ -33,6 +35,31 @@ reviewed result, human interventions, lost/duplicated actions, and check runs
 requiring agent supervision. Preserve failures and unknowns. Correctness requires
 no unauthorized disclosure, lost drafts or stale verification treated as current.
 This plan is the implementation sequence, not a new mandatory approval process.
+
+## Connected product parts — 2026-11-12
+
+These are capabilities in one project, not a request for additional navigation.
+The default contributor path is: open work → obtain relevant context → act →
+check → review → leave the current result and next step.
+
+| Part | Existing foundation / candidate | Remaining proof or simplification |
+| --- | --- | --- |
+| Project context | Docs, source references, selected-task context and continuation briefs | A fresh contributor identifies the correct next action without reconstructing old chats; stale or inaccessible evidence is explicit. Keep one authoritative document per subject. |
+| Work and ownership | Tasks, scoped permissions, requests, attempts and results | Show ready, blocked and review-needed work in its project context; reconcile unaccepted assignments. A member identity does not prove an executing device. |
+| Entry and interfaces | Shareable project/task links, GitHub contribution path, copied connection prompt, browser and agent tools | Verify the same intended destination and authority through each path; avoid mandatory human signup when an existing agent can participate. |
+| Design and implementation | Project design conventions, code/components, browser evidence and review | Assess a real task in the rendered product. Reuse project components and remove redundant controls before adding explanation. Captures and automated accessibility checks do not establish usability. |
+| Deterministic execution | Source-pinned one-shot local affected-unit checks and existing runner | Establish exact-source packaging, cancellation and result integrity. Broader recipes and unattended dispatch remain separate, evidence-led additions. |
+| Review and delivery | Artifact-linked results, independent review paths and serialized release tooling | Distinguish submitted, accepted, merged and verified in production; qualify the composed revision and preserve rollback. Current hold means no deploy. |
+| Continuation and recovery | Selected work briefs, revision checks, retained drafts and explicit uncertain outcomes | A different contributor resumes after interruption without repeating effects or trusting stale checks. Direct messaging remains available for exceptions. |
+| Learning | Existing quality scorecard and journey probes | Measure reviewed completion, elapsed time and total human effort; choose one bottleneck and one small change. Do not build another mandatory reporting system. |
+
+For every proposed control, paragraph, status or process, ask whether removing it
+would make the next useful action clearer. Preserve permissions, uncertainty,
+recovery and review evidence; hide implementation details unless needed to act.
+Prefer automatic links and derived state to duplicate summaries and manual forms.
+Use the [active scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md#active-mvp-scorecard--2026-11-12)
+for definitions and failure accounting. Repository checks establish technical
+properties, not customer benefit or a measured advantage over another product.
 
 ## Scope reassessment — 2026-11-02
 
