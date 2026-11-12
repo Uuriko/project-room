@@ -37,7 +37,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.8.0",
+  version: "1.9.0",
   summary: "Account deletion purges the account's sign-in credentials, "
     + "sessions, room memberships, connected Gmail data, private inbox content "
     + "(imported messages, drafts, read state), connected email data, derived "
@@ -47,12 +47,12 @@ export const RETENTION_POLICY = Object.freeze({
     + "room, and any member permission a grant conferred is stripped. Guest invites, share links, "
     + "membership invitations, and agent and referral invites issued by the account are revoked, and agent "
     + "connections the account sponsored are disconnected. Personal rooms this account solely owns are archived "
-    + "and their messages and files are purged. Security audit rows, inbox/email "
+    + "and their messages, documents (including revisions), and files are purged. Security audit rows, inbox/email "
     + "command receipts, abuse "
     + "reports, operator unpublish records, bounty payment journal "
     + "entries, and "
     + "the deactivated account tombstone are retained under legal hold; "
-    + "room history already shared with other members is room-owned and is "
+    + "room history already shared with other members, including document bodies, revisions and room-member author ids, is room-owned and is "
     + "not rewritten. A shared room with other members and no other owner "
     + "blocks deletion until ownership is transferred.",
   purged: Object.freeze([
@@ -83,7 +83,7 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "abuse_reports", reason: "public_abuse_reports rows are retained as safety evidence under the same legal hold; deleting them would destroy abuse investigations." }),
     Object.freeze({ category: "unpublish_records", reason: "public_unpublish rows are the live unpublish state consulted by the public read model; deleting them would re-expose unpublished content." }),
     Object.freeze({ category: "profile_tombstone", reason: "The account id remains as a deactivated tombstone (active=0, profile scrubbed) so retained audit rows stay attributable. It can never sign in again." }),
-    Object.freeze({ category: "room_history", reason: "Room events already shared with other members (messages, work history) are room-owned history and are not rewritten when another owner remains; only the member binding is removed. Sole ownership of a shared room blocks deletion until that ownership is transferred." }),
+    Object.freeze({ category: "room_history", reason: "Room records already shared with other members (messages, work history, document bodies and revisions with room-member author ids) are room-owned history and are not rewritten when another owner remains; only the member binding is removed. Sole ownership of a shared room blocks deletion until that ownership is transferred." }),
     Object.freeze({ category: "bounty_journal", reason: "bounty_journal entries are the room's tamper-evident payment ledger (#3550): every entry is one leg of a two-account movement, hash-chained to the account's other entries and cited by counterparties' signed receipts. Deleting one account's legs would orphan the counterparty legs, break the hash chain and the conservation audit, and void those receipts. Entries stay in place, attributed only to the deactivated account tombstone — profile scrubbed, credentials and memberships purged — like the retained audit rows." }),
   ]),
 });

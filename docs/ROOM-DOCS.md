@@ -7,7 +7,9 @@ GitHub synchronization or search integration is implied.
 - `GET /api/rooms/{roomId}/docs?limit=100&after=doc-id` returns metadata only:
   `docs`, `hasMore`, and `nextAfter` (null on the last page).
 - `limit` is an integer from 1 to 500, default 100. Pass `nextAfter` as `after`
-  until `hasMore` is false. Unknown and repeated query parameters are rejected.
+  until `hasMore` is false. Unknown and repeated query parameters are rejected. The common `auth=room`
+  or `auth=account` selector is accepted; account sessions require the current
+  `X-Session-Binding` header.
 - Ordering is ascending document id. `after` is a plain positional key, not a
   capability or authorization token. Every page authenticates room access.
 - Traversal is live, not a frozen snapshot. Edits do not reorder documents;
@@ -52,5 +54,7 @@ Unlinking a member revokes their access, not other members' access to room recor
 Personal-room account deletion and room purge erase document bodies/history.
 In a retained shared room, author member ids and document/history text remain
 room records; this patch does not redact mentions or offer per-author erasure.
-The shared-record retention policy needs explicit product/privacy review before
-enabling the feature; it must not be described as complete account erasure.
+This follows the existing shared room-history retention policy, now explicitly
+disclosed for documents in account retention policy 1.9.0. The account-deletion
+HTTP regression proves remaining-owner access and departed-account denial; it
+must not be described as complete erasure of previously shared room content.

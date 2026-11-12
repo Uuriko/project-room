@@ -16,7 +16,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 async function startServer(t, f) {
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ store: f.store, roomDocsEnabled: true });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams(); server.closeAllConnections();
@@ -144,10 +144,17 @@ for (const entityProjection of [false, true]) test(`a solely owned personal room
 
 test("a shared room with another owner transfers and the account is deleted", async t => {
   const ctx = await deletionAccount(t, 2);
+  const policyResponse = await get(ctx.origin, "/api/account/retention", ctx.creds.cookie);
+  assert.equal(policyResponse.status, 200);
+  const policy = await policyResponse.json();
+  assert.match(JSON.stringify(policy), /document bodies/);
+  assert.match(JSON.stringify(policy), /room-member author ids/);
   const roomId = "shared-with-partner";
   const { send } = createRoom(ctx, roomId, "organization", "Shared project");
   send(T.MEMBER_ADDED, { memberId: "partner", displayName: "Partner", kind: "human", permissions: ["accept_work"] });
   send(T.MESSAGE_POSTED, { messageId: "kept-note", body: "keep-this-history" });
+  writeDoc(ctx.f.store, { roomId, docId: "shared-spec", title: "Shared", body: "shared first", baseRev: 0, author: "owner" });
+  writeDoc(ctx.f.store, { roomId, docId: "shared-spec", title: "Shared", body: "shared second", baseRev: 1, author: "owner" });
   const partnerId = "partner-account";
   ctx.f.store.createAccount(partnerId);
   ctx.f.store.bindHumanAccount(roomId, "partner", partnerId);
@@ -164,6 +171,15 @@ test("a shared room with another owner transfers and the account is deleted", as
   assert.equal(ctx.f.store.account(ctx.accountId).active, false);
   assert.equal(ctx.f.store.db.prepare("SELECT count(*) AS n FROM member_accounts WHERE account_id=?").get(ctx.accountId).n, 0);
   assert.equal(ctx.f.store.accountForMember(roomId, "partner").id, partnerId);
+  assert.equal(getDoc(ctx.f.store.db, { roomId, docId: "shared-spec" }).body, "shared second");
+  const historical = getDoc(ctx.f.store.db, { roomId, docId: "shared-spec", rev: 1 });
+  assert.equal(historical.body, "shared first"); assert.equal(historical.updatedBy, "owner");
+  const partnerKey = ctx.f.store.issueAccessKey(roomId, "partner");
+  const retained = await fetch(ctx.origin + `/api/rooms/${roomId}/docs/shared-spec?rev=1`, { headers: { Authorization: `Bearer ${partnerKey}` } });
+  assert.equal(retained.status, 200); assert.equal((await retained.json()).doc.body, "shared first");
+  const departed = await fetch(ctx.origin + `/api/rooms/${roomId}/docs?auth=account`, { headers: { Cookie: ctx.creds.cookie, "X-Session-Binding": ctx.binding } });
+  assert.equal(departed.status, 401);
+
 });
 
 test("the sole owner of a shared room with other members is refused and listed", async t => {
@@ -275,4 +291,17 @@ test("a document update invalidates an earlier account deletion confirmation", a
   assert.equal(res.status, 409);
   assert.equal((await res.json()).error.code, "plan_changed");
   assert.equal(getDoc(ctx.f.store.db, { roomId, docId: "spec" }).body, "two");
+});
+
+test("document lists accept the common account auth selector with current session binding", async t => {
+  const ctx = await deletionAccount(t, "docs-account-selector");
+  const roomId = "docs-account-selector";
+  createRoom(ctx, roomId, "personal", "Account docs");
+  writeDoc(ctx.f.store, { roomId, docId: "spec", title: "Spec", body: "private", baseRev: 0, author: "owner" });
+  const read = query => fetch(ctx.origin + `/api/rooms/${roomId}/docs?${query}`, { headers: { Cookie: ctx.creds.cookie, "X-Session-Binding": ctx.binding } });
+  const listed = await read("auth=account&limit=1");
+  assert.equal(listed.status, 200); assert.deepEqual((await listed.json()).docs.map(doc => doc.docId), ["spec"]);
+  assert.equal((await read("auth=account&auth=room")).status, 422);
+  assert.equal((await read("auth=invalid")).status, 422);
+  assert.equal((await read("auth=account&unknown=x")).status, 422);
 });
