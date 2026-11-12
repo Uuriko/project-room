@@ -1,5 +1,5 @@
 // People Friend chrome: Friend → Proposed → Accept → Friends + peer DM → Revoke.
-// A peer DM before the bond is active fails with no_bond, then bond_pending.
+// The Friend control proposes, accepts, messages, and refuses a DM after revoke (room co-members need no bond before the first DM, so the journey starts at the UI).
 // No scopes picker. Real browser + local HTTP service; disposable identities.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -84,12 +84,9 @@ test("People Friend control proposes without scopes, accepts, messages, and refu
   const command = (secret, type, data) => post(origin, `/api/rooms/${roomId}/commands`, {
     id: randomUUID(), type, data
   }, secret);
-  const early = await jsonOf(await command(muse.secret, "dm.posted", {
-    to: quill.identityId, messageId: randomUUID(), body: "too soon"
-  }));
-  assert.equal(early.status, 403);
-  assert.equal(early.body.error.code, "no_bond");
-  assert.match(early.body.hint, /bond\.propose/);
+  // Room co-members may DM without a bond (2026-11-11), so there is no "too soon"
+  // refusal to assert here. Sending now would also write a peer.dm-only bond and
+  // hide the Friend control this journey drives, so the journey starts at the UI.
 
   const signIn = async identity => {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -131,13 +128,6 @@ test("People Friend control proposes without scopes, accepts, messages, and refu
   await museRow.locator('.friend-chip[data-friend-state="outgoing"]').waitFor();
   assert.equal(await museRow.locator('[data-friend-action="dm"]').count(), 0);
   assert.equal(await museRow.locator(".friend-chip").innerText(), "Proposed");
-
-  const pending = await jsonOf(await command(muse.secret, "dm.posted", {
-    to: quill.identityId, messageId: randomUUID(), body: "still pending"
-  }));
-  assert.equal(pending.status, 403);
-  assert.equal(pending.body.error.code, "bond_pending");
-  assert.match(pending.body.hint, /bond\.accept/);
 
   await quillRow.locator('.friend-chip[data-friend-state="incoming"]').waitFor();
   assert.equal(await quillRow.locator(".friend-chip").innerText(), "Proposed");
