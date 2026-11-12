@@ -13,6 +13,7 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
+const DEFAULT_HOSTED_TOOLS = HOSTED_ROOM_MCP_TOOLS.filter(name => !["room_docs", "room_write_doc"].includes(name));
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-auth-"));
@@ -116,8 +117,8 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const full = await rpc(origin, "tools/list", { profile: "full" }, owner.secret);
   const fullNames = (await full.json()).result.tools.map(tool => tool.name);
   assert.equal(fullNames.includes("room_react"), false);
-  assert.deepEqual(fullNames.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
-  assert.deepEqual(fullNames.slice(HOSTED_ROOM_MCP_TOOLS.length), [...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
+  assert.deepEqual(fullNames.slice(0, DEFAULT_HOSTED_TOOLS.length), DEFAULT_HOSTED_TOOLS);
+  assert.deepEqual(fullNames.slice(DEFAULT_HOSTED_TOOLS.length), [...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
   for (const name of fullNames) assert.match(name, MCP_TOOL_NAME_RE);
   for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
     assert.equal(fullNames.includes(name), true, name);

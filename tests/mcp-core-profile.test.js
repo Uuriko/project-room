@@ -19,12 +19,14 @@ import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
+const DOC_TOOLS = ["room_docs", "room_write_doc"];
+const DEFAULT_HOSTED_TOOLS = HOSTED_ROOM_MCP_TOOLS.filter(name => !DOC_TOOLS.includes(name));
 
-async function serve(t) {
+async function serve(t, roomDocsEnabled = false) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-core-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   const rooms = new AgentRooms(store);
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ store, roomDocsEnabled });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams(); server.closeAllConnections();
@@ -54,6 +56,17 @@ async function call(origin, name, args, secret) {
 function namesOf(body) {
   return body.result.tools.map(tool => tool.name);
 }
+
+test("enabled Room Docs appear in full discovery without enlarging the core profile", async t => {
+  const {origin, store, rooms} = await serve(t, true);
+  const owner = store.identities.create("Docs owner");
+  rooms.create(owner.secret, {roomId:"docs-profile", title:"Docs", purpose:"Flag contract", kind:"personal", displayName:"Owner"});
+  const full = await (await rpc(origin, "tools/list", {profile:"full"}, owner.secret)).json();
+  assert.deepEqual(namesOf(full), [...HOSTED_ROOM_MCP_TOOLS, ...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
+  const core = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
+  assert.deepEqual(namesOf(core), [...CORE_MCP_TOOLS]);
+  assert.equal(DOC_TOOLS.some(name => namesOf(core).includes(name)), false);
+});
 
 test("default tools/list is the short core profile and every listed name is legal", async t => {
   const { origin, store, rooms } = await serve(t);
@@ -104,7 +117,8 @@ test("default tools/list is the short core profile and every listed name is lega
   const queryBody = await queried.json();
   assert.equal(queryBody.result.profile, "full");
   assert.ok(namesOf(queryBody).every(name => MCP_TOOL_NAME_RE.test(name)));
-  assert.deepEqual(namesOf(queryBody).slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
+  assert.deepEqual(namesOf(queryBody).slice(0, DEFAULT_HOSTED_TOOLS.length), DEFAULT_HOSTED_TOOLS);
+  assert.equal(DOC_TOOLS.some(name => namesOf(queryBody).includes(name)), false);
   assert.equal(queryBody.result.tools.find(tool => tool.name === "bond_list").aliases[0], "bond.list");
   assert.equal(queryBody.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
   assert.equal(queryBody.result.tools.some(tool => tool.name.includes(".")), false);
