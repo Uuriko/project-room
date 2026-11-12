@@ -107,7 +107,6 @@ const WORKITEMS_REFERENCE_SITES = [
   "src/board.js",
   "src/conversation.js",
   "src/events.js",
-  "src/growth-emit.js",
   "src/help-offers.js",
   "src/human-experience.js",
   "src/message-reducers.js",

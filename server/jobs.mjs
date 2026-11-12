@@ -17,9 +17,6 @@ import { projectMapEnabled } from "./project-map.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
 import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
-import { createWatcher } from "../src/growth-watch.js";
-import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
-import { growthCollector } from "../src/growth-emit.js";
 import { backupFailureDetail, verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
 import { relieveProjectionsIncrementally } from "./store-relief.mjs";
 import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
@@ -955,18 +952,6 @@ export const JOBS = Object.freeze([
     }
   }),
   defineJob({
-    name: "growth-watch",
-    cadenceMs: DEFAULT_INTERVAL_MS,
-    runtimes: Object.freeze(["node"]),
-    singleRuntimeReason: "Growth watch reads the process-local collector. The Worker does not host that collector.",
-    enabled: () => true,
-    disabledReason: () => null,
-    async run(_store, ctx) {
-      if (typeof ctx.growthTick !== "function") return { skipped: 1 };
-      return ctx.growthTick();
-    }
-  }),
-  defineJob({
     name: "project-map",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
@@ -1156,32 +1141,6 @@ export function startNodeScheduler({
 } = {}) {
   if (!store) throw new TypeError("node scheduler needs a store");
   const overrides = new Map();
-  let growthIntervalMs = DEFAULT_INTERVAL_MS;
-  let growthEnabled = false;
-  let growthTick = null;
-  let growthTicks = 0;
-  try {
-    growthIntervalMs = finiteInterval(env.GROWTH_WATCH_INTERVAL_MS, DEFAULT_INTERVAL_MS);
-    if (growthIntervalMs > 0) {
-      const watcher = createWatcher({ collector: growthCollector, rules: defaultGrowthRules() });
-      growthTick = () => {
-        growthTicks += 1;
-        const result = watcher.tick();
-        const triggered = Array.isArray(result?.triggered) ? result.triggered : [];
-        const context = { at: new Date(now()).toISOString(), window: result?.window ?? null };
-        for (const hit of triggered) {
-          try { defaultOnAlert(hit, context); }
-          catch (error) { console.warn(`[growth] alert delivery failed: ${oneLine(error?.message ?? error)}`); }
-        }
-        return { triggered: triggered.length };
-      };
-      growthEnabled = true;
-      overrides.set("growth-watch", growthIntervalMs);
-    }
-  } catch (error) {
-    growthEnabled = false;
-    console.warn(`[growth] scheduler disabled: ${oneLine(error?.message ?? error)}`);
-  }
   let channelIntervalMs = channelDrainLimits.intervalMs;
   let channelEnabled = false;
   let drainer = null;
@@ -1224,7 +1183,7 @@ export function startNodeScheduler({
   // retentionIndex so each tick prunes the next table). It must therefore be
   // passed to jobs as-is — a fresh spread copy per tick silently discarded
   // the rotated retentionIndex and every tick pruned table index 0 again.
-  const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, growthTick, retentionIndex: 0 };
+  const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, retentionIndex: 0 };
   let timer = null;
   let running = false;
   async function runOnce() {
@@ -1234,7 +1193,6 @@ export function startNodeScheduler({
     try {
       const at = now();
       for (const job of jobsFor("node")) {
-        if (job.name === "growth-watch" && !growthEnabled) continue;
         if (job.name === "channel-drain" && !channelEnabled) continue;
         if (!jobEnabled(job, env, store)) continue;
         const cadenceMs = overrides.get(job.name) ?? job.cadenceMs;
@@ -1276,8 +1234,7 @@ export function startNodeScheduler({
     } finally { running = false; }
   }
   return {
-    growthEnabled, growthIntervalMs, channelEnabled, channelIntervalMs,
-    getGrowthTickCount: () => growthTicks,
+    channelEnabled, channelIntervalMs,
     start() {
       if (timer || !(tickMs > 0)) return;
       timer = setInterval(() => { void runOnce(); }, tickMs);
@@ -1292,7 +1249,7 @@ export function startNodeScheduler({
       const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
       return JOBS.map(job => {
         const inRuntime = job.runtimes.includes("node");
-        const gated = (job.name === "growth-watch" && !growthEnabled) || (job.name === "channel-drain" && !channelEnabled);
+        const gated = job.name === "channel-drain" && !channelEnabled;
         const enabled = inRuntime && !gated && jobEnabled(job, env, store);
         const reason = !inRuntime ? (job.singleRuntimeReason ?? "Runs on the Worker only")
           : gated ? "Disabled for this process" : enabled ? null : jobDisabledReason(job, env, store);

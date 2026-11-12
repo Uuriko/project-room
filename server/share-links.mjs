@@ -2,8 +2,7 @@ import {currentInviteContext,prepareCurrentWrite,withCurrentServingWriter} from 
 import {shareLinkAgentPrefix as agentJoinPrefix,assertShareLinkUsage,assertShareLinkJoinEvidence,assertShareLinkRedemption} from './share-link-evidence.mjs';
 import { canInviteCoOwners, museDevelopmentAccess } from "../src/room-administration.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, NEVER_GRANT, canInviteMembers, historyVisibility, ownMember } from "../src/events.js";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { applyEvent, validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, NEVER_GRANT, canInviteMembers, historyVisibility, ownMember } from "../src/events.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./journal.mjs";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
@@ -588,7 +587,7 @@ export class ShareLinks {
       this.store.appendInvitationJournal(record, "issued");
       const incoming = invitationJoinedEvent({ ...record, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
       refuseArchivedWrite(room.state);
-      const joinedState = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      const joinedState = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       let state=joinedState;
       // Co-admin: the room creator, who minted the link, raises the new
       // member from moderator to the link grant (linkPermissions, capped at
@@ -597,7 +596,7 @@ export class ShareLinks {
         roomId: row.room_id, actorId: row.issuer_member_id, type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
         data: { memberId, expectedMemberRevision: state.members[memberId].revision, permissions: linkPermissions(access), active: true,
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } }) : null;
-      if (grant) state = { ...applyEventWithGrowth(state, grant, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      if (grant) state = { ...applyEvent(state, grant), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       if(context){
         this.saveAdmission(room,context,joinedState,incoming);
         if(grant){const next=this.admissionRoom(row.room_id,[row.issuer_member_id,memberId]);this.saveAdmission(next.room,next.context,state,grant);}
@@ -640,7 +639,7 @@ export class ShareLinks {
     const admission = this.admissionIssuer(row, room), now = this.store.now();
     const rejoin = event({ id: randomUUID(), idempotencyKey: `link-rejoin:${row.id}:${redemptionId}`, roomId: row.room_id, actorId: admission.memberId, type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
       data: { memberId, expectedMemberRevision: member.revision, permissions: ["co_admin", "co_owner"].includes(access) ? linkPermissions(access) : [...INVITATION_ROLES[role]], active: true, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
-    const state = { ...applyEventWithGrowth(room.state, rejoin, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+    const state = { ...applyEvent(room.state, rejoin), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     this.saveAdmission(room,context,state,rejoin);
   }
   // A share link is an invite link: a first join credits the link's issuer on
