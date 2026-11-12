@@ -31,21 +31,33 @@ test('late save response after navigation preserves a newer local draft and sele
 test('real logout and a second account cannot recover the first account document draft',{timeout:30000},async t=>{
  const page=await fixture(t);await register(page,'first@example.invalid');await create(page);
  await page.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('[data-body]').fill('Private first-account draft');
- const original=await page.evaluate(()=>sessionStorage.getItem('project-room:doc-drafts:v1'));assert.match(original,/Private first-account draft/);
+ const original=await page.evaluate(()=>sessionStorage.getItem('project-room:doc-drafts:v2'));assert.match(original,/Private first-account draft/);
  await page.locator('#room-docs-close').click();await page.locator('#session-menu-button').click();await page.locator('#signout-button').click();await page.locator('#auth-panel:visible').waitFor();
  await page.goto(new URL(page.url()).origin);await register(page,'second@example.invalid');await page.locator('#room-docs-open').click();assert.doesNotMatch(await page.locator('#room-docs-root').innerText(),/Race document|Private first-account draft/);
  // Restoring an old storage record is stronger than only relying on logout cleanup:
  // the real new authenticated session must reject the first session's scope.
- await page.evaluate(value=>sessionStorage.setItem('project-room:doc-drafts:v1',value),original);await page.reload();await page.locator('#room-docs-open').click();assert.doesNotMatch(await page.locator('#room-docs-root').innerText(),/Race document|Private first-account draft/);
+ await page.evaluate(value=>sessionStorage.setItem('project-room:doc-drafts:v2',value),original);await page.reload();await page.locator('#room-docs-open').click();assert.doesNotMatch(await page.locator('#room-docs-root').innerText(),/Race document|Private first-account draft/);
 });
 
 test('same account switching into a real second room does not restore first-room drafts',{timeout:30000},async t=>{
  const page=await fixture(t);await register(page,'rooms@example.invalid');await create(page);
  const firstRoom=new URL(page.url()).searchParams.get('room');await page.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('[data-body]').fill('Private first-room draft');
- const original=await page.evaluate(()=>sessionStorage.getItem('project-room:doc-drafts:v1'));
+ const original=await page.evaluate(()=>sessionStorage.getItem('project-room:doc-drafts:v2'));
  await page.locator('#room-docs-close').click();await page.locator('#nav-rooms').click();await page.locator('#account-room-create > summary').click();
  await page.locator('#account-room-title').fill('Second room');await page.locator('#account-room-purpose').fill('Local isolation acceptance');await page.locator('#account-room-name').fill('Fixture owner');await page.locator('#account-room-submit').click();
  await page.waitForFunction(first=>{const room=new URL(location.href).searchParams.get('room');return room&&room!==first;},firstRoom);
  await page.locator('#room-docs-open').click();assert.doesNotMatch(await page.locator('#room-docs-root').innerText(),/Race document|Private first-room draft/);
- await page.evaluate(value=>sessionStorage.setItem('project-room:doc-drafts:v1',value),original);await page.reload();await page.locator('#room-docs-open').click();assert.doesNotMatch(await page.locator('#room-docs-root').innerText(),/Race document|Private first-room draft/);
+ await page.evaluate(value=>sessionStorage.setItem('project-room:doc-drafts:v2',value),original);await page.reload();await page.locator('#room-docs-open').click();assert.doesNotMatch(await page.locator('#room-docs-root').innerText(),/Race document|Private first-room draft/);
+});
+
+
+test('recovery capacity refuses a new draft without evicting existing saved drafts',{timeout:30000},async t=>{
+ const page=await fixture(t);await register(page,'capacity@example.invalid');await create(page);
+ await page.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('[data-body]').fill('First retained draft');
+ for(let i=0;i<19;i++)await page.getByRole('button',{name:'New document'}).click();
+ const before=await page.evaluate(()=>sessionStorage.getItem('project-room:doc-drafts:v2'));
+ assert.match(before,/First retained draft/);
+ await page.getByRole('button',{name:'New document'}).click();
+ assert.match(await page.locator('[data-save-status]').innerText(),/Draft recovery unavailable/);
+ assert.equal(await page.evaluate(()=>sessionStorage.getItem('project-room:doc-drafts:v2')),before);
 });

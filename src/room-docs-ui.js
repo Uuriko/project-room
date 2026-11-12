@@ -1,13 +1,13 @@
 import { draftRecoveryScope } from './conversation.js';
-// Minimal experimental room docs surface. Drafts are memory-only and scoped to
-// the exact active RoomClient session; they never contain credentials.
+// Drafts use bounded tab storage keyed by authenticated account and room scope.
+// Active requests additionally belong to the exact RoomClient session.
 export function installRoomDocs({ client, getState, getSession }) {
   const open = document.querySelector('#room-docs-open'), dialog = document.querySelector('#room-docs-dialog');
   const root = document.querySelector('#room-docs-root'), navigation = document.querySelector('#room-docs-navigation');
   let owner = null, generation = 0, drafts = new Map(), current = null, next = null, docs = [];
   const recoveryKey='project-room:doc-drafts:v2';
   function records() { try { const raw=sessionStorage.getItem(recoveryKey);if(!raw)return {};if(raw.length>1100000){sessionStorage.removeItem(recoveryKey);return {}}const data=JSON.parse(raw);if(!data||typeof data!=="object"||Array.isArray(data)){sessionStorage.removeItem(recoveryKey);return {}}const valid=Object.fromEntries(Object.entries(data).filter(([,v])=>v&&Number.isFinite(v.expires)&&v.expires>Date.now()&&v.expires<=Date.now()+12*60*60*1000&&Array.isArray(v.entries)).slice(-20));if(Object.keys(valid).length!==Object.keys(data).length){if(Object.keys(valid).length)sessionStorage.setItem(recoveryKey,JSON.stringify(valid));else sessionStorage.removeItem(recoveryKey)}return valid; }catch{try{sessionStorage.removeItem(recoveryKey)}catch{}return {}} }
-  function persist(s) {const scope=draftRecoveryScope(s);if(!scope)return false;try{const data=records();if(drafts.size)data[scope]={expires:Date.now()+12*60*60*1000,entries:[...drafts].slice(-20)};else delete data[scope];const value=JSON.stringify(data);if(value.length>1100000)return false;sessionStorage.setItem(recoveryKey,value);return true}catch{return false}}
+  function persist(s) {const scope=draftRecoveryScope(s);if(!scope||drafts.size>20)return false;try{const data=records();if(drafts.size&&!Object.hasOwn(data,scope)&&Object.keys(data).length>=20)return false;if(drafts.size)data[scope]={expires:Date.now()+12*60*60*1000,entries:[...drafts]};else delete data[scope];const value=JSON.stringify(data);if(value.length>1100000)return false;sessionStorage.setItem(recoveryKey,value);return true}catch{return false}}
   function recover(s) {const scope=draftRecoveryScope(s);if(!scope)return new Map();const entries=records()[scope]?.entries||[];return new Map(entries.filter(x=>Array.isArray(x)&&typeof x[0]==='string'&&/^[a-z0-9][a-z0-9-]{0,63}$/.test(x[0])&&x[1]&&typeof x[1].title==='string'&&x[1].title.length<=200&&typeof x[1].body==='string'&&x[1].body.length<=50000&&Number.isSafeInteger(x[1].baseRev)&&x[1].baseRev>=0).slice(-20))}
   function clearRecovery(){try{sessionStorage.removeItem(recoveryKey);sessionStorage.removeItem('project-room:doc-drafts:v1')}catch{}}
   const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -47,7 +47,7 @@ export function installRoomDocs({ client, getState, getSession }) {
     const s=owner;if(!owns(s))return;
     if(e.target.closest('[data-more]')) { await list(s,next); return; }
     const doc=e.target.closest('[data-doc]');if(doc){const entry=drafts.get(doc.dataset.doc);if(entry?.baseRev===0){current={docId:doc.dataset.doc,title:entry.title||'Untitled draft',body:'',rev:0};render();return;}await read(s,doc.dataset.doc);return;}
-    if(e.target.closest('[data-new]')){const id='doc-'+crypto.randomUUID();current={docId:id,title:'New document',body:'',rev:0};drafts.set(id,{title:'',body:'',baseRev:0});persist(s);render();root.querySelector('[data-title]').focus();return;}
+    if(e.target.closest('[data-new]')){const id='doc-'+crypto.randomUUID();current={docId:id,title:'New document',body:'',rev:0};drafts.set(id,{title:'',body:'',baseRev:0});const recovered=persist(s);render();if(!recovered)root.querySelector('[data-save-status]').textContent='Draft recovery unavailable; save before leaving.';root.querySelector('[data-title]').focus();return;}
     if(e.target.closest('[data-edit]')){root.querySelector('[data-editor]').hidden=false;root.querySelector('[data-body]').focus();return;}
     if(!e.target.closest('[data-save]')||!current)return;
     const d=current, submitted=drafts.get(d.docId)??{title:root.querySelector('[data-title]').value,body:root.querySelector('[data-body]').value,baseRev:d.rev};drafts.set(d.docId,submitted);
