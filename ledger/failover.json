@@ -1,0 +1,11 @@
+{
+  "state": "normal",
+  "declaredBy": null,
+  "declaredAt": null,
+  "reason": null,
+  "busIssue": "https://github.com/Uuriko/project-room/issues/6127",
+  "pollCadenceSeconds": 120,
+  "returnCondition": "a test room ask round-trips",
+  "updatedAt": "2026-11-12T02:54:56Z",
+  "version": 1
+}
