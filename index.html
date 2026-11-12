@@ -699,6 +699,14 @@
       </div>
     </dialog>
 
+    <dialog id="continuation-dialog" aria-labelledby="continuation-title">
+      <div class="panel-header"><h2 id="continuation-title">Continue with an agent</h2><button id="continuation-close" class="button ghost" type="button">Close</button></div>
+      <p id="continuation-sharing" class="form-hint">Review before sharing. This may include private task details and evidence links. Copying does not connect an agent or start work.</p>
+      <label for="continuation-preview" class="sr-only">Continuation to copy</label>
+      <textarea id="continuation-preview" rows="12" readonly spellcheck="false" aria-describedby="continuation-sharing"></textarea>
+      <p id="continuation-status" class="form-status" role="status" aria-live="polite"></p>
+      <div class="portable-actions"><button id="continuation-copy" class="button primary" type="button" disabled>Copy</button><button id="continuation-refresh" class="button secondary" type="button" disabled>Refresh</button></div>
+    </dialog>
     <dialog id="portable-dialog" aria-labelledby="portable-title">
       <div class="panel-header"><h2 id="portable-title">Use my AI</h2><button id="portable-close" class="button ghost" type="button">Close</button></div>
       <p id="portable-work-title"></p>
@@ -707,6 +715,7 @@
         <label id="portable-progress-label" class="form-hint" hidden><input id="portable-progress" type="checkbox"> Include progress and handoff</label>
         <label for="packet-preview" class="sr-only">Prompt to copy</label>
         <textarea id="packet-preview" rows="10" readonly spellcheck="false" aria-describedby="portable-sharing"></textarea>
+        <p id="packet-changed" class="form-status" role="status" hidden>Work changed. Refresh the prompt before copying. <button id="packet-refresh" class="button ghost" type="button">Refresh prompt</button></p>
         <p id="portable-sharing" class="form-hint">Review before sharing with your AI. Copying doesn’t start work.</p>
         <div class="portable-actions"><button id="packet-copy" class="button primary" type="button">Copy</button><button id="portable-add-result" class="button secondary" type="button">Paste AI draft</button></div>
       </section>
