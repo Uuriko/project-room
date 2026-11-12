@@ -640,7 +640,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     partialWorkSnapshot = false; inspectedWorkRecord = null;
-    docsUi?.reset({clear: !leavingPage && !sessionExpired && !preserveScopedBackup});
+    docsUi?.reset({clear: !leavingPage && !sessionExpired && !preserveScopedBackup && !["accepted-room-switch", "invited-room-switch"].includes(endedContext)});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
