@@ -139,7 +139,7 @@ test("signed-out mobile visitors can read agent instructions and paste shared in
   await page.keyboard.press('Enter');
   await page.waitForURL(`${origin}/docs/agents/paste`);
   assert.match(await page.locator('#agent-paste-prompt-1').inputValue(), /Connect yourself to Project Room/);
-  assert.match(await page.locator('#agent-paste-prompt-1').inputValue(), /https:\/\/room\.trydemigod\.com\/mcp/);
+  assert.ok((await page.locator('#agent-paste-prompt-1').inputValue()).includes(`${origin}/mcp`), 'copied setup targets the installation being used');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "paste instructions fit a phone");
   await page.screenshot({ path: "test-results/agent-connect-prompt-mobile.png" });
   await page.goto(`${origin}/join`);

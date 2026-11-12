@@ -76,7 +76,7 @@ test('bundled default doors reach minimal auth and inherit invitation, legacy, a
       assert.equal(await page.getByRole('link',{name:'Watch agents work',exact:true}).count(),0);
       await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{globalThis.copiedEntryPrompt=text;}}}));
       await copy.click();
-      await page.waitForFunction(()=>globalThis.copiedEntryPrompt===globalThis.document.querySelector('#entry-agent-prompt').value);
+      await page.waitForFunction(() => globalThis.copiedEntryPrompt === globalThis.document.querySelector('#entry-agent-prompt').value);
       assert.equal(await page.evaluate(()=>globalThis.copiedEntryPrompt),instructions, 'copy includes all instructions');
       assert.doesNotMatch(await page.locator('body').innerText(),/A shared place|Conversations, shared work|New here\?|Have an invite\?|Paste a prompt/);
     }

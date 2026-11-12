@@ -65,7 +65,10 @@ relevant to your change.
 
 ## Shared-checkout maintainers
 
-Maintainers coordinate overlapping work through the work-claim board:
-`GET /api/rooms/{roomId}/work-claims`. Follow
-[ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md) for claims and releases.
-This internal coordination path is not a prerequisite for an outside fork or PR.
+Maintainers coordinate overlapping work through the selected room's current
+work and ownership records. In native rooms, follow `room_list_work` pagination,
+read the selected task and use its allowed lifecycle actions. The `work-claims`
+board and `scripts/room-coord.mjs` are legacy-only; compatibility reads do not
+make legacy claim writes available in native rooms. Follow
+[ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md) for the current route and
+serialized releases. Room participation is optional for an outside fork or PR.
