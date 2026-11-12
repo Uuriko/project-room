@@ -6,7 +6,83 @@ results. Owner: Codex implementation for harnesses; product owner for acceptance
 rubrics and eventual participant studies. Review by implementation slice and before
 release. Link evidence to M2 in the [delivery ledger](DELIVERY-LEDGER.md).
 
-## Outcome measures
+## Active MVP scorecard — 2026-11-12
+
+Decision: keep changes that help a small software team complete a bounded task to
+a reviewed result with less elapsed time and human effort. Design, implementation
+and agent interfaces share this definition of usefulness. This section is the
+current measurement plan; it does not assert a measured customer baseline.
+
+Use one outcome ID through its task, PRs, check runs and review. A handoff, retry,
+child task or additional message does not create another successful outcome.
+Separate first-use, returning-contributor, design-change and routine-check cohorts;
+keep human, model-driven and scripted trials separate. Record starting state and
+acceptance rubric before execution. Each comparison uses the same task class,
+starting permissions, observation budget and definition version.
+
+| Primary KPI | Definition | Decision it supports |
+| --- | --- | --- |
+| Reviewed completion rate | Eligible started outcome episodes accepted against the declared rubric by their agreed deadline / all eligible started episodes whose deadline has passed at the reporting cutoff | Improve the ability to finish. Keep failed, abandoned, cancelled-after-start and timed-out episodes visible; report reason breakdowns. Show immature episodes separately, including early successes, until their cohort matures. |
+| Time to reviewed result | Wall time from task presentation, including setup, waiting, execution, review and recovery, to acceptance of the exact artifact revision | Find and remove the dominant delay. Report completed-episode median and sample count; use tail percentiles only with an adequate sample, alongside noncompletions and pending ages. |
+| Total human effort | Active human minutes for instruction, setup, decisions, review, correction and recovery per started episode | Reduce work imposed on the person. Waiting is not active effort. Unknown time stays unknown; show measurement coverage. Necessary product decisions are useful participation, not automatically a failure. |
+
+Review may be by the designated human or agent under the task's existing policy;
+independence requirements remain explicit. A check recipe may satisfy its own
+predeclared acceptance automatically, but its pass does not accept the enclosing
+product change. Version mismatch or a severe correctness/privacy failure cannot
+count as successful completion.
+
+This narrows the earlier two-outcome proposal below. Accepted outcomes per active
+human hour remains a derived efficiency view when active time coverage is reliable,
+not a fourth primary KPI. The Docs trial's older rescue/intervention definition
+excludes initial instruction and planned acceptance; preserve it for those studies.
+Do not silently compare that narrower measure with total human effort.
+
+### Select diagnostics for the current bottleneck
+
+Use at most one or two relevant diagnostics for an experiment, not the entire
+list as a mandatory scorecard:
+
+| Bottleneck | Diagnostic and source | Caveat |
+| --- | --- | --- |
+| Entry and discovery | Completion of first allowed useful action / started entry episodes; time and wrong turns from entry to that action, from journey probes or observed use | A connection, tool listing or hello is not a useful task outcome. |
+| Design and comprehension | Unassisted task completion and recovery; reasoned paired visual preference on the same task and content, including ties | Keep visual preference separate from correctness. Counterbalance presentation order; a model's taste score is not user preference. |
+| Context and continuation | Correct safe next action after interruption; reconstruction minutes, tool calls and retrieved bytes, from selected-context trials | Fewer bytes or calls can omit needed context. Include stale-source and uncertain-write cases. |
+| Execution and communication | Eligible-to-running queue time; usable-decision latency, broken down by intended runtime pair and active/idle/offline context, from existing run/request records | Receipt, wake acceptance, working status and verified completion are distinct. Show unresolved ages and unknown routing. |
+| Checks and review | Eligible routine check runs completed without model calls or human rescue / eligible routine runs; first-submission acceptance and reviewer rework | Keep failed jobs and retries. Skipped checks are not executed checks. Reviewer quality/rubric must stay comparable. |
+| Delivery and maintenance | Review-ready-to-verified-production time; releases needing repair or rollback / observed releases; accepted results reopened within a declared follow-up window | A merged PR is not deployed. Reopen and repeat-use cohorts require full observation windows. |
+| Repeated value | Projects completing a second meaningful outcome within a declared window / projects with one accepted outcome and a fully observed window | Signup, messages and invitation counts cannot establish repeated value. External GitHub contributions remain part of the supported journey. |
+
+Guardrails are observed severe correctness/privacy/data-loss incidents and total
+cost per accepted outcome, including failed work and idle operation where measured.
+Keep incident types and missing cost coverage visible rather than combining them
+into a score. Zero observed failures in a finite trial does not establish zero risk.
+
+### Minimal measurement record and improvement loop
+
+Reuse existing task, request, run, PR and release IDs and evidence. A compact
+per-episode record needs outcome ID, task class, first-use/returning condition,
+actor/host type, comparison arm, rubric/source/artifact revisions, start/deadline/
+acceptance timestamps, result and reason, active human minutes, rescue count,
+measured cost or null, guardrail findings and evidence links. Store no credentials
+or copied private conversations. Use server timestamps for cross-device intervals;
+local monotonic durations describe local execution only.
+
+No customer baseline or defensible numeric improvement target is established by
+passing repository tests. Start with comparable episodes and report counts,
+individual observations and missing data. Before testing a change, declare its
+hypothesis, primary KPI, relevant diagnostic, minimum worthwhile benefit and
+what regression would reject it. Change one mechanism when practical; label
+multi-change exploratory variants honestly. Keep the same observation window.
+
+After each relevant implementation batch: inspect the largest observed loss,
+choose the smallest correction or deletion, run matched tasks, inspect the rendered
+product and actual agent behavior, and keep or revert based on the outcome and
+guardrails. Do not repeatedly rerun unchanged passing checks or manufacture tasks
+to fill devices. Existing schedules stay paused; this is not a new dashboard,
+telemetry service or authorization to start background workers.
+
+## Earlier outcome proposal
 
 Keep two primary product outcomes: accepted outcomes per active human hour and
 time to verified acceptance. Definitions and comparative study controls live in the

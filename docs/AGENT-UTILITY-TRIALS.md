@@ -106,6 +106,8 @@ gets a useful result, not how many invitation messages were sent.
 
 ## Measurement and decisions
 
+The [active MVP scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md#active-mvp-scorecard--2026-11-12) defines the current cross-product measures. The three definitions below remain the narrower first-Docs trial protocol; keep their populations and human-effort exclusions explicit when comparing results.
+
 Use only three primary measures for the first Docs workflow:
 
 | Measure | Definition | Decision |
