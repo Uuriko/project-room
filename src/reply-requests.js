@@ -2,7 +2,7 @@ import { currentRecordReplyCount,currentRecordReplyOwner } from './current-recor
 // Shared request semantics. Deliberately independent of events, storage and UI.
 export const REPLY_CANCELLED = "reply_request.cancelled";
 export const REPLY_PROGRESSED = "reply_request.progressed";
-export const REPLY_PROGRESS_STATES = Object.freeze(["acknowledged", "working", "needs_input", "error"]);
+export const REPLY_PROGRESS_STATES = Object.freeze(["acknowledged", "accepted", "working", "needs_input", "error"]);
 export const REPLY_POLICY_VERSION = 1;
 export const MAX_REPLY_REQUESTS = 500;
 // Keep a worst-case escaped answer plus its envelope inside one 64 KiB
@@ -229,12 +229,16 @@ export function progressReplyRequest(state, incoming) {
   const request = replyRequest(state, data.requestMessageId);
   requireValid(actor && actor.active !== false, "Inactive reply request actor");
   requireValid(incoming.actorId === request.recipientId, "Only the recipient may report progress on a request");
-  requireValid(REPLY_PROGRESS_STATES.includes(data.progress), "Progress must be acknowledged, working, needs_input or error");
+  requireValid(REPLY_PROGRESS_STATES.includes(data.progress), "Progress must be acknowledged, accepted, working, needs_input or error");
   requireValid(data.note === undefined || text(data.note) && data.note.length <= 1000, "Progress note must be 1..1000 characters");
   openRevision(request, data.expectedRequestRevision);
   const at = incoming.at;
   Object.assign(request, { acknowledgedAt: request.acknowledgedAt ?? at, lastActivityAt: at,
     progressState: data.progress, progressNote: data.note ?? null, progressEventId: incoming.id });
+  // Stage clocks for the asker: accepted = the recipient committed to do it, working = it is
+  // underway. First report of each wins, so a later restatement never moves them.
+  if (data.progress === "accepted") request.acceptedAt = request.acceptedAt ?? at;
+  else if (data.progress === "working" && request.acceptedAt) request.workingAt = request.workingAt ?? at;
   if (data.progress === "needs_input") request.needsInputAt = at;
   else if (data.progress === "error") request.errorAt = at;
   else { delete request.needsInputAt; delete request.errorAt; }

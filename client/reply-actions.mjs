@@ -33,9 +33,9 @@ const definitions = [
       contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: responseBody }, ["responseToRequestId", "expectedRequestRevision", "responseOutcome", "toMemberId"]],
   ["room_cancel_request", null, "Cancel your open request with a reason. The actual human room owner may also cancel. Does not stop another process." + retry,
     { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision, reason: text }, ["requestMessageId", "expectedRequestRevision", "reason"]],
-  ["room_progress_request", null, "Tell the asker where a request addressed to you stands: acknowledged, working, needs_input (you need something from them; say what in note) or error. The request stays open; answer it later with room_respond_to_request using the same revision." + retry,
+  ["room_progress_request", null, "Tell the asker where a request addressed to you stands: acknowledged (you saw it), accepted (you commit to do it), working (it is underway), needs_input (you need something from them; say what in note) or error. Acknowledged alone proves neither acceptance nor progress. The request stays open; answer it later with room_respond_to_request using the same revision." + retry,
     { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision,
-      progress: { type: "string", enum: ["acknowledged", "working", "needs_input", "error"] }, note: { ...text, maxLength: 1000 } }, ["requestMessageId", "expectedRequestRevision", "progress"]]
+      progress: { type: "string", enum: ["acknowledged", "accepted", "working", "needs_input", "error"] }, note: { ...text, maxLength: 1000 } }, ["requestMessageId", "expectedRequestRevision", "progress"]]
 ];
 const actions = new Map(definitions.map(([name, route, description, properties, required = Object.keys(properties)]) =>
   [name, { route, tool: { name, description, inputSchema: { type: "object", properties, required, additionalProperties: false },
@@ -172,8 +172,12 @@ const requestFields = "id openingEventId requesterId recipientId workItemId stat
 const REQUEST_LIFECYCLE_STATES = ["pending", "active", "needs_input", "error", "complete", "stale"];
 const validProgress = value => keys(value, ["state", "note", "at"]) && REPLY_PROGRESS_STATES.includes(value.state)
   && (value.note === null || typeof value.note === "string" && value.note.length <= 1000) && (value.at === null || date(value.at));
+const REQUEST_STAGES = ["accepted", "working", "needs_input", "error", "stale", "completed"];
+const validStages = value => keys(value, ["stage", "receivedAt", "acceptedAt", "workingAt", "completedAt"]) && REQUEST_STAGES.includes(value.stage)
+  && date(value.acceptedAt) && ["receivedAt", "workingAt", "completedAt"].every(key => value[key] === null || date(value[key]));
 const validLifecycle = value => value && typeof value === "object" && !Array.isArray(value)
-  && Object.keys(value).every(key => ["state", "outcome", "unresponsive", "since", "thresholds"].includes(key))
+  && Object.keys(value).every(key => ["state", "outcome", "unresponsive", "since", "thresholds", "stages"].includes(key))
+  && (value.stages === undefined || validStages(value.stages))
   && REQUEST_LIFECYCLE_STATES.includes(value.state) && typeof value.unresponsive === "boolean"
   && (value.since === null || date(value.since))
   && (value.outcome === undefined || ["answered", "declined", "cancelled"].includes(value.outcome))
