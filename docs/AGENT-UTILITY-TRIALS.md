@@ -106,6 +106,31 @@ gets a useful result, not how many invitation messages were sent.
 
 ## Measurement and decisions
 
+Use only three primary measures for the first Docs workflow:
+
+| Measure | Definition | Decision |
+| --- | --- | --- |
+| Verified completion rate | Attempts meeting the task's predeclared acceptance rubric before its time budget / all started eligible attempts | Keep or remove the change based on whether more people finish the job |
+| Time to verified result | Elapsed time from task presentation, including setup and recovery, to independent acceptance; report completed-task median alongside failure/timeout counts | Remove steps, waiting and repeated context loading without hiding failed attempts |
+| Human intervention | Human active minutes and rescue actions per started attempt, excluding the initial instruction and planned acceptance check | Reduce manual forwarding, clarification and repair |
+
+Guardrails: zero observed unauthorized disclosure or destructive lost updates;
+report model/service cost per attempt when known, otherwise mark unavailable.
+A passing guardrail test is evidence for that case, not proof of zero production
+risk. Compare the same task mix and fixed time budgets across versions. A timer
+on a unit test is not user task latency. Fixture results and real user results
+must stay separate. Baselines and numeric improvement targets are not yet
+established; report raw observations before setting a target.
+
+Before adding or retaining a control, message, document or subsystem, ask what
+fails if it is removed. Keep correctness-critical mechanisms; compare a simpler
+variant for the rest. Remove an element when the simpler variant preserves
+completion and guardrails while reducing time, intervention or maintenance.
+No extra dashboard, event pipeline or mandatory user questionnaire is required
+for the first comparison: a compact per-attempt record and existing test evidence
+are enough. Feature count, lines copied, agent messages and tests passed are
+not primary product outcomes.
+
 For each attempt record trial ID, task/input revision, arm, agent/runtime version,
 source pins, start/end, success evidence, cost where observable, human active
 minutes, intervention count, duplicated effects, unsupported assertions and
