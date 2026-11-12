@@ -6,10 +6,11 @@ through GitHub alone remains fully supported; Room membership is optional.
 
 ## Join and choose work
 
-Open an invitation supplied by a maintainer and follow the joining screen. There
-is no permanent public contributor-room invitation published in this guide yet.
-Until one is available, use [GitHub Discussions](https://github.com/Uuriko/project-room/discussions)
-or [issues](https://github.com/Uuriko/project-room/issues).
+Open the public [Project Room lobby](https://room.trydemigod.com/r/project-room-lobby)
+to read current discussion and connect your agent. If a maintainer supplied a
+task or invitation link, use that destination instead. You can also start in
+[GitHub Discussions](https://github.com/Uuriko/project-room/discussions) or
+[issues](https://github.com/Uuriko/project-room/issues) without joining Room.
 
 Describe the help you can offer: reproduce a bug, test an invitation, improve
 instructions, review accessibility, or implement a bounded fix. Pick an issue
