@@ -6,6 +6,8 @@ import {event} from '../src/events.js';
 import {publicRoomView} from '../server/public-rooms.mjs';
 import {unpublishPublic} from '../server/legal-store.mjs';
 import {readCurrentPublicWork} from '../server/current-public-work.mjs';
+import {loadPublicRoomTask} from '../server/public-read-model.mjs';
+import {textVersion} from '../server/text-results.mjs';
 import {withCurrentRoomWriter, CURRENT_PUBLIC_WORK_PREDICATE, CURRENT_PUBLIC_WORK_INDEX_SQL, readCurrentWorkItem} from '../server/current-room-repository.mjs';
 
 function fixture(t){
@@ -111,4 +113,78 @@ test('published tasks later associated with private requests stay hidden and pag
  assert.deepEqual(second.document.tasks.map(x=>x.id),['z-public']);assert.equal(second.document.coverage.tasks.hasMore,false);
  store.transaction(()=>withCurrentRoomWriter(store.db,'public-work-room',()=>store.db.prepare("UPDATE current_room_records SET payload=? WHERE room_id='public-work-room' AND domain='workPrivacy' AND record_key='a-private-0'").run(JSON.stringify({version:1,requests:0,parties:{}}))));
  assert.throws(page,/current_room_corrupt/,'untrusted privacy metadata must not make the task public');
+});
+
+
+test('selected public task reads one protected body beyond discovery page with no grants',t=>{
+ const {store,task}=fixture(t);for(let i=0;i<9;i++)task('before-'+i,true);task('z-selected',true);task('secret');
+ const prepare=store.db.prepare.bind(store.db);
+ store.db.prepare=sql=>{
+  if (/\b(?:FROM|JOIN)\s+(?:messages|events)\b/i.test(sql)) throw Error('Conversation read forbidden');
+  if (/FROM work_entities INDEXED BY current_public_work_keys/.test(sql)) assert.match(sql,/work_id=\?/);
+  return prepare(sql);
+ };
+ const result=loadPublicRoomTask(store,'public-work-room','z-selected');
+ assert.equal(result.task.id,'z-selected');assert.equal(result.task.state,'proposed');
+ assert.ok(Number.isSafeInteger(result.task.revision));
+ assert.deepEqual(Object.keys(result.task).sort(),['definitionOfDone','id','revision','state','title']);
+ assert.deepEqual(result.room.tasks,[result.task]);
+ assert.equal(result.room.coverage.tasks.selection,'selected');
+ assert.equal(result.room.coverage.tasks.assignmentGranted,false);assert.equal(result.room.coverage.tasks.executionGranted,false);
+ for(const id of ['secret','missing','../bad',undefined,null])assert.equal(loadPublicRoomTask(store,'public-work-room',id),null);
+ assert.equal(loadPublicRoomTask(store,'different-room','z-selected'),null);
+});
+
+test('selected public links immediately hide private association, task withdrawal and room takedown',t=>{
+ const {store,task,send}=fixture(t);task('selected',true);
+ const read=()=>loadPublicRoomTask(store,'public-work-room','selected');
+ assert.ok(read());send('withdraw','work.public_set',{workItemId:'selected',enabled:false});assert.equal(read(),null);
+ send('republish','work.public_set',{workItemId:'selected',enabled:true});assert.ok(read());
+ send('off','room.public_page_set',{enabled:false});assert.equal(read(),null);
+ send('on','room.public_page_set',{enabled:true});assert.ok(read());
+ send('producer','member.added',{memberId:'producer',displayName:'Producer',kind:'agent',permissions:[]});
+ send('private','message.posted',{messageId:'private',toMemberId:'producer',workItemId:'selected',requestKind:'reply',body:'PRIVATE'});
+ assert.equal(read(),null);
+ task('other',true);assert.ok(loadPublicRoomTask(store,'public-work-room','other'));
+ unpublishPublic(store.db,{kind:'room',id:'public-work-room',byAccount:'operator',now:Date.now()});
+ assert.equal(loadPublicRoomTask(store,'public-work-room','other'),null);
+});
+
+test('selected public lookup fails closed for archive and unverified task or privacy payloads',t=>{
+ for(const mutation of ['archive','body','privacy']){
+  const {store,task,send}=fixture(t);task('selected',true);
+  const read=()=>loadPublicRoomTask(store,'public-work-room','selected');
+  if(mutation==='archive'){send('archive','room.archived',{});assert.equal(read(),null);continue;}
+  store.transaction(()=>withCurrentRoomWriter(store.db,'public-work-room',()=>{
+   if(mutation==='body'){
+    const row=store.db.prepare("SELECT body FROM work_entities WHERE room_id='public-work-room' AND work_id='selected'").get();
+    const body=JSON.parse(row.body);body.title='UNVERIFIED';
+    store.db.prepare("UPDATE work_entities SET body=? WHERE room_id='public-work-room' AND work_id='selected'").run(JSON.stringify(body));
+   }else store.db.prepare("UPDATE current_room_records SET payload=? WHERE room_id='public-work-room' AND domain='workPrivacy' AND record_key='selected'").run(JSON.stringify({version:1,requests:0,parties:{forged:true}}));
+  }));
+  assert.throws(read,/current_room_corrupt/);
+ }
+});
+
+test('legacy public discovery caches do not qualify selected task links',t=>{
+ const store=new RoomStore(':memory:');t.after(()=>store.close());store.initialize(initialRoom('legacy-public'));
+ const key=store.issueAccessKey('legacy-public','owner');let serial=0;
+ const send=(type,data)=>store.command(key,'legacy-public',{id:'legacy-'+(++serial),type,data});
+ send('work.proposed',{workItemId:'task',title:'Published',definitionOfDone:'Task',accountableMemberId:'owner'});
+ send('work.public_set',{workItemId:'task',enabled:true});send('room.public_page_set',{enabled:true});
+ assert.equal(loadPublicRoomTask(store,'legacy-public','task'),null);
+});
+
+
+test('selected public links retain the existing open-task-only publication boundary',t=>{
+ const {store,task,send}=fixture(t);task('selected',true);
+ const item=()=>readCurrentWorkItem(store.db,'public-work-room','selected');
+ const mutate=(id,type,data={})=>send(id,type,{workItemId:'selected',expectedRevision:item().revision,...data});
+ mutate('accept','work.accepted');mutate('start','work.started');
+ const before=loadPublicRoomTask(store,'public-work-room','selected');assert.equal(before.task.state,'working');
+ assert.equal(before.task.revision,item().revision);
+ const body='Recorded result';const posted=send('result','message.posted',{messageId:'result',workItemId:'selected',body});
+ mutate('complete','work.completed',{evidenceKind:'room_text',evidenceMessageId:'result',evidenceMessageEventId:posted.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null,producerId:'owner',summary:'Finished',nextAction:'Review'});
+ assert.equal(item().state,'completed');
+ assert.equal(loadPublicRoomTask(store,'public-work-room','selected'),null);
 });

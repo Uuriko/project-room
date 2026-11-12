@@ -80,3 +80,35 @@ export function readCurrentPublicWork(store, roomId, {after = ''} = {}) {
       assignmentGranted:false, executionGranted:false}};
   }));
 }
+
+
+// One explicitly published open task, never a scan of an unrelated page.
+// Return null for all unavailable identities; membership/private associations
+// cannot be inferred from the public result. Corrupt proof data still fails shut.
+export function readCurrentPublicTask(store, roomId, workId) {
+  if (!validId(workId)) return null;
+  return store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {
+    const db = store.db, head = readCurrentHead(db, roomId, b);
+    const room = readCurrentRecord(db, roomId, 'metadata', 'room', b);
+    if (!head || room?.id !== roomId) corrupt('public room metadata unavailable');
+    if (!publicPage({room}).enabled || room.archivedAt) return null;
+    const row = db.prepare(`SELECT work_id, length(CAST(body AS BLOB)) AS bytes
+      FROM work_entities INDEXED BY current_public_work_keys
+      WHERE room_id=? AND ${CURRENT_PUBLIC_WORK_PREDICATE} AND work_id=?`).get(roomId, workId);
+    if (!row) return null;
+    chargeCurrentReadBudget(b, Buffer.byteLength(row.work_id) + 64, 1);
+    if (readCurrentWorkPrivacy(db, roomId, workId, b).requests) return null;
+    if (!Number.isSafeInteger(row.bytes) || row.bytes < 1 || row.bytes > 128 * 1024)
+      corrupt('public work candidate exceeds supported payload');
+    return withCurrentWorkReadUnits(store, roomId, unit => {
+      const item = unit.work(workId);
+      if (!item || item.id !== workId || publicTask(item).enabled !== true
+        || !['proposed', 'accepted', 'working', 'blocked'].includes(item.state)
+        || typeof item.title !== 'string' || typeof item.definitionOfDone !== 'string'
+        || !Number.isSafeInteger(item.revision) || item.revision < 0)
+        corrupt('public task differs from protected current record');
+      return {id:item.id, title:item.title, definitionOfDone:item.definitionOfDone,
+        state:item.state, revision:item.revision};
+    });
+  }));
+}
