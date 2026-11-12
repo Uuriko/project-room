@@ -68,6 +68,7 @@ const withRef = (path, ref) => {
 const pageStyle = () => `:root{color-scheme:dark}
 body{margin:0;background:#10141a;color:#e8eef6;font:17px/1.55 system-ui,sans-serif}
 main{max-width:42rem;margin:0 auto;padding:2rem 1.25rem 3rem}
+body>header{max-width:42rem;margin:0 auto;padding:1rem 1.25rem 0}body>header p{margin:0}
 h1{font-size:clamp(1.6rem,5vw,2.2rem);line-height:1.15;letter-spacing:-.03em}
 a{color:#8eb6ff}
 .card{border-top:1px solid #2a3340;padding:1rem 0;overflow-wrap:anywhere;word-break:break-word;max-width:100%}
@@ -87,7 +88,8 @@ img,svg,table{max-width:100%}
 #copy-room-setup{min-height:44px;padding:0 1rem;border:0;border-radius:.45rem;background:#5555bd;color:#fff;font:600 1rem system-ui,sans-serif;cursor:pointer}
 #copy-room-setup:hover{background:#6a6ad4}
 #copy-room-setup:focus-visible{outline:2px solid #8eb6ff;outline-offset:3px}
-#copy-room-setup:disabled{opacity:.65;cursor:wait}`;
+#copy-room-setup:disabled{opacity:.65;cursor:wait}
+@media (pointer:coarse){main>p>a:not(.try),header a,footer a{display:inline-flex;align-items:center;min-height:2.75rem}}`;
 
 function head({ title, description, path }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
