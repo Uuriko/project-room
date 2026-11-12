@@ -15,7 +15,8 @@ test("CONTRIBUTING.md has working local contributor entry points", () => {
     assert.ok(links.includes(target), `Guide should link to ${target}`);
     assert.ok(existsSync(join(root, target)), `Contributor link should resolve: ${target}`);
   }
-  assert.match(content, /work-claim board/);
+  assert.match(content, /room_list_work/);
+  assert.match(content, /legacy-only/);
   assert.doesNotMatch(content, /#1160/);
 });
 test("CONTRIBUTING.md matches actual repo policy", () => {
@@ -23,7 +24,8 @@ test("CONTRIBUTING.md matches actual repo policy", () => {
   const content = readFileSync(path, "utf8");
   assert.ok(content.includes("npm run lint"), "Guide should name the repo's canonical lint command");
   assert.ok(!content.includes("npx eslint"), "Guide should not name a non-canonical lint command");
-  assert.match(content, /GET \/api\/rooms\/\{roomId\}\/work-claims/, "Guide should name the room work-claim board");
+  assert.match(content, /room_list_work[\s\S]*allowed lifecycle actions/, "Native shared-checkout contributors follow current work actions");
+  assert.match(content, /No hosted account, private coordination bus, or live-room claim is required/, "Outside contributors are not forced through maintainer coordination");
   assert.doesNotMatch(content, /#1160/);
   for (const check of ["lint", "contract", "browser", "cloudflare"]) {
     assert.ok(content.includes(check), `Guide should name the CI check: ${check}`);

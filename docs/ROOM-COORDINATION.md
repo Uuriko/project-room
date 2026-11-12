@@ -377,3 +377,75 @@ node scripts/room-guard.mjs --base origin/main --strict
 `RoomAgentClient` (`client/room-agent.mjs`).
 Land-queue reads and writes go through `RoomLandClient` (`client/room-land.mjs`): `landQueue()`,
 `addLandItem({ repo, prNumber })` and `removeLandItem(itemId)`.
+
+
+### Proposed runtime admission contract — 2026-11-12
+
+This is a reviewable contract for the observed shared-seat failure, not a shipped
+API or permission grant. Member-only requests keep their existing semantics;
+runtime targeting must be an explicitly supported, negotiated option. No live
+listener, saved identity or credential is changed by this document.
+
+| Identifier | Meaning | What it must not establish |
+| --- | --- | --- |
+| Member | Project participant with existing permissions | Which laptop, listener or agent process is executing |
+| Runtime | Server-bound installation/adapter identity under that participant | Authority beyond the member's current scopes |
+| Session | Authenticated runtime connection generation and declared capabilities | Perpetual presence or completion of work |
+| Attempt | Existing immutable execution reservation and its journal | A fresh permission grant or permission to retry an unknown effect |
+
+A supported sender chooses a concrete runtime for an execution-directed request.
+The service validates the target's binding and supported capability, and records
+that target with the request revision. A body saying "other laptop" is a human
+hint, not attestation. An unavailable or incompatible target is explicit; never
+silently substitute another listener sharing the member identity. Ordinary
+member conversations and helpful context replies remain possible.
+
+Admission is a server-side decision, using authenticated runtime/session
+provenance rather than caller-supplied display labels. Execution requires current
+room access, permitted scope, current request basis, a matching intended runtime
+and the existing attempt reservation. Repeated admission of the same operation
+returns its recorded outcome. A different runtime must not steal or terminally
+satisfy that targeted obligation. A reply-only runtime may append a contextual
+response but cannot report execution or close a request requiring the execution
+runtime. Grok's handoff lifecycle remains the progress owner; do not add a second
+progress tracker for this binding.
+
+A matching authenticated runtime may reconnect with a new session generation
+and reconcile its existing attempt. Session expiry or missing presence alone
+must not release a possibly active execution reservation. Reassignment requires
+an explicit owner decision and reconciliation of the original attempt; unknown
+external effects block automatic replay. Completion remains a result linked to
+source and evidence, followed by the existing review/verification path.
+
+Acceptance cases are the actual Jill 5386/5388/5406 and other-desktop 5321/5331
+exchanges, plus duplicate admission, reply-only fallback, stale session,
+revocation, reconnect and lost response after a committed result. The wrong
+runtime's helpful message must remain visible without closing the intended
+runtime's obligation. A correct retry must not create another effect. Existing
+member-only clients must not advertise runtime-targeted delivery. Compare saved,
+admitted, useful-response and verified-outcome latency separately, with pending
+ages and unverified provenance visible. This requires backend and adapter work
+before it can be called a guarantee.
+
+
+### Recent coordination evidence and the next comparisons — 2026-11-12
+
+Recent findings disagree in useful ways. Do not turn them into a universal
+agent count, model pairing or requirement to run a review swarm.
+
+| Source | Concrete observation | Application and limit |
+| --- | --- | --- |
+| [Stackness, Nov 9](https://stackness.dev/blog/how-much-faster-are-parallel-coding-agents-measured-on-364-runs) | Author reports 364 timed task runs, 1.21 effective parallelism overall and 1.46 in the busiest window; delayed integration left 92 files requiring merge resolution. | Keep batches small and integrate promptly. This observational project metric is not a randomized throughput speedup. |
+| [Generality Labs, Oct 29](https://generality.org/blog/posts/mirrorcode-collaboration/) | Fixed total token budgets across three reconstruction tasks; strong acceleration on Ruff, while single agents outperform teams on Cprepro. Hardware allocation changes with team size. | Parallelize separable work, compare matched outcomes and count all resources. Do not generalize one benchmark's optimum to Room. |
+| [ParallACT, submitted Oct 30](https://arxiv.org/abs/2611.00314) | Contradictory shared-code requests show a 62% to 16% drop in one tested configuration; a communication channel recovers only part of the loss. | Resolve incompatible requirements and interfaces before parallel edits. Faster messages alone cannot resolve a product decision. Preprint, not Room evidence. |
+| [PASC, Oct 5](https://doi.org/10.4230/LIPIcs.ESEM.2026.18) | Structured peer effects, commits and test outputs reduced cost per resolved task about 20% and destructive concurrent edits about 47% versus silent pairs in its benchmark. | Prefer derived peer activity over repeated status messages. This shared-container result does not justify abandoning our isolated worktrees. |
+| [Fable team experiment, Nov 9](https://claude.dev/blog/safely-scaling-multi-agent-teams-with-fable-5-2/) | Agents coordinated through Git and transactional SQL without dedicated messaging tools; runtime identity was tagged outside each sandbox. | Reuse canonical work/results and authenticated provenance. A highly parallel formal-proof experiment is not a two-laptop product benchmark. |
+| [Practitioner queue discussion](https://www.reddit.com/r/ClaudeCode/comments/1x72r98/my_claude_code_setup_got_out_of_hand_now_the/) | Author describes exact-commit review, a separate repair session and a stopping condition for nonconverging loops. | Borrow the workflow pattern, not an unmeasured speed claim; we already have PR/head/result primitives. |
+| [Practitioner review experiment](https://www.reddit.com/r/ClaudeAI/comments/1xm2xkm/followup_i_tested_ai_code_review_on_40_real_bugs/) | Self-reported 288 small-task runs and 40 historical bugs; five reviewers collectively caught 12 bugs. | Encode requirements as tests where possible and measure review precision as well as recall. Single repo, small samples and model-assisted grading limit generalization. |
+
+First compare one implementation owner plus an independent reviewer against two
+implementers on similarly scoped, separable tasks. Keep model/source/tool budgets
+comparable and include integration, review wait, failures, rework and human
+intervention. Separately test derived Git/CI/task changes against manual status
+recaps, reusing Grok's existing integration lane. A disagreement in requirements
+is a decision to resolve, not a reason to add another chat or more agents.

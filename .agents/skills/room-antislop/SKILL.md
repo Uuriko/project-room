@@ -25,7 +25,7 @@ rule numbers (R-xx) are kept so findings can be traced. See
   MEDIUM, and consistency rules LOW. Fix only what is in your claimed scope,
   and post the rest to the owner or the Board.
 - **Before flagging,** check DESIGN.md. An intentional choice recorded there
-  (the minimal login, dark default, the "Agent sign in" name) isn't a finding.
+  (the minimal login, dark default, and copyable agent connection prompt) isn't a finding.
 - **Look for clusters, not single tells.** One em dash, one eyebrow, or one
   short sentence isn't slop by itself.
 

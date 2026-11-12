@@ -104,7 +104,7 @@ node scripts/design-evidence-gallery.mjs --out test-results/design-review --jour
 ```
 
 The optional `--journey` selects `entry`, `access`, `signup`, `room-create`,
-`permissions` or `admission`. Omit it for the existing complete gallery. A selected
+`permissions`, `admission`, `results` or `continuation`. Omit it for the existing complete gallery. A selected
 journey avoids dumping unrelated screens into the agent's context.
 
 Use a new output directory for each run. Open `index.html` in that directory;
@@ -143,7 +143,30 @@ new baselines. Supplement axe with keyboard, focus return, zoom and screen-reade
 checks. See [QA](QA-SYSTEM.md), [testing](HOW-TO-TEST.md), and
 [collaboration experiments](COLLABORATION-EXPERIMENTS.md).
 
-## First three journeys
+## Compare revisions without rebuilding the evidence
+
+After capturing baseline and candidate into separate directories, use:
+
+```sh
+node scripts/design-evidence-gallery.mjs --baseline /path/to/baseline-gallery --candidate /path/to/candidate-gallery --out /path/to/new-comparison
+```
+
+The comparison writes a side-by-side `index.html` and bounded `comparison.json`
+for agents. It verifies screenshot hashes and matches state IDs, fixtures,
+components, tests, viewports, themes, browser and environment. Different or
+unknown conditions, unstable source, failed captures and missing states remain
+explicit. It copies evidence images into the output without changing either
+input, running new tests, refreshing baselines or approving design.
+
+Use the comparison to ask what became clearer, what can be removed, and whether
+the task and recovery still work. A changed image or lower axe count is not a
+usability result. Keep the hypothesis, interaction results and review decision
+with the existing task or PR. Pair screenshots with task completion, wrong turns,
+recovery and human effort; keep failed attempts. Stop when another iteration has
+no concrete expected benefit. The first real comparison used the existing
+result-reading accessibility repair; it is not a new participant study.
+
+## Journey coverage
 
 Load the relevant implementation with the selected screenshots:
 
@@ -216,6 +239,29 @@ recovery, time, agent calls and reviewer rework. Ask for a reasoned paired visua
 preference separately from functional correctness. Keep failed trials; a small
 pilot does not establish causation. Stop iterating when remaining changes have no
 clear task or visual benefit; repeated model critique can produce busywork.
+
+## Practical setup choices — 2026-11-12
+
+The surrounding tools should reduce repeated work rather than create another
+project operating system. These are researched mechanisms, not measured Room
+productivity gains or instructions to install every tool.
+
+| Setup | Borrow or reuse | Decision and qualification |
+| --- | --- | --- |
+| [Agent Skills](https://agentskills.io/specification) | Small discoverable entry, optional scripts, selected references | Keep project guidance versioned and load references on demand. A skill is not a permission grant or proof that a host loads it. |
+| [gstack design review](https://github.com/garrytan/gstack/tree/main/design-review) | Inspect rendered screens, concrete findings, responsive checks and paired screenshots | Reuse this review pattern through our gallery. Do not import its full runtime, onboarding, telemetry or weighted design scores. No upstream code copied in this change. |
+| [Playwright CLI](https://github.com/microsoft/playwright-cli) and [Trace Viewer](https://playwright.dev/docs/trace-viewer) | Concise browser commands for shell agents; step/DOM/network evidence for a failed journey | Existing Playwright scripts remain the deterministic owner. Evaluate CLI only for a host lacking adequate browser tools; trace one reproducible failure before adding permanent capture overhead. Traces may contain sensitive page/network data. |
+| [Storybook MCP](https://storybook.js.org/docs/ai/mcp/overview) | Real component states and structured usage context | Keep existing real-app fixtures first. Its AI APIs remain preview and component-manifest support varies by framework; installation is not automatically useful for this app. |
+| [Git worktrees](https://git-scm.com/docs/git-worktree) | Independent checkouts for parallel changes | Continue isolated source-pinned work; reconcile ownership and review before composition. Do not create a checkout for every thought or delete unpushed work as cleanup. |
+| [Diátaxis](https://diataxis.fr/) | Separate learning tutorials, task how-tos, technical reference and explanation | Use the existing handbook index to route readers by need. Preserve stable links and useful history; no wholesale directory migration is necessary. |
+
+The preferred current setup is the existing Room task and Docs, an isolated
+checkout, selected project instructions, actual-app browser fixtures, the paired
+review gallery and existing local checks/CI. Keep their results attached to the
+same work/result/PR. Add a new tool only for an observed gap, with source/license,
+installation and maintenance cost, a bounded trial and a removal condition in the
+existing [source library](SOURCE-LIBRARY.md). Workflow documentation establishes
+what a setup does, not how much faster it makes our contributors.
 
 ## Sources
 

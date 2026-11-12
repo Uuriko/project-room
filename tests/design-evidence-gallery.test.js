@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { readCaptures, renderGallery, selectJourneys, buildReviewPacket, renderReviewPrompt } from "../scripts/design-evidence-gallery.mjs";
+import { readCaptures, renderGallery, selectJourneys, buildReviewPacket, renderReviewPrompt, compareGalleries } from "../scripts/design-evidence-gallery.mjs";
 
 test("gallery binds screenshot bytes, preserves failed test status and refuses unsafe paths", t => {
   const dir = mkdtempSync(join(tmpdir(), "design-gallery-"));
@@ -56,4 +56,40 @@ test("agent review context retains failed and missing evidence without inventing
   assert.match(renderReviewPrompt(packet),/insufficient evidence/);
   assert.match(renderReviewPrompt(packet),/Capture checks passed: false/);
   assert.match(renderReviewPrompt(packet),/Screenshots cannot establish/);
+});
+
+
+function comparisonFixture(t) {
+  const root=mkdtempSync(join(tmpdir(),"design-pair-"));t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const bytes=Buffer.from("synthetic screenshot bytes"),sha256=createHash("sha256").update(bytes).digest("hex");
+  const capture={id:"task-dark",title:"<script>untrusted</script>",fixture:"Synthetic task",component:"task",script:"task.mjs",testName:"task",viewport:{width:390,height:844},theme:{declared:"dark"},fullPage:true,browserVersion:"test",screenshot:"task-dark.png",sha256,testPassed:true,accessibility:{serious:[],other:[]}};
+  const report={version:1,source:{commit:"a".repeat(40),tree:"b".repeat(40),dirty:false},sourceStable:true,passed:true,environment:{platform:"test"},runs:[{status:0}],captures:[capture]};
+  function save(side,change={}) {const dir=join(root,side);mkdirSync(dir,{recursive:true});writeFileSync(join(dir,"manifest.json"),JSON.stringify({...report,...change}));writeFileSync(join(dir,"task-dark.png"),bytes);return dir;}
+  return {root,capture,report,save};
+}
+
+test("paired review preserves sources, missing states and escaped labels without approving design",t=>{
+ const f=comparisonFixture(t),baseline=f.save("before"),candidate=f.save("after",{source:{...f.report.source,commit:"c".repeat(40)},captures:[f.capture,{...f.capture,id:"new-state"}]} );
+ const result=compareGalleries(baseline,candidate,join(f.root,"out"));
+ assert.equal(result.pairs.length,1);assert.equal(result.pairs[0].comparable,true);
+ assert.deepEqual(result.unmatched,[{id:"new-state",missingFrom:"baseline"}]);
+ assert.equal(result.designDecision,null);assert.equal(result.reviewStatus,"not_reviewed");
+ const html=readFileSync(join(f.root,"out/index.html"),"utf8");assert.doesNotMatch(html,/<script>/);assert.match(html,/&lt;script&gt;/);
+ assert.equal(result.pairs[0].imageBytesChanged,false);
+ assert.throws(()=>compareGalleries(baseline,candidate,join(f.root,"out")),/new or empty/);
+});
+
+test("paired review makes changed fixtures, environments and failed or unstable captures noncomparable",t=>{
+ const f=comparisonFixture(t),baseline=f.save("before"),candidate=f.save("after",{passed:false,sourceStable:false,environment:{platform:"different"},captures:[{...f.capture,fixture:"Different task",testPassed:false}]});
+ const pair=compareGalleries(baseline,candidate,join(f.root,"out")).pairs[0];
+ assert.equal(pair.comparable,false);for(const reason of ["different_or_unknown_fixture","different_environment","candidate_source_unstable_or_unknown","candidate_capture_checks_not_passed"])assert.ok(pair.reasons.includes(reason));
+});
+
+test("paired review rejects tampered screenshot bytes and paths outside the evidence directory",t=>{
+ const f=comparisonFixture(t),baseline=f.save("before"),candidate=f.save("after");
+ writeFileSync(join(candidate,"task-dark.png"),"tampered");
+ assert.throws(()=>compareGalleries(baseline,candidate,join(f.root,"out")),/digest mismatch/);
+ writeFileSync(join(f.root,"outside.png"),"outside");
+ f.save("after",{captures:[{...f.capture,screenshot:"../outside.png"}]});
+ assert.throws(()=>compareGalleries(baseline,candidate,join(f.root,"out")),/Unsafe/);
 });

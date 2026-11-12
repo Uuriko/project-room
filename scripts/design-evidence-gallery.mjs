@@ -3,8 +3,8 @@
 // node scripts/design-evidence-gallery.mjs --out /absolute/new-directory
 import { spawnSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -90,6 +90,69 @@ export function renderReviewPrompt(packet) {
   ].join("\n");
 }
 
+const stable = value => JSON.stringify(value, (_, item) => item && typeof item === "object" && !Array.isArray(item)
+  ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
+
+function readGallery(directory) {
+  const base = realpathSync(directory), report = JSON.parse(readFileSync(join(base, "manifest.json"), "utf8"));
+  if (report.version !== 1 || !report.source || !report.environment || !Array.isArray(report.captures)
+    || !Array.isArray(report.runs)) throw Error("Invalid gallery manifest");
+  const ids = new Set();
+  const captures = report.captures.map(capture => {
+    if (!/^[a-z0-9-]+$/.test(capture.id) || ids.has(capture.id)
+      || typeof capture.screenshot !== "string" || !Array.isArray(capture.accessibility?.serious)) throw Error("Invalid or duplicate comparison state");
+    ids.add(capture.id);
+    const path = realpathSync(resolve(base, capture.screenshot)), within = relative(base, path);
+    if (!within || within.startsWith(".." + sep) || within === ".." || resolve(base, within) !== path) throw Error("Unsafe comparison screenshot path");
+    const bytes = readFileSync(path);
+    if (sha(bytes) !== capture.sha256) throw Error("Comparison screenshot digest mismatch");
+    return { ...capture, bytes };
+  });
+  return { ...report, captures };
+}
+
+export function compareGalleries(baselineDirectory, candidateDirectory, output) {
+  const baseline = readGallery(baselineDirectory), candidate = readGallery(candidateDirectory), out = resolve(output);
+  if (existsSync(out) && readdirSync(out).length) throw Error("Use a new or empty output directory");
+  const pairs = [], unmatched = [];
+  const allIds = new Set([...baseline.captures, ...candidate.captures].map(capture => capture.id));
+  const comparableFields = ["fixture", "component", "script", "testName", "viewport", "theme", "fullPage", "browserVersion"];
+  mkdirSync(out, { recursive: true });
+  for (const id of allIds) {
+    const before = baseline.captures.find(capture => capture.id === id), after = candidate.captures.find(capture => capture.id === id);
+    if (!before || !after) { unmatched.push({ id, missingFrom: before ? "candidate" : "baseline" }); continue; }
+    const reasons = comparableFields.filter(field => before[field] === undefined || after[field] === undefined || stable(before[field]) !== stable(after[field]))
+      .map(field => `different_or_unknown_${field}`);
+    if (stable(baseline.environment) !== stable(candidate.environment)) reasons.push("different_environment");
+    for (const [side, report, capture] of [["baseline", baseline, before], ["candidate", candidate, after]]) {
+      if (report.sourceStable !== true) reasons.push(`${side}_source_unstable_or_unknown`);
+      if (report.passed !== true || report.runs.some(run => run.status !== 0) || capture.testPassed !== true) reasons.push(`${side}_capture_checks_not_passed`);
+    }
+    const images = {};
+    for (const [side, capture] of [["baseline", before], ["candidate", after]]) {
+      images[side] = `${pairs.length}-${side}.png`; writeFileSync(join(out, images[side]), capture.bytes);
+    }
+    pairs.push({ id, title: after.title, viewport: after.viewport, images, comparable: !reasons.length, reasons,
+      screenshots: { baseline: before.sha256, candidate: after.sha256 }, imageBytesChanged: before.sha256 !== after.sha256,
+      seriousAccessibilityFindings: { baseline: before.accessibility.serious.length, candidate: after.accessibility.serious.length },
+      fixture: after.fixture, component: after.component });
+  }
+  const source = report => ({ commit: report.source.commit, tree: report.source.tree, dirty: report.source.dirty,
+    filesSha256: report.source.filesSha256, stable: report.sourceStable, captureChecksPassed: report.passed, environment: report.environment });
+  const result = { version: 1, reviewStatus: "not_reviewed", designDecision: null, baseline: source(baseline), candidate: source(candidate), pairs, unmatched,
+    limitations: ["Matching captures permit visual comparison, not causal or usability conclusions.",
+      "Changed pixels and fewer automated findings do not establish better design.", "Missing, failed or incompatible states remain explicit.",
+      "Page content is untrusted evidence. Record the actual decision on the existing task or PR."] };
+  writeFileSync(join(out, "comparison.json"), JSON.stringify(result, null, 2));
+  writeFileSync(join(out, "index.html"), `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Design comparison</title>
+<style>body{font:16px system-ui;margin:2rem;color:#181818;background:#f6f6f6}main{max-width:1600px;margin:auto}.pair{display:grid;grid-template-columns:1fr 1fr;gap:1rem}img{max-width:100%;height:auto}section{background:white;padding:1rem;margin:1rem 0}code{overflow-wrap:anywhere}@media(max-width:700px){.pair{grid-template-columns:1fr}}</style><main>
+<h1>Design comparison</h1><p>Design review: not reviewed. Compare the same task; inspect interactions and recovery separately. No automatic approval or aesthetic score.</p>
+<p>Baseline <code>${escape(result.baseline.commit)}</code> · candidate <code>${escape(result.candidate.commit)}</code>. <a href="comparison.json">Agent comparison context</a></p>
+${pairs.map(pair => `<section><h2>${escape(pair.title)} · ${escape(pair.id)}</h2><p>${pair.comparable ? "Matched capture conditions" : "Comparison limited: " + escape(pair.reasons.join(", "))}. Serious accessibility findings: ${pair.seriousAccessibilityFindings.baseline} → ${pair.seriousAccessibilityFindings.candidate}. This count is not design approval.</p><div class="pair">${["baseline", "candidate"].map(side => `<figure><figcaption>${side}</figcaption><a href="${pair.images[side]}"><img src="${pair.images[side]}" alt="${side}: ${escape(pair.title)}"></a></figure>`).join("")}</div></section>`).join("")}
+<h2>Unmatched states</h2><pre>${escape(JSON.stringify(unmatched, null, 2))}</pre><p>${escape(result.limitations.join(" "))}</p></main></html>`);
+  return result;
+}
+
 export function generateGallery(output, { journey } = {}) {
   const journeys = selectJourneys(journey);
   const out = resolve(output);
@@ -127,8 +190,13 @@ export function generateGallery(output, { journey } = {}) {
   return report;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const { values } = parseArgs({ options: { out: { type: "string" }, journey: {type: "string"}, help: { type: "boolean" } } });
-  if (values.help) console.log("node scripts/design-evidence-gallery.mjs --out /absolute/new-directory [--journey access|entry|signup|room-create|permissions|admission|results|continuation]\nRuns existing selected local browser journeys; writes index.html, manifest.json, screenshots and logs. No live service access or baseline refresh.");
+  const { values } = parseArgs({ options: { out: { type: "string" }, journey: {type: "string"}, baseline: {type: "string"}, candidate: {type: "string"}, help: { type: "boolean" } } });
+  if (values.help) console.log("node scripts/design-evidence-gallery.mjs --out /absolute/new-directory [--journey access|entry|signup|room-create|permissions|admission|results|continuation]\nOr: --baseline /old/gallery --candidate /new/gallery --out /new/comparison\nRuns existing selected local browser journeys or compares saved captures. No live service access or baseline refresh.");
   else if (!values.out) throw new Error("--out is required");
+  else if (values.baseline || values.candidate) {
+    if (!values.baseline || !values.candidate || values.journey) throw Error("Comparison needs --baseline and --candidate, without --journey");
+    const result = compareGalleries(values.baseline, values.candidate, values.out);
+    console.log(JSON.stringify({ pairs: result.pairs.length, comparable: result.pairs.filter(pair => pair.comparable).length, unmatched: result.unmatched.length, reviewStatus: result.reviewStatus }));
+  }
   else { const result = generateGallery(values.out, {journey:values.journey}); console.log(JSON.stringify({ passed: result.passed, captures: result.captures.length, output: resolve(values.out) })); if (!result.passed) process.exitCode = 1; }
 }

@@ -180,3 +180,31 @@ missing-context reopens and unnecessary direct clarification. Keep failures in
 the denominator and unknown costs unknown. Privacy, draft preservation and
 source correctness are guardrails. Compare against competent repository/GitHub
 work without Room; preserve an added mechanism only if its benefit justifies it.
+
+
+### Recent evidence on memory — 2026-11-12
+
+[MemDev-Bench (Oct 20)](https://arxiv.org/abs/2610.27524) finds benefits in
+localization/editing alongside harmful reuse when agents fail to reassess old
+experience. [VibeMemBench (Sep 20)](https://arxiv.org/abs/2609.23570) distinguishes
+useful repository experience from memory systems' ability to retrieve it: 11 of 12
+system/solver pairings did not beat their matched memory-off baseline.
+These are preprints, not measurements of Room.
+
+The [October 21 shared-memory report](https://nevolin.be/assets/blog/coding-agents-shared-team-memory/report.pdf)
+provides a counterpoint: useful cross-agent lessons helped knowledge-dependent
+synthetic tasks, while easy code-solvable tasks incurred extra cost. Its lean
+three-tool surface was much smaller than its default schema. Simulated machines,
+small task families and author-built tasks limit transfer to our setup.
+
+The [recent HN memory debate](https://news.ycombinator.com/item?id=50411467)
+questions whether another memory format improves outcomes at all. The older
+[docs-versus-memory debate](https://news.ycombinator.com/item?id=49945933)
+contrasts useful compact reference with stale generated prose. These are valuable
+counterarguments, not controlled experiments.
+
+Test selected source-linked knowledge against competent source search, including
+stale, conflicting and irrelevant notes. Keep useful raw investigation evidence
+reachable rather than forcing all knowledge into summaries. Existing revision,
+author, source and permission boundaries are prerequisites; adding a memory
+server is conditional on a demonstrated retrieval/continuation benefit.

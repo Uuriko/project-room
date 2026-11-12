@@ -36,6 +36,31 @@ requiring agent supervision. Preserve failures and unknowns. Correctness require
 no unauthorized disclosure, lost drafts or stale verification treated as current.
 This plan is the implementation sequence, not a new mandatory approval process.
 
+## Integrated contributor-path checkpoint — 2026-11-12
+
+Peer changes composed on `ab49fba0d`: selected-task keyboard continuation and
+addressed-work-first agent orientation, including the reduced brief budget path.
+The keyboard action reuses the existing continuation dialog and current session
+checks; it does not copy, claim or start work automatically. The brief keeps its
+bounded general suggestions while directing the next read to work needing the
+viewer. Composed qualification: 22 activation/current-overview checks and 21
+keyboard/continuation browser checks passed. These are fixture checks, not a
+measured customer speedup or production release.
+
+The actual other desktop retains rendered human-journey/design experiments.
+This MacBook Air parent owns composition and structured context. Grok retains
+mobile touch CSS, CI-to-work receipts, handoff stages and digest freshness. Jill
+reviews runtime admission against the observed wrong-runtime exchange. Shared
+member names do not establish this ownership: current explicit replies do.
+
+Finish the existing journey before broadening scope: qualify the enabled Docs
+path and selected references; reconcile remaining peer auth/preview changes;
+resolve discovery ownership; run exact-head integration and supported recovery;
+then use the existing serialized release lane when the current hold is lifted.
+No new dashboard, task store, summary writer or contributor form is required by
+this checkpoint. Remove redundant UI or process only when its supported behavior
+and recovery path survive the change.
+
 ## Connected product parts — 2026-11-12
 
 These are capabilities in one project, not a request for additional navigation.
