@@ -185,10 +185,18 @@ function tableColumns(db, table) {
   return db.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all().map(column => column.name);
 }
 
+// Staging table for a frozen export snapshot. Live writes must not land
+// in the backup stream, so the exporter materializes parts here (or in
+// memory) before any await. The table is never itself exported.
+export const BACKUP_EXPORT_PARTS_TABLE = "room_backup_export_parts";
+export const BACKUP_EXPORT_PART_BYTES = 4 * 1024 * 1024;
+
 function exportTableOrder(db) {
   const present = new Set(tableNames(db));
   const ordered = FIRST.filter(table => present.has(table));
-  for (const table of [...present].sort()) if (!ordered.includes(table)) ordered.push(table);
+  for (const table of [...present].sort()) {
+    if (!ordered.includes(table) && table !== BACKUP_EXPORT_PARTS_TABLE) ordered.push(table);
+  }
   return ordered;
 }
 
@@ -418,16 +426,87 @@ export function exportNdjsonText(db) {
   return [...exportNdjsonLines(db)].join("");
 }
 
-export function exportNdjsonStream(db) {
+function concatBytes(chunks, total) {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.byteLength; }
+  return out;
+}
+
+// Write a frozen NDJSON snapshot into BACKUP_EXPORT_PARTS_TABLE. Must run
+// inside a write transaction on a fenced store (the Durable Object's
+// store.transaction, or RoomStore.transaction). CREATE/DELETE/INSERT are
+// writes; export reads see the transaction's snapshot, and parts written
+// to this skipped table cannot appear in the dump. Returns the part count.
+export function materializeExportParts(db, { pageRows, partBytes = BACKUP_EXPORT_PART_BYTES } = {}) {
+  db.exec(`CREATE TABLE IF NOT EXISTS "${BACKUP_EXPORT_PARTS_TABLE}" (part_index INTEGER PRIMARY KEY, bytes BLOB NOT NULL)`);
+  db.exec(`DELETE FROM "${BACKUP_EXPORT_PARTS_TABLE}"`);
   const encoder = new TextEncoder();
-  const lines = exportNdjsonLines(db);
+  const insert = db.prepare(`INSERT INTO "${BACKUP_EXPORT_PARTS_TABLE}" (part_index, bytes) VALUES (?, ?)`);
+  let partIndex = 0, pending = [], pendingBytes = 0;
+  const flush = () => {
+    if (!pendingBytes) return;
+    insert.run(partIndex, concatBytes(pending, pendingBytes));
+    partIndex += 1;
+    pending = [];
+    pendingBytes = 0;
+  };
+  for (const line of exportNdjsonLines(db, pageRows != null ? { pageRows } : {})) {
+    const chunk = encoder.encode(line);
+    pending.push(chunk);
+    pendingBytes += chunk.byteLength;
+    if (pendingBytes >= partBytes) flush();
+  }
+  flush();
+  return partIndex;
+}
+
+export function streamMaterializedExportParts(db, store = null) {
+  const countRow = db.prepare(`SELECT count(*) AS n FROM "${BACKUP_EXPORT_PARTS_TABLE}"`).get();
+  const count = Number(countRow?.n) || 0;
+  let index = 0;
+  const clear = () => {
+    const wipe = () => db.exec(`DELETE FROM "${BACKUP_EXPORT_PARTS_TABLE}"`);
+    if (store?.transaction) store.transaction(wipe);
+    else wipe();
+  };
   return new ReadableStream({
     pull(controller) {
-      const next = lines.next();
-      if (next.done) controller.close();
-      else controller.enqueue(encoder.encode(next.value));
+      if (index >= count) {
+        clear();
+        controller.close();
+        return;
+      }
+      const row = db.prepare(`SELECT bytes FROM "${BACKUP_EXPORT_PARTS_TABLE}" WHERE part_index=?`).get(index);
+      index += 1;
+      const bytes = row?.bytes;
+      controller.enqueue(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes ?? []));
     }
   });
+}
+
+// Snapshot first, then stream. The Durable Object serves other requests
+// between ReadableStream pulls (and writeDailyBackup awaits KV I/O between
+// chunks), so a lazy generator would let live writes tear the export.
+// Consuming the generator in this turn — with no await — is a consistent
+// snapshot: the isolate cannot run another request until we yield.
+// Small exports stay in memory; callers that need a spilled snapshot use
+// materializeExportParts inside a write transaction (exportRoomNdjson).
+export function exportNdjsonStream(db) {
+  const encoder = new TextEncoder();
+  const chunks = Array.from(exportNdjsonLines(db), line => encoder.encode(line));
+  let offset = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (offset >= chunks.length) controller.close();
+      else controller.enqueue(chunks[offset++]);
+    }
+  });
+}
+
+export function exportNdjsonConsistentStream(store, options) {
+  store.transaction(() => materializeExportParts(store.db, options));
+  return streamMaterializedExportParts(store.db, store);
 }
 
 export function authorizeOperatorExport(authorization, expected) {

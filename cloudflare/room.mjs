@@ -46,7 +46,7 @@ import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge
 import { edgeAnonymousMcpResponse, edgeMcpApplies } from './edge-mcp.mjs';
 import { runtimeTiming, appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthCacheMs, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse } from './health-probe.mjs';
-import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
+import { exportNdjsonConsistentStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 import { createWakeAdapters } from '../server/wake-adapters.mjs';
@@ -817,10 +817,13 @@ export class ProjectRoom extends DurableObject {
     }
   }
   // Operator and cron export. Returns a stream of NDJSON; callers must not log it.
+  // The stream is a frozen snapshot: parts are materialized in one write
+  // transaction before any await, so a live write that arrives while the
+  // backup uploads to KV cannot tear the day's copy.
   exportRoomNdjson() {
     if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused || !this.store) throw new Error('Room paused');
-    return exportNdjsonStream(this.store.db);
+    return exportNdjsonConsistentStream(this.store);
   }
 }
 

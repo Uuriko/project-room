@@ -17,10 +17,22 @@ import { createHash } from "node:crypto";
 
 // Only stages assigned by this module may become durable/public failure details.
 const backupFailures = new WeakMap();
-function backupFailure(stage, message = `room-backup: ${stage} failed`) {
+function backupFailure(stage, message = `room-backup: ${stage} failed`, reason = null) {
   const error = new Error(message);
-  backupFailures.set(error, { code: `backup_${stage}_failed`, component: stage, errorClass: 'backup_failure' });
+  const detail = { code: `backup_${stage}_failed`, component: stage, errorClass: 'backup_failure' };
+  if (typeof reason === "string" && /^[a-z][a-z0-9_]{0,40}$/i.test(reason)) detail.reason = reason;
+  backupFailures.set(error, detail);
   return error;
+}
+
+// Stable tokens for GET /api/health/jobs lastErrorReason. The exact count
+// or hash values stay off the public health surface.
+export function verificationReasonToken(reasonText) {
+  if (typeof reasonText !== "string" || !reasonText) return null;
+  if (reasonText.startsWith("event count moved: the trailer counts")) return "trailer_count_mismatch";
+  if (reasonText.startsWith("event count moved")) return "event_count_moved";
+  if (reasonText.includes("same count, different rows") || reasonText.includes("event log changed")) return "event_hash_changed";
+  return "export_torn";
 }
 export function backupFailureDetail(error) {
   return backupFailures.get(error) ?? { code: 'backup_unknown_failed', component: 'unknown', errorClass: 'backup_failure' };
@@ -250,10 +262,10 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
   }
   if (tracker.headLine !== null) {
     const reason = tornReason(tracker.headLine, tracker.tail);
-    if (reason) throw backupFailure("verification", `room-backup: refusing manifest, export torn (${reason})`);
+    if (reason) throw backupFailure("verification", `room-backup: refusing manifest, export torn (${reason})`, verificationReasonToken(reason));
   }
   const hashReason = hashTracker.finish();
-  if (hashReason) throw backupFailure("verification", `room-backup: refusing manifest, export torn (${hashReason})`);
+  if (hashReason) throw backupFailure("verification", `room-backup: refusing manifest, export torn (${hashReason})`, verificationReasonToken(hashReason));
   if (pendingBytes || !parts.length) await flush();
   const manifest = { kind: "room-backup-manifest", version: BACKUP_MANIFEST_VERSION, key, createdAt: new Date(now).toISOString(), bytes: total, sha256: whole.digest("hex"), parts };
   await backupStep("manifest_write", () => kv.put(key, JSON.stringify(manifest), { ...options, metadata: { parts: parts.length, bytes: total } }));
@@ -296,11 +308,11 @@ async function writeR2Backup(bucket, key, body) {
   }
   if (tracker.headLine !== null) {
     const reason = tornReason(tracker.headLine, tracker.tail);
-    if (reason) throw backupFailure("verification", `room-backup: refusing to store export, export torn (${reason})`);
+    if (reason) throw backupFailure("verification", `room-backup: refusing to store export, export torn (${reason})`, verificationReasonToken(reason));
   }
   const bytes = concatBytes(chunks, total);
   const hashReason = trailerHashReason(bytes);
-  if (hashReason) throw backupFailure("verification", `room-backup: refusing to store export, export torn (${hashReason})`);
+  if (hashReason) throw backupFailure("verification", `room-backup: refusing to store export, export torn (${hashReason})`, verificationReasonToken(hashReason));
   const sha256 = whole.digest("hex");
   await backupStep("manifest_write", () => bucket.put(key, bytes, {
     httpMetadata: { contentType: "application/x-ndjson" },
