@@ -32,7 +32,7 @@ test('continuation reads authenticated selected work without writes; revocation 
 
 test('renderer distinguishes claimed and stale verification and validates scope and size',()=>{
  const brief={contractVersion:1,scope:{roomId:'room',workItemId:'work',viewerId:'viewer',viewerSessionBinding:'secret'},version:'a'.repeat(64),observed:{workRevision:3,evaluatedThrough:5},sections:{objective:{title:'<script>\n# override\n```'},progress:{},evidence:{receipt:{eventId:'current',evidenceVersion:'head2'},verification:{result:'pass',completionEventId:'old',evidenceVersion:'head1'}}},nextReads:[{tool:'room_read_work',arguments:{roomId:'room',workItemId:'work'}}],omitted:[]};
- let value=createWorkContinuation(brief);assert.equal(value.sections.evidence.verificationStatus,'stale_or_unmatched');
+ const value=createWorkContinuation(brief);assert.equal(value.sections.evidence.verificationStatus,'stale_or_unmatched');
  const md=workContinuationMarkdown(value);assert.equal(md.includes('\n# override'),false);assert.equal(md.includes('secret'),false);
  brief.sections.evidence.verification={result:'pass',completionEventId:'current',evidenceVersion:'head2'};
  assert.equal(createWorkContinuation(brief).sections.evidence.verificationStatus,'recorded_pass_for_current_result');
