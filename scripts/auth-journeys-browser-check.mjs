@@ -217,7 +217,7 @@ async function magicLinkReuse(t) {
   const form = await openMagicSignin(other, email);
   await form.locator('[name="email"]').fill(email);
   await form.locator('button[type="submit"]').click();
-  await other.getByText(/check/i).first().waitFor();
+  await other.locator("#auth-signin-ui [data-signin-panel]").getByText(/check/i).first().waitFor();
   const mail = f.mailTo(email);
   assert.ok(mail?.link && !mail.purpose, "a sign-in link was mailed");
   const phone = await f.open(PHONE);
