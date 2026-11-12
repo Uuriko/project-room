@@ -20,7 +20,7 @@ export const PROJECT_STATE_MAX_BYTES = 6144;
 export const RECEIPT_SCAN_EVENTS = 1500;
 export const WORK_PAGE = 8;
 export const WORK_MAX_PAGES = 16; // 128 items; beyond that `complete` is false
-const CAPS = Object.freeze({ inProgress: 12, blocked: 8, needsYou: 8, needsHuman: 8, mergedNotDeployed: 10, receipts: 5, attention: 6 });
+const CAPS = Object.freeze({ inProgress: 10, blocked: 6, needsYou: 6, needsHuman: 6, mergedNotDeployed: 8, receipts: 4, attention: 5 });
 
 const clip = (text, n) => {
   if (typeof text !== "string") return null;
@@ -65,16 +65,17 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
     counts[board] = (counts[board] ?? 0) + 1;
     if (board === "done" || board === "delivered") continue;
     const step = nextWorkStep(item, nowMs, ownerId);
+    const owner = name(item.claim?.status === "active" ? item.claim.holderId : item.accountableMemberId);
+    const nextFor = step.memberId == null ? null : name(step.memberId);
+    // Null and redundant fields are omitted: this document is read on every wake.
     const row = {
-      id: item.id, title: clip(item.title, 70) ?? "(private)", state: board,
-      owner: name(item.claim?.status === "active" ? item.claim.holderId : item.accountableMemberId),
-      next: step.action, nextFor: step.memberId == null ? null : name(step.memberId),
-      handoff: item.handoff?.open ? "open" : null,
+      id: item.id, title: clip(item.title, 48) ?? "(private)", state: board, owner, next: step.action,
+      ...(nextFor && nextFor !== owner ? { nextFor } : {}), ...(item.handoff?.open ? { handoff: "open" } : {}),
       quietMin: minutes(nowMs, item.updatedAt ?? item.createdAt)
     };
     row._t = Date.parse(item.updatedAt ?? item.createdAt) || 0; // sort key, removed before serialization
     if (board === "accepted" || board === "working") inProgress.push(row);
-    if (board === "blocked") blocked.push({ ...row, blockedBy: clip(item.blocker?.reason, 80), unblock: clip(item.blocker?.nextAction, 60) });
+    if (board === "blocked") blocked.push({ ...row, blockedBy: clip(item.blocker?.reason, 60), ...(item.blocker?.nextAction ? { unblock: clip(item.blocker.nextAction, 40) } : {}) });
     if (step.needsAttention && step.memberId === viewerId) needsYou.push(row);
     if (step.needsAttention && step.memberId != null && member(step.memberId)?.kind === "human") needsHuman.push(row);
   }
@@ -116,6 +117,10 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
     receiptWindow: receiptWindow ?? null,
     truncated: {}
   };
+  const listed = new Set([...state.inProgress, ...state.blocked].map(row => row.id));
+  const pointer = ({ id, next, nextFor }) => ({ id, next, ...(nextFor ? { nextFor } : {}) });
+  state.needsYou = state.needsYou.map(row => (listed.has(row.id) ? pointer(row) : row));
+  state.needsHuman = state.needsHuman.map(row => (listed.has(row.id) ? pointer(row) : row));
   const shed = { inProgress: inProgress.length - state.inProgress.length, blocked: blocked.length - state.blocked.length,
     needsYou: needsYou.length - state.needsYou.length, needsHuman: needsHuman.length - state.needsHuman.length,
     mergedNotDeployed: pending.length - (state.mergedNotDeployed.items?.length ?? 0) };

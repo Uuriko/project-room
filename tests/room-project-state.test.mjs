@@ -47,7 +47,7 @@ test("builder: merged-not-deployed is the merges after the last good deploy; unk
   assert.equal(s.live.deployedAt, at(3));
   assert.equal(s.mergedNotDeployed.count, 1);
   assert.deepEqual(s.mergedNotDeployed.items.map(i => i.pr), [3]);
-  assert.deepEqual(s.receipts.map(r => r.kind), ["ci", "merged", "deploy", "merged", "merged"]);
+  assert.deepEqual(s.receipts.map(r => r.kind), ["ci", "merged", "deploy", "merged"], "newest four");
   const unknown = buildProjectState({ ...base, receipts: [] });
   assert.equal(unknown.mergedNotDeployed.count, null);
   assert.equal(unknown.live.smoke, "no-receipt");
@@ -125,8 +125,10 @@ test("MCP twin on a normalized agent room: same document, bounded, unknown argum
   assert.equal(state.work.complete, true);
   assert.equal(state.work.counts.proposed, 9);
   assert.equal(state.work.counts.accepted, 2);
-  assert.equal(state.needsYou.length, 8, "capped at 8, the remaining rows are counted");
-  assert.equal(state.truncated.needsYou, 2);
+  assert.equal(state.needsYou.length, 6, "capped at 6, the remaining rows are counted");
+  assert.equal(state.truncated.needsYou, 4);
+  const listedRow = state.needsYou.find(row => state.inProgress.some(other => other.id === row.id));
+  assert.ok(!listedRow || !("title" in listedRow), "a row already listed in full under inProgress is a pointer in needsYou");
   assert.equal(state.live.lastDeploy.sha, "234527c7");
   assert.equal(state.mergedNotDeployed.count, 1);
   assert.ok(Buffer.byteLength(JSON.stringify(state)) <= PROJECT_STATE_MAX_BYTES + 256);
