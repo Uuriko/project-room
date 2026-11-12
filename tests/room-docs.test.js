@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { roomDocsEnabled } from "../server/room-docs.mjs";
+import { roomDocsEnabled, listDocs, getDoc } from "../server/room-docs.mjs";
 import { getRoomDocs, getRoomDoc, postRoomDoc, ROOM_DOC_ROUTES } from "../server/routes/room-docs.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
 
@@ -58,4 +58,15 @@ test("flag on: stale writes conflict, bad input and unknown docs are refused", a
   assert.equal((await f.call(getRoomDoc, { docId: "nope" })).code, "unknown_doc");
   assert.equal((await f.call(getRoomDoc, { docId: "spec", query: "?rev=9" })).code, "unknown_doc");
   assert.equal((await f.call(getRoomDoc, { docId: "spec", query: "?rev=0" })).code, "invalid_body");
+});
+
+ test("reading an uninitialized document store performs no DDL", t => {
+  const store = new RoomStore(":memory:");
+  t.after(() => store.close());
+  const schema = () => store.db.prepare("SELECT name, sql FROM sqlite_master ORDER BY name").all();
+  const before = schema();
+  assert.deepEqual(listDocs(store.db, { roomId: "commons" }), { docs: [], hasMore: false, nextAfter: null });
+  assert.equal(getDoc(store.db, { roomId: "commons", docId: "spec" }), null);
+  assert.equal(getDoc(store.db, { roomId: "commons", docId: "spec", rev: 1 }), null);
+  assert.deepEqual(schema(), before);
 });
