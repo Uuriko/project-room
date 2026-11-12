@@ -1738,7 +1738,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end(bytes);
         };
         const githubLanding = accountId => {
-          const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
+          // Same rule as the Google callback: never land on an archived room.
+          const firstRoom = store.db.prepare(`SELECT m.room_id FROM member_accounts m LEFT JOIN rooms r ON r.id=m.room_id
+            WHERE m.account_id=? AND r.archived_at IS NULL ORDER BY m.room_id LIMIT 1`)
             .get(accountId);
           return firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1";
         };
