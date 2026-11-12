@@ -2521,8 +2521,13 @@ function syncChatSuggestions() {
   // "Ask @Agent" is for the channel view: a thread already has its own replies.
   const ask = latest && !currentThreadId
     ? { members: state.members, replyCount: (conversation.threads.get(latest.id)?.length ?? 1) - 1, now: Date.now() } : null;
+  // The nudge is about the latest message, not the task currently in view.
+  // Once that message already has a task, offering to make it one again is
+  // misleading. Keep reply and agent suggestions independently available.
+  const alreadyHasTask = latest && Object.values(state.workItems).some(item =>
+    item.sourceMessageId === latest.id || item.id === latest.workItemId);
   const offer = latest && !isRoomArchived(state) && !activeChannel()?.archivedAt
-    ? chatSuggestions(latest, { viewerId: session.member.id, canCreateWork: can("steer"), dismissed: dismissedSuggestions, ask }) : null;
+    ? chatSuggestions(latest, { viewerId: session.member.id, canCreateWork: can("steer") && !alreadyHasTask, dismissed: dismissedSuggestions, ask }) : null;
   // A question can cross the wait while nothing else changes, so check again then.
   clearTimeout(askAgentTimer);
   const waitLeft = ask && !offer?.agent ? Date.parse(latest.createdAt) + ASK_AGENT_AFTER_MS - ask.now : NaN;

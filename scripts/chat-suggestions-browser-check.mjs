@@ -74,6 +74,17 @@ for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mob
     await page.locator("#new-work-form").waitFor({ state: "visible" });
     await page.keyboard.press("Escape");
 
+    // A task created elsewhere from the latest message should remove the
+    // duplicate nudge even for someone who did not click it themselves.
+    say("producer", "Can someone review the release checklist?");
+    await task.waitFor();
+    const source = f.store.snapshot(f.keys.owner, "commons").state.messages.at(-1);
+    f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.WORK_PROPOSED, data: {
+      workItemId: crypto.randomUUID(), title: "Review the release checklist", definitionOfDone: "Checklist reviewed",
+      accountableMemberId: "owner", mode: "read", sourceMessageId: source.id,
+    } });
+    await task.waitFor({ state: "detached" });
+
     say("producer", "Should we ship today?");
     await box.getByRole("button", { name: "Yes", exact: true }).waitFor();
     await box.getByRole("button", { name: "Hide suggestions" }).click();
