@@ -10,7 +10,7 @@ test('connection status preserves read failures and manual recovery instead of i
   const status={textContent:'',dataset:{}},explanation={textContent:''},bar={classList:{toggle(){}}};
   const ctx={state:null,$:selector=>({'#connection-status':status,'#connection-explanation':explanation,'.connection-bar':bar}[selector])};
   vm.createContext(ctx);vm.runInContext(source.slice(start,end),ctx);
-  for(const text of ['Current view unavailable · bounded read refused; displayed history may be stale. Refresh to retry.','Connection interrupted · refresh to recover; no peer activity inferred']) {
+  for(const text of ['Current view unavailable · displayed history may be stale. Refresh to retry.','Connection interrupted · refresh to recover; no peer activity inferred']) {
     ctx.setConnectionStatus(text);
     assert.equal(status.textContent,text);
     assert.equal(explanation.textContent,text);

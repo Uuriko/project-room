@@ -142,7 +142,7 @@ for (const code of ['current_room_context_unavailable', 'current_snapshot_select
   assert.equal(f.snapshots.length,count);
   assert.equal(f.client.sequence,1);
   assert.equal(held.cursor,0,'a failed read never acknowledges history');
-  assert.match(f.statuses.at(-1),/Current view unavailable.*bounded read refused/);
+  assert.match(f.statuses.at(-1),/Current view unavailable.*displayed history may be stale/);
   assert.doesNotMatch(f.statuses.at(-1),/PRIVATE|reconnect|Connection interrupted/);
   assert.ok(f.client.refreshRetry,'the existing bounded recovery timer remains available');
   t.mock.timers.tick(1000); await settle();
@@ -155,7 +155,7 @@ test('unknown conflict and transport errors do not impersonate a protected read 
   for (const error of [Object.assign(new Error('PRIVATE'),{status:409,code:'unknown_private_code'}),new TypeError('PRIVATE')]) {
     f.client.handleFailure(error);
     assert.match(f.statuses.at(-1),/^Connection interrupted/);
-    assert.doesNotMatch(f.statuses.at(-1),/PRIVATE|bounded read refused|unknown_private_code/);
+    assert.doesNotMatch(f.statuses.at(-1),/PRIVATE|Current view unavailable|unknown_private_code/);
   }
 });
 
@@ -171,7 +171,7 @@ test('account binding changes remain access-ending conflicts',async t=>{
   const f=await fixture(t);f.client.session.authMode='account';
   f.client.handleFailure(Object.assign(new Error('PRIVATE'),{status:409,code:'session_binding_changed'}));
   assert.equal(f.client.session,null);assert.equal(f.client.refreshRetry,null);
-  assert.doesNotMatch(f.statuses.at(-1),/bounded read refused/);
+  assert.doesNotMatch(f.statuses.at(-1),/Current view unavailable/);
 });
 
 test('an old-room read refusal cannot overwrite status after session replacement', async t => {
