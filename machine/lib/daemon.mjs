@@ -412,6 +412,9 @@ export function daemonWakeApi(origin, secret, fetchImpl = globalThis.fetch) {
       if (beat.ok) api.paused = Array.isArray(beat.value?.paused) ? beat.value.paused : [];
       return beat.ok;
     },
+    // Wake hint only: this host never handles the signals it sees and the queue is
+    // per identity (shared with the bot's "room-machine" host), so it must not send
+    // ack=cursor - that would settle doorbells the bot has not handled.
     async poll(waitMs, after = null) {
       const cursor = typeof after === "string" && after ? `&after=${encodeURIComponent(after)}` : "";
       const page = await call(`/api/agent-wakes/poll?hostId=${encodeURIComponent(DAEMON_APPROVAL_HOST_ID)}&waitMs=${Math.max(0, Math.floor(waitMs))}${cursor}`);

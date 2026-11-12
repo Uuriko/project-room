@@ -38,6 +38,10 @@ export function createRoomApi({ origin, secret, signal }) {
         body: { hostId: BOT_HOST_ID, mode: "wakeable", cadenceSeconds: 300, workWakes: true },
       });
     },
+    // The bot acks each signal by id after it handles it (see loop.mjs); the
+    // heartbeat page it works from carries no cursor, and some outcomes (halted,
+    // paused, pending approval) deliberately leave signals unacked, so it does not
+    // use ack=cursor.
     async poll(waitMs) {
       const wait = Number.isInteger(waitMs) && waitMs >= 0 ? waitMs : 0;
       return call(origin, `/api/agent-wakes/poll?hostId=${encodeURIComponent(BOT_HOST_ID)}&waitMs=${wait}`, auth);
