@@ -393,7 +393,7 @@ suppressing stale work notifications. It introduces no work item writer.
 
 ## Normalized-storage census reconciliation (2026-11-02)
 
-The current census is **83 source files**, including the following 17 additions.
+This reconciliation checkpoint recorded **83 source files**, including the following 17 additions.
 The first 15 were reviewed at `988a8c236`; the search and work snapshot readers
 were reviewed against `ca7508fd5`. The older counts and council migration proposal above
 record their historical checkpoints; they are not the current serving contract.
@@ -447,3 +447,13 @@ replans a room applies to the legacy path, not normalized serving. This census
 update changes no reducer, storage owner, permission, guard or migration gate.
 It is source reconciliation and does not claim production activation or complete
 removal of the blob/recovery cost problem.
+
+## Continuation UI census amendment (2026-11-12)
+
+The current pinned census contains **86 source files**. The continuation dialog
+adds a read-only client dependency; the existing lifecycle writers and board sync
+events remain unchanged.
+
+| Source | Role | Actual work dependency |
+|---|---|---|
+| `src/continuation-ui.js` | reader | Checks selected work membership in the current client view before opening, then compares work revision to the authenticated selected-work response before copying. It reads no other work bodies and performs no work lifecycle or board writes. |

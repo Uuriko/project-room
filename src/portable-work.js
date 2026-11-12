@@ -42,6 +42,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     if (owns(entry) && !$("portable-export").hidden && clipboard.busy && (!copying || clipboard.slow)) status(uiText("clipboard.pending"));
     if (!clipboard.busy && $("portable-status").textContent === uiText("clipboard.pending")) status("");
     const current = getState()?.workItems?.[entry?.workId];
+    const packetChanged = Boolean(entry && !entry.native && (!current || current.revision !== entry.basisRevision));
     const older = entry?.native && current && current.revision > entry.basisRevision;
     const unavailable = entry?.native && (!current || current.revision < entry.basisRevision);
     $("portable-close").disabled = saving;
@@ -50,7 +51,10 @@ export function installPortableWork({ client, getState, onSaved }) {
     $("portable-result").readOnly = saving || uncertain;
     $("portable-older").disabled = saving || uncertain;
     $("portable-submit").textContent = uncertain ? "Retry draft" : "Post draft";
-    $("packet-copy").disabled = clipboard.busy || copying || !$("packet-preview").value;
+    $("packet-changed").hidden = !packetChanged;
+    $("packet-changed").classList.toggle("visible", packetChanged);
+    $("packet-refresh").disabled = !current || copying || clipboard.busy;
+    $("packet-copy").disabled = clipboard.busy || copying || packetChanged || !$("packet-preview").value;
     $("packet-copy").textContent = copying ? "Copying…" : "Copy";
     $("portable-source").disabled = copying && !clipboard.slow; $("portable-progress").disabled = copying && !clipboard.slow;
     $("portable-form").setAttribute("aria-busy", String(saving));
@@ -110,16 +114,28 @@ export function installPortableWork({ client, getState, onSaved }) {
   dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
   $("portable-source").addEventListener("change", preview);
   $("portable-progress").addEventListener("change", preview);
+  $("packet-refresh").addEventListener("click", () => {
+    const state = getState(), item = state?.workItems?.[entry?.workId];
+    if (!owns(entry) || !item || copying || clipboard.busy) return;
+    const oldSource = entry.state.workItems[entry.workId].sourceMessageId;
+    entry.state = state; entry.basisRevision = item.revision;
+    entry.packetOptions = { packetId: crypto.randomUUID(), exportedAt: new Date().toISOString() };
+    $("portable-source-label").hidden = !item.sourceMessageId;
+    if (!item.sourceMessageId || item.sourceMessageId !== oldSource) $("portable-source").checked = false;
+    $("portable-progress-label").hidden = !(item.handoff || item.receipt || item.blocker || item.claim || item.attempt_count);
+    if ($("portable-progress-label").hidden) $("portable-progress").checked = false;
+    preview(); $("packet-copy").focus();
+  });
   $("portable-older").addEventListener("change", controls);
   $("portable-add-result").addEventListener("click", () => mode(true));
   $("packet-copy").addEventListener("click", async () => {
     const ticket = entry;
-    if (!owns(ticket) || clipboard.busy || copying || !$("packet-preview").value) return;
+    if (!owns(ticket) || clipboard.busy || copying || !$("packet-preview").value || getState()?.workItems?.[ticket.workId]?.revision !== ticket.basisRevision) return;
     copying = true; controls();
     try {
       const outcome = await clipboard.copy($("packet-preview").value);
       if (outcome === "failed") throw new Error("clipboard_failed");
-      if (owns(ticket) && !$("portable-export").hidden) status(outcome === "copied" ? "Copied. Paste into your AI." : uiText("clipboard.pending"));
+      if (owns(ticket) && !$("portable-export").hidden) status(getState()?.workItems?.[ticket.workId]?.revision !== ticket.basisRevision ? "Work changed during copy. Refresh the prompt and copy again." : outcome === "copied" ? "Copied. Paste into your AI." : uiText("clipboard.pending"));
     } catch {
       if (owns(ticket) && !$("portable-export").hidden) { status("Select the prompt and copy it manually."); $("packet-preview").focus(); $("packet-preview").select(); }
     } finally {

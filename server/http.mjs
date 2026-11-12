@@ -416,7 +416,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
   operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
-  publicAgentPages = false,
+  publicAgentPages = false, roomDocsEnabled = false,
   credentialReadBurst = CREDENTIAL_READ_BURST,
   credentialWriteBurst = CREDENTIAL_WRITE_BURST }) {
   // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
@@ -805,6 +805,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   store.nativeMcpEventsEnabled = Boolean(nativeEvents);
   if (nativeEvents) store.enqueueNativeMcpEvent = nativeEvents.emit;
   const hostedRoomMcp = createHostedRoomMcp(store, {
+    roomDocsEnabled,
     nativeHandler: nativeEvents?.handler,
     nativeStatus: nativeEvents?.status,
     agentRooms, oauthProvider: oauthResource ? oauthProvider : null, inviteOAuthProvider: inviteOAuth?.provider, oauthResource,
@@ -1465,7 +1466,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         gmail, channelWebhooks, telegram, telegramStatus,
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
-        publicAgentPages, jevShadowAdmission,
+        publicAgentPages, roomDocsEnabled, jevShadowAdmission,
         streams,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
@@ -1742,7 +1743,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const firstRoom = store.db.prepare(`SELECT m.room_id FROM member_accounts m LEFT JOIN rooms r ON r.id=m.room_id
             WHERE m.account_id=? AND r.archived_at IS NULL ORDER BY m.room_id LIMIT 1`)
             .get(accountId);
-          return firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1";
+          return firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}&github=signed-in` : "/?account=1&github=signed-in";
         };
         try {
           if (url.searchParams.getAll("state").length > 1 || url.searchParams.getAll("code").length > 1) {
@@ -1901,6 +1902,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 409, { error: "agent_connection_required", error_description: "Join the room as yourself, then create your own connected agent before authorizing it" });
         const scopeLabels = {
           "rooms:read": "See your rooms",
+          "docs:write": "Create and edit room documents",
           "chat:read": "Read messages",
           "chat:write": "Post messages",
           "work:read": "See work items",
@@ -2647,7 +2649,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         let page;
         try {
           if (url.searchParams.getAll('workAfter').length > 1) reject(422, 'invalid_feed_cursor', 'Invalid public task page; reload the room');
-          page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin(), workAfter:url.searchParams.get('workAfter') ?? '' });
+          if (url.searchParams.getAll('workId').length > 1 || url.searchParams.has('workId') && url.searchParams.has('workAfter')) reject(422, 'invalid_public_work', 'Choose one public task');
+          page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin(), workAfter:url.searchParams.get('workAfter') ?? '', ...(url.searchParams.has('workId') ? {workId:url.searchParams.get('workId')} : {}) });
         } catch (error) {
           if (error?.code !== 'invalid_feed_cursor' || roomPage[2] || !acceptPrefersHtml(req.headers.accept)) throw error;
           return sendPage(422, publicTaskPageExpired(roomPage[1]), null, `/r/${roomPage[1]}`, 'no-store');

@@ -1,5 +1,39 @@
 # Project Room: six-outcome delivery plan
 
+## MVP completion plan — 2026-11-12
+
+The first user group is a small software team taking a bounded task to a reviewed
+PR. A new contributor must be able to start from a shared project/task link or
+GitHub, bring an existing agent, find useful work, preserve context, submit a
+reviewable result, and leave a clear next step. Production rollout follows the
+existing release lane. More features do not substitute for this completed path.
+
+| Order | Concrete work | Evidence required to call it complete |
+| --- | --- | --- |
+| 1 | Qualify the current foundation and local checks | Runtime package includes every imported module; source-bound tests and relevant CI pass; failures have an attributed fix. |
+| 2 | Compose the other desktop's simplified entry | Removed sign-in clutter stays removed; the one copied prompt handles existing connections, room selection, access checks and required host consent; narrow-screen and clipboard failure paths work. |
+| 3 | Restore reliable work discovery and honest recovery | Excluded private events do not hide eligible work or disclose private content; bounded pagination and retained-history messages describe their real state. Keep the existing worker's claim. |
+| 4 | Finish one contributor journey | Start outside Room, open selected work, connect or continue through GitHub, obtain context, submit a PR/result, review it and resume after interruption without duplicate actions or lost drafts. |
+| 5 | Ship and verify the composed candidate | Reconcile current release owner/hold; qualify the exact candidate, release once, read back the serving version, and exercise the changed entry, Docs and selected-task paths. |
+
+Implementation checkpoint: PR6143 contains the Docs/continuation/shared-task
+foundation; PR6155 adds one-shot local checks. Both are candidates, not evidence
+of production availability. The other desktop owns sign-in simplification;
+Jill's worker owns bounded discovery and its parent owns generic wake/connection
+qualification. Coordinate these existing lanes instead of starting replacements.
+
+Local checks may reduce agent supervision immediately. Automatic job discovery,
+trusted device enrollment, unattended pickup, broader check recipes and cache
+reuse are follow-on slices; each must demonstrate a useful result with safe
+interruption recovery before becoming a default. A running laptop is not itself
+a useful outcome. Keep old schedules paused unless explicitly resumed.
+
+Measure attempted/completed contributor journeys, time to first useful task and
+reviewed result, human interventions, lost/duplicated actions, and check runs
+requiring agent supervision. Preserve failures and unknowns. Correctness requires
+no unauthorized disclosure, lost drafts or stale verification treated as current.
+This plan is the implementation sequence, not a new mandatory approval process.
+
 ## Scope reassessment — 2026-11-02
 
 John owns outside-account testing; do not ask him again for a tester or make that

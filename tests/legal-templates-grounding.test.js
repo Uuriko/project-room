@@ -59,7 +59,7 @@ const EVIDENCE = [
     ["server/access-requests.mjs", /display_name TEXT NOT NULL/],
   ]],
   [PRIVACY, "room messages", [
-    ["server/account-deletion.mjs", /Messages and files in personal rooms/],
+    ["server/account-deletion.mjs", /Messages, documents and files in personal rooms/],
   ]],
   [PRIVACY, "public key", [
     ["server/account-login-methods.mjs", /public_key_cose TEXT NOT NULL/],
@@ -109,7 +109,7 @@ const EVIDENCE = [
     ["server/account-deletion.mjs", /account_access_events rows are retained for security auditing/],
   ]],
   [PRIVACY, "room-owned history", [
-    ["server/account-deletion.mjs", /Room events already shared with other members.*are room-owned history/],
+    ["server/account-deletion.mjs", /Room records already shared with other members.*are room-owned history/],
   ]],
   [PRIVACY, "deactivated tombstone", [
     ["server/account-deletion.mjs", /deactivated tombstone \(active=0, profile scrubbed\)/],

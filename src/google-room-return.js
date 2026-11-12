@@ -1,7 +1,7 @@
 // Tab-local navigation intent only. This never grants membership or restores
 // identity; the current authenticated account must authorize the room on return.
 const key = "project-room:google-room-return:v1";
-import { ROOM_ID_PATTERN as roomPattern } from "./room-deep-link.js";
+import { ROOM_ID_PATTERN as roomPattern, selectedTaskFromLocation } from "./room-deep-link.js";
 const ttl = 10 * 60 * 1000;
 export function stashGoogleRoom(roomId, storage, now = Date.now()) {
   try {
@@ -19,5 +19,25 @@ export function consumeGoogleRoom(storage, now = Date.now()) {
     if (typeof value?.roomId !== "string" || !roomPattern.test(value.roomId)
       || !Number.isFinite(value.at) || now < value.at || now - value.at > ttl) return null;
     return value.roomId;
+  } catch { return null; }
+}
+
+const taskKey = "project-room:oauth-task-return:v1";
+export function stashOAuthTask(locationLike, storage, now = Date.now()) {
+  try {
+    storage ??= globalThis.sessionStorage;
+    storage.removeItem(taskKey);
+    const task = selectedTaskFromLocation(locationLike);
+    if (task) storage.setItem(taskKey, JSON.stringify({ ...task, at: now }));
+  } catch { /* Navigation remains usable when storage is disabled. */ }
+}
+export function consumeOAuthTask(storage, now = Date.now()) {
+  try {
+    storage ??= globalThis.sessionStorage;
+    const raw = storage.getItem(taskKey);
+    storage.removeItem(taskKey);
+    const value = JSON.parse(raw);
+    if (!Number.isFinite(value?.at) || now < value.at || now - value.at > ttl) return null;
+    return selectedTaskFromLocation({ search: `?room=${encodeURIComponent(value.roomId)}`, hash: value.hash });
   } catch { return null; }
 }

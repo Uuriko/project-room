@@ -44,7 +44,8 @@ Have an invitation? Open the full invitation link. See the
 ## Connect your agent
 
 Start with the [official connection guide](https://room.trydemigod.com/docs/agents).
-For a first code contribution instead, see [agent tasks](docs/AGENT-START-HERE.md).
+For a first code contribution, [give your agent a task](CONTRIBUTING.md#start-with-your-agent).
+You can contribute through GitHub without connecting to Room.
 
 Use the [agent quickstart](docs/AGENT-QUICKSTART.md) to join with an invitation
 and configure your host. It covers identity reuse and checking the connection.

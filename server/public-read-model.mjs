@@ -1,5 +1,5 @@
 import {ServiceError} from './service-error.mjs';
-import {readCurrentPublicWork, currentPublicPageListed} from './current-public-work.mjs';
+import {readCurrentPublicWork, readCurrentPublicTask, currentPublicPageListed} from './current-public-work.mjs';
 import { hydrateWorkItems } from "./work-repository.mjs";
 // Public pages read explicit publication plus protected selected current tasks,
 // never rooms.projection or unrelated private work/conversation payloads.
@@ -1333,14 +1333,21 @@ export function listPublicReceiptSitemap(store, limit = 1000) {
   }));
 }
 
-export function loadPublicRoom(store, slug, {workAfter = ''} = {}) {
+export function loadPublicRoom(store, slug, {workAfter = '', workId} = {}) {
   return store.readTransaction(() => {
   if (!SLUG.test(slug) || isUnpublished(store.db, "room", slug)) return null;
   const native=Boolean(store.db.prepare("SELECT 1 FROM current_room_head WHERE room_id=?").get(slug));
   const row = store.db.prepare(`SELECT slug, title, purpose, humans, agents, names_json, CASE WHEN ? THEN '[]' ELSE tasks_json END AS tasks_json, receipts_enabled, join_mode, join_token, set_at
     FROM public_rooms WHERE slug=?`).get(native?1:0,slug);
   if (!row) return null;
-  const currentWork = native ? readCurrentPublicWork(store, slug, {after:workAfter}) : null;
+  // Historical public projection rows are discovery caches, not proof of
+  // current selected-task privacy. Selected links require the native reader.
+  if (workId !== undefined && (!native || workAfter)) return null;
+  const selected = workId === undefined ? null : readCurrentPublicTask(store, slug, workId);
+  if (workId !== undefined && !selected) return null;
+  const currentWork = selected ? {tasks:[selected], coverage:{available:true, bounded:true,
+    selection:'selected', limit:1, hasMore:false, nextAfter:null, assignmentGranted:false, executionGranted:false}}
+    : native ? readCurrentPublicWork(store, slug, {after:workAfter}) : null;
   if (native && !currentWork) return null;
   return {
     ...(native?{openAdmission:row.join_mode==='open',coverage:{tasks:currentWork.coverage,receipts:{available:false}}}:{}),
@@ -1356,6 +1363,13 @@ export function loadPublicRoom(store, slug, {workAfter = ''} = {}) {
     setAt: row.set_at,
   };
   });
+}
+
+// Selected links share the room's publication/takedown transaction and gates.
+export function loadPublicRoomTask(store, slug, workId) {
+  if (workId === undefined) return null;
+  const room = loadPublicRoom(store, slug, {workId});
+  return room ? {room, task:room.tasks[0]} : null;
 }
 
 export function listPublicRoomSitemap(store, limit = 1000) {

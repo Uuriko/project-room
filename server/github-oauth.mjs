@@ -29,7 +29,7 @@ export const GITHUB_PENDING_MAX = 1000;
 // browsers (Accept: text/html) get a page that navigates to the account
 // home or the first room, mirroring the Google flow.
 export function githubPostLoginPage(href) {
-  if (href !== '/?github=error' && href !== '/?account=1' && !/^\/\?room=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(href)) fail('github_callback_invalid');
+  if (href !== '/?github=error' && !/^\/\?(?:account=1|room=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127})(?:&github=signed-in)?$/.test(href)) fail('github_callback_invalid');
   const safe = href.replace(/&/g, '&amp;');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}"><title>Opening Project Room</title></head><body><p>Opening Room…</p><p><a href="${safe}">Continue</a></p></body></html>`;
 }
@@ -310,4 +310,3 @@ export async function fetchGitHubUser(accessToken, fetchFn = fetch) {
   const email = primary ? primary.email : null;
   return { id: user.id, login, email };
 }
-

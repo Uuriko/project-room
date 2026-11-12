@@ -116,7 +116,8 @@ When the repository variable `ROOM_AUTO_DEPLOY` is `1`, `deploy-prod` also runs 
 If an authorized GitHub connection can merge code but cannot dispatch Actions,
 start the merged commit title with `[deploy-production]`. The existing
 `workflow_run` trigger then requests this commit's release after `test` or
-`schema-gate` completes. Both gates must still pass. The commit must remain
+`schema-gate` completes. The exact commit must pass `schema-gate`; the `test`
+result remains advisory under the deployment checks above. The commit must remain
 the current main tip. Signing, smoke, serialized uploads, and rollback stay
 unchanged. Ordinary commits do not opt in when `ROOM_AUTO_DEPLOY` is unset.
 
@@ -134,7 +135,32 @@ A failed run posts the actual recovery disposition for each Worker: `ROLL FORWAR
 
 ## Roll back
 
-Run **rollback-prod** with `prod_version_id`, an optional `entry_version_id` and a `reason`. Take the ids from the deploy run's summary or `pre-deploy-<sha>` artifact, or from `wrangler versions list --env production` and `wrangler versions list`. The automatic schema floor is necessary, not sufficient: equal schema numbers do not prove compatibility with new row semantics, fenced tables, or retained runtime. Schema migrations are forward-only. A code rollback does not undo one. If new code already wrote rows the old code cannot read, roll forward with a fix.
+Run [**rollback-prod**](../.github/workflows/rollback-prod.yml) with
+`prod_version_id`, an optional `entry_version_id`, `reason`,
+`compatibility_file` and `compatibility_reviewed: true`. The compatibility file
+must be a JSON receipt committed in the workflow checkout, covering the exact
+current and target Worker version IDs and source revisions. It must link passing
+qualification for old-code/new-data compatibility, retained runtime and Worker
+bindings to GitHub Actions runs or commit-pinned source. Review that evidence
+before acknowledging it; the gate checks receipt scope, not whether the reported
+tests actually ran. See the format and validation in
+[manual-rollback.mjs](../scripts/manual-rollback.mjs). Missing qualification or
+unknown target source requires forward recovery.
+
+Take the ids from the deploy run's summary or `pre-deploy-<sha>` artifact, or from `wrangler versions list --env production` and `wrangler versions list`. The automatic schema floor is necessary, not sufficient: equal schema numbers do not prove compatibility with new row semantics, fenced tables, or retained runtime. Schema migrations are forward-only. A code rollback does not undo one. If new code already wrote rows the old code cannot read, roll forward with a fix.
+
+### Automatic source revert is not production recovery
+
+[auto-revert.yml](../.github/workflows/auto-revert.yml) can revert a repeatedly
+failing main commit when `ROOM_AUTO_REVERT` is not `0`. It changes repository
+source; it does not roll back production. Its current `GITHUB_TOKEN` push
+suppresses push-triggered workflows, and it dispatches only `test.yml` afterward.
+The resulting revert commit therefore lacks the exact-SHA `schema-gate` push run
+required by [deploy-prod.yml](../.github/workflows/deploy-prod.yml); manually
+running tests does not satisfy that gate. An authorized operator must resolve
+this qualification gap before deploying the revert, or use a separately
+qualified forward fix or the rollback procedure above. Do not bypass the gate
+or report production recovered from a successful source revert alone.
 
 ## Recording release ownership
 
@@ -287,14 +313,17 @@ and shared Durable Object source readbacks to converge. This margin does not
 relax the exact revision, readiness, health, or signed-card checks, nor the
 existing evidence-gated retry policy.
 
-The pinned Wrangler 4.116.0 schema and CLI do not support
-`durable_objects.code_update_strategy` or `--durable-objects-code-update-mode`.
-We therefore rely on the provider's current deferred-300s default; it is not an
-explicit configuration pin. Do not add an ignored field or force immediate
-resets. A separately qualified Wrangler upgrade can make that policy explicit
-on the canonical production Worker; entry bindings reference that Worker.
+The repository pins Wrangler **4.155.0** in
+[cloudflare/package.json](../cloudflare/package.json).
+[deploy-prod.yml](../.github/workflows/deploy-prod.yml) explicitly passes
+`--durable-objects-code-update-mode 'deferred 60s'` on both Worker uploads,
+overriding the provider default for this path. The entry bindings reference the
+canonical production Worker. The 420-second smoke budget remains unchanged;
+verify source adoption rather than treating an upload or elapsed delay as proof.
 
-Rollback is also a deployment and can wait for adoption. Automatic recovery now
+Rollback also requires observed source adoption. The qualified manual rollback
+helper explicitly requests `--durable-objects-code-update-mode immediate`;
+automatic recovery can still wait for adoption. Automatic recovery
 requires the shared Durable Object source proof described above before setting
 `rollback_verified`; older receipts proved allocation and Worker source only.
 Manual preflight-bound readback also checks the shared object and may fail closed

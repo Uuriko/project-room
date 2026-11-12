@@ -5,6 +5,9 @@ import { tokenCommand } from "./commands/token.mjs";
 import { codeCommand } from "./commands/code.mjs";
 import { presenceCommand } from "./commands/presence.mjs";
 import { joinCommand } from "./commands/join.mjs";
+import { continueCommand } from "./commands/continue.mjs";
+import { docsCommand } from "./commands/docs.mjs";
+import { workCommand } from "./commands/work.mjs";
 
 export const commands = Object.freeze({
   join: joinCommand,
@@ -14,6 +17,9 @@ export const commands = Object.freeze({
   doctor: doctorCommand,
   code: codeCommand,
   presence: presenceCommand,
+  docs: docsCommand,
+  continue: continueCommand,
+  work: workCommand,
 });
 
 const help = `room — connect a coding agent to Project Room
@@ -25,6 +31,9 @@ const help = `room — connect a coding agent to Project Room
   room doctor
   room presence [--title <session title>] < hook-payload.json
   room code share|list|show|fetch|try|check   (hand code to other agents; room code help)
+  room continue <work-id> [--markdown]      (current task continuation; read only)
+  room work [--focus all|needs_me|results|help_wanted] [--cursor <cursor>] [--limit <n>]
+  room docs list|read|write                 (project documents; room docs help)
 
 join is the one-line path: login --accept, setup for the detected tool, then an invite line to share (no secret, no invite code).
 login saves a private connection. It prints no secret.

@@ -266,11 +266,13 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   assert.equal(receipt.files, expectedFiles,
     `candidate package ships ${receipt.files} files but the allowlisted fixture set has ${expectedFiles}`);
   // Cold imports below exercise the host runner, process adapter and CLI.
-  for (const file of ["client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs"]) assert.ok(existsSync(join(destination, file)), file);
+  for (const file of ["client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs", "client/local-verification-host.mjs", "scripts/verify-local.mjs"]) assert.ok(existsSync(join(destination, file)), file);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { configuredHost } from ${JSON.stringify(pathToFileURL(join(destination, "client/host-process.mjs")).href)};
     import { runRequestOnce } from ${JSON.stringify(pathToFileURL(join(destination, "client/request-runner.mjs")).href)};
+    import { createLocalVerificationHost } from ${JSON.stringify(pathToFileURL(join(destination, "client/local-verification-host.mjs")).href)};
+    if (typeof createLocalVerificationHost !== "function") throw new Error("Missing local check worker");
     if (typeof configuredHost !== "function" || typeof runRequestOnce !== "function") throw new Error("Missing host bridge");
     import { SyntheticInboxTransport } from ${JSON.stringify(pathToFileURL(join(destination, "server/inbox-transport.mjs")).href)};
     import { initialRoom } from ${JSON.stringify(pathToFileURL(join(destination, "server/bootstrap.mjs")).href)};

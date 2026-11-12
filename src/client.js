@@ -1401,7 +1401,11 @@ export class RoomClient {
       this.endAccess();
       return;
     }
-    this.onStatus("Connection interrupted · refresh to recover; no peer activity inferred");
+    // A protected read refusal is a data-selection failure, not evidence that
+    // the transport disconnected. Never echo source text or unknown codes.
+    this.onStatus(error.status === 409 && ["current_room_context_unavailable", "current_snapshot_selection_unavailable"].includes(error.code)
+      ? "Current view unavailable · displayed history may be stale. Refresh to retry."
+      : "Connection interrupted · refresh to recover; no peer activity inferred");
     // A reconnect must preserve the server's cooldown rather than turn a
     // successful transport open into permission to retry an overloaded read.
     this.refreshInterrupted = true;

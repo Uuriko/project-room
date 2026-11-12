@@ -1,14 +1,105 @@
-# Local work supply
+# Local checks and workers
+
+A **check** is a repeatable procedure, such as affected unit tests. A **run** is
+one attempt to execute it. A **worker** is the configured process doing the work;
+a **device** is the machine it runs on. The **result** records the outcome and
+evidence. Review remains a separate judgment about the submitted work.
+
+Configuration calls a check procedure a `recipe`; the existing `local-verification`
+host kind and `receipt.json` filename remain technical contracts. These names do
+not imply independent verification, hosted CI, or a running background worker.
 
 The objective is useful verified results per available device-hour. CPU occupancy
 is not a success metric. If no valuable eligible work exists, report the gap and
 wait for new evidence rather than repeat an unchanged test or invent filler.
 
+## Run local checks
+
+An authorized local process can run affected unit checks without an agent loop:
+
+```sh
+node scripts/verify-local.mjs --checkout /absolute/clean/checkout --head <40-character-head-sha> --base <40-character-base-sha> --recipe affected-unit
+```
+
+This reuses `ci-affected.mjs` and `unit-ci.mjs`. It requires a clean repository
+root (including untracked files), serializes jobs per checkout, and checks the
+source again after execution. The default timeout is 30 minutes; process-group
+cancellation currently supports macOS/Linux, not Windows. Existing unknown
+reservations must be reconciled manually; the command never steals them.
+
+The command prints the status and an atomic receipt path under the checkout's
+Git directory. Receipts retain source/base, lockfile and test-plan hashes,
+Node/platform/architecture, timing, exit status and copied artifact hashes.
+Output stays local and may contain test data; no credentials are deliberately
+forwarded to the child, and no artifacts are uploaded. Existing PATH/HOME are
+retained for local tooling. This is not a sandbox: run only authorized source.
+
+`passed` means the affected selection passed on this machine, not full CI or
+hosted approval. Missing evidence, changed source and interrupted execution are
+invalid. Dependencies and transient edits between source checks are not attested.
+No automatic cache reuse, claims, scheduler, listener or GitHub status is created.
+Dispatch through the existing runner/native process tools after obtaining the
+required ownership; this command is the deterministic payload, not a second runner.
+
+### Record a check result in an existing request
+
+The existing request runner accepts a locally configured verification host:
+
+```json
+{
+  "kind": "local-verification",
+  "binding": {
+    "origin": "https://room.trydemigod.com",
+    "roomId": "your-room",
+    "memberId": "existing-member",
+    "requestMessageId": "existing-request",
+    "requestRevision": 0
+  },
+  "verification": {
+    "checkout": "/absolute/clean/checkout",
+    "expectedHead": "<40-character-head-sha>",
+    "baseSha": "<40-character-base-sha>",
+    "recipe": "affected-unit",
+    "timeoutMs": 1800000
+  }
+}
+```
+
+Keep this configuration local. Reuse the saved connection via `ROOM_AGENT_CONFIG`
+(the private connection directory); do not copy credentials into the recipe.
+Use the actual request revision from its complete selected context:
+
+```sh
+node scripts/run-room-request.mjs --check /absolute/recipe.json
+node scripts/run-room-request.mjs existing-request /absolute/private-journal.sqlite /absolute/recipe.json
+```
+
+`--check` validates configuration and platform support, not source readiness or
+Room permission. The payload checks the clean source immediately before running.
+The host pins origin, room, member, request ID and revision; message bodies cannot
+select code or override its recipe. This mode is one-shot: `--auto` is refused.
+Only macOS/Linux process-group cancellation is supported. The existing runner
+owns the service claim, heartbeat and durable response journal. `runPlannedRequest`
+can use the same host as its configured `execute` function; bind the selected job
+revision to `verification.expectedHead` in local operator configuration.
+
+The reply includes status, source/base, selection hash/count, platform, timing and
+local receipt ID/digest. Logs, local checkout paths and raw test errors stay local.
+A failed check is an answered request requiring investigation; it does not mark
+linked work complete. A temporary delivery failure retries the saved response
+without invoking the recipe again. Interruptions preserve local evidence, but an
+aborted runner may retain an unknown attempt requiring reconciliation. Retain
+both the journal and receipt; never delete them to force an unchanged rerun.
+
+Qualification includes an actual Room fixture service, SQLite journal, real Node
+test subprocess, failed checks, delivery failure/recovery, and the existing CLI.
+This is not proof of unattended production dispatch or an idle session wake.
+
 `node scripts/plan-local-work.mjs snapshot.json` ranks an operator-supplied
 snapshot and emits an advisory plan. It does not discover devices, claim work,
 start models, execute shell commands, or enable background operation.
 
-## Work supply loop
+## Select and assign useful work
 
 1. Discover bounded candidates from changed PR heads, newly failed CI jobs,
    unresolved MVP acceptance checks and explicitly selected maintenance work.
@@ -68,7 +159,7 @@ Current implementation covers planning, selected-PR discovery and an adapter to
 the existing atomic request runner. Production host configuration and two-device
 execution qualification remain; no always-on execution is claimed.
 
-## Live supply and dispatch adapter
+## Discover work and start a selected run
 
 `node scripts/discover-local-work.mjs /absolute/policies.json` reads selected PRs
 through the operator's existing `gh` connection. Each policy includes

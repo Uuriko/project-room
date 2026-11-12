@@ -1,5 +1,6 @@
 import { validId } from "../src/events.js";
 import { parseShareInviteCode } from "../src/share-invite-code.js";
+import { selectedTaskFromLocation } from "../src/room-deep-link.js";
 
 // Slice 3 (RC-2026-09-17-012) — mail sender seam for magic-link sign-in.
 //
@@ -120,7 +121,7 @@ export function validateMagicReturnTo(value) {
   if (url.hash) {
     const invitationPattern = "[A-Za-z0-9_-]{43}";
     const match = new RegExp(`^#(?:invite/${invitationPattern}|join/([^/]+)(?:/(work|message)/([^/]+))?)$`).exec(url.hash);
-    if (!match && !(url.hash.startsWith("#code/") && parseShareInviteCode(url.hash.slice(6)))) return null;
+    if (!match && !selectedTaskFromLocation(url) && !(url.hash.startsWith("#code/") && parseShareInviteCode(url.hash.slice(6)))) return null;
     if (match?.[1] && !(new RegExp(`^${invitationPattern}$`).test(match[1]) || parseShareInviteCode(match[1]))) return null;
     if (match?.[3] && !validId(match[3])) return null;
   }

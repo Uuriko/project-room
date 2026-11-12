@@ -220,8 +220,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /Message #general/);
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);
-  assert.match(html, /id="agent-signin-button"/);
-  assert.match(html, />Agent sign in</);
+  assert.match(html, /id="entry-agent-prompt"/);
+  assert.doesNotMatch(html, />Agent sign in</);
   assert.doesNotMatch(html, /More options/);
   assert.doesNotMatch(html, /share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
   assert.match(html, /id="auth-room-hint"/);

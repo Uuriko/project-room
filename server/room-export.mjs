@@ -1,3 +1,4 @@
+import { ROOM_DOC_SCHEMA, ROOM_DOC_TABLES } from "./room-docs.mjs";
 import { assertRestoreAdmitted, withRestoreTransaction, beginRestore, completeRestore } from './restore-admission.mjs';
 import { withCurrentRestoreTableRows, verifyCurrentRoomSchema, invalidateCurrentRoomSchema, restoredCurrentFormatPresent } from './current-room-repository.mjs';
 // Durable Object export. The on-disk server copies its sqlite file
@@ -647,6 +648,7 @@ export const CONTENT_DIGEST_SKIPPED_TABLES = Object.freeze([...REPLAY_SKIPPED_TA
 // Restore only the known lazy schemas, never backup-supplied DDL. Streaming
 // restore calls this when it encounters the first row in a native namespace.
 export function ensureNativeAgentRestoreSchema(db, names) {
+  if (ROOM_DOC_TABLES.some(table => names.has(table))) db.exec(ROOM_DOC_SCHEMA);
   if (names.has("message_replay_units")) ensureReplayCutoverRestoreSchema(db);
   // Production also creates these application schemas lazily. Restore their
   // rows using code-owned DDL; never accept schema supplied by the export.

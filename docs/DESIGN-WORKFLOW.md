@@ -4,6 +4,62 @@
 applies that direction. Keep the brief, findings and evidence on the existing
 work item or PR; do not create another design backlog or living handbook.
 
+## Design is part of the task
+
+A finished product change must make the intended task work and make its interface
+understandable. Code correctness, visual craft, information architecture, content,
+accessibility and recovery belong in the same acceptance decision. An agent tool
+is an interface too: discovery, names, schemas, bounded context, errors and safe
+retries affect whether its user can complete the task.
+
+For another project, use that project's design direction and components, not
+Project Room's visual identity. Keep a small Design document in existing project
+Docs, or link its repository equivalent if that is already authoritative. Include
+who it serves, its main tasks, a few annotated references, canonical components,
+tokens, language and important states. Link live code and revisioned decisions;
+do not create a second copy of task status or assume a Figma file syncs itself.
+Agents should retrieve this selected context when starting relevant work.
+
+For a new flow, compare distinct structures before polishing one. For a small
+repair, use the existing structure. A reference says what to borrow, such as
+information density or navigation, and what does not fit this project's audience.
+A beautiful screenshot with an unreachable action is unfinished; passing tests do
+not establish that a design is coherent or pleasant to use.
+
+## What to automate and what to judge
+
+| Ordinary code and tools | Design judgment |
+| --- | --- |
+| Render selected actual components/states, capture viewports/themes, retain source and image hashes | Choose the task flow, hierarchy, visual direction and what deserves emphasis |
+| Check token use, available component APIs, links, contrast, overflow and applicable interaction contracts | Decide whether a deviation helps the actual task or merely adds decoration |
+| Run keyboard/recovery tests and retain failures | Exercise discoverability, wording and recovery without relying on the author's explanation |
+| Package selected evidence and known gaps with the work result | Review the rendered product and record accept, changes requested or insufficient evidence |
+
+Use current reference implementations in place of repeated instructions. Add a
+mechanical check for a recurring concrete defect when the intended rule is clear.
+Do not ban a typeface, color or layout globally just because generated designs
+sometimes overuse it. Do not optimize screenshot similarity over usefulness.
+
+## Product integration, using existing objects
+
+1. **Docs** holds or links the project's design direction, annotated examples and
+   component references. Existing revision, access and conflict rules apply.
+2. **Work** identifies the user, intended outcome and the relevant design context.
+   Design work and engineering work share one task/result model.
+3. **Checks and runs** produce source-bound previews, screenshots and interaction
+   evidence on configured devices. A preview URL or capture stays tied to its
+   revision; it is not evidence about whichever deployment happens to be current.
+4. **Review** puts specific feedback beside that result: element/state, observed
+   problem, task impact, correction and acceptance evidence. Preserve the reasons
+   for a decision so the next agent does not reopen a settled choice blindly.
+
+This is an integration direction, not a claim that automated design-context
+retrieval, native preview annotations or cross-device capture dispatch are shipped.
+The current implementation is the local evidence gallery and review packet below.
+Start there before adding a canvas, new navigation destinations or a design queue.
+Existing Figma/Storybook projects can link their authoritative assets and tools;
+installing either is not required to contribute or use this workflow.
+
 ## Scoped brief and agent prompt
 
 Copy the relevant fields into the work description. Small repairs do not need
@@ -44,11 +100,20 @@ data into public artifacts or third-party design tools.
 Generate the local gallery with the existing Playwright installation:
 
 ```sh
-node scripts/design-evidence-gallery.mjs --out test-results/design-review
+node scripts/design-evidence-gallery.mjs --out test-results/design-review --journey entry
 ```
+
+The optional `--journey` selects `entry`, `access`, `signup`, `room-create`,
+`permissions` or `admission`. Omit it for the existing complete gallery. A selected
+journey avoids dumping unrelated screens into the agent's context.
 
 Use a new output directory for each run. Open `index.html` in that directory;
 `manifest.json` contains screenshot digests, source provenance and test outcomes.
+`review.json` is a compact agent context with the selected states, source,
+failures and coverage gaps; `review.md` is the copyable review prompt. Both start
+with design review **not reviewed** and no decision. Passing captures cannot set
+that decision. Record the actual review on the existing work item or PR.
+
 The command runs selected existing browser journeys against disposable local
 stores. It neither contacts production nor updates visual baselines. Its overall
 result describes capture/test completion; inspect accessibility findings separately.
@@ -128,9 +193,33 @@ Do not migrate frameworks just to adopt a component kit or install overlapping
 prompt packs. The existing [room-antislop skill](../.agents/skills/room-antislop/SKILL.md)
 remains the local filter.
 
+## Research update — 2026-11-12
+
+These sources support workflow choices, not a claim that a tool produces better
+customer outcomes in Project Room. Product documentation establishes capability;
+maintainer examples and community reports are weaker evidence of effectiveness.
+
+| Source | Useful mechanism | Decision here |
+| --- | --- | --- |
+| [Figma MCP](https://developers.figma.com/docs/figma-mcp-server/mcp-vs-agent/) and [Code Connect](https://help.figma.com/hc/en-us/articles/42495296821911-Code-Connect-and-MCP) | Structured frames, layout, variables and links to real component implementations, alongside screenshots | Retrieve selected project context; use existing assets when supplied. A connection alone does not provide design judgment. |
+| [Vercel design-system workflow](https://vercel.com/blog/ai-powered-prototyping-with-design-systems) | Reusable components, consistent APIs and tokens make design constraints available to generation | Reuse actual components and runnable examples; avoid a parallel screenshot-only implementation. |
+| [Builder engineering account](https://www.builder.io/blog/how-to-make-ai-agents-follow-your-design-system) | Reference code plus checks catch deprecated imports and invalid styling that prose can miss | Keep instructions short and point to code; extend existing deterministic checks for repeated observed defects. |
+| [Storybook MCP](https://storybook.js.org/docs/ai/mcp/overview) | Component documentation, state examples, interaction and accessibility tooling; current AI features are preview | Adopt its component/state context pattern through existing fixtures; no framework migration or installation for this slice. |
+| [Impeccable](https://github.com/pbakaus/impeccable) and [gstack design review](https://github.com/garrytan/gstack/tree/main/design-review) | Targeted critique, simplification/hardening passes and rendered-browser review | Use focused operations and evidence-linked findings. No wholesale prompt-pack installation or invented aesthetic pass score. |
+| [Practitioner discussion](https://www.reddit.com/r/ClaudeCode/comments/1xfumto/how_are_you_handling_uxui_with_claude/) | Reported use of constrained components, tokens, visual references and screenshot critique | A source of testable tactics, not controlled evidence or a universal recipe. |
+| [Duan et al., 2024](https://arxiv.org/abs/2403.13139) | Study of heuristic feedback on 51 interfaces and a study with 12 design experts; useful findings coexisted with false positives and missed issues | Use critique as assistance. Keep expert/user judgment and task behavior separate from model approval. The older-model result does not estimate today's models. |
+
+For one consequential changed flow, compare the existing approach with a selected
+brief/components/state packet and independent review. Keep the task, audience and
+starting state comparable. Record unassisted task completion, wrong turns,
+recovery, time, agent calls and reviewer rework. Ask for a reasoned paired visual
+preference separately from functional correctness. Keep failed trials; a small
+pilot does not establish causation. Stop iterating when remaining changes have no
+clear task or visual benefit; repeated model critique can produce busywork.
+
 ## Sources
 
-Reviewed 2026-10-29. References are not runtime-loaded instructions.
+Earlier review 2026-10-29. References are not runtime-loaded instructions.
 
 - [GenUI study](https://arxiv.org/abs/2606.13843): 24 designers and product managers;
   structured input, broad exploration and fidelity have tradeoffs, not a universal winner.

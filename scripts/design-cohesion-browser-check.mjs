@@ -50,13 +50,13 @@ test("shared tokens, focus, and settings sections render together", { timeout: 6
   await page.locator("#auth-title").waitFor();
   const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
   assert.equal(bg, "#202127");
-  const hint = await page.locator("#agent-signin-button").evaluate(node => {
+  const hint = await page.locator("label[for=entry-agent-prompt]").evaluate(node => {
     const color = getComputedStyle(node).color;
     const background = getComputedStyle(document.documentElement).backgroundColor;
     return { color, background };
   });
   const hintRatio = contrastRatio(hex(hint.color), hex(hint.background));
-  assert.ok(hintRatio >= 4.5, `entrance More ${hint.color} on ${hint.background} is ${hintRatio.toFixed(2)}:1`);
+  assert.ok(hintRatio >= 4.5, `agent prompt label ${hint.color} on ${hint.background} is ${hintRatio.toFixed(2)}:1`);
   assert.equal(hex(hint.color), "#aaaab7");
   await page.keyboard.press("Tab");
   const outline = await page.evaluate(() => {

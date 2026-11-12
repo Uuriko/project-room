@@ -37,9 +37,8 @@ test("visible entry choices open focused flows without hiding pending agent sign
     assert.equal(await page.locator('[data-password-mode="signup"]').isVisible(), true);
     assert.equal(await page.locator('[data-signin-form="password"]').isVisible(), true);
     assert.equal(await page.locator("#google-signin").isVisible(), false, "unconfigured provider is not offered");
-    // The wall's "Agent sign in" is a link to the standalone page now
-    // (decision #37); the whole flow below lives on /agent-signin.
-    await page.locator("#agent-signin-button").click();
+    // The standalone agent credential flow remains directly accessible.
+    await page.goto(new URL("/agent-signin", page.url()).href);
     await page.locator('[name="identityId"]').waitFor({ state: "visible" });
     assert.equal(new URL(page.url()).pathname === "/agent-signin", true);
     assert.equal(await page.evaluate(() => document.activeElement.tagName), "BODY", "page load preserves the start of keyboard navigation");
@@ -68,10 +67,10 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.locator('[data-agent-status]').filter({ hasText: "That agent ID and secret don’t match. Check both and try again." }).waitFor();
     await page.locator("#agent-signin-home").click();
     await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
-    await page.locator("#agent-signin-button").click();
+    await page.goto(new URL("/agent-signin", page.url()).href);
     await page.locator("[data-agent-new]").click();
     await page.locator("#agent-signin-home").click();
-    await page.locator("#agent-signin-button").click();
+    await page.goto(new URL("/agent-signin", page.url()).href);
     await page.locator('[name="identityId"]').waitFor({ state: "visible" });
     assert.equal(await page.evaluate(() => document.activeElement.tagName), "BODY", "leaving clears the phase and reopening preserves page navigation");
     await page.unroute("**/api/auth/agent/rooms");
@@ -128,7 +127,7 @@ for (const accountCookie of [false, true]) test(`agent browser sign-in keeps its
     });
     assert.equal(response.status(), 201);
   }
-  await page.locator("#agent-signin-button").click();
+  await page.goto(new URL("/agent-signin", page.url()).href);
   await page.locator('[name="identityId"]').fill(identity.identityId);
   await page.locator('[name="secret"]').fill(identity.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
@@ -160,7 +159,7 @@ for (const width of [1280, 390]) {
     const page = await browser.newPage({ viewport: { width, height: 900 } }), errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    await page.locator("#agent-signin-button").click();
+    await page.goto(new URL("/agent-signin", page.url()).href);
     const otherIdentity = f.store.identities.create("Different fixture agent");
     for (const bad of [{ identityId: identity.identityId, secret: crypto.randomUUID() }, { identityId: otherIdentity.identityId, secret: identity.secret }]) {
       await page.locator('[name="identityId"]').fill(bad.identityId);
@@ -222,7 +221,7 @@ for (const width of [1280, 390]) {
     t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    await page.locator("#agent-signin-button").click(); await page.locator('[data-agent-new]').click();
+    await page.goto(new URL("/agent-signin", page.url()).href); await page.locator('[data-agent-new]').click();
     await page.locator('[name="createName"]').fill("New fixture agent");
     const created = page.waitForResponse(response => new URL(response.url()).pathname === "/api/agent-identities");
     await page.locator('[data-agent-form="create"] button[type="submit"]').click();
@@ -253,7 +252,7 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    await page.locator("#agent-signin-button").click(); await page.locator('[data-agent-new]').click();
+    await page.goto(new URL("/agent-signin", page.url()).href); await page.locator('[data-agent-new]').click();
   await page.locator('[name="createName"]').fill("Unsaved fixture agent");
   await page.locator('[data-agent-form="create"] button[type="submit"]').click();
   await page.locator('[data-agent-created]').waitFor();
@@ -263,7 +262,7 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   assert.equal(await page.locator('[data-agent-secret][type="password"]').count(), 2);
   page.once("dialog", dialog => dialog.accept());
   await page.locator("#agent-signin-home").click();
-    await page.locator("#agent-signin-button").click();
+    await page.goto(new URL("/agent-signin", page.url()).href);
   assert.equal(await page.locator('[name="identityId"]').inputValue(), "");
   assert.equal(await page.locator('[name="secret"]').inputValue(), "");
   assert.equal(await page.locator('[data-agent-secret]').count(), 0);

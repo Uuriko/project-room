@@ -1773,7 +1773,11 @@ body:has(#main:not([hidden])) .site-footer { display: none; }
 .signin-more[open] > summary::after { content: " −"; }
 .signin-more > summary::-webkit-details-marker { display: none; }
 .signin-more > a, .signin-more > button { display: block; margin: .25rem auto; min-height: 44px; padding: .6rem; font-size: var(--text-sm); }
-#signin-entry-routes { margin-top: .6rem; }
+#signin-entry-routes { grid-template-columns: minmax(0, 1fr) auto; align-items: center; margin: .6rem 0 1rem; }
+#signin-entry-routes label { margin: 0; }
+#entry-agent-prompt { grid-column: 1 / -1; grid-row: 2; }
+#entry-agent-copy { grid-column: 2; grid-row: 3; width: auto; min-height: 44px; padding-inline: 1rem; }
+#entry-agent-copy-status { grid-column: 1 / -1; margin: 0; }
 #signin-entry-routes #agent-signin-button { justify-self: center; color: var(--muted); text-decoration: none; font-weight: 400; }
 #signin-entry-routes #join-code-link { justify-self: center; display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-sm); text-decoration: none; }
 [data-signin-form="password"] > .signin-more, #signup-password-hint { grid-column: 1 / -1; }
@@ -1876,3 +1880,5 @@ svg[width="20"][height="20"] { width: 1.25rem; height: 1.25rem; }
 #new-direct-dialog { width: min(100% - 2rem, 32rem); }
 #new-direct-people { margin-top: var(--space-4); max-height: 50vh; overflow-y: auto; }
 #new-direct-people .channel { min-height: 44px; width: 100%; text-align: left; }
+
+#room-docs-root .room-docs-text { white-space: pre-wrap; overflow-wrap: anywhere; }

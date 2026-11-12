@@ -824,6 +824,16 @@
         "title": "Discard File"
       }
     },
+    "room_docs": {
+      "inputSchema": "6aca2eec05b51b87",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Docs"
+      }
+    },
     "room_get_file": {
       "inputSchema": "08502609b54ff943",
       "annotations": {
@@ -1392,6 +1402,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Work Claim Thread"
+      }
+    },
+    "room_write_doc": {
+      "inputSchema": "93b938d2bc193da9",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Write Doc"
       }
     },
     "squads_create": {

@@ -151,7 +151,8 @@ export function authenticateMcpOAuthRequest(store, token, roomId) {
 // invitation tools; current Room authority is still checked by the service.
 const scopeTools = {
   'members:invite': ['room_create_agent_invite'],
-  'rooms:read': ['room_check_access'],
+  'rooms:read': ['room_check_access', 'room_docs'],
+  'docs:write': ['room_write_doc'],
   'chat:read': ['room_read_messages', 'room_mark_caught_up', 'room_read_inbox', 'room_wait_for_attention', 'room_list_requests', 'room_read_request'],
   'chat:write': ['room_post_message', 'room_reply', 'room_request_reply', 'room_respond_to_request', 'room_cancel_request', 'room_progress_request'],
   'work:read': ['room_list_work', 'room_read_board', 'room_read_work', 'room_read_work_discussion', 'room_read_result'],

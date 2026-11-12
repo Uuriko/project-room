@@ -10,14 +10,14 @@ const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(
 async function fixture(t) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 10000 });
   t.mock.method(Math, 'random', () => 0);
-  const streams = [], reads = [], probes = [], responses = [];
+  const streams = [], reads = [], probes = [], responses = [], statuses = [], snapshots = [];
   let pending = null, active = 0, maximum = 0, probeResponse = null;
   class Events extends EventTarget {
     readyState = 1;
     constructor() { super(); streams.push(this); }
     close() { this.readyState = 2; }
   }
-  const client = new RoomClient({ events: Events, fetcher: async path => {
+  const client = new RoomClient({ events: Events, onStatus: value => statuses.push(value), onSnapshot: value => snapshots.push(value), fetcher: async path => {
     if (path === '/api/session') return Response.json(identity);
     if (path.includes("view=work")) {
       probes.push(path); return probeResponse ?? Response.json(snapshot);
@@ -29,7 +29,7 @@ async function fixture(t) {
   await client.restore(); streams.at(-1).dispatchEvent(new Event('open')); await settle();
   t.after(() => client.disconnect());
   reads.length = 0;
-  return { client, streams, reads, probes, maximum: () => maximum,
+  return { client, streams, reads, probes, statuses, snapshots, maximum: () => maximum,
     respond(response) { responses.push(response); },
     probeRespond(response) { probeResponse = response; },
     hold() { let resolve; pending = new Promise(r => { resolve = r; }); return () => { pending = null; resolve(); }; },
@@ -132,4 +132,57 @@ test('a rejected old-room recovery cannot restore a full-read obligation in the 
   reject(new Error('Old room failed')); await settle();
   assert.equal(f.client.refreshRecoveryNeedsFull, false);
   assert.equal(f.client.refreshRetryNotBefore, 0);
+});
+
+for (const code of ['current_room_context_unavailable', 'current_snapshot_selection_unavailable']) test(`${code} preserves the held view and reports a read refusal without claiming a reconnect`, async t => {
+  const f = await fixture(t), held = f.client.live.snapshot, count = f.snapshots.length;
+  f.respond(Response.json({error:{code,message:'PRIVATE SOURCE TEXT'}},{status:409}));
+  await f.client.refresh(null,{revalidate:true}).catch(error=>f.client.handleFailure(error));
+  assert.equal(f.client.live.snapshot,held);
+  assert.equal(f.snapshots.length,count);
+  assert.equal(f.client.sequence,1);
+  assert.equal(held.cursor,0,'a failed read never acknowledges history');
+  assert.match(f.statuses.at(-1),/Current view unavailable.*displayed history may be stale/);
+  assert.doesNotMatch(f.statuses.at(-1),/PRIVATE|reconnect|Connection interrupted/);
+  assert.ok(f.client.refreshRetry,'the existing bounded recovery timer remains available');
+  t.mock.timers.tick(1000); await settle();
+  assert.equal(f.client.refreshInterrupted,false);
+  assert.match(f.statuses.at(-1),/^Connected to room service/);
+});
+
+test('unknown conflict and transport errors do not impersonate a protected read refusal', async t => {
+  const f = await fixture(t);
+  for (const error of [Object.assign(new Error('PRIVATE'),{status:409,code:'unknown_private_code'}),new TypeError('PRIVATE')]) {
+    f.client.handleFailure(error);
+    assert.match(f.statuses.at(-1),/^Connection interrupted/);
+    assert.doesNotMatch(f.statuses.at(-1),/PRIVATE|Current view unavailable|unknown_private_code/);
+  }
+});
+
+for (const status of [401,403]) test(`HTTP ${status} still ends access even with a bounded-read code`, async t => {
+  const f = await fixture(t), previous = f.statuses.length;
+  f.client.handleFailure(Object.assign(new Error('PRIVATE'),{status,code:'current_room_context_unavailable'}));
+  assert.equal(f.client.session,null);
+  assert.equal(f.client.refreshRetry,null);
+  assert.equal(f.statuses.length,previous);
+});
+
+test('account binding changes remain access-ending conflicts',async t=>{
+  const f=await fixture(t);f.client.session.authMode='account';
+  f.client.handleFailure(Object.assign(new Error('PRIVATE'),{status:409,code:'session_binding_changed'}));
+  assert.equal(f.client.session,null);assert.equal(f.client.refreshRetry,null);
+  assert.doesNotMatch(f.statuses.at(-1),/Current view unavailable/);
+});
+
+test('an old-room read refusal cannot overwrite status after session replacement', async t => {
+  const f = await fixture(t);
+  let reject;
+  f.client.refresh = () => new Promise((_resolve,no)=>{reject=no;});
+  f.event(); await settle();
+  f.client.disconnect(); f.client.session = {roomId:'new-room',member:{id:'new-viewer'}};
+  const count=f.statuses.length;
+  reject(Object.assign(new Error('PRIVATE'),{status:409,code:'current_room_context_unavailable'}));
+  await settle();
+  assert.equal(f.statuses.length,count);
+  assert.equal(f.client.refreshInterrupted,false);
 });

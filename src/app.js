@@ -1,5 +1,5 @@
 import { createDirectConversationWindow, createMessageSelection, createConversationDirectory } from "./direct-conversation-window.js";
-import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
+import { stashGoogleRoom, consumeGoogleRoom, stashOAuthTask, consumeOAuthTask } from "./google-room-return.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
@@ -47,6 +47,7 @@ import { createNeedsAttentionCard, installMemberPermissions } from "./needs-atte
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
+import { installContinuation } from "./continuation-ui.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
@@ -54,7 +55,7 @@ import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-nav
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, selectedTaskFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -284,7 +285,7 @@ try {
     : start === "invite-agent"
       ? { kind: "invite-agent", agent: acqUrl.searchParams.get("agent") || "" }
       : acqUrl.searchParams.has("request")
-        ? { kind: "request", roomId: acqUrl.searchParams.get("request") || "" }
+        ? { kind: "request", roomId: acqUrl.searchParams.get("request") || "", task: selectedTaskFromLocation(acqUrl) }
         : null;
   if (intent) {
     window.sessionStorage.setItem(ACQUISITION_KEY, JSON.stringify(intent));
@@ -327,6 +328,7 @@ redirectAgentInvite(initialInvitationFragment);
 // sessionStorage only for the round-trip (cleared on dialog close/accept and
 // consumed one-shot at boot); merely previewing an invitation never stores it.
 function stashInviteForOAuth() {
+  stashOAuthTask({ search: location.search, hash: location.hash });
   if (invitation.secret) stashPendingInvite(window.sessionStorage, invitation.secret);
   // [QA-Join]: the #join/ share-link fragment is dropped by the OAuth
   // round-trip exactly like #invite/. Stash the live address-bar token (put
@@ -349,13 +351,14 @@ function stashInviteForOAuth() {
   if (githubButton) githubButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
 let briefReconcileNote = ""; // Catch-up reconciliation failure, shown in the brief while the dialog is open.
-let portableWorkUI = null;
+let portableWorkUI = null, continuationUI = null;
 let resultCopyUI = null;
 let remindersUI = null;
 let agentConnectionsUI = null;
 let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
+let docsUi = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let partialWorkSnapshot = false, inspectedWorkRecord = null;
 // JDOT-COH-NAV begin
@@ -518,7 +521,9 @@ const client = new RoomClient({
     partialWorkSnapshot = snapshot.snapshotVersion === 2;
     inspectedWorkRecord = null;
     state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
+    if (session && (session.roomId !== identity.roomId || session.member?.id !== identity.member?.id)) docsUi?.reset();
     session = identity;
+    if (presenceBoundary) void docsUi?.sync();
     // A successful room snapshot supersedes a denied deep link from an
     // earlier room/account. Keep unrelated account failures visible.
     const accountStatus = $("#account-status");
@@ -583,6 +588,7 @@ const client = new RoomClient({
     instructionsUI?.sync();
     resultCopyUI?.sync();
     portableWorkUI?.sync();
+    continuationUI?.sync();
     workspaceUI?.sync();
     if (firstSnapshot) {
       // JDOT-MEMBER-PERMS-UI begin
@@ -604,7 +610,11 @@ const client = new RoomClient({
       if (!location.hash) restoreResultSelection();
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
-    if (firstSnapshot) revealLocationHash();
+    if (firstSnapshot) {
+      const acquisition = readAcquisition();
+      if (acquisition?.kind === "request" && acquisition.roomId === state.room.id) clearAcquisition();
+      revealLocationHash();
+    }
     else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
     retryPendingHashReveal();
     resumeConfirmedWorkNavigation();
@@ -637,6 +647,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     partialWorkSnapshot = false; inspectedWorkRecord = null;
+    docsUi?.reset({clear: !leavingPage && !sessionExpired && !preserveScopedBackup && !["accepted-room-switch", "invited-room-switch"].includes(endedContext)});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
@@ -660,6 +671,7 @@ const client = new RoomClient({
     ownerOffersUI?.reset();
     shareLinksUI?.resetManagement();
     portableWorkUI?.reset();
+    continuationUI?.reset();
     resultCopyUI?.reset();
     remindersUI?.reset();
     resetNotifications();
@@ -856,6 +868,7 @@ portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: m
   notice(visible ? "Draft posted. Work status is unchanged." : "Draft posted. Refresh to view it. Work status is unchanged.");
 } });
 resultCopyUI = installResultCopy({ client, getState: () => state });
+continuationUI = installContinuation({ client, getState: () => state });
 workspaceUI = installWorkspaceNavigation({ account: accountClient, getRoom: () => state,
   onRooms: () => loadAccountRooms(),
   onNavigate: () => { if (!$("#status").classList.contains("error")) clearNotice(); } });
@@ -944,7 +957,7 @@ const signinUI = createAuthSigninUI({
     const roomId = selectedRoomFromLocation();
     if (roomId) destination.searchParams.set("room", roomId);
     else if (accountHomeFromLocation()) destination.searchParams.set("account", "1");
-    destination.hash = invitation.secret ? `#invite/${invitation.secret}` : (shareLinksUI?.pendingFragment() || "");
+    destination.hash = invitation.secret ? `#invite/${invitation.secret}` : (shareLinksUI?.pendingFragment() || selectedTaskFromLocation(location)?.hash || "");
     return `${destination.pathname}${destination.search}${destination.hash}`;
   },
   onSignInUncertain: async (options) => {
@@ -1482,12 +1495,12 @@ const recordHref = (kind, id) => `#pr-record/${kind}/${encodeURIComponent(id)}`;
 const workDomId = id => recordDomId("work", id);
 const workHref = id => recordHref("work", id);
 function setConnectionStatus(text) {
-  const normalized = /^(Reconnecting|Connection interrupted)/.test(text)
+  const normalized = /^Reconnecting/.test(text)
     ? "Connection interrupted · reconnecting; displayed history may be stale"
     : text;
   const status = $("#connection-status");
   const wasInterrupted = status.dataset.interrupted === "true";
-  status.dataset.interrupted = String(/^(Connection interrupted|Room service unavailable|Reconnecting)/.test(normalized));
+  status.dataset.interrupted = String(/^(Connection interrupted|Room service unavailable|Reconnecting|Current view unavailable)/.test(normalized));
   const connected = normalized === "Connected to room service · no peer read or processing receipt";
   const visible = connected ? "Connected" : normalized;
   status.dataset.state = connected ? "connected"
@@ -3463,6 +3476,7 @@ async function readSelectedWorkRecord(id, expandDetails) {
     // summary window and completeness metadata remain unchanged.
     inspectedWorkRecord = structuredClone(item);
     state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
+    syncAcquisitionControls();
     return revealWork(id, expandDetails);
   } catch (error) {
     if (current()) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
@@ -4087,7 +4101,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${replacement}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${replacement}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}<button type="button" class="button secondary" data-continue-work="${esc(i.id)}">Continue with an agent</button>${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -6167,8 +6181,8 @@ function syncAcquisitionControls() {
     tasksControl.hidden = !isOwner;
     const list = $("#public-tasks-list");
     if (isOwner && list) {
-      const open = Object.values(state.workItems ?? {}).filter(item => ["proposed", "accepted", "working", "blocked"].includes(item.state));
-      list.replaceChildren(...open.map(item => {
+      const publishable = Object.values(state.workItems ?? {}).filter(item => ["proposed", "accepted", "working", "blocked"].includes(item.state) || item.publicTask?.enabled === true);
+      list.replaceChildren(...publishable.map(item => {
         const li = document.createElement("li");
         const label = document.createElement("label");
         const box = document.createElement("input");
@@ -6178,6 +6192,13 @@ function syncAcquisitionControls() {
         box.addEventListener("change", () => sendAcquisition(T.WORK_PUBLIC_SET, { workItemId: item.id, enabled: box.checked }));
         label.append(box, document.createTextNode(" " + item.title));
         li.append(label);
+        if (item.publicTask?.enabled && state.room.publicPage?.enabled) {
+          const link = document.createElement("a");
+          link.href = `/r/${encodeURIComponent(state.room.id)}?workId=${encodeURIComponent(item.id)}`;
+          link.textContent = "View public task";
+          link.setAttribute("aria-label", `View public task: ${item.title}`);
+          li.append(document.createTextNode(" "), link);
+        }
         return li;
       }));
     }
@@ -6318,7 +6339,8 @@ async function runAcquisitionIntent() {
       if (ref) query.set("ref", ref);
       const qs = query.toString();
       const door = location.pathname.startsWith("/room/") ? "/room" : "";
-      location.assign(`${door}/join${qs ? `?${qs}` : ""}`);
+      const task = selectedTaskFromLocation({search: `?room=${encodeURIComponent(roomId)}`, hash: intent.task?.hash});
+      location.assign(`${door}/join${qs ? `?${qs}` : ""}${task && task.roomId === intent.task?.roomId ? task.hash : ""}`);
       return;
     }
     if (intent.kind === "template") {
@@ -8304,6 +8326,16 @@ const ready = (async () => {
   try { consentReturn = validatedOAuthReturn(sessionStorage.getItem(oauthReturnKey)); } catch { /* Ordinary navigation remains available. */ }
   const returnParams = new URLSearchParams(location.search);
   const providerReturned = returnParams.get("google") === "signed-in" || returnParams.get("github") === "signed-in";
+  if (providerReturned) {
+    const task = consumeOAuthTask();
+    if (task && !consentReturn && !initialJoinFragment && !initialInvitationFragment) {
+      const destination = new URL(location.href);
+      destination.searchParams.set("room", task.roomId);
+      destination.searchParams.delete("account");
+      destination.hash = task.hash;
+      history.replaceState(history.state, "", destination.pathname + destination.search + destination.hash);
+    }
+  }
   if (returnParams.get("oauth") !== "login" && consentReturn
     && (validatedDesktopConsent(consentReturn) || providerReturned)) {
     const account = await ensureAccountSession();
@@ -8344,7 +8376,7 @@ const ready = (async () => {
     const account = await ensureAccountSession();
     const explicitRoom = consumeGoogleRoom();
     const remembered = account?.authenticated ? readMemberRoom(account.account.id)?.roomId : null;
-    const target = explicitRoom || remembered || selectedRoomFromLocation();
+    const target = selectedTaskFromLocation(location)?.roomId || explicitRoom || remembered || selectedRoomFromLocation();
     const next = new URL(location.href);
     next.searchParams.delete("google");
     if (target) { next.searchParams.set("room", target); next.searchParams.delete("account"); }
@@ -8358,7 +8390,7 @@ const ready = (async () => {
     // cookie before the account gate, or a fresh joiner is stranded at the
     // sign-in panel despite holding a working session. A cookie for a
     // different room is dropped and the account flow decides as before.
-    if (requestedRoom && !accountHomeFromLocation() && !googleReturned) {
+    if (requestedRoom && !accountHomeFromLocation() && !providerReturned) {
       try {
         const joined = await restoreAtStartup();
         if (joined?.roomId === requestedRoom) return;
@@ -8540,8 +8572,13 @@ const ready = (async () => {
 }
 // --- end W board ---
 
+docsUi = installRoomDocs({client, getState: () => state, getSession: () => session});
+void docsUi.sync();
 return ready;
 }
 
 // Cached HTML from before the entry split still names this module directly.
 if (document.querySelector('script[type="module"][src$="/src/app.js"]')) startApp();
+
+// Experimental room documents UI; uses the same authenticated RoomClient as the room.
+import { installRoomDocs } from "./room-docs-ui.js";

@@ -37,14 +37,9 @@ for (const touch of [false, true]) {
         const button = page.getByRole('button', { name, exact: true });
         assert.equal(await button.count(), 1); assert.equal(await button.isVisible(), true);
       }
-      // Agent sign in is a link to its own page now (decision #37).
-      const agentLink = page.getByRole('link', { name: 'Agent sign in', exact: true });
-      assert.equal(await agentLink.count(), 1); assert.equal(await agentLink.isVisible(), true);
-      for (const [name, href] of [['Connect an agent', '/docs/agents/paste'], ['Watch agents work', '/watch']]) {
-        const link = page.getByRole('link', { name, exact: true });
-        assert.equal(await link.isVisible(), true);
-        assert.equal(await link.getAttribute('href'), href);
-      }
+      assert.equal(await page.locator('#entry-agent-prompt').isVisible(), true);
+      assert.equal(await page.locator('#entry-agent-copy').isVisible(), true);
+      assert.equal(await page.getByRole('link', { name: 'Watch agents work', exact: true }).count(), 0);
       assert.doesNotMatch(await page.locator('body').innerText(), /A shared place|Conversations, shared work|Have an invite\?|Paste a prompt/);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     }

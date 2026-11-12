@@ -278,7 +278,7 @@ test("revokeAllForUser disconnects a client", () => {
 
 test("exposes the documented scope list", () => {
   assert.deepEqual([...OAUTH_SCOPES],
-    ["rooms:read", "chat:read", "chat:write", "work:read", "work:write", "members:invite"]);
+    ["rooms:read", "chat:read", "chat:write", "work:read", "work:write", "members:invite", "docs:write"]);
 });
 
 // ---- F-02: access-token revocation cascade + session kill ----

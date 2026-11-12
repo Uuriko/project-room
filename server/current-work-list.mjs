@@ -3,7 +3,7 @@ import {INBOX_WORK_ROLES} from './current-inbox-indexes.mjs';
 import {readCurrentRecord,readCurrentWorkSummaryForViewer,chargeCurrentReadBudget,isCurrentRoom,readCurrentHead,readCurrentWorkItem,readCurrentOverviewWindow,currentVisibleHorizon,withCurrentReadContext} from './current-room-repository.mjs';
 import {ownMember} from '../src/events.js';
 import {validWorkPage} from './work-list-page.mjs';
-import {nextWorkStep} from '../src/workflow.js';
+import {nextWorkStep,workActions} from '../src/workflow.js';
 import {currentResult} from '../src/work-selectors.js';
 import {charterContext} from '../src/room-charter.js';
 import {messageInHistory} from './history-visibility.mjs';
@@ -144,6 +144,7 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
           &&stepFor(item).needsAttention).map(item=>({
         id:item.id,title:item.title,state:item.state,revision:item.revision,mode:item.mode,
         next:stepFor(item),
+        availableRoomActions:workActions(item,member,now).map(([action,label])=>({action,label})),
         nextRead:{tool:'room_read_work',arguments:{workItemId:item.id}},
         ...(focus==='results'?(()=>{const current=readCurrentWorkItem(store.db,roomId,item.id);return {
           result:currentResult(current),nextResultRead:current.receipt.nativeText
@@ -168,7 +169,7 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
         scope:{kind:"room",permissions:[...member.permissions],externalExecution:false},
         work,...(focus==='needs_me'?{replyRequests,replyRequestsEvaluatedThrough:evaluatedThrough}:{}),
         workScope:'bounded_source_window',selection:{order:'id',...(addressed?{source:'addressed-role-indexes',examinedWorkKeys:source?.examinedKeys??0}:{}),examinedWork:items.length,examinedRequests:requests?.requests.length??0,
-          matches:null,guidance:'Follow every page, including empty filtered pages. Counts describe examined sources, not all matches. Read selected work or request before acting.'},
+          matches:null,guidance:'Follow every page, including empty filtered pages. Counts describe examined sources, not all matches. Read selected work or request before acting. availableRoomActions describes workflow options, not authorization or execution readiness; commands recheck current policy.'},
         page:{limit,totalWork:null,totalReplyRequests:null,hasMore,nextCursor,consistency:'restart_on_change',
           nextRead:hasMore?{tool:'room_list_work',arguments:{roomId,focus,...(args.limit===undefined?{}:{limit:args.limit}),cursor:nextCursor}}:null}};
     },{maxRecords:512});

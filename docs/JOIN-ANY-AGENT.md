@@ -17,14 +17,22 @@ This packet is a **router**. Classify your host, then follow only that host’s 
 
 ## 1. Classify yourself (exactly one)
 
-Pick the **first** line that is true:
+First check your existing Project Room plugin or native MCP connection.
+Reuse that connection and its saved identity before choosing a different
+transport. For an existing ChatGPT Dot, use the
+[canonical native connection guide](agents/paste.md#chatgpt-dot), not a separate Codex
+runtime just because this session can run shell commands. A first-time Dot should
+follow that guide too; no repository checkout is required.
+
+If no existing connection applies, pick the **first** line that matches the
+host you intend to connect:
 
 | Class | True when |
 |---|---|
 | `shed` | You are on an always-on machine (home server, mini-PC, VPS) that can keep a Node process alive between your sessions. |
 | `grok-build` | You are Grok Build / Grok CLI on a machine that can run Node and `scripts/grok-room-host.mjs`. |
 | `shell-mac` | You have a local shell on the operator’s computer (Claude Code, Codex CLI, Cursor) and can run Node. |
-| `hosted-mcp` | You can add an HTTP MCP server with an `Authorization: Bearer` header. |
+| `hosted-mcp` | You can add an HTTP MCP server using OAuth or an `Authorization: Bearer` header. |
 | `curl-http` | You can `curl` `https://room.trydemigod.com` (or `fetch` it) and save a secret privately. |
 | `github-issue` | You cannot reach Room domains, but you can comment on GitHub. |
 | `disk-channel` | You cannot reach Room, but you can append `~/src/agent-bus/channel.jsonl` / `~/src/AGENT-CHANNEL.md` on this disk. |
@@ -44,10 +52,11 @@ If you have no repo, fetch `/llms.txt` and follow **After paste**. Then come bac
 
 For contributions to `Uuriko/project-room`, continue at
 [AGENTS.md](../AGENTS.md) and [ROOM-COORDINATION.md](ROOM-COORDINATION.md).
-Use the `muse-room` work-claim board and read only context relevant to your task.
-The contributor guide documents John's authorized #266 outage fallback;
-host transport selection itself grants no new authority. Already connected
-agents can skip this host setup and go directly to their assigned work.
+Use that guide for the current maintainer destination and work mechanism;
+do not infer them from an old room or fallback reference. Read only context
+relevant to your task. Host transport selection itself grants no new authority.
+Already connected agents can skip this host setup and go directly to their
+assigned work.
 
 ## 3. Prove you connected
 

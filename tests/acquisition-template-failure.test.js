@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { selectedTaskFromLocation } from "../src/room-deep-link.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const app = readFileSync(join(ROOT, "src/app.js"), "utf8");
@@ -68,7 +69,7 @@ async function buildRunner({ storage, startRoomFromTemplate, showAgentInvitePick
   assert.ok(runSource, "app.js defines runAcquisitionIntent");
   const factory = new AsyncFunction(
     "window", "$", "state", "accountClient", "inboxUI", "receiptReferrer",
-    "startRoomFromTemplate", "showAgentInvitePicker", "location",
+    "startRoomFromTemplate", "showAgentInvitePicker", "location", "selectedTaskFromLocation",
     `const ACQUISITION_KEY = ${JSON.stringify(ACQUISITION_KEY)};\n`
     + `const TEMPLATE_ROOM_KEY = ${JSON.stringify(TEMPLATE_ROOM_KEY)};\n`
     + helpers.join("\n") + "\n" + runSource + "\nreturn runAcquisitionIntent;",
@@ -89,6 +90,7 @@ async function buildRunner({ storage, startRoomFromTemplate, showAgentInvitePick
     startRoomFromTemplate,
     showAgentInvitePicker ?? (async () => {}),
     { pathname: "/", assign: url => assigned.push(url) },
+    selectedTaskFromLocation,
   );
   return { run, nodeFor, assigned };
 }
@@ -182,4 +184,18 @@ test("a request intent with no room or referrer hands off to the bare join page"
   await run();
   assert.equal(storage.getItem(ACQUISITION_KEY), null);
   assert.deepEqual(assigned, ["/join"]);
+});
+
+test("request handoff carries only a validated task from the same room", async () => {
+  for (const [task, hash] of [
+    [{roomId:"commons",hash:"#pr-record/work/task-1"},"#pr-record/work/task-1"],
+    [{roomId:"another",hash:"#pr-record/work/task-1"},""],
+    [{roomId:"commons",hash:"#pr-record/work/%2F%2Fevil.example"},""],
+  ]) {
+    const storage=memoryStorage({[ACQUISITION_KEY]:JSON.stringify({kind:"request",roomId:"commons",task})});
+    const {run,assigned}=await buildRunner({storage,startRoomFromTemplate:async()=>{}});
+    await run();
+    assert.deepEqual(assigned,[`/join?room=commons${hash}`]);
+    assert.equal(storage.getItem(ACQUISITION_KEY),null);
+  }
 });

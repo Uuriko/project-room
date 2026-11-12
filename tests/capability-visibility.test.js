@@ -66,7 +66,7 @@ function writeNames(tools) {
 
 // A t1_readonly agent with one linked room: builds the fixture once,
 // returns the MCP caller bound to the demoted identity plus both rooms.
-async function demotedPeer(t) {
+async function demotedPeer(t, roomDocsEnabled = false) {
   const { store, rooms } = setup(t);
   const owner = store.identities.create("Owen");
   const peer = store.identities.create("Peer agent");
@@ -77,7 +77,7 @@ async function demotedPeer(t) {
   assert.ok(peerMemberId, "peer member id missing from redeem response");
   demoteToReadonly(store.db, created.roomId, peerMemberId, { updatedBy: "owner", nowMs: Date.now() });
 
-  const mcp = createHostedRoomMcp(store);
+  const mcp = createHostedRoomMcp(store, { roomDocsEnabled });
   const call = (method, params, secret) =>
     mcp(rpc(method, params), { authorization: `Bearer ${secret}` });
   return { store, rooms, owner, peer, roomId: created.roomId, call };
@@ -130,13 +130,16 @@ test("readonly Room membership preserves independent public contribution authori
 
 const JOIN_HELPERS = new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"]);
 
-test("owner keeps the full catalog: withholding changes nothing for the unrestricted", async t => {
-  const { owner, call } = await demotedPeer(t);
+for (const roomDocsEnabled of [false, true]) test(`owner keeps the enabled catalog with Room Docs ${roomDocsEnabled ? "enabled" : "disabled"}`, async t => {
+  const { owner, call } = await demotedPeer(t, roomDocsEnabled);
   for (const profile of ["core", "full"]) {
     const listed = await call("tools/list", { profile }, owner.secret);
     const names = toolNames(listed.result.tools);
-    // Joined members skip the join helpers on core; that is not withholding.
-    const unfiltered = [...toolNames(listedMcpTools(profile, false))].filter(name => profile === "full" || !JOIN_HELPERS.has(name));
+    // Deployment flags apply even to owners; joined members also skip core
+    // join helpers. Neither omission is per-agent capability withholding.
+    const unfiltered = [...toolNames(listedMcpTools(profile, false))]
+      .filter(name => profile === "full" || !JOIN_HELPERS.has(name))
+      .filter(name => roomDocsEnabled || !["room_docs", "room_write_doc"].includes(name));
     assert.deepEqual([...names].sort(), [...unfiltered].sort(),
       `${profile}: owner catalog must equal the unfiltered list`);
   }

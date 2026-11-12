@@ -67,11 +67,12 @@ function gitOk(args, options) {
 
 export async function connection({ env = process.env, cwd = process.cwd() } = {}) {
   if (env.ROOM_ORIGIN && env.ROOM_ID && env.PROJECT_ROOM_SECRET) {
-    return { origin: env.ROOM_ORIGIN.replace(/\/$/, ""), roomId: env.ROOM_ID, secret: env.PROJECT_ROOM_SECRET };
+    return { origin: env.ROOM_ORIGIN.replace(/\/$/, ""), roomId: env.ROOM_ID, secret: env.PROJECT_ROOM_SECRET,
+      ...(env.ROOM_AGENT_MEMBER ? { memberId: env.ROOM_AGENT_MEMBER } : {}) };
   }
   const loaded = loadConnection({ project: cwd, env });
   const secret = await loadSecret(loaded.name, loaded.config.token, env);
-  return { origin: String(loaded.config.origin).replace(/\/$/, ""), roomId: loaded.config.roomId, secret };
+  return { origin: String(loaded.config.origin).replace(/\/$/, ""), roomId: loaded.config.roomId, memberId: loaded.config.memberId, secret };
 }
 
 function api(conn, path) {

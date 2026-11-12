@@ -1,3 +1,4 @@
+import { runRoomDocTool, validRoomDocArgs } from "./mcp-room-docs.mjs";
 import { withInviteShare } from "./invite-share.mjs";
 import { withMcpCallLog } from "./mcp-call-log.mjs";
 import {publishedLobbyContext} from './current-public-face.mjs';
@@ -175,6 +176,7 @@ function validRoomArgs(name, args) {
   const selected = ROOM_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
+  if (["room_docs", "room_write_doc"].includes(name)) return validRoomDocArgs(name, args);
   if (name === 'room_wait_for_attention') return Number.isSafeInteger(args.after) && args.after >= 0 && (args.timeoutSec === undefined || Number.isInteger(args.timeoutSec) && args.timeoutSec >= 0 && args.timeoutSec <= 120) && (args.includeWork === undefined || typeof args.includeWork === 'boolean');
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
@@ -551,14 +553,14 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
-function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal) {
+function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, roomDocsEnabled) {
   if (typeof spendCredential === "function") {
     spendCredential(secret, mcpRoomToolScope(name) === "rooms:write" ? "write" : "read");
   }
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
   return withSpendCharge(store, secret, name, args,
-    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal));
+    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, roomDocsEnabled));
 }
 
 // A work-item tool given a Board claim id answered a bare work_not_found
@@ -590,7 +592,8 @@ async function boardClaimCall(store, secret, name, args) {
   throw error;
 }
 
-function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal) {
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, roomDocsEnabled) {
+  if (["room_docs", "room_write_doc"].includes(name)) return runRoomDocTool(store, secret, name, args, roomDocsEnabled);
   if (BOARD_CLAIM_TOOLS.includes(name)) return boardClaimCall(store, secret, name, args);
   if (name === 'room_wait_for_attention') return waitForAttention(store, secret, args.roomId, {...args, signal});
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId, oauthIdentity: /^(oat|iat)_/.test(secret ?? "") ? identity : null, claimSec: args.claimSec ?? 0 });
@@ -1107,7 +1110,7 @@ function listSelection(message, searchParams) {
 
 const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name), ...ACTION_META_TOOL_NAMES]);
 
-async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null, nativeEventsEnabled = false, nativeStatus, signal }) {
+async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null, nativeEventsEnabled = false, nativeStatus, signal, roomDocsEnabled = false }) {
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
@@ -1167,6 +1170,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       profile: selection.profile,
       ...(selection.focus === undefined ? {} : { focus: selection.focus }),
       tools: listedMcpTools(selection.profile, selection.aliases, agent, selection.focus)
+        .filter(tool => roomDocsEnabled || !["room_docs", "room_write_doc"].includes(tool.name))
         .filter(tool => !oauthPrincipal || mcpOAuthToolAllowed(canonicalMcpToolName(tool.name), oauthPrincipal.scopes)),
       _meta: {
         discovery: MCP_DISCOVERY_BLOCK,
@@ -1197,7 +1201,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     if (name === SEARCH_ACTIONS_TOOL) {
       const schema = actionMetaToolDefs.find(entry => entry.name === name).inputSchema;
       if (!validSearchActionsArgs(args)) return argumentFailure(requestId, name, args, schema);
-      return { jsonrpc: "2.0", id: requestId, result: toolResult(searchActions(args.query, { agent: resolveCatalogAgent(store, identity), limit: args.limit })) };
+      return { jsonrpc: "2.0", id: requestId, result: toolResult(searchActions(args.query, { agent: resolveCatalogAgent(store, identity), limit: args.limit, tools: HOSTED_TOOLS.filter(tool => (roomDocsEnabled || !["room_docs", "room_write_doc"].includes(tool.name)) && (!oauthPrincipal || mcpOAuthToolAllowed(tool.name, oauthPrincipal.scopes))) })) };
     }
     if (name === RUN_ACTION_TOOL) {
       const schema = actionMetaToolDefs.find(entry => entry.name === name).inputSchema;
@@ -1209,7 +1213,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         return mcpCallError(requestId, { reason: "unknown_tool", tool: args.name, suggestion: closestToolName(args.name, HOSTED_ROOM_MCP_TOOLS) });
       }
       return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
-        { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal, nativeEventsEnabled, nativeStatus, signal });
+        { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal, nativeEventsEnabled, nativeStatus, signal, roomDocsEnabled });
     }
     // DC3-P3 (R1/R2), bounty_accept only: permission before shape at the
     // transport. A seat that may not accept this bounty gets the escrow
@@ -1258,7 +1262,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         const value = await callWakeTool(store, secret, identity, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
       }
-      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal);
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, roomDocsEnabled);
       if (name === "room_check_access" && value.scope === "room") {
         value.nativeMonitoring = oauthPrincipal && typeof nativeStatus === "function"
           ? await nativeStatus(mcpOAuthPrincipalDescriptor(oauthPrincipal))
@@ -1324,6 +1328,7 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
 // Heartbeat, wake and webhook tools never reach callRoomTool; they run through
 // callWakeTool under the mcp:wake gate and are unchanged here.
 const MCP_ROOM_WRITE_TOOLS = new Set([
+  "room_write_doc",
   ...BOARD_CLAIM_TOOLS,
   "room_create", "room_join", "room_merge_members",
   "squads_create", "squads_update_members", "squads_disband",
@@ -1375,7 +1380,7 @@ function resolveMcpIdentity(store, secret, userAgent) {
   return identity;
 }
 
-export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, inviteOAuthProvider, oauthResource, nativeHandler, nativeStatus } = {}) {
+export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, inviteOAuthProvider, oauthResource, nativeHandler, nativeStatus, roomDocsEnabled = false } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return withMcpCallLog(async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress, signal } = {}) {
     if (typeof authorization === "string" && /^bearer (?:oat|iat)_/i.test(authorization)) {
@@ -1393,7 +1398,7 @@ export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthP
             authorizeDescriptor: descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider: oauthProvider,
               inviteProvider: inviteOAuthProvider, resource: oauthResource, descriptor }) });
         return handleAuthed(message, { store, secret: token, identity, mcpUrl,
-          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal, nativeEventsEnabled: typeof nativeHandler === "function", nativeStatus, signal });
+          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal, nativeEventsEnabled: typeof nativeHandler === "function", nativeStatus, signal, roomDocsEnabled });
       });
     }
     // Anonymous enrollment: mint an identity secret without leaving MCP.
@@ -1412,6 +1417,6 @@ export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthP
     if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
     const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
     if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
-    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms, spendCredential, signal });
+    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms, spendCredential, signal, roomDocsEnabled });
   });
 }

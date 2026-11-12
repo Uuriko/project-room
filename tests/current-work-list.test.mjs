@@ -10,6 +10,7 @@ import {serveRoomMcp,MCP_VERSION} from '../client/mcp-stdio.mjs';
 import {PassThrough} from 'node:stream';
 import {readWorkItem} from '../server/work-repository.mjs';
 import {textVersion} from '../server/text-results.mjs';
+import {setTier} from '../server/autonomy-tiers.mjs';
 
 function fixture(t,filename=':memory:') {
   const store=new RoomStore(filename);t.after(()=>{try{store.close();}catch{}});const events=initialRoom();
@@ -79,6 +80,7 @@ test('SDK and stdio traverse the same HTTP source pages and reject another room 
   t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
   let sent=0;const client=new RoomAgentClient({origin:'http://127.0.0.1:'+server.address().port,roomId:'commons',memberId:'worker',token:keys.worker,fetchImpl:(...args)=>{sent++;return fetch(...args);}});
   let page=await client.orient({paginate:true,focus:'needs_me'}),ids=[],requests=[];
+  assert.deepEqual(page.work[0].availableRoomActions,[]);
   for(let i=0;i<10;i++){ids.push(...page.work.map(w=>w.id));requests.push(...page.replyRequests.map(r=>r.id));if(!page.page.nextRead)break;page=await client.orient({paginate:true,...page.page.nextRead.arguments});}
   assert.deepEqual(ids,['task-18']);assert.deepEqual(requests,['request-12']);
   const input=new PassThrough(),output=new PassThrough(),pending=new Map();let buffer='',serial=0;
@@ -87,7 +89,7 @@ test('SDK and stdio traverse the same HTTP source pages and reject another room 
   const rpc=(method,params)=>new Promise(resolve=>{const id=++serial;pending.set(id,resolve);input.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n');});
   await rpc('initialize',{protocolVersion:MCP_VERSION,capabilities:{},clientInfo:{name:'work-test',version:'1'}});input.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
   let pointer={tool:'room_list_work',arguments:{}},all=[];
-  for(let i=0;i<10;i++){const r=await rpc('tools/call',{name:pointer.tool,arguments:pointer.arguments});assert.ok(!r.error,JSON.stringify(r));assert.ok(!r.result.isError,JSON.stringify(r));all.push(...r.result.structuredContent.work.map(w=>w.id));pointer=r.result.structuredContent.page.nextRead;if(!pointer)break;}
+  for(let i=0;i<10;i++){const r=await rpc('tools/call',{name:pointer.tool,arguments:pointer.arguments});assert.ok(!r.error,JSON.stringify(r));assert.ok(!r.result.isError,JSON.stringify(r));assert.ok(r.result.structuredContent.work.every(row=>Array.isArray(row.availableRoomActions)));all.push(...r.result.structuredContent.work.map(w=>w.id));pointer=r.result.structuredContent.page.nextRead;if(!pointer)break;}
   assert.equal(all.length,19);assert.equal(new Set(all).size,19);
   const before=sent,wrong=await rpc('tools/call',{name:'room_list_work',arguments:{roomId:'another'}});assert.equal(wrong.error.code,-32602);assert.equal(sent,before);
   await assert.rejects(()=>client.orient({paginate:true,query:'Title'}),e=>e.code==='current_work_selection_unavailable');
@@ -158,4 +160,57 @@ test('SDK refuses malformed unavailable-help pointers and never follows them aut
   mutate=value=>{corrupt(value);return value;};
   await assert.rejects(()=>client.orient({paginate:true,focus:'help_wanted'}),error=>error.code==='invalid_response');
  }
+});
+
+
+test('native listing exposes existing workflow actions without granting readiness or mutating work',t=>{
+  let now=Date.now();const store=new RoomStore(':memory:',{now:()=>now});t.after(()=>store.close());
+  store.initialize(initialRoom(),{representation:'normalized-current-v1'});
+  const owner=store.issueAccessKey('commons','owner');let serial=0;
+  const send=(key,type,data)=>store.command(key,'commons',{id:'actions-'+(++serial),type,data});
+  send(owner,'member.added',{memberId:'worker',displayName:'Worker',kind:'agent',permissions:['accept_work','complete_work','write_external']});
+  const worker=store.issueAccessKey('commons','worker');
+  const item=id=>readWorkItem(store.db,'commons',id);
+  const change=(id,type,data={})=>send(worker,type,{workItemId:id,expectedRevision:item(id).revision,...data});
+  for(const [id,mode] of [['a-read','read'],['b-write','write'],['c-proposed','read'],['d-foreign','read'],['e-read','read']]){
+    send(owner,'work.proposed',{workItemId:id,title:id,definitionOfDone:'PRIVATE acceptance detail',mode,accountableMemberId:id==='d-foreign'?'owner':'worker'});
+    if(!['c-proposed','d-foreign'].includes(id))change(id,'work.accepted');
+  }
+  // Native source paging must continue across a full page. Reads must not use
+  // full-room hydration or imply that this bounded page is the whole queue.
+  store.room=()=>{throw Error('whole-room hydration');};store.snapshot=()=>{throw Error('full snapshot');};
+  const list=()=>pages(store,worker).flatMap(page=>page.work);
+  const actions=id=>list().find(row=>row.id===id).availableRoomActions.map(x=>x.action);
+  const before=item('a-read').revision;
+  assert.ok(actions('a-read').includes('start'));
+  assert.ok(actions('e-read').includes('start'));
+  assert.equal(actions('b-write').includes('start'),false);
+  assert.ok(actions('b-write').includes('claim'));
+  assert.ok(actions('c-proposed').includes('accept'));
+  assert.equal(actions('c-proposed').includes('start'),false);
+  assert.deepEqual(actions('d-foreign'),[]);
+  const listed=list().find(row=>row.id==='a-read');
+  assert.equal(listed.revision,before);assert.equal(item('a-read').revision,before);
+  assert.deepEqual(listed.nextRead,{tool:'room_read_work',arguments:{workItemId:'a-read'}});
+  assert.equal(JSON.stringify(list()).includes('PRIVATE acceptance detail'),false);
+  change('b-write','claim.acquired',{repository:'example/repo',ref:'main',paths:['one'],expiresAt:new Date(now+60000).toISOString()});
+  assert.ok(actions('b-write').includes('start'));
+  now+=60001;
+  assert.equal(actions('b-write').includes('start'),false);
+  assert.ok(actions('b-write').includes('claim'));
+  const handoff=change('e-read','work.handoff_recorded',{doneSummary:'Progress saved',nextAction:'Owner triage',limitReason:'Interrupted',haltAll:true});
+  const handedOff=list().find(row=>row.id==='e-read');
+  assert.equal(handedOff.next.action,'triaged_handoff');
+  assert.equal(handedOff.next.memberId,'owner');
+  assert.throws(()=>change('e-read','work.started'),error=>error.code==='halt_active');
+  send(owner,'work.halt_cleared',{memberId:'worker',haltEventId:handoff.event.id});
+  // Legacy availableRoomActions is a workflow hint, not target-room autonomy
+  // authority. Preserve that meaning and prove the canonical writer refuses.
+  setTier(store.db,'commons','worker','t1_readonly');
+  const page=store.currentWorkListing(worker,'commons');
+  assert.equal(page.scope.externalExecution,false);
+  assert.match(page.selection.guidance,/not authorization or execution readiness/);
+  assert.ok(actions('a-read').includes('start'));
+  assert.throws(()=>change('a-read','work.started'),error=>error.code==='agent_readonly');
+  assert.equal(item('a-read').revision,before);
 });
