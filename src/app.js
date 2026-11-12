@@ -1495,12 +1495,12 @@ const recordHref = (kind, id) => `#pr-record/${kind}/${encodeURIComponent(id)}`;
 const workDomId = id => recordDomId("work", id);
 const workHref = id => recordHref("work", id);
 function setConnectionStatus(text) {
-  const normalized = /^(Reconnecting|Connection interrupted)/.test(text)
+  const normalized = /^Reconnecting/.test(text)
     ? "Connection interrupted · reconnecting; displayed history may be stale"
     : text;
   const status = $("#connection-status");
   const wasInterrupted = status.dataset.interrupted === "true";
-  status.dataset.interrupted = String(/^(Connection interrupted|Room service unavailable|Reconnecting)/.test(normalized));
+  status.dataset.interrupted = String(/^(Connection interrupted|Room service unavailable|Reconnecting|Current view unavailable)/.test(normalized));
   const connected = normalized === "Connected to room service · no peer read or processing receipt";
   const visible = connected ? "Connected" : normalized;
   status.dataset.state = connected ? "connected"
