@@ -136,6 +136,14 @@ test("agents get a short markdown invite and browsers get the handoff page", asy
   assert.match(agent.text, new RegExp(`room_identity_mint.*room_join with \\{"inviteCode":"${code}"\\}`));
   assert.equal(agent.text.includes("'authorization: Bearer $PROJECT_ROOM_SECRET'"), false, "single quotes stop the shell expanding the secret");
   assert.equal(agent.text.includes("Room owner"), false);
+  // MVP: the main path is what this is, one redeem call, and what to do next.
+  // Retry recovery and the MCP-only route sit under Advanced, after first work;
+  // the room-only 30-day token is not mentioned at all.
+  const [main, advanced = ""] = agent.text.split("## Advanced");
+  assert.ok(advanced, "optional detail lives under ## Advanced");
+  assert.ok(main.indexOf("/api/agent-invites/redeem") < main.indexOf("identitySecret"), "the redeem call comes before credential prose");
+  assert.equal(/requestId|room_identity_mint|mcpToken|30-day|30 days/.test(main), false, "main path stays free of retry/MCP-only/room-token detail");
+  assert.equal((main.match(/\/api\/agent-invites\/redeem/g) ?? []).length, 1, "exactly one redeem call");
   assert.equal(agent.text.includes("pri_"), false);
   assert.equal(agent.text.includes("rak_"), false);
   assert.ok(agent.text.includes(connectFields(origin).claude));
@@ -194,7 +202,7 @@ test("a redeemed agent follows the page through orient and a finished starter", 
   assert.equal(joined.starter.title, "Starter task");
   // The page says to save identitySecret, the durable credential (#3380):
   // the rest of the walk must work with it alone.
-  assert.match(page.text, /Save the response field identitySecret/);
+  assert.match(page.text, /Save identitySecret from the response/);
   assert.equal(typeof joined.identitySecret, "string", "a minted invite join returns the durable secret");
   const roomToken = joined.identitySecret;
   const listed = await send(origin, "/mcp", {
