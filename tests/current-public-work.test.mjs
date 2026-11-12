@@ -10,9 +10,9 @@ import {loadPublicRoomTask} from '../server/public-read-model.mjs';
 import {textVersion} from '../server/text-results.mjs';
 import {withCurrentRoomWriter, CURRENT_PUBLIC_WORK_PREDICATE, CURRENT_PUBLIC_WORK_INDEX_SQL, readCurrentWorkItem} from '../server/current-room-repository.mjs';
 
-function fixture(t){
+function fixture(t, seedEvents=[]){
  const store=new RoomStore(':memory:');t.after(()=>store.close());
- store.initialize(initialRoom('public-work-room'),{representation:'normalized-current-v1'});
+ store.initialize([...initialRoom('public-work-room'),...seedEvents],{representation:'normalized-current-v1'});
  const owner=store.issueAccessKey('public-work-room','owner');
  const send=(id,type,data={})=>store.command(owner,'public-work-room',{id,type,data});
  send('page','room.public_page_set',{enabled:true});
@@ -121,7 +121,7 @@ test('selected public task reads one protected body beyond discovery page with n
  const prepare=store.db.prepare.bind(store.db);
  store.db.prepare=sql=>{
   if (/\b(?:FROM|JOIN)\s+(?:messages|events)\b/i.test(sql)) throw Error('Conversation read forbidden');
-  if (/FROM work_entities INDEXED BY current_public_work_keys/.test(sql)) assert.match(sql,/work_id=\?/);
+  if (/FROM work_entities/.test(sql)) assert.match(sql,/work_id=\?/);
   return prepare(sql);
  };
  const result=loadPublicRoomTask(store,'public-work-room','z-selected');
@@ -176,15 +176,50 @@ test('legacy public discovery caches do not qualify selected task links',t=>{
 });
 
 
-test('selected public links retain the existing open-task-only publication boundary',t=>{
+test('selected public links survive completion without publishing private results or entering open discovery',t=>{
  const {store,task,send}=fixture(t);task('selected',true);
  const item=()=>readCurrentWorkItem(store.db,'public-work-room','selected');
  const mutate=(id,type,data={})=>send(id,type,{workItemId:'selected',expectedRevision:item().revision,...data});
  mutate('accept','work.accepted');mutate('start','work.started');
  const before=loadPublicRoomTask(store,'public-work-room','selected');assert.equal(before.task.state,'working');
  assert.equal(before.task.revision,item().revision);
- const body='Recorded result';const posted=send('result','message.posted',{messageId:'result',workItemId:'selected',body});
- mutate('complete','work.completed',{evidenceKind:'room_text',evidenceMessageId:'result',evidenceMessageEventId:posted.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null,producerId:'owner',summary:'Finished',nextAction:'Review'});
+ const body='PRIVATE RESULT TEXT';const posted=send('result','message.posted',{messageId:'result',workItemId:'selected',body});
+ mutate('complete','work.completed',{evidenceKind:'room_text',evidenceMessageId:'result',evidenceMessageEventId:posted.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null,producerId:'owner',summary:'PRIVATE SUMMARY',nextAction:'PRIVATE NEXT ACTION'});
  assert.equal(item().state,'completed');
+ const completed=loadPublicRoomTask(store,'public-work-room','selected');
+ assert.equal(completed.task.state,'completed');assert.equal(completed.task.revision,item().revision);
+ assert.deepEqual(Object.keys(completed.task).sort(),['definitionOfDone','id','revision','state','title']);
+ assert.doesNotMatch(JSON.stringify(completed),/PRIVATE|evidenceMessage|producerId|verification|checksClaimed/);
+ assert.deepEqual(readCurrentPublicWork(store,'public-work-room').tasks,[]);
+ send('withdraw-completed','work.public_set',{workItemId:'selected',enabled:false});
  assert.equal(loadPublicRoomTask(store,'public-work-room','selected'),null);
+ send('republish-completed','work.public_set',{workItemId:'selected',enabled:true});
+ assert.equal(loadPublicRoomTask(store,'public-work-room','selected').task.state,'completed');
+ send('producer','member.added',{memberId:'producer',displayName:'PRIVATE MEMBER NAME',kind:'agent',permissions:[]});
+ send('private-terminal','message.posted',{messageId:'private-terminal',toMemberId:'producer',workItemId:'selected',requestKind:'reply',body:'PRIVATE REQUEST'});
+ assert.equal(loadPublicRoomTask(store,'public-work-room','selected'),null);
+});
+
+test('superseded public links do not disclose replacement work or removed members',t=>{
+ const {store,task,send}=fixture(t,[
+  event({roomId:'public-work-room',actorId:'owner',type:'member.added',data:{memberId:'former',displayName:'FORMER PRIVATE NAME',kind:'agent',permissions:[]}}),
+  event({roomId:'public-work-room',actorId:'former',type:'member.public_name_set',data:{enabled:true}})
+ ]);task('selected',true);task('private-replacement');
+ assert.ok(loadPublicRoomTask(store,'public-work-room','selected').room.names.includes('FORMER PRIVATE NAME'));
+ send('remove','member.access_changed',{memberId:'former',expectedMemberRevision:0,active:false,permissions:[]});
+ send('supersede','work.superseded',{workItemId:'selected',expectedRevision:readCurrentWorkItem(store.db,'public-work-room','selected').revision,supersededByWorkItemId:'private-replacement',reason:'PRIVATE REPLACEMENT REASON'});
+ const value=loadPublicRoomTask(store,'public-work-room','selected');
+ assert.equal(value.task.state,'superseded');
+ assert.doesNotMatch(JSON.stringify(value),/FORMER|private-replacement|PRIVATE REPLACEMENT|supersededBy/);
+ assert.deepEqual(readCurrentPublicWork(store,'public-work-room').tasks,[]);
+ send('page-off','room.public_page_set',{enabled:false});assert.equal(loadPublicRoomTask(store,'public-work-room','selected'),null);
+ send('page-on','room.public_page_set',{enabled:true});assert.ok(loadPublicRoomTask(store,'public-work-room','selected'));
+ send('archive-terminal','room.archived',{});assert.equal(loadPublicRoomTask(store,'public-work-room','selected'),null);
+});
+
+test('selected task uses a bounded primary-key lookup even after completion',t=>{
+ const {store}=fixture(t);
+ const plan=store.db.prepare('EXPLAIN QUERY PLAN SELECT work_id, length(CAST(body AS BLOB)) AS bytes FROM work_entities WHERE room_id=? AND work_id=?').all('public-work-room','selected');
+ assert.ok(plan.some(row=>/SEARCH work_entities/.test(row.detail)&&/room_id=\? AND work_id=\?/.test(row.detail)));
+ assert.ok(plan.every(row=>!/^SCAN/.test(row.detail)));
 });

@@ -82,7 +82,10 @@ export function readCurrentPublicWork(store, roomId, {after = ''} = {}) {
 }
 
 
-// One explicitly published open task, never a scan of an unrelated page.
+// One explicitly published task, never a scan of an unrelated page. A shared
+// task link survives completion/supersession while publication remains enabled;
+// discovery above intentionally stays open-only. This returns the published
+// contract and recorded state, NOT private result text, evidence or verification.
 // Return null for all unavailable identities; membership/private associations
 // cannot be inferred from the public result. Corrupt proof data still fails shut.
 export function readCurrentPublicTask(store, roomId, workId) {
@@ -93,8 +96,9 @@ export function readCurrentPublicTask(store, roomId, workId) {
     if (!head || room?.id !== roomId) corrupt('public room metadata unavailable');
     if (!publicPage({room}).enabled || room.archivedAt) return null;
     const row = db.prepare(`SELECT work_id, length(CAST(body AS BLOB)) AS bytes
-      FROM work_entities INDEXED BY current_public_work_keys
-      WHERE room_id=? AND ${CURRENT_PUBLIC_WORK_PREDICATE} AND work_id=?`).get(roomId, workId);
+      FROM work_entities
+      WHERE room_id=? AND work_id=?
+      AND CASE WHEN json_valid(body) THEN json_extract(body,'$.publicTask.enabled')=1 ELSE 0 END`).get(roomId, workId);
     if (!row) return null;
     chargeCurrentReadBudget(b, Buffer.byteLength(row.work_id) + 64, 1);
     if (readCurrentWorkPrivacy(db, roomId, workId, b).requests) return null;
@@ -103,7 +107,7 @@ export function readCurrentPublicTask(store, roomId, workId) {
     return withCurrentWorkReadUnits(store, roomId, unit => {
       const item = unit.work(workId);
       if (!item || item.id !== workId || publicTask(item).enabled !== true
-        || !['proposed', 'accepted', 'working', 'blocked'].includes(item.state)
+        || !['proposed', 'accepted', 'working', 'blocked', 'completed', 'superseded'].includes(item.state)
         || typeof item.title !== 'string' || typeof item.definitionOfDone !== 'string'
         || !Number.isSafeInteger(item.revision) || item.revision < 0)
         corrupt('public task differs from protected current record');
