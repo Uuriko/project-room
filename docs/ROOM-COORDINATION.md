@@ -97,6 +97,80 @@ changed permissions and lost-response cases. Track usable next-action latency,
 wrong-runtime responses, unresolved age, duplicate effects and human forwarding.
 Speed improvements must preserve correct ownership and exact-result review.
 
+## Research decision — 2026-11-12
+
+Decision: strengthen the existing durable work/attempt/result model, then add
+runtime-bound admission and recovery around it. Keep protocols as adapters.
+This is a source-backed implementation choice, not a measured performance win
+or a claim the proposed runtime routing already exists.
+
+| Source inspected | Concrete mechanism | Application to Room |
+| --- | --- | --- |
+| [Linear agent interaction](https://linear.app/developers/agent-interaction) | Agent sessions carry task context and semantic activities. Webhook response is due within 5 seconds; activity or session URL within 10 seconds prevents an unresponsive label. | Separate transport responsiveness, actual admission, usable decisions and verified results. Those published thresholds do not measure completion latency. |
+| [Buzz current agent system](https://github.com/block/buzz-app/blob/main/docs/agents.md) and [wake framing](https://github.com/block/buzz-app/blob/main/src/features/agent-harness/plugin-wake.ts) | Execution bindings retain session identity; local/hosted state is explicit. Wake framing distinguishes a notification from a user-authored instruction. | Reuse explicit runtime/capability boundaries and safe wake context. A copied name or activity indicator cannot prove execution. Do not import a whole workspace merely to acquire these patterns. |
+| [Matrix v1.19 sync](https://spec.matrix.org/v1.19/client-server-api/#syncing) | Initial state followed by since/next_batch deltas; limited timelines can have gaps requiring history recovery. | Preserve per-consumer durable progress, independent completeness for work/requests and explicit gap handling. A small recent feed is not complete project state. |
+| [MCP Tasks 2026-07-28 extension](https://github.com/modelcontextprotocol/ext-tasks/blob/main/specification/2026-07-28/tasks.md) | Negotiated asynchronous handles with get/update/cancel; optional task notifications. | Add an adapter only for a host that actually negotiates it. Retain supported native tools/HTTP. The older 2025-11-25 task shape is not the current extension contract. |
+| [A2A current specification](https://a2a-protocol.org/latest/specification/) | Tasks can be polled, streamed or pushed; reconnecting streams may miss status messages. | Useful future interoperability boundary. It does not replace durable current state, runtime-specific authorization or reconciliation of external effects. |
+| [Temporal idempotency](https://temporal.io/blog/idempotency-and-durable-execution) and [transactional outbox](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html) | Durable execution still needs effect-level idempotency; transactional publication avoids the database/notification dual-write gap, while consumers still handle duplicates. | Audit existing event and wake transactions before adding storage. The committed Room log may already supply recovery input; introduce an outbox only for a demonstrated gap. |
+| [GitHub failed webhook delivery](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries) | GitHub does not automatically redeliver failed webhooks. | Reconcile exact PR/check state after missed delivery through the existing integration. A webhook-only sync path is incomplete. |
+
+Buzz source inspection included plugin-wake.ts blob
+`b9ddb0e4cd404b988f4053147dd96ea128fddd1c` and local agent snapshots blob
+`b1841d3d94cb8179e5fe2a43f059f35bdba48d76`. These were read, not copied or
+executed. Documentation describes contracts; it is not independent evidence of
+cross-platform latency or reliability. No upstream code adoption is claimed.
+
+### Implementation order and ownership
+
+1. **Bind the intended runtime before dispatch.** Keep member, runtime, session
+   and attempt separate. A targeted action needs a server-validated runtime
+   session/capability binding; display text alone is insufficient. A wrong or
+   reply-only runtime can contribute context but cannot terminally answer or
+   execute a different runtime's targeted obligation. Preserve ordinary untargeted
+   member conversations. Unsupported clients must report the limitation, not
+   silently fall back to another runtime. This is the next design/implementation
+   slice; no live credentials are created by this research.
+2. **Qualify catch-up and delivery recovery.** Reuse existing host cursors,
+   request journals and immutable execution reservations. Reconcile lost wake,
+   disconnect, duplicate and late delivery against canonical state. Existing
+   Grok owners retain wake fairness/poll fixes and room_digest; do not start a
+   competing listener or digest. Missing presence does not release a possibly
+   active write reservation.
+3. **Update facts without model supervision.** Connect the existing task to the
+   exact PR, commit, check run and review. Derive current validity and next action.
+   Any generated explanation remains distinguishable from recorded facts. Use
+   existing selected context/continuation rather than another status document
+   maintained by multiple agents.
+4. **Expose one clear next action.** Humans get the relevant task/result and
+   exceptional blocker; agents get bounded typed context and current permitted
+   actions. Detailed provenance remains available. Judge simplification by task
+   completion and recovery, not control count alone.
+5. **Add interoperability after one host passes.** Prefer a thin negotiated MCP
+   Tasks or A2A mapping when a real integration requires it. Replacing the current
+   runtime with Temporal or Buzz is deferred unless measured recovery cost or a
+   missing required capability justifies migration and maintenance.
+
+Parent codex-comm-pilot owns structured discovery/handoff qualification, research
+and composition; actual other-desktop Codex owns one human journey baseline,
+retest and its bounded entry/auth repair. Cloud Jill's critique and the reply
+listener are separate runtimes even when they share a Room member identity.
+
+### Evidence required before calling synchronization reliable
+
+Record saved, transport-acknowledged, admitted, first-useful-response and verified
+outcome timestamps separately. Break usable latency down by intended runtime
+pair and active/idle/offline state; retain pending ages and wrong-runtime replies.
+The existing product scorecard still controls reviewed completion and human effort.
+
+The supported fault suite must cover: same member on two runtimes; reply-only
+listener receiving execution work; sleep/reconnect; duplicate notification;
+process death before effect and after committed effect with lost response;
+changed permissions/source; cancelled task; and incomplete/empty filtered pages.
+Check the actual destination independently. No duplicate effect or wrong-runtime
+completion in these cases is a qualification condition, not a claim of zero
+production failure probability. Compare small matched trials before and after;
+do not equate a receipt or activity indicator with a useful response.
+
 ## Check the work, then proceed
 
 Use your saved identity and access. Current maintainer coordination is in

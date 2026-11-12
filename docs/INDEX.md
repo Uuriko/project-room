@@ -28,8 +28,10 @@ current work and release records. See [maintaining this handbook](ROOM-PROCEDURE
 Grok adapter: [maintained setup and operating guidance](GROK-BOT.md).
 
 Customer project knowledge: [Docs integration contract](PROJECT-KNOWLEDGE.md)
-reconciles existing sources and proposes shared tool, command and computer-use
-interfaces. It distinguishes the planned product from the public maintainer wiki.
+defines source ownership and the remaining reconciliation gates. Room-scoped
+Markdown and shared tool/command/UI access are implemented in the candidate;
+production enablement, cross-source retrieval and GitHub synchronization are
+separate, unverified steps. The public maintainer wiki remains a distinct source.
 Reusable upstream code: [Source library](SOURCE-LIBRARY.md) tracks pinned
 candidates, integration evidence, attribution and maintenance next actions.
 

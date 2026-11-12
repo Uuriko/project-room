@@ -65,3 +65,118 @@ automatic GitHub synchronization and rich-text editor dependencies are not part
 of this slice. They need evidence from a task the current workflow cannot handle.
 The broader [product trials](AGENT-UTILITY-TRIALS.md) remain hypotheses, not a
 commitment to make Project Room a particular kind of product.
+
+
+## Reconciliation audit — 2026-11-12
+
+The document foundation is implemented in this candidate. A fully reconciled,
+production-qualified project memory is not finished. This is an inventory and
+next-step decision, not an enabled-feature announcement.
+
+| Capability | Evidence at this candidate | Remaining boundary |
+| --- | --- | --- |
+| Shared project Markdown | `server/room-docs.mjs`, HTTP/MCP service and CLI; current/history reads and base-revision writes | `ROOM_DOCS` defaults off; current production enablement not verified here. |
+| Human document workflow | `src/room-docs-ui.js`; read/create/edit, conflict-preserved drafts, session fencing | Reader displays escaped Markdown text; rich rendering, stable selected-document links and broader navigation need separate qualification. |
+| Maintainer knowledge | Handbook index, procedures, historical lessons and generated public wiki API | Public repository references are not private room Docs; no automatic migration is demonstrated. |
+| Task continuation | Existing selected-work context, brief builder and generated continuation | Carries source observations, omissions and evidence references; does not retrieve every linked document or external artifact. |
+| Code and review evidence | GitHub files/PRs and exact-head checks | Automatic document synchronization and complete cross-source reconciliation are absent. |
+| Reusable upstream code | Source-library contract and pinned intake records | Product Sources view and automated adoption/update workflow remain proposed. |
+| End-to-end usefulness | Synthetic continuation fixtures and outcome-trial tools | No participant trials recorded in the current prepared trial set; tests do not establish productivity improvement. |
+
+### One project record, several authoritative sources
+
+Give contributors one navigable project entry with current objective, available
+work, decisions and relevant references. Do not require them to read every
+conversation or local handoff. One entry need not mean one database: existing
+systems retain ownership of their facts, and the project view resolves links.
+
+| Information | Authority | Derived presentation |
+| --- | --- | --- |
+| Accepted scope, assignments, attempts, results and review decisions | Existing Room work/request records | Current work list, selected-work brief, next action |
+| Shared rationale, project notes, decisions and design constraints | Revisioned room Docs; repository-owned guidance stays in Git | Task-linked excerpts with document id and revision |
+| Code, pull requests and checks | Linked repository and exact commit/check run | Source links and observed status with read time |
+| Historical evidence and lessons | Original result/trace and reviewed procedure change | Selective reusable guidance with evidence links |
+| Current agent working context | Generated from authorized selected records | Bounded continuation export; never a new execution authority |
+| Private session notes or local execution journal | The relevant client/runtime | Explicitly local recovery, not silently shared project knowledge |
+
+A useful working packet contains the objective, current source revision,
+constraints, assignment, relevant decisions, latest result and verification,
+unresolved questions, next action and links for deeper reading. Every included
+item needs its source/version or an explicit unknown. Prefer extracting existing
+structured facts to asking a model to rewrite them. This packet is a view of
+project records; do not introduce a second manually maintained status sheet.
+
+### Lifecycle and reconciliation
+
+1. On entry, authenticate, discover enabled actions and read bounded current work.
+   Selecting work supplies its existing brief and linked references. Follow
+   pagination and report missing sources; incomplete context stays incomplete.
+2. Read relevant Docs and source files on demand. Keep permission checks at the
+   source; public wiki search must never ingest private room text. A future
+   cross-source index is derived and must filter authorized results before
+   exposing titles, snippets or counts.
+3. Persist results through existing work actions. Write a Doc only when it adds
+   durable rationale or a reusable decision. Ordinary checks and status changes
+   should update their structured owner rather than generate more prose.
+4. Reconcile concurrent edits with the existing revision conflict. Preserve both
+   conflicting claims until resolved; timestamp recency alone does not establish
+   truth. Distinguish a proposal, accepted decision and superseded decision.
+5. Refresh derived context when its referenced revision changes. Unknown outcomes
+   require readback using the original operation id. Permission revocation must
+   prevent future reads and inclusion; downloaded/exported copies have separate
+   retention limits and cannot be promised remotely erased.
+6. Leave a continuation generated from saved records. On return, reread those
+   records before acting. A historical success is not a current check, and a
+   copied prompt cannot grant permissions or resume an unknown external effect.
+
+### Research and what to adopt
+
+- [Anthropic context engineering](https://www.anthropic.com/research/effective-context-engineering-for-ai-agents)
+  supports small, relevant context and on-demand exploration. Adopt progressive
+  disclosure and measure retrieval failures rather than loading the entire wiki.
+- [Anthropic long-running harnesses](https://www.anthropic.com/research/effective-harnesses-for-long-running-agents)
+  describes incremental work and clear artifacts between sessions. Reuse our
+  existing results/continuation path and test fresh-agent recovery.
+- [LangGraph memory](https://docs.langchain.com/oss/python/concepts/memory)
+  separates thread checkpoints from cross-thread memory. Preserve that distinction:
+  a runtime checkpoint is not a shared project decision.
+- [Letta context repositories](https://www.letta.com/blog/context-repositories/)
+  uses versioned files and progressively disclosed context. Git export/import is
+  a useful future portable interface, but it needs explicit source ownership and
+  conflict handling; it is not automatic bidirectional synchronization.
+- [Graphiti](https://github.com/getzep/graphiti) models temporal facts with source
+  provenance and invalidation. Evaluate that pattern for demonstrated relational
+  retrieval failures; adding its graph database, extraction models and operations
+  is not yet justified. No code was copied or executed for this review.
+- [Anthropic multi-agent research](https://www.anthropic.com/research/multi-agent-research-system)
+  reports gains for parallel research alongside substantial token cost and limits
+  for tightly coupled coding. Optimize accepted outcomes and recovery effort,
+  not agent count or keeping devices busy.
+- [Lost in the Middle](https://arxiv.org/abs/2307.03172) demonstrates positional
+  retrieval failures in the models tested. It motivates our context-retrieval
+  experiment; its 2023 results are not a benchmark of today's specific agents.
+
+### Smallest next implementation and acceptance gate
+
+First qualify the existing Docs journey end to end and its release/restore
+boundary. Next connect a selected task to selected document revisions through
+the existing brief/context service. Keep larger search, graph memory and GitHub
+write synchronization conditional on measured failures. The other desktop owns
+human journey/keyboard experiments; this runtime owns composition and structured
+context qualification. No competing listener or second task store is needed.
+
+Test a fresh contributor, a returning contributor after a source change, and two
+contributors editing related material. Each must find the correct task and
+relevant decision, identify stale/conflicting evidence, make one accepted change,
+and leave the next contributor able to continue. Include permission loss,
+incomplete lists, failed/unknown saves and interruption. A successful local
+fixture does not establish hosted rollout or native-host behavior.
+
+Use the existing [trial protocol](AGENT-UTILITY-TRIALS.md) and
+[scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md): accepted task completion,
+elapsed time, human reconstruction effort and cost per accepted outcome. Record
+context-specific diagnostics: relevant-source retrieval success, stale-fact use,
+missing-context reopens and unnecessary direct clarification. Keep failures in
+the denominator and unknown costs unknown. Privacy, draft preservation and
+source correctness are guardrails. Compare against competent repository/GitHub
+work without Room; preserve an added mechanism only if its benefit justifies it.

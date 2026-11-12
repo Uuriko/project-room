@@ -81,7 +81,9 @@ test('bundled default doors reach minimal auth and inherit invitation, legacy, a
       assert.doesNotMatch(await page.locator('body').innerText(),/A shared place|Conversations, shared work|New here\?|Have an invite\?|Paste a prompt/);
     }
     // The copy must carry a selected task without leaking unrelated URL data.
-    await page.goto(origin + '/?room=qa&token=DO_NOT_COPY#pr-record/work/item-1');
+    const taskLocation = new URL('/?room=qa#pr-record/work/item-1', origin);
+    taskLocation.searchParams.set('token', 'DO_NOT_COPY');
+    await page.goto(taskLocation.href);
     await page.locator('#auth-panel').waitFor({state:'visible'});
     const taskPrompt = await page.locator('#entry-agent-prompt').inputValue();
     assert.ok(taskPrompt.includes(origin + '/?room=qa#pr-record/work/item-1'));
