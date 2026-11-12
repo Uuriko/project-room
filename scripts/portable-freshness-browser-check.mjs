@@ -1,0 +1,47 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { rmSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { EVENT_TYPES as T } from '../src/events.js';
+import { signInFixture } from './auth-signin.mjs';
+import { openSearch } from './room-chrome.mjs';
+
+test('an open external prompt is refreshed after the task changes, including during copy', { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  let browser;
+  t.after(async () => {
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+  const page = await context.newPage();
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page, f.keys.owner);
+  await openSearch(page); await page.locator('#message-search').fill('Test: prepare an agenda');
+  await page.locator('#search-list [data-open-work="test-handoff"]').click();
+  const card = page.locator('[data-work-record-id="test-handoff"]');
+  await card.locator('.work-details > summary').click();
+  await card.getByRole('button', { name: 'Use my AI', exact: true }).click();
+  await page.locator('#portable-source').check();
+  const old = await page.locator('#packet-preview').inputValue();
+  assert.match(old, /Revision: 0/);
+  await page.evaluate(() => { navigator.clipboard.writeText = () => new Promise(resolve => { window.finishCopy = resolve; }); });
+  await page.locator('#packet-copy').click();
+  f.store.command(f.keys.producer, 'commons', { id: crypto.randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId: 'test-handoff', expectedRevision: 0 } });
+  await page.locator('#packet-changed').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#packet-copy').isDisabled(), true);
+  assert.equal(await page.locator('#packet-refresh').isDisabled(), true);
+  await page.evaluate(() => window.finishCopy());
+  await page.getByText('Work changed during copy. Refresh the prompt and copy again.', { exact: true }).waitFor();
+  await page.locator('#packet-refresh').click();
+  const fresh = await page.locator('#packet-preview').inputValue();
+  assert.match(fresh, /Revision: 1/);
+  assert.match(fresh, /Please prepare an agenda/);
+  assert.notEqual(fresh, old);
+  assert.equal(await page.locator('#packet-changed').isHidden(), true);
+  assert.equal(await page.locator('#packet-copy').isEnabled(), true);
+});
