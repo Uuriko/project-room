@@ -332,7 +332,7 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     aroundCount: brief.around.length + brief.aroundMore,
     quietMembers: brief.quietMembers,
     openWorkTotal: brief.openWorkTotal,
-    next: { method: "GET", endpoint: brief.full, why: "this room's brief is over budget; read the full pack" },
+    next: brief.next,
     full: brief.full,
     eventCursor: brief.eventCursor
   };
