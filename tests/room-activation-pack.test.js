@@ -270,6 +270,13 @@ test("view=brief: who is around, what you may do, up to three things to pick up"
   assert.ok(brief.pickUp.some(item => item.id === "pack-work-2"), "unclaimed open work is offered");
   assert.ok(brief.pickUp.every(item => item.id !== "pack-work-1"), "claimed work is not offered");
   assert.equal(typeof brief.next.endpoint, "string");
+  assert.equal(brief.next.tool, "room_list_work");
+  assert.deepEqual(brief.next.arguments, { roomId: ROOM, focus: "needs_me" });
+  const attention = await fetch(`${origin}${brief.next.endpoint}`, { headers: { Authorization: `Bearer ${f.workerKey}` } });
+  assert.equal(attention.status, 200, "the recommended room-scoped read accepts the same member credential");
+  const attentionPage = await attention.json();
+  assert.ok(Array.isArray(attentionPage.work));
+  assert.ok(attentionPage.work.some(work => work.id === "pack-work-1"), "the next read finds the member's claimed work");
   assert.equal(brief.full, `/api/rooms/${ROOM}/activation-pack`);
   assert.equal(brief.members, undefined, "the full roster stays in the full pack");
   assert.ok(Buffer.byteLength(text) <= BRIEF_BYTES, `brief is ${Buffer.byteLength(text)} bytes`);
@@ -289,7 +296,8 @@ test("brief presence: stale members are counted, not listed", () => {
   ], now, "me");
   assert.deepEqual(brief.around.map(m => [m.handle, m.state]), [["Live", "online"], ["Yesterday", "recent"]]);
   assert.equal(brief.quietMembers, 2);
-  assert.equal(brief.next.endpoint, "/api/rooms/r/conversation");
+  assert.equal(brief.next.endpoint, "/api/rooms/r/work-list?focus=needs_me");
+  assert.equal(brief.next.tool, "room_list_work");
 });
 
 test("brief stays under its byte budget with 100 online members and long multibyte text", () => {

@@ -275,10 +275,10 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
     .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
   const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
-  const firstClaim = claims[0]?.claimAction;
-  const next = firstClaim ? { why: "claim the top open task", ...firstClaim }
-    : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
-      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` };
+  // The bounded room-wide window does not establish what is assigned to this
+  // viewer. Check addressed work and requests before suggesting a new claim.
+  const next = { why: "check addressed work and requests; follow pages", method: "GET", endpoint: `${roomPath}/work-list?focus=needs_me`,
+    tool: "room_list_work", arguments: { roomId: pack.room.slug, focus: "needs_me" } };
   const brief = {
     contentTrust: pack.contentTrust,
     view: "brief",
