@@ -7,12 +7,45 @@ bindings. No migrations, schedules, routes or custom domains are changed.
 Usage: deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>
 """
 import sys, os, json, hashlib, base64, mimetypes, uuid
-import urllib.request, urllib.error
+import urllib.request, urllib.error, urllib.parse
 
 sys.path.insert(0, "/opt/hatch/skills/skill-creator/bin")
 
 ALLOWED_HOSTS = ("api.cloudflare.com",)
 BASE = "https://api.cloudflare.com"
+
+def _origin(url):
+    parts = urllib.parse.urlparse(url)
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    port = parts.port
+    if port is None:
+        port = 443 if scheme == "https" else 80 if scheme == "http" else None
+    return (scheme, host, port)
+
+class SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse cross-origin redirects; permit same-origin ones.
+
+    urllib follows redirects automatically and, unlike Fetch, strips
+    nothing: it forwards Authorization unchanged to the redirect target,
+    cross-origin included. Every request this script makes carries a
+    Cloudflare credential (the access token attached by the surrogate
+    helper in api(), or the upload JWT set directly on the asset-bucket
+    request), so a cross-origin 3xx from api.cloudflare.com would hand
+    that credential to the target. Raising here means no redirected
+    request is ever sent to a different origin; same-origin redirects
+    keep urllib's default handling.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if _origin(req.full_url) != _origin(newurl):
+            raise urllib.error.URLError(
+                f"refusing cross-origin redirect: {req.full_url} -> {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+# The one opener for every request in this script, so all call sites
+# (api() and the asset-bucket upload) inherit the redirect guard.
+_OPENER = urllib.request.build_opener(SameOriginRedirectHandler())
 
 # 2026-09-27 (deep audit 5850308933): the script name selects which Worker
 # receives the production bindings. Accept only the known project-room
@@ -29,7 +62,7 @@ def api(method, path, body=None, content_type="application/json"):
     from dynamic_credentials import add_surrogate_to_request
     add_surrogate_to_request(req, "custom.cloudflare", entry_name="access_token", allowed_hosts=ALLOWED_HOSTS)
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with _OPENER.open(req, timeout=180) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as e:
         raw = e.read()
@@ -138,7 +171,7 @@ def main():
                      "Authorization": f"Bearer {jwt}"},
             method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=180) as resp:
+            with _OPENER.open(req, timeout=180) as resp:
                 uresp = json.loads(resp.read().decode("utf-8"))
                 if uresp.get("result", {}).get("jwt"):
                     completion_jwt = uresp["result"]["jwt"]
