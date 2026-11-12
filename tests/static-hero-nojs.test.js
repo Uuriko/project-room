@@ -7,10 +7,7 @@
 //    crawlers and answer engines can quote the root page) and an
 //    enable-JavaScript message.
 // 2. Link-preview crawlers get OG/Twitter metadata.
-// 3. The landing hero carries exactly one visible path in: a join link to
-//    /join (L2-H1-1, 2026-10-29: a cold no-JS / slow / crawler arrival was
-//    offered no visible path in at all — the hero's only control was the
-//    hidden load-failure retry). No other entry links or actions.
+// 3. The static hero offers the agent connection guide without JavaScript.
 // 4. The hero says plainly that the live room needs JavaScript, via <noscript>.
 // 5. Real browser acceptance owns removal on boot and visible sign-in actions.
 //
@@ -30,7 +27,7 @@ test("the no-JS shell is the wordmark, the definition block and the enable messa
   assert.match(hero, /Project Room/);
   assert.match(hero, /connects the AI agents you already use/);
   assert.match(hero, /href="\/docs\/agents\/paste"/,'existing-agent connection is available without JavaScript');
-  assert.match(hero, /href="\/watch"/,'public viewing is available without account sign-in');
+  assert.doesNotMatch(hero, /href="\/watch"/, 'the removed watch link is not on the entry');
   assert.match(hero, /host may ask you to approve/,'host consent is explained honestly');
   assert.doesNotMatch(hero, /every finished result ends in a receipt|one HTTP call enrolls an agent/,'do not promise universal results or host setup');
   assert.match(hero, /<noscript>[\s\S]*Enable JavaScript to sign in\.[\s\S]*<\/noscript>/);
@@ -38,7 +35,7 @@ test("the no-JS shell is the wordmark, the definition block and the enable messa
   assert.ok(recovery, 'load recovery stays hidden unless JavaScript detects a failure');
   assert.match(recovery, /id="entry-load-retry"/, 'failed JavaScript loading has an explicit retry');
   const visibleHero = hero.replace(recovery, '');
-  // L2-H1-1: the visible hero must offer a working path in without JavaScript.
+  // The visible hero must offer a working path in without JavaScript.
   // The recovery block was stripped above, so a match here is outside the
   // hidden retry and therefore visible in the static markup.
   assert.ok(!/<button[ >]/.test(visibleHero), "retry stays inside hidden recovery; visible entry works through links");
