@@ -28,12 +28,14 @@ test("logged-out entry starts with the wordmark and omits the old product hero",
   const html = await response.text();
   assert.match(html,/<h1 id="auth-title"[^>]*>PROJECT ROOM<\/h1>/);
   assert.ok(!html.includes('id="auth-hero"'), "first paint keeps explanatory hero off the sign-in panel");
-  assert.ok(html.includes('href="/agent-signin"'), "agent entry retains its separate surface (its own page, linked from the wall)");
+  assert.match(html, /<textarea id="entry-agent-prompt"[^>]*readonly/, "agent instructions are selectable on the entry");
+  assert.match(html, /id="entry-agent-copy"/, "the prompt has a copy action");
+  assert.doesNotMatch(html, /id="agent-signin-button"/, "the old entry link is removed");
 });
 
 test("product and agent guides remain available away from the minimal entry", async t => {
   const { origin } = await serve(t);
-  for (const path of ["/about", "/llms.txt"]) {
+  for (const path of ["/about", "/llms.txt", "/agent-signin"]) {
     const response = await fetch(`${origin}${path}`);
     assert.equal(response.status, 200, `${path} serves 200`);
   }
