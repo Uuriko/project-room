@@ -24,7 +24,9 @@ for (const mobile of [false, true]) {
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-    const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce", permissions: ["clipboard-read", "clipboard-write"] });
+    // This suite intercepts command responses to test unknown-outcome retry.
+    // A service worker can handle the request before page.route sees it.
+    const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce", permissions: ["clipboard-read", "clipboard-write"], serviceWorkers: "block" });
     const external = [], errors = [], writes = [];
     await context.route("**/*", route => {
       if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); }

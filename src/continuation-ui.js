@@ -9,13 +9,18 @@ export function installContinuation({ client, getState }) {
   const owns = ticket => Boolean(ticket && entry === ticket && ticket.epoch === epoch && dialog.open
     && client.generation === ticket.generation && client.session === ticket.session && client.ownsAccountSession()
     && getState()?.room?.id === ticket.session.roomId);
-  const stale = ticket => ticket?.basis == null || getState()?.workItems?.[ticket.workId]?.revision !== ticket.basis;
+  const stale = ticket => ticket?.basis == null || getState()?.workItems?.[ticket.workId]?.revision !== ticket.basis
+    || getState()?.members?.[ticket.session.member.id]?.revision !== ticket.viewerRevision
+    || getState()?.members?.[ticket.session.member.id]?.active !== true;
+  const accessChanged = ticket => ticket?.viewerRevision != null
+    && (getState()?.members?.[ticket.session.member.id]?.revision !== ticket.viewerRevision
+      || getState()?.members?.[ticket.session.member.id]?.active !== true);
   const setStatus = text => { $('continuation-status').textContent = text; $('continuation-status').classList.toggle('visible', Boolean(text)); };
   function controls() {
     const valid = owns(entry), changed = valid && entry.basis != null && stale(entry);
     $('continuation-copy').disabled = !valid || entry.loading || changed || copying || clipboard.busy || !$('continuation-preview').value;
     $('continuation-refresh').disabled = !valid || entry.loading || copying || clipboard.busy;
-    if (changed && $('continuation-status').textContent !== 'Work changed during copy. Refresh and copy again.') setStatus('Work changed. Refresh before copying.');
+    if (changed && !['Work changed during copy. Refresh and copy again.', 'Your access changed during copy. Refresh and copy again.'].includes($('continuation-status').textContent)) setStatus(accessChanged(entry) ? 'Your access changed. Refresh before copying.' : 'Work changed. Refresh before copying.');
   }
   function reset() {
     epoch++; entry = null; $('continuation-preview').value = ''; setStatus('');
@@ -32,8 +37,8 @@ export function installContinuation({ client, getState }) {
       if (!owns(ticket)) return;
       const markdown = workContinuationMarkdown(createWorkContinuation(brief));
       if (!owns(ticket)) return;
-      ticket.basis = context.work.revision; $('continuation-preview').value = markdown;
-      setStatus(stale(ticket) ? 'Work changed. Refresh before copying.' : '');
+      ticket.basis = context.work.revision; ticket.viewerRevision = context.viewer.revision; $('continuation-preview').value = markdown;
+      setStatus(stale(ticket) ? accessChanged(ticket) ? 'Your access changed. Refresh before copying.' : 'Work changed. Refresh before copying.' : '');
     } catch (error) { if (owns(ticket)) setStatus(error.message || 'Could not load work. Try again.'); }
     finally { if (owns(ticket)) { ticket.loading = false; controls(); } }
   }
@@ -55,7 +60,7 @@ export function installContinuation({ client, getState }) {
     try {
       const result = await clipboard.copy($('continuation-preview').value);
       if (!owns(ticket)) return;
-      if (stale(ticket)) setStatus('Work changed during copy. Refresh and copy again.');
+      if (stale(ticket)) setStatus(accessChanged(ticket) ? 'Your access changed during copy. Refresh and copy again.' : 'Work changed during copy. Refresh and copy again.');
       else if (result === 'copied') setStatus('Copied. Paste into your agent.');
       else if (result === 'pending') setStatus('Copy is still in progress.');
       else { setStatus('Select the continuation and copy it manually.'); $('continuation-preview').focus(); $('continuation-preview').select(); }
