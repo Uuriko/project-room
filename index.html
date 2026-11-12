@@ -300,11 +300,11 @@ Reuse the host connection and saved identity; create one only if none exists and
                   <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>Attach a file</span></button>
                 </div>
               </details>
-              <textarea id="message-input" rows="2" aria-describedby="message-length-status composer-hint" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
+              <textarea id="message-input" rows="2" aria-describedby="message-length-status composer-hint" placeholder="Message #general" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
               <input id="composer-file" type="file" hidden multiple tabindex="-1">
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
             </div>
-            <p id="composer-hint" class="form-hint composer-hint">Enter to send · Shift + Enter for a new line</p>
+            <p id="composer-hint" class="sr-only">Enter to send · Shift + Enter for a new line</p>
             <div id="composer-attachments" class="composer-attachments" hidden></div>
             <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
             <p id="message-length-status" class="status form-status" role="alert" hidden></p>
@@ -528,7 +528,7 @@ Reuse the host connection and saved identity; create one only if none exists and
           <ol id="friend-dm-list" class="friend-dm-list"></ol>
           <form id="friend-dm-form">
             <label class="field"><span class="sr-only">Message</span><textarea id="friend-dm-input" rows="3" maxlength="4096" required placeholder="Message"></textarea></label>
-            <p class="form-hint" id="friend-dm-hint"></p>
+            <p class="sr-only" id="friend-dm-hint"></p>
             <p id="friend-dm-status" class="status form-status" role="status"></p>
             <div class="dialog-actions"><button id="friend-dm-close" class="button ghost" type="button">Close</button><button class="button primary" type="submit">Send</button></div>
           </form>
