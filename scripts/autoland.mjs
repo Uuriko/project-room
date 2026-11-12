@@ -10,8 +10,8 @@
  * receipts already live in that workflow.
  *
  * Usage
- *   GH_TOKEN=<user-or-app-token> node scripts/autoland.mjs
- *   GH_TOKEN=... node scripts/autoland.mjs --dry-run
+ *   Set the GH_TOKEN environment variable (a user or app token), then run
+ *   node scripts/autoland.mjs, or add --dry-run to only report.
  */
 import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -195,7 +195,7 @@ export function appendSummary(line, env = process.env) {
 
 export async function postRoom(line, env = process.env, fetchImpl = fetch) {
   appendSummary(line, env);
-  const token = env.ROOM_RECEIPT_TOKEN || "";
+  const token = env.ROOM_RECEIPT_TOKEN;
   if (!token) {
     appendSummary("ROOM_RECEIPT_TOKEN not set; no Room receipt posted.", env);
     return false;
