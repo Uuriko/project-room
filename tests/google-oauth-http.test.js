@@ -160,6 +160,45 @@ test("callback success without rooms lands on the account home, session establis
   assert.equal(session.account.id, `google:${sub}`);
 });
 
+async function googleLanding(t, f) {
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const { authorize, slotCookie } = await beginFlow(origin);
+  const callback = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-fixture`,
+    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+  assert.equal(callback.status, 200);
+  assert.equal(callback.headers.get("x-room-auth-failure"), null);
+  const sessionCookie = accountCookie(callback);
+  assert.equal(f.store.authenticateAccountSession(sessionCookie).account.id, `google:${sub}`);
+  return /content="0;url=([^"]+)"/.exec(await callback.text())?.[1];
+}
+
+function googleMemberOfCommons(f) {
+  const pre = f.store.createAccountSessionSlot();
+  f.store.loginAccountSessionWithGoogle(pre.token, sub, 0);
+  f.store.command(f.keys.owner, "commons", { id: "google-member-1", type: T.EVENT_TYPES.MEMBER_ADDED,
+    data: { memberId: "googler", displayName: "Googler", kind: "human", permissions: [] } });
+  f.store.bindHumanAccount("commons", "googler", `google:${sub}`);
+}
+
+test("callback never lands on an archived room: archived-only membership goes to the account home", async t => {
+  const f = createAcceptanceFixture();
+  googleMemberOfCommons(f);
+  f.store.command(f.keys.owner, "commons", { id: "archive-commons", type: T.EVENT_TYPES.ROOM_ARCHIVED, data: {} });
+  assert.match(await googleLanding(t, f), /^\/\?account=1&amp;google=signed-in$/);
+});
+
+test("callback skips an archived room that sorts before the active one", async t => {
+  const f = createAcceptanceFixture();
+  googleMemberOfCommons(f);
+  // "a-archived" sorts before "commons"; it is archived history, so the active room wins.
+  f.store.db.prepare("INSERT INTO rooms (id, sequence, projection, archived_at) VALUES ('a-archived', 0, ?, ?)")
+    .run(JSON.stringify({ room: { ownerId: "owner", title: "Old" }, members: {} }), new Date(0).toISOString());
+  f.store.db.prepare("INSERT INTO member_accounts (room_id, member_id, account_id, origin) VALUES ('a-archived', 'googler', ?, 'human')")
+    .run(`google:${sub}`);
+  assert.match(await googleLanding(t, f), /^\/\?room=commons&amp;google=signed-in$/);
+});
+
 test("callback with a state mismatch provisions no account", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
