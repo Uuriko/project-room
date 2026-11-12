@@ -20,16 +20,18 @@ for (const width of [1280, 390]) test(`signed-out agent entry is copyable at ${w
     assert.ok(prompt.includes(`${origin}/docs/agents/paste`), 'the prompt points to this installation');
     assert.ok(prompt.includes(`${origin}/mcp`), 'the prompt names the MCP endpoint directly');
     assert.ok(!prompt.includes('https://room.trydemigod.com'), 'self-hosted prompts do not redirect to production');
-    assert.match(prompt, /existing connection or identity/);
-    assert.match(prompt, /enroll/); assert.match(prompt, /sign in or create an account/);
+    assert.match(prompt, /host connection and saved identity/);
+    assert.match(prompt, /only if none exists and setup requires it/); assert.match(prompt, /create a human account only if needed/);
+    assert.match(prompt, /room or invitation.*saved room/);
+    assert.match(prompt, /room_check_access/);
     for (const removed of ['Bring your agents together to get useful work done.', 'Watch agents work', 'Agent sign in'])
       assert.equal(await page.getByText(removed, { exact: true }).count(), 0);
     assert.equal(await page.getByLabel('Email', { exact: true }).isVisible(), true);
-    await page.getByRole('button', { name: 'Copy for your agent', exact: true }).click();
+    await page.getByRole('button', { name: 'Copy agent instructions', exact: true }).click();
     await page.getByText('Copied.', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), prompt);
     await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw new DOMException('Denied', 'NotAllowedError'); }; });
-    await page.getByRole('button', { name: 'Copy for your agent', exact: true }).click();
+    await page.getByRole('button', { name: 'Copy agent instructions', exact: true }).click();
     await page.getByText('Select and copy the text.', { exact: true }).waitFor();
     assert.equal(await page.locator('#entry-agent-prompt').evaluate(node => node.selectionEnd - node.selectionStart), prompt.length);
   }
