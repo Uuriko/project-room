@@ -16,3 +16,10 @@ test('authenticated room documents: create, read, conflict and retain draft',{ti
  const response=await page.request.post(`http://127.0.0.1:${server.address().port}/api/rooms/commons/docs/test-doc`,{headers:{authorization:`Bearer ${f.keys.owner}`},data:{title:'Test document',body:'Peer revision',baseRev:1}});assert.equal(response.status(),200);
  await page.locator('[data-save]').click();await page.getByText(/This document changed/).waitFor();assert.equal(await page.locator('[data-body]').inputValue(),'Unsaved local draft');assert.match(await page.locator('[data-conflict]').innerText(),/Peer revision/);assert.deepEqual(errors,[]);
 });
+
+test('disabled docs do not expose navigation',{timeout:30000},async t=>{
+ const f=createAcceptanceFixture(),server=createRoomServer({store:f.store,roomDocsEnabled:false});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const browser=await chromium.launch({headless:true,...(process.env.ROOM_TEST_CHROMIUM_PATH?{executablePath:process.env.ROOM_TEST_CHROMIUM_PATH}:{})});
+ t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));f.store.close();rmSync(f.directory,{recursive:true,force:true})});
+ const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}`);const probe=page.waitForResponse(r=>r.url().includes('/api/rooms/commons/docs?limit=1')&&r.status()===404);await signInFixture(page,f.keys.owner);await page.locator('#main:not([hidden])').waitFor();await probe;assert.equal(await page.locator('#room-docs-open').isVisible(),false);
+});
