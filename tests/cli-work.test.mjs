@@ -6,7 +6,32 @@ import { createRoomServer } from '../server/http.mjs';
 import { workCommand } from '../cli/commands/work.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { initialRoom } from '../server/bootstrap.mjs';
 const execFileAsync = promisify(execFile);
+
+test('work CLI default needs_me follows legacy signed cursors beyond 25 without an explicit limit', async t => {
+  const store = new RoomStore(':memory:'); store.initialize(initialRoom());
+  const owner = store.issueAccessKey('commons', 'owner');
+  store.command(owner, 'commons', {id: 'reader', type: 'member.added', data: {memberId: 'reader', displayName: 'Reader', kind: 'agent', permissions: ['accept_work']}});
+  const secret = store.issueAccessKey('commons', 'reader');
+  for (let i = 0; i < 31; i++) store.command(owner, 'commons', {id: crypto.randomUUID(), type: 'work.proposed',
+    data: {workItemId: `legacy-${i}`, title: `Task ${i}`, definitionOfDone: 'Produce a result', mode: 'read', accountableMemberId: 'reader'}});
+  const server = createRoomServer({store}); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close();});
+  const conn = {origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', memberId: 'reader', secret};
+  let result; const methods = [], io = {connection: async () => conn, out: text => {
+    assert.equal(text.includes(secret), false); result = JSON.parse(text);
+  }, fetchImpl: (url, options) => {methods.push(options?.method ?? 'GET'); return fetch(url, options);}};
+  await workCommand([], io);
+  assert.equal(result.work.length, 25); assert.equal(result.page.nextRead.arguments.focus, 'needs_me');
+  assert.match(result.page.nextRead.arguments.cursor, /^[^.]+\.[^.]+$/);
+  assert.equal(result.page.nextRead.arguments.limit, 25);
+  const ids = new Set(result.work.map(item => item.id));
+  await workCommand(result.cli.nextArgv.slice(2), io);
+  assert.equal(result.work.length, 6); assert.equal(result.cli.complete, true); assert.equal(result.cli.nextArgv, null);
+  for (const item of result.work) {assert.equal(ids.has(item.id), false); ids.add(item.id);}
+  assert.equal(ids.size, 31); assert.ok(methods.every(method => method === 'GET'));
+});
 
 test('work CLI traverses bounded native pages without writes and rejects stale cursors', async t => {
   const store = new RoomStore(':memory:'), identity = store.identities.create('Fixture agent');
