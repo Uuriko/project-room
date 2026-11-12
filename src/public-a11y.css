@@ -53,3 +53,9 @@ h1.join-brand { text-align: center; margin: 0 0 1.5rem; font-size: 1rem; font-we
 
 /* The Advanced browser join disclosure is a touch and keyboard action. */
 #join-browser-alternative > summary { box-sizing: border-box; min-height: 44px; padding-block: .5rem; cursor: pointer; }
+
+/* Standalone links under the sign-in forms (Back to log in, What is Project
+   Room) are 17px tall by default. Give touch users a 44px target. */
+@media (pointer: coarse) {
+  .join-card .form-hint a { display: inline-flex; align-items: center; min-height: var(--control-min-target-coarse); }
+}
