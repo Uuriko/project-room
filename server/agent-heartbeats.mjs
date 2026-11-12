@@ -1264,6 +1264,49 @@ export class AgentHeartbeats {
     }
   }
 
+  // True when at least one mention/DM doorbell is older than WAKE_STALE_PRUNE_MS
+  // and still pending. The jobs registry uses this as a work-gate so an idle
+  // store does not wake just to find nothing to prune.
+  staleWakesPending() {
+    try {
+      this.ensureListenerSchema();
+      const staleBefore = this.now() - WAKE_STALE_PRUNE_MS;
+      return Boolean(this.db.prepare(`SELECT 1 AS ok FROM agent_wake_signals
+        WHERE delivered_at IS NULL AND kind IN ('mention','dm') AND created_at<? LIMIT 1`).get(staleBefore));
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return false;
+    }
+  }
+
+  // Same rules as settleWakes' age prune, applied to every agent that has a
+  // stale mention/DM doorbell. Bounded to SETTLE_LIMIT acknowledged rows per
+  // call so a large pile is cleared across ticks, not in one write. Reuses
+  // settleWakes so pause, lease, and claim exclusions stay in one place.
+  pruneStaleWakes({ limit = SETTLE_LIMIT } = {}) {
+    const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, SETTLE_LIMIT) : SETTLE_LIMIT;
+    try { this.ensureListenerSchema(); } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return Object.freeze({ pruned: 0 });
+    }
+    let agents;
+    try {
+      const staleBefore = this.now() - WAKE_STALE_PRUNE_MS;
+      agents = this.db.prepare(`SELECT DISTINCT agent_id AS agentId FROM agent_wake_signals
+        WHERE delivered_at IS NULL AND kind IN ('mention','dm') AND created_at<?
+        ORDER BY agent_id`).all(staleBefore);
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return Object.freeze({ pruned: 0 });
+    }
+    let pruned = 0;
+    for (const { agentId } of agents) {
+      if (pruned >= cap) break;
+      pruned += this.settleWakes({ agentId, door: "cron" }).acknowledged.length;
+    }
+    return Object.freeze({ pruned });
+  }
+
   // RC-2026-09-28-3602: room-hosted wake poll — a synchronous, durable,
   // non-consuming read of the agent's pending wake signals. When called
   // before any wait, it returns the current pending set immediately (so
