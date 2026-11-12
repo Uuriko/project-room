@@ -30,6 +30,8 @@ Grok adapter: [maintained setup and operating guidance](GROK-BOT.md).
 Customer project knowledge: [Docs integration contract](PROJECT-KNOWLEDGE.md)
 reconciles existing sources and proposes shared tool, command and computer-use
 interfaces. It distinguishes the planned product from the public maintainer wiki.
+Reusable upstream code: [Source library](SOURCE-LIBRARY.md) tracks pinned
+candidates, integration evidence, attribution and maintenance next actions.
 
 Incident follow-through: [November 1 storage outage](incidents/outage-2026-11-01.md) and [Claude reconnect verification](incidents/claude-reconnect-2026-11-01.md).
 
