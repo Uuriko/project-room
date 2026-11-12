@@ -1048,7 +1048,23 @@ export class AgentPluginStore {
       if (!offer.send) return Object.freeze({ deliveries: Object.freeze([]), coalesced: true });
       wakeCount = offer.count;
     }
-    const result = this.mutate(() => {
+    const offered = !rewake && adapters?.enabled;
+    let result;
+    try { result = this.#journalWakePing({ identityId, signal, rewake, adapters, wakeCount }); }
+    catch (error) {
+      // The coalescer already recorded this signal as sent. If the journal write
+      // failed, nothing was sent: retract it so the caller's retry (the mention
+      // re-wake retries after 5 minutes) journals instead of coalescing into a
+      // wake that never existed and being settled with no journal row.
+      if (offered) adapters.coalescer.retract(identityId, signal?.roomId, signal?.signalId ?? null);
+      throw error;
+    }
+    if (result.deliveries.length > 0) this.kickDispatch();
+    return result;
+  }
+
+  #journalWakePing({ identityId, signal, rewake, adapters, wakeCount }) {
+    return this.mutate(() => {
       const rows = this.db.prepare(
         "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
       const deliveries = [];
@@ -1090,8 +1106,6 @@ export class AgentPluginStore {
       }
       return Object.freeze({ deliveries: Object.freeze(deliveries) });
     });
-    if (result.deliveries.length > 0) this.kickDispatch();
-    return result;
   }
 
   // Distinct wakeUrls of the identity's wakeable hosts. Never throws — a
