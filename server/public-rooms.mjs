@@ -102,7 +102,10 @@ img,svg,table{max-width:100%}
 #copy-room-setup{min-height:44px;padding:0 1rem;border:0;border-radius:.45rem;background:#5555bd;color:#fff;font:600 1rem system-ui,sans-serif;cursor:pointer}
 #copy-room-setup:hover{background:#6a6ad4}
 #copy-room-setup:focus-visible{outline:2px solid #8eb6ff;outline-offset:3px}
-#copy-room-setup:disabled{opacity:.65;cursor:wait}`;
+#copy-room-setup:disabled{opacity:.65;cursor:wait}
+#copy-task-link{margin-top:.5rem;padding:0 1rem;border:1px solid #526070;border-radius:.45rem;background:transparent;color:inherit;font:600 1rem system-ui,sans-serif;cursor:pointer}
+#copy-task-link:focus-visible{outline:2px solid #8eb6ff;outline-offset:3px}
+#task-link{min-height:44px;padding:.5rem;border:1px solid #526070;border-radius:.45rem;background:#141b24;color:inherit}`;
 
 function head({ title, description, path }) {
   const canonical = `${ROOM_ORIGIN}${path}`;

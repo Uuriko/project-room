@@ -115,7 +115,7 @@
     "src/client.js": "sha256:8f5475d673d387064a4cf6621698c7620417070a9ab49844c12922c473e60725",
     "src/clipboard.js": "sha256:849b3e4c3cfbb4e5859bf052674496c3d2e140ebd0ef2da540abd442db0a4ae6",
     "src/composer-files.js": "sha256:c82b382b8e7b66bcc915f614a2d9b4084601c5efa267be56e22a87cb19c1d84d",
-    "src/continuation-ui.js": "sha256:360d29a8a5d8ce5b6ce9d464054551cf004ad18b685f9b613e8917ca2d89fca6",
+    "src/continuation-ui.js": "sha256:f0080db14a3d30cd5a47c56e1635b03aba762e68ce6d0315960fa1055aa25aa4",
     "src/conversation-intent.js": "sha256:518fa45e3c1a14e2a28c11bb29e98f821aea18549a8b8321b88a84b8eb39a591",
     "src/conversation.js": "sha256:cd566a87f8bc890a5dd9776706c5c19298a94ef348260f62063d377b845ad98d",
     "src/current-record-context.js": "sha256:22aa841b7b5f1c41af068420cf8296eadc7e57a31476ce7cb9fb856ff0098c41",
