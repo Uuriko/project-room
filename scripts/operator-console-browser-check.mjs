@@ -64,7 +64,7 @@ async function connect(page, origin, token = TOKEN) {
 async function planLeftover(page) {
   await page.locator("#op-find-room-id").fill("qa9-");
   await page.locator("#op-find-form button[type=submit]").click();
-  await page.locator("#op-find-results li", { hasText: "qa9-console-leftover" }).getByRole("button", { name: /Add room qa9-console-leftover/ }).click();
+  await page.locator("#op-find-results li", { hasText: "qa9-console-leftover" }).getByRole("button", { name: /Add to plan: room qa9-console-leftover/ }).click();
   await page.locator("#op-reason").fill("Remove console QA leftover");
   await page.locator("#op-plan-button").click();
   await page.locator("#op-plan").waitFor({ state: "visible" });

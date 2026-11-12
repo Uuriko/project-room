@@ -293,7 +293,7 @@ function init() {
       for (const entry of entries) {
         const item = el("li");
         item.append(el("span", `${entry.kind} ${entry.id}${entry.label ? ` · ${entry.label}` : ""}`));
-        const add = el("button", "Add to plan", { type: "button", "aria-label": `Add ${entry.kind} ${entry.id} to the plan` });
+        const add = el("button", "Add to plan", { type: "button", "aria-label": `Add to plan: ${entry.kind} ${entry.id}` });
         add.addEventListener("click", () => addTarget(entry.kind, entry.id, entry.kind === "room" ? entry.label : null));
         item.append(add);
         list.append(item);
