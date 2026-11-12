@@ -59,3 +59,35 @@ test('same timestamp with conflicting semantic metadata is not an identical dupl
   assert.equal(r.traces[0].duplicateObservations, 0);
   assert.equal(analyzeAgentTrace([{ ...rows[0], operationHash: 'invalid' }]).invalidEvents, 1);
 });
+
+const handoff = (overrides={}) => ({handoffHash:'a'.repeat(64),clockId:'room-server',fromRuntime:'desktop',toRuntime:'acp-mac',context:'review',openedAtMs:100,responseAtMs:130,responseRuntime:'acp-mac',useful:true,responseEvidenceHash:'b'.repeat(64),deadlineMs:20,...overrides});
+const evaluate = records => analyzeAgentTrace([], {nowMs:200,clockId:'room-server',records}).handoffs;
+test('shared-seat wrong runtime cannot improve useful latency or erase pending age', () => {
+  const r=evaluate([handoff({responseRuntime:'other-acp'})]);
+  assert.equal(r.samples[0].useful,false);
+  assert.equal(r.samples[0].pendingAgeMs,100);
+  assert.equal(r.directions[0].wrongRuntime,1);
+  assert.equal(r.directions[0].medianUsefulResponseMs,null);
+  assert.equal(r.directions[0].deadlineBreaches,1);
+});
+test('directions and context remain separate; completed late replies count deadline misses', () => {
+  const r=evaluate([handoff(),handoff({handoffHash:'c'.repeat(64),fromRuntime:'acp-mac',toRuntime:'desktop',responseRuntime:'desktop'}),handoff({handoffHash:'d'.repeat(64),context:'decision'})]);
+  assert.equal(r.directions.length,3);
+  assert.ok(r.directions.every(d=>d.useful===1&&d.medianUsefulResponseMs===30&&d.deadlineBreaches===1));
+});
+test('missing response and runtime evidence stays unknown, never a zero-latency success or proved drop', () => {
+  const r=evaluate([handoff({responseRuntime:null}),handoff({handoffHash:'c'.repeat(64),responseAtMs:null,responseRuntime:null,useful:null,responseEvidenceHash:null,deadlineMs:null})]);
+  assert.equal(r.directions[0].unknownOutcomes,2);
+  assert.equal(r.directions[0].missingTelemetry,2);
+  assert.equal(r.directions[0].deadlineEvaluable,1);
+  assert.equal(r.directions[0].useful,0);
+});
+test('repeated correlations and mismatched or backward clocks cannot fabricate successful samples', () => {
+  const r=evaluate([handoff(),handoff({useful:false}),handoff({handoffHash:'c'.repeat(64),clockId:'laptop'}),handoff({handoffHash:'d'.repeat(64),responseAtMs:99})]);
+  assert.equal(r.samples.length,0);assert.equal(r.invalidRecords,4);assert.equal(r.duplicateCorrelationKeys,1);
+});
+test('no freeform body, source or arbitrary fields escape handoff evaluation', () => {
+  const r=evaluate([handoff({body:'private contents',source:'secret',unrelated:'private'})]);
+  assert.doesNotMatch(JSON.stringify(r),/private|secret/);
+  assert.equal(evaluate([handoff({responseEvidenceHash:null})]).directions[0].useful,0);
+});
