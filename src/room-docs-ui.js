@@ -2,7 +2,7 @@
 // the exact active RoomClient session; they never contain credentials.
 export function installRoomDocs({ client, getState, getSession }) {
   const open = document.querySelector('#room-docs-open'), dialog = document.querySelector('#room-docs-dialog');
-  const root = document.querySelector('#room-docs-root');
+  const root = document.querySelector('#room-docs-root'), navigation = document.querySelector('#room-docs-navigation');
   let owner = null, generation = 0, drafts = new Map(), current = null, next = null, docs = [];
   const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function owns(s) { return !!s && s === owner && s === getSession() && s === client.session && getState()?.room?.id === s.roomId && client.ownsAccountSession(); }
@@ -29,7 +29,8 @@ export function installRoomDocs({ client, getState, getSession }) {
     if (owner !== s) { owner=s; drafts=new Map(); current=null; docs=[]; next=null; }
     ++generation; render(); if (!dialog.open) dialog.showModal(); void list(s);
   });
-  function reset(){generation++;owner=null;drafts.clear();current=null;docs=[];next=null;root.replaceChildren();if(dialog.open)dialog.close();}
+  function reset(){generation++;owner=null;drafts.clear();current=null;docs=[];next=null;root.replaceChildren();navigation.hidden=true;if(dialog.open)dialog.close();}
+  async function sync(){const s=getSession(),ticket=client.generation;if(!s||s!==client.session||getState()?.room?.id!==s.roomId){navigation.hidden=true;return;}try{await client.request(path(s)+'?limit=1',{fresh:true});if(getSession()===s&&client.session===s&&client.generation===ticket)navigation.hidden=false;}catch{if(getSession()===s&&client.generation===ticket)navigation.hidden=true;}}
   document.querySelector('#room-docs-close').addEventListener('click',()=>dialog.close());
   root.addEventListener('input', e => {
     const s=owner,d=current;if(!owns(s)||!d||!e.target.matches('[data-title],[data-body]'))return;
@@ -48,5 +49,5 @@ export function installRoomDocs({ client, getState, getSession }) {
     catch(error){if(!owns(s)||!button.isConnected)return;if(error.status===409){status.textContent='This document changed. Your draft is preserved; compare it with the current version before retrying.';try{const latest=(await client.request(path(s,d.docId),{fresh:true})).doc;if(!owns(s)||!button.isConnected)return;const box=root.querySelector('[data-conflict]');box.innerHTML=`<p>Current revision ${latest.rev}</p><pre class="room-docs-text">${esc(latest.body)}</pre><button type="button" data-use-latest>Use this revision as base</button>`;box.querySelector('[data-use-latest]').onclick=()=>{const old=drafts.get(d.docId);if(old){drafts.set(d.docId,{...old,baseRev:latest.rev});status.textContent='Saving will replace the current text with your draft.';box.innerHTML='';}};}catch{status.textContent+=' Could not load the current version.';}}else status.textContent=`Could not save. Your draft is preserved. ${error.message}`;}
     finally{if(button.isConnected){button.disabled=false;for(const f of editor.querySelectorAll('input,textarea'))f.disabled=false;}}
   });
-  return { reset };
+  return { reset, sync };
 }
