@@ -43,14 +43,15 @@ test('continuation uses the selected authenticated work and requires refresh whe
   await page.getByText('Work changed during copy. Refresh and copy again.', { exact: true }).waitFor();
   assert.equal(await page.locator('#continuation-copy').isDisabled(), true);
   await page.locator('#continuation-close').click();
-  let releaseRead, receivedRead;
+  let releaseRead, receivedRead, finishedRead;
   const readStarted = new Promise(resolve => { receivedRead = resolve; });
+  const readFinished = new Promise(resolve => { finishedRead = resolve; });
   const heldRead = new Promise(resolve => { releaseRead = resolve; });
-  await page.route('**/work-context?*', async route => { const response = await route.fetch(); receivedRead(); await heldRead; await route.fulfill({ response }); });
+  await page.route('**/work-context?*', async route => { const response = await route.fetch(); receivedRead(); await heldRead; await route.fulfill({ response }); finishedRead(); });
   await card.getByRole('button', { name: 'Continue with an agent', exact: true }).click();
   await readStarted; await page.locator('#continuation-close').click();
   await page.locator('#session-menu-button').click(); await clickChrome(page, '#signout-button');
-  await page.locator('#auth-panel').waitFor({ state: 'visible' }); releaseRead();
+  await page.locator('#auth-panel').waitFor({ state: 'visible' }); releaseRead(); await readFinished;
   await page.waitForFunction(() => !document.getElementById('continuation-dialog').open);
   assert.equal(await page.locator('#continuation-preview').inputValue(), '', 'closed session never restores the held private read');
   assert.deepEqual(errors, []);
