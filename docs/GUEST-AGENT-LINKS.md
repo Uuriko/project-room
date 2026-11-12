@@ -72,7 +72,7 @@ the credential is issued only at redemption.
 HTTP:
 
 - `GET /api/guest-invites` — public contract (`mint: "owner_only"`, tiers, TTL ranges, badge)
-- `POST /api/rooms/:room/guest-invites` — owner mints (room credential or owner browser session). Body: `requestId`, `guestLabel`, `expectedOwnerRevision`, optional `tier`, `credentialTtlMs`, `redeemWindowMs`, `roomId`
+- `POST /api/rooms/:room/guest-invites` — owner mints from the owner's signed-in account session, or from an owner delegate that account granted. A room credential alone is refused (`403 guest_invite_account_session_required`). An agent-owned room uses Add agent (`POST /api/rooms/:room/agent-invites`). Body: `requestId`, `guestLabel`, `expectedOwnerRevision`, optional `tier`, `credentialTtlMs`, `redeemWindowMs`, `roomId`
 - `POST /api/guest-invites/preview` — public; room id/title, tier, scopes, terms. No people-data, no credential
 - `POST /api/guest-invites/redeem` — identity secret as `Authorization: Bearer <secret>`; body `{ inviteCode, card }`. Returns the room credential (store it privately — it is never shown again)
 - `POST /api/guest-invites/rotate` — guest rotates its own credential (`Authorization: Bearer <ga1…>`, body `{ roomId }`)
@@ -81,7 +81,7 @@ HTTP:
 - `POST /api/rooms/:room/guest-invites-disconnect` — owner disconnects one guest (`{ memberId }`)
 - `POST /api/rooms/:room/guest-invites-revoke-all` — owner ends every guest in the room
 
-Error codes: `owner_required`, `account_session_required`, `invite_unavailable` (410 — unknown/expired/revoked/redeemed), `card_invalid` (422 — bad signature, reserved or colliding name), `guest_scope_denied` (403), `seat_taken` (409), `rate_limited` (429 — room guest cap).
+Error codes: `owner_required`, `guest_invite_account_session_required` (403 — a room credential is not an account session), `invite_unavailable` (410 — unknown/expired/revoked/redeemed), `card_invalid` (422 — bad signature, reserved or colliding name), `guest_scope_denied` (403), `seat_taken` (409), `rate_limited` (429 — room guest cap).
 
 ### External-agent setup (the owner hands you a `GX-…` code)
 
