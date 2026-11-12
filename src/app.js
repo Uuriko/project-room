@@ -521,6 +521,7 @@ const client = new RoomClient({
     state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
     if (session && (session.roomId !== identity.roomId || session.member?.id !== identity.member?.id)) docsUi?.reset();
     session = identity;
+    if (presenceBoundary) void docsUi?.sync();
     // A successful room snapshot supersedes a denied deep link from an
     // earlier room/account. Keep unrelated account failures visible.
     const accountStatus = $("#account-status");
@@ -8544,6 +8545,7 @@ const ready = (async () => {
 // --- end W board ---
 
 docsUi = installRoomDocs({client, getState: () => state, getSession: () => session});
+void docsUi.sync();
 return ready;
 }
 
