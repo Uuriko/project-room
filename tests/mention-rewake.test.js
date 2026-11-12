@@ -63,14 +63,19 @@ test("acknowledged and answered mentions are not re-woken", t => {
   assert.equal(wakes.length, 0);
 });
 
-test("a failing re-wake never blocks the flip", t => {
-  const { f, clock, wakes } = setup(t);
+test("a failing re-wake never blocks the read, and the mention stays retryable instead of being dropped", t => {
+  const { f, clock } = setup(t);
   say(f, f.keys.owner, { messageId: "m1", body: "@Scout hello" });
-  wakes.length = 0;
   setDeadline(f, "m1", clock.now() + 1000);
   clock.advance(1001);
+  const real = f.store.agentHeartbeats.wakeIfOffline;
   f.store.agentHeartbeats.wakeIfOffline = () => { throw new Error("boom"); };
   assert.doesNotThrow(() => f.store.flipExpiredMentions("commons"));
-  const state = f.store.db.prepare("SELECT state FROM mention_states WHERE room_id='commons' AND mentioned_member_id='rewake-agent'").get().state;
-  assert.equal(state, "timed_out");
+  const row = () => f.store.db.prepare("SELECT state, timeout_at AS timeoutAt FROM mention_states WHERE room_id='commons' AND mentioned_member_id='rewake-agent'").get();
+  assert.equal(row().state, "delivered", "not terminal: the wake never went out, so it is retried (zero-drop)");
+  assert.ok(row().timeoutAt > clock.now(), "deadline pushed back by the retry backoff");
+  f.store.agentHeartbeats.wakeIfOffline = real;
+  clock.advance(5 * 60 * 1000 + 1);
+  f.store.flipExpiredMentions("commons");
+  assert.equal(row().state, "timed_out", "terminal once the re-wake succeeds");
 });

@@ -78,3 +78,57 @@ test("the jobs registry schedules and runs the sweep, and stays idle with nothin
   await job.run(f.store, {});
   assert.equal(rewakes(f, identityId).length, 1);
 });
+
+// #6160 follow-up (Dot's method-level specimens): overflow, a throwing re-wake
+// and a failing room must not lose or starve mentions.
+test("51 overdue mentions: the first tick wakes 50 and leaves the 51st due, the next tick wakes it", t => {
+  const { f, clock, identityId } = setup(t);
+  const due = clock.now() + 200000;
+  for (let i = 0; i < 51; i++) { clock.advance(2100); say(f, f.keys.owner, { messageId: `o${i}`, body: `@Scout item ${i}` }); setDeadline(f, `o${i}`, due + i); }
+  clock.advance(due - clock.now() + 1000);
+  f.store.agentHeartbeats.heartbeat({ agentId: identityId, hostId: "scout-host", mode: "wakeable", wakeUrl: "https://scout.example.test/wake" });
+  const rewakeCount = () => f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=? AND message_id LIKE 'rewake:%'").get(identityId).n;
+  f.store.sweepExpiredMentions();
+  assert.equal(rewakeCount(), 50);
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM mention_states WHERE state='delivered'").get().n, 1, "the overflow row is still delivered and due");
+  assert.notEqual(f.store.nextMentionSweepAt(), null);
+  f.store.sweepExpiredMentions();
+  assert.equal(rewakeCount(), 51, "nothing was dropped");
+  assert.equal(f.store.nextMentionSweepAt(), null);
+});
+
+test("a throwing re-wake keeps the mention retryable and is retried once the backoff passes", t => {
+  const { f, clock, identityId } = setup(t);
+  say(f, f.keys.owner, { messageId: "r1", body: "@Scout please" });
+  setDeadline(f, "r1", clock.now() + 1000);
+  clock.advance(1001);
+  const real = f.store.rewakeTimedOutMention.bind(f.store);
+  let boom = true;
+  f.store.rewakeTimedOutMention = (...args) => { if (boom) throw new Error("wake backend down"); return real(...args); };
+  f.store.sweepExpiredMentions();
+  assert.equal(f.store.db.prepare("SELECT state FROM mention_states").get().state, "delivered", "not terminal after a failed re-wake");
+  assert.equal(rewakes(f, identityId).length, 0);
+  boom = false;
+  f.store.sweepExpiredMentions();
+  assert.equal(rewakes(f, identityId).length, 0, "still inside the retry backoff");
+  clock.advance(5 * 60 * 1000 + 1);
+  f.store.sweepExpiredMentions();
+  assert.equal(rewakes(f, identityId).length, 1);
+  assert.equal(f.store.db.prepare("SELECT state FROM mention_states").get().state, "timed_out");
+});
+
+test("a room that keeps failing cannot starve later rooms", t => {
+  const { f, clock, identityId } = setup(t);
+  say(f, f.keys.owner, { messageId: "good", body: "@Scout please" });
+  setDeadline(f, "good", clock.now() + 2000);
+  const goodEvent = eventIdOf(f, "good");
+  // A due row in a room that sorts first and whose flip always throws.
+  f.store.db.exec("PRAGMA foreign_keys=OFF");
+  f.store.db.prepare("INSERT INTO mention_states(room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at) VALUES('aaa-broken','e1','m1','delivered',0,?)").run(clock.now() + 1000);
+  clock.advance(2500);
+  const real = f.store.flipExpiredMentions.bind(f.store);
+  f.store.flipExpiredMentions = (roomId, nowMs) => { if (roomId === "aaa-broken") throw new Error("poisoned room"); return real(roomId, nowMs); };
+  f.store.sweepExpiredMentions({ limit: 1 });
+  f.store.sweepExpiredMentions({ limit: 1 });
+  assert.deepEqual(rewakes(f, identityId).map(row => row.messageId), [`rewake:${goodEvent}`], "the healthy room was reached on a later tick");
+});
