@@ -1,7 +1,26 @@
+import { clipboard as signinPromptClipboard } from "./clipboard.js";
 import { hasSessionHint } from "./browser-session.js";
 import { uiText } from "./strings.js";
 // Static imports must finish before the readable fallback yields to startup.
 import "./entry-started.js";
+
+// Copy the complete visible prompt; host connection happens in the receiving agent.
+const signinAgentPrompt = document.querySelector("#signin-agent-prompt");
+const signinAgentCopy = document.querySelector("#signin-agent-copy");
+const signinAgentStatus = document.querySelector("#signin-agent-copy-status");
+signinPromptClipboard.subscribe(() => { signinAgentCopy.disabled = signinPromptClipboard.busy; });
+signinAgentCopy.addEventListener("click", async () => {
+  signinAgentStatus.textContent = "Copying…";
+  const outcome = await signinPromptClipboard.copy(signinAgentPrompt.value);
+  if (outcome === "copied") signinAgentStatus.textContent = "Copied. Paste into your agent to connect.";
+  else {
+    signinAgentPrompt.focus();
+    signinAgentPrompt.select();
+    signinAgentStatus.textContent = outcome === "pending"
+      ? "Clipboard is taking longer than expected. You can copy the selected prompt manually."
+      : "Copy the selected prompt, then paste it into your agent.";
+  }
+});
 
 let flight = null, dispose = () => {};
 const resumeKey = "project-room:signin-entry:v1";

@@ -37,15 +37,19 @@ for (const touch of [false, true]) {
         const button = page.getByRole('button', { name, exact: true });
         assert.equal(await button.count(), 1); assert.equal(await button.isVisible(), true);
       }
-      // Agent sign in is a link to its own page now (decision #37).
-      const agentLink = page.getByRole('link', { name: 'Agent sign in', exact: true });
-      assert.equal(await agentLink.count(), 1); assert.equal(await agentLink.isVisible(), true);
-      for (const [name, href] of [['Connect an agent', '/docs/agents/paste'], ['Watch agents work', '/watch']]) {
-        const link = page.getByRole('link', { name, exact: true });
-        assert.equal(await link.isVisible(), true);
-        assert.equal(await link.getAttribute('href'), href);
-      }
-      assert.doesNotMatch(await page.locator('body').innerText(), /A shared place|Conversations, shared work|Have an invite\?|Paste a prompt/);
+      assert.equal(await page.getByRole('link', { name: 'Agent sign in', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('link', { name: 'Watch agents work', exact: true }).count(), 0);
+      const prompt = page.locator('#signin-agent-prompt');
+      assert.equal(await prompt.isVisible(), true);
+      assert.match(await prompt.inputValue(), /room_check_access/);
+      const copy = page.locator('#signin-agent-copy');
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+      await copy.click();
+      await page.getByRole('status').filter({ hasText: 'Copied. Paste into your agent' }).waitFor();
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), await prompt.inputValue());
+      const fieldBox = await prompt.boundingBox(), copyBox = await copy.boundingBox();
+      assert.ok(copyBox.y >= fieldBox.y + fieldBox.height, 'copy is below the text box');
+      assert.doesNotMatch(await page.locator('body').innerText(), /A shared place|Conversations, shared work|Have an invite\?/);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     }
     // Capture the actual first navigation before the app handles each hash.

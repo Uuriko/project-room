@@ -23,7 +23,7 @@ test("agent conversation retains full work records and result controls", { timeo
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = []; page.on("pageerror", error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.locator("#agent-signin-button").click();
+  await page.goto(new URL("/agent-signin", page.url()).href);
   await page.locator('[name="identityId"]').fill(identity.identityId);
   await page.locator('[name="secret"]').fill(identity.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();

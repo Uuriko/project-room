@@ -50,7 +50,8 @@ test("shared tokens, focus, and settings sections render together", { timeout: 6
   await page.locator("#auth-title").waitFor();
   const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
   assert.equal(bg, "#202127");
-  const hint = await page.locator("#agent-signin-button").evaluate(node => {
+  await page.locator("#signin-agent-copy-status").evaluate(node => { node.textContent = "Copied."; });
+  const hint = await page.locator("#signin-agent-copy-status").evaluate(node => {
     const color = getComputedStyle(node).color;
     const background = getComputedStyle(document.documentElement).backgroundColor;
     return { color, background };

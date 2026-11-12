@@ -63,13 +63,12 @@ test('bundled default doors reach minimal auth and inherit invitation, legacy, a
       assert.equal(new URL(page.url()).origin,origin);
       assert.equal(new URL(page.url()).search,'?entry=release&next=%2Fabout');
       assert.equal(await page.locator('#auth-title').innerText(),'PROJECT ROOM');
-      assert.equal(await page.getByRole('link',{name:'Agent sign in',exact:true}).count(),1);
+      assert.equal(await page.getByRole('link',{name:'Agent sign in',exact:true}).count(),0);
+      assert.equal(await page.locator('#signin-agent-prompt').isVisible(),true);
+      assert.equal(await page.getByRole('button',{name:'Copy prompt',exact:true}).isVisible(),true);
       assert.equal(await page.getByRole('button',{name:'Create account',exact:true}).isVisible(),true);
       assert.equal(await page.getByRole('button',{name:'Log in',exact:true}).isVisible(),true);
-      for (const [name,href] of [['Connect an agent','/docs/agents/paste'],['Watch agents work','/watch']]) {
-        const link=page.getByRole('link',{name,exact:true});
-        assert.equal(await link.isVisible(),true);assert.equal(await link.getAttribute('href'),href);
-      }
+      assert.equal(await page.getByRole('link',{name:'Watch agents work',exact:true}).count(),0);
       assert.doesNotMatch(await page.locator('body').innerText(),/A shared place|Conversations, shared work|New here\?|Have an invite\?|Paste a prompt/);
     }
     // Observe the browser's first destination before app routing handles each

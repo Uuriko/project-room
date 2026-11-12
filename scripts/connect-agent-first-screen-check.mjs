@@ -49,15 +49,17 @@ for (const touch of [false, true]) {
 
     const prompt = page.locator('#join-agent-prompt');
     assert.equal(await prompt.isVisible(), false, 'setup instructions stay off anonymous entrance');
-    assert.equal(await page.getByRole('link', { name: 'Agent sign in', exact: true }).count(), 1);
-    await page.locator('#agent-signin-button').focus();
-    await page.keyboard.press('Enter');
-    // The link opens the standalone agent sign-in page (decision #37).
-    await page.locator('#agent-signin-ui [name=identityId]').waitFor({ state: 'visible' });
-    assert.equal(page.url().endsWith('/agent-signin'), true);
-    assert.equal(await prompt.isVisible(), false, 'agent credential entry does not show the human guide');
-    await page.locator('#agent-signin-home').click();
-    await page.locator('#auth-panel').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#signin-agent-prompt').isVisible(), true);
+    await page.bringToFront();
+    await page.locator('#signin-agent-copy').scrollIntoViewIfNeeded();
+    await page.locator('#signin-agent-copy').press('Enter');
+    await page.locator('#signin-agent-copy-status').filter({hasText:'Copied.'}).waitFor();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), await page.locator('#signin-agent-prompt').inputValue());
+    await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {writeText: async () => {throw new Error('denied');}} }));
+    await page.locator('#signin-agent-copy').click();
+    await page.locator('#signin-agent-copy-status').filter({hasText:'Copy the selected prompt'}).waitFor();
+    assert.equal(await page.locator('#signin-agent-prompt').evaluate(el => el.selectionEnd - el.selectionStart), (await page.locator('#signin-agent-prompt').inputValue()).length);
+    await page.evaluate(() => delete navigator.clipboard);
     const owner = store.issueAccessKey('commons', 'owner');
     await signInFixture(page, owner);
     await openSettings(page, 'advanced-room-tools');

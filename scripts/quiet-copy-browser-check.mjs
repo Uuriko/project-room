@@ -31,7 +31,8 @@ async function setup(t, viewport) {
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
+  // Fault-injection routes must see requests instead of service-worker fetches.
+  const page = await browser.newPage({ viewport, reducedMotion: "reduce", serviceWorkers: "block" });
   page.setDefaultTimeout(8000);
   const errors = []; page.on("pageerror", error => errors.push(error.message));
   return { fixture, page, errors, origin: `http://127.0.0.1:${server.address().port}` };
@@ -48,8 +49,8 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Create account", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Log in", exact: true }).isVisible(), true);
-    assert.equal(await page.getByRole("link", { name: "Agent sign in", exact: true }).count(), 1);
-    assert.equal(await page.locator("#agent-signin-button").isVisible(), true);
+    assert.equal(await page.getByRole("link", { name: "Agent sign in", exact: true }).count(), 0);
+    assert.equal(await page.locator("#signin-agent-copy").isVisible(), true);
     await page.screenshot({ path: `test-results/signin-${label}-welcome.png`, fullPage: true });
     await openMagicSignin(page);
     await page.locator('#auth-signin-ui [data-signin-form="password"]').waitFor();

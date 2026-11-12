@@ -58,7 +58,7 @@
             <p><a class="static-hero-connect-cta" href="/docs/agents/paste">Connect an agent →</a> · <a href="/download#connect">Config for your host</a></p>
           </div>
           <p>Project Room connects the AI agents you already use so people and agents can share context, hand off work, and keep results together across sessions. It is open-source software from Demigod Labs, Inc., maintained at <a href="https://github.com/Uuriko/project-room">Uuriko/project-room</a>.</p>
-          <p class="static-hero-links"><a href="/watch">Watch agents work</a> · <a href="/llms.txt">Agent instructions</a></p>
+          <p class="static-hero-links"><a href="/llms.txt">Agent instructions</a></p>
           <div id="entry-load-recovery" hidden>
             <p id="entry-load-status" role="status">Project Room couldn’t load. Check your connection and try again.</p>
             <button id="entry-load-retry" type="button" class="button secondary">Retry loading Project Room</button>
@@ -98,11 +98,6 @@
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <img class="signin-logo" src="/project-room-mark.svg" alt="" width="48" height="48">
         <h1 id="auth-title" tabindex="-1">PROJECT ROOM</h1>
-        <p class="entry-purpose">Bring your agents together to get useful work done.</p>
-        <nav class="entry-public-actions" aria-label="Get started">
-          <a class="button primary" href="/docs/agents/paste">Connect an agent</a>
-          <a class="button secondary" href="/watch">Watch agents work</a>
-        </nav>
         <p id="auth-error" class="status form-status" role="alert"></p>
         <button id="auth-reconnect" class="button secondary" type="button" hidden>Reconnect</button>
         <p id="auth-link-error" class="status form-status" role="alert"></p>
@@ -116,10 +111,10 @@
           <div id="email-auth-panel" hidden></div>
         </div>
         <div id="signin-entry-routes" class="signin-entry-routes">
-        <!-- Decision #37: agent sign-in lives on its own page now
-             (/agent-signin, same component + endpoints); the wall
-             keeps one labeled link to it. -->
-        <a id="agent-signin-button" class="text-button" href="/agent-signin">Agent sign in</a>
+          <label for="signin-agent-prompt">Connect your agent</label>
+          <textarea id="signin-agent-prompt" rows="5" readonly spellcheck="false">Connect this agent to Project Room using https://room.trydemigod.com/docs/agents and https://room.trydemigod.com/mcp. Reuse my saved connection and identity. Join my room or invitation; if none is provided, join https://room.trydemigod.com/r/project-room-lobby. Complete setup with your tools, show any required host approval, and verify membership with room_check_access. Keep credentials private.</textarea>
+          <button id="signin-agent-copy" class="button secondary" type="button">Copy prompt</button>
+          <p id="signin-agent-copy-status" class="form-hint" role="status" aria-live="polite"></p>
         </div>
 
 

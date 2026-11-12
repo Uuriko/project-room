@@ -24,7 +24,8 @@ async function setup(t, { passkey = false, mail } = {}) {
   await new Promise(resolve => server.listen(port, "127.0.0.1", resolve));
   const origin = configuredOrigin ?? `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch(chromiumLaunchOptions());
-  const context = await browser.newContext();
+  // Fault-injection routes must see requests instead of service-worker fetches.
+  const context = await browser.newContext({ serviceWorkers: "block" });
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
   const errors = []; page.on("pageerror", error => errors.push(error.message));
@@ -51,7 +52,7 @@ test("compact login and signup remain usable in both themes and small windows", 
     assert.equal(await form.locator('[name="email"]').getAttribute("autocomplete"), "username");
     assert.equal(await form.locator('[name="password"]').getAttribute("autocomplete"), "current-password");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    for (const selector of ['[data-signin-form="password"] button[type="submit"]', '[data-password-visibility]', '[data-password-mode]', '[data-forgot-password]', '#agent-signin-button']) {
+    for (const selector of ['[data-signin-form="password"] button[type="submit"]', '[data-password-visibility]', '[data-password-mode]', '[data-forgot-password]', '#signin-agent-copy']) {
       const box = await page.locator('#auth-panel').locator(selector).boundingBox();
       assert.ok(box.height >= 44, selector + " touch target");
     }
@@ -77,7 +78,7 @@ test("compact login and signup remain usable in both themes and small windows", 
     assertAxeClean(await axeSerious(page), `login ${theme} ${viewport.width}x${viewport.height}`);
     await page.screenshot({ path: `test-results/login-polish/${theme}-${viewport.width}x${viewport.height}.png`, fullPage: true });
   }
-  await page.locator('#agent-signin-button').click();
+  await page.goto(new URL('/agent-signin', page.url()).href);
   await page.locator('#agent-signin-ui [name="identityId"]').waitFor({ state: 'visible' });
   await page.locator('#agent-signin-home').click();
   await page.locator('[data-signin-form="password"]').waitFor({ state: 'visible' });
