@@ -61,6 +61,10 @@ export function createOpenAiProvider({ key, model, fetchImpl }) {
       if (responseId) body.previous_response_id = responseId;
       const response = await fetchImpl(OPENAI_URL, {
         method: "POST",
+        // Authorization is stripped cross-origin by the fetch platform
+        // today, but guard anyway: one header-name change would otherwise
+        // expose the key, and the Room clients standardise on this.
+        redirect: "error",
         headers: openaiHeaders(key),
         body: JSON.stringify(body),
       });

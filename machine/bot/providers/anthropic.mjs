@@ -78,6 +78,11 @@ export function createAnthropicProvider({ key, model, fetchImpl }) {
       const body = anthropicBody({ model, messages });
       const response = await fetchImpl(ANTHROPIC_URL, {
         method: "POST",
+        // The API key travels in the custom x-api-key header, which the
+        // fetch platform does NOT strip on cross-origin redirects (only
+        // Authorization is stripped). Refuse redirects outright so the
+        // key can never be forwarded to another origin.
+        redirect: "error",
         headers: anthropicHeaders(key),
         body: JSON.stringify(body),
       });

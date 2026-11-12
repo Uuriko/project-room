@@ -27,6 +27,10 @@ export function createDashaProvider({ key, model, fetchImpl }) {
       const body = dashaBody({ model, messages });
       const response = await fetchImpl(DASHA_URL, {
         method: "POST",
+        // Same posture as the other key-carrying providers: refuse
+        // redirects so a future header change cannot forward the key
+        // cross-origin (only Authorization is platform-stripped today).
+        redirect: "error",
         headers: dashaHeaders(key),
         body: JSON.stringify(body),
       });
