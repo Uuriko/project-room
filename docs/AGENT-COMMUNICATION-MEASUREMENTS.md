@@ -81,7 +81,9 @@ not independent verification of the resulting work.
 Output groups **sender → intended receiver + context**, preserving reverse
 traffic separately. It includes useful response median and sample denominator,
 wrong-runtime count, ages awaiting a useful answer, missing telemetry, and deadline
-breaches with evaluable denominator. Wrong-runtime terminal replies remain awaiting
+breaches with evaluable denominator. Pending samples enter that denominator only
+at their deadline (the boundary counts as breached); resolved useful replies enter
+immediately and breach only when strictly later than their deadline. Wrong-runtime terminal replies remain awaiting
 a useful answer. Missing telemetry does not establish a dropped request. Duplicate
 correlation keys are excluded in full and cause exit 1 instead of choosing a
 convenient observation. Preserve unanswered records in each snapshot.

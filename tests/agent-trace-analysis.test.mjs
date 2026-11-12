@@ -91,3 +91,14 @@ test('no freeform body, source or arbitrary fields escape handoff evaluation', (
   assert.doesNotMatch(JSON.stringify(r),/private|secret/);
   assert.equal(evaluate([handoff({responseEvidenceHash:null})]).directions[0].useful,0);
 });
+
+ test('pending deadlines mature at the boundary; resolved on-time responses enter the denominator', () => {
+  const r=evaluate([handoff({responseAtMs:null,responseRuntime:null,useful:null,deadlineMs:101}),
+    handoff({handoffHash:'c'.repeat(64),responseAtMs:null,responseRuntime:null,useful:null,deadlineMs:100}),
+    handoff({handoffHash:'d'.repeat(64),deadlineMs:30})]);
+  assert.equal(r.samples[0].deadlineBreached,null);
+  assert.equal(r.samples[1].deadlineBreached,true);
+  assert.equal(r.samples[2].deadlineBreached,false);
+  assert.equal(r.directions[0].deadlineEvaluable,2);
+  assert.equal(r.directions[0].deadlineBreaches,1);
+});

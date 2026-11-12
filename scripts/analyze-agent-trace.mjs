@@ -88,7 +88,9 @@ export function analyzeHandoffs({ nowMs, clockId, records } = {}) {
     const wrongRuntime = responseObserved && runtimeMatch === false;
     const pendingAgeMs = useful ? null : nowMs - r.openedAtMs;
     const usefulResponseMs = useful ? r.responseAtMs - r.openedAtMs : null;
-    const deadlineBreached = r.deadlineMs == null ? null : (usefulResponseMs ?? pendingAgeMs) > r.deadlineMs;
+    const deadlineBreached = r.deadlineMs == null ? null
+      : useful ? usefulResponseMs > r.deadlineMs
+        : pendingAgeMs >= r.deadlineMs ? true : null;
     const sample = { handoffHash:r.handoffHash, fromRuntime:r.fromRuntime ?? null, toRuntime:r.toRuntime ?? null,
       context:r.context ?? null, responseRuntime:r.responseRuntime ?? null, responseObserved,
       runtimeMatch, wrongRuntime, useful, usefulResponseMs, pendingAgeMs, deadlineBreached,
