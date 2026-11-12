@@ -618,7 +618,7 @@ export class Bridge {
         onFirstOutput: kind => this.stageObserver.mark(receipt.signalIds, 'first_observable_output', receipt.requestId, kind)});
       this.stats.turns++;
       if (formal) {
-        const delivery = prepareFormalDelivery(formal, recorder.text, stopReason);
+        const delivery = prepareFormalDelivery(formal, recorder.formalText ?? recorder.text, stopReason);
         body = delivery.kind === 'formal' ? delivery.recipe.command.data.body : delivery.body;
         if (delivery.kind === 'formal') formalDelivery = delivery;
         else { formalPending = delivery.pendingReason; formalDraft = delivery.draft; }

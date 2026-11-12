@@ -9,6 +9,7 @@ import {RoomStore} from '../server/store.mjs';
 import {createRoomServer} from '../server/http.mjs';
 import {seedScopedInbox} from './helpers/scoped-inbox-source.mjs';
 import {Bridge} from '../room-acp/src/bridge.mjs';
+import {TurnRecorder} from '../room-acp/src/render.mjs';
 import {RoomClient, RoomError} from '../room-acp/src/room.mjs';
 import {readCompleteRequest, prepareFormalDelivery} from '../room-acp/src/formal-delivery.mjs';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -40,6 +41,7 @@ async function fixture(t, options = {}) {
       session:async () => ({sessionId:'synthetic', created:true}),
       prompt:async (_key, prompt) => {
         counts.prompts++; counts.prompt = prompt;
+        if (options.updates) { const recorder = new TurnRecorder(); for (const update of options.updates) recorder.update(update); return {recorder, stopReason:options.stopReason ?? 'end_turn'}; }
         return {recorder:{text:options.text ?? JSON.stringify({outcome:'answered', body:'Useful verified answer'}), tools:new Map()},
           stopReason:options.stopReason ?? 'end_turn'};
       }
@@ -389,4 +391,30 @@ test('follow-up preparation accepts the larger exact answer in previous exchange
   assert.equal(follow.preparation.previousExchanges[0].messages.find(m=>m.id===answered.request.responseMessageId).body,body);
   validateReplyRead(follow,{name:'room_read_request',args:{requestMessageId:'follow-long-answer'},roomId:'commons'});
   assert.equal(follow.request.status,'open');
+});
+
+const messageChunk = (messageId, text) => ({sessionUpdate:'agent_message_chunk', ...(messageId ? {messageId} : {}), content:{type:'text',text}});
+test('formal delivery uses the final ACP message, excluding separate commentary', async t => {
+  const json=JSON.stringify({outcome:'answered',body:'Final bounded answer'});
+  const f=await fixture(t,{updates:[messageChunk('commentary','I will check the evidence.'),messageChunk('final',json.slice(0,15)),messageChunk('final',json.slice(15)),{sessionUpdate:'agent_thought_chunk',content:{type:'text',text:'private reasoning must not become the reply'}}]}),bridge=f.make();
+  await f.ready(bridge); await bridge.turn('dm',[f.wake]);
+  const current=await f.read(bridge);
+  assert.equal(current.request.status,'answered');
+  assert.equal(current.page.items.find(item=>item.kind==='answered').message.body,'Final bounded answer');
+});
+for (const [label,updates] of [
+  ['untagged mixed text',[messageChunk(null,'Checking.'),messageChunk(null,JSON.stringify({outcome:'answered',body:'Unbound candidate'}))]],
+  ['invalid final message',[messageChunk('first',JSON.stringify({outcome:'answered',body:'Earlier candidate'})),messageChunk('last','Still checking')]],
+  ['interleaved message IDs',[messageChunk('first','Checking'),messageChunk('last','Another message'),messageChunk('first',JSON.stringify({outcome:'answered',body:'Ambiguous candidate'}))]],
+]) test(`formal extraction keeps ${label} pending`,async t=>{
+  const f=await fixture(t,{updates}),bridge=f.make();await f.ready(bridge);await bridge.turn('dm',[f.wake]);assert.equal((await f.read(bridge)).request.status,'open');
+});
+
+test('final-message tracking stays bounded and falls back after 256 groups',()=>{
+  const recorder=new TurnRecorder();
+  for(let i=0;i<256;i++) recorder.update(messageChunk(`message-${i}`,'Commentary.'));
+  recorder.update(messageChunk('last',JSON.stringify({outcome:'answered',body:'Over-budget candidate'})));
+  assert.equal(recorder.messageIds.size,256);
+  assert.equal(recorder.formalText,recorder.text);
+  assert.throws(()=>JSON.parse(recorder.formalText));
 });
