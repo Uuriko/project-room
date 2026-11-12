@@ -1094,6 +1094,16 @@
         "title": "Progress Request"
       }
     },
+    "room_project_state": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Project State"
+      }
+    },
     "room_propose_work": {
       "inputSchema": "b21245e92696cb37",
       "annotations": {
@@ -1796,6 +1806,16 @@
         "title": "Progress Request"
       }
     },
+    "room_project_state": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Project State"
+      }
+    },
     "room_propose_work": {
       "inputSchema": "b21245e92696cb37",
       "annotations": {
@@ -2168,6 +2188,16 @@
         "title": "Progress Request"
       }
     },
+    "room_project_state": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Project State"
+      }
+    },
     "room_read_inbox": {
       "inputSchema": "ee592ebb81a15aae",
       "annotations": {
@@ -2420,6 +2450,16 @@
         "title": "Progress Request"
       }
     },
+    "room_project_state": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Project State"
+      }
+    },
     "room_read_request": {
       "inputSchema": "5961abded4617dbb",
       "annotations": {
@@ -2670,6 +2710,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Progress Request"
+      }
+    },
+    "room_project_state": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Project State"
       }
     },
     "room_read_request": {

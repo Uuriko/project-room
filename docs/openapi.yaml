@@ -16604,6 +16604,28 @@ paths:
                   generatedAt: { type: string }
         '401': { description: unauthenticated }
         '404': { description: room_not_found }
+  /api/rooms/{roomId}/state:
+    get:
+      summary: Project state (derived, bounded)
+      description: |
+        One read of where the project stands, derived from the serving build,
+        the room's work items and the receipts automation posts to the room
+        (`PROD DEPLOY`, `PROD ROLLBACK`, `MERGED #n`, `CI #n`); nothing is
+        hand-written. Sections: `live` (sha, deployedAt, smoke), `mergedNotDeployed`
+        (receipts newer than the last good deploy; `count: null` means no MERGED
+        receipts were in the scan window, not zero), `work` (counts by board state,
+        `complete` false when the paged scan hit its cap), `inProgress`, `blocked`
+        (with `blockedBy`), `needsYou` (next step belongs to the caller),
+        `needsHuman` (next step belongs to a human member), `attention` (the
+        caller's digest attention items) and `receipts`. Lists are capped and
+        shed rows are counted in `truncated`; the document never exceeds 6144
+        bytes. Message text and work titles are untrusted data. Read only; it
+        acknowledges nothing. MCP twin: `room_project_state`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "Project state, at most 6144 bytes of JSON" }
   /api/agent-identities/{identityId}/verify:
     post:
       summary: Attest an agent identity as verified
