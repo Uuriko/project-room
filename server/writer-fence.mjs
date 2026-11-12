@@ -487,22 +487,26 @@ const RETIRED_EMISSARY_TABLES = Object.freeze([
 // issued, for data preservation). It stays in the allowed set so the
 // recovery audit passes on upgraded databases, while fresh databases simply
 // do not have it.
-// Retired by the T0 cut C-02 (#4975): board_vtwo_*, analytics_firsts and
-// guest_link_exchanges are no longer created, and nothing drops them on boot,
-// so every database opened before that cut still carries its (empty, unread)
-// copies. They stay in the allowed set so the restore inventory and the
-// recovery audit accept upgraded databases; fresh databases simply do not
-// have them.
-const RETIRED_C02_TABLES = Object.freeze([
+const RETIRED_OPERATOR_TABLES = Object.freeze([
+  "agent_operator_controls",
+]);
+// Retired by PR #4975 (T0 deletions): no module creates these six tables
+// anymore and no DROP was issued, so databases written before the removal
+// still carry them. #4975 removed them from the allowed sets outright,
+// which made the restore gates (restore-ndjson seal, restore freeze,
+// recovery audit) fail closed on every upgraded database that retains
+// them, and on restores sealing such a database. They stay in the allowed
+// set so restores pass on upgraded databases, while fresh databases
+// simply do not have them — the same disposition as the retired Emissary
+// and operator tables above. Rows in old backups are not imported; see
+// REPLAY_SKIPPED_TABLES in server/room-export.mjs.
+const RETIRED_4975_TABLES = Object.freeze([
   "board_vtwo_claims",
   "board_vtwo_events",
   "board_vtwo_idempotency",
   "board_vtwo_mirror",
   "analytics_firsts",
   "guest_link_exchanges",
-]);
-const RETIRED_OPERATOR_TABLES = Object.freeze([
-  "agent_operator_controls",
 ]);
 // Analytics tables (server/analytics/schema.mjs) + the claim-bond P0 shadow
 // journal (server/analytics/claim-bond-shadow.mjs) + the P1 claim-reputation
@@ -573,7 +577,7 @@ const PROJECT_MAP_ADDITIVE_TABLES = Object.freeze(["project_maps", "project_map_
 // Native event state is lazy and additive: old binaries have no writers.
 // Keep it outside versioned triggers so compatible rollback remains possible.
 export const MCP_EVENT_ADDITIVE_TABLES = Object.freeze(["mcp_event_subscriptions", "mcp_event_outbox"]);
-export const lazyAdditiveTables = Object.freeze(["message_replay_units", ...MCP_EVENT_ADDITIVE_TABLES, ...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...RETIRED_C02_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES, "room_automations", "room_automation_runs", "room_inbound_hooks", "room_inbound_deliveries", "room_board_views", "connect_funnel_salt", "connect_funnel", "needs_me_claims"]);
+export const lazyAdditiveTables = Object.freeze(["message_replay_units", ...MCP_EVENT_ADDITIVE_TABLES, ...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...RETIRED_4975_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES, "room_automations", "room_automation_runs", "room_inbound_hooks", "room_inbound_deliveries", "room_board_views", "connect_funnel_salt", "connect_funnel", "needs_me_claims"]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

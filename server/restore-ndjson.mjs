@@ -288,7 +288,10 @@ export function continueRestoreCoverage(store,input){
 function createNdjsonPreparse({retainRows=true}={}) {
   const byTable = new Map();
   const skippedTables = {};
-  const digests = createTableDigests();
+  // Restore-side digests: also digest the #4975-retired tables so a legacy
+  // trailer pin for them can be verified (see createTableDigests in
+  // server/room-export.mjs). The rows themselves are still skipped below.
+  const digests = createTableDigests({ verifyRetired4975Pins: true });
   let watermark = null;
   let trailer = null;
   const writeLine = line => {
@@ -311,8 +314,10 @@ function createNdjsonPreparse({retainRows=true}={}) {
     if (typeof record?.table !== "string" || !IDENT.test(record.table) || !record.row || typeof record.row !== "object" || Array.isArray(record.row))
       throw new Error("Export line is not a table row");
     // #3325: digest every loadable row as parsed, before the skip branch
-    // below decides what lands — the digest set and the skip set are
-    // disjoint by construction (CONTENT_DIGEST_SKIPPED_TABLES).
+    // below decides what lands. The one overlap is deliberate: the six
+    // #4975-retired tables are digested here (restore-side only) so a
+    // legacy trailer pin for them can be verified, even though the skip
+    // branch below still keeps their rows out of the store.
     digests.add(record.table, record.row);
     // Cloudflare-internal storage tables are the target DO's own business;
     // they are never room data and must not cross between Durable Objects.
@@ -531,7 +536,9 @@ export function createBackupReplaySession(store, { audit = "strict", sourceSchem
   const skippedTables = {};
   let receivedBytes=0,byteCarry='';
   const eventTuples = [];
-  const digests = createTableDigests();
+  // Restore-side digests, as in createNdjsonPreparse: verify a legacy
+  // #4975-retired-table trailer pin while the rows themselves stay skipped.
+  const digests = createTableDigests({ verifyRetired4975Pins: true });
   const counts = new Map();
   const unlandedEmpty = new Map();
   const knownColumns = new Map();
