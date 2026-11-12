@@ -36,6 +36,23 @@ test('thin context preserves shared selector semantics including independent ver
 });
 
 import {createHostedRoomMcp} from '../server/mcp-room-profile.mjs';
+test('brief MCP orientation points to the viewer’s addressed work in a normalized room',async t=>{
+ const store=new RoomStore(':memory:');t.after(()=>store.close());
+ const identity=store.identities.create('Orientation test agent'),events=initialRoom();events[1].data.identityId=identity.identityId;events[1].data.kind='agent';
+ store.initialize(events,{representation:'normalized-current-v1'});
+ store.db.prepare('INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('commons',identity.identityId,'owner',new Date(store.now()).toISOString());
+ const owner=store.issueAccessKey('commons','owner');
+ store.command(owner,'commons',{id:'propose-focused',type:'work.proposed',data:{workItemId:'focused',title:'Addressed task',definitionOfDone:'A result',accountableMemberId:'owner'}});
+ store.room=()=>{throw Error('MCP must not hydrate whole room');};
+ const mcp=createHostedRoomMcp(store),call=(name,args)=>mcp({jsonrpc:'2.0',id:name,method:'tools/call',params:{name,arguments:args}},{authorization:`Bearer ${identity.secret}`});
+ const pack=await call('room_activation_pack',{roomId:'commons',view:'brief'});
+ assert.equal(pack.error,undefined,JSON.stringify(pack));
+ const next=pack.result.structuredContent.next;
+ assert.equal(next.tool,'room_list_work');assert.equal(next.arguments.focus,'needs_me');
+ const result=await call(next.tool,next.arguments);
+ assert.equal(result.error,undefined,JSON.stringify(result));assert.equal(result.result.isError,undefined,JSON.stringify(result));
+ assert.ok(result.result.structuredContent.work.some(work=>work.id==='focused'));
+});
 test('actual hosted MCP get_room_context composes current Orient through identity authentication',async t=>{
  const store=new RoomStore(':memory:');t.after(()=>store.close());
  const identity=store.identities.create('Current agent'),events=initialRoom();events[1].data.identityId=identity.identityId;events[1].data.kind='agent';
