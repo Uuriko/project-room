@@ -101,14 +101,21 @@ export function baseTreeCounts(ref) {
 
 // Growth past the ratchet is allowed only when declared: the PR carries the
 // i18n-growth label or a line "i18n-growth: <reason>" in its body (read from
-// the Actions event payload), or I18N_ALLOW_GROWTH=1 locally. A label or body
+// the Actions event payload), an explicit manual-run reason, or
+// I18N_ALLOW_GROWTH=1 locally. A label or body
 // edit needs a fresh pull_request event (for example, a new push). Re-running
 // an existing Actions run retains its original event payload and declaration.
 export function growthAllowance(env = process.env) {
   if (env.I18N_ALLOW_GROWTH === "1") return "I18N_ALLOW_GROWTH=1";
   if (!env.GITHUB_EVENT_PATH) return null;
   try {
-    const pr = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")).pull_request;
+    const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
+    if (env.GITHUB_EVENT_NAME === "workflow_dispatch") {
+      const reason = event.inputs?.i18n_growth_reason;
+      if (typeof reason === "string" && reason.trim()) return `Manual i18n-growth: ${reason.trim().slice(0, 120)}`;
+      return null;
+    }
+    const pr = event.pull_request;
     if (!pr) return null;
     if ((pr.labels || []).some((l) => l?.name === "i18n-growth")) return "PR label i18n-growth";
     const line = /^\s*i18n-growth:\s*(\S.*)$/im.exec(pr.body || "");

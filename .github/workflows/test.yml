@@ -23,6 +23,12 @@ on:
   schedule:
     - cron: "17 10 * * *"
   workflow_dispatch:
+    inputs:
+      i18n_growth_reason:
+        description: Explicit reason for intentional untranslated copy growth, equivalent to a PR i18n-growth declaration
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read

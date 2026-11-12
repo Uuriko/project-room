@@ -267,6 +267,22 @@ test("growthAllowance reads the PR label or an i18n-growth body line from the ev
   }
 });
 
+test("manual CI needs its own nonempty explicit growth reason; unrelated events cannot inherit it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "i18n-manual-event-"));
+  const event = join(dir, "event.json");
+  try {
+    const read = (inputs, eventName = "workflow_dispatch") => {
+      writeFileSync(event, JSON.stringify({ inputs }));
+      return growthAllowance({ GITHUB_EVENT_PATH: event, GITHUB_EVENT_NAME: eventName });
+    };
+    assert.equal(read({}), null);
+    assert.equal(read({ i18n_growth_reason: "   " }), null);
+    assert.equal(read({ i18n_growth_reason: true }), null);
+    assert.equal(read({ i18n_growth_reason: "Declared Docs and entry copy; translations pending" }, "push"), null);
+    assert.equal(read({ i18n_growth_reason: "Declared Docs and entry copy; translations pending" }), "Manual i18n-growth: Declared Docs and entry copy; translations pending");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("findUnpinnedFiles flags tracked surface files missing from the manifest", () => {
   assert.deepEqual(findUnpinnedFiles(["a.js", "b.js"], ["a.js", "b.js", "c.js"]), []);
   assert.deepEqual(findUnpinnedFiles(["a.js", "b.js"], ["a.js"]), ["b.js"]);
