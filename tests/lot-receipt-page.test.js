@@ -254,6 +254,53 @@ test("a work receipt with no journal lot row gains no lot fields", () => {
   assert.equal("settlement" in receipt, false);
 });
 
+test("F-4: a live lot stops naming an unpublished signed receipt, published ids still named", () => {
+  const { escrow, db, store } = makeEscrow();
+  const bounty = runToPaid(escrow);
+  recordOptIn(db);
+  const lotId = lotOfKind(db, bounty.bountyId, "payout");
+  const before = publicReceiptById(store, lotId);
+  assert.ok(before, "the settled payout lot must resolve before unpublish");
+  assert.equal(before.lot.signedReceiptIds.length, 1);
+  const signedId = before.lot.signedReceiptIds[0];
+
+  db.prepare("INSERT INTO public_unpublish (kind, target) VALUES ('receipt', ?)").run(signedId);
+  const after = publicReceiptById(store, lotId);
+  assert.ok(after, "unpublishing a linked receipt does not hide the lot itself");
+  assert.deepEqual(after.lot.signedReceiptIds, [],
+    "an unpublished receipt id must not be named by a live public lot");
+  assert.equal(after.lot.workReceiptId, null);
+  // Removing the veto restores the name: unpublish is a read-time veto.
+  db.prepare("DELETE FROM public_unpublish WHERE kind='receipt' AND target=?").run(signedId);
+  assert.deepEqual(publicReceiptById(store, lotId).lot.signedReceiptIds, [signedId],
+    "a published receipt id is still named");
+});
+
+test("F-4: a live lot stops naming an unpublished work receipt in both fields, signed ids still named", () => {
+  const { escrow, db, store } = makeEscrow();
+  const { lotId } = runToPaidCrossReferenced(escrow, db);
+  recordOptIn(db);
+  const before = publicReceiptById(store, lotId);
+  assert.ok(before, "the payout lot must resolve before unpublish");
+  assert.equal(before.lot.workReceiptId, PWR_ID);
+  assert.ok(before.lot.signedReceiptIds.includes(PWR_ID));
+
+  db.prepare("INSERT INTO public_unpublish (kind, target) VALUES ('receipt', ?)").run(PWR_ID);
+  const after = publicReceiptById(store, lotId);
+  assert.ok(after, "unpublishing the work receipt does not hide the lot itself");
+  assert.equal(after.lot.workReceiptId, null,
+    "workReceiptId pointing at an unpublished receipt must be dropped, not named");
+  assert.ok(!after.lot.signedReceiptIds.includes(PWR_ID),
+    "signedReceiptIds must not name the unpublished work receipt either");
+  for (const id of after.lot.signedReceiptIds) {
+    assert.notEqual(id, PWR_ID);
+  }
+  // The JSON face carries the same filtered fields.
+  const json = receiptJson(after);
+  assert.equal(json.lot.workReceiptId, null);
+  assert.ok(!json.lot.signedReceiptIds.includes(PWR_ID));
+});
+
 test("a lot whose entries carry no work receipt id reports workReceiptId null", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToPaid(escrow);
