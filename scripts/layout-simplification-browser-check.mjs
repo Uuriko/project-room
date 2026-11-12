@@ -125,7 +125,7 @@ for (const width of [390, 1280]) for (const theme of ['light', 'dark']) {
     await page.locator('#main').waitFor({ state: 'visible' });
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
     await page.locator('#message-input').fill('Keep my draft through navigation');
-    assert.equal(await page.locator('#composer-hint').isVisible(), width >= 500);
+    assert.equal(await page.locator('#composer-hint').evaluate(node => getComputedStyle(node).position), 'absolute');
     assert.equal(await page.locator('.app-shell > #workspace-nav').count(), 0, 'no redundant bottom navigation in a conversation');
     if (width < 500) {
       assert.equal(await page.locator('.app-shell').evaluate(node => parseFloat(getComputedStyle(node).paddingBottom)), 0);
