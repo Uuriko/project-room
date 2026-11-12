@@ -55,12 +55,12 @@ export class AgentWakeClient {
       throw usage();
     this.#connection = { ...connection }; this.#fetch = fetchImpl;
   }
-  async #request(path, body, timeoutMs = 15000) {
+  async #request(path, body, timeoutMs = 15000, extraHeaders = {}) {
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const response = await this.#fetch(this.#connection.origin + edgeDoorApiPath(this.#connection.origin, path), {
         method: body === undefined ? 'GET' : 'POST', redirect: 'error', credentials: 'omit', signal,
-        headers: { Authorization: 'Bearer ' + this.#connection.token, 'User-Agent': 'project-room-agent',
+        headers: { Authorization: 'Bearer ' + this.#connection.token, 'User-Agent': 'project-room-agent', ...extraHeaders,
           ...(body === undefined ? {} : { 'Content-Type': 'application/json', Origin: this.#connection.origin }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) })
       });
@@ -136,8 +136,18 @@ export class AgentWakeClient {
     return { version: 1, status: 'registered_not_listening', hostId, cadenceSeconds, pendingWakes: listener && !listenerInfo.acquired ? [] : signals(value.pendingWakes),
       ...(listener ? { listener: listenerInfo } : {}), execution: 'not_observed' };
   }
-  async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion, cursor = null }) {
+  // `cursor` pages the queue (observation only). `ackThrough: true` is the one
+  // opt-in that consumes: it tells the server that every pending mention/dm
+  // doorbell at or before `cursor` is already handled (ack=cursor). Pass it only
+  // for the cursor of a page whose signals this host has FULLY handled; a crash
+  // before handling simply never sends it. It needs the listener lease (the fence
+  // token rides in x-room-listener-token) and never touches ask, assignment, bond,
+  // land or claimed signals - the server enforces that.
+  async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion, cursor = null, ackThrough = false }) {
     hostOptions(hostId, cadenceSeconds);
+    if (ackThrough !== false && ackThrough !== true) throw usage();
+    if (cursor !== null && (typeof cursor !== 'string' || !/^[A-Za-z0-9_-]{1,1024}$/.test(cursor))) throw usage();
+    if (ackThrough && cursor === null) throw usage();
     if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 55000) throw usage();
     const before = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch, attentionCursor, sinceVersion });
     requireConnection(before);
@@ -149,7 +159,8 @@ export class AgentWakeClient {
     const registered = await this.setup({ hostId, cadenceSeconds, listener: true });
     if (!registered.listener.acquired) return contended();
     const receivingToken = this.#fencingToken;
-    const value = await this.#request('/api/agent-wakes/poll?hostId=' + encodeURIComponent(hostId) + '&waitMs=' + waitMs + (cursor === null ? '' : '&cursor=' + encodeURIComponent(cursor)), undefined, waitMs + 10000);
+    const value = await this.#request('/api/agent-wakes/poll?hostId=' + encodeURIComponent(hostId) + '&waitMs=' + waitMs + (cursor === null ? '' : '&cursor=' + encodeURIComponent(cursor)) + (ackThrough ? '&ack=cursor' : ''),
+      undefined, waitMs + 10000, ackThrough ? { 'x-room-listener-token': receivingToken } : {});
     if (!id(value.agentId) || typeof value.timedOut !== 'boolean' || !Number.isFinite(value.waitedMs)) throw invalid();
     const pendingWakes = signals(value.pendingWakes);
     if (value.nextCursor != null && (typeof value.nextCursor !== 'string' || value.nextCursor.length > 1024)) throw invalid();
@@ -162,7 +173,7 @@ export class AgentWakeClient {
     const renewed = await this.setup({ hostId, cadenceSeconds, listener: true });
     if (!renewed.listener.acquired || this.#fencingToken !== receivingToken) return contended(after);
     return { version: 1, status: pendingWakes.length ? 'signals_received' : 'wait_completed', hostId, pendingWakes, more: value.more === true, nextCursor: value.nextCursor ?? null,
-      timedOut: value.timedOut, waitedMs: value.waitedMs, acknowledged: false,
+      timedOut: value.timedOut, waitedMs: value.waitedMs, acknowledged: false, acknowledgedThroughCursor: ackThrough ? cursor : null,
       observations: { before, after }, sourceCursorsAre: 'read_observations_not_handled', execution: 'not_observed' };
   }
   async ack({ signalIds, hostId }) {
