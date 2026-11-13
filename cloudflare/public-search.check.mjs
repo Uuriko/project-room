@@ -79,7 +79,7 @@ test('actual Worker public search routes load packaged HTML and preserve private
       const canonical = '/' + file.slice(0, -5);
       const page = await call(present, canonical); assert.equal(page.status, 200, canonical); assert.equal(page.headers.get('x-robots-tag'), 'all', canonical);
       assertPublicPolicy(page, origin);
-      assert.ok((await page.text()).includes(`rel="canonical" href="${origin}${canonical}"`), 'DO-served page names the configured ROOM_ORIGIN');
+      assert.match(await page.text(), new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
     }
     const doorAbout = await present.dispatchFetch('https://www.getdasha.com/room/about', { method: 'GET', redirect: 'manual', headers: { 'CF-Connecting-IP': '192.0.2.1' } });
     assert.equal(doorAbout.status, 200);
