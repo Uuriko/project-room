@@ -1,5 +1,6 @@
 import { withInviteShare } from "./invite-share.mjs";
 import { readProjectState } from "./project-state.mjs";
+import { readResponseLatency } from "./response-latency.mjs";
 import { withMcpCallLog } from "./mcp-call-log.mjs";
 import {publishedLobbyContext} from './current-public-face.mjs';
 import {waitForAttention} from './attention-wait.mjs';
@@ -179,7 +180,7 @@ function validRoomArgs(name, args) {
   if (name === 'room_wait_for_attention') return Number.isSafeInteger(args.after) && args.after >= 0 && (args.timeoutSec === undefined || Number.isInteger(args.timeoutSec) && args.timeoutSec >= 0 && args.timeoutSec <= 120) && (args.includeWork === undefined || typeof args.includeWork === 'boolean');
   if (name === "room_digest") return (args.since === undefined || Number.isSafeInteger(args.since) && args.since >= 0)
     && (args.cursor === undefined || typeof args.cursor === "string" && args.cursor.length >= 1 && args.cursor.length <= 12288);
-  if (name === "room_check_access" || name === "room_activation_pack" || name === "room_project_state") return true;
+  if (name === "room_check_access" || name === "room_activation_pack" || name === "room_project_state" || name === "room_response_latency") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
   if (name === "room_map") {
@@ -733,6 +734,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
     return withContentTrust({ ...digest, nextRead: { tool: "room_digest", arguments: nextArguments, partial: Boolean(partial) } });
   }
   if (name === "room_project_state") return withContentTrust(readProjectState(store, secret, roomId));
+  if (name === "room_response_latency") return withContentTrust(readResponseLatency(store, secret, roomId));
   if (name === "room_member_card") {
     // plan-dir-card: the member chip's card over MCP. Same read as
     // GET /api/rooms/:roomId/members/:memberId/card.
