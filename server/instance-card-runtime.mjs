@@ -1,3 +1,5 @@
+// One Node signing interface for explicit public configuration and verification.
+export { readInstanceCardFiles } from './instance-card-files.mjs';
 // Verify bounded public build output at startup. No private keys, key lookup,
 // network requests, or trust-on-first-use. Caller owns trusted configuration.
 import {discoveryDoc, ROOM_ORIGIN, deployedInfo} from './agent-discovery.mjs';

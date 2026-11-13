@@ -1,4 +1,4 @@
-import { readInstanceCardFiles } from './server/instance-card-files.mjs';
+import { readInstanceCardFiles } from './server/instance-card-runtime.mjs';
 import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { RoomStore } from "./server/store.mjs";
