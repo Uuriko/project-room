@@ -33,7 +33,8 @@ foreign keys and an owner-private file. Never point this at an existing Room DB.
 Replay later must be explicit; existing Room data and identities stay intact.
 
 Limits:8 simultaneous connections,3-second absolute header-receive deadline,
-5-second idle socket timeout,15-second transport/cooperative tool budget,64KiB HTTP body,16KiB message text,100 messages per read and20
+5-second initial idle socket timeout,10-second authenticated body-read socket timeout,
+15-second transport/cooperative tool budget,64KiB HTTP body,16KiB message text,100 messages per read and20
 requests per legacy JSON-RPC batch. Full connections are closed when saturated.
 Host and Origin validation precede tool dispatch. Authentication is required even
 for valid MCP requests, including discovery, initialization, GET, HEAD, OPTIONS
