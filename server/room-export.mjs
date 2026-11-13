@@ -6,7 +6,7 @@ import { withCurrentRestoreTableRows, verifyCurrentRoomSchema, invalidateCurrent
 // The secret columns named in EXPORT_SECRET_COLUMNS and raw secret shapes
 // inside other cells (see the patterns at TOKEN_SOURCE) are sha256 hex.
 // Everything else round-trips verbatim.
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { bootstrapLegacyWriteProofs } from "./write-integrity.mjs";
@@ -433,42 +433,114 @@ function concatBytes(chunks, total) {
   return out;
 }
 
+// Snapshot identity for materialized exports. All exports used to share
+// one staging identity: materialize ran DELETE FROM the single parts
+// table and re-inserted from part 0, so a second export that materialized
+// while a first export's stream was still being pulled replaced the
+// first export's parts (its stream then served the second export's
+// bytes), and the first stream's end-of-stream clear deleted the second
+// export's parts mid-pull (its stream then served empty chunks). Parts
+// are now namespaced by an export id: materialize, streaming and clear
+// touch only their own export's rows, so overlapping exports cannot
+// collide. Rows left behind by a crashed or abandoned export are swept
+// by the next materialize whose id is not actively streaming.
+const EXPORT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+// Streams created in this isolate, by database. A materialize sweep
+// keeps these exports' parts and deletes every other staged export's.
+const activeExportIdsByDb = new WeakMap();
+
+function normalizeExportId(value) {
+  if (value == null || value === "") return "";
+  if (typeof value !== "string" || !EXPORT_ID_PATTERN.test(value)) throw new Error("Export id is invalid");
+  return value;
+}
+
+function activeExportIds(db) {
+  let ids = activeExportIdsByDb.get(db);
+  if (!ids) {
+    ids = new Set();
+    activeExportIdsByDb.set(db, ids);
+  }
+  return ids;
+}
+
+function ensureExportPartsTable(db) {
+  const existing = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(BACKUP_EXPORT_PARTS_TABLE);
+  // The pre-repair schema keys parts by part_index alone, which cannot
+  // hold two exports at once. Staged parts are transient (never backup
+  // data), so an old-schema table is dropped and recreated, not migrated.
+  if (existing && !/export_id/i.test(existing.sql ?? "")) db.exec(`DROP TABLE "${BACKUP_EXPORT_PARTS_TABLE}"`);
+  db.exec(`CREATE TABLE IF NOT EXISTS "${BACKUP_EXPORT_PARTS_TABLE}" (export_id TEXT NOT NULL DEFAULT '', part_index INTEGER NOT NULL, bytes BLOB NOT NULL, PRIMARY KEY (export_id, part_index))`);
+}
+
+function sweepStaleExportParts(db, keepId) {
+  const active = activeExportIdsByDb.get(db);
+  const staged = db.prepare(`SELECT DISTINCT export_id FROM "${BACKUP_EXPORT_PARTS_TABLE}"`).all();
+  const wipe = db.prepare(`DELETE FROM "${BACKUP_EXPORT_PARTS_TABLE}" WHERE export_id=?`);
+  for (const row of staged) {
+    if (row.export_id === keepId || active?.has(row.export_id)) continue;
+    wipe.run(row.export_id);
+  }
+}
+
 // Write a frozen NDJSON snapshot into BACKUP_EXPORT_PARTS_TABLE. Must run
 // inside a write transaction on a fenced store (the Durable Object's
 // store.transaction, or RoomStore.transaction). CREATE/DELETE/INSERT are
 // writes; export reads see the transaction's snapshot, and parts written
 // to this skipped table cannot appear in the dump. Returns the part count.
-export function materializeExportParts(db, { pageRows, partBytes = BACKUP_EXPORT_PART_BYTES } = {}) {
-  db.exec(`CREATE TABLE IF NOT EXISTS "${BACKUP_EXPORT_PARTS_TABLE}" (part_index INTEGER PRIMARY KEY, bytes BLOB NOT NULL)`);
-  db.exec(`DELETE FROM "${BACKUP_EXPORT_PARTS_TABLE}"`);
+// partBytes is a HARD cap: an encoded line is sliced at byte level, so no
+// stored part ever exceeds it — previously a whole line was appended
+// before flushing, so one long line (a base64 attachment row) produced a
+// part of partBytes + line size, and a single oversized line produced an
+// arbitrarily oversized part.
+export function materializeExportParts(db, { pageRows, partBytes = BACKUP_EXPORT_PART_BYTES, exportId } = {}) {
+  if (!Number.isSafeInteger(partBytes) || partBytes < 1) throw new Error("Export part size must be a positive integer");
+  const id = normalizeExportId(exportId);
+  ensureExportPartsTable(db);
+  sweepStaleExportParts(db, id);
   const encoder = new TextEncoder();
-  const insert = db.prepare(`INSERT INTO "${BACKUP_EXPORT_PARTS_TABLE}" (part_index, bytes) VALUES (?, ?)`);
+  const removeOwn = db.prepare(`DELETE FROM "${BACKUP_EXPORT_PARTS_TABLE}" WHERE export_id=?`);
+  removeOwn.run(id);
+  const insert = db.prepare(`INSERT INTO "${BACKUP_EXPORT_PARTS_TABLE}" (export_id, part_index, bytes) VALUES (?, ?, ?)`);
   let partIndex = 0, pending = [], pendingBytes = 0;
   const flush = () => {
     if (!pendingBytes) return;
-    insert.run(partIndex, concatBytes(pending, pendingBytes));
+    insert.run(id, partIndex, concatBytes(pending, pendingBytes));
     partIndex += 1;
     pending = [];
     pendingBytes = 0;
   };
   for (const line of exportNdjsonLines(db, pageRows != null ? { pageRows } : {})) {
-    const chunk = encoder.encode(line);
-    pending.push(chunk);
-    pendingBytes += chunk.byteLength;
-    if (pendingBytes >= partBytes) flush();
+    let chunk = encoder.encode(line);
+    while (chunk.byteLength) {
+      const room = partBytes - pendingBytes;
+      const takeLength = Math.min(chunk.byteLength, room);
+      pending.push(chunk.subarray(0, takeLength));
+      pendingBytes += takeLength;
+      chunk = chunk.subarray(takeLength);
+      if (pendingBytes >= partBytes) flush();
+    }
   }
   flush();
   return partIndex;
 }
 
-export function streamMaterializedExportParts(db, store = null) {
-  const countRow = db.prepare(`SELECT count(*) AS n FROM "${BACKUP_EXPORT_PARTS_TABLE}"`).get();
+export function streamMaterializedExportParts(db, store = null, options = {}) {
+  const exportId = normalizeExportId(typeof options === "string" ? options : options?.exportId);
+  const countRow = db.prepare(`SELECT count(*) AS n FROM "${BACKUP_EXPORT_PARTS_TABLE}" WHERE export_id=?`).get(exportId);
   const count = Number(countRow?.n) || 0;
+  activeExportIds(db).add(exportId);
   let index = 0;
+  let cleaned = false;
   const clear = () => {
-    const wipe = () => db.exec(`DELETE FROM "${BACKUP_EXPORT_PARTS_TABLE}"`);
-    if (store?.transaction) store.transaction(wipe);
-    else wipe();
+    if (cleaned) return;
+    cleaned = true;
+    activeExportIds(db).delete(exportId);
+    try {
+      const wipe = () => db.prepare(`DELETE FROM "${BACKUP_EXPORT_PARTS_TABLE}" WHERE export_id=?`).run(exportId);
+      if (store?.transaction) store.transaction(wipe);
+      else wipe();
+    } catch { /* a failed wipe is swept by the next materialize */ }
   };
   return new ReadableStream({
     pull(controller) {
@@ -477,10 +549,20 @@ export function streamMaterializedExportParts(db, store = null) {
         controller.close();
         return;
       }
-      const row = db.prepare(`SELECT bytes FROM "${BACKUP_EXPORT_PARTS_TABLE}" WHERE part_index=?`).get(index);
+      const row = db.prepare(`SELECT bytes FROM "${BACKUP_EXPORT_PARTS_TABLE}" WHERE export_id=? AND part_index=?`).get(exportId, index);
       index += 1;
-      const bytes = row?.bytes;
+      if (!row) {
+        // Our own parts vanished mid-stream: serve nothing silently —
+        // an empty chunk would certify a truncated snapshot as whole.
+        clear();
+        controller.error(new Error("Export snapshot part is missing"));
+        return;
+      }
+      const bytes = row.bytes;
       controller.enqueue(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes ?? []));
+    },
+    cancel() {
+      clear();
     }
   });
 }
@@ -490,11 +572,28 @@ export function streamMaterializedExportParts(db, store = null) {
 // chunks), so a lazy generator would let live writes tear the export.
 // Consuming the generator in this turn — with no await — is a consistent
 // snapshot: the isolate cannot run another request until we yield.
-// Small exports stay in memory; callers that need a spilled snapshot use
-// materializeExportParts inside a write transaction (exportRoomNdjson).
-export function exportNdjsonStream(db) {
+// The in-memory snapshot is BOUNDED: this path used to buffer the whole
+// export with no limit at all, so on a ~651 MB store the operator export
+// (operatorExportResponse, below) tried to hold the entire store in
+// memory at once. Now the bytes actually being buffered — the encoded
+// export, not the database file, whose projections and indexes can make
+// it far larger than the export — are counted as they are encoded, and
+// the moment they pass maxBytes the export refuses with
+// BACKUP_SNAPSHOT_TOO_LARGE instead of buffering on. Callers that need
+// a larger snapshot use materializeExportParts inside a write
+// transaction (exportRoomNdjson), which spills to the staging table
+// instead of RAM, or pass a larger maxBytes.
+export function exportNdjsonStream(db, { maxBytes = BACKUP_SNAPSHOT_MAX_BYTES } = {}) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error("Export stream byte bound must be a positive integer");
   const encoder = new TextEncoder();
-  const chunks = Array.from(exportNdjsonLines(db), line => encoder.encode(line));
+  const chunks = [];
+  let total = 0;
+  for (const line of exportNdjsonLines(db)) {
+    const chunk = encoder.encode(line);
+    total += chunk.byteLength;
+    if (total > maxBytes) throw new Error(BACKUP_SNAPSHOT_TOO_LARGE);
+    chunks.push(chunk);
+  }
   let offset = 0;
   return new ReadableStream({
     pull(controller) {
@@ -513,7 +612,13 @@ export function exportNdjsonStream(db) {
 // no manifest is written, the room-backup job stays failing, and health says so.
 export const BACKUP_SNAPSHOT_MAX_BYTES = 96 * 1024 * 1024;
 export const BACKUP_SNAPSHOT_TOO_LARGE = "backup_snapshot_too_large";
+export const BACKUP_SNAPSHOT_SIZE_UNKNOWN = "backup_snapshot_size_unknown";
 
+// The store's size in bytes, or null when it cannot be determined. The
+// #6176 guard returned 0 for "unknown", so an unmeasurable store always
+// passed the size check below — the guard failed OPEN exactly when its
+// input was missing. Unknown is now a distinct value and every caller
+// decides explicitly: the consistent-snapshot guard refuses on it.
 export function storeDatabaseBytes(db) {
   try {
     // Workers exposes the complete SQLite size directly; page PRAGMAs are
@@ -522,16 +627,25 @@ export function storeDatabaseBytes(db) {
     if (Number.isSafeInteger(native) && native >= 0) return native;
     const count = Number(db.prepare("PRAGMA page_count").get()?.page_count);
     const size = Number(db.prepare("PRAGMA page_size").get()?.page_size);
-    if (Number.isFinite(count) && Number.isFinite(size)) return count * size;
-  } catch { /* unknown size: do not block on it */ }
-  return 0;
+    if (Number.isSafeInteger(count) && count >= 0 && Number.isSafeInteger(size) && size > 0) {
+      const bytes = count * size;
+      if (Number.isSafeInteger(bytes)) return bytes;
+    }
+  } catch { /* unknown size: reported as null below */ }
+  return null;
 }
 
 export function exportNdjsonConsistentStream(store, options) {
   const maxBytes = options?.maxSnapshotBytes ?? BACKUP_SNAPSHOT_MAX_BYTES;
-  if (storeDatabaseBytes(store.db) > maxBytes) throw new Error(BACKUP_SNAPSHOT_TOO_LARGE);
-  store.transaction(() => materializeExportParts(store.db, options));
-  return streamMaterializedExportParts(store.db, store);
+  const databaseBytes = storeDatabaseBytes(store.db);
+  // Fail closed: a size we cannot measure is not a size of zero.
+  if (databaseBytes === null) throw new Error(BACKUP_SNAPSHOT_SIZE_UNKNOWN);
+  if (databaseBytes > maxBytes) throw new Error(BACKUP_SNAPSHOT_TOO_LARGE);
+  // Each snapshot gets its own staging identity, so an overlapping
+  // export materializing or clearing its parts cannot corrupt this one.
+  const exportId = normalizeExportId(options?.exportId ?? `exp-${randomUUID()}`);
+  store.transaction(() => materializeExportParts(store.db, { ...options, exportId }));
+  return streamMaterializedExportParts(store.db, store, { exportId });
 }
 
 export function authorizeOperatorExport(authorization, expected) {
@@ -550,7 +664,7 @@ function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 }
 
-export function operatorExportResponse(request, token, db) {
+export function operatorExportResponse(request, token, db, { maxExportBytes = BACKUP_SNAPSHOT_MAX_BYTES } = {}) {
   const url = new URL(request.url);
   if (url.pathname !== "/api/operator/export") return null;
   const auth = authorizeOperatorExport(request.headers.get("authorization"), token);
@@ -559,7 +673,18 @@ export function operatorExportResponse(request, token, db) {
   if (auth === "denied") return jsonResponse(401, { error: { code: "unauthorized", message: "Operator token required" } });
   if (!db) return jsonResponse(503, { error: { code: "unavailable", message: "Export unavailable" } });
   if (request.method === "HEAD") return new Response(null, { status: 200, headers: ndjsonHeaders });
-  return new Response(exportNdjsonStream(db), { status: 200, headers: ndjsonHeaders });
+  // The operator path serves the bounded in-memory stream: an export
+  // past the bound is refused with a bounded error instead of buffering
+  // the whole store. The spilled, materialized path (exportRoomNdjson)
+  // is the route for stores past this bound.
+  let body;
+  try { body = exportNdjsonStream(db, { maxBytes: maxExportBytes }); }
+  catch (error) {
+    if (String(error?.message ?? error).includes(BACKUP_SNAPSHOT_TOO_LARGE))
+      return jsonResponse(413, { error: { code: "snapshot_too_large", message: "Export exceeds the operator export size bound" } });
+    throw error;
+  }
+  return new Response(body, { status: 200, headers: ndjsonHeaders });
 }
 
 // REL-14: the inverse of sanitizeCell's BLOB encoding. Any other object is

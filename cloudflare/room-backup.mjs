@@ -46,8 +46,10 @@ async function backupStep(stage, action) {
 async function startExport(room) {
   try { return await room.exportRoomNdjson(); }
   catch (error) {
-    const tooLarge = String(error?.message ?? error).includes("backup_snapshot_too_large");
-    throw backupFailure("export", undefined, tooLarge ? "snapshot_too_large" : null);
+    const message = String(error?.message ?? error);
+    const reason = message.includes("backup_snapshot_too_large") ? "snapshot_too_large"
+      : message.includes("backup_snapshot_size_unknown") ? "snapshot_size_unknown" : null;
+    throw backupFailure("export", undefined, reason);
   }
 }
 async function* exportChunks(body) {
