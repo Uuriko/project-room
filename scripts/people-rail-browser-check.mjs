@@ -157,6 +157,19 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   assert.equal(started.status(), 201); await refresh();
   await signal.locator('.member-availability').filter({ hasText: /^Working$/ }).waitFor();
   assert.match(await signal.locator('.member-working-on').textContent(), /Check the observation path/);
+  const workLink = signal.locator('.member-working-on a');
+  assert.equal(await workLink.textContent(), 'Check the observation path');
+  assert.equal(await workLink.getAttribute('data-open-work'), 'signal-work');
+  await page.locator('#message-input').fill('Keep this unsent while inspecting work');
+  await workLink.click();
+  await page.locator('[data-work-record-id="signal-work"]').waitFor({ state: 'visible' });
+  assert.match(page.url(), /#pr-record\/work\/signal-work$/);
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep this unsent while inspecting work');
+  await ensurePeopleOpen(page);
+  await workLink.focus();
+  await page.keyboard.press('Enter');
+  await page.locator('[data-work-record-id="signal-work"]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep this unsent while inspecting work', 'repeated keyboard navigation preserves the draft');
   const presenceRoute = /\/api\/rooms\/commons\/presence(?:\?|$)/;
   // Browser wall clock and a real transport hold model an aged tab returning;
   // this is an explicit visibility event, not a physically suspended machine.
@@ -184,6 +197,9 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
     await page.evaluate(mode => { document.documentElement.dataset.theme = mode; }, theme);
     if (width === 390 && !await page.locator('#main').evaluate(node => node.classList.contains('sidebar-open'))) await page.locator('#sidebar-toggle').click();
     await signal.scrollIntoViewIfNeeded();
+    assert.equal(await workLink.getAttribute('data-open-work'), 'signal-work', 'stale reports keep their exact source link');
+    assert.ok((await workLink.boundingBox()).height >= 24, 'inline work link has a usable pointer target');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'work title stays within the viewport');
     await page.screenshot({ path: `test-results/availability-resume-${width}-${theme}.png` });
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
