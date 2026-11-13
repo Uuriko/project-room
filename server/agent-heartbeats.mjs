@@ -1,3 +1,4 @@
+import { guardTurn, REPLY_GUARD_NOTE } from './turn-guard.mjs';
 import { boundedWakeDeliveryActive, readWakeWindow, compareWakePosition } from './wake-delivery-window.mjs';
 // Agent host heartbeats and the durable mention/DM wake queue.
 //
@@ -924,6 +925,7 @@ export class AgentHeartbeats {
         fail(409, WAKE_SIGNAL_FENCED_CODE, WAKE_SIGNAL_FENCED_MESSAGE);
       }
       const acknowledged = [];
+      const ackedRows = new Map();
       const stmt = this.db.prepare(
         "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND signal_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)");
       for (const signalId of signalIds) {
@@ -935,6 +937,7 @@ export class AgentHeartbeats {
         const kinds = new Map([...sqlChunks(acknowledged)].flatMap(chunk => this.db.prepare(
           `SELECT signal_id AS signalId, kind, room_id AS roomId, created_at AS createdAt FROM agent_wake_signals WHERE signal_id IN (${sqlPlaceholders(chunk)})`)
           .all(...chunk)).map(row => [row.signalId, row]));
+        for (const [id, row] of kinds) ackedRows.set(id, row);
         for (const signalId of acknowledged) {
           const row = kinds.get(signalId);
           recordWakeEvent(this.db, { at, roomId: row?.roomId ?? roomId, store: "signals",
@@ -947,9 +950,13 @@ export class AgentHeartbeats {
           event: "acked", door, kind: "work", subjectId: agentId });
         acknowledged.push(signalId);
       }
+      // Turn end + advisory reply guard (server/turn-guard.mjs): only for the message signals this call settled.
+      const settled = acknowledged.filter(id => ackedRows.has(id)).map(id => ackedRows.get(id));
+      const guard = settled.length > 0 ? guardTurn(this.db, { agentId, rows: settled, at, door }) : { silent: [] };
       this.clearWakeBudgetMarks(agentId, acknowledged);
       if (acknowledged.length > 0) { try { this.store.agentPlugin?.noteWakeAcknowledged?.(agentId, roomId, acknowledged); } catch { /* wake adapters are advisory */ } }
-      return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
+      return Object.freeze({ acknowledged: Object.freeze(acknowledged),
+        ...(guard.silent.length > 0 ? { replyGuard: Object.freeze({ advisory: true, silent: Object.freeze(guard.silent), note: REPLY_GUARD_NOTE }) } : {}) });
     });
   }
 

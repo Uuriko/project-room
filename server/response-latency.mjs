@@ -24,6 +24,7 @@
 // room_signal_log that feeds `wake` is the one close port: server/signal-log.mjs.)
 import { ownMember } from "../src/events.js";
 import { ACK_WINDOW_MS } from "./request-states.mjs";
+import { readReceiptSignals } from "./receipt-signals.mjs";
 import { isCurrentRoom, currentRoomOwnerAuthority, readCurrentRecord, withCurrentReadContext } from "./current-room-repository.mjs";
 
 export const LATENCY_VERSION = 1;
@@ -148,11 +149,13 @@ export function buildWakeContext(rows, { scan = LATENCY_WAKE_SCAN } = {}) {
   if (!rows?.length) return null;
   const read = rows.length;
   const groups = {};
-  rows = rows.filter(row => typeof row.type === "string" && row.type.startsWith("wake.")); // receipts share the table
+  rows = rows.filter(row => typeof row.type === "string" && (row.type.startsWith("wake.") || row.type === "turn.completed")); // receipts share the table
   if (!rows.length) return null;
+  const turns = { completed: 0, silent: 0, unknown: 0 };
   for (const row of rows) {
     let d = {};
     try { d = JSON.parse(row.detail ?? "{}"); } catch { /* counts still hold */ }
+    if (row.type === "turn.completed") { turns.completed += 1; if (d.rp === 0) turns.silent += 1; else if (d.rp !== 1) turns.unknown += 1; continue; }
     const group = WAKE_GROUP[d.k] ?? "other";
     const g = groups[group] ?? (groups[group] = { sent: 0, delivered: 0, acked: 0, expired: 0, dropped: 0, deliverMs: [], ackMs: [] });
     if (row.type === "wake.sent") g.sent += 1;
@@ -167,10 +170,34 @@ export function buildWakeContext(rows, { scan = LATENCY_WAKE_SCAN } = {}) {
     deliverMs.sort((a, b) => a - b); ackMs.sort((a, b) => a - b);
     out[name] = { ...counts, deliverP50Ms: percentile(deliverMs, 50), ackP50Ms: percentile(ackMs, 50), ackP90Ms: percentile(ackMs, 90) };
   }
-  return { rows: rows.length, since: iso(rows.at(-1).ts_ms), complete: read < scan, ...out };
+  return { rows: rows.length, since: iso(rows.at(-1).ts_ms), complete: read < scan, ...(turns.completed ? { turns } : {}), ...out };
 }
 
-export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, through, window, events, mentions = [], members = {}, wake = null }) {
+// Pure. receipts: readReceiptSignals output (newest first). Merge -> prod smoke:
+// a merge ships at the first good PROD DEPLOY posted after it. Reports shipped /
+// pending counts, the oldest pending age, merge-to-prod p50/p90 and how the latest
+// deploy ended. Counts only what the typed receipts hold (the window is honest).
+export function buildShipContext(receipts, nowMs) {
+  if (!receipts?.length) return null;
+  const asc = [...receipts].sort((a, b) => a.seq - b.seq);
+  const merges = asc.filter(r => r.parsed.kind === "merged");
+  const deploys = asc.filter(r => r.parsed.kind === "deploy");
+  if (!merges.length && !deploys.length) return null;
+  const okDeploys = deploys.filter(r => r.parsed.smoke === "ok");
+  const lat = [];
+  let pending = 0, oldest = null;
+  for (const m of merges) {
+    const d = okDeploys.find(x => x.seq > m.seq);
+    if (d) lat.push(Math.max(0, Date.parse(d.at) - Date.parse(m.at)));
+    else { pending += 1; const t = Date.parse(m.at); if (oldest === null || t < oldest) oldest = t; }
+  }
+  lat.sort((a, b) => a - b);
+  const last = deploys.at(-1);
+  return { merged: merges.length, shipped: lat.length, pending, ...(oldest !== null ? { oldestPendingMin: Math.max(0, Math.round((nowMs - oldest) / MIN)) } : {}),
+    mergeToProdP50Ms: percentile(lat, 50), mergeToProdP90Ms: percentile(lat, 90), lastDeploy: last ? last.parsed.smoke : "none" };
+}
+
+export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, through, window, events, mentions = [], members = {}, wake = null, ship = null }) {
   const nowMs = typeof now === "number" ? now : Date.parse(now);
   const name = id => (id == null ? null : clip(ownMember(members, id)?.displayName, 24) ?? String(id).slice(0, 12));
   const items = collectLatencyItems({ events, mentions, ownerId, now: nowMs });
@@ -217,6 +244,7 @@ export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, th
     dropped: droppedRows.slice(0, CAPS.dropped).map(shape),
     waiting: waitingRows.slice(0, CAPS.waiting).map(shape),
     ...(wake ? { wake } : {}),
+    ...(ship ? { ship } : {}),
     truncated: {}
   };
   const shed = { pairs: pairRows.length - state.pairs.length, dropped: droppedRows.length - state.dropped.length, waiting: waitingRows.length - state.waiting.length };
@@ -239,6 +267,8 @@ export function latencyLine(doc) {
   return { dropped, waiting, late,
     ...(w ? { worst: `${w.from} -> ${w.to} (${w.ctx}): ${w.dropped} dropped, ${w.waiting} waiting` } : {}),
     ...(doc.wake?.message?.ackP50Ms != null ? { wakeAckP50Ms: doc.wake.message.ackP50Ms } : {}),
+    ...(doc.wake?.turns?.silent ? { silentTurns: doc.wake.turns.silent } : {}),
+    ...(doc.ship?.pending ? { unshipped: doc.ship.pending, oldestUnshippedMin: doc.ship.oldestPendingMin } : {}),
     see: "room_response_latency" };
 }
 
@@ -308,7 +338,7 @@ export function readResponseLatency(store, token, roomId, { expectedSessionBindi
     } catch { wakeRows = []; /* table is lazy: no wake signal has been logged yet */ }
     const value = buildResponseLatency({ roomId, viewerId, ownerId, now, through: head,
       window: { fromSeq: floor + 1, throughSeq: head, events: rows.length, complete: floor === 0 }, events, mentions, members,
-      wake: buildWakeContext(wakeRows) });
+      wake: buildWakeContext(wakeRows), ship: buildShipContext(readReceiptSignals(store.db, roomId, { limit: 200 }), now) });
     memo.set(memoKey, { head, at: now, value });
     if (memo.size > 64) memo.delete(memo.keys().next().value);
     return value;

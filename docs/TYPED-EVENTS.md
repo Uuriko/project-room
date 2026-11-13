@@ -136,4 +136,17 @@ cards read the same pairing, so a card and the latency read can never disagree.
   otherwise the journal text parse runs, and `receiptWindow.source` says which one answered. A parity test pins
   that both give the same receipts, merged-not-deployed and last deploy. The Board's per-card "waiting on you"
   UI is not changed here: the server read it would use is the same latency read.
-- **PR3**: reply guard on turn end, PR watch event source ending at prod smoke, `turn.completed`.
+- **PR3 (built on PR2b)**: `turn.completed` and an advisory reply guard at wake ack (`server/turn-guard.mjs`),
+  and the ship context (merge -> first good prod smoke) in the latency read.
+  - `turn.completed`: a wake ack by an agent over REST or MCP (never the stale-prune cron) appends one row per room:
+    signals acked, kinds, `rp` (1 replied, 0 silent, -1 unknown), door.
+  - Reply guard: for mention/DM signals, did the agent post in that room since the oldest acked signal was created
+    (last 200 journal rows)? If not, the ack result carries one advisory `replyGuard` with a note that licenses
+    silence; if the window does not reach back to the signal, the verdict is unknown, never silent. A signal acks once,
+    so it is reminded at most once. The latency read shows `wake.turns {completed, silent, unknown}` and the state
+    line `silentTurns`, so a silent failure is visible to the requester, not just nagged at the agent.
+  - Ship: `ship {merged, shipped, pending, oldestPendingMin, mergeToProdP50/P90Ms, lastDeploy}` from the typed
+    receipts: a merge ships at the first good PROD DEPLOY posted after it; the state line carries `unshipped`.
+    This is the PR watch ending at prod smoke, derived rather than polled.
+  - Not done: an active nudge for requests and DMs that are still waiting past SLA (the latency read lists them; a
+    wake on SLA breach needs a policy decision on who gets nagged), and Board card UI.
