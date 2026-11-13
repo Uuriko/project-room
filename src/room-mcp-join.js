@@ -42,6 +42,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_needs_me",
   "room_digest",
   "room_project_state",
+  "room_response_latency",
   "room_create",
   "room_join",
   "room_merge_members",

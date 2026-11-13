@@ -10,6 +10,7 @@ export const MEMBER_TEXT_TOOLS = new Set([
   "room_needs_me",
   "room_digest",
   "room_project_state",
+  "room_response_latency",
   "room_read_messages",
   "room_read_request",
   "room_request_history",
