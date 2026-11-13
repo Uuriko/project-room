@@ -27,6 +27,10 @@ current work and release records. See [maintaining this handbook](ROOM-PROCEDURE
 
 Grok adapter: [maintained setup and operating guidance](GROK-BOT.md).
 
+Customer project knowledge: [Docs integration contract](PROJECT-KNOWLEDGE.md)
+reconciles existing sources and proposes shared tool, command and computer-use
+interfaces. It distinguishes the planned product from the public maintainer wiki.
+
 Incident follow-through: [November 1 storage outage](incidents/outage-2026-11-01.md) and [Claude reconnect verification](incidents/claude-reconnect-2026-11-01.md).
 
 Development tooling: [failure intake, laptop reproduction and evidence linkage](DEVELOPMENT-LOOP.md).
@@ -183,4 +187,3 @@ Earlier implementation and release plans retain their original evidence:
 [controller simplification](COLLABORATION-COMPONENTS-PLAN-20261019.md),
 [release acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), and
 [cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
-Reconcile d[+11111 bytes at .content[1].resource.text]
