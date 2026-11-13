@@ -1,15 +1,23 @@
 # Project Room delivery ledger
 
-Execution order and complete scope mapping: [build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md).
+Current scope: [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+This retained design or operating reference does not authorize work in cut areas.
+Its package order, proposed features and dated assignments are historical;
+correctness contracts still apply to supported behavior. Select work from current
+scope and claims, not this document's unfinished checklist.
+
+
+Historical package order and scope mapping: [build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md).
 
 Updated 2026-10-18. Owner role for these local items: Codex implementation.
 This ledger preserves the seven stages in the [execution plan](ARCHITECTURE-EXECUTION-PLAN.md),
 plus the [infra research](FRONTIER-INFRA-RESEARCH-2026-10-18.md) and
 [startup/product strategy](STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md).
-Detailed requirements in those documents remain binding; these rows do not replace them.
+Detailed requirements describe the historical design; the current scope above
+determines which are retained. These rows do not override a cut.
 
 Statuses: qualified checkpoint = local evidence recorded, not production release;
-in progress = partial implementation; planned = accepted work outstanding;
+in progress = historical partial implementation; planned = historical proposed work;
 experiment = hypothesis awaiting validation. Do not delete unresolved rows. A
 superseded row requires a reason and replacement ID. Completion requires linked
 evidence and a source revision, not just a checkbox.
@@ -38,7 +46,7 @@ evidence and a source revision, not just a checkbox.
 | M2 | Multidimensional quality qualification — planned | A1–A6 as relevant | [Scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md), actual baselines and reproducible tests; no target labeled achieved without data |
 | G1 | Historical commitment reconciliation — planned | None | Audit earlier strategy documents, chat decisions and active branches; map commitments here with source and disposition |
 
-## Next implementation sequence
+## Historical implementation sequence
 
 1. Finish A2 explicit contexts and command parity, preserving A1 unfinished consumers.
 2. Split A3 aggregates and establish R3/R4 contracts. Start P1 journey instrumentation
@@ -47,8 +55,8 @@ evidence and a source revision, not just a checkbox.
 4. Complete A5, all remaining A6 requirements, then A7. Run P3, M1 and M2 against
    actual delivered behavior. G1 may add obligations; it never silently removes one.
 
-New research is not a reason to abandon this sequence. Independent measurement and
-source reconciliation can proceed without waiting for every architectural stage.
+This sequence is retained for traceability, not execution. Current scope can defer
+or retire its packages; use current claims for the next bounded action.
 
 ## Automation research additions (2026-10-18)
 

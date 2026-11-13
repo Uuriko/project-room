@@ -1,5 +1,12 @@
 # Automation that produces accepted outcomes
 
+Current scope: [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+This retained design or operating reference does not authorize work in cut areas.
+Its package order, proposed features and dated assignments are historical;
+correctness contracts still apply to supported behavior. Select work from current
+scope and claims, not this document's unfinished checklist.
+
+
 Research date: 2026-10-18. Extends the [quality scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md)
 and [delivery ledger](DELIVERY-LEDGER.md). This is a product architecture and research
 checkpoint; no recurring jobs, external messages, deployments or purchases were activated.

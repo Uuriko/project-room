@@ -1,5 +1,12 @@
 # An adaptive Project Room: cohesive vision and completion plan
 
+Current scope: [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+This retained design or operating reference does not authorize work in cut areas.
+Its package order, proposed features and dated assignments are historical;
+correctness contracts still apply to supported behavior. Select work from current
+scope and claims, not this document's unfinished checklist.
+
+
 Historical vision and sequencing proposal, captured 2026-10-18. Current scope and
 execution pointers live in the [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md).
 Retain the acceptance requirements below where that plan retains their scope;

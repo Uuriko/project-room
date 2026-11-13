@@ -13,6 +13,20 @@ No repository checkout, public task, code change or local agent runtime is
 required for a supported hosted connection. The maintainer workflow below is
 for users who asked you to build or fix Project Room.
 
+## Current product scope
+
+Before selecting implementation work, read the current scope in
+[FOCUSED-DELIVERY-PLAN.md](docs/FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+It takes precedence over historical plans, backlog pricing and old issue/PR
+acceptance sketches. An open ticket, failing test for a cut feature, green PR
+or old implementation is not a reason to restart that feature. Later explicit
+owner tasking can change scope; name that tasking when it does.
+
+Keep concrete security, data-integrity and existing-obligation repairs distinct
+from feature expansion. Do not discard old data, weaken authorization or abandon
+existing commitments to implement a cut. Current task/claim state still determines
+ownership; this scope rule adds no release freeze or new approval ceremony.
+
 ## Validation
 
 Choose validation proportionate to the change: focused or affected tests, lint,

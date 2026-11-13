@@ -1,5 +1,41 @@
 # Known issues: the single ledger
 
+<a id="scope-reconciliation"></a>
+
+## Scope reconciliation November 13 2026
+
+Current product scope is [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+John asked to reconcile agents restarting previously cut work. Older statuses,
+counts, owners and `DECISION-PENDING` entries below are dated evidence, not a
+current execution queue. Recheck a concrete defect at the intended revision;
+do not rebuild a cut feature to satisfy an old issue or acceptance sketch.
+
+| Retained decision or candidate | Current disposition |
+| --- | --- |
+| KI-070 bounties/escrow/spend | The October 30 product cut stands; no renewed keep/delete decision is needed. Preserve existing value/obligations and required limits; assess removal separately. |
+| KI-071 public volunteer work; KI-172/KI-183 opportunities | No recruitment/matching/ranking expansion. Existing invitations and private work remain core. Do not revive the feed to solve its lack of adoption. |
+| KI-072 growth/referrals/SEO | Cut. Prefer removal of inactive paths to new growth fixes. |
+| KI-073 machines/relay; KI-077 delivery paths | No general fleet/orchestrator or new queue. Preserve the specifically requested existing-host connection and current safety contracts. |
+| KI-074 email/Gmail | Deferred. Keep retained private data safe; no new Inbox product. |
+| KI-075 graph/wiki/map | No product expansion. Existing source reference and diagnostic use does not imply a new knowledge subsystem. |
+| PR #4781 gallery and #5164 bounty pricing | Outside MVP: new feature and re-homed cut feature respectively; retain their history, stop feature execution. |
+| PR #4791 opportunities-to-public-pool pointer and #6087 public-work ranking | Outside MVP: recruitment/discovery expansion; do not treat old backlog pricing as scope. |
+| PR #4790 growth-kit URL restoration | Deferred growth-surface repair; inspect any effect on ordinary invitation safety separately before changing it. |
+| PR #4745 reputation farming guard | Requires a named current authorization/trust dependency before selection as containment; not approval for a reputation roadmap. |
+| PR #6118 growth removal and #6094 squads removal | Existing cut-removal candidates; preserve their authors and retirement/recovery qualifications. No new parallel deletion stack or merge claim. |
+| PR #5447 bounty pause | Containment/removal candidate; preserve settlement of existing obligations. An open PR is not proof production is paused. |
+| PR #5862 public receipt privacy | A concrete privacy-containment candidate is not cancelled by a public-receipts feature cut. Recheck exact source and scope before selecting it. |
+| PR #6067 normalized public publishing | Public-publishing expansion stays held; existing work-only repair was selected separately. No general publication requirement. |
+| PR #6191/#6192 independent-host origin/discovery and #6193 backup defect | Current specifically requested self-host/defect candidates, subject to their exact scope, collision and qualification records. A general earlier defer label does not cancel them. |
+
+These are source/intent dispositions from the November 13 reconciliation,
+not a claim that any candidate has landed, a full 615-PR classification, or a
+fresh finding about production. Current task records and PR state own execution
+status. Security, data integrity and existing obligations remain in scope even
+when their surrounding feature is cut. No branch or stored data deletion follows
+from this table.
+
+
 ## Maintainer checkpoint — 2026-10-31
 
 The dated reports below remain historical evidence, not proof of the current deployment.
@@ -8,7 +44,8 @@ The dated reports below remain historical evidence, not proof of the current dep
 - Backup recovery: the backup's hashes and loaded content verify. PR5482 repairs known lazy-schema and replay-audit compatibility gaps. Strict recovery still refuses one preserved legacy quarantine:703 of704 rooms replay clean. This is not a clean-restore claim and does not authorize dropping that history.
 
 
-This is the one list of known Project Room problems. It replaces the scattered lists in dated audits, QA rounds, room posts and backlog inventories for anything about what is broken or what to cut. New findings go here (or into a GitHub issue that this file links), not into a new plan doc.
+This ledger preserves known Project Room reports. It replaces scattered dated
+issue lists; current scope and cuts are owned by FOCUSED-DELIVERY-PLAN.md above. New findings go here (or into a GitHub issue that this file links), not into a new plan doc.
 
 Checked against main `2249dbb5` and production `dfe1848a` on 2026-10-30 (PT). Evidence is a merged or open PR, a code line on main, a production read, or a dated room report. "Open (fix in PR)" means a PR exists but has not merged. Nothing here claims a deploy.
 
@@ -130,7 +167,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-067 | Invariants workflow deletes prior FAIL evidence; drops error text | #4263 #4262 #4261 | open | issues open | bug | P3 | S | Jill fleet | Jill fleet owns invariants harness |
 | KI-068 | Browser test list hand-maintained | SIMPLIFY #3 | open | no PR | simplify | P3 | S | Fo | Glob runner |
 | KI-069 | Docs: 438 md files, 19 plan/backlog docs | MVP cut #1, #12 | open (fix in PR) | #5407 open; this ledger replaces lists | cut | P2 | S | Grok | Land #5407; KNOWN-ISSUES is the one issue list |
-| KI-070 | Bounties, escrow, spend (~20k lines) carry money risk | MVP cut #2, SIMPLIFY #35 | open (fix in PR) | Potter decision Oct 30: cut. #5447 pauses new bounty work in production (REST + MCP); full removal of routes, tools, OpenAPI and docs is the follow-up; docs and llms copy live in server/agent-discovery.mjs, a #5428 path, so that part waits for Codex | cut | P2 | L | Potter ruling | Potter keep or delete; until then fix only P1s (KI-012) |
+| KI-070 | Bounties, escrow, spend (~20k lines) carry money risk | MVP cut #2, SIMPLIFY #35 | open (fix in PR) | Potter decision Oct 30: cut. #5447 pauses new bounty work in production (REST + MCP); full removal of routes, tools, OpenAPI and docs is the follow-up; docs and llms copy live in server/agent-discovery.mjs, a #5428 path, so that part waits for Codex | cut | P2 | L | maintainers | Cut reaffirmed November 13; no new feature work. Named current safety/obligation repair or qualified removal only; see scope reconciliation. |
 | KI-071 | Public volunteer work (~7.5k lines) | MVP cut #6 | open | frozen; prod claims exist | cut | P3 | M | Grok | Freeze; delete after 30-day zero writes |
 | KI-072 | Growth, referrals, SEO probes | MVP cut #5 | open (fix in PR) | #5408 open | cut | P3 | S | Grok | Land #5408 |
 | KI-073 | Machines, relay, herdr in repo (~19k lines) | MVP cut #3 | open | relay live | cut | P3 | M | Grok | Move out after room-acp on npm |
@@ -234,11 +271,11 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-171 | Bounty evidenceUrl field: required, never checked, carries nothing | Jill MI-502 (23888) | open | server/bounty-escrow-routes.mjs:371 requires evidenceUrl; never fetched or checked | cut | P2 | S | Codex (proposed) | DECISION-PENDING: delete the requirement, or start checking the field — the one outcome ruled out is the current required-but-dead state |
 | KI-172 | /api/opportunities.json: a live-looking dead feed — 200, generatedAt advances, opportunities always empty, referenced nowhere | Jill MI-503 (23888) | open | route still served; docs list it; issue #1609 open | cut | P2 | S | Codex (proposed) | DECISION-PENDING: remove the feed surface; claimable work exists elsewhere and nothing references this feed |
 
-## Blocked on Potter
+## Historical operator dependencies October 30
 
 - KI-001: one bounded operator read of the integrity failure row (room id and mismatch labels only).
 - KI-062: CI capacity (free GitHub org or GitHub app).
-- KI-070: keep or delete bounties, escrow and spend.
+- KI-070: superseded as a scope question by the recorded cut; preservation and removal details remain separate.
 - KI-026: an npm login for publishing room-acp (the served tarball in #5415 works without it).
 - KI-005: backups stay untouched until Potter asks.
 

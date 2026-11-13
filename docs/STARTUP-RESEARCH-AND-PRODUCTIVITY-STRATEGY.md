@@ -1,5 +1,12 @@
 # Project Room: verified work as the product
 
+Current scope: [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+This retained design or operating reference does not authorize work in cut areas.
+Its package order, proposed features and dated assignments are historical;
+correctness contracts still apply to supported behavior. Select work from current
+scope and claims, not this document's unfinished checklist.
+
+
 Research checkpoint: 2026-10-18. This extends, rather than replaces, the
 [architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) and
 [frontier infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-18.md).
