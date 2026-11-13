@@ -60,6 +60,7 @@ import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventRows, redactMessageTree } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
+import { advertisedOrigin, advertisedText, advertisedDocument, advertisedDocumentBody, advertisedSkillDigests, advertisedHtml, isHostedOrigin } from "./advertised-origin.mjs";
 import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
@@ -268,11 +269,11 @@ const gr2PublicPath = pathname => {
   return null;
 };
 // --- end GR2 ---
-const canonicalLink = pathname => {
+const canonicalLink = (pathname, origin = ROOM_ORIGIN) => {
   const path = pathname === "/index.html" ? "/" : pathname === "/about.html" ? "/about" : pathname === "/offers.html" ? "/offers" : pathname;
-  return `<${ROOM_ORIGIN}${path}>; rel="canonical"`;
+  return `<${origin}${path}>; rel="canonical"`;
 };
-const publicPageLinks = (url, pathname) => `${discoveryLinks(url)}, ${canonicalLink(pathname)}`;
+const publicPageLinks = (url, pathname, origin = ROOM_ORIGIN) => `${discoveryLinks(url)}, ${canonicalLink(pathname, origin)}`;
 const pathId = encoded => {
   let id;
   try { id = decodeURIComponent(encoded); } catch { reject(404, "not_found", "Not found"); }
@@ -861,6 +862,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (url.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("Non-loopback origins require HTTPS");
   }
   const expectedOrigin = () => origin || `http://127.0.0.1:${server.address().port}`;
+  // Self-hosted discovery: advertise this instance's own origin (the one invite
+  // URLs use) instead of the hosted constant. Hosted mode is a strict no-op.
+  const pageLinks = (requestUrl, pathname) => publicPageLinks(requestUrl, pathname, advertisedOrigin(expectedOrigin()));
+  const advertise = text => advertisedText(text, expectedOrigin());
+  const advertiseHtml = html => advertisedHtml(html, expectedOrigin());
   // Avoid local-instance sign-in collisions; namespacing is not host isolation.
   const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
@@ -2204,7 +2210,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.writeHead(302, { Location: publicRoomAppUrl(url.href, expectedOrigin()) });
           return res.end();
         }
-        const packet = discoveryDoc("/llms.txt");
+        const packet = advertisedDocument(discoveryDoc("/llms.txt"), expectedOrigin());
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks(url));
         const packetBytes = Buffer.from(packet.body);
@@ -2226,7 +2232,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
           for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
         }
-        let docBody = discovery.body;
+        let docBody = advertisedSkillDigests(advertisedDocumentBody(discovery.type, discovery.body, expectedOrigin()), expectedOrigin(), discoveryDoc);
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy
         // asset carries the base catalog; the node server injects the live
@@ -2456,7 +2462,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!PUBLIC_RECEIPT_ID.test(receiptDetail[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptDetail[1]);
           if (!receipt) reject(404, "not_found", "Not found");
-          res.setHeader("Link", publicPageLinks(url, `/receipts/${receipt.id}`));
+          res.setHeader("Link", pageLinks(url, `/receipts/${receipt.id}`));
           // Verify at read time (?verify=1, GET only): re-run the receipt's
           // checks now — source record, artifact/journal hashes, and the
           // linked pull request re-fetched from GitHub through the same
@@ -2479,7 +2485,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // JDOT-PUBLIC-CSP-RUM begin: public-page policy
           res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
           // JDOT-PUBLIC-CSP-RUM end
-          const html = Buffer.from(renderReceiptDetailHtml(receipt, { verification }));
+          const html = Buffer.from(advertiseHtml(renderReceiptDetailHtml(receipt, { verification })));
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
           return res.end(req.method === "HEAD" ? undefined : html);
         }
@@ -2491,7 +2497,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           limit: limitRaw == null ? 20 : Number(limitRaw),
         });
         if (queried.error) reject(queried.error.status, queried.error.code, queried.error.message);
-        res.setHeader("Link", publicPageLinks(url, "/receipts"));
+        res.setHeader("Link", pageLinks(url, "/receipts"));
         if (url.pathname === "/api/public/receipts") {
           const body = Buffer.from(JSON.stringify(receiptsListJson(queried)));
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
@@ -2500,7 +2506,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
         res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
         // JDOT-PUBLIC-CSP-RUM end
-        const html = Buffer.from(renderReceiptsHtml(queried));
+        const html = Buffer.from(advertiseHtml(renderReceiptsHtml(queried)));
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
         return res.end(req.method === "HEAD" ? undefined : html);
       }
@@ -2537,15 +2543,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           path: item.path,
           lastmod: item.lastmod || PUBLIC_PAGE_LASTMOD,
         }));
-        const xml = publicSearchSitemap(ROOM_ORIGIN, [
+        const xml = advertise(publicSearchSitemap(ROOM_ORIGIN, [
           ...available.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
           { path: "/receipts", lastmod: PUBLIC_PAGE_LASTMOD },
           ...LEGAL_SITEMAP_PATHS.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
           ...receiptEntries,
           ...publicSitemapEntries(store), // GR2 templates, agents, and opted-in room pages
-        ]);
+        ]));
         if (!url.search) res.setHeader("X-Robots-Tag", "all");
-        res.setHeader("Link", publicPageLinks(url, "/sitemap.xml"));
+        res.setHeader("Link", pageLinks(url, "/sitemap.xml"));
         res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
         return res.end(req.method === "HEAD" ? undefined : xml);
       }
@@ -2569,16 +2575,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const sendPage = (status, html, jsonBody, canonical, cacheControl = "public, max-age=60", policy = PUBLIC_PAGE_CSP) => {
           if (!url.search) res.setHeader("X-Robots-Tag", "all");
           res.setHeader("Cache-Control", cacheControl);
-          res.setHeader("Link", publicPageLinks(url, canonical));
+          res.setHeader("Link", pageLinks(url, canonical));
           if (jsonBody) {
-            const body = Buffer.from(JSON.stringify(jsonBody));
+            const body = Buffer.from(advertise(JSON.stringify(jsonBody)));
             res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
             return res.end(req.method === "HEAD" ? undefined : body);
           }
           // JDOT-PUBLIC-CSP-RUM begin: public-page policy
           res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), policy));
           // JDOT-PUBLIC-CSP-RUM end
-          const body = Buffer.from(html);
+          const body = Buffer.from(advertiseHtml(html));
           res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
           return res.end(req.method === "HEAD" ? undefined : body);
         };
@@ -2705,7 +2711,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // starting at GET / alone can find the agent card from Link headers.
         // GR1: marketing documents also name the canonical host.
         const linkPath = canonical && reviewedPublicSearchPaths.includes(canonical) ? canonical : (gr1Alias ? url.pathname : null);
-        const discovery = linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url);
+        const discovery = linkPath ? pageLinks(url, linkPath) : discoveryLinks(url);
         const shell = path === "index.html";
         res.setHeader("Link", shell ? `${discovery}, </src/styles.css>; rel=preload; as=style` : discovery);
         if (shell && req.method === "GET" && typeof res.writeEarlyHints === "function") {
@@ -2719,9 +2725,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         else if (shell) res.setHeader("Cache-Control", "public, max-age=60");
         // The front door keeps the GitHub anchor in source. Omit it from the
         // served bytes unless this server was given a GitHub auth config.
-        const payload = path === "index.html"
+        const frontDoor = path === "index.html"
           ? Buffer.from(frontDoorHtml(data, { githubConfigured: Boolean(githubAuth) }))
           : data;
+        // Canonical/OG tags in marketing pages name this instance, not the hosted service.
+        const payload = type === "text/html" && !isHostedOrigin(expectedOrigin()) ? Buffer.from(advertiseHtml(frontDoor.toString("utf8"))) : frontDoor;
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : payload);
         }
