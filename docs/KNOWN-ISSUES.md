@@ -35,7 +35,6 @@ status. Security, data integrity and existing obligations remain in scope even
 when their surrounding feature is cut. No branch or stored data deletion follows
 from this table.
 
-
 ## Maintainer checkpoint — 2026-10-31
 
 The dated reports below remain historical evidence, not proof of the current deployment.

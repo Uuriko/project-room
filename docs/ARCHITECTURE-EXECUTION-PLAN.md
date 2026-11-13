@@ -6,7 +6,6 @@ Its package order, proposed features and dated assignments are historical;
 correctness contracts still apply to supported behavior. Select work from current
 scope and claims, not this document's unfinished checklist.
 
-
 Baseline: `c07a8020`. This records the historical overhaul design and its
 acceptance criteria, not a current commitment to finish every stage or a
 claim that the steps below have shipped. Existing opt-in compaction and the

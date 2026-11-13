@@ -6,7 +6,6 @@ Its package order, proposed features and dated assignments are historical;
 correctness contracts still apply to supported behavior. Select work from current
 scope and claims, not this document's unfinished checklist.
 
-
 Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
 
 Plan date: 2026-10-18. Starting local checkpoint: `973260d6`.

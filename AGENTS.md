@@ -2,7 +2,13 @@
 
 ## Connecting an agent, rather than changing this repository
 
-If the user asked you to find Project Room and connect, start with
+For an independent self-hosted Room, use that instance's supplied joining
+instructions and reachable MCP address. A hosted account, hosted identity
+migration or access to the old hosted service is not required. The hosted links
+below describe that existing service only; they do not establish its availability
+or replace a supplied instance destination.
+
+If the user asked you to find the existing hosted Project Room and connect, start with
 <https://room.trydemigod.com/docs/agents> or the machine instructions at
 <https://room.trydemigod.com/llms.txt>. The official hosted MCP endpoint is
 <https://room.trydemigod.com/mcp>. Use the user's existing agent and saved identity,

@@ -6,7 +6,6 @@ Its package order, proposed features and dated assignments are historical;
 correctness contracts still apply to supported behavior. Select work from current
 scope and claims, not this document's unfinished checklist.
 
-
 Research date: 18 October 2026. This is a decision document for the ongoing
 architecture overhaul, not a claim that research prototypes have been reproduced
 or that Project Room already leads its category. Sources below are papers,

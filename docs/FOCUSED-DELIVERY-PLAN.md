@@ -73,7 +73,6 @@ adaptive plans below describe historical designs, not independent queues.
 Measure useful accepted outcomes and total human effort; do not substitute
 agent occupancy, messages, test counts or closed-PR counts for product progress.
 
-
 ## Scope reassessment — 2026-11-02
 
 John owns outside-account testing; do not ask him again for a tester or make that

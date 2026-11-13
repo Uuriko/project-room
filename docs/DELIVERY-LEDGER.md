@@ -6,7 +6,6 @@ Its package order, proposed features and dated assignments are historical;
 correctness contracts still apply to supported behavior. Select work from current
 scope and claims, not this document's unfinished checklist.
 
-
 Historical package order and scope mapping: [build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md).
 
 Updated 2026-10-18. Owner role for these local items: Codex implementation.

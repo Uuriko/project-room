@@ -6,7 +6,6 @@ Its package order, proposed features and dated assignments are historical;
 correctness contracts still apply to supported behavior. Select work from current
 scope and claims, not this document's unfinished checklist.
 
-
 2026-10-18. Decision: strengthen existing components and their connections.
 These are proposed measurements and provisional gates, not established product
 results. Owner: Codex implementation for harnesses; product owner for acceptance
