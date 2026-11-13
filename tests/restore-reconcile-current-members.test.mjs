@@ -4,6 +4,7 @@ import { RoomStore, ServiceError } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { event } from '../src/events.js';
 import { reconcileRestoredAuthority } from '../server/backup.mjs';
+import { withCurrentReadContext } from '../server/current-room-repository.mjs';
 
 function fixture(t, representation, { restored = false, history = 0, empty = false } = {}) {
   const store = new RoomStore(':memory:');
@@ -65,7 +66,18 @@ test('non-missing canonical authority failures propagate rather than becoming un
     new Error('current_room_corrupt: synthetic authority proof failure')]) {
     // Fault the existing authority dependency; no test-only production seam,
     // forged proof, table edit or disabled writer guard is introduced.
-    current.roomAuthority = () => { throw failure; };
+    current.recoveryMembers = () => { throw failure; };
     assert.throws(() => reconcileRestoredAuthority(restored, current), error => error === failure);
   }
+});
+
+test('recovery census includes inactive members and refuses an active serving context', t => {
+  const store = fixture(t, 'current', { restored: true });
+  assert.deepEqual(Object.keys(store.recoveryMembers('commons')).sort(),
+    ['historical', 'kept', 'missing', 'owner', 'revoked']);
+  assert.equal(store.recoveryMembers('commons').historical.active, false);
+  assert.throws(() => withCurrentReadContext(store.db, 'commons', () => store.recoveryMembers('commons')), error =>
+    error.status === 409 && error.code === 'current_room_context_unavailable');
+  assert.deepEqual(Object.keys(store.recoveryMembers('commons')).sort(),
+    ['historical', 'kept', 'missing', 'owner', 'revoked']);
 });
