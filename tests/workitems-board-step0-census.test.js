@@ -67,6 +67,7 @@ const WORKITEMS_REFERENCE_SITES = [
   "server/owner-attention.mjs",
   "server/owner-overview.mjs",
   "server/project-offers.mjs",
+  "server/project-state.mjs",
   "server/public-read-model.mjs",
   "server/public-work-reviews.mjs",
   "server/purge-registry.mjs",
@@ -162,7 +163,7 @@ function referenceSites() {
   return found.sort();
 }
 
-test("step0 census: workItems reference-site inventory is pinned (85 files)", () => {
+test("step0 census: workItems reference-site inventory is pinned (86 files)", () => {
   assert.deepEqual(referenceSites(), WORKITEMS_REFERENCE_SITES);
 });
 

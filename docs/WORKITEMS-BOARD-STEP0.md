@@ -393,6 +393,12 @@ suppressing stale work notifications. It introduces no work item writer.
 
 ## Normalized-storage census reconciliation (2026-11-02)
 
+2026-11-12 reader amendment: `server/project-state.mjs` (#6173) composes
+bounded, privacy-filtered normalized overview pages, or the legacy room's
+work items, into a derived project-state response. It does not mutate work
+items or board claims. Adding this existing reader brings the pinned
+`server/` + `src/` reference-site inventory from 85 to 86 files.
+
 The current census is **83 source files**, including the following 17 additions.
 The first 15 were reviewed at `988a8c236`; the search and work snapshot readers
 were reviewed against `ca7508fd5`. The older counts and council migration proposal above
