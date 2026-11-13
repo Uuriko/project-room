@@ -31,7 +31,7 @@
 import { createHash } from "node:crypto";
 
 export const SIGNAL_TYPES = Object.freeze([
-  "wake.sent", "wake.delivered", "wake.acked", "wake.dropped",
+  "wake.sent", "wake.delivered", "wake.acked", "wake.dropped", "turn.completed",
   "pr.merged", "ci.settled", "deploy.finished", "smoke.passed", "smoke.failed", "rollback"
 ]);
 export const SIGNAL_DETAIL_MAX_BYTES = 256;
