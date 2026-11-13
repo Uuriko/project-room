@@ -8,5 +8,12 @@ Copyright rowboatlabs. Licensed under the Apache License, Version 2.0.
 Project Room changes adapt these patterns to GitHub issue coordination.
 Existing attribution comments are retained.
 
+The hash-chain preimage and canonical-JSON logic in server/signal-log.mjs
+is adapted from block/buzz, crates/buzz-audit/src/hash.rs
+(https://github.com/block/buzz, commit fae3f03).
+Copyright 2026 Block, Inc. Licensed under the Apache License, Version 2.0.
+Project Room changes: its own domain tag, epoch-millisecond u64 timestamps,
+no legacy encoding, Node createHash instead of the Rust sha2 crate.
+
 Third-party research screenshots, quoted material, names and logos remain
 subject to their respective owners' rights; see THIRD_PARTY.md.

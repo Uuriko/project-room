@@ -730,7 +730,7 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit", "current_room_writer_permit", "current_restore_admission", "current_restore_audit_scratch",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures",
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures", "room_signal_log",
   ...RETIRED_4975_TABLES
 ]);
 

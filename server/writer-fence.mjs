@@ -542,7 +542,7 @@ const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", 
 // loss journal, purely additive, created lazily on first recorded outcome;
 // kind/timestamp/subject only, never content. Older writers have no code
 // path to them.
-const WAKE_METRICS_ADDITIVE_TABLES = Object.freeze(["agent_wake_counters", "agent_wake_failures"]);
+const WAKE_METRICS_ADDITIVE_TABLES = Object.freeze(["agent_wake_counters", "agent_wake_failures", "room_signal_log"]);
 // runOnce replay journal (server/run-once.mjs): purely additive, created
 // lazily on first table-backed runOnce() use.
 const RUN_ONCE_ADDITIVE_TABLES = Object.freeze(["request_replays"]);

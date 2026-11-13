@@ -168,7 +168,21 @@ for (const mobile of [false, true]) {
     const target = page.locator('[data-message-record-id="mention-owner"]');
     await target.focus();
     await page.keyboard.press("u");
-    await page.locator('.chat-divider.unread', { hasText: "New messages" }).first().waitFor({ state: "visible" });
+    await target.locator('.chat-divider.unread', { hasText: "New messages" }).waitFor({ state: "visible" });
+
+    const readWrites = [];
+    page.on('request', request => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/read-horizon')) readWrites.push(request.url());
+    });
+    await page.locator('#message-list').focus();
+    await page.keyboard.press('g');
+    await page.keyboard.press('u');
+    assert.equal(await target.evaluate(node => node === document.activeElement), true, 'go unread focuses the first unread message');
+    await page.keyboard.press('g');
+    await page.keyboard.press('u');
+    assert.equal(await target.evaluate(node => node === document.activeElement), true, 'repeated navigation keeps the same unread boundary');
+    await page.waitForTimeout(1700);
+    assert.deepEqual(readWrites, [], 'navigation alone does not acknowledge the conversation');
 
     // The room-actions palette lists Activity (desktop: the palette button is
     // hidden on small screens). Since #1319 the palette's Activity entry opens
@@ -186,6 +200,10 @@ for (const mobile of [false, true]) {
       await page.locator('[data-update-filter="all"][aria-selected="true"]').waitFor();
       await page.locator("#updates-close").click();
       await updatesDialog.waitFor({ state: "hidden" });
+      await clickChrome(page, '#room-actions-open');
+      await page.locator('#room-actions-query').fill('unread');
+      await page.locator('[data-room-action="first-unread"]').click();
+      assert.equal(await target.evaluate(node => node === document.activeElement), true, 'finder opens the same unread boundary');
     }
 
     assert.deepEqual(errors, [], "no page errors");

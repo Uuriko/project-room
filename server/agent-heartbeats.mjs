@@ -933,12 +933,12 @@ export class AgentHeartbeats {
       // with each signal's own kind/room (an ack may span rooms).
       if (acknowledged.length > 0) {
         const kinds = new Map([...sqlChunks(acknowledged)].flatMap(chunk => this.db.prepare(
-          `SELECT signal_id AS signalId, kind, room_id AS roomId FROM agent_wake_signals WHERE signal_id IN (${sqlPlaceholders(chunk)})`)
+          `SELECT signal_id AS signalId, kind, room_id AS roomId, created_at AS createdAt FROM agent_wake_signals WHERE signal_id IN (${sqlPlaceholders(chunk)})`)
           .all(...chunk)).map(row => [row.signalId, row]));
         for (const signalId of acknowledged) {
           const row = kinds.get(signalId);
           recordWakeEvent(this.db, { at, roomId: row?.roomId ?? roomId, store: "signals",
-            event: "acked", door, kind: row?.kind ?? "", subjectId: agentId });
+            event: "acked", door, kind: row?.kind ?? "", subjectId: agentId, ref: signalId, sentAt: row?.createdAt ?? null });
         }
       }
       const workAcked = this.store.workWakes?.ack(agentId, signalIds, roomId) ?? [];
@@ -1041,7 +1041,8 @@ export class AgentHeartbeats {
     // #3345: a claimed batch is a delivery on the listener door.
     for (const signal of signals) {
       recordWakeEvent(this.db, { at, roomId: signal.roomId ?? roomId, store: "signals",
-        event: "delivered", door: "listener", kind: signal.kind, subjectId: agentId });
+        event: "delivered", door: "listener", kind: signal.kind, subjectId: agentId,
+        ref: signal.signalId, sentAt: signal.createdAt, signalLog: !signal.redelivered });
     }
     return Object.freeze({ signals: Object.freeze(signals) });
   }
@@ -1101,7 +1102,7 @@ export class AgentHeartbeats {
       VALUES (?, ?, ?, ?, ?, ?, NULL)`).run(signalId, agentId, kind, roomId, messageId, at);
     // #3345: every emission attempt resolves to exactly one audited outcome.
     recordWakeEvent(this.db, { at, roomId, store: "signals",
-      event: applied.changes > 0 ? "emitted" : "coalesced", kind, subjectId: agentId });
+      event: applied.changes > 0 ? "emitted" : "coalesced", kind, subjectId: agentId, ref: signalId });
     const row = this.db.prepare(
       "SELECT * FROM agent_wake_signals WHERE agent_id=? AND room_id IS ? AND message_id=?").get(agentId, roomId, messageId);
     // RC-2026-09-28-3602: a genuinely new signal releases the room-hosted
@@ -1223,7 +1224,7 @@ export class AgentHeartbeats {
         // Only doorbell kinds (mention, dm) are ever settled here, by cursor or
         // by age: ask, assignment, bond and land signals are obligations and
         // leave the queue only through an explicit ack by signal id.
-        let rows = this.db.prepare(`SELECT s.signal_id AS signalId, s.kind AS kind, s.room_id AS roomId FROM agent_wake_signals s
+        let rows = this.db.prepare(`SELECT s.signal_id AS signalId, s.kind AS kind, s.room_id AS roomId, s.created_at AS createdAt FROM agent_wake_signals s
           WHERE s.agent_id=? AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id=?)
             AND (s.room_id IS NULL OR s.room_id NOT IN (SELECT value FROM json_each(?)))
             AND NOT EXISTS (SELECT 1 FROM agent_wake_signal_claims c WHERE c.signal_id=s.signal_id)
@@ -1253,7 +1254,8 @@ export class AgentHeartbeats {
         for (const row of rows) {
           if (stmt.run(at, agentId, row.signalId).changes === 0) continue;
           acknowledged.push(row.signalId);
-          recordWakeEvent(this.db, { at, roomId: row.roomId, store: "signals", event: "acked", door, kind: row.kind, subjectId: agentId });
+          recordWakeEvent(this.db, { at, roomId: row.roomId, store: "signals", event: "acked", door, kind: row.kind, subjectId: agentId,
+            ref: row.signalId, sentAt: row.createdAt });
         }
         this.clearWakeBudgetMarks(agentId, acknowledged);
         return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
