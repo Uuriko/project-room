@@ -127,7 +127,13 @@ cards read the same pairing, so a card and the latency read can never disagree.
   emitted from `wake-metrics.recordWakeEvent` (a delivered/acked row carries its own latency, so nothing is paired
   at read time; poll presentations and coalesces stay counter-only; ack by the stale prune is `expired`), a `wake`
   section in the latency read, registrations (writer-fence lazy tables, restore skip list, purge registry).
-- **PR2b**: `pr.merged`, `ci.settled`, `deploy.finished`, `smoke.*`, `rollback` appended server-side when the
+- **PR2b (built on PR2a)**: `pr.merged`, `ci.settled`, `deploy.finished`, `smoke.*`, `rollback` appended server-side when the
   journal records a post `parseReceipt` already recognizes (no workflow or secret changes), state and Board read
   structured receipts first with the text parse as fallback, one `latency` line in `room_project_state`.
+  As built: `server/receipt-signals.mjs` hooks the public message post path; `readReceiptSignals` reads a partial
+  index over non-wake rows (`room_signal_log_receipts`), so a state read touches a handful of rows instead of
+  scanning up to 1,500 journal rows; the log answers only when it holds a deploy with a good smoke (the anchor),
+  otherwise the journal text parse runs, and `receiptWindow.source` says which one answered. A parity test pins
+  that both give the same receipts, merged-not-deployed and last deploy. The Board's per-card "waiting on you"
+  UI is not changed here: the server read it would use is the same latency read.
 - **PR3**: reply guard on turn end, PR watch event source ending at prod smoke, `turn.completed`.
