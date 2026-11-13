@@ -57,7 +57,7 @@ test("ack of a mention with no post since: one advisory reminder that licenses s
 });
 
 test("never a false silent: non-message kinds, the cron door and an unreachable window are not reminded", t => {
-  const { f, clock, hb, agentId, wake, turns, say } = setup(t);
+  const { f, clock, hb, agentId, wake, turns } = setup(t);
   const ask = wake("ask", "a1");
   assert.equal(hb.ackWakes({ agentId, signalIds: [ask.signalId], door: "rest" }).replyGuard, undefined, "asks are obligations, not guarded here");
   assert.equal(turns().at(-1).rp, -1);
