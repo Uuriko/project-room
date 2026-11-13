@@ -146,7 +146,10 @@ const statusOf = (item, now) => {
 // acked with door "cron" is the stale prune: expired unhandled, not an answer.
 export function buildWakeContext(rows, { scan = LATENCY_WAKE_SCAN } = {}) {
   if (!rows?.length) return null;
+  const read = rows.length;
   const groups = {};
+  rows = rows.filter(row => typeof row.type === "string" && row.type.startsWith("wake.")); // receipts share the table
+  if (!rows.length) return null;
   for (const row of rows) {
     let d = {};
     try { d = JSON.parse(row.detail ?? "{}"); } catch { /* counts still hold */ }
@@ -164,7 +167,7 @@ export function buildWakeContext(rows, { scan = LATENCY_WAKE_SCAN } = {}) {
     deliverMs.sort((a, b) => a - b); ackMs.sort((a, b) => a - b);
     out[name] = { ...counts, deliverP50Ms: percentile(deliverMs, 50), ackP50Ms: percentile(ackMs, 50), ackP90Ms: percentile(ackMs, 90) };
   }
-  return { rows: rows.length, since: iso(rows.at(-1).ts_ms), complete: rows.length < scan, ...out };
+  return { rows: rows.length, since: iso(rows.at(-1).ts_ms), complete: read < scan, ...out };
 }
 
 export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, through, window, events, mentions = [], members = {}, wake = null }) {
