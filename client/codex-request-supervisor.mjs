@@ -9,7 +9,7 @@ import { scopedCodexThreads } from "./codex-supervisor.mjs";
 // Room delivery is HTTPS; this supervisor needs no inbound port or VPN.
 export async function superviseCodexRequests({ connection, db, directory, connect, cwd, policy,
   allowedRequesterIds, allowedRequestIds, signal, emit = () => {}, pollMs = 2000, timeoutMs = 300000,
-  connectOnStart = false, singleRequest = false }) {
+  connectOnStart = false, singleRequest = false, settleLinkedWork = false }) {
   if (!Array.isArray(allowedRequesterIds) || !allowedRequesterIds.length || allowedRequesterIds.length > 20
     || new Set(allowedRequesterIds).size !== allowedRequesterIds.length
     || !allowedRequesterIds.every(id => typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id)))
@@ -83,7 +83,7 @@ export async function superviseCodexRequests({ connection, db, directory, connec
       emit({ type: "request_selection", requestMessageId, requesterId: allowedRequesterIds[0],
         execution: "not_started", workLifecycle: "unchanged" });
       try {
-        const result = await runRequestOnce({ connection, db, requestMessageId, execute,
+        const result = await runRequestOnce({ connection, db, requestMessageId, execute, settleLinkedWork: settleLinkedWork === true,
           allowRequest: requesterAllowed, selectRequest, signal: controller.signal });
         // A refused run report is not settled: the reply is saved but the
         // service never accepted the outcome, so it needs reconciliation.
@@ -102,7 +102,7 @@ export async function superviseCodexRequests({ connection, db, directory, connec
       }
     }
     if (connectOnStart && !unresolved() && !controller.signal.aborted) await prepare();
-    if (!controller.signal.aborted) await runRequestQueue({ connection, db, execute, allowRequest: requesterAllowed, selectRequest,
+    if (!controller.signal.aborted) await runRequestQueue({ connection, db, execute, allowRequest: requesterAllowed, selectRequest, settleLinkedWork: settleLinkedWork === true,
       signal: controller.signal, intervalMs: pollMs, onPoll: () => {
         owner.health("watching"); state(idleStatus());
       }, emit: event => {
