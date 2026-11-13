@@ -166,6 +166,18 @@ for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
 }
 // GET/HEAD-only liveness paths; any other method is 405 with Allow (#1529).
 const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/version"]);
+// Guessed joining doors (F-01): exact page paths a stranger plausibly types
+// for the way in. None has ever been a route or an API path; the block below
+// (after the /join page handler) hands them to the real door with a 302.
+// The /room/ twins of the www door target /room/join, like every other
+// public door. Deliberately absent: /signup, /register, /get-started,
+// /join-us — ambiguous intent, no stranger-pass evidence; they keep the
+// generic 404 handling.
+const GUESSED_JOIN_DOORS = new Map();
+for (const door of ["/joining", "/start", "/docs/joining", "/docs/start", "/docs/onboarding", "/onboarding", "/invite"]) {
+  GUESSED_JOIN_DOORS.set(door, "/join");
+  GUESSED_JOIN_DOORS.set(`/room${door}`, "/room/join");
+}
 // W009: the wiki read API owns every /api/wiki/ template inside
 // server/wiki-read-api.mjs (reads are lazy per request; import is side-effect-free).
 const wikiReadApi = createWikiReadApi();
@@ -3488,6 +3500,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (liveCode) page = joinPageForAgentCode(page, liveCode);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
+      }
+      // Guessed joining doors (F-01): the exact paths in GUESSED_JOIN_DOORS
+      // fell through to the generic 404 below — a JSON body naming an API
+      // re-list for machine clients, and an HTML page that never links /join
+      // for browsers. Hand the stranger to the real door instead: a 302
+      // handoff (the /r/<id>/board precedent), uncached, GET/HEAD only, in
+      // every Accept mode — these paths have never been API routes, so no
+      // error contract exists for them. The query string is not carried
+      // over (the /compare dispatch likewise sends the bare target), one
+      // trailing slash is tolerated, and every other method falls through
+      // to today's handling unchanged. Bare /ard.json shares the fall-
+      // through below and is deliberately not in the set: it is unchanged.
+      const guessedDoorPath = url.pathname.length > 1 && url.pathname.endsWith("/") ? url.pathname.slice(0, -1) : url.pathname;
+      const guessedJoinDoor = GUESSED_JOIN_DOORS.get(guessedDoorPath);
+      if (guessedJoinDoor && ["GET", "HEAD"].includes(req.method)) {
+        res.writeHead(302, { Location: guessedJoinDoor, "Cache-Control": "no-store" });
+        return res.end();
       }
       // Standalone agent sign-in page (decision #37): GET /agent-signin
       // plus the /room twin; same component and endpoints as the wall's
