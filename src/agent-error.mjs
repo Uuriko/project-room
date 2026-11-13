@@ -1401,6 +1401,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         next: [command("Resend work.proposed with humanDecisionMakerId naming a member who holds the decide permission.")]
       };
     }
+    // B1 claim door: a second seat's work.accepted — the generic "Read
+    // current work" recovery names no remedy and a retry by the same seat
+    // can never succeed. The remedy is the accountable member: they accept
+    // it, or new work is proposed naming the caller as accountableMemberId.
+    // (The HTTP body for this refusal also carries the accountable member's
+    // id in its top-level `remedy` field — see server/store.mjs.)
+    if (/^Only the accountable member may accept work/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "command_rejected",
+        hint: "Only the accountable member named on this work item can accept it. Ask them to accept it, or get work proposed naming you as accountableMemberId.",
+        next: [readWork, command("Read the work item for its accountableMemberId; ask that member to accept the work, or ask a member with steer permission to propose new work naming you as accountableMemberId. Do not retry work.accepted as a different member.")]
+      };
+    }
     return {
       status: "action_required", reason: "command_rejected",
       hint: "Read current work. Do not silently rebase.",
