@@ -5,9 +5,23 @@
 // event tail and SSE frames (SEC-2b). Webhook payloads are fenced (Q3-D). Board
 // lists are stamped (SEC-2). A guest cannot add a Board review note, so a
 // review-profile member writes the Board marker.
+// Native-room edition: the fixture work item travels the native lifecycle
+// (propose / accept / start / complete with room-text evidence / verify by
+// the designated verifier) because the production legacy_work_retired
+// guard refuses legacy claim creation in a current-format room — this
+// harness originally failed exactly there (qa3-gates run 43150756518 on
+// PR #6136's head, exit 2 at the old Board claim seeding; #6136 converted
+// authz-board and board-growth and flagged this script as the follow-up).
+// Do not relax the guard to revive the legacy fixture — seed native
+// fixtures instead. The guest's 403 on the legacy review door is kept as
+// the guest pin (the attest gate refuses the link guest before any claim
+// lookup), and the review-profile member writes the Board marker the
+// native way: a discussion message on the work item, plus the designated
+// verifier's verification summary, which carries the marker into the
+// native work-context read judged below.
 // Usage: node scripts/qa3/content-trust.mjs --origin http://127.0.0.1:4173 --db room.sqlite
 import { argv, exit } from "node:process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { createQaClient } from "../qa2/lib/client.mjs";
 import { assertLocalOrigin, createReport } from "./lib/summary.mjs";
@@ -80,13 +94,17 @@ async function shareLink(roomPath, token) {
   throw new Error("share link: member revision did not match");
 }
 
-function readPayload(roomId) {
+function readPayload(roomId, eventId) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     db.exec("PRAGMA busy_timeout = 5000");
+    // The delivery for the guest message itself, by its event id. The
+    // native fixture posts more message.posted events than the legacy
+    // one did (discussion note, completion evidence), so the old
+    // latest-message.posted pick would judge the wrong payload.
     const row = db.prepare(
-      "SELECT payload_json FROM agent_webhook_deliveries WHERE room_id = ? AND event_type = ? ORDER BY created_at DESC LIMIT 1"
-    ).get(roomId, "message.posted");
+      "SELECT payload_json FROM agent_webhook_deliveries WHERE room_id = ? AND event_id = ? LIMIT 1"
+    ).get(roomId, eventId);
     return row?.payload_json ?? "";
   } finally {
     db.close();
@@ -119,14 +137,38 @@ try {
     token: owner.secret,
     body: { url: "https://example.com/qa3-content-trust", events: ["message.posted"] },
   }), "subscribe webhook");
-  must(await client.request("POST", `${roomPath}/work-claims`, {
+  // Retirement pin: the legacy Board door stays retired in a native
+  // room — a legacy create is refused 409 legacy_work_retired. This
+  // replaces the old create + claim seeding, which tripped this guard.
+  const legacyCreate = await client.request("POST", `${roomPath}/work-claims`, {
     token: owner.secret,
     body: { id: "trust-claim", title: "trust claim" },
-  }), "create claim");
-  must(await client.request("POST", `${roomPath}/work-claims/trust-claim/claim`, {
-    token: owner.secret,
-    body: { note: "held", leaseHours: 1 },
-  }), "claim");
+  });
+  if (legacyCreate.status !== 409 || legacyCreate.json?.error?.code !== "legacy_work_retired") {
+    throw new Error(`legacy create pin: expected 409 legacy_work_retired, got HTTP ${legacyCreate.status} ${legacyCreate.text.slice(0, 160)}`);
+  }
+  // Native lifecycle fixture: the owner proposes the item with the
+  // review-profile member as its designated verifier, then accepts and
+  // starts it. Completion and verification land after the marker
+  // messages below, mirroring the lifecycle #6136 seeded for
+  // authz-board.
+  const command = (token, type, data) => client.request("POST", `${roomPath}/commands`, {
+    token,
+    body: cmd(type, data),
+  });
+  must(await command(owner.secret, "work.proposed", {
+    workItemId: "trust-claim", title: "trust claim",
+    definitionOfDone: "qa3 result recorded",
+    accountableMemberId: owner.identityId,
+    verifierMemberId: reviewer.identityId,
+    independentVerificationRequired: true, mode: "read",
+  }), "propose work");
+  must(await command(owner.secret, "work.accepted", {
+    workItemId: "trust-claim", expectedRevision: 0,
+  }), "accept work");
+  must(await command(owner.secret, "work.started", {
+    workItemId: "trust-claim", expectedRevision: 1,
+  }), "start work");
 
   const streamAbort = new AbortController();
   const stream = await fetch(`${origin}${roomPath}/stream`, {
@@ -139,7 +181,7 @@ try {
     until: frames => frames.some(frame => frame.text.includes(marker)),
   });
 
-  must(await client.request("POST", `${roomPath}/commands`, {
+  const guestPosted = must(await client.request("POST", `${roomPath}/commands`, {
     token: guest.secret,
     body: cmd("message.posted", { messageId: randomUUID(), body: `@${ownerName} ${marker}` }),
   }), "guest message");
@@ -148,10 +190,33 @@ try {
     body: { note: marker },
   });
   if (guestNote.status !== 403) throw new Error(`guest review note: expected 403, got HTTP ${guestNote.status}`);
-  must(await client.request("POST", `${roomPath}/work-claims/trust-claim/review`, {
-    token: reviewer.secret,
-    body: { note: marker },
-  }), "reviewer review note");
+  // The reviewer's Board marker, the native way: a discussion message
+  // on the work item (the legacy review door has no claim to attach to
+  // in a native room). The lifecycle then completes with room-text
+  // evidence and the designated verifier — this reviewer — verifies it;
+  // the verification summary carries the marker into the work-context
+  // read, as the legacy review note carried it into the Board list.
+  must(await command(reviewer.secret, "message.posted", {
+    messageId: randomUUID(), body: marker, workItemId: "trust-claim",
+  }), "reviewer discussion note");
+  const evidenceBody = `result trust-claim ${stamp}`;
+  const evidenceMessageId = randomUUID();
+  const evidencePosted = must(await command(owner.secret, "message.posted", {
+    messageId: evidenceMessageId, body: evidenceBody, workItemId: "trust-claim",
+  }), "completion evidence message");
+  const evidenceVersion = `sha256:${createHash("sha256").update(evidenceBody, "utf8").digest("hex")}`;
+  const completed = must(await command(owner.secret, "work.completed", {
+    workItemId: "trust-claim", expectedRevision: 2, evidenceKind: "room_text",
+    evidenceMessageId, evidenceMessageEventId: evidencePosted.event?.id ?? "missing-event",
+    evidenceVersion, previousCompletionEventId: null,
+    producerId: owner.identityId,
+    summary: "result trust-claim", nextAction: "verify",
+  }), "complete work");
+  must(await command(reviewer.secret, "verification.recorded", {
+    workItemId: "trust-claim", expectedRevision: 3, result: "pass",
+    completionEventId: completed.event?.id, evidenceVersion,
+    summary: `verify ${marker}`,
+  }), "verify work");
 
   const frames = await framesPromise;
   streamAbort.abort();
@@ -170,11 +235,19 @@ try {
 
   const claims = await client.request("GET", `${roomPath}/work-claims?limit=20`, { token: owner.secret });
   if (claims.status !== 200) throw new Error(`work-claims: HTTP ${claims.status}`);
-  judge("http work-claims list", claims.text, { payload: true, expectedFail: null });
+  // The legacy list is history inspection in a native room: it carries
+  // no member-authored text (native work never lands there), so the
+  // marker is not required on it — its contentTrust stamp still is. The
+  // payload-carrying Board-work read is the native work-context below.
+  judge("http work-claims list", claims.text, { payload: false, expectedFail: null });
+
+  const workContext = await client.request("GET", `${roomPath}/work-context?workItemId=trust-claim`, { token: owner.secret });
+  if (workContext.status !== 200) throw new Error(`work-context: HTTP ${workContext.status}`);
+  judge("http work-context", workContext.text, { payload: true, expectedFail: null });
 
   let payload = "";
   for (let attempt = 0; attempt < 5 && !payload.includes(marker); attempt++) {
-    payload = readPayload(roomId);
+    payload = readPayload(roomId, guestPosted.event?.id ?? "missing-event");
     if (!payload.includes(marker)) await new Promise(resolve => setTimeout(resolve, 200));
   }
   judge("webhook stored payload", payload, { payload: true, expectedFail: null });
