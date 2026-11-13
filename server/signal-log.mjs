@@ -47,6 +47,9 @@ export const signalLogSchema = `
     detail TEXT NOT NULL DEFAULT '{}', prev_hash BLOB, hash BLOB NOT NULL,
     PRIMARY KEY(room_id, seq)
   ) WITHOUT ROWID;
+  -- Partial index: only non-wake rows (receipts), so reading receipts never walks the much
+  -- higher-volume wake rows, and wake rows pay no index write.
+  CREATE INDEX IF NOT EXISTS room_signal_log_receipts ON room_signal_log(room_id, seq) WHERE type NOT LIKE 'wake.%';
 `;
 const ensured = new WeakSet();
 export function ensureSignalLogSchema(db) {
