@@ -12798,7 +12798,11 @@ paths:
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `heartbeats:report` scope. Signals stay queued until acknowledged —
         receiving them on a heartbeat does not consume them. Returns
-        `{ acknowledged: [signalId] }`. A room access key meeting the same
+        `{ acknowledged: [signalId] }`, plus an advisory `replyGuard`
+        `{ advisory, silent: [{signalId, kind, roomId}], note }` only when a
+        mention or DM was acknowledged and the agent has not posted in that
+        room since (never repeated, never an error; unknown is not silent).
+        A room access key meeting the same
         single-room binding requirements can acknowledge only this room's
         signals; other-room and unknown ids are not applied or disclosed.
         Authorization is rechecked after upload. Optional `fencingToken`:
@@ -12821,7 +12825,7 @@ paths:
                 signalIds: { type: array, items: { type: string }, minItems: 1 }
                 fencingToken: { type: string, minLength: 1, description: "the live listener lease's fencing token, required to ack signals fenced by that lease" }
       responses:
-        '200': { description: "{ acknowledged: [signalId] }" }
+        '200': { description: "{ acknowledged: [signalId], replyGuard?: { advisory, silent, note } }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '404': { description: 'agent_not_registered — no host has reported for this identity yet; the registration gate poll enforces applies at ack too (#3266)' }
