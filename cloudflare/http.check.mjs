@@ -26,9 +26,6 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     method, redirect, headers: { Host: new URL(origin).host, 'CF-Connecting-IP': ip, ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
     ...(data ? { body: JSON.stringify(data) } : {})
   });
-  // The edge serves discovery bytes as authored (hosted origin); the Durable Object names its configured
-  // ROOM_ORIGIN. Compare both sides in the hosted spelling so each assertion checks content, not origin.
-  const hostedText = async response => (await response.text()).split(origin).join('https://room.trydemigod.com');
   const json = async (response, status = 200) => {
     assert.equal(response.status, status, response.status >= 400 ? await response.clone().text() : 'Unexpected response status');
     return response.json();
@@ -133,18 +130,18 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.match(await packet.text(), /# (Uuriko )?Project Room/);
     const plainDoor = await call('/room', { headers: { Accept: 'text/plain' } });
     assert.match(plainDoor.headers.get('content-type'), /text\/plain/);
-    assert.equal(await hostedText(plainDoor), await hostedText(await call('/llms.txt')));
+    assert.equal(await plainDoor.text(), await (await call('/llms.txt')).text());
     const leftoverPacket = await call('/room/skill');
     assert.equal(leftoverPacket.status, 200);
-    assert.equal(await hostedText(leftoverPacket), await hostedText(await call('/llms.txt')));
+    assert.equal(await leftoverPacket.text(), await (await call('/llms.txt')).text());
     const leftoverCard = await call('/room/agent.json');
     assert.equal(leftoverCard.status, 200);
-    assert.deepEqual(JSON.parse(await hostedText(leftoverCard)), JSON.parse(await hostedText(await call('/.well-known/agent.json'))));
+    assert.deepEqual(await leftoverCard.json(), await (await call('/.well-known/agent.json')).json());
     const a2aCard = await call('/.well-known/agent-card.json');
     assert.equal(a2aCard.status, 200);
     assert.match(a2aCard.headers.get('content-type'), /application\/json/);
-    const a2aCardJson = JSON.parse(await hostedText(a2aCard));
-    assert.deepEqual(a2aCardJson, JSON.parse(await hostedText(await call('/.well-known/agent.json'))));
+    const a2aCardJson = await a2aCard.json();
+    assert.deepEqual(a2aCardJson, await (await call('/.well-known/agent.json')).json());
     // RC-2026-09-23-105: discovery card shape (A2A v1.0 field conventions) on the production card.
     for (const field of ['name', 'description', 'version', 'supportedInterfaces', 'capabilities', 'defaultInputModes', 'defaultOutputModes', 'skills']) assert.ok(a2aCardJson[field] !== undefined, field);
     assert.ok(Array.isArray(a2aCardJson.supportedInterfaces) && a2aCardJson.supportedInterfaces.length > 0);
@@ -200,15 +197,15 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const kits = await call('/room/kits');
     assert.equal(kits.status, 200);
     assert.match(kits.headers.get('content-type'), /text\/plain/);
-    const kitsBody = await hostedText(kits);
+    const kitsBody = await kits.text();
     assert.match(kitsBody, /This is a catalog\. Not an App Store/);
-    assert.notEqual(kitsBody, await hostedText(await call('/llms.txt')));
-    assert.equal(kitsBody, await hostedText(await call('/room/apps')));
-    assert.equal(kitsBody, await hostedText(await call('/room/tools')));
-    assert.equal(kitsBody, await hostedText(await call('/kits.txt')));
-    assert.equal(kitsBody, await hostedText(await call('/kits.json')));
-    assert.equal(kitsBody, await hostedText(await call('/room/kits.json')));
-    assert.equal(kitsBody, await hostedText(await call('/kits')));
+    assert.notEqual(kitsBody, await (await call('/llms.txt')).text());
+    assert.equal(kitsBody, await (await call('/room/apps')).text());
+    assert.equal(kitsBody, await (await call('/room/tools')).text());
+    assert.equal(kitsBody, await (await call('/kits.txt')).text());
+    assert.equal(kitsBody, await (await call('/kits.json')).text());
+    assert.equal(kitsBody, await (await call('/room/kits.json')).text());
+    assert.equal(kitsBody, await (await call('/kits')).text());
     const login = await call('/api/session', { data: { accessKey: ownerKey } });
     const cookie = login.headers.get('set-cookie');
     assert.match(cookie, /^__Host-room_session=/);
