@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { AGENT_PASTE_COPY_SCRIPT } from "../server/agent-paste-copy.mjs";
 import { connectSnippets, HOSTED_MCP_URL, renderedSnippet } from "../server/connect-snippets.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// Node paths are resolved only when rendering/writing pages, not when the
+// module is imported by the Workers test bundle.
+const sourceRoot = () => join(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://room.trydemigod.com";
 export const PASTE_PAGE = Object.freeze({ id: "paste", docsPath: "/docs/agents/paste", htmlFile: "docs/agents/paste.html" });
 
@@ -193,7 +195,7 @@ Call room_check_access, read the intended Room's current work and follow page co
   return pages;
 }
 
-export function agentPages(dir = join(root, "docs", "agents"), { origin = ORIGIN } = {}) {
+export function agentPages(dir = join(sourceRoot(), "docs", "agents"), { origin = ORIGIN } = {}) {
   const url = new URL(origin);
   if (url.origin !== origin || !['https:', 'http:'].includes(url.protocol)
       || (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) throw new TypeError('Expected an exact HTTPS or loopback HTTP guide origin');
@@ -247,14 +249,14 @@ export function agentPages(dir = join(root, "docs", "agents"), { origin = ORIGIN
 export function writeAgentPages({ origin = ORIGIN } = {}) {
   const pages = agentPages(undefined, { origin });
   for (const [file, html] of pages) {
-    const path = join(root, file);
+    const path = join(sourceRoot(), file);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, html);
   }
   return pages;
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isMain = import.meta.url && process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
   const pages = writeAgentPages({ origin: process.env.ROOM_ORIGIN ?? ORIGIN });
   console.log(`Wrote ${pages.size} agent docs pages.`);
