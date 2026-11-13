@@ -1,3 +1,4 @@
+import { loadInstanceCardRuntime } from './instance-card-runtime.mjs';
 import { agentPages } from '../scripts/build-agent-docs.mjs';
 import { instanceDiscoveryBody, instanceCardSignatureState } from './node-discovery-origin.mjs';
 import { connectFunnelEnabled, createConnectFunnel } from "./connect-funnel.mjs";
@@ -400,7 +401,7 @@ export const CREDENTIAL_WRITE_REFILL_PER_SECOND = 1;
 // Per-credential write budget for routes that carry no user-authored content.
 export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
-export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
+export function createRoomServer({ store, origin, instanceCard, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
   loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
@@ -432,7 +433,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // Worker entry's card is additionally covered at build time by
   // scripts/sign-agent-card.mjs, which fails closed without the key.
   let renderedAgentPages;
-  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: instanceCardSignatureState(origin) });
+  const instanceRuntime = loadInstanceCardRuntime({ origin, instanceCard });
+  const discoveryBody = doc => instanceRuntime ? instanceRuntime.body(doc) : instanceDiscoveryBody(doc, origin);
+  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: instanceRuntime?.signatureState ?? instanceCardSignatureState(origin) });
   for (const warning of bootConfigWarnings) warnBootConfigOnce(warning);
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
@@ -2210,7 +2213,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const packet = discoveryDoc("/llms.txt");
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks(url));
-        const packetBytes = Buffer.from(instanceDiscoveryBody(packet, origin));
+        const packetBytes = Buffer.from(discoveryBody(packet));
         res.writeHead(200, { "Content-Type": packet.type, "Content-Length": packetBytes.length });
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
       }
@@ -2229,7 +2232,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
           for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
         }
-        let docBody = instanceDiscoveryBody(discovery, origin);
+        let docBody = discoveryBody(discovery);
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy
         // asset carries the base catalog; the node server injects the live
