@@ -583,6 +583,34 @@ test('Mark unread survives a reload: layout scrolls never mark read; a reader wh
     await page.waitForTimeout(4000);
     assert.deepEqual(reads, [], `${viewport.width}px: no read horizon is posted after a reload with no reader input`);
     assert.notEqual(await lastRead(), latest, `${viewport.width}px: the message is still unread`);
+    const bottomBox = await page.locator('#message-list').boundingBox();
+    await page.mouse.move(bottomBox.x + bottomBox.width / 2, bottomBox.y + Math.min(bottomBox.height, viewport.height - bottomBox.y) / 2);
+    await page.mouse.wheel(0, 100000);
+    // Headless shell keeps every page focused. Model lifecycle signals at the
+    // document boundary; this is not a physical background-tab qualification.
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => false });
+      window.dispatchEvent(new Event('blur'));
+    });
+    assert.equal(await page.evaluate(() => document.visibilityState === 'visible' && document.hasFocus()), false, 'the conversation has actually lost active reading focus');
+    await page.waitForTimeout(2200);
+    assert.deepEqual(reads, [], `${viewport.width}px: leaving during the read debounce preserves unread state`);
+    assert.notEqual(await lastRead(), latest, 'the server still holds the unread boundary');
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      const list = document.querySelector('#message-list');
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: 100000, bubbles: true }));
+    });
+    await page.waitForTimeout(1700);
+    assert.deepEqual(reads, [], 'a hidden surface cannot schedule another read');
+    await page.evaluate(() => {
+      delete document.visibilityState; delete document.hasFocus;
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    await page.waitForTimeout(1700);
+    assert.deepEqual(reads, [], 'returning to the tab alone is not reading intent');
     // A reader who scrolls up and back down to the newest message marks it read.
     const box = await page.locator('#message-list').boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height, viewport.height - box.y) / 2);

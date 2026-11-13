@@ -7300,6 +7300,7 @@ function scheduleHorizonAdvance() {
   // scrolls. Only fires while the user holds the bottom of the view, so an
   // explicit Mark unread never gets wiped without a scroll.
   clearTimeout(horizonAdvanceTimer);
+  if (!activeReadingSurface()) { horizonAdvanceTimer = null; return; }
   const generation = client.generation, view = conversationViewKey();
   horizonAdvanceTimer = setTimeout(() => {
     horizonAdvanceTimer = null;
@@ -7307,7 +7308,7 @@ function scheduleHorizonAdvance() {
   }, 1500);
 }
 async function advanceHorizon() {
-  if (!state || !session || !client.session || !nearBottomOfList()) return;
+  if (!state || !session || !client.session || !activeReadingSurface() || !nearBottomOfList()) return;
   const { threadId, peerMemberId, cacheKey } = readPositionScope();
   const generation = client.generation, view = conversationViewKey();
   const messages = visibleConversationMessages();
@@ -7323,6 +7324,15 @@ async function advanceHorizon() {
     renderMessages();
   } catch { /* best-effort; the next scroll retries */ }
 }
+function activeReadingSurface() {
+  return document.visibilityState === "visible" && document.hasFocus();
+}
+function cancelBackgroundRead() {
+  clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
+  readerScrollAt = -Infinity;
+}
+window.addEventListener("blur", cancelBackgroundRead);
+document.addEventListener("visibilitychange", () => { if (!activeReadingSurface()) cancelBackgroundRead(); });
 function resetAttention() {
   // Session/room teardown: drop every persisted-attention cache so the next
   // session never sees the previous member's activity, saves, or horizons.
