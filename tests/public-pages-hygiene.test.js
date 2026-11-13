@@ -45,7 +45,7 @@ test("GET /receipts publishes canonical metadata", async t => {
   const response = await fetch(`${origin}/receipts`);
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /rel="canonical" href="https:\/\/room\.trydemigod\.com\/receipts"/);
+  assert.ok(html.includes(`rel="canonical" href="${origin}/receipts"`), "canonical names this instance");
   assert.match(html, /name="description" content="[^"]+"/);
   assert.match(html, /property="og:title"/);
   assert.match(html, /property="og:description" content="[^"]+"/);
@@ -56,9 +56,9 @@ test("GET /receipts publishes canonical metadata", async t => {
 test("sitemap lists compare pages and those pages return 200", async t => {
   const origin = await serve(t);
   const xml = await (await fetch(`${origin}/sitemap.xml`)).text();
-  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
-  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
-  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
+  assert.ok(xml.includes(`<loc>${origin}/</loc>`));
+  assert.ok(xml.includes(`<loc>${origin}/offers</loc>`));
+  assert.ok(xml.includes(`<loc>${origin}/about</loc>`));
   assert.match(xml, /\/compare\/project-room-vs-slack/);
   assert.equal(xml.includes("/compare</loc>"), false);
   // No hub page and no sitemap entry; a bare /compare 301s to a real

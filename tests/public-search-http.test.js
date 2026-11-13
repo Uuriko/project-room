@@ -9,6 +9,10 @@ import { publicSearchAssets, publicSearchSitemap, publicBuildLastmod, PUBLIC_PAG
 import { publicAssetPaths } from "../server/public-assets.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+// These assertions describe the authored, hosted shape of each document. A
+// loopback server advertises its own origin (server/advertised-origin.mjs), so
+// map that origin back to the hosted one before matching.
+const unadvertise = (text, origin) => String(text).split(origin).join("https://room.trydemigod.com");
 
 async function serve(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-public-search-"));
@@ -58,7 +62,7 @@ test("public doors are indexable while credentials and unknown pages keep privat
   assert.match(about.headers.get("content-security-policy"), /style-src 'unsafe-inline'/);
   assert.doesNotMatch(about.headers.get("content-security-policy"), /script-src[^;]*'self'/);
   assert.doesNotMatch(about.headers.get("content-security-policy"), /connect-src[^;]*'self'/);
-  assert.match(await about.text(), /rel="canonical" href="https:\/\/room.trydemigod.com\/about"/);
+  assert.match(unadvertise(await about.text(), origin), /rel="canonical" href="https:\/\/room.trydemigod.com\/about"/);
   const head = await fetch(origin + "/about", { method: "HEAD" });
   assert.equal(head.status, 200); assert.equal(head.headers.get("x-robots-tag"), "all"); assert.equal(await head.text(), "");
   const alias = await fetch(origin + "/about.html", { redirect: "manual" });
@@ -81,9 +85,9 @@ test("public doors are indexable while credentials and unknown pages keep privat
     assert.equal(page.status, 200, canonical);
     assertPublicPolicy(page, origin);
     assert.equal(page.headers.get("x-robots-tag"), "all", canonical);
-    const html = await page.text();
+    const html = unadvertise(await page.text(), origin);
     assert.match(html, new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
-    assert.match(page.headers.get("link") ?? "", new RegExp(`<https://room\\.trydemigod\\.com${canonical}>; rel="canonical"`));
+    assert.match(unadvertise(page.headers.get("link") ?? "", origin), new RegExp(`<https://room\\.trydemigod\\.com${canonical}>; rel="canonical"`));
     for (const block of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
     assert.match(html, /"@type":"FAQPage"/);
   }
@@ -120,7 +124,7 @@ test("public doors are indexable while credentials and unknown pages keep privat
   assert.equal((await fetch(origin + "/room/offers")).status, 404);
   const map = await fetch(origin + "/sitemap.xml");
   assert.equal(map.status, 200); assert.equal(map.headers.get("x-robots-tag"), "all");
-  const xml = await map.text();
+  const xml = unadvertise(await map.text(), origin);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.match(xml, /https:\/\/room.trydemigod.com\/about/); assert.match(xml, /\/receipts/);
@@ -132,7 +136,7 @@ test("public doors are indexable while credentials and unknown pages keep privat
     assert.match(xml, new RegExp(`/compare/${slug}</loc>`));
   }
   assert.doesNotMatch(xml, /\/join|\/api|token/);
-  assert.match(await (await fetch(origin + "/robots.txt")).text(), /Sitemap: https:\/\/room.trydemigod.com\/sitemap.xml/);
+  assert.match(unadvertise(await (await fetch(origin + "/robots.txt")).text(), origin), /Sitemap: https:\/\/room.trydemigod.com\/sitemap.xml/);
 });
 
 test("sitemap lastmod derives from real entry dates and the build stamp, never a frozen constant", () => {
@@ -252,13 +256,13 @@ test("sitemap probes independent assets concurrently and excludes a failed asset
   await new Promise(setImmediate);
   const started = probes.length;
   release();
-  const xml = await (await response).text();
+  const xml = unadvertise(await (await response).text(), origin);
   assert.equal(started, candidates.length, 'one pending asset must not serialize all other probes');
   assert.deepEqual(probes, candidates.map(([, file]) => file), 'each reviewed asset is probed once in catalog order');
   assert.doesNotMatch(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   missing = 'offers.html';
-  const changed = await (await fetch(origin + '/sitemap.xml')).text();
+  const changed = unadvertise(await (await fetch(origin + '/sitemap.xml')).text(), origin);
   assert.match(changed, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.doesNotMatch(changed, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
 });
@@ -273,11 +277,11 @@ test("default public loader serves the same package bytes it advertises and does
   const retained = await fetch(origin + '/about');
   assert.equal(retained.status, 200);
   assert.equal(await retained.text(), 'available package bytes', 'advertised cached bytes remain actually serveable');
-  const first = await (await fetch(origin + '/sitemap.xml')).text();
+  const first = unadvertise(await (await fetch(origin + '/sitemap.xml')).text(), origin);
   assert.match(first, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.doesNotMatch(first, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   writeFileSync(join(directory, 'offers.html'), 'newly available package bytes');
-  const later = await (await fetch(origin + '/sitemap.xml')).text();
+  const later = unadvertise(await (await fetch(origin + '/sitemap.xml')).text(), origin);
   assert.match(later, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.equal(await (await fetch(origin + '/offers')).text(), 'newly available package bytes');
 });
