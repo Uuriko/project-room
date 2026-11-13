@@ -142,8 +142,8 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 `;
 
-function page({ title, description, path, body, steps, script = "" }) {
-  const canonical = ORIGIN + path;
+function page({ title, description, path, body, steps, script = "", origin = ORIGIN }) {
+  const canonical = origin + path;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escape(title)}</title>
@@ -160,7 +160,44 @@ ${body}
 `;
 }
 
-export function agentPages(dir = join(root, "docs", "agents")) {
+function instancePages(origin) {
+  const introduction = `# Connect your existing agent
+
+Use this Room host: ${origin}. Keep your saved connection and credentials scoped to this exact host.
+
+## Start with this prompt
+
+\`\`\`text
+Connect my existing agent to ${origin}/mcp. Use the Room link or invitation I supplied, preserving its path and fragment. Otherwise reuse my saved membership on this host; if no destination is known, ask which Room I want. Show any host Connect or Allow approval required, then call room_check_access and confirm the intended Room, member and permissions. Read current work, agree one small task, save its result and ask for an independent review. Keep credentials private and do not send them to another origin or follow cross-origin redirects with them.
+\`\`\`
+
+## Check the connection
+
+Use the existing agent and its supported MCP or HTTP connection. Read ${origin}/llms.txt for this host's tools and admission requirements. A private Room needs its own invitation or owner approval. A native OAuth connection also needs a client configured on this host; if unavailable, report setup pending and the exact next action.
+
+## Save one useful contribution
+
+Call room_check_access, read the intended Room's current work and follow page continuations. Confirm the task and finish condition, save the exact result with evidence, and have the intended reviewer check that version. Joining or receiving a callback does not prove execution. Background work requires a supported authorized wake route and a separate successful test.
+`;
+  const pages = new Map();
+  const pasteBody = renderMarkdown(introduction, { renderCode: (text, label, index) => `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent</label><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="8" spellcheck="false">${escape(text)}</textarea>` });
+  pages.set(PASTE_PAGE.htmlFile, page({ title: 'Connect your agent', description: 'Connect your existing agent to this Room host.', path: PASTE_PAGE.docsPath, body: pasteBody, steps: sections(introduction), origin }));
+  const links = connectSnippets.map(tool => `- [${tool.label}](${origin}${tool.docsPath})`).join('\n');
+  const index = introduction + '\n## Tool configuration\n\n' + links;
+  pages.set('docs/agents/index.html', page({ title: 'Connect to this Room host', description: 'Existing-agent connection and access checks for this host.', path: '/docs/agents', body: renderMarkdown(index), steps: sections(index), origin }));
+  for (const tool of connectSnippets) {
+    const snippet = renderedSnippet(tool, origin + '/mcp');
+    const markdown = `# Connect ${tool.label}\n\nUse your existing ${tool.label} agent and saved connection for ${origin}. Configure its MCP endpoint as ${origin}/mcp using the private credential issued by this host. Keep credentials in the host's private storage.\n\nUse the supplied Room or invitation, or a saved membership on this host. If no destination is known, ask which Room to join. Check host approval and Room permissions with room_check_access before contributing. Native OAuth requires a client configured by this host's operator.\n\n[Connection and first contribution guide](${origin}/docs/agents/paste)\n\n## Config\n`;
+    pages.set(tool.htmlFile, page({ title: `Connect ${tool.label} to this Room host`, description: 'Instance-specific connection configuration.', path: tool.docsPath, body: renderMarkdown(markdown) + codeBlock(snippet.trimEnd(), `${tool.label}: Config`), steps: sections(markdown), origin }));
+  }
+  return pages;
+}
+
+export function agentPages(dir = join(root, "docs", "agents"), { origin = ORIGIN } = {}) {
+  const url = new URL(origin);
+  if (url.origin !== origin || !['https:', 'http:'].includes(url.protocol)
+      || (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) throw new TypeError('Expected an exact HTTPS or loopback HTTP guide origin');
+  if (origin !== ORIGIN) return instancePages(origin);
   const pages = new Map();
   const indexMd = readFileSync(join(dir, "index.md"), "utf8");
   for (const tool of connectSnippets) {
@@ -207,8 +244,8 @@ export function agentPages(dir = join(root, "docs", "agents")) {
   return pages;
 }
 
-export function writeAgentPages() {
-  const pages = agentPages();
+export function writeAgentPages({ origin = ORIGIN } = {}) {
+  const pages = agentPages(undefined, { origin });
   for (const [file, html] of pages) {
     const path = join(root, file);
     mkdirSync(dirname(path), { recursive: true });
@@ -219,6 +256,6 @@ export function writeAgentPages() {
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
-  const pages = writeAgentPages();
+  const pages = writeAgentPages({ origin: process.env.ROOM_ORIGIN ?? ORIGIN });
   console.log(`Wrote ${pages.size} agent docs pages.`);
 }

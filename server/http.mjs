@@ -1,3 +1,5 @@
+import { agentPages } from '../scripts/build-agent-docs.mjs';
+import { instanceDiscoveryBody, instanceCardSignatureState } from './node-discovery-origin.mjs';
 import { connectFunnelEnabled, createConnectFunnel } from "./connect-funnel.mjs";
 import {createAccountAgentEnrollment} from './account-agent-enrollment.mjs';
 import { writeStoreRoute } from "./store-pages.mjs";
@@ -59,7 +61,7 @@ import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventRows, redactMessageTree } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
+import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
@@ -429,7 +431,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // mailer warning below follows the same once-per-process rule). The
   // Worker entry's card is additionally covered at build time by
   // scripts/sign-agent-card.mjs, which fails closed without the key.
-  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: agentCardSignatureState() });
+  let renderedAgentPages;
+  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: instanceCardSignatureState(origin) });
   for (const warning of bootConfigWarnings) warnBootConfigOnce(warning);
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
@@ -2207,7 +2210,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const packet = discoveryDoc("/llms.txt");
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks(url));
-        const packetBytes = Buffer.from(packet.body);
+        const packetBytes = Buffer.from(instanceDiscoveryBody(packet, origin));
         res.writeHead(200, { "Content-Type": packet.type, "Content-Length": packetBytes.length });
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
       }
@@ -2226,7 +2229,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
           for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
         }
-        let docBody = discovery.body;
+        let docBody = instanceDiscoveryBody(discovery, origin);
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy
         // asset carries the base catalog; the node server injects the live
@@ -2679,7 +2682,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const [path, type] = assets.get(url.pathname);
         let data = null;
         try {
-          data = await loadAsset(path);
+          if (path.startsWith('docs/agents/') && generatedAgentPages.includes(path)) {
+            renderedAgentPages ??= agentPages(undefined, { origin: origin ?? ROOM_ORIGIN });
+            data = Buffer.from(renderedAgentPages.get(path));
+          } else data = await loadAsset(path);
         } catch (error) {
           // Decision #36 (#3254, Option A): the generated agent pages are
           // build output an exact-commit package deliberately does not
@@ -2690,7 +2696,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
-        if(canonical==='/docs/agents/paste'&&url.searchParams.get('room')==='project-room-lobby')data=Buffer.from(renderLobbyAgentPastePage(data.toString('utf8')));
+        if((origin===undefined||origin===ROOM_ORIGIN)&&canonical==='/docs/agents/paste'&&url.searchParams.get('room')==='project-room-lobby')data=Buffer.from(renderLobbyAgentPastePage(data.toString('utf8')));
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
         if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicSearchPageCsp(canonical, expectedOrigin()));
         // JDOT-PUBLIC-CSP-RUM end
