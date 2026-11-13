@@ -5317,6 +5317,7 @@ document.addEventListener("keydown", event => {
     clearTimeout(attentionKeyTimer);
     if (key === "a") { event.preventDefault(); updatesUi?.open("all"); }
     else if (key === "l") { event.preventDefault(); openLater(); }
+    else if (key === "u") { event.preventDefault(); jumpToFirstUnread(); }
     return;
   }
   if (key === "g") {
@@ -5377,6 +5378,7 @@ function roomActionEntries() {
     { id: "pinned-search", label: "Pinned", words: "pins pinned search", target: "#search-pinned", activate: true, always: true },
     { id: "catch-up", label: "Catch up", words: "updates attention needs me reminders", always: true },
     { id: "activity", label: "Activity", words: "activity mentions replies feed unread", always: true },
+    { id: "first-unread", label: uiText("attention.firstUnread"), words: "unread new messages g u", always: true },
     { id: "later", label: "Saved for later", words: "later saved bookmarks read later", always: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", always: true },
     { id: "people", label: "People", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
@@ -5528,6 +5530,7 @@ function chooseRoomAction(id) {
   const entry = roomActionEntries().find(value => value.id === id);
   if (!entry) { renderRoomActions(); $("#room-actions-query").focus(); return; }
   closeRoomActions(false);
+  if (id === "first-unread") { jumpToFirstUnread(); return; }
   if (updatesUi.openAction(id)) return;
   if (id === "how-invite") {
     const button = $("#invite-people-button");
@@ -7340,6 +7343,17 @@ function horizonAnchorFor(messages, lastRead) {
   const index = messages.findIndex(m => m.id === lastRead);
   if (index < 0) return null; // the horizon message is not in this view
   return messages[index + 1]?.id ?? null;
+}
+function jumpToFirstUnread() {
+  if (!ownsRoomActions(null) || document.querySelector("dialog[open]")) return;
+  const target = $("#message-list .chat-divider.unread")?.closest("[data-message-record-id]");
+  if (!target) { notice(uiText("attention.noLoadedUnread")); return; }
+  // Navigation is not reading intent, including a scroll still in flight.
+  readerScrollAt = -Infinity;
+  clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
+  timelinePin.clear();
+  target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: "start", behavior: "instant" });
 }
 async function refreshSavedIds() {
   if (!state || !session || savedIdsBusy) return;
