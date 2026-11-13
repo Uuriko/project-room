@@ -640,6 +640,21 @@ export function storeDatabaseBytes(db) {
   return null;
 }
 
+// Staged rows one pre-guard sweep may delete. The sweep runs inside a single
+// synchronous transaction before the size guard, so its work must have a bound:
+// 16 rows is at most 16 x BACKUP_EXPORT_PART_BYTES (64 MiB) of blobs and 16
+// written rows. A store inflated by more orphans than that drains over
+// successive backup attempts (each refused attempt still removes up to the cap),
+// instead of one attempt doing unbounded delete work at the moment it is refused.
+export const PRE_GUARD_SWEEP_MAX_ROWS = 16;
+
+function sweepStaleExportPartsBounded(db, maxRows) {
+  const active = [...(activeExportIdsByDb.get(db) ?? [])];
+  const skip = active.length ? `WHERE export_id NOT IN (${active.map(() => "?").join(",")})` : "";
+  const result = db.prepare(`DELETE FROM "${BACKUP_EXPORT_PARTS_TABLE}" WHERE rowid IN (SELECT rowid FROM "${BACKUP_EXPORT_PARTS_TABLE}" ${skip} LIMIT ?)`).run(...active, maxRows);
+  return Number(result?.changes ?? 0);
+}
+
 // Reclaim staged exports nobody is streaming. materializeExportParts sweeps
 // them too, but only after the size guard below has let the export start, and
 // the guard measures the staging table itself: orphaned staging inflated the
@@ -647,19 +662,22 @@ export function storeDatabaseBytes(db) {
 // the sweep that would have brought the store back under it. Sweeping first
 // breaks that loop. A no-op when no staging table exists. Exports streaming in
 // this isolate are kept (activeExportIds), exactly as in the materialize sweep.
-export function sweepOrphanedExportParts(store) {
+// Bounded to maxRows deleted rows per call (see PRE_GUARD_SWEEP_MAX_ROWS);
+// returns how many rows it deleted.
+export function sweepOrphanedExportParts(store, { maxRows = PRE_GUARD_SWEEP_MAX_ROWS } = {}) {
+  if (!Number.isSafeInteger(maxRows) || maxRows < 1) return 0;
   try {
     const exists = store.db.prepare("SELECT 1 AS n FROM sqlite_master WHERE type='table' AND name=?").get(BACKUP_EXPORT_PARTS_TABLE);
-    if (!exists?.n) return;
+    if (!exists?.n) return 0;
     const orphaned = store.db.prepare(`SELECT 1 AS n FROM "${BACKUP_EXPORT_PARTS_TABLE}" LIMIT 1`).get();
-    if (!orphaned?.n) return;
-    store.transaction(() => sweepStaleExportParts(store.db, null));
-  } catch { /* best effort: the size guard below still decides, and materialize sweeps again */ }
+    if (!orphaned?.n) return 0;
+    return store.transaction(() => sweepStaleExportPartsBounded(store.db, maxRows)) ?? 0;
+  } catch { return 0; /* best effort: the size guard below still decides, and materialize sweeps again */ }
 }
 
 export function exportNdjsonConsistentStream(store, options) {
   const maxBytes = options?.maxSnapshotBytes ?? BACKUP_SNAPSHOT_MAX_BYTES;
-  sweepOrphanedExportParts(store);
+  sweepOrphanedExportParts(store, { maxRows: options?.sweepMaxRows ?? PRE_GUARD_SWEEP_MAX_ROWS });
   const databaseBytes = storeDatabaseBytes(store.db);
   // Fail closed: a size we cannot measure is not a size of zero.
   if (databaseBytes === null) throw new Error(BACKUP_SNAPSHOT_SIZE_UNKNOWN);

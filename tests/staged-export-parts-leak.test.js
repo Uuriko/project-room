@@ -11,7 +11,9 @@
 //    and storeDatabaseBytes counted the staging table itself (and free pages left
 //    by earlier deletes). A store inflated by orphaned staging therefore tripped the
 //    guard, which prevented the sweep that would have shrunk it.
-// Every test here fails on origin/main (5844f827) and passes with the fix.
+// On origin/main (5844f827) the first two tests below fail (mid-stream leak; sweep-before-guard);
+// the others pin behaviour that must not change (refusal before staging, an active stream's rows kept)
+// or the new bound on the pre-guard sweep (they need the fix to exist). All pass with the fix.
 // All stores are disposable temp stores; nothing here touches live data.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -22,7 +24,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import {
   exportNdjsonConsistentStream, storeDatabaseBytes,
-  BACKUP_EXPORT_PARTS_TABLE, BACKUP_SNAPSHOT_TOO_LARGE
+  BACKUP_EXPORT_PARTS_TABLE, BACKUP_SNAPSHOT_TOO_LARGE, PRE_GUARD_SWEEP_MAX_ROWS, sweepOrphanedExportParts
 } from "../server/room-export.mjs";
 import { writeKvBackup } from "../cloudflare/room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -105,5 +107,64 @@ test("an export that is still streaming keeps its parts while a second export sw
   assert.equal(stagedStats(store).exports, 2, "the live export is not swept as an orphan");
   await new Response(second).text();
   for (;;) { const { done } = await reader.read(); if (done) break; }
+  assert.deepEqual(stagedStats(store), { rows: 0, exports: 0, bytes: 0 });
+});
+
+function plantOrphans(store, exports, partsPerExport, partBytes = 64 * 1024) {
+  store.db.prepare(`CREATE TABLE IF NOT EXISTS "${BACKUP_EXPORT_PARTS_TABLE}" (export_id TEXT NOT NULL DEFAULT '', part_index INTEGER NOT NULL, bytes BLOB NOT NULL, PRIMARY KEY (export_id, part_index))`).run();
+  for (let e = 0; e < exports; e += 1) {
+    for (let part = 0; part < partsPerExport; part += 1) store.db.prepare(`INSERT INTO "${BACKUP_EXPORT_PARTS_TABLE}" (export_id, part_index, bytes) VALUES (?, ?, ?)`).run(`orphan-${e}`, part, new Uint8Array(partBytes));
+  }
+}
+
+test("the pre-guard sweep is bounded per call, drains over calls, and never touches an active stream's rows", async t => {
+  const store = openStore(t, 4, 400);
+  assert.equal(PRE_GUARD_SWEEP_MAX_ROWS, 16);
+  plantOrphans(store, 5, 8); // 40 orphaned rows
+  assert.equal(stagedStats(store).rows, 40);
+  const deleted = [];
+  for (let call = 0; call < 6 && stagedStats(store).rows > 0; call += 1) {
+    deleted.push(sweepOrphanedExportParts(store, { maxRows: 16 }));
+    assert.ok(deleted.at(-1) <= 16, `call ${call} deleted ${deleted.at(-1)} rows, over the cap`);
+  }
+  assert.deepEqual(deleted, [16, 16, 8], "40 orphaned rows drain as 16 + 16 + 8");
+  assert.deepEqual(stagedStats(store), { rows: 0, exports: 0, bytes: 0 });
+  // An export streaming in this isolate keeps every row even when the cap exceeds the orphan count.
+  const live = exportNdjsonConsistentStream(store, { partBytes: 200 });
+  const reader = live.getReader();
+  await reader.read();
+  const liveRows = stagedStats(store).rows;
+  assert.ok(liveRows >= 2);
+  plantOrphans(store, 2, 3);
+  assert.equal(sweepOrphanedExportParts(store, { maxRows: 1000 }), 6, "only the 6 orphan rows go");
+  assert.equal(stagedStats(store).rows, liveRows, "the active export's rows are untouched");
+  for (;;) { const { done } = await reader.read(); if (done) break; }
+  assert.deepEqual(stagedStats(store), { rows: 0, exports: 0, bytes: 0 });
+  // Degenerate caps do nothing.
+  plantOrphans(store, 1, 2);
+  assert.equal(sweepOrphanedExportParts(store, { maxRows: 0 }), 0);
+  assert.equal(stagedStats(store).rows, 2);
+});
+
+test("a refused oversized export still removes at most the cap per attempt, and a later attempt succeeds once drained", async t => {
+  const store = openStore(t, 4, 400);
+  const liveBytes = storeDatabaseBytes(store.db);
+  plantOrphans(store, 4, 6, 512 * 1024); // 24 rows, ~12 MiB staged
+  const maxSnapshotBytes = liveBytes + 1024 * 1024;
+  const rowsAfter = [];
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const rowsBefore = stagedStats(store).rows;
+    try {
+      const text = await new Response(exportNdjsonConsistentStream(store, { maxSnapshotBytes, sweepMaxRows: 10 })).text();
+      assert.match(text, /"kind":"trailer"/);
+      rowsAfter.push("exported");
+      break;
+    } catch (error) {
+      assert.match(String(error.message), new RegExp(BACKUP_SNAPSHOT_TOO_LARGE));
+      assert.ok(rowsBefore - stagedStats(store).rows <= 10, "a refused attempt deletes at most the cap");
+      rowsAfter.push(stagedStats(store).rows);
+    }
+  }
+  assert.deepEqual(rowsAfter, [14, 4, "exported"], "24 rows: refused at 14 left, refused at 4 left, third attempt drains and exports");
   assert.deepEqual(stagedStats(store), { rows: 0, exports: 0, bytes: 0 });
 });
