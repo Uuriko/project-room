@@ -54,6 +54,13 @@ Only127.0.0.1 or a currently assigned100.64.0.0/10 Tailscale address is accepted
 no fallback to all interfaces is permitted. The installer refuses existing
 installation paths and LaunchAgent labels rather than overwriting them.
 
+To qualify launchd before network exposure, first activate with
+`--bind 127.0.0.1 --hostname localhost`. After approval of the concrete tailnet
+exposure, repeat the intended tailnet plan with `--retarget`, then add
+`--activate` to change only this installer's own config and restart its service.
+Retargeting preserves the ledger and Keychain item and validates the existing
+plist and database/checkout paths. Never retarget a different Room service.
+
 ## Credentials and startup
 
 Activation creates or reuses one dedicated login-Keychain generic password:
