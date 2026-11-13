@@ -35,7 +35,7 @@ class DeadlineTests(unittest.TestCase):
                 time.sleep(.2)
                 return {}
             try:
-                with patch.object(server, 'REQUEST_LIFETIME_SECONDS', .08), patch.object(service, 'status', slow_status):
+                with patch.object(server, 'REQUEST_BUDGET_SECONDS', .08), patch.object(service, 'status', slow_status):
                     connection = http.client.HTTPConnection('127.0.0.1', service.server_address[1], timeout=2)
                     body = [{'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'status'}}, {'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'post','arguments':{'room':'release','text':'must not dispatch','requestId':'late-batch'}}}]
                     connection.request('POST','/mcp',json.dumps(body),{'Content-Type':'application/json','Authorization':'Bearer synthetic-deadline-bearer-00000000000000'})

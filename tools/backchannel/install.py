@@ -101,7 +101,7 @@ def main():
                           "bind": args.bind, "label": LABEL, "availability": "after user login and Keychain unlock",
                           "credentials": "dedicated login-Keychain item; no value in configuration",
                           "limits": {"concurrentConnections": 8, "idleSeconds": 5,
-                                     "requestLifetimeSeconds": 15, "bodyBytes": 65536, "readPageMaximum": 100}}, indent=2))
+                                     "headerReceiveSeconds": 3, "requestBudgetSeconds": 15, "bodyBytes": 65536, "readPageMaximum": 100}}, indent=2))
         return
     if args.retarget:
         retarget_config(base, plist, expected, plan)

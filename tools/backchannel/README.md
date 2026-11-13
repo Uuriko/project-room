@@ -32,12 +32,13 @@ cursor and acknowledgment metadata. SQLite uses WAL, FULL synchronous mode,
 foreign keys and an owner-private file. Never point this at an existing Room DB.
 Replay later must be explicit; existing Room data and identities stay intact.
 
-Limits:8 simultaneous connections,5-second idle socket timeout,15-second total
-request lifetime,64KiB HTTP body,16KiB message text,100 messages per read and20
+Limits:8 simultaneous connections,3-second absolute header-receive deadline,
+5-second idle socket timeout,15-second transport/cooperative tool budget,64KiB HTTP body,16KiB message text,100 messages per read and20
 requests per legacy JSON-RPC batch. Full connections are closed when saturated.
 Host and Origin validation precede tool dispatch. Authentication is required even
-for discovery, initialization, GET and status. Bodies and bearer headers are not
-logged. A suspended/sleeping Mac cannot serve requests.
+for valid MCP requests, including discovery, initialization, GET, HEAD, OPTIONS
+and status. Malformed HTTP syntax can receive a generic pre-auth refusal without
+server/runtime version headers. Bodies and bearer headers are not logged. A suspended/sleeping Mac cannot serve requests.
 
 ## Test and plan
 
@@ -113,3 +114,29 @@ and requests recovery only after another identity check; readiness remains
 unverified until an authenticated smoke check. No token or ledger is replaced.
 Physical reboot remains UNVERIFIED; availability requires login, accessible
 Keychain and an awake Mac. Source qualification does not update the live service.
+
+
+Header parsing must finish within3seconds even if bytes keep arriving. This
+reduces unauthenticated header-slot holding; a tailnet peer flooding new sockets
+can still deny service. It is not a per-peer fairness or availability guarantee.
+The15second transport/cooperative budget is separate from the header cutoff and
+is not a hard cancellation guarantee for filesystem sync or committed work.
+
+The login-Keychain item isolates the credential from repo/config/log files;
+it does not isolate arbitrary programs run as the same macOS user. The item's
+access controls may trust the system Python interpreter rather than this script.
+Treat same-user processes as trusted; the source does not claim script-exclusive
+Keychain custody. Native tests only read the existing item or intentionally
+nonexistent item/keychain paths; they never call ensure or create credentials.
+
+
+Optional macOS read-only Keychain checks, only on the operator Mac with the
+existing item already present:
+
+```sh
+ROOM_BACKCHANNEL_NATIVE_KEYCHAIN_TEST=1 /usr/bin/python3 -m unittest discover -s tools/backchannel -p 'test_*.py' -v
+```
+
+Without that opt-in (and on Linux), the three native Keychain checks are
+explicitly skipped, not passed. No check creates an item or changes Keychain
+access controls. The suite does not simulate an actual locked login Keychain.

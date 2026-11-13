@@ -19,7 +19,8 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 AUTHOR = "shared-bearer"
-REQUEST_LIFETIME_SECONDS = 15
+REQUEST_BUDGET_SECONDS = 15
+HEADER_RECEIVE_SECONDS = 3
 VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"]
 
 
@@ -259,16 +260,45 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle(self):
         # Transport deadline plus cooperative tool admission/SQLite/subprocess budgets.
-        self.deadline = time.monotonic() + REQUEST_LIFETIME_SECONDS
-        deadline = threading.Timer(REQUEST_LIFETIME_SECONDS, self.expire)
+        self.deadline = time.monotonic() + REQUEST_BUDGET_SECONDS
+        deadline = threading.Timer(REQUEST_BUDGET_SECONDS, self.expire)
         deadline.daemon = True
         deadline.start()
+        self.header_deadline = time.monotonic() + HEADER_RECEIVE_SECONDS
+        self.header_timer = threading.Timer(HEADER_RECEIVE_SECONDS, self.expire)
+        self.header_timer.daemon = True
+        self.header_timer.start()
         try:
             super().handle()
         except (BrokenPipeError, ConnectionResetError, socket.timeout):
             pass
         finally:
             deadline.cancel()
+            self.header_timer.cancel()
+
+    def parse_request(self):
+        parsed = super().parse_request()
+        if time.monotonic() >= self.header_deadline:
+            return False
+        if parsed:
+            self.header_timer.cancel()
+        return parsed
+
+    def send_response(self, code, message=None):
+        # No framework/runtime version fingerprint, including pre-auth responses.
+        self.send_response_only(code, message)
+        self.send_header("Date", self.date_time_string())
+
+    def send_error(self, code, message=None, explain=None):
+        if getattr(self, "request_version", "HTTP/0.9") == "HTTP/0.9":
+            self.request_version = "HTTP/1.0"
+        # Malformed request syntax has no usable auth envelope; return generic JSON.
+        # Valid but unsupported methods still pass bearer/Host/Origin admission.
+        if code == 501 and hasattr(self, "headers"):
+            if self.admit():
+                self.reply(405, {"error": "Method refused"})
+            return
+        self.reply(code, {"error": "Request refused"})
 
     def expire(self):
         try:
@@ -291,7 +321,8 @@ class Handler(BaseHTTPRequestHandler):
         if status == 405: self.send_header("Allow", "POST")
         if status == 401: self.send_header("WWW-Authenticate", 'Bearer realm="room-backup"')
         self.end_headers()
-        self.wfile.write(data)
+        if getattr(self, "command", None) != "HEAD":
+            self.wfile.write(data)
 
     def admit(self):
         authorization = self.headers.get("Authorization", "").encode("utf-8")
@@ -310,6 +341,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.admit(): self.reply(405)
 
     do_DELETE = do_GET
+    do_HEAD = do_GET
+    do_OPTIONS = do_GET
 
     def do_POST(self):
         if not self.admit(): return
@@ -324,7 +357,7 @@ class Handler(BaseHTTPRequestHandler):
         self.connection.settimeout(10)
         try:
             request = json.loads(self.rfile.read(length))
-        except (ValueError, OSError):
+        except (ValueError, OSError, RecursionError):
             self.reply(400, {"error": "Invalid JSON"}); return
         if isinstance(request, list):
             if not 1 <= len(request) <= 20:
