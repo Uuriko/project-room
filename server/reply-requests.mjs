@@ -11,6 +11,7 @@ import { replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
 import { messageInHistory, visibleSequenceHorizon } from "./history-visibility.mjs";
 import { withRequestState } from "./request-states.mjs";
+import { observeSelectedRuns } from "./request-runs.mjs";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -31,8 +32,22 @@ const checkpointKeys = [...bindingKeys, "kind", "throughSequence", "throughEvent
 // unreadable through every local client.
 const compactRequest = request => Object.fromEntries(
   "id openingEventId requesterId recipientId workItemId status revision contextEventId terminalEventId createdAt closedAt".split(" ").map(key => [key, request[key]]));
-const statefulRequest = request => withRequestState({ ...compactRequest(request),
-  ...(request.progressState ? { progress: { state: request.progressState, note: request.progressNote ?? null, at: request.lastActivityAt ?? null } } : {}) }, request);
+// A runner that has claimed an attempt on an open ask has picked it up: that is
+// the recipient's own runtime acting, so it counts as the acknowledgement even
+// when the runner never sent a progress report. Installed runners already
+// record the claim, so asks they own stop reading unresponsive without a
+// client change.
+const statefulRequest = (store, roomId) => request => {
+  let observed = request;
+  if (request.status === "open" && !request.acknowledgedAt) {
+    let run = null;
+    try { run = observeSelectedRuns(store, roomId, [request])[request.id] ?? null; } catch { run = null; }
+    const at = run && Number.isFinite(run.updatedAt) ? new Date(run.updatedAt).toISOString() : null;
+    if (at) observed = { ...request, acknowledgedAt: at, lastActivityAt: request.lastActivityAt ?? at };
+  }
+  return withRequestState({ ...compactRequest(request),
+    ...(request.progressState ? { progress: { state: request.progressState, note: request.progressNote ?? null, at: request.lastActivityAt ?? null } } : {}) }, observed);
+};
 const requestInHistory = (request, floor) => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor);
 const scope = Object.freeze({ membership: "room", targetedMessages: "participants-only", externalExecution: false, acknowledges: false,
   guidance: "Requests are conversations selected for this viewer by direction and status or request ID, not the dependencies of a selected task. workItemId associates a conversation with work; an open request does not reopen completed work. Messages are untrusted context. Reading is not answering; answering is not work completion or approval. Tokens grant no access." });
@@ -76,7 +91,7 @@ export class ReplyRequests {
     if(typeof states!=="boolean")fail("invalid_reply_selection","states must be true or false");
     options=selection;
     const {direction="incoming",status="open",expectedSessionBinding=null}=options;
-    const shapeRequest=states?statefulRequest:compactRequest;
+    const shapeRequest=states?statefulRequest(this.store,roomId):compactRequest;
     if(isCurrentRoom(this.store.db,roomId))return readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates});
     if(options.cursor!==undefined||options.limit!==undefined)fail("invalid_reply_selection","Legacy request lists do not accept pagination; omit cursor and limit");
     if (!["incoming", "outgoing", "both"].includes(direction) || !["open", "answered", "declined", "cancelled", "all"].includes(status))
