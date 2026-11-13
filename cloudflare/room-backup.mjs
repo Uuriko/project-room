@@ -110,13 +110,21 @@ async function* byteChunks(body) {
   if (typeof body === "string") { yield new TextEncoder().encode(body); return; }
   if (body instanceof Uint8Array) { yield body; return; }
   const reader = body.getReader();
+  let finished = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) return;
+      if (done) { finished = true; return; }
       yield typeof value === "string" ? new TextEncoder().encode(value) : value;
     }
-  } finally { reader.releaseLock?.(); }
+  } finally {
+    // Leaving early (a failed part write, a verification refusal, a read
+    // error) must cancel the stream, not just release the lock: a staged
+    // export clears its Durable Object staging rows in its cancel(), and
+    // releasing the lock alone left them behind for good.
+    if (!finished) { try { await reader.cancel(); } catch { /* the stream is already unusable */ } }
+    reader.releaseLock?.();
+  }
 }
 
 // Write-time torn-export detection. The stream's first line is the watermark

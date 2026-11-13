@@ -628,15 +628,38 @@ export function storeDatabaseBytes(db) {
     const count = Number(db.prepare("PRAGMA page_count").get()?.page_count);
     const size = Number(db.prepare("PRAGMA page_size").get()?.page_size);
     if (Number.isSafeInteger(count) && count >= 0 && Number.isSafeInteger(size) && size > 0) {
-      const bytes = count * size;
+      // Free pages left by deletes (a swept staging table) are reusable and
+      // hold no data: the snapshot bound is about live bytes, and the file
+      // does not shrink after DELETE without a VACUUM.
+      let free = Number(db.prepare("PRAGMA freelist_count").get()?.freelist_count);
+      if (!Number.isSafeInteger(free) || free < 0 || free > count) free = 0;
+      const bytes = (count - free) * size;
       if (Number.isSafeInteger(bytes)) return bytes;
     }
   } catch { /* unknown size: reported as null below */ }
   return null;
 }
 
+// Reclaim staged exports nobody is streaming. materializeExportParts sweeps
+// them too, but only after the size guard below has let the export start, and
+// the guard measures the staging table itself: orphaned staging inflated the
+// store past the cap, the cap refused the export, and the refusal prevented
+// the sweep that would have brought the store back under it. Sweeping first
+// breaks that loop. A no-op when no staging table exists. Exports streaming in
+// this isolate are kept (activeExportIds), exactly as in the materialize sweep.
+export function sweepOrphanedExportParts(store) {
+  try {
+    const exists = store.db.prepare("SELECT 1 AS n FROM sqlite_master WHERE type='table' AND name=?").get(BACKUP_EXPORT_PARTS_TABLE);
+    if (!exists?.n) return;
+    const orphaned = store.db.prepare(`SELECT 1 AS n FROM "${BACKUP_EXPORT_PARTS_TABLE}" LIMIT 1`).get();
+    if (!orphaned?.n) return;
+    store.transaction(() => sweepStaleExportParts(store.db, null));
+  } catch { /* best effort: the size guard below still decides, and materialize sweeps again */ }
+}
+
 export function exportNdjsonConsistentStream(store, options) {
   const maxBytes = options?.maxSnapshotBytes ?? BACKUP_SNAPSHOT_MAX_BYTES;
+  sweepOrphanedExportParts(store);
   const databaseBytes = storeDatabaseBytes(store.db);
   // Fail closed: a size we cannot measure is not a size of zero.
   if (databaseBytes === null) throw new Error(BACKUP_SNAPSHOT_SIZE_UNKNOWN);
