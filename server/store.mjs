@@ -7392,6 +7392,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (error?.code === TRUST_OFF_CODE) fail(403, TRUST_OFF_CODE, error.message);
         if (error?.code === CHANNEL_ARCHIVED_CODE) fail(409, CHANNEL_ARCHIVED_CODE, error.message);
         if (error?.code === "display_name_unavailable") fail(422, "display_name_unavailable", error.message);
+        // B1 claim door: a second seat's work.accepted is refused here with
+        // the bare reducer message and no remedy — the caller cannot tell
+        // who CAN accept the work or what to do instead. Keep the 422 and
+        // the command_rejected code exactly as they are, but carry the
+        // remedy as error detail (merged onto the HTTP error envelope as a
+        // top-level `remedy` field by server/http.mjs, and surfaced as
+        // `detail` on the MCP failure shape). The accountable member id is
+        // read from the pre-command item state — the same state the guard
+        // checked — and is already visible to room members on the work read.
+        if (incoming.type === T.WORK_ACCEPTED && error.message === "Only the accountable member may accept work") {
+          const accountable = room.state.workItems?.[incoming.data.workItemId]?.accountableMemberId;
+          const refused = new ServiceError(422, "command_rejected", error.message);
+          refused.detail = { remedy: typeof accountable === "string" && accountable
+            ? `Only ${accountable}, the accountable member named on this work item, can accept it. Ask ${accountable} to accept the work, or ask a member with steer permission to propose new work naming you as accountableMemberId. Do not retry work.accepted as a different member — it will be refused again.`
+            : "Only the accountable member named on this work item can accept it. Read the work item for its accountableMemberId and ask that member to accept the work, or ask a member with steer permission to propose new work naming you as accountableMemberId. Do not retry work.accepted as a different member — it will be refused again." };
+          throw refused;
+        }
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
         if (command.type === T.POLL_VOTED && (/^Event data missing /.test(error.message) || error.message === "Invalid poll vote" || error.message === "Vote must reference a poll")) {
           fail(422, "invalid_arguments", error.message);
