@@ -462,6 +462,20 @@ const ROWS = [
     }
   },
   {
+    "table": "room_signal_log",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "target_id"
+      ]
+    }
+  },
+  {
     "table": "bounty_disputes",
     "key": "room_id",
     "action": "delete",
