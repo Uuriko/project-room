@@ -9,9 +9,10 @@ import { publicSearchAssets, publicSearchSitemap, publicBuildLastmod, PUBLIC_PAG
 import { publicAssetPaths } from "../server/public-assets.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-// These assertions describe the authored, hosted shape of each document. A
-// loopback server advertises its own origin (server/advertised-origin.mjs), so
-// map that origin back to the hosted one before matching.
+// These assertions describe the authored, hosted shape of each public page,
+// canonical Link header and the sitemap. A loopback server advertises its own
+// origin for those (server/advertised-origin.mjs), so map that origin back to
+// the hosted one before matching. Discovery documents are not rewritten here.
 const unadvertise = (text, origin) => String(text).split(origin).join("https://room.trydemigod.com");
 
 async function serve(t, options = {}) {
@@ -136,7 +137,7 @@ test("public doors are indexable while credentials and unknown pages keep privat
     assert.match(xml, new RegExp(`/compare/${slug}</loc>`));
   }
   assert.doesNotMatch(xml, /\/join|\/api|token/);
-  assert.match(unadvertise(await (await fetch(origin + "/robots.txt")).text(), origin), /Sitemap: https:\/\/room.trydemigod.com\/sitemap.xml/);
+  assert.match(await (await fetch(origin + "/robots.txt")).text(), /Sitemap: https:\/\/room.trydemigod.com\/sitemap.xml/);
 });
 
 test("sitemap lastmod derives from real entry dates and the build stamp, never a frozen constant", () => {
