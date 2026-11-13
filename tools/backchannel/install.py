@@ -5,12 +5,64 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
+import tempfile
 import shutil
 import subprocess
 
 from server import validate_bind
 
 LABEL = "com.projectroom.backup-mcp.v1"
+
+
+def verify_loaded_job(plist, expected):
+    target = "gui/%s/%s" % (os.getuid(), LABEL)
+    result = subprocess.run(["/bin/launchctl", "print", target], check=True,
+                            capture_output=True, text=True, timeout=5)
+    def field(name):
+        found = re.findall(r"(?m)^\t" + name + r" = ([^\n]*)$", result.stdout)
+        if len(found) != 1:
+            raise ValueError("Loaded service identity unavailable")
+        return found[0]
+    block = re.search(r"(?ms)^\targuments = \{\n(.*?)^\t\}", result.stdout)
+    arguments = [line.strip() for line in block[1].splitlines()] if block else []
+    if field("path") != str(plist) or field("program") != expected[0] or arguments != expected:
+        raise ValueError("Loaded service does not match this dedicated installation")
+    return target
+
+
+def atomic_config(path, content):
+    fd, temporary = tempfile.mkstemp(prefix="config-", suffix=".next", dir=str(path.parent))
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as file:
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, str(path))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def retarget_config(base, plist, expected, plan):
+    target = verify_loaded_job(plist, expected)
+    config = base / "config.json"
+    previous = config.read_bytes()
+    atomic_config(config, (json.dumps(plan, indent=2) + "\n").encode())
+    try:
+        subprocess.run(["/bin/launchctl", "kickstart", "-k", target], check=True,
+                       capture_output=True, timeout=10)
+    except Exception:
+        atomic_config(config, previous)
+        # Re-check ownership before requesting recovery; never kick an unrelated job.
+        try:
+            verify_loaded_job(plist, expected)
+            subprocess.run(["/bin/launchctl", "kickstart", "-k", target], check=True,
+                           capture_output=True, timeout=10)
+        except Exception:
+            raise RuntimeError("Retarget failed; previous config restored; service recovery unverified") from None
+        raise RuntimeError("Retarget failed; previous config restored; recovery requested, readiness unverified") from None
 
 
 def main():
@@ -43,6 +95,7 @@ def main():
         current = json.loads((base / "config.json").read_text())
         if installed.get("Label") != LABEL or installed.get("ProgramArguments") != expected or current.get("database") != plan["database"] or current.get("checkout") != plan["checkout"]:
             raise ValueError("Existing service does not match this dedicated installation")
+        verify_loaded_job(plist, expected)
     if not args.activate:
         print(json.dumps({"activated": False, "endpoint": "http://%s:%s/mcp" % (args.hostname.rstrip("."), args.port),
                           "bind": args.bind, "label": LABEL, "availability": "after user login and Keychain unlock",
@@ -51,13 +104,7 @@ def main():
                                      "requestLifetimeSeconds": 15, "bodyBytes": 65536, "readPageMaximum": 100}}, indent=2))
         return
     if args.retarget:
-        temporary = base / "config.next.json"
-        descriptor = os.open(str(temporary), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        with os.fdopen(descriptor, "w") as file:
-            file.write(json.dumps(plan, indent=2) + "\n")
-            file.flush(); os.fsync(file.fileno())
-        os.replace(str(temporary), str(base / "config.json"))
-        subprocess.run(["/bin/launchctl", "kickstart", "-k", "gui/%s/%s" % (os.getuid(), LABEL)], check=True)
+        retarget_config(base, plist, expected, plan)
         print("Dedicated bind configuration updated; verify authenticated smoke before announcing readiness.")
         return
     # This explicit activation boundary is intentionally separate from planning.

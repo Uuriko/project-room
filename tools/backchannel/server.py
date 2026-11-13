@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Stateless Streamable HTTP MCP for a shared, private outage backchannel."""
 import argparse
+from contextlib import contextmanager
 import datetime as dt
 import hmac
 import ipaddress
@@ -18,7 +19,17 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 AUTHOR = "shared-bearer"
+REQUEST_LIFETIME_SECONDS = 15
 VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"]
+
+
+def remaining(deadline, ceiling=5):
+    if deadline is None:
+        return ceiling
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise TimeoutError("Request deadline expired")
+    return min(left, ceiling)
 
 
 def stamp():
@@ -65,23 +76,31 @@ class Ledger:
                 PRAGMA application_id=0x50524243;
             """)
 
-    def connect(self):
-        db = sqlite3.connect(str(self.path), timeout=5)
+    @contextmanager
+    def connect(self, deadline=None):
+        db = sqlite3.connect(str(self.path), timeout=remaining(deadline))
         db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys=ON")
-        db.execute("PRAGMA synchronous=FULL")
-        return db
+        if deadline is not None:
+            db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+        try:
+            db.execute("PRAGMA foreign_keys=ON")
+            db.execute("PRAGMA synchronous=FULL")
+            with db:
+                yield db
+                remaining(deadline)  # Refuse commit if the cooperative budget expired.
+        finally:
+            db.close()
 
     @staticmethod
     def message(row):
         return {"seq": row["seq"], "id": row["id"], "room": row["room"],
                 "author": row["author"], "text": row["text"], "ts": row["ts"], "replyTo": row["reply_to"]}
 
-    def post(self, room, text, replyTo=None, requestId=None):
+    def post(self, room, text, replyTo=None, requestId=None, _deadline=None):
         string(room, 128, "room"); string(text, 16384, "text")
         if replyTo is not None: string(replyTo, 128, "replyTo")
         if requestId is not None: string(requestId, 128, "requestId")
-        with self.connect() as db:
+        with self.connect(_deadline) as db:
             db.execute("BEGIN IMMEDIATE")
             if requestId:
                 prior = db.execute("SELECT * FROM messages WHERE request_id=?", (requestId,)).fetchone()
@@ -98,13 +117,13 @@ class Ledger:
                        (message_id, room, AUTHOR, text, stamp(), replyTo, requestId))
             return self.message(db.execute("SELECT * FROM messages WHERE id=?", (message_id,)).fetchone())
 
-    def read(self, room, since=0, limit=50):
+    def read(self, room, since=0, limit=50, _deadline=None):
         string(room, 128, "room")
         if type(since) is not int or not 0 <= since <= 9223372036854775807:
             raise ValueError("since must be a nonnegative sequence cursor")
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
-        with self.connect() as db:
+        with self.connect(_deadline) as db:
             rows = db.execute("SELECT * FROM messages WHERE room=? AND seq>? ORDER BY seq LIMIT ?",
                               (room, since, limit + 1)).fetchall()
             held = rows[:limit]
@@ -117,9 +136,9 @@ class Ledger:
             return {"messages": messages, "nextSince": held[-1]["seq"] if held else since,
                     "hasMore": len(rows) > limit}
 
-    def ack(self, id):
+    def ack(self, id, _deadline=None):
         string(id, 128, "id")
-        with self.connect() as db:
+        with self.connect(_deadline) as db:
             if not db.execute("SELECT 1 FROM messages WHERE id=?", (id,)).fetchone():
                 raise ValueError("Unknown message")
             db.execute("INSERT OR IGNORE INTO acknowledgments VALUES(?,?,?)", (id, AUTHOR, stamp()))
@@ -178,13 +197,13 @@ class Service(ThreadingHTTPServer):
         finally:
             self.slots.release()
 
-    def status(self):
+    def status(self, _deadline=None):
         git = subprocess.run(["/usr/bin/git", "-C", self.checkout, "rev-parse", "HEAD"],
-                             capture_output=True, text=True, timeout=5)
+                             capture_output=True, text=True, timeout=remaining(_deadline))
         head = git.stdout.strip() if git.returncode == 0 else None
         if head and not re.fullmatch("[0-9a-f]{40}", head): head = None
         boot = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.boottime"],
-                              capture_output=True, text=True, timeout=5)
+                              capture_output=True, text=True, timeout=remaining(_deadline))
         seconds = re.search(r"sec = (\d+)", boot.stdout) if boot.returncode == 0 else None
         return {"hostname": socket.gethostname(), "tailnetHostname": self.tailnet_hostname,
                 "uptimeSeconds": max(0, int(time.time()) - int(seconds[1])) if seconds else None,
@@ -193,7 +212,7 @@ class Service(ThreadingHTTPServer):
                 "serviceUptimeSeconds": int(time.monotonic() - self.started), "gitHead": head,
                 "authorSemantics": "One shared bearer; author is not an authenticated agent identity."}
 
-    def rpc(self, request):
+    def rpc(self, request, deadline=None):
         if not isinstance(request, dict) or request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
             return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid request"}}
         identifier = request.get("id")
@@ -201,6 +220,7 @@ class Service(ThreadingHTTPServer):
         response = {"jsonrpc": "2.0", "id": identifier}
         method, params = request["method"], request.get("params", {})
         try:
+            remaining(deadline)
             if not isinstance(params, dict): raise ValueError("Invalid params")
             if method == "initialize":
                 version = params.get("protocolVersion")
@@ -216,16 +236,19 @@ class Service(ThreadingHTTPServer):
                 if set(arguments) - set(contract["properties"]) or set(contract["required"]) - set(arguments):
                     raise ValueError("Invalid tool arguments")
                 operation = self.status if name == "status" else getattr(self.ledger, name)
-                value = operation(**arguments)
+                value = operation(_deadline=deadline, **arguments)
+                remaining(deadline)
                 result = {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False)}], "isError": False}
             else:
                 response["error"] = {"code": -32601, "message": "Method not found"}
                 return response
             response["result"] = result
+        except TimeoutError:
+            response["error"] = {"code": -32001, "message": "Deadline expired; mutation outcome may be unknown. Reconcile by requestId/read/ack."}
         except (ValueError, TypeError):
             response["error"] = {"code": -32602, "message": "Invalid parameters or message reference"}
         except Exception:
-            response["error"] = {"code": -32603, "message": "Operation unavailable; no success recorded"}
+            response["error"] = {"code": -32603, "message": "Operation unavailable; mutation outcome may be unknown. Reconcile by requestId/read/ack."}
         return response
 
 
@@ -235,12 +258,15 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
 
     def handle(self):
-        # A hard lifetime also bounds clients sending headers one byte at a time.
-        deadline = threading.Timer(15, self.expire)
+        # Transport deadline plus cooperative tool admission/SQLite/subprocess budgets.
+        self.deadline = time.monotonic() + REQUEST_LIFETIME_SECONDS
+        deadline = threading.Timer(REQUEST_LIFETIME_SECONDS, self.expire)
         deadline.daemon = True
         deadline.start()
         try:
             super().handle()
+        except (BrokenPipeError, ConnectionResetError, socket.timeout):
+            pass
         finally:
             deadline.cancel()
 
@@ -254,6 +280,8 @@ class Handler(BaseHTTPRequestHandler):
         pass  # Never log message bodies, bearer headers or URL query strings.
 
     def reply(self, status, body=None):
+        if time.monotonic() >= self.deadline:
+            return
         data = b"" if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -301,10 +329,14 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(request, list):
             if not 1 <= len(request) <= 20:
                 self.reply(400); return
-            responses = [self.server.rpc(item) for item in request]
+            responses = []
+            for item in request:
+                if time.monotonic() >= self.deadline:
+                    return
+                responses.append(self.server.rpc(item, deadline=self.deadline))
             response = [item for item in responses if item is not None]
         else:
-            response = self.server.rpc(request)
+            response = self.server.rpc(request, deadline=self.deadline)
         self.reply(200 if response else 202, response if response else None)
 
 

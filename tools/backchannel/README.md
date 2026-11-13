@@ -93,3 +93,23 @@ not prove remote reachability, tailnet ACL admission or Grok receipt.
 Protocol reference: [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports).
 Independent implementation; no Buzz source copied. The completed Buzz UX work
 is in PRs6183,6184 and6185, separate from this operational backup.
+
+
+## Security continuation (source only until separately installed)
+
+Requests have a15-second transport deadline and cooperative tool budgets:
+SQLite lock waits/progress and status subprocesses share the remaining budget;
+batches stop admitting later calls after expiry. This cannot interrupt arbitrary
+OS filesystem sync or undo an already committed mutation. A lost response or
+timeout means outcome unknown: reconcile a post using the identical requestId
+and payload, read the ledger, or repeat the idempotent ack. Never infer failure
+means nothing was saved.
+
+Keychain reads are scoped to the explicit login.keychain-db search list and
+creation targets that keychain. An unavailable login keychain fails closed.
+Retarget also validates the loaded launchd job's plist/program/arguments before
+writing configuration. Failed activation atomically restores the previous config
+and requests recovery only after another identity check; readiness remains
+unverified until an authenticated smoke check. No token or ledger is replaced.
+Physical reboot remains UNVERIFIED; availability requires login, accessible
+Keychain and an awake Mac. Source qualification does not update the live service.
