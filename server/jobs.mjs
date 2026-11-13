@@ -352,6 +352,33 @@ export const STORE_GROWTH_LIMITS = Object.freeze({
   dbBytes: 8_000_000_000
 });
 
+// Where the bytes are. The backup snapshot design depends on which tables hold
+// the store (append-only vs rewritten in place), and the health surface only
+// carries flat numbers, so each figure is its own gauge. Full-table reads, so
+// at most once per COMPOSITION_REFRESH_MS per isolate; a missing table or
+// column simply leaves its gauge out.
+const COMPOSITION_REFRESH_MS = 6 * 60 * 60 * 1000;
+const COMPOSITION_QUERIES = Object.freeze({
+  bytesRoomProjection: "SELECT COALESCE(SUM(octet_length(projection)), 0) AS n FROM rooms",
+  bytesProjectionBodies: "SELECT COALESCE(SUM(octet_length(body)), 0) AS n FROM projection_bodies",
+  bytesEventBodies: "SELECT COALESCE(SUM(octet_length(body)), 0) AS n FROM events",
+  bytesMessageBodies: "SELECT COALESCE(SUM(octet_length(body)), 0) AS n FROM messages",
+  bytesBackupStaging: "SELECT COALESCE(SUM(octet_length(bytes)), 0) AS n FROM room_backup_export_parts"
+});
+let compositionCache = { at: 0, value: {} };
+export function measureStoreComposition(store, now = Date.now()) {
+  if (now - compositionCache.at < COMPOSITION_REFRESH_MS) return compositionCache.value;
+  const value = {};
+  for (const [name, sql] of Object.entries(COMPOSITION_QUERIES)) {
+    try {
+      const n = Number(store.db.prepare(sql).get()?.n);
+      if (Number.isSafeInteger(n) && n >= 0) value[name] = n;
+    } catch { /* table or column not present on this store */ }
+  }
+  compositionCache = { at: now, value };
+  return value;
+}
+
 export function measureStoreGrowth(store) {
   const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
     COALESCE(MAX(LENGTH(CAST(projection AS BLOB))), 0) AS maxProjectionBytes FROM rooms`).get();
@@ -993,7 +1020,7 @@ export const JOBS = Object.freeze([
     // Relief needs a verified recovery point (the newest verified daily
     // backup, at most a day old); without one it archives nothing.
     async run(store, ctx = {}) {
-      let gauges = measureStoreGrowth(store);
+      let gauges = { ...measureStoreGrowth(store), ...measureStoreComposition(store) };
       let relief = null;
       if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
         const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
@@ -1001,7 +1028,7 @@ export const JOBS = Object.freeze([
         relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery });
         // Flat counts: the heartbeat keeps only top-level numbers, so a
         // nested relief object never reached /api/health/jobs.
-        gauges = { ...measureStoreGrowth(store), ...reliefCounts(relief) };
+        gauges = { ...measureStoreGrowth(store), ...reliefCounts(relief), ...measureStoreComposition(store) };
       }
       const breach = storeGrowthBreach(gauges);
       if (!breach) return gauges;
