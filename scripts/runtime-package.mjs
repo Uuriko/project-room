@@ -456,6 +456,7 @@ const dx1aAssets = ["scripts/install.sh", "docs/agents/index.html", "docs/agents
 
 optional.push(...dx1aAssets, "server/connect-snippets.mjs");
 // Node renders guidance from these exact source inputs, without a manual build.
+optional.push("docs/SELF-HOST-SIGNING.md", "scripts/sign-instance-card.mjs", "server/instance-card-artifact.mjs", "server/instance-card-runtime.mjs", "server/instance-card-files.mjs");
 optional.push("scripts/build-agent-docs.mjs", "server/node-discovery-origin.mjs",
   ...["index", "paste", "claude-code", "codex", "cursor", "cline", "vscode", "aider", "openai-agents-sdk", "langgraph", "crewai"].map(name => `docs/agents/${name}.md`));
 // CP-ADMIN-1: operator console (unlinked, token-only).
@@ -643,7 +644,8 @@ export function verifyRuntimeSource(directory) {
   return { files: files.size };
 }
 
-export function createRuntimePackage({ repository, commit, destination }) {
+export function createRuntimePackage({ repository, commit, destination, buildId }) {
+  if (buildId !== undefined) check(typeof buildId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(buildId) && !["dev", "unstamped"].includes(buildId), "invalid instance build id");
   check(typeof commit === "string" && hashPattern.test(commit),
     `commit must be a full 40-char hash, got: ${String(commit).slice(0, 64)}`);
   const git = (...args) => execFileSync("git", args, { cwd: repository, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
@@ -664,6 +666,15 @@ export function createRuntimePackage({ repository, commit, destination }) {
   const missingRequired = required.filter(path => !entries.some(entry => entry.path === path));
   check(missingRequired.length === 0, `required runtime files missing from the package: ${missingRequired.join(", ")}`);
   const files = new Map(entries.map(entry => [entry.path, git("cat-file", "blob", entry.object)]));
+  let build;
+  if (buildId !== undefined) {
+    const source = files.get("server/version.mjs")?.toString();
+    check(source && (source.match(/export const SOURCE_REVISION = "[^"\n]*";/g) ?? []).length === 1
+      && (source.match(/export const BUILD_ID = "[^"\n]*";/g) ?? []).length === 1, "unsupported instance build version source");
+    files.set("server/version.mjs", Buffer.from(source.replace(/export const SOURCE_REVISION = "[^"\n]*";/, `export const SOURCE_REVISION = "${commit}";`)
+      .replace(/export const BUILD_ID = "[^"\n]*";/, `export const BUILD_ID = "${buildId}";`)));
+    build = {sourceRevision: commit, buildId};
+  }
   const runtime = runtimeMetadata(files);
   check(isAbsolute(destination) && destination === resolve(destination),
     `destination must be an absolute normalized path, got: ${destination}`);
@@ -673,7 +684,7 @@ export function createRuntimePackage({ repository, commit, destination }) {
     mkdirSync(dirname(join(output, path)), { recursive: true, mode: 0o700 });
     writeFileSync(join(output, path), bytes, { mode: 0o600, flag: "wx" });
   }
-  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(files),
+  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, ...(build ? { build } : {}), publicAssets: assetsFor(files),
     files: [...files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })),
     limitation: "Content consistency only; not trusted provenance, recovery freshness, hosted readiness or publication approval." };
   // Last write is the completion marker. A partial directory is not a package.
@@ -728,6 +739,12 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
       `packaged file ${entry.path} does not match its manifest bytes/sha256`);
     files.set(entry.path, bytes);
   }
+  if (manifest.build !== undefined) {
+    const build = manifest.build, source = files.get("server/version.mjs")?.toString();
+    check(build && Object.keys(build).sort().join() === "buildId,sourceRevision" && build.sourceRevision === manifest.sourceCommit
+      && typeof build.buildId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(build.buildId) && !["dev", "unstamped"].includes(build.buildId)
+      && source?.includes(`export const SOURCE_REVISION = "${build.sourceRevision}";`) && source.includes(`export const BUILD_ID = "${build.buildId}";`), "instance build metadata does not match package source and stamp");
+  }
   const expectedAssets = assetsFor(files);
   const missingAssets = expectedAssets.filter(asset => !manifest.publicAssets.includes(asset));
   const extraAssets = manifest.publicAssets.filter(asset => !expectedAssets.includes(asset));
@@ -747,9 +764,9 @@ if (process.argv[1] && pathToFileURL(realpathSync(process.argv[1])).href === imp
   const [action, ...args] = process.argv.slice(2);
   try {
     let result;
-    if (action === "create" && args.length === 3) result = createRuntimePackage({ repository: args[0], commit: args[1], destination: args[2] });
+    if (action === "create" && (args.length === 3 || args.length === 5 && args[3] === "--build-id")) result = createRuntimePackage({ repository: args[0], commit: args[1], destination: args[2], ...(args.length === 5 ? {buildId: args[4]} : {}) });
     else if (action === "verify" && args.length >= 1 && args.length <= 2) result = verifyRuntimePackage(args[0], { expectedCommit: args[1] });
-    else throw new Error("Usage: runtime-package.mjs create REPOSITORY EXACT_COMMIT NEW_ABSOLUTE_DIRECTORY | verify DIRECTORY [EXACT_COMMIT]");
+    else throw new Error("Usage: runtime-package.mjs create REPOSITORY EXACT_COMMIT NEW_ABSOLUTE_DIRECTORY [--build-id ID] | verify DIRECTORY [EXACT_COMMIT]");
     console.log(JSON.stringify(result));
   } catch { console.error("Runtime package operation failed. No upload, deployment or overwrite was requested. Inspect the private output before retrying."); process.exitCode = 1; }
 }
