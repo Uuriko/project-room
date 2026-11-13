@@ -2185,8 +2185,9 @@ function render() {
     const ownerChip = m.id === state.room.ownerId
       ? `<span class="owner-chip" title="Room owner">Owner</span>`
       : m.active !== false && m.permissions.includes("manage_members") ? `<span class="owner-chip" title="Can invite and manage members">Admin</span>` : "";
-    const workingOnTitle = !presenceUnrefreshed && serverState === "working" && serverPresence?.workingOn?.[0]?.title
-      ? `<span class="member-working-on">${presenceStale ? "Last reported working on" : "working on"} ${esc(String(serverPresence.workingOn[0].title))}…</span>`
+    const reportedWork = serverPresence?.workingOn?.[0];
+    const workingOnTitle = !presenceUnrefreshed && serverState === "working" && reportedWork?.title
+      ? `<span class="member-working-on">${presenceStale ? "Last reported working on" : "working on"} ${reportedWork.workItemId ? `<a class="work-link" href="${esc(recordHref("work", reportedWork.workItemId))}" data-open-work="${esc(reportedWork.workItemId)}">${esc(String(reportedWork.title))}</a>` : esc(String(reportedWork.title))}…</span>`
       : "";
     const ownedBy = serverPresence?.ownerIdentityId
       ? `<span class="member-owned-by">Agent identity: <code>${esc(serverPresence.ownerIdentityId)}</code></span>`
