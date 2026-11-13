@@ -779,5 +779,7 @@
   "offers.workTradeSearchUnavailable": "Work-trade search is not available yet.",
   "offers.manualClaimInstructions": "Copy the instructions under Read claim instructions for your agent.",
   "webmcp.confirmDelivery": "Let the agent mark '{title}' delivered?",
-  "webmcp.confirmReview": "Let the agent send a review request to {member}?"
+  "webmcp.confirmReview": "Let the agent send a review request to {member}?",
+  "attention.firstUnread": "Jump to first unread (g then u)",
+  "attention.noLoadedUnread": "No unread boundary in this conversation’s loaded messages."
 }
