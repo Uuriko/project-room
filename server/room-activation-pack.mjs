@@ -13,7 +13,8 @@ import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
-import { availableClaimsInRoom, memoizeBoardList } from "./available-work.mjs";
+import { availableClaimsFromBoard, availableClaimsInRoom, memoizeBoardList } from "./available-work.mjs";
+import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 
 /**
@@ -161,12 +162,19 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
   if(overview) {
     const {state,visibleSequence:sequence,workWindow}=overview;
     const pins=store.readTransaction(()=>readCurrentPinsWindow(store,roomSlug,viewerId));
+    // FUNNEL-FIXES pack 2, cure C1: the overview pack carries the same
+    // viewer-gated Board claims as the legacy branch. memoizeBoardList
+    // memoizes a failed board read as an empty board, so a failed read
+    // degrades to openClaims: [] exactly as the legacy branch degrades.
+    const boardList=memoizeBoardList(store);
+    const openClaims=availableClaimsFromBoard(boardList(roomSlug),roomSlug,{viewerId,state:{members:state.members,room:{ownerId:state.room.ownerId},workItems:state.workItems}});
     return withContentTrust({room:{slug:state.room.id,title:state.room.title,state:state.room.archivedAt?'archived':'active',kind:roomKind(state.room),owner:state.room.ownerId},
       members:Object.values(state.members).filter(member=>member.active!==false).map(memberOf),
       openWork:Object.values(state.workItems).filter(item=>OPEN_WORK_STATES.has(item.state)).map(item=>workOf(item,new Date(store.now()).toISOString())),
+      openClaims,
       workWindow,workScope:'workWindow',participationRules:{...roomPolicy(state),trust:roomTrust(state).enabled},coordinationNorms:{...COORDINATION_NORMS},
       pinnedResources:pins.items.map(pinnedOf),pinWindow:{sourceWindow:pins.sourceWindow,page:pins.page},
-      omitted:['board_claims',...(pins.page.hasMore?['additional_pinned_message_bodies']:[]),'full_room_orientation'],eventCursor:sequence,generatedAt:new Date(store.now()).toISOString(),
+      omitted:[...(pins.page.hasMore?['additional_pinned_message_bodies']:[]),'full_room_orientation'],eventCursor:sequence,generatedAt:new Date(store.now()).toISOString(),
       orient:buildOrient(store,roomSlug,viewerId,{text:false,workAfter:options.workAfter??''})});
   }
   // Unknown rooms fail here with the store's 404 (room_not_found).
@@ -271,13 +279,28 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   const around = listed.slice(0, BRIEF_AROUND);
   const you = pack.members.find(member => member.id === viewerId) ?? null;
   const claims = (pack.openClaims ?? []).slice(0, BRIEF_ITEMS).map(claim => ({
-    id: claim.id, title: clip(claim.title, 100), untrusted: true, claimAction: claim.claimAction }));
-  const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
-    .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
+    id: claim.id, title: clip(claim.title, 100), untrusted: true, source: claim.source ?? "board", claimAction: claim.claimAction }));
+  // FUNNEL-FIXES pack 2, cure C1: pickUp is exactly the viewer-gated Board
+  // claims — never a viewer-blind backfill of native work items. A member
+  // who fails the Board gate gets the gate stated, with the lawful next
+  // steps, instead of advertised work they cannot claim. Zero grant: the
+  // gate predicate and every write path are unchanged, and
+  // mayWriteWorkClaims / mayWriteBoardClaims stay separate predicates.
+  const boardGate = you && !mayWriteWorkClaims({ member: you, ownerId: pack.room.owner ?? null }) ? {
+    canClaimBoardWork: false,
+    reason: "work_claims_not_permitted",
+    needsProfile: ["contribute", "review", "collaborate"],
+    next: [
+      { action: "ask-owner-for-contribute-invite" },
+      { action: "request-permissions", permissions: ["accept_work", "complete_work"], expiresUndecidedAfterDays: 7 },
+      { action: "public-work", method: "POST", endpoint: "/api/public-work/match" }
+    ]
+  } : null;
   const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
   const firstClaim = claims[0]?.claimAction;
+  const publicWorkStep = boardGate?.next.find(step => step.action === "public-work");
   const next = firstClaim ? { why: "claim the top open task", ...firstClaim }
-    : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
+    : publicWorkStep ? { why: "Board work here needs a profile you do not hold yet; public work needs no room grant", method: publicWorkStep.method, endpoint: publicWorkStep.endpoint }
       : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` };
   const brief = {
     contentTrust: pack.contentTrust,
@@ -291,7 +314,8 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     // The window the around[] "recent" label stands for, stated in the
     // payload itself (REGISTER row 59).
     recentWindowMs: BRIEF_ACTIVE_MS,
-    pickUp: [...claims, ...unclaimed],
+    pickUp: [...claims],
+    ...(boardGate ? { boardGate } : {}),
     openWorkTotal: pack.workWindow ? null : pack.openWork.length,
     ...(pack.workWindow ? {workWindow: pack.workWindow, workScope: pack.workScope, omitted: pack.omitted} : {}),
     recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)
@@ -332,6 +356,7 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     aroundCount: brief.around.length + brief.aroundMore,
     quietMembers: brief.quietMembers,
     openWorkTotal: brief.openWorkTotal,
+    ...(brief.boardGate ? { boardGate: brief.boardGate } : {}),
     next: { method: "GET", endpoint: brief.full, why: "this room's brief is over budget; read the full pack" },
     full: brief.full,
     eventCursor: brief.eventCursor

@@ -18,7 +18,8 @@ test('actual default context and Begin enumerate bounded work summaries with hon
  assert.equal(ids.length,19);assert.equal(new Set(ids).size,19);assert.equal(pages,3);
  const orient=buildOrient(store,'commons','owner');assert.equal(orient.workTotal,null);assert.equal(orient.workWindow.complete,false);
  const pack=buildActivationPack(store,'commons','owner');assert.equal(pack.openWork.length,8);
- const brief=briefActivationPack(pack,[],store.now(),'owner');assert.equal(brief.you.memberId,'owner');assert.ok(brief.pickUp.length>0);assert.equal(brief.openWorkTotal,null);assert.deepEqual(brief.workWindow,pack.workWindow);assert.deepEqual(brief.omitted,pack.omitted);
+ assert.ok(Array.isArray(pack.openClaims));assert.deepEqual(pack.openClaims,[],'proposed items have no Board card (C1)');assert.ok(!pack.omitted.includes('board_claims'),'the overview pack carries openClaims; board_claims is no longer omitted (C1)');
+ const brief=briefActivationPack(pack,[],store.now(),'owner');assert.equal(brief.you.memberId,'owner');assert.deepEqual(brief.pickUp,[],'the brief must not backfill proposed work items (C1)');assert.equal(brief.openWorkTotal,null);assert.deepEqual(brief.workWindow,pack.workWindow);assert.deepEqual(brief.omitted,pack.omitted);
  assert.throws(()=>buildOrient(store,'commons','owner',{q:'Useful'}),/indexed query/);
  assert.ok(!sql.some(query=>/SELECT.*(?:payload|record_json|projection).*FROM work_entities/i.test(query)),'overview must never load work bodies');
  assert.ok(!sql.some(query=>/^SELECT projection FROM rooms/i.test(query)),'overview must not load room blob');
@@ -60,4 +61,32 @@ test('context visible horizon never exposes another pair private head or scans a
  assert.equal(store.roomContext(owner,'commons').evaluatedThrough,5);assert.equal(store.roomContext(a,'commons').evaluatedThrough,6);
  for(let i=0;i<16;i++)store.command(a,'commons',{id:'hidden-'+i,type:'message.posted',data:{messageId:'hidden-'+i,body:'Private backlog',toMemberId:'b'}});
  assert.throws(()=>store.roomContext(owner,'commons'),/excluded tail/);
+});
+
+import {createRoomServer} from '../server/http.mjs';
+test('overview brief never backfills an accepted native work item (C1, overview branch)', async t=>{
+ const store=new RoomStore(':memory:');t.after(()=>store.close());store.initialize(initialRoom(),{representation:'normalized-current-v1'});
+ const token = store['issue' + 'AccessKey']('commons', 'owner');
+ store.command(token,'commons',{id:'cov-propose',type:'work.proposed',data:{workItemId:'cov-task',title:'Coverage task',definitionOfDone:'Done',accountableMemberId:'owner'}});
+ store.command(token,'commons',{id:'cov-accept',type:'work.accepted',data:{workItemId:'cov-task',expectedRevision:0}});
+ const server=createRoomServer({store});
+ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+ t.after(async()=>{server.closeStreams?.();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));});
+ const origin=`http://127.0.0.1:${server.address().port}`;
+ // Staging fact, pinned so a future Board un-retirement fails loudly here:
+ // in a current-format (native-work) room the Board claim route is retired,
+ // so no Board rows exist and openClaims is honestly empty. A non-empty
+ // overview openClaims arises only from pre-retirement rows, which no
+ // production write path available to a test can stage (the board sync is
+ // gated to legacy-projection writes; the backfill reads that projection).
+ const created=await fetch(`${origin}/api/rooms/commons/work-claims`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({id:'cov-claim',title:'Coverage task',tags:['starter']})});
+ const createdText=await created.text();
+ assert.equal(created.status,409,createdText);
+ assert.match(createdText,/legacy_work_retired/);
+ const pack=buildActivationPack(store,'commons','owner');
+ assert.ok(pack.openWork.some(item=>item.id==='cov-task'&&item.state==='accepted'),'the accepted item exists in openWork — exactly what the old brief backfilled');
+ assert.deepEqual(pack.openClaims,[]);
+ const brief=briefActivationPack(pack,[],store.now(),'owner');
+ assert.deepEqual(brief.pickUp,[],'the brief must not offer the accepted native item as pick-up work (C1)');
+ assert.equal(brief.boardGate,undefined,'the owner passes the Board gate: no boardGate');
 });
