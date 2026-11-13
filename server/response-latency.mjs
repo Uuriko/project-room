@@ -20,7 +20,8 @@
 //
 // The idea (every action is a typed event; the more event types, the more the
 // log can tell its members) is shared with Buzz (block/buzz, Apache-2.0); no
-// Buzz source is copied here. See docs/TYPED-EVENTS.md.
+// Buzz source is copied here. See docs/TYPED-EVENTS.md. (The hash-chained
+// room_signal_log that feeds `wake` is the one close port: server/signal-log.mjs.)
 import { ownMember } from "../src/events.js";
 import { ACK_WINDOW_MS } from "./request-states.mjs";
 import { isCurrentRoom, currentRoomOwnerAuthority, readCurrentRecord, withCurrentReadContext } from "./current-room-repository.mjs";
@@ -32,6 +33,9 @@ export const LATENCY_MAX_BYTES = 6144;
 // budget, so the window is fixed and the result is memoized per head.
 export const LATENCY_SCAN_EVENTS = 1500;
 export const LATENCY_MEMO_MS = 60_000;
+// Wake context: the last rows of room_signal_log (primary-key range, one read).
+export const LATENCY_WAKE_SCAN = 600;
+const WAKE_GROUP = Object.freeze({ mention: "message", dm: "message", assignment: "work", ask: "work", land: "work", bond: "work" });
 const MIN = 60_000;
 export const LATENCY_SLA_MS = Object.freeze({ mention: 30 * MIN, dm: 30 * MIN, request: 30 * MIN, work: 60 * MIN, handoff: 60 * MIN });
 export const LATENCY_CONTEXTS = Object.freeze(Object.keys(LATENCY_SLA_MS));
@@ -136,7 +140,34 @@ const statusOf = (item, now) => {
   return item.deadlineMissed || now - item.at > item.sla ? "dropped" : "waiting";
 };
 
-export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, through, window, events, mentions = [], members = {} }) {
+// Pure. rows: room_signal_log rows { type, ts_ms, detail } newest first. Counts
+// only, grouped (message = mention+dm, work = assignment/ask/land/bond) and
+// without targets, so a private DM wake does not name anyone to other viewers.
+// acked with door "cron" is the stale prune: expired unhandled, not an answer.
+export function buildWakeContext(rows, { scan = LATENCY_WAKE_SCAN } = {}) {
+  if (!rows?.length) return null;
+  const groups = {};
+  for (const row of rows) {
+    let d = {};
+    try { d = JSON.parse(row.detail ?? "{}"); } catch { /* counts still hold */ }
+    const group = WAKE_GROUP[d.k] ?? "other";
+    const g = groups[group] ?? (groups[group] = { sent: 0, delivered: 0, acked: 0, expired: 0, dropped: 0, deliverMs: [], ackMs: [] });
+    if (row.type === "wake.sent") g.sent += 1;
+    else if (row.type === "wake.delivered") { g.delivered += 1; if (Number.isFinite(d.lat)) g.deliverMs.push(d.lat); }
+    else if (row.type === "wake.acked") {
+      if (d.d === "cron") g.expired += 1; else { g.acked += 1; if (Number.isFinite(d.lat)) g.ackMs.push(d.lat); }
+    } else if (row.type === "wake.dropped") g.dropped += 1;
+  }
+  const out = {};
+  for (const [name, g] of Object.entries(groups)) {
+    const { deliverMs, ackMs, ...counts } = g;
+    deliverMs.sort((a, b) => a - b); ackMs.sort((a, b) => a - b);
+    out[name] = { ...counts, deliverP50Ms: percentile(deliverMs, 50), ackP50Ms: percentile(ackMs, 50), ackP90Ms: percentile(ackMs, 90) };
+  }
+  return { rows: rows.length, since: iso(rows.at(-1).ts_ms), complete: rows.length < scan, ...out };
+}
+
+export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, through, window, events, mentions = [], members = {}, wake = null }) {
   const nowMs = typeof now === "number" ? now : Date.parse(now);
   const name = id => (id == null ? null : clip(ownMember(members, id)?.displayName, 24) ?? String(id).slice(0, 12));
   const items = collectLatencyItems({ events, mentions, ownerId, now: nowMs });
@@ -182,6 +213,7 @@ export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, th
     pairs: pairRows.slice(0, CAPS.pairs).map(({ _k, ...row }) => row),
     dropped: droppedRows.slice(0, CAPS.dropped).map(shape),
     waiting: waitingRows.slice(0, CAPS.waiting).map(shape),
+    ...(wake ? { wake } : {}),
     truncated: {}
   };
   const shed = { pairs: pairRows.length - state.pairs.length, dropped: droppedRows.length - state.dropped.length, waiting: waitingRows.length - state.waiting.length };
@@ -253,8 +285,13 @@ export function readResponseLatency(store, token, roomId, { expectedSessionBindi
         });
       } catch { /* names degrade to short ids; the numbers do not depend on them */ }
     }
+    let wakeRows = [];
+    try {
+      wakeRows = store.db.prepare("SELECT type, ts_ms, detail FROM room_signal_log WHERE room_id=? ORDER BY seq DESC LIMIT ?").all(roomId, LATENCY_WAKE_SCAN);
+    } catch { wakeRows = []; /* table is lazy: no wake signal has been logged yet */ }
     const value = buildResponseLatency({ roomId, viewerId, ownerId, now, through: head,
-      window: { fromSeq: floor + 1, throughSeq: head, events: rows.length, complete: floor === 0 }, events, mentions, members });
+      window: { fromSeq: floor + 1, throughSeq: head, events: rows.length, complete: floor === 0 }, events, mentions, members,
+      wake: buildWakeContext(wakeRows) });
     memo.set(memoKey, { head, at: now, value });
     if (memo.size > 64) memo.delete(memo.keys().next().value);
     return value;

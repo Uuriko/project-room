@@ -81,8 +81,8 @@ One canonical name per action. Today's journal types map 1:1; names marked NEW n
 Schema for the NEW events (one compact table, PR2, hash-chained per room):
 `room_signal_log(room_id, seq, ts_ms, type, actor_id, target_id, ref, parent_seq, detail_json<=256B, prev_hash, hash)`.
 `ref` is a message event id, work item id, signal id or sha8. `parent_seq` is the causal parent
-(the request this answers). No content, no secrets. Retention: 30 days or 20,000 rows per
-room, whichever is smaller, pruned by the hourly wake job (#6175); aggregates (the counters) keep
+(the request this answers). No content, no secrets. Retention (as built): 14 days or 5,000 rows per
+room, whichever is smaller, pruned from the oldest end at every hundredth append (no new job; the newest row is never pruned); aggregates (the counters) keep
 the long view. Backup: excluded from the one-turn snapshot like other derived tables (see the backup snapshot design: derived tables are rebuilt on restore); chain head is kept so a restore can say "log truncated".
 
 ## 4. Latency, dropped, late (PR1, shipped as code)
@@ -122,7 +122,12 @@ cards read the same pairing, so a card and the latency read can never disagree.
 
 - **PR1 (this change)**: `GET /api/rooms/{id}/latency`, MCP `room_response_latency`, OpenAPI,
   scopes, catalog snapshot, tests. Read-only, no schema.
-- **PR2**: `room_signal_log` (wake.*, pr.*, deploy.*, smoke.*, rollback) with the TLV hash chain,
-  emitters at the existing call sites (`wake-metrics.recordWakeEvent`, `merge-receipt.yml`,
-  deploy-prod), wake context in the latency read, state/Board read from it.
+- **PR2a (this change)**: `room_signal_log` with the TLV hash chain (`server/signal-log.mjs`,
+  adapted from Buzz `buzz-audit/src/hash.rs`, Apache-2.0, see NOTICE), `wake.sent/delivered/acked/dropped`
+  emitted from `wake-metrics.recordWakeEvent` (a delivered/acked row carries its own latency, so nothing is paired
+  at read time; poll presentations and coalesces stay counter-only; ack by the stale prune is `expired`), a `wake`
+  section in the latency read, registrations (writer-fence lazy tables, restore skip list, purge registry).
+- **PR2b**: `pr.merged`, `ci.settled`, `deploy.finished`, `smoke.*`, `rollback` appended server-side when the
+  journal records a post `parseReceipt` already recognizes (no workflow or secret changes), state and Board read
+  structured receipts first with the text parse as fallback, one `latency` line in `room_project_state`.
 - **PR3**: reply guard on turn end, PR watch event source ending at prod smoke, `turn.completed`.

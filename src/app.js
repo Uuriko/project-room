@@ -5318,6 +5318,7 @@ document.addEventListener("keydown", event => {
     clearTimeout(attentionKeyTimer);
     if (key === "a") { event.preventDefault(); updatesUi?.open("all"); }
     else if (key === "l") { event.preventDefault(); openLater(); }
+    else if (key === "u") { event.preventDefault(); jumpToFirstUnread(); }
     return;
   }
   if (key === "g") {
@@ -5378,6 +5379,7 @@ function roomActionEntries() {
     { id: "pinned-search", label: "Pinned", words: "pins pinned search", target: "#search-pinned", activate: true, always: true },
     { id: "catch-up", label: "Catch up", words: "updates attention needs me reminders", always: true },
     { id: "activity", label: "Activity", words: "activity mentions replies feed unread", always: true },
+    { id: "first-unread", label: uiText("attention.firstUnread"), words: "unread new messages g u", always: true },
     { id: "later", label: "Saved for later", words: "later saved bookmarks read later", always: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", always: true },
     { id: "people", label: "People", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
@@ -5529,6 +5531,7 @@ function chooseRoomAction(id) {
   const entry = roomActionEntries().find(value => value.id === id);
   if (!entry) { renderRoomActions(); $("#room-actions-query").focus(); return; }
   closeRoomActions(false);
+  if (id === "first-unread") { jumpToFirstUnread(); return; }
   if (updatesUi.openAction(id)) return;
   if (id === "how-invite") {
     const button = $("#invite-people-button");
@@ -7301,6 +7304,7 @@ function scheduleHorizonAdvance() {
   // scrolls. Only fires while the user holds the bottom of the view, so an
   // explicit Mark unread never gets wiped without a scroll.
   clearTimeout(horizonAdvanceTimer);
+  if (!activeReadingSurface()) { horizonAdvanceTimer = null; return; }
   const generation = client.generation, view = conversationViewKey();
   horizonAdvanceTimer = setTimeout(() => {
     horizonAdvanceTimer = null;
@@ -7308,7 +7312,7 @@ function scheduleHorizonAdvance() {
   }, 1500);
 }
 async function advanceHorizon() {
-  if (!state || !session || !client.session || !nearBottomOfList()) return;
+  if (!state || !session || !client.session || !activeReadingSurface() || !nearBottomOfList()) return;
   const { threadId, peerMemberId, cacheKey } = readPositionScope();
   const generation = client.generation, view = conversationViewKey();
   const messages = visibleConversationMessages();
@@ -7324,6 +7328,15 @@ async function advanceHorizon() {
     renderMessages();
   } catch { /* best-effort; the next scroll retries */ }
 }
+function activeReadingSurface() {
+  return document.visibilityState === "visible" && document.hasFocus();
+}
+function cancelBackgroundRead() {
+  clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
+  readerScrollAt = -Infinity;
+}
+window.addEventListener("blur", cancelBackgroundRead);
+document.addEventListener("visibilitychange", () => { if (!activeReadingSurface()) cancelBackgroundRead(); });
 function resetAttention() {
   // Session/room teardown: drop every persisted-attention cache so the next
   // session never sees the previous member's activity, saves, or horizons.
@@ -7341,6 +7354,17 @@ function horizonAnchorFor(messages, lastRead) {
   const index = messages.findIndex(m => m.id === lastRead);
   if (index < 0) return null; // the horizon message is not in this view
   return messages[index + 1]?.id ?? null;
+}
+function jumpToFirstUnread() {
+  if (!ownsRoomActions(null) || document.querySelector("dialog[open]")) return;
+  const target = $("#message-list .chat-divider.unread")?.closest("[data-message-record-id]");
+  if (!target) { notice(uiText("attention.noLoadedUnread")); return; }
+  // Navigation is not reading intent, including a scroll still in flight.
+  readerScrollAt = -Infinity;
+  clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
+  timelinePin.clear();
+  target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: "start", behavior: "instant" });
 }
 async function refreshSavedIds() {
   if (!state || !session || savedIdsBusy) return;

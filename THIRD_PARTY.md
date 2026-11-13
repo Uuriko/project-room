@@ -8,6 +8,13 @@ relicense dependencies, quoted source material or third-party artwork.
   `scripts/room`, `ROOM-HEALTH.md`, and `lanes/instinct.md`. Preserve these
   notices and [NOTICE](NOTICE). Upstream:
   https://github.com/rowboatlabs/rowboat (Apache-2.0).
+- **Buzz:** the hash-chained signal log (`server/signal-log.mjs`) adapts the
+  version-2 TLV hash preimage and canonical JSON from
+  [block/buzz](https://github.com/block/buzz) `crates/buzz-audit/src/hash.rs`
+  at commit `fae3f03` (Apache-2.0, Copyright 2026 Block, Inc.). See [NOTICE](NOTICE).
+  Local changes: own domain tag, u64 millisecond timestamps instead of RFC 3339 text,
+  no legacy v1 encoding, Node `createHash`. The Apache-2.0 text is the root `LICENSE`.
+  Other Buzz ideas (honest partial counts, never-go-dark states) are design influence, not code.
 - **Research screenshots:** images in `research/**/screenshots/` depict other
   products for comparison. They are excluded from our Apache license; their
   associated research documents supply context and source links. Do not use

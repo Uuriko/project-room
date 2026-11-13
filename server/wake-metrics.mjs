@@ -44,6 +44,8 @@
 // Both tables are lazy/additive (created on first record, like the
 // listener-lease tables) and registered in writer-fence lazyAdditiveTables.
 
+import { appendSignal } from "./signal-log.mjs";
+
 export const WAKE_STORES = Object.freeze(["signals", "work", "queue"]);
 export const WAKE_EVENTS = Object.freeze([
   "emitted", "coalesced", "suppressed_no_host", "suppressed_no_identity",
@@ -88,7 +90,23 @@ const isMissingTable = error => /no such (table|column)/i.test(String(error?.mes
 // wake path and must not be able to fail a message post, a heartbeat or
 // an ack. (Tests pin that counters DO move on every real path, so a
 // silent no-op here cannot hide.) Returns true when recorded.
-export function recordWakeEvent(db, { at, roomId = null, store, event, door = "", kind = "", n = 1, subjectId = null, reason = null } = {}) {
+// room_signal_log (typed events, hash-chained): the per-signal events. `ref` is
+// the signal id and `sentAt` its created_at, so a delivered/acked row carries its
+// own latency and nothing has to be paired at read time. A poll-door "delivered"
+// is a repeatable presentation, not a delivery, and stays counter-only; acked
+// with door "cron" is the stale prune (expired unhandled).
+const SIGNAL_OF = Object.freeze({ emitted: "wake.sent", delivered: "wake.delivered", acked: "wake.acked" });
+function logWakeSignal(db, { at, roomId, store, event, door, kind, subjectId, reason, ref, sentAt }) {
+  let type = null;
+  if (reason !== null) type = "wake.dropped";
+  else if (store === "signals" && SIGNAL_OF[event] && (event !== "delivered" || door === "listener")) type = SIGNAL_OF[event];
+  if (!type) return;
+  const detail = { k: kind || undefined, d: door || undefined, why: reason ?? undefined,
+    lat: Number.isSafeInteger(sentAt) && at >= sentAt && type !== "wake.sent" ? at - sentAt : undefined };
+  appendSignal(db, { roomId: roomId ?? "", at, type, targetId: subjectId, ref, detail });
+}
+
+export function recordWakeEvent(db, { at, roomId = null, store, event, door = "", kind = "", n = 1, subjectId = null, reason = null, ref = null, sentAt = null, signalLog = true } = {}) {
   try {
     if (!WAKE_STORES.includes(store) || !WAKE_EVENTS.includes(event)) return false;
     if (reason !== null && !WAKE_FAILURE_REASONS.includes(reason)) return false;
@@ -106,6 +124,7 @@ export function recordWakeEvent(db, { at, roomId = null, store, event, door = ""
       db.prepare(`DELETE FROM agent_wake_failures WHERE id <=
         (SELECT MAX(id) FROM agent_wake_failures) - ?`).run(FAILURE_JOURNAL_CAP);
     }
+    if (n === 1 && signalLog) logWakeSignal(db, { at: stamp, roomId, store, event, door, kind, subjectId, reason, ref, sentAt });
     return true;
   } catch {
     return false;
