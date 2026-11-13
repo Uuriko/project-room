@@ -18,11 +18,9 @@ test('hosted discovery supports a zero-Room outside contributor through lost sub
   const counts = () => ['agent_identities', 'identity_links', 'rooms'].map(table => store.db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n);
   const before = counts();
   const discovery = await fetch(`${origin}/mcp/server-card`); assert.equal(discovery.status, 200); const card = await discovery.json();
-  const advertised = new URL(card.remotes[0].url);
-  // A self-hosted server advertises its own origin (server/advertised-origin.mjs), so this
-  // disposable HTTP fixture's card must name the fixture itself. The hosted constant stays
-  // fixed on the hosted origin (tests/advertised-origin.test.js).
-  assert.equal(advertised.origin, origin);
+  const advertised = new URL(card.remotes[0].url); assert.equal(advertised.protocol, 'https:');
+  // The deployed discovery document intentionally has a fixed canonical URL.
+  // Only its advertised path is replayed to this disposable real HTTP fixture.
   const endpoint = `${origin}${advertised.pathname}`;
   const headers = secret => ({ 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) });
   let id = 0;

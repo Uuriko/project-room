@@ -60,7 +60,7 @@ import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventRows, redactMessageTree } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
-import { advertisedOrigin, advertisedText, advertisedDocument, advertisedDocumentBody, advertisedSkillDigests, advertisedHtml, isHostedOrigin } from "./advertised-origin.mjs";
+import { advertisedOrigin, advertisedText, advertisedHtml, isHostedOrigin } from "./advertised-origin.mjs";
 import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
@@ -2210,7 +2210,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.writeHead(302, { Location: publicRoomAppUrl(url.href, expectedOrigin()) });
           return res.end();
         }
-        const packet = advertisedDocument(discoveryDoc("/llms.txt"), expectedOrigin());
+        const packet = discoveryDoc("/llms.txt");
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks(url));
         const packetBytes = Buffer.from(packet.body);
@@ -2232,7 +2232,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
           for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
         }
-        let docBody = advertisedSkillDigests(advertisedDocumentBody(discovery.type, discovery.body, expectedOrigin()), expectedOrigin(), discoveryDoc);
+        let docBody = discovery.body;
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy
         // asset carries the base catalog; the node server injects the live
