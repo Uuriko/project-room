@@ -11,7 +11,7 @@ import {readCurrentWorkListing} from './current-work-list.mjs';
 import { isUnfilledIntroBody } from './first-connect-task.mjs';
 import {attentionWaitStatus} from './attention-wait.mjs';
 import { WRITE_GRANT_POLICY_VERSION } from '../src/work-reducers.js';
-import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget } from './current-room-repository.mjs';
+import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomRecoveryMembers, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget } from './current-room-repository.mjs';
 import {bindReplayAppend} from './replay-cutover.mjs';
 import { savedHistoricalReplayCheckpoint } from './historical-replay-contract.mjs';
 import { bootstrapLegacyWriteProofs, configureWriteIntegrity, beginWriteProofFrame, endWriteProofFrame, publishProjectionWrites, projectionDigest, projectionContentHash, servingContentProof, servingProofDrift, assertProjectionWrite, assertMessageWrite, recordMessageWrite, withVerifiedRoomReconstruction } from './write-integrity.mjs';
@@ -4156,6 +4156,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if(!this._restoreOpening)assertRestoreAdmitted(this.db);
     const current = currentRoomOwnerAuthority(this.db, roomId);
     return current ? current.ownerId : this.roomAuthority(roomId)?.ownerId;
+  }
+  // Internal recovery comparison API; no HTTP/MCP route grants this census.
+  recoveryMembers(roomId) {
+    return this.readTransaction(() => {
+      if(!this._restoreOpening)assertRestoreAdmitted(this.db);
+      return currentRoomRecoveryMembers(this.db,roomId) ?? this.room(roomId).state.members;
+    });
   }
   roomAuthority(roomId, { includeHistory = false, memberId = null, activeOnly = false } = {}) {
     if(!this._restoreOpening)assertRestoreAdmitted(this.db);

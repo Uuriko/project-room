@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
-import { isCurrentRoom } from "./current-room-repository.mjs";
 
 // REL-14: content digests, so a restore proves byte equality instead of
 // matching row counts only. events: every row in (room_id, sequence) order.
@@ -113,14 +112,6 @@ export async function backupRoom(source, destinationDirectory) {
 // row flag (OAuth refresh families, autonomy tiers, login-method bindings,
 // stitch presence) state their comparison in their examine() below.
 
-// Complete protected membership census, never an active-only or selected
-// subset. Native budget/proof failures propagate; no partial report is safe.
-function reconciliationMembers(store, roomId) {
-  return store.readTransaction(() => isCurrentRoom(store.db, roomId)
-    ? store.roomAuthority(roomId).members
-    : store.room(roomId).state.members);
-}
-
 const tableExists = (db, name) => Boolean(db.prepare(
   "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 
@@ -227,7 +218,7 @@ const RECONCILE_CLASSES = [
   { kind: "member", checkedKey: "rooms", examine(restored, current, stale) {
     const rooms = restored.db.prepare("SELECT id FROM rooms").all();
     for (const room of rooms) {
-      const restoredMembers = reconciliationMembers(restored, room.id);
+      const restoredMembers = restored.recoveryMembers(room.id);
       // A room deleted from the current store after the backup is exactly the
       // resurrection case this rehearsal exists to report: the member read
       // throws 404 room_not_found for it, and that must not abort the whole
@@ -236,7 +227,7 @@ const RECONCILE_CLASSES = [
       // (storage, corruption) still propagates.
       let currentMembers;
       try {
-        currentMembers = reconciliationMembers(current, room.id);
+        currentMembers = current.recoveryMembers(room.id);
       } catch (error) {
         if (error?.code !== "room_not_found") throw error;
         currentMembers = {};
