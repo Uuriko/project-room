@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
+import { isCurrentRoom } from "./current-room-repository.mjs";
 
 // REL-14: content digests, so a restore proves byte equality instead of
 // matching row counts only. events: every row in (room_id, sequence) order.
@@ -112,6 +113,14 @@ export async function backupRoom(source, destinationDirectory) {
 // row flag (OAuth refresh families, autonomy tiers, login-method bindings,
 // stitch presence) state their comparison in their examine() below.
 
+// Complete protected membership census, never an active-only or selected
+// subset. Native budget/proof failures propagate; no partial report is safe.
+function reconciliationMembers(store, roomId) {
+  return store.readTransaction(() => isCurrentRoom(store.db, roomId)
+    ? store.roomAuthority(roomId).members
+    : store.room(roomId).state.members);
+}
+
 const tableExists = (db, name) => Boolean(db.prepare(
   "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 
@@ -218,16 +227,16 @@ const RECONCILE_CLASSES = [
   { kind: "member", checkedKey: "rooms", examine(restored, current, stale) {
     const rooms = restored.db.prepare("SELECT id FROM rooms").all();
     for (const room of rooms) {
-      const restoredMembers = restored.room(room.id).state.members;
+      const restoredMembers = reconciliationMembers(restored, room.id);
       // A room deleted from the current store after the backup is exactly the
-      // resurrection case this rehearsal exists to report: RoomStore.room()
+      // resurrection case this rehearsal exists to report: the member read
       // throws 404 room_not_found for it, and that must not abort the whole
       // reconciliation. Treat the missing room as having no current members,
       // so every active restored member is named stale below. Any other error
       // (storage, corruption) still propagates.
       let currentMembers;
       try {
-        currentMembers = current.room(room.id).state.members;
+        currentMembers = reconciliationMembers(current, room.id);
       } catch (error) {
         if (error?.code !== "room_not_found") throw error;
         currentMembers = {};
@@ -645,7 +654,7 @@ const RECONCILE_CLASSES = [
 // row is classified into exactly one kind so a row is never named twice.
 function checkApiKeys(restored, current, stale, kind, onboarding) {
   if (!tableExists(restored.db, "agent_api_keys")) return 0;
-  const select = "SELECT key_id, identity_id, scopes_json, revoked FROM agent_api_keys";
+  const select = "SELECT key_id, key_hash, identity_id, scopes_json, revoked FROM agent_api_keys";
   const isOnboarding = row => {
     try {
       const scopes = JSON.parse(row.scopes_json);
@@ -663,6 +672,7 @@ function checkApiKeys(restored, current, stale, kind, onboarding) {
     const cur = now.get(row.key_id);
     if (cur === undefined) stale.push({ kind, id: row.key_id, detail: `${noun} for ${row.identity_id} unknown to the current store` });
     else if (cur.revoked) stale.push({ kind, id: row.key_id, detail: `${noun} for ${row.identity_id} was revoked after the backup` });
+    else if (cur.key_hash !== row.key_hash) stale.push({ kind, id: row.key_id, detail: `${noun} for ${row.identity_id} was rotated after the backup` });
   }
   return rows.length;
 }
