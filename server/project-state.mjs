@@ -13,6 +13,9 @@ import { ownMember } from "../src/events.js";
 import { workRoleHolder } from "./work-context.mjs";
 import { isCurrentRoom } from "./current-room-repository.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
+import { parseReceipt } from "./receipts.mjs";
+import { readReceiptSignals } from "./receipt-signals.mjs";
+import { readResponseLatency, latencyLine } from "./response-latency.mjs";
 
 export const PROJECT_STATE_VERSION = 1;
 export const PROJECT_STATE_MAX_BYTES = 6144;
@@ -31,29 +34,12 @@ const strip = ({ _t, ...row }) => row;
 const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 const minutes = (now, at) => { const t = Date.parse(at); return Number.isFinite(t) ? Math.max(0, Math.round((now - t) / 60000)) : null; };
 
-// Receipt formats are the ones deploy-prod, ci-receipt and merge-receipt post.
-// Anything that does not match is not a receipt.
-export function parseReceipt(body) {
-  if (typeof body !== "string") return null;
-  let m = /^PROD DEPLOY ([0-9a-f]{8}) · (.*)$/s.exec(body.split("\n", 1)[0]);
-  if (m) {
-    const line = m[2];
-    const ok = /strict smoke success/.test(line) && /live smoke success/.test(line) || /\bPASSED\b/.test(line) || /workflow smoke ok/.test(line);
-    const failed = /ROLL FORWARD REQUIRED|ROLLBACK NOT VERIFIED|ROLLBACK VERIFIED|NO DEPLOYMENT CHANGE|smoke failure|smoke cancelled/.test(line);
-    return { kind: "deploy", sha: m[1], smoke: failed ? "failed" : ok ? "ok" : "unknown" };
-  }
-  m = /^PROD ROLLBACK · (.*)$/s.exec(body.split("\n", 1)[0]);
-  if (m) return { kind: "rollback", smoke: /smoke ok/.test(m[1]) ? "ok" : "unknown" };
-  m = /^MERGED #(\d{1,7}) ([0-9a-f]{8}) · (.{0,200})$/s.exec(body.split("\n", 1)[0]);
-  if (m) return { kind: "merged", pr: Number(m[1]), sha: m[2], title: clip(m[3].split(" · ")[0], 70) };
-  m = /^CI #(\d{1,7}) ([0-9a-f]{8}) (PASSED|FAILED)\b(.{0,120})/s.exec(body.split("\n", 1)[0]);
-  if (m) return { kind: "ci", pr: Number(m[1]), sha: m[2], verdict: m[3].toLowerCase(), detail: clip(m[4].replace(/·\s*https?:\S+/, ""), 60) };
-  return null;
-}
+// parseReceipt lives in receipts.mjs (pure, no imports) so the post path can use it without this module's graph.
+export { parseReceipt };
 
 // Pure builder. `members` maps id → {displayName, kind}; `items` are work
 // items as the reducers hold them (privacy already applied by the reader).
-export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, live, items, itemsComplete, members, receipts, receiptWindow, attention }) {
+export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, live, items, itemsComplete, members, receipts, receiptWindow, attention, latency = null }) {
   const member = id => (id == null || !members ? null : ownMember(members, id));
   const name = id => (id == null ? null : clip(member(id)?.displayName, 24) ?? String(id).slice(0, 12));
   const nowMs = typeof now === "number" ? now : Date.parse(now);
@@ -84,7 +70,7 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
   for (const list of [inProgress, blocked, needsYou, needsHuman]) list.sort(byQuiet);
 
   // Receipts → what is live and what merged since.
-  const rows = (receipts ?? []).map(r => ({ ...r, parsed: parseReceipt(r.body) })).filter(r => r.parsed);
+  const rows = (receipts ?? []).map(r => ({ ...r, parsed: r.parsed ?? parseReceipt(r.body) })).filter(r => r.parsed);
   const deploys = rows.filter(r => r.parsed.kind === "deploy" || r.parsed.kind === "rollback").sort((a, b) => b.seq - a.seq);
   const lastOkDeploy = deploys.find(r => r.parsed.smoke === "ok" && r.parsed.kind === "deploy") ?? null;
   const merges = rows.filter(r => r.parsed.kind === "merged").sort((a, b) => a.seq - b.seq);
@@ -115,6 +101,7 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
     attention: (attention ?? []).slice(0, CAPS.attention).map(a => ({ kind: a.kind, seq: a.seq, id: a.id, summary: clip(a.summary, 80) })),
     receipts: rows.sort((a, b) => b.seq - a.seq).slice(0, CAPS.receipts).map(r => ({ seq: r.seq, at: iso(Date.parse(r.at)), by: name(r.actorId), ...r.parsed })),
     receiptWindow: receiptWindow ?? null,
+    ...(latency ? { latency } : {}),
     truncated: {}
   };
   const listed = new Set([...state.inProgress, ...state.blocked].map(row => row.id));
@@ -171,7 +158,13 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
     // The viewer's history floor clamps the scan like every other read.
     const historyFloor = store.historyFloor(roomId, viewerId, head);
     const floor = Math.max(0, head - RECEIPT_SCAN_EVENTS, historyFloor ? historyFloor.sequence - 1 : 0);
-    const receipts = store.db.prepare(
+    // Typed receipts first: when room_signal_log holds a good deploy anchor, the
+    // log answers (a few indexed rows, no journal scan). Anything else falls back
+    // to the text parse over the journal tail, so history before the log still reads.
+    let receipts = null, receiptSource = "journal";
+    const typed = readReceiptSignals(store.db, roomId, { floorSeq: floor });
+    if (typed?.some(r => r.parsed.kind === "deploy" && r.parsed.smoke === "ok")) { receipts = typed; receiptSource = "log"; }
+    if (!receipts) receipts = store.db.prepare(
       `SELECT sequence AS seq, json_extract(body,'$.at') AS at, json_extract(body,'$.actorId') AS actorId, json_extract(body,'$.data.body') AS body
        FROM events WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='message.posted' AND json_extract(body,'$.data.toMemberId') IS NULL
          AND (json_extract(body,'$.data.body') LIKE 'PROD DEPLOY %' OR json_extract(body,'$.data.body') LIKE 'PROD ROLLBACK %'
@@ -179,10 +172,12 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
        ORDER BY sequence DESC LIMIT 200`).all(roomId, floor);
     let attention = [];
     try { attention = store.roomDigest(token, roomId, { since: 0, expectedSessionBinding })?.attention ?? []; } catch { attention = []; }
+    let latency = null;
+    try { latency = latencyLine(readResponseLatency(store, token, roomId, { expectedSessionBinding })); } catch { latency = null; }
     return buildProjectState({
-      roomId, viewerId, ownerId, sequence: head, now,
+      roomId, viewerId, ownerId, sequence: head, now, latency,
       live: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID },
-      items, itemsComplete: complete, members, receipts, receiptWindow: { fromSeq: floor + 1, throughSeq: head }, attention
+      items, itemsComplete: complete, members, receipts, receiptWindow: { fromSeq: floor + 1, throughSeq: head, source: receiptSource }, attention
     });
   });
 }

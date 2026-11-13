@@ -146,6 +146,7 @@ import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } fr
 import { wakeForAgent } from "./sleeper-wake.mjs";
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
+import { recordReceiptSignal } from "./receipt-signals.mjs"; // typed receipts (room_signal_log)
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
@@ -7533,6 +7534,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.reminders.retireMember(roomId, command.data.memberId);
       }
       if (command.type === T.MESSAGE_POSTED) {
+        recordReceiptSignal(this.db, { roomId, at: incoming.at, actorId: auth.member.id, body: command.data.body,
+          eventId: incoming.id, journalSeq: sequence, toMemberId: command.data.toMemberId });
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
         this.humanPush.notifyPosted({

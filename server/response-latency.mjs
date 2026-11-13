@@ -146,7 +146,10 @@ const statusOf = (item, now) => {
 // acked with door "cron" is the stale prune: expired unhandled, not an answer.
 export function buildWakeContext(rows, { scan = LATENCY_WAKE_SCAN } = {}) {
   if (!rows?.length) return null;
+  const read = rows.length;
   const groups = {};
+  rows = rows.filter(row => typeof row.type === "string" && row.type.startsWith("wake.")); // receipts share the table
+  if (!rows.length) return null;
   for (const row of rows) {
     let d = {};
     try { d = JSON.parse(row.detail ?? "{}"); } catch { /* counts still hold */ }
@@ -164,7 +167,7 @@ export function buildWakeContext(rows, { scan = LATENCY_WAKE_SCAN } = {}) {
     deliverMs.sort((a, b) => a - b); ackMs.sort((a, b) => a - b);
     out[name] = { ...counts, deliverP50Ms: percentile(deliverMs, 50), ackP50Ms: percentile(ackMs, 50), ackP90Ms: percentile(ackMs, 90) };
   }
-  return { rows: rows.length, since: iso(rows.at(-1).ts_ms), complete: rows.length < scan, ...out };
+  return { rows: rows.length, since: iso(rows.at(-1).ts_ms), complete: read < scan, ...out };
 }
 
 export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, through, window, events, mentions = [], members = {}, wake = null }) {
@@ -223,6 +226,20 @@ export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, th
     while (size() > LATENCY_MAX_BYTES && state[key].length > 1) { state[key].pop(); state.truncated[key] = (state.truncated[key] ?? 0) + 1; }
   }
   return state;
+}
+
+// One short line for room_project_state: how many requests are dropped / waiting /
+// late right now, the worst pair, and the median wake ack. Same numbers as the
+// full read (it is derived from it), so the two can never disagree.
+export function latencyLine(doc) {
+  if (!doc?.totals) return null;
+  let dropped = 0, waiting = 0, late = 0;
+  for (const t of Object.values(doc.totals)) { dropped += t.dropped ?? 0; waiting += t.waiting ?? 0; late += t.late ?? 0; }
+  const w = doc.pairs?.find(p => p.dropped > 0 || p.waiting > 0);
+  return { dropped, waiting, late,
+    ...(w ? { worst: `${w.from} -> ${w.to} (${w.ctx}): ${w.dropped} dropped, ${w.waiting} waiting` } : {}),
+    ...(doc.wake?.message?.ackP50Ms != null ? { wakeAckP50Ms: doc.wake.message.ackP50Ms } : {}),
+    see: "room_response_latency" };
 }
 
 const memos = new WeakMap();

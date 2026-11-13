@@ -115,6 +115,11 @@ test("buildWakeContext: counts and latency by group, cron ack is expired not ans
   assert.equal(ctx.rows, 7); assert.equal(ctx.complete, true); assert.equal(ctx.since, new Date(T + 3).toISOString());
   assert.ok(!JSON.stringify(ctx).includes("agent"));
   assert.equal(buildWakeContext([]), null);
+  // Receipts share the table: they are not wake rows, add no group and no row count.
+  const mixed = buildWakeContext([row("pr.merged", { pr: 1, js: 3 }, T + 20), row("wake.sent", { k: "mention" }, T + 19), row("deploy.finished", { sha: "aaaaaaaa", js: 4 }, T + 18)]);
+  assert.deepEqual(Object.keys(mixed).sort(), ["complete", "message", "rows", "since"]);
+  assert.equal(mixed.rows, 1);
+  assert.equal(buildWakeContext([row("pr.merged", { js: 1 })]), null, "receipts only: no wake section");
 });
 
 test("latency read: wake context appears once the log has rows, stays inside the byte cap, and a read appends nothing", t => {
