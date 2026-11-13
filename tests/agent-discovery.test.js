@@ -14,6 +14,8 @@ import {
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../server/agent-discovery.mjs";
+import { advertisedDocumentBody, advertisedSkillDigests, advertisedText } from "../server/advertised-origin.mjs";
+const adv = (doc, origin) => advertisedSkillDigests(advertisedDocumentBody(doc.type, doc.body, origin), origin, discoveryDoc);
 
 const FORBIDDEN = /Bearer (?!<saved-identity-secret>|<room-mcp-token>)|ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
@@ -195,8 +197,8 @@ test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases",
     // scratch server has no published cards, so the served body is the
     // static doc plus `"members": []`.
     const expectedBody = discoveryDoc(path) === discoveryDoc("/skills")
-      ? JSON.stringify({ ...JSON.parse(expected.body), members: [] }, null, 2) + "\n"
-      : expected.body;
+      ? JSON.stringify({ ...JSON.parse(adv(expected, origin)), members: [] }, null, 2) + "\n"
+      : adv(expected, origin);
     assert.equal(await get.text(), expectedBody, path);
     const head = await fetch(origin + path, { method: "HEAD" });
     assert.equal(head.status, 200, path);
@@ -267,7 +269,7 @@ test("agents.json is a machine-readable flows/steps/actions doc served at /agent
   const get = await fetch(origin + "/agents.json");
   assert.equal(get.status, 200);
   assert.equal(get.headers.get("content-type"), "application/json; charset=utf-8");
-  assert.deepEqual(JSON.parse(await get.text()), doc);
+  assert.deepEqual(JSON.parse(await get.text()), JSON.parse(advertisedText(JSON.stringify(doc), origin)));
 });
 
 test("conventional skill/agent filenames serve the same short packet as /llms.txt", async t => {
@@ -281,7 +283,7 @@ test("conventional skill/agent filenames serve the same short packet as /llms.tx
       assert.equal(discoveryDoc(path).type, short.type, path);
       const get = await fetch(origin + path);
       assert.equal(get.status, 200, path);
-      assert.equal(await get.text(), short.body);
+      assert.equal(await get.text(), adv(short, origin));
     }
   }
 });
@@ -350,11 +352,11 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
     assert.equal(discoveryDoc(path).body, skill.body, `${path} serves identical bytes`);
     const get = await fetch(origin + path);
     assert.equal(get.status, 200, path);
-    assert.equal(await get.text(), skill.body);
+    assert.equal(await get.text(), adv(skill, origin));
   }
   const get = await fetch(origin + "/SKILL.md");
   assert.equal(get.status, 200, "/SKILL.md");
-  assert.equal(await get.text(), skill.body);
+  assert.equal(await get.text(), adv(skill, origin));
   // The lowercase alias is untouched: still the short packet.
   assert.equal(discoveryDoc("/skill.md").body, packet.body, "lowercase /skill.md still aliases llms.txt");
 });
@@ -409,14 +411,14 @@ test("www leftover synonyms serve the short packet or agent card, not 404", asyn
     const get = await fetch(origin + path);
     assert.equal(get.status, 200, path);
     assert.equal(get.headers.get("content-type"), short.type, path);
-    assert.equal(await get.text(), short.body, path);
+    assert.equal(await get.text(), adv(short, origin), path);
   }
   for (const path of ["/room/agent.json", "/room/agent.json/"]) {
     assert.equal(discoveryDoc(path).body, card.body, path);
     const get = await fetch(origin + path);
     assert.equal(get.status, 200, path);
     assert.equal(get.headers.get("content-type"), card.type, path);
-    assert.equal(await get.text(), card.body, path);
+    assert.equal(await get.text(), adv(card, origin), path);
   }
   // Door roots stay out of ALIASES so HTML / Accept: text/plain keep working.
   assert.equal(discoveryDoc("/room"), null);
@@ -462,7 +464,7 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
     const get = await fetch(origin + path);
     assert.equal(get.status, 200, path);
     assert.equal(get.headers.get("content-type"), catalog.type, path);
-    assert.equal(await get.text(), catalog.body, path);
+    assert.equal(await get.text(), adv(catalog, origin), path);
     const head = await fetch(origin + path, { method: "HEAD" });
     assert.equal(head.status, 200, path);
     assert.equal(await head.text(), "");
@@ -569,7 +571,7 @@ test("advertised door root redirects to the app; packets stay at /room/llms.txt"
     const plain = await fetch(`${base}${path}`, { headers: { Accept: "text/plain" } });
     assert.equal(plain.status, 200, path);
     assert.match(plain.headers.get("content-type"), /text\/plain/);
-    assert.equal(await plain.text(), llmsTxt());
+    assert.equal(await plain.text(), advertisedText(llmsTxt(), base));
   }
   const workspace = await fetch(`${base}/`);
   assert.equal(workspace.status, 200);
@@ -578,7 +580,7 @@ test("advertised door root redirects to the app; packets stay at /room/llms.txt"
   const packet = await fetch(`${base}/room/llms.txt`);
   assert.equal(packet.status, 200);
   assert.match(packet.headers.get("content-type"), /text\/plain/);
-  assert.equal(await packet.text(), llmsTxt());
+  assert.equal(await packet.text(), advertisedText(llmsTxt(), base));
 });
 
 test("edge door predicate: getdasha /room only, prefix preserved", () => {

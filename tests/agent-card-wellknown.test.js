@@ -12,6 +12,7 @@ import {
   attachCardSignatureEnvelope, agentJwksJson,
 } from "../server/agent-discovery.mjs";
 import { AGENT_CARD_PUBLIC_KEY, AGENT_CARD_AGENT_ID, AGENT_CARD_KEY_ID } from "../server/agent-card-key.mjs";
+import { advertisedDocumentBody, advertisedText } from "../server/advertised-origin.mjs";
 import {
   canonicalCardBytes, generateKeyPair, isValidPublicKey, signCard, verifyCardSignature,
   signCardJws, verifyCardJws, publicKeyToJwk,
@@ -147,7 +148,7 @@ test("funnel serves the signed-shape card at the well-known path", async t => {
   const twin = await (await fetch(`${origin}/.well-known/agent.json`)).json();
   assert.deepEqual(card, twin, "agent-card.json and agent.json serve identical bytes");
   const doc = discoveryDoc(AGENT_CARD_A2A_PATH);
-  assert.deepEqual(JSON.parse(doc.body), card, "served bytes match discoveryDoc");
+  assert.deepEqual(JSON.parse(advertisedDocumentBody(doc.type, doc.body, origin)), card, "served bytes match discoveryDoc, rewritten to this instance origin");
 });
 
 test("root card aliases serve identical bytes to the well-known card", async t => {
@@ -171,8 +172,8 @@ test("robots.txt names the AI crawlers explicitly", async t => {
     assert.match(body, new RegExp(`User-agent: ${bot.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}`), bot);
   }
   assert.match(body, /Allow: \//);
-  assert.match(body, /Agentmap: https:\/\/room\.trydemigod\.com\/\.well-known\/ard\.json/);
-  assert.equal(body, robotsTxt(), "served bytes match robotsTxt()");
+  assert.ok(body.includes(`Agentmap: ${origin}/.well-known/ard.json`), "Agentmap names this instance");
+  assert.equal(body, advertisedText(robotsTxt(), origin), "served bytes match robotsTxt() at this instance origin");
 });
 
 test("ARD ai-catalog serves at ard.json and ai-catalog.json with the same bytes", async t => {
@@ -189,7 +190,7 @@ test("ARD ai-catalog serves at ard.json and ai-catalog.json with the same bytes"
   // §4.5.1) — the publisher domain must be the serving host, not a sibling
   // brand or docs host.
   for (const entry of catalog.entries) {
-    assert.match(entry.identifier, /^urn:air:room\.trydemigod\.com:/, `URN publisher domain anchored to serving host: ${entry.identifier}`);
+    assert.ok(entry.identifier.startsWith(`urn:air:${new URL(origin).hostname}:`), `URN publisher domain anchored to serving host: ${entry.identifier}`);
   }
   assert.equal(typeof catalog.host?.displayName, "string");
   assert.ok(Array.isArray(catalog.entries) && catalog.entries.length >= 2);
@@ -207,15 +208,15 @@ test("ARD ai-catalog serves at ard.json and ai-catalog.json with the same bytes"
   assert.ok(cardEntry, "A2A card entry present");
   assert.equal(cardEntry.metadata.signatureKeyId, AGENT_CARD_KEY_ID, "catalog advertises the configured card signing key");
   if (agentCard().keyId) assert.equal(cardEntry.metadata.signatureKeyId, agentCard().keyId);
-  assert.equal(cardEntry.url, "https://room.trydemigod.com/.well-known/agent-card.json");
+  assert.equal(cardEntry.url, `${origin}/.well-known/agent-card.json`);
   const mcpEntry = catalog.entries.find(e => e.type === "application/mcp-server-card+json");
   assert.ok(mcpEntry, "MCP entry present");
-  assert.equal(mcpEntry.url, "https://room.trydemigod.com/room/mcp/server-card");
+  assert.equal(mcpEntry.url, `${origin}/room/mcp/server-card`);
   assert.deepEqual(mcpEntry.capabilities, [
     "room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet",
     "public_work_recommend", "room_check_access", "room_list_work"
   ], "MCP entry lists the real public join tools plus the flagship gated tools");
-  assert.deepEqual(catalog, JSON.parse(aiCatalog()), "served bytes match aiCatalog()");
+  assert.deepEqual(catalog, JSON.parse(advertisedText(aiCatalog(), origin)), "served bytes match aiCatalog() at this instance origin");
   const doc = discoveryDoc("/.well-known/ard.json");
   assert.equal(doc.body, aiCatalog(), "discoveryDoc body matches aiCatalog()");
 });

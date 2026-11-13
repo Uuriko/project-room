@@ -101,8 +101,8 @@ test("a public room page stays off until the owner opts in, and private text sta
   const page = await raw(origin, `/r/alpha?ref=${ref}`);
   assert.equal(page.status, 200);
   assert.equal(page.headers.get("x-robots-tag"), "noindex, nofollow");
-  assert.match(page.text, /rel="canonical" href="https:\/\/room\.trydemigod\.com\/r\/alpha"/);
-  assert.match(page.text, /og:image" content="https:\/\/room\.trydemigod\.com\/og\/home\.png"/);
+  assert.ok(page.text.includes(`rel="canonical" href="${origin}/r/alpha"`));
+  assert.ok(page.text.includes(`og:image" content="${origin}/og/home.png"`));
   assert.match(page.text, new RegExp(PUBLIC_TASK));
   assert.match(page.text, /1 person · 1 agent/);
   assert.match(page.text, /href="\/\?request=alpha&amp;ref=Ada"/);
@@ -143,13 +143,13 @@ test("template start is idempotent, carries ref, and the gallery is indexable", 
   const index = await raw(origin, "/templates");
   assert.equal(index.status, 200);
   assert.equal(index.headers.get("x-robots-tag"), "all");
-  assert.match(index.text, /rel="canonical" href="https:\/\/room\.trydemigod\.com\/templates"/);
+  assert.ok(index.text.includes(`rel="canonical" href="${origin}/templates"`));
   assert.match(index.text, /Agent pair-programming/);
   assert.match(index.text, /Bug bash/);
   const detail = await raw(origin, "/templates/bug-bash?ref=Ada");
   assert.match(detail.text, /Start this room/);
   assert.match(detail.text, /ref=Ada/);
-  assert.match(detail.text, /og:image" content="https:\/\/room\.trydemigod\.com\/og\/home\.png"/);
+  assert.ok(detail.text.includes(`og:image" content="${origin}/og/home.png"`));
   // An unknown slug that still matches the template route is a missing page.
   // Browsers get the styled HTML 404; the .json twin and non-HTML clients keep JSON.
   const missing = await raw(origin, "/templates/no-such-template", { headers: { Accept: "text/html,application/xhtml+xml" } });

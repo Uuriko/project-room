@@ -10,6 +10,7 @@ import {
   discoveryDoc, DISCOVERY_PATHS, skillMd, agentSkillsIndexJson,
   AGENT_SKILLS_INDEX_PATH, AGENT_SKILLS_SCHEMA
 } from "../server/agent-discovery.mjs";
+import { advertisedText } from "../server/advertised-origin.mjs";
 import { classifyEdgePath, edgePublicResponse } from "../cloudflare/edge-public.mjs";
 
 // Agent Skills discovery (v0.2.0, cloudflare/agent-skills-discovery-rfc):
@@ -85,12 +86,12 @@ test("the whole agent-skills prefix resolves: bare prefix, index, per-skill path
     assert.equal(artifact.status, 200);
     const bytes = Buffer.from(await artifact.arrayBuffer());
     assert.equal(index.skills[0].digest, `sha256:${createHash("sha256").update(bytes).digest("hex")}`);
-    assert.equal(bytes.toString("utf8"), skillMd());
+    assert.equal(bytes.toString("utf8"), advertisedText(skillMd(), origin));
     assert.notEqual(index.skills[0].digest, `sha256:${sha256(bytes.toString("utf8") + "\n")}`, "changed bytes do not match");
   }
   const skillGet = await fetch(origin + SKILL_PATH);
   assert.equal(skillGet.status, 200, SKILL_PATH);
-  assert.equal(await skillGet.text(), skillMd());
+  assert.equal(await skillGet.text(), advertisedText(skillMd(), origin));
   assert.equal((await fetch(origin + AGENT_SKILLS_INDEX_PATH, { method: "POST" })).status, 405, "index is a read-only document");
 });
 
