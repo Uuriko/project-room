@@ -1314,6 +1314,16 @@
         "title": "Respond To Request"
       }
     },
+    "room_response_latency": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Response Latency"
+      }
+    },
     "room_revoke_agent_invite": {
       "inputSchema": "d5fb1615705f5fb1",
       "annotations": {
@@ -2266,6 +2276,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Respond To Request"
+      }
+    },
+    "room_response_latency": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Response Latency"
       }
     },
     "room_wait_for_attention": {

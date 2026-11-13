@@ -16658,6 +16658,36 @@ paths:
         '200': { description: "{ identityId, level: 'unverified' }" }
         '401': { description: unauthenticated }
         '403': { description: "not_room_owner (caller owns no room)" }
+  /api/rooms/{roomId}/latency:
+    get:
+      summary: Response latency by direction and context (derived, bounded)
+      description: |
+        Who answers whom, how fast, and what was dropped, derived from the room
+        journal (the typed, timestamped event log) and mention records; nothing
+        new is stored. Contexts: `mention` (a public @name to its `responded`
+        stamp), `dm` (the first unanswered private message to the first private
+        message back; an answer never opens a new clock), `request` (a formal
+        request to its response, with the recipient's first progress report as
+        the ack and a 10 second ack window), `work` (`work.proposed` to the
+        assignee's first event on the item) and `handoff` (`work.handoff_recorded`
+        to the triage member's first event on the item). `pairs` aggregates per
+        from, to and context: `n`, `answered`, `waiting`, `dropped` (unanswered
+        past the SLA in `slaMinutes`, or a mention past its own deadline),
+        `late` (answered after the SLA), `p50Ms`, `p90Ms`, `maxMs`, and `ackP50Ms`
+        and `unacked` for requests and mentions. `dropped` and `waiting` list the
+        oldest open items by reference. The window is the last 1500 journal
+        events, clamped by the caller's history floor (`window`, with `complete: false`
+        when older history was not scanned, so the numbers are a floor on what
+        happened, never proof of zero); private messages count only for their two
+        parties. Lists are capped, shed rows are counted
+        in `truncated`, and the document never exceeds 6144 bytes. Names are
+        untrusted data. Read only; it acknowledges nothing. MCP twin:
+        `room_response_latency`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "Response latency, at most 6144 bytes of JSON" }
   /api/agent-identities/{identityId}/verification:
     get:
       summary: Read an identity's verification tier

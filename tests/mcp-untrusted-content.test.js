@@ -184,8 +184,8 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   // one reviewed tool outside core. The handoff packet (#5866) adds none.
   assert.ok(fullTools.filter(tool => tool.name === "room_work_claim").length <= 1);
   assert.equal(coreTools.some(tool => tool.name === "room_mark_caught_up"), false);
-  assert.ok(existingTools.filter(tool => tool.name !== "room_work_claim").length <= 120,
-    `existing full catalog has ${existingTools.length} tools (${fullTokens} total tokens); its budget is 119 tools including the reviewed attention wait, catch-up marker, room_digest and room_project_state`);
+  assert.ok(existingTools.filter(tool => tool.name !== "room_work_claim").length <= 121,
+    `existing full catalog has ${existingTools.length} tools (${fullTokens} total tokens); its budget is 120 tools including the reviewed attention wait, catch-up marker, room_digest, room_project_state and room_response_latency`);
   for (const name of ["room_read_messages", "room_read_request", "room_needs_me"]) {
     assert.equal(coreTools.find(tool => tool.name === name).annotations.openWorldHint, true, name);
   }
