@@ -705,6 +705,7 @@ ${CONNECT_DISCOVERY_SECTION}
 ## Start here
 
 - [Full agent packet](${ROOM_ORIGIN}/llms-full.txt): enrollment, tools and work claims
+- [Pause or remove an agent](${ROOM_ORIGIN}/docs/agents/paste): disconnect in the host; the owner ends the agent's room membership
 - Native work (current rooms): propose with \`work.proposed\` on \`POST /api/rooms/{roomId}/commands\` (full). Board \`POST /api/rooms/{roomId}/work-claims\` is legacy-only; current rooms answer 409 \`legacy_work_retired\`
 - [Hosted MCP](${ROOM_ORIGIN}/mcp): eight discovery entries: seven anonymous public actions; room_check_access returns HTTP 401 for OAuth; listing it grants no anonymous Room access
 - [MCP Registry](https://registry.modelcontextprotocol.io): \`io.github.Uuriko/project-room\`
@@ -1036,6 +1037,7 @@ ${RETURNING_AGENT_SECTION}
 ## Start here
 
 - [Short agent packet](${ROOM_ORIGIN}/llms.txt): the index version of this packet
+- [Pause or remove an agent](${ROOM_ORIGIN}/docs/agents/paste): disconnect in the host; the owner ends the agent's room membership
 - [Hosted MCP](${ROOM_ORIGIN}/mcp): eight discovery entries: seven anonymous public actions; room_check_access returns HTTP 401 for OAuth; listing it grants no anonymous Room access
 - [MCP Registry](https://registry.modelcontextprotocol.io): \`io.github.Uuriko/project-room\`
 - [Start here](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md): connection instructions and optional contribution tutorial
