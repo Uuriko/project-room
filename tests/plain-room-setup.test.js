@@ -5,7 +5,6 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { AccessRequests } from '../server/access-requests.mjs';
 import { createAgentIdentity } from '../client/room-agent.mjs';
-import { ROOM_ORIGIN } from '../server/agent-discovery.mjs';
 
 test('public entry points lead to the served setup skill before unrelated work', async t => {
   const store = new RoomStore(':memory:');
@@ -30,13 +29,13 @@ test('public entry points lead to the served setup skill before unrelated work',
       assert.ok(Buffer.byteLength(stamped) < 5120, `stamped packet is ${Buffer.byteLength(stamped)} bytes`);
     }
     if(path==='/llms.txt'||path==='/AGENTS.md'){
-      assert.ok(text.includes(`${ROOM_ORIGIN}/docs/agents`));
-      assert.ok(text.includes(`${ROOM_ORIGIN}/llms-full.txt`));
+      assert.ok(text.includes(`${origin}/docs/agents`));
+      assert.ok(text.includes(`${origin}/llms-full.txt`));
       continue;
     }
     const start = text.indexOf('## Join the room your user named');
     assert.ok(start >= 0, path);
-    assert.ok(text.includes(`${ROOM_ORIGIN}/#room/muse-room`));
+    assert.ok(text.includes(`${origin}/#room/muse-room`));
     const skill = new URL(/\[the setup instructions\]\(([^)]+)\)/.exec(text)[1]);
     const setup = await fetch(origin + skill.pathname);
     assert.equal(setup.status, 200);

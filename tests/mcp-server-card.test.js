@@ -66,11 +66,11 @@ test("server card and /.well-known/mcp.json are one document from the live tool 
   assert.equal(card.description.length <= 100, true);
   assert.equal(registry.description.length <= 100, true);
   assert.equal(card.version, ROOM_MCP_SERVER_VERSION);
-  assert.equal(card.url, "https://room.trydemigod.com/mcp");
+  assert.equal(card.url, `${origin}/mcp`);
   assert.equal(card.remotes[0].url, card.url);
   assert.equal(card.remotes[0].type, "streamable-http");
   assert.equal(card.oauth, false);
-  assert.equal(card.auth.mint, "https://room.trydemigod.com/api/agent-identities");
+  assert.equal(card.auth.mint, `${origin}/api/agent-identities`);
   assert.equal(card.cacheScope, MCP_DISCOVERY_CACHE_SCOPE);
   assert.equal(card.ttlMs, MCP_DISCOVERY_TTL_MS);
   assert.equal(card.cacheScope, "public");
@@ -134,14 +134,16 @@ test("server card and /.well-known/mcp.json are one document from the live tool 
   assert.match(options.headers.get("access-control-allow-methods") ?? "", /GET/);
   assert.equal(options.headers.get("cache-control"), MCP_DISCOVERY_CACHE_CONTROL);
 
+  // The edge door serves the authored hosted bytes; the loopback server names its own origin.
+  const hostedCard = responses[0].split(origin).join("https://room.trydemigod.com");
   const door = roomEntry(new Request("https://www.trydemigod.com/room/mcp/server-card"));
   assert.equal(door.status, 200);
   assert.equal(door.headers.get("content-type"), MCP_SERVER_CARD_MEDIA_TYPE);
   assert.equal(door.headers.get("cache-control"), MCP_DISCOVERY_CACHE_CONTROL);
   assert.equal(door.headers.get("access-control-allow-origin"), "*");
-  assert.equal(await door.text(), responses[0]);
+  assert.equal(await door.text(), hostedCard);
   const doorAlias = roomEntry(new Request("https://www.trydemigod.com/room/.well-known/mcp.json"));
-  assert.equal(await doorAlias.text(), responses[0]);
+  assert.equal(await doorAlias.text(), hostedCard);
   const doorOptions = roomEntry(new Request("https://www.trydemigod.com/room/.well-known/mcp.json", { method: "OPTIONS" }));
   assert.equal(doorOptions.status, 204);
   assert.equal(doorOptions.headers.get("cache-control"), MCP_DISCOVERY_CACHE_CONTROL);

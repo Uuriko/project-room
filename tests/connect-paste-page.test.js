@@ -1,3 +1,4 @@
+import { advertisedHtml } from "../server/advertised-origin.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -54,7 +55,7 @@ test("the paste page is a registered public page linked from /docs/agents, with 
   const csp = page.headers.get("content-security-policy");
   assert.doesNotMatch(csp, /script-src[^;]*'self'/, "no first-party scripts on the marketing CSP");
   const html = await page.text();
-  assert.equal(html, readFileSync(PASTE_PAGE.htmlFile, "utf8"));
+  assert.equal(html, advertisedHtml(readFileSync(PASTE_PAGE.htmlFile, "utf8"), origin));
   assert.ok(csp.includes(`'sha256-${AGENT_PASTE_COPY_HASH}'`));
   assert.ok(html.includes(`<script>${AGENT_PASTE_COPY_SCRIPT}</script>`));
   assert.equal((html.match(/<script(?! type="application\/ld\+json")/g) || []).length, 1);
