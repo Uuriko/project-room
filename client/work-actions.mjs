@@ -24,13 +24,13 @@ const resultSegments = { type: "array", maxItems: 20, description: "Optional 1â€
   items: object({ kind: { type: "string", enum: ["fact", "inference", "proposal"] },
     text: { ...text, maxLength: 2000 } }, ["kind", "text"]) };
 const definitions = [
-  ["submit_text_result", "Save room text as result", T.WORK_COMPLETED, "Submit one immutable work-linked Room message as your assigned result. Preview it with room_read_result first. Pins its post event, exact UTF-8 SHA-256 and previous completion (explicit null for first). Same completion/claim gates as external evidence. Posting, producer attribution, review and human approval remain separate.", {
+  ["submit_text_result", "Save room text as result", T.WORK_COMPLETED, "Submit one immutable work-linked Room message as your assigned result. Preview it with room_read_result first. Pins its post event, exact UTF-8 SHA-256 and previous completion; the hosted server fills any of those (and producerId null) from the message id when omitted. Same completion/claim gates as external evidence. Posting, producer attribution, review and human approval remain separate.", {
     summary: text, nextAction: text, evidenceMessageId: id, evidenceMessageEventId: id,
     evidenceVersion: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
     previousCompletionEventId: { ...id, type: ["string", "null"] }, producerId: { ...id, type: ["string", "null"] },
     externalProducer, attempt, segments: resultSegments,
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
-  }, ["summary", "nextAction", "evidenceMessageId", "evidenceMessageEventId", "evidenceVersion", "previousCompletionEventId", "producerId"]],
+  }, ["summary", "nextAction", "evidenceMessageId"]],
   ["propose_work", "Propose work", T.WORK_PROPOSED, "Propose a new assigned task. Requires steer permission; ordinary enrolled agents do not receive it. This neither accepts nor starts work.", {
     title: text, definitionOfDone: text, accountableMemberId: id, dependsOn: { type: "array", maxItems: 16, items: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" }, description: "Existing same-room Board claim IDs, not message/session IDs. Every prerequisite must be done before claiming or starting. Read dependencies on room_read_work; acceptance rechecks existence." }, mode: { type: "string", enum: ["read", "write"] },
     independentVerificationRequired: bool, ownerDecisionRequired: bool, verifierMemberId: id, humanDecisionMakerId: id, sourceMessageId: id
