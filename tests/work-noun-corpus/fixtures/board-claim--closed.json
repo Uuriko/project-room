@@ -1,0 +1,83 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "board-claim/closed",
+  "machine": "board-claim",
+  "legacyState": "closed",
+  "provenance": {
+    "harvestedFrom": [
+      "server/work-claims.mjs item literal + CLAIM_LIFECYCLE",
+      "tests/work-claim-board.test.js",
+      "tests/work-claim-bundle-lifecycle.test.js"
+    ],
+    "census": "prod-census.json: board claims observed live in unclaimed/done/closed"
+  },
+  "legacy": {
+    "id": "wc_u1_closed",
+    "title": "Unify the work nouns",
+    "state": "closed",
+    "owner": null,
+    "history": [],
+    "claimedAt": null,
+    "leaseStartAt": null,
+    "leaseExpiresAt": null,
+    "deliveryMode": null,
+    "reviewPolicy": null,
+    "reviewedBy": null,
+    "attestations": [],
+    "tags": [],
+    "files": [],
+    "fileBlocks": {},
+    "blobs": [],
+    "dependsOn": [],
+    "parentClaimId": null,
+    "evidenceRefs": [],
+    "premiseFlag": null,
+    "acceptanceCriteria": [
+      "One state machine"
+    ],
+    "delivery": null,
+    "verification": null,
+    "pullRequest": null,
+    "pullRequests": [],
+    "repo": null,
+    "branch": null,
+    "chain": [],
+    "supersededBy": null,
+    "workItemId": null,
+    "squadId": null,
+    "kind": "work",
+    "revision": 0,
+    "ci": null,
+    "reviews": []
+  },
+  "doors": {
+    "rest": {
+      "surface": "GET /rooms/{id}/work-claims/{claimId}",
+      "statePath": "state",
+      "state": "closed",
+      "excerpt": {
+        "state": "closed"
+      }
+    },
+    "board-v2": {
+      "surface": "board/v2 claims lens (same item)",
+      "statePath": "state",
+      "state": "closed",
+      "excerpt": {
+        "state": "closed"
+      }
+    },
+    "commands": {
+      "surface": "work_claim.updated event payload",
+      "statePath": "state",
+      "state": "closed",
+      "excerpt": {
+        "state": "closed"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "closed"
+  }
+}

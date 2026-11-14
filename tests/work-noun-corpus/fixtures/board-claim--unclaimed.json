@@ -1,0 +1,83 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "board-claim/unclaimed",
+  "machine": "board-claim",
+  "legacyState": "unclaimed",
+  "provenance": {
+    "harvestedFrom": [
+      "server/work-claims.mjs item literal + CLAIM_LIFECYCLE",
+      "tests/work-claim-board.test.js",
+      "tests/work-claim-bundle-lifecycle.test.js"
+    ],
+    "census": "prod-census.json: board claims observed live in unclaimed/done/closed"
+  },
+  "legacy": {
+    "id": "wc_u1_unclaimed",
+    "title": "Unify the work nouns",
+    "state": "unclaimed",
+    "owner": null,
+    "history": [],
+    "claimedAt": null,
+    "leaseStartAt": null,
+    "leaseExpiresAt": null,
+    "deliveryMode": null,
+    "reviewPolicy": null,
+    "reviewedBy": null,
+    "attestations": [],
+    "tags": [],
+    "files": [],
+    "fileBlocks": {},
+    "blobs": [],
+    "dependsOn": [],
+    "parentClaimId": null,
+    "evidenceRefs": [],
+    "premiseFlag": null,
+    "acceptanceCriteria": [
+      "One state machine"
+    ],
+    "delivery": null,
+    "verification": null,
+    "pullRequest": null,
+    "pullRequests": [],
+    "repo": null,
+    "branch": null,
+    "chain": [],
+    "supersededBy": null,
+    "workItemId": null,
+    "squadId": null,
+    "kind": "work",
+    "revision": 0,
+    "ci": null,
+    "reviews": []
+  },
+  "doors": {
+    "rest": {
+      "surface": "GET /rooms/{id}/work-claims/{claimId}",
+      "statePath": "state",
+      "state": "unclaimed",
+      "excerpt": {
+        "state": "unclaimed"
+      }
+    },
+    "board-v2": {
+      "surface": "board/v2 claims lens (same item)",
+      "statePath": "state",
+      "state": "unclaimed",
+      "excerpt": {
+        "state": "unclaimed"
+      }
+    },
+    "commands": {
+      "surface": "work_claim.updated event payload",
+      "statePath": "state",
+      "state": "unclaimed",
+      "excerpt": {
+        "state": "unclaimed"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "open"
+  }
+}
