@@ -1,5 +1,11 @@
 # Delivery control: implementation plan
 
+Current scope: [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+This retained design or operating reference does not authorize work in cut areas.
+Its package order, proposed features and dated assignments are historical;
+correctness contracts still apply to supported behavior. Select work from current
+scope and claims, not this document's unfinished checklist.
+
 Updated 2026-10-29 UTC. This is the implementation plan for
 Project Room owning its development and maintenance workflow. It complements
 [the product architecture plan](ARCHITECTURE-EXECUTION-PLAN.md); it does not
