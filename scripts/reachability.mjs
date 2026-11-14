@@ -30,12 +30,6 @@ export const KEEP = [
   "server/supervision-routes.mjs",
   "server/session-adapter.mjs",
   "server/session-adapter/herdr-bridge-adapter.mjs",
-  // Notification delivery integrations remain inert, not implicitly enabled.
-  "server/notify-policy.mjs",
-  "server/notify-email.mjs",
-  "server/channel-adapters/webhook-secret.mjs",
-  "server/channel-adapters/slack-webhook.mjs",
-  "server/channel-adapters/discord-webhook.mjs",
   // Client stores restored for audit-wave-3c regression coverage (#2893);
   // runtime wiring is a separate product decision, not implicit enablement.
   "src/handoff-store.mjs",
