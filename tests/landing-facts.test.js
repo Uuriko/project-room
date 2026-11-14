@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { attachRestCommitIds, landingFacts, pathLeases } from "../scripts/landing-facts.mjs";
+import { attachRestCommitIds, checkSummary, landingFacts, mergeSlot, pathLeases } from "../scripts/landing-facts.mjs";
 
 const MAIN = "a".repeat(40);
 const HEAD = "b".repeat(40);
@@ -276,4 +276,81 @@ test("a quoted tab in a name-only path still matches the lease", async () => {
   const facts = await landingFacts({ fetchImpl, execImpl, claimsImpl, nowMs: Date.parse("2026-10-10T03:50:00.000Z") });
   assert.deepEqual(facts.touchedPaths, ["server/tab\tname.mjs"]);
   assert.equal(facts.pathLeases.paths[0].holders[0].claimId, "held-tab");
+});
+
+test("mergeSlot names the live holder and treats an expired lease as not held", () => {
+  const now = Date.parse("2026-10-22T03:00:00.000Z");
+  const live = mergeSlot({ truncated: false, claims: [{ id: "MERGE-SLOT", state: "claimed", owner: "codex", leaseExpiresAt: "2026-10-22T04:00:00.000Z" }] }, now);
+  assert.deepEqual(live, { unavailable: false, held: true, owner: "codex", state: "claimed", leaseExpiresAt: "2026-10-22T04:00:00.000Z", expired: false });
+  const stale = mergeSlot({ truncated: false, claims: [{ id: "MERGE-SLOT", state: "claimed", owner: "codex", leaseExpiresAt: "2026-10-22T02:00:00.000Z" }] }, now);
+  assert.equal(stale.held, false);
+  assert.equal(stale.expired, true);
+  assert.equal(mergeSlot({ truncated: false, claims: [{ id: "MERGE-SLOT", state: "released", owner: "codex" }] }, now).held, false);
+  assert.deepEqual(mergeSlot({ truncated: false, claims: [] }, now), { unavailable: false, held: false });
+  assert.deepEqual(mergeSlot({ truncated: true, claims: [] }, now), { unavailable: "claims_truncated" });
+  assert.deepEqual(mergeSlot(null, now), { unavailable: "claims_unreadable" });
+});
+
+test("checkSummary reports exact-head status with pending and failed names", () => {
+  const head = "a".repeat(40);
+  const runs = (list, total) => ({ total_count: total ?? list.length, check_runs: list });
+  const ok = { status: "completed", conclusion: "success", name: "unit" };
+  const st = (rows, over = {}) => ({ sha: head, total_count: rows.length, statuses: rows, ...over });
+  const leaseOk = { context: "room/release-lease", state: "success" };
+  const none = st([leaseOk]);
+  assert.equal(checkSummary(head, runs([ok, { status: "completed", conclusion: "skipped", name: "s" }, { status: "completed", conclusion: "neutral", name: "n" }]), none).status, "green");
+  assert.equal(checkSummary(head, runs([ok])).status, "incomplete");
+  assert.equal(checkSummary(head, runs([ok]), st([leaseOk])).status, "green");
+  const lease = checkSummary(head, runs([ok]), st([{ context: "room/release-lease", state: "pending" }]));
+  assert.equal(lease.status, "pending");
+  assert.deepEqual(lease.pending, ["room/release-lease"]);
+  assert.equal(checkSummary(head, runs([ok]), st([leaseOk, { context: "x", state: "error" }])).status, "failing");
+  const pend = checkSummary(head, runs([ok, { status: "queued", conclusion: null, name: "browser 3/6" }]));
+  assert.equal(pend.status, "pending");
+  assert.deepEqual(pend.pending, ["browser 3/6"]);
+  const fail = checkSummary(head, runs([{ status: "queued", name: "b" }, { status: "completed", conclusion: "failure", name: "a" }]));
+  assert.equal(fail.status, "failing");
+  assert.deepEqual(fail.failed, ["a"]);
+  assert.equal(checkSummary(head, runs([ok], 120)).status, "incomplete");
+  for (const conclusion of ["stale", null, "something_new"]) {
+    const odd = checkSummary(head, runs([ok, { status: "completed", conclusion, name: "odd" }]), none);
+    assert.equal(odd.status, "incomplete");
+    assert.deepEqual(odd.unknown, ["odd"]);
+  }
+  assert.equal(checkSummary(head, runs([]), st([]), []).status, "none");
+  // 17513 probes: missing required context, truncated status page, wrong sha.
+  const missing = checkSummary(head, runs([ok]), st([], { state: "pending" }));
+  assert.equal(missing.status, "incomplete");
+  assert.deepEqual(missing.missingRequired, ["room/release-lease"]);
+  assert.equal(checkSummary(head, runs([ok]), st([leaseOk], { total_count: 2, state: "failure" })).status, "incomplete");
+  assert.equal(checkSummary(head, runs([ok]), st([leaseOk], { sha: "f".repeat(40) })).status, "incomplete");
+  assert.deepEqual(checkSummary(head, {}), { head, unavailable: "checks_unreadable" });
+});
+
+test("facts carry mergeSlot with claims and checks at the PR head", async () => {
+  const PRHEAD = "c".repeat(40);
+  const execImpl = (args) => {
+    const key = args.join(" ");
+    if (key === "rev-parse HEAD") return { status: 0, stdout: `${HEAD}\n`, stderr: "" };
+    if (key === "rev-parse origin/main") return { status: 0, stdout: `${MAIN}\n`, stderr: "" };
+    if (key.startsWith("rev-list")) return { status: 0, stdout: "0\n", stderr: "" };
+    if (key.startsWith("diff --name-only")) return { status: 0, stdout: "server/store.mjs\n", stderr: "" };
+    if (key.startsWith("diff ")) return { status: 0, stdout: "diff local\n", stderr: "" };
+    if (key.startsWith("patch-id")) return { status: 0, stdout: `${HEAD} x\n`, stderr: "" };
+    return { status: 1, stdout: "", stderr: key };
+  };
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ sourceRevision: PROD, buildId: "t", deployment: "production" }) });
+  const claimsImpl = async () => ({ truncated: false, claims: [{ id: "MERGE-SLOT", state: "in_progress", owner: "codex", leaseExpiresAt: "2026-10-22T05:00:00.000Z" }] });
+  const ghImpl = async () => ({ number: 4490, headRefOid: PRHEAD, author: { login: "grok" }, reviews: [] });
+  const seen = [];
+  const checksImpl = async (sha) => { seen.push(sha); return { runs: { total_count: 1, check_runs: [{ status: "in_progress", name: "browser" }] }, statuses: { sha: PRHEAD, total_count: 0, statuses: [] } }; };
+  const facts = await landingFacts({ fetchImpl, execImpl, claimsImpl, ghImpl, checksImpl, pr: 4490, nowMs: Date.parse("2026-10-22T03:00:00.000Z") });
+  assert.equal(facts.mergeSlot.owner, "codex");
+  assert.equal(facts.mergeSlot.held, true);
+  assert.deepEqual(seen, [PRHEAD]);
+  assert.equal(facts.checks.head, PRHEAD);
+  assert.equal(facts.checks.status, "pending");
+  const broken = await landingFacts({ fetchImpl, execImpl, ghImpl, pr: 4490, checksImpl: async () => { throw new Error("x"); } });
+  assert.deepEqual(broken.checks, { head: PRHEAD, unavailable: "checks_unreadable" });
+  assert.equal(broken.notMergeAuthorization, true);
 });
