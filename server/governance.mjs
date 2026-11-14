@@ -13,7 +13,7 @@ import {
 } from "./guest-agent-links.mjs";
 import { GUEST_CREDENTIAL_TTL_DEFAULT_MS } from "./guest-invites.mjs";
 import { wakeQueueLimits } from "./wake-queue-limits.mjs";
-import { SEVERITY_KEEP_DAYS, ARCHIVE_AFTER_DAYS } from "./audit-retention.mjs";
+import { SEVERITY_KEEP_DAYS, ARCHIVE_AFTER_DAYS, DECISION_RECORD_RETENTION_DAYS } from "./audit-retention.mjs";
 import {
   DEFAULT_LEASE_HOURS,
   MAX_LEASE_HOURS,
@@ -138,10 +138,13 @@ const communications = () => ({
 });
 
 // Retention: enforced by server/audit-retention.mjs — age beyond keepDays
-// purges, older than ARCHIVE_AFTER_DAYS archives, else keeps.
+// purges, older than ARCHIVE_AFTER_DAYS archives, else keeps. Decision-
+// bearing events (#3614, accountability R-3) floor at the decision-record
+// class below, at any severity.
 const retention = () => ({
   severityKeepDays: { ...SEVERITY_KEEP_DAYS },
   archiveAfterDays: ARCHIVE_AFTER_DAYS,
+  decisionRecordRetentionDays: DECISION_RECORD_RETENTION_DAYS,
 });
 
 // Identity rotation/revocation: live self-service routes registered in
