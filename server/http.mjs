@@ -2739,7 +2739,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (hit && hit.source.equals(frontDoor)) payload = hit.payload;
           else {
             payload = Buffer.from(advertiseHtml(frontDoor.toString("utf8")));
-            advertisedPageCache.set(cacheKey, { source: frontDoor, payload });
+            advertisedPageCache.set(cacheKey, { source: Buffer.from(frontDoor), payload }); // own copy: a later in-place change to the loader's buffer must not alias the snapshot
           }
         }
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
