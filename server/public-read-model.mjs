@@ -94,7 +94,8 @@ export const PUBLIC_READ_MODEL_SCHEMA = `
     id INTEGER PRIMARY KEY CHECK (id = 1),
     phase TEXT NOT NULL,
     cursor TEXT,
-    done INTEGER NOT NULL
+    done INTEGER NOT NULL,
+    completed_at INTEGER
   );
 `;
 
@@ -107,6 +108,16 @@ export function ensurePublicReceiptVerificationColumn(db) {
   const columns = new Set(db.prepare("PRAGMA table_info(public_receipts)").all().map(column => column.name));
   if (columns.size > 0 && !columns.has("verification_state")) {
     db.exec("ALTER TABLE public_receipts ADD COLUMN verification_state TEXT");
+  }
+}
+
+// Tables created before the backfill learned to re-arm itself carry no
+// completion stamp; the CREATE above only shapes fresh tables. The stamp
+// is the sweep clock: a finished sweep re-arms once it is this old.
+export function ensurePublicReadModelBackfillColumns(db) {
+  const columns = new Set(db.prepare("PRAGMA table_info(public_read_model_backfill)").all().map(column => column.name));
+  if (columns.size > 0 && !columns.has("completed_at")) {
+    db.exec("ALTER TABLE public_read_model_backfill ADD COLUMN completed_at INTEGER");
   }
 }
 
@@ -872,14 +883,64 @@ function backfillCursor(store) {
 }
 
 function saveCursor(store, phase, cursor, done) {
+  if (done) {
+    // A completed sweep stamps its completion time; that stamp is the
+    // only clock the re-arm below reads. Predating tables without the
+    // column keep the plain write (their unstamped finish reads as due).
+    try {
+      store.db.prepare("UPDATE public_read_model_backfill SET phase=?, cursor=?, done=1, completed_at=? WHERE id=1")
+        .run(phase, cursor, Date.now());
+      return;
+    } catch { /* predating table: fall through to the unstamped write */ }
+  }
   store.db.prepare("UPDATE public_read_model_backfill SET phase=?, cursor=?, done=? WHERE id=1").run(phase, cursor, done ? 1 : 0);
+}
+
+// The reconciliation cadence (quiet-room mirror sweep, design of
+// 2026-11-01): a completed sweep re-arms 30 days after it finished, so a
+// room that never writes again still has its publication mirror compared
+// against its recorded setting on a bounded period. The re-arm rides the
+// existing job: the job's enabled check and the backfill itself read this
+// one predicate, and the reset happens inside the backfill's own first
+// due call — no new scheduler, no external re-arm act.
+export const PUBLIC_READ_MODEL_SWEEP_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function publicReadModelSweepDue(store, { now = Date.now(), intervalMs = PUBLIC_READ_MODEL_SWEEP_INTERVAL_MS } = {}) {
+  let row = null;
+  try {
+    row = store.db.prepare("SELECT done, completed_at AS completedAt FROM public_read_model_backfill WHERE id=1").get();
+  } catch {
+    try { row = store.db.prepare("SELECT done FROM public_read_model_backfill WHERE id=1").get(); } catch { return true; }
+  }
+  if (!row) return true;
+  if (Number(row.done) !== 1) return true;
+  // A sweep that finished before completion was stamped has no clock to
+  // wait on: it is due now. That is the inaugural sweep for every store
+  // whose one-shot backfill latched off before this stamp existed.
+  if (!Number.isFinite(row.completedAt)) return true;
+  return now - row.completedAt >= intervalMs;
+}
+
+function rearmBackfillCursor(store) {
+  try {
+    store.db.prepare("UPDATE public_read_model_backfill SET phase='rooms', cursor='', done=0, completed_at=NULL WHERE id=1").run();
+  } catch {
+    store.db.prepare("UPDATE public_read_model_backfill SET phase='rooms', cursor='', done=0 WHERE id=1").run();
+  }
 }
 
 // One bounded batch. The worker cron calls this until done is 1.
 export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, deadline = Infinity } = {}) {
   const cap = Number.isInteger(limit) && limit > 0 && limit <= 100 ? limit : PUBLIC_BACKFILL_BATCH;
-  const cursor = backfillCursor(store);
-  if (cursor.done) return { done: true, rooms: 0, receipts: 0, cards: 0 };
+  let cursor = backfillCursor(store);
+  if (cursor.done) {
+    if (!publicReadModelSweepDue(store)) return { done: true, rooms: 0, receipts: 0, cards: 0 };
+    // Exactly one reset per completed sweep: the stamp is cleared and
+    // done flips back to 0 in the same write, so no later call in this
+    // sweep can re-trigger it, and the next completion stamps afresh.
+    rearmBackfillCursor(store);
+    cursor = { phase: "rooms", cursor: "", done: 0 };
+  }
   const expired = () => Date.now() >= deadline;
   if (cursor.phase === "rooms") {
     const rows = store.db.prepare("SELECT id, projection FROM rooms WHERE id > ? ORDER BY id LIMIT ?").all(cursor.cursor ?? "", cap);
