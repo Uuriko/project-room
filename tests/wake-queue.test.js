@@ -182,3 +182,65 @@ test("guest-agent members cannot enqueue or requeue wakes, and can pause their o
   assert.equal(f.store.wakeQueue.list(guestKey, "commons").wakes.length, 0);
   assert.equal(f.enqueue().receipt.state, "pending");
 });
+
+// RES-0124 (L03-C1): lease expiry was honoured only by recover() at store
+// open, so a holder that vanished mid-run stranded its wake in 'leased'
+// until a restart. The runtime drain path (due()/lease()) now runs the same
+// expiry sweep recover() runs, so an expired lease is reclaimed while the
+// server keeps running.
+test("expired leases are reclaimed on the runtime drain path without a restart", t => {
+  const f = fixture(t);
+  f.enqueue();
+  const memberId = f.store.authenticate(f.keys.owner, "commons").member.id;
+  const leased = f.store.wakeQueue.lease("commons", memberId, "recipe:draft-catch-up", "worker-vanished");
+  assert.equal(leased.state, "leased"); assert.equal(leased.attempts, 1);
+  // The holder vanishes; the clock runs well past the 30s lease. The store
+  // is never reopened, so recover() never runs.
+  f.advance(wakeQueueLimits.leaseMs + 10 * 60 * 1000);
+  const due = f.store.wakeQueue.due(f.at());
+  assert.equal(due.length, 1, "the expired lease is visible as due again at runtime");
+  assert.equal(due[0].state, "pending"); assert.equal(due[0].attempts, 1, "the interrupted attempt was counted once, not re-counted by reclaim");
+  assert.equal(due[0].leaseOwner, null);
+  const successor = f.store.wakeQueue.lease("commons", memberId, "recipe:draft-catch-up", "worker-successor", f.at());
+  assert.ok(successor, "a successor can lease the reclaimed wake without a restart");
+  assert.equal(successor.attempts, 2);
+  // Exactly-once across reclaim + redelivery: the successor's completion
+  // applies its effect once, a retried completion is a duplicate no-op, and
+  // the vanished holder can no longer complete the wake it lost.
+  const requestId = randomUUID();
+  let effects = 0;
+  const done = f.store.wakeQueue.complete("commons", memberId, "recipe:draft-catch-up", { requestId, leaseOwner: "worker-successor", effect: "draft-written" });
+  if (!done.duplicate) effects += 1;
+  const again = f.store.wakeQueue.complete("commons", memberId, "recipe:draft-catch-up", { requestId, leaseOwner: "worker-successor", effect: "draft-written" });
+  if (!again.duplicate) effects += 1;
+  assert.equal(again.duplicate, true, "retried completion after reclaim is a duplicate no-op");
+  assert.equal(effects, 1, "the effect applied exactly once across reclaim and redelivery");
+  assert.throws(() => f.store.wakeQueue.complete("commons", memberId, "recipe:draft-catch-up", { requestId: randomUUID(), leaseOwner: "worker-vanished" }),
+    { code: "wake_not_leased" }, "the expired holder cannot complete a wake it no longer holds");
+  assert.equal(f.list()[0].state, "done");
+});
+
+test("runtime reclaim dead-letters an exhausted expired lease instead of resurrecting it", t => {
+  const f = fixture(t);
+  f.enqueue({ maxAttempts: 1 });
+  const memberId = f.store.authenticate(f.keys.owner, "commons").member.id;
+  f.store.wakeQueue.lease("commons", memberId, "recipe:draft-catch-up", "worker-vanished");
+  f.advance(wakeQueueLimits.leaseMs + 1);
+  assert.equal(f.store.wakeQueue.due(f.at()).length, 0, "an exhausted expired lease is not offered again");
+  const wake = f.list()[0];
+  assert.equal(wake.state, "dead", "runtime reclaim follows recover(): exhausted leases dead-letter");
+  assert.equal(wake.lastError, "crash_recovery_attempts_exhausted", "same outcome shape as store-open recovery");
+  assert.equal(f.store.wakeQueue.lease("commons", memberId, "recipe:draft-catch-up", "worker-successor", f.at()), null);
+});
+
+test("runtime sweep leaves an unexpired lease untouched", t => {
+  const f = fixture(t);
+  f.enqueue();
+  const memberId = f.store.authenticate(f.keys.owner, "commons").member.id;
+  f.store.wakeQueue.lease("commons", memberId, "recipe:draft-catch-up", "worker-alive");
+  f.advance(wakeQueueLimits.leaseMs - 1);
+  assert.equal(f.store.wakeQueue.due(f.at()).length, 0, "a live lease is not reclaimed early");
+  assert.equal(f.store.wakeQueue.lease("commons", memberId, "recipe:draft-catch-up", "worker-other", f.at()), null, "a live lease cannot be taken over");
+  const wake = f.list()[0];
+  assert.equal(wake.state, "leased"); assert.equal(wake.leaseOwner, "worker-alive");
+});

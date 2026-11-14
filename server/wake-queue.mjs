@@ -379,11 +379,13 @@ export class WakeQueue {
     });
   }
   due(now, limit = 32) {
+    this.reclaimExpiredLeases(now);
     return this.db.prepare("SELECT * FROM wake_queue WHERE state='pending' AND due_at<=? AND NOT EXISTS (SELECT 1 FROM wake_queue_pause p WHERE p.room_id=wake_queue.room_id AND p.member_id=wake_queue.member_id) ORDER BY due_at,queue_key LIMIT ?").all(now, limit).map(view);
   }
   // lease moves one due wake to leased, consuming one attempt. Returns null
   // when the wake is no longer leasable (already leased, completed, dead).
   lease(roomId, memberId, queueKey, owner, now = this.store.now()) {
+    this.reclaimExpiredLeases(now);
     // Paused members start no new attempts, even by direct lease.
     const changed = this.db.prepare("UPDATE wake_queue SET state='leased',attempts=attempts+1,lease_owner=?,lease_expires_at=?,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=? AND state='pending' AND due_at<=? AND NOT EXISTS (SELECT 1 FROM wake_queue_pause p WHERE p.room_id=wake_queue.room_id AND p.member_id=wake_queue.member_id)")
       .run(owner, now + wakeQueueLimits.leaseMs, now, roomId, memberId, queueKey, now).changes;
@@ -433,15 +435,23 @@ export class WakeQueue {
       return { state: "pending", attempts: row.attempts, dueAt: now + backoff };
     });
   }
-  // recover runs at store open: leases whose holder vanished (process died)
-  // expire back to pending. The attempt was already counted at lease time, so
-  // crash-retry consumes budget exactly like an observed failure. Returns the
-  // number of recovered wakes.
-  recover(now = this.store.now()) {
+  // reclaimExpiredLeases is the single expiry sweep, shared verbatim by
+  // recover() (store open) and by the runtime drain path (due()/lease()
+  // above): a lease whose expiry has passed is handed back exactly as
+  // recover() would hand it back — same expiry rule (lease_expires_at<=now),
+  // same outcomes, same last_error. The attempt was already counted at lease
+  // time, so a reclaimed retry consumes budget exactly like an observed
+  // failure. Returns the number of wakes returned to pending.
+  reclaimExpiredLeases(now) {
     // M-18: exhausted leases must not get an extra attempt after a crash —
     // they go to dead, like fail() would have, instead of back to pending.
     this.db.prepare("UPDATE wake_queue SET state='dead',lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE state='leased' AND lease_expires_at<=? AND attempts>=max_attempts")
       .run("crash_recovery_attempts_exhausted", now, now);
     return this.db.prepare("UPDATE wake_queue SET state='pending',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE state='leased' AND lease_expires_at<=? AND attempts<max_attempts").run(now, now).changes;
+  }
+  // recover runs at store open: leases whose holder vanished (process died)
+  // expire back to pending.
+  recover(now = this.store.now()) {
+    return this.reclaimExpiredLeases(now);
   }
 }
