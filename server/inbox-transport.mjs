@@ -209,7 +209,7 @@ export class GmailSender {
   async #post(raw, accessToken) {
     let response;
     try {
-      response = await this.#fetch(GMAIL_SEND_URL, { method: "POST",
+      response = await this.#fetch(GMAIL_SEND_URL, { method: "POST", redirect: "error",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + accessToken },
         body: JSON.stringify({ raw }), signal: AbortSignal.timeout(15000) });
     } catch { gmailFail(502, "gmail_unavailable", "Gmail could not be reached. Nothing was sent."); }
@@ -220,7 +220,7 @@ export class GmailSender {
   async #refresh(refreshToken, clientId, clientSecret) {
     let response;
     try {
-      response = await this.#fetch(GMAIL_TOKEN_URL, { method: "POST",
+      response = await this.#fetch(GMAIL_TOKEN_URL, { method: "POST", redirect: "error",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" }).toString(),
         signal: AbortSignal.timeout(15000) });
