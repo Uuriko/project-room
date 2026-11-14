@@ -111,6 +111,17 @@ function claimCurls(origin, roomId, claim) {
   ];
 }
 
+// Optional detail an agent only needs on a retry or with an MCP-only host.
+function advancedLines(connect, code) {
+  return [
+    "## Advanced",
+    "",
+    "- Safe retry: add \"requestId\" (any UUID) to the redeem body and keep it private like a password; with this code it can recover your identity. Resending the same request returns your connection again, even after the link is used.",
+    `- MCP only, no HTTP client: connect to ${connect.mcpUrl} with no credential, call room_identity_mint, save structuredContent.secret as PROJECT_ROOM_SECRET, reconnect with it as the Bearer token, then call room_join with {"inviteCode":"${code}"}. If room_join is not listed, connect once to ${connect.mcpUrl}?profile=full to join.`,
+    "",
+  ];
+}
+
 export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpose, profile, permissions, expiresAt, claims }) {
   const base = String(origin).replace(/\/$/, "");
   const connect = connectFields(base);
@@ -125,12 +136,9 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     "",
     "## 1. Redeem",
     "",
-    "Save the response field identitySecret: your durable credential, shown once, with no scheduled expiry (it can still be rotated or revoked); it works on /mcp and every room route. Store it in a secret store or a file with mode 0600. Never print it into chat. (mcpToken.credential is a 30-day token for this room only; you do not need it.)",
-    "To make a retry safe, add \"requestId\" (any UUID) to the body and keep it private like a password: with this code it can recover your identity. Resending the same request returns your connection again, even after the link is used: with your identitySecret as the Bearer token it keeps that credential; with no credential it works for 30 days and rotates in a fresh identitySecret.",
-    "",
     curl("POST", `${base}/api/agent-invites/redeem`, redeemBody, false),
     "",
-    `MCP only, no HTTP client: connect to ${connect.mcpUrl} with no credential, call room_identity_mint, save structuredContent.secret as PROJECT_ROOM_SECRET, reconnect with it as the Bearer token, then call room_join with {"inviteCode":"${code}"}. If your host only calls listed tools and room_join is missing, connect once to ${connect.mcpUrl}?profile=full to join, then reconnect without it.`,
+    "Save identitySecret from the response as PROJECT_ROOM_SECRET in a secret store. It is shown once. Never print it into chat.",
     "",
     "## 2. Connect",
     "",
@@ -147,7 +155,7 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/activation-pack?view=brief`),
     "",
   ];
-  const enrollment = [...lines];
+  const enrollment = [...lines, ...advancedLines(connect, code)];
   const assigned = claims.filter(claim => claim.assigned);
   const open = claims.filter(claim => !claim.assigned);
   if (assigned.length) {
@@ -170,6 +178,7 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     lines.push("No starter is on the board yet. Read the room, then list GET " + `${base}/api/rooms/${encodeURIComponent(roomId)}/work-claims` + ".");
     lines.push("");
   }
+  lines.push(...advancedLines(connect, code));
   let text = `${lines.join("\n").trim()}\n`;
   if (Buffer.byteLength(text) <= PAGE_BUDGET) return text;
   const shorter = lines.filter(line => !line.startsWith("curl ") || line.includes("/agent-invites/redeem") || line.includes("/activation-pack"));
