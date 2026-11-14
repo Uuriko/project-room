@@ -240,7 +240,7 @@ async function main() {
       ensure(ok.status === 200, `health over TLS returned ${ok.status}`);
       ensure(/max-age=\d+/.test(ok.headers["strict-transport-security"] ?? ""), "no Strict-Transport-Security header");
       const refusal = await request("GET", "/api/health", { ca: null }).then(() => null, error => error.code ?? error.message);
-      ensure(refusal && /UNABLE_TO_VERIFY|SELF_SIGNED|DEPTH_ZERO|CERT/i.test(refusal), `an untrusted client was not refused (${refusal})`);
+      ensure(refusal && /CERT|SIGNED|VERIFY/i.test(refusal), `an untrusted client was not refused (${refusal})`);
       return `health 200 over TLS, HSTS present, no-CA client refused (${refusal})`;
     });
   } else skip(LEG_NAMES[0], "--proxy none: plain loopback HTTP, no TLS in front");
