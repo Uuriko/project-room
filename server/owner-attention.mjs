@@ -17,6 +17,13 @@ import {isCurrentRoom} from './current-room-repository.mjs';
 import { createHash } from "node:crypto";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
 import { canCloseWork, hasCurrentReview, resolveNamedReviewers } from "./work-claims.mjs";
+import { enrichNeedsYouQueue } from "./next-line.mjs";
+// Computed `next:` verb per attention kind (closed vocabulary, next-line.mjs).
+const ATTENTION_VERBS = Object.freeze({
+  access_request: "decide", verification: "verify", decision: "decide",
+  board_review: "review", claim_lease: "review", spend: "decide",
+  jev_escalation: "review", native_work: "review", reply_request: "decide",
+});
 
 class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -107,8 +114,9 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
   requireOwner(store, auth, roomId);
   if(isCurrentRoom(store.db,roomId)){
     const page=store.currentWorkListing(token,roomId,{focus:'needs_me',limit:4,...(cursor?{cursor}:{}),expectedSessionBinding});
-    const items=[...page.work.map(work=>({kind:work.next.action==='verify'?'verification':work.next.action==='decide'?'decision':'native_work',id:work.id,severity:'action',title:work.title,detail:work.next.label,actions:[{action:'inspect',method:'GET',path:`/?room=${encodeURIComponent(roomId)}#pr-record/work/${encodeURIComponent(work.id)}`}]})),...(page.replyRequests??[]).map(request=>({kind:'reply_request',id:request.id,severity:'action',title:'Reply requested',detail:'Inspect the selected conversation before answering',actions:[{action:'inspect',method:'GET',path:`/?room=${encodeURIComponent(roomId)}#pr-record/message/${encodeURIComponent(request.id)}`}]}))];
-    return{...page,contractVersion:2,ownerOnly:true,items,itemCount:null,actionCount:null,pageOffset:0,reset:false,previousCursor:null,nextCursor:page.page.nextCursor,
+    const rawItems=[...page.work.map(work=>({kind:work.next.action==='verify'?'verification':work.next.action==='decide'?'decision':'native_work',id:work.id,severity:'action',title:work.title,detail:work.next.label,actions:[{action:'inspect',method:'GET',path:`/?room=${encodeURIComponent(roomId)}#pr-record/work/${encodeURIComponent(work.id)}`}]})),...(page.replyRequests??[]).map(request=>({kind:'reply_request',id:request.id,severity:'action',title:'Reply requested',detail:'Inspect the selected conversation before answering',actions:[{action:'inspect',method:'GET',path:`/?room=${encodeURIComponent(roomId)}#pr-record/message/${encodeURIComponent(request.id)}`}]}))];
+    const queue=enrichNeedsYouQueue(rawItems,{holderId:auth.member.id,verbFor:item=>ATTENTION_VERBS[item.kind]??'review',dueAtFor:item=>item.dueAt??null});
+    return{...page,contractVersion:2,ownerOnly:true,items:queue.items,nextLine:queue.nextLine,nextLineJson:queue.nextLineJson,itemCount:null,actionCount:null,pageOffset:0,reset:false,previousCursor:null,nextCursor:page.page.nextCursor,
       coverage:{complete:!page.page.hasMore,kind:'canonical-personal-work-and-requests',omitted:['room-wide-oversight','legacy-claims','spend','shadow-diagnostics'],separate:[{path:`/api/rooms/${roomId}/access-requests?status=pending`,kind:'membership-approval-queue'}]},
       nextRead:page.page.hasMore?{path:`/api/rooms/${roomId}/needs-attention?cursor=${encodeURIComponent(page.page.nextCursor)}`} :null};
   }
@@ -150,6 +158,7 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
         items.push(Object.freeze({
           kind: "claim_lease",
           id: item.id,
+          dueAt: claim.expiresAt,
           severity: expiresMs <= nowMs ? "action" : "info",
           title: `Claim expiring: ${item.title}`,
           detail: expiresMs <= nowMs ? "The claim lease has expired" : `The claim lease expires in about ${hours}h`,
@@ -257,7 +266,14 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
     }
   }
 
-  const ordered = orderedAttention(items);
+  // Queue rendering: holding actor + due date + `1 of N` per item, and the
+  // one computed `next:` line (JSON twin + human line) over the full queue.
+  const queue = enrichNeedsYouQueue(orderedAttention(items), {
+    holderId: auth.member.id,
+    verbFor: item => ATTENTION_VERBS[item.kind] ?? "review",
+    dueAtFor: item => item.dueAt ?? null,
+  });
+  const ordered = queue.items;
   // A changed queue restarts at the first page; never combine pages from
   // different snapshots or silently skip entries after a removal.
   const fingerprint = createHash("sha256").update(JSON.stringify([
@@ -286,6 +302,8 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
     reset: cursor !== null && !valid,
     previousCursor: pageOffset > 0 ? pageCursor(Math.max(0, pageOffset - MAX_ITEMS)) : null,
     nextCursor: pageOffset + MAX_ITEMS < ordered.length ? pageCursor(pageOffset + MAX_ITEMS) : null,
+    nextLine: queue.nextLine,
+    nextLineJson: queue.nextLineJson,
     items: Object.freeze(ordered.slice(pageOffset, pageOffset + MAX_ITEMS)),
   });
 }
