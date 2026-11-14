@@ -42,6 +42,11 @@ export function renderPublicContributionTerms(terms, { skill = false } = {}) {
   const safeText = (value, max) => typeof value === 'string' && value.trim() && value.length <= max && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value);
   if (!safeText(terms.title, 200) || !safeText(terms.summary, 4000)) fail('Invalid public offer text');
   for (const key of ['acceptanceCriteria', 'exclusions']) if (!Array.isArray(terms[key]) || terms[key].length > 20 || key === 'acceptanceCriteria' && !terms[key].length || terms[key].some(value => !safeText(value, 1000))) fail('Invalid public offer criteria');
+  // #3613 B1: the citable criterion ids + criteria hash ride the brief so a
+  // deliverer or reviewer can cite c1…cN against the pinned set.
+  if (terms.acceptanceCriteriaWithIds !== undefined && (!Array.isArray(terms.acceptanceCriteriaWithIds) || terms.acceptanceCriteriaWithIds.length > 20
+    || terms.acceptanceCriteriaWithIds.some(entry => !entry || typeof entry !== 'object' || typeof entry.criterionId !== 'string' || !/^c[1-9][0-9]*$/.test(entry.criterionId) || !safeText(entry.text, 1000)))) fail('Invalid public offer criteria ids');
+  if (terms.criteriaHash !== undefined && (typeof terms.criteriaHash !== 'string' || !/^[a-f0-9]{64}$/.test(terms.criteriaHash))) fail('Invalid public offer criteria hash');
   for (const key of ['schema', 'id', 'repositoryUrl', 'submissionUrl', 'deadline']) if (terms[key] !== undefined && (typeof terms[key] !== 'string' || terms[key].length > 2048)) fail('Invalid public offer metadata');
   for (const key of ['repositoryUrl', 'submissionUrl']) if (terms[key] !== undefined) {
     let url;
@@ -61,7 +66,7 @@ export function renderPublicContributionTerms(terms, { skill = false } = {}) {
     const expectedDecimals = reward.unit === 'USD' ? 2 : reward.unit === 'USDC' ? 6 : reward.unit === 'credit' ? 3 : null;
     if (expectedDecimals === null || reward.decimals !== expectedDecimals || reward.kind === 'cash' && reward.unit === 'credit' || reward.kind === 'work_trade' && reward.unit !== 'credit') fail('Invalid public reward unit');
   }
-  const publicValue = Object.fromEntries(['schema', 'id', 'version', 'kind', 'title', 'summary', 'acceptanceCriteria', 'exclusions', 'repositoryUrl', 'submissionUrl', 'deadline', 'reward', 'approvalPolicy', 'fundingStatus', 'paymentStatus'].filter(key => Object.hasOwn(terms, key)).map(key => [key, terms[key]]));
+  const publicValue = Object.fromEntries(['schema', 'id', 'version', 'kind', 'title', 'summary', 'acceptanceCriteria', 'acceptanceCriteriaWithIds', 'criteriaHash', 'exclusions', 'repositoryUrl', 'submissionUrl', 'deadline', 'reward', 'approvalPolicy', 'fundingStatus', 'paymentStatus'].filter(key => Object.hasOwn(terms, key)).map(key => [key, terms[key]]));
   // Nested whitelists prevent accidentally forwarding private API extensions.
   publicValue.reward = Object.fromEntries((reward.kind === 'unpaid' ? ['kind', 'terms', 'basis'] : ['kind', 'unit', 'amountMinor', 'decimals', 'terms', 'basis']).filter(key => Object.hasOwn(reward, key) && reward[key] !== '').map(key => [key, terms.reward[key]]));
   publicValue.approvalPolicy = { mode: terms.approvalPolicy.mode };
