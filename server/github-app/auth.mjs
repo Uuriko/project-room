@@ -2,9 +2,11 @@
 //
 // GH-APP-1 and VL-2b call this instead of minting their own tokens. Secrets
 // are read from the environment only: GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY,
-// GITHUB_APP_WEBHOOK_SECRET. When any of them is missing the helpers stay
-// inert (credentials() is null; token calls throw not_configured). Key
-// material is never put in an error message.
+// GITHUB_APP_WEBHOOK_SECRET. Each name also answers to its ROOM_-prefixed
+// variant (the production Worker inventory carries ROOM_GITHUB_APP_*); the
+// canonical name wins when both are set. When any of them is missing the
+// helpers stay inert (credentials() is null; token calls throw
+// not_configured). Key material is never put in an error message.
 //
 // The JWT is RS256 via WebCrypto. iat is 60 seconds behind the clock and exp
 // is 9 minutes ahead, which stays inside GitHub's 10 minute maximum. An
@@ -27,17 +29,33 @@ function readEnv(env, key) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// The Worker's secret inventory names the App credentials ROOM_GITHUB_APP_*
+// while this module's canonical names drop the prefix. Either spelling
+// configures the App; the canonical name wins when both are set.
+function readEnvAny(env, key) {
+  return readEnv(env, key) || readEnv(env, `ROOM_${key}`);
+}
+
 function normalizePem(value) {
   return (value.includes("\\n") ? value.replace(/\\n/g, "\n") : value).trim();
 }
 
 export function githubAppCredentials(env = process.env) {
-  const appId = readEnv(env, "GITHUB_APP_ID");
-  const privateKey = readEnv(env, "GITHUB_APP_PRIVATE_KEY");
-  const webhookSecret = readEnv(env, "GITHUB_APP_WEBHOOK_SECRET");
+  const appId = readEnvAny(env, "GITHUB_APP_ID");
+  const privateKey = readEnvAny(env, "GITHUB_APP_PRIVATE_KEY");
+  const webhookSecret = readEnvAny(env, "GITHUB_APP_WEBHOOK_SECRET");
   if (!appId || !privateKey || !webhookSecret) return null;
   if (!/^\d{1,20}$/.test(appId)) return null;
   return { appId, privateKeyPem: normalizePem(privateKey), webhookSecret };
+}
+
+// The installation id is a public numeric identifier, not a secret: it
+// names the installation installationToken() mints for. It is read from
+// the environment under the same canonical/ROOM_ pair as the credentials
+// and is valid only as a bare numeric string.
+export function githubAppInstallationId(env = process.env) {
+  const id = readEnvAny(env, "GITHUB_APP_INSTALLATION_ID");
+  return /^\d{1,20}$/.test(id) ? id : null;
 }
 
 function derLength(length) {
@@ -114,13 +132,36 @@ function clockOf(now) {
   return Number.isFinite(value) ? value : Date.now();
 }
 
-export async function installationToken(installationId, { env = process.env, fetchFn = globalThis.fetch, now = Date.now, cache = processCache } = {}) {
+// A caller that needs less than the App's full grant can narrow the mint:
+// GitHub accepts a permissions object on the access_tokens POST and issues
+// a token carrying only that subset (each name at or below the level the
+// App itself holds). The body is deterministic — names sorted — and the
+// cache key carries the subset, so a narrowed token never answers an
+// un-narrowed caller or the reverse. Omitting the option mints exactly as
+// before: no body, the installation's full granted set.
+function narrowedMint(permissions) {
+  if (permissions === undefined) return null;
+  if (!permissions || typeof permissions !== "object" || Array.isArray(permissions)) {
+    throw new GitHubAppError("invalid_permissions", "installation token permissions must be an object of permission levels");
+  }
+  const names = Object.keys(permissions).sort();
+  if (names.length === 0 || names.some(name => !["read", "write", "admin"].includes(permissions[name]))) {
+    throw new GitHubAppError("invalid_permissions", "installation token permissions must name read, write, or admin levels");
+  }
+  const subset = {};
+  for (const name of names) subset[name] = permissions[name];
+  return { key: names.map(name => `${name}:${subset[name]}`).join(","), body: JSON.stringify({ permissions: subset }) };
+}
+
+export async function installationToken(installationId, { env = process.env, fetchFn = globalThis.fetch, now = Date.now, cache = processCache, permissions = undefined } = {}) {
+  const narrowed = narrowedMint(permissions);
   const credentials = githubAppCredentials(env);
   if (!credentials) throw new GitHubAppError("not_configured", "GitHub App credentials are not set");
   const id = String(installationId ?? "");
   if (!/^\d{1,20}$/.test(id)) throw new GitHubAppError("invalid_installation", "installation id must be numeric");
   const clock = clockOf(now);
-  const hit = cache.get(id);
+  const cacheKey = narrowed ? `${id}|${narrowed.key}` : id;
+  const hit = cache.get(cacheKey);
   if (hit && clock < hit.refreshAt) return hit.token;
   const jwt = await appJwt({ appId: credentials.appId, privateKeyPem: credentials.privateKeyPem, now: clock });
   let response;
@@ -133,7 +174,9 @@ export async function installationToken(installationId, { env = process.env, fet
         Accept: "application/vnd.github+json",
         "User-Agent": "project-room",
         "X-GitHub-Api-Version": "2022-11-28",
+        ...(narrowed ? { "Content-Type": "application/json" } : {}),
       },
+      ...(narrowed ? { body: narrowed.body } : {}),
     });
   } catch {
     throw new GitHubAppError("token_failed", "GitHub installation token request failed");
@@ -145,6 +188,6 @@ export async function installationToken(installationId, { env = process.env, fet
   if (typeof body?.token !== "string" || body.token.length === 0) throw new GitHubAppError("token_failed", "GitHub installation token response had no token");
   const expiresAt = Date.parse(body.expires_at ?? "");
   const refreshAt = Number.isFinite(expiresAt) ? expiresAt - TOKEN_SKEW_MS : clock;
-  cache.set(id, { token: body.token, refreshAt });
+  cache.set(cacheKey, { token: body.token, refreshAt });
   return body.token;
 }

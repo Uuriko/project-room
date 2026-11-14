@@ -5,7 +5,7 @@
 // instead of copying them. A later manifest that asks for issues access is
 // a separate JSON file; it should still call these functions.
 export { parseEvent, verifyWebhook, WEBHOOK_BODY_LIMIT, WEBHOOK_EVENTS } from "./verify.mjs";
-export { GITHUB_API, GitHubAppError, appJwt, githubAppCredentials, installationToken } from "./auth.mjs";
+export { GITHUB_API, GitHubAppError, appJwt, githubAppCredentials, githubAppInstallationId, installationToken } from "./auth.mjs";
 export { COMMENT_LIMIT, MARKER_PREFIX, ROOM_ORIGIN, TURN_OFF_URL, claimMarker, renderPrComment } from "./render.mjs";
 export { REPO_CONFIG_LIMIT, REPO_CONFIG_PATH, fetchRepoConfig, parseRepoConfig } from "./repo-config.mjs";
 export { DAILY_POST_CAP, shouldPost } from "./policy.mjs";
