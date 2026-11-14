@@ -80,7 +80,7 @@ test("Dot round-3 3a: a genuinely new room whose genesis time EQUALS the baselin
   try {
     await tick(fixture.store);
     await tick(fixture.store);
-    assert.match(snapshotText(fixture.store), /^v2:/);
+    assert.match(snapshotText(fixture.store), /^v3:/);
     // The room does not exist when the baseline is written; it is
     // initialized afterwards carrying a genesis timestamp that merely
     // ties the baseline's verified_at (same millisecond — e.g. an
@@ -101,7 +101,7 @@ test("Dot round-3 3b: a genuinely new room whose genesis time is 1ms BEFORE the 
   try {
     await tick(fixture.store);
     await tick(fixture.store);
-    assert.match(snapshotText(fixture.store), /^v2:/);
+    assert.match(snapshotText(fixture.store), /^v3:/);
     fixture.store.initialize(roomWithGenesisAt("beta", verifiedAt(fixture.store) - 1));
     const scan = await tick(fixture.store);
     assert.equal(scan.verified, 1, "a 1ms-older body timestamp is not proof the baseline covered this room");
@@ -123,7 +123,7 @@ test("Dot round-3 3c: events constructed before the baseline but initialized aft
     const beta = initialRoom("beta");
     await tick(fixture.store);
     await tick(fixture.store);
-    assert.match(snapshotText(fixture.store), /^v2:/);
+    assert.match(snapshotText(fixture.store), /^v3:/);
     const genesisAt = Date.parse(beta[0].at);
     assert.ok(genesisAt <= verifiedAt(fixture.store), "construction invariant: the bodies predate the baseline");
     const logHighWaterAtBaseline = fixture.store.db.prepare("SELECT COALESCE(MAX(rowid), 0) AS m FROM events").get().m;
@@ -175,7 +175,7 @@ test("Dot round-3 3e (negative control): the originally baselined room still fai
     await tick(fixture.store);
     await tick(fixture.store);
     const baseline = snapshotText(fixture.store);
-    assert.match(baseline, /^v2:/);
+    assert.match(baseline, /^v3:/);
     assert.ok(roomState(fixture.store, "alpha")?.hash);
     fixture.store.db.prepare("DELETE FROM integrity_room_state WHERE room_id='alpha'").run();
     mutateSameLength(fixture.store, "alpha");
@@ -194,7 +194,7 @@ test("Dot round-3 3f (legacy bridge): a snapshot written before the insertion wa
   try {
     await tick(fixture.store);
     await tick(fixture.store);
-    assert.match(snapshotText(fixture.store), /^v2:/);
+    assert.match(snapshotText(fixture.store), /^v3:/);
     // Simulate the pre-round-3 snapshot row: every baseline written
     // before this cure lacks the insertion high-water mark (NULL).
     fixture.store.db.prepare("UPDATE integrity_snapshot SET covered_event_rowid=NULL WHERE id=1").run();

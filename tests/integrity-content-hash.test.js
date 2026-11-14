@@ -40,12 +40,12 @@ function mutateSameLength(store) {
   return row.projection;
 }
 
-test("the first scan on a never-baselined store writes a v2 digest snapshot", async () => {
+test("the first scan on a never-baselined store writes a v3 digest snapshot", async () => {
   const fixture = openStore();
   try {
     const first = await fixture.store.verifyRoomIntegrity({ yieldBetween: async () => {} });
     assert.equal(first.verified, 1);
-    assert.match(snapshotText(fixture.store), /^v2:1:2:\d+:0:0:0:[0-9a-f]{64}$/);
+    assert.match(snapshotText(fixture.store), /^v3:1:2:\d+:0:0:0:[0-9a-f]{64}$/);
     assert.equal(snapshotText(fixture.store), fixture.store.integrityChecksum().text);
     const quiet = await fixture.store.verifyRoomIntegrity({ yieldBetween: async () => {} });
     assert.equal(quiet.matched, 1);
@@ -106,7 +106,7 @@ test("a legacy baseline recorded over mutated bytes is not certified on the tran
     assert.equal(transition.verified, 0, "the transition scan certifies nothing against a digest-less baseline");
     assert.equal(transition.matched, 0);
     assert.equal(transition.baselineUpgraded, 1, "the digest baseline adoption is explicit, not silent");
-    assert.match(snapshotText(fixture.store), /^v2:/);
+    assert.match(snapshotText(fixture.store), /^v3:/);
   } finally { fixture.close(); }
 });
 
@@ -124,7 +124,7 @@ test("a legacy counts-only baseline is upgraded explicitly, never matched or cer
     assert.equal(transition.matched, 0, "a digest-less baseline never matches");
     assert.equal(transition.verified, 0, "a digest-less baseline never certifies the transition scan");
     assert.equal(transition.baselineUpgraded, 1);
-    assert.match(snapshotText(fixture.store), /^v2:/);
+    assert.match(snapshotText(fixture.store), /^v3:/);
     const quiet = await fixture.store.verifyRoomIntegrity({ yieldBetween: async () => {} });
     assert.equal(quiet.matched, 1, "the upgraded digest baseline is authoritative from the next scan");
   } finally { fixture.close(); }
