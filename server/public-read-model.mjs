@@ -989,9 +989,30 @@ const receiptFilter = (room, needle) => {
 // requires. Candidate rooms are pre-filtered in SQL on the recorded
 // opt-in and bounded per request; a derivation failure yields no
 // derived rows, never an error and never a leak.
+//
+// L3-D1 follow-up: #6204 wired this derivation into the receipts list
+// (queryPublicReceipts) and the single-receipt read (publicReceiptById)
+// only. The remaining public surfaces — collectPublicReceipts, the
+// receipt sitemap (listPublicReceiptSitemap), the room proof page
+// (roomProofRows), the directory receipt counts (queryDirectoryEntries)
+// and ?verify=1 re-derivation (rederivePublicReceipt) — now merge the
+// same derived rows at read time, each under the same rules: the
+// recorded opt-in gates the derivation, the visibility legs above have
+// already applied inside it, a stored row with the same id wins, and a
+// derivation failure yields the stored-row result unchanged. No write
+// path changes: the deliberate decision in
+// server/current-room-repository.mjs (normalized rooms do not publish
+// receipt rows from sparse command contexts) stands exactly as it
+// did — publication still never happens from a command context; these
+// surfaces READ canonical records through the bounded addressed
+// readers, they do not widen any command context or enable the
+// projection the gate refuses.
 const CURRENT_DERIVED_ROOM_CAP = 100;
 
-function currentDerivedReceipts(store, { room = null } = {}) {
+// The derived rows in stored-row (SQL) shape, before the public
+// projection — the directory count reads credited identities from
+// agent_ids_json, which rowToPublic deliberately does not project.
+function currentDerivedReceiptSourceRows(store, { room = null } = {}) {
   // Candidate rooms are pre-filtered in SQL on the metadata record's
   // recorded opt-in, so a store with no opted-in current room pays one
   // query for this whole section; the bounded reader below remains
@@ -1041,10 +1062,15 @@ function currentDerivedReceipts(store, { room = null } = {}) {
         if (toggle && toggle.public_receipts === 0) continue;
       } catch { continue; } // an unreadable owner toggle fails closed
       const people = [credit(state, item.receipt.reportedById), credit(state, item.receipt.producerId), credit(state, item.accountableMemberId)];
-      const { agents, humans } = creditsFrom(people);
+      const { agents, humans, agentIds } = creditsFrom(people);
+      // Credited MEMBER ids become identity ids through this room's
+      // links, exactly as optedInRows translates them for a stored
+      // row's agent_ids_json — the directory count credits a derived
+      // receipt to the same identities a stored row would name.
+      const creditedIds = [...new Set(agentIds.map(id => identityByMember.get(id)).filter(id => typeof id === "string"))];
       const version = typeof item.receipt.evidenceVersion === "string" && SHA256.test(item.receipt.evidenceVersion)
         ? item.receipt.evidenceVersion : null;
-      rows.push(receiptWithOutcome(store, {
+      rows.push({
         id,
         title: cleanName(item.title) ?? "Receipt",
         source: "work-item",
@@ -1053,17 +1079,41 @@ function currentDerivedReceipts(store, { room = null } = {}) {
         room_title: roomFields.roomTitle,
         agents_json: JSON.stringify(agents),
         humans_json: JSON.stringify(humans),
+        agent_ids_json: JSON.stringify(creditedIds),
         pull_request: pullRequestUrl(item.receipt.evidenceUrl),
         merged_at: null,
         verification_state: "room_recorded",
         hashes_json: JSON.stringify(hashList(version ? [version] : [])),
         at: iso(item.updatedAt) ?? new Date(0).toISOString(),
         start_href: href,
-      }));
+      });
     }
   }
   return rows;
 }
+
+function currentDerivedReceipts(store, { room = null } = {}) {
+  return currentDerivedReceiptSourceRows(store, { room }).map(row => receiptWithOutcome(store, row));
+}
+
+// The derived receipts' credited identities, by receipt id — the
+// directory count's input. Derived ids with a stored row are the
+// stored projection's to count (the surfaces dedupe by id, stored
+// wins), so they are excluded here.
+function currentDerivedReceiptCredits(store) {
+  const rows = currentDerivedReceiptSourceRows(store, {});
+  if (!rows.length) return new Map();
+  const stored = new Set(store.db.prepare(`SELECT id FROM public_receipts
+    WHERE id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(rows.map(row => row.id))).map(row => row.id));
+  const credits = new Map();
+  for (const row of rows) {
+    if (stored.has(row.id)) continue;
+    credits.set(row.id, parseJson(row.agent_ids_json, []).filter(id => typeof id === "string" && id));
+  }
+  return credits;
+}
+
+const byAtDescIdAsc = (a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // Every stored row this list could serve, unpaginated — the merge
 // input when derived current-room rows join the list. Applies the
@@ -1308,7 +1358,37 @@ function receiptWithOutcome(store, row) {
 export function rederivePublicReceipt(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id) || LOT_RECEIPT_ID.test(id)) return null;
   const stored = store.db.prepare("SELECT source, origin_room_id FROM public_receipts WHERE id=?").get(id);
-  if (!stored) return null;
+  if (!stored) {
+    // L3-D1 follow-up (?verify=1): a current-format room's work-item
+    // receipt has no stored row to re-derive against, so verification
+    // reported its source record "missing" even while the receipt
+    // itself resolves publicly. Its source IS the canonical record
+    // the read-time derivation projects, so re-deriving is the
+    // derivation itself, mapped back into insertReceipt shape; the
+    // checker's compared fields (title, agents, humans, pullRequest,
+    // mergedAt, hashes, at) are the derivation's own, so a derived
+    // receipt verifies against exactly what the public faces serve.
+    // The derivation requires the room's recorded opt-in and applies
+    // the visibility legs, so an opted-out or hidden receipt still
+    // re-derives to null — no-longer-verifiable, as before.
+    if (!id.startsWith("wir_")) return null;
+    let derived = null;
+    try { derived = currentDerivedReceipts(store, {}).find(candidate => candidate.id === id) ?? null; }
+    catch { derived = null; }
+    if (!derived) return null;
+    return {
+      artifactHashOk: null,
+      row: {
+        id: derived.id, title: derived.title, source: derived.source,
+        originRoomId: null, roomId: derived.room?.id ?? null, roomTitle: derived.room?.title ?? null,
+        agents: derived.agents, humans: derived.humans,
+        agentIds: [],
+        pullRequest: derived.pullRequest, mergedAt: derived.mergedAt,
+        verificationState: derived.verification?.state ?? null,
+        hashes: derived.hashes, at: derived.at, startHref: derived.startHref,
+      },
+    };
+  }
   if (stored.source === "public-work") {
     let record;
     try {
@@ -1474,14 +1554,40 @@ export function publicLotReceiptById(store, id) {
 
 export function collectPublicReceipts(store) {
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${visibility}${sourceAgreementSql(store.db)} ORDER BY at DESC, id ASC`).all()
+  const stored = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${visibility}${sourceAgreementSql(store.db)} ORDER BY at DESC, id ASC`).all()
     .map(row => receiptWithOutcome(store, row));
+  // L3-D1 follow-up: an opted-in current room's receipts have no
+  // stored rows (see currentDerivedReceipts); merge the read-time
+  // derivation, stored row winning an id both carry, in this
+  // surface's newest-first order. With no derived rows the stored
+  // result returns exactly as before.
+  let derived = [];
+  try { derived = currentDerivedReceipts(store, {}); } catch { derived = []; }
+  if (!derived.length) return stored;
+  const byId = new Map();
+  for (const row of stored) byId.set(row.id, row);
+  for (const row of derived) if (!byId.has(row.id)) byId.set(row.id, row);
+  return [...byId.values()].sort(byAtDescIdAsc);
 }
 
 export function listPublicReceiptSitemap(store, limit = 1000) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility}${sourceAgreementSql(store.db)} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
+  const stored = store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility}${sourceAgreementSql(store.db)} ORDER BY at DESC, id ASC LIMIT ?`).all(cap);
+  // L3-D1 follow-up: derived current-room receipts join the sitemap
+  // under the same rules as collectPublicReceipts above; the cap
+  // applies to the merged, newest-first union, so a derived receipt
+  // displaces only rows older than itself.
+  let derived = [];
+  try { derived = currentDerivedReceipts(store, {}); } catch { derived = []; }
+  let merged = stored;
+  if (derived.length) {
+    const byId = new Map();
+    for (const row of stored) byId.set(row.id, row);
+    for (const row of derived) if (!byId.has(row.id)) byId.set(row.id, { id: row.id, at: row.at });
+    merged = [...byId.values()].sort(byAtDescIdAsc).slice(0, cap);
+  }
+  return merged.map(row => ({
     path: `/receipts/${row.id}`,
     lastmod: typeof row.at === "string" ? row.at.slice(0, 10) : null,
   }));
@@ -1554,9 +1660,21 @@ export function proofLevelOf(receipt) {
 // public receipt read.
 export function roomProofRows(store, slug) {
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
+  const stored = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
     WHERE ${visibility}${sourceAgreementSql(store.db)} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
     ORDER BY at DESC, id ASC`).all(slug, slug).map(row => receiptWithOutcome(store, row));
+  // L3-D1 follow-up: a current-format room's proof page held no rows
+  // at all, however the owner opted in — its receipts are derived at
+  // read time for this room only (the derivation's own room filter),
+  // which attributes them by origin exactly as the stored origin leg
+  // above attributes a legacy room's. Stored row wins a shared id.
+  let derived = [];
+  try { derived = currentDerivedReceipts(store, { room: slug }); } catch { derived = []; }
+  if (!derived.length) return stored;
+  const byId = new Map();
+  for (const row of stored) byId.set(row.id, row);
+  for (const row of derived) if (!byId.has(row.id)) byId.set(row.id, row);
+  return [...byId.values()].sort(byAtDescIdAsc);
 }
 
 // Newest-first page of receipts that name this room. `after` is the last row
@@ -1585,19 +1703,41 @@ export function queryDirectoryEntries(store, { cursor = null, limit = DIRECTORY_
     }
     const current = store.db.prepare("SELECT name, agent_id FROM public_directory_entries WHERE agent_id=?").get(cursor);
     if (!current) return { error: { status: 422, code: "invalid_cursor", message: "cursor is not an agent on this list" } };
-    rows = store.db.prepare(`SELECT agent_id, name, description, skills_json, receipt_count, room_count
+    rows = store.db.prepare(`SELECT agent_id, name, description, skills_json, identity_id, receipt_count, room_count
       FROM public_directory_entries WHERE name > ? OR (name = ? AND agent_id > ?)
       ORDER BY name ASC, agent_id ASC LIMIT ?`).all(current.name, current.name, current.agent_id, cap + 1);
   } else {
-    rows = store.db.prepare(`SELECT agent_id, name, description, skills_json, receipt_count, room_count
+    rows = store.db.prepare(`SELECT agent_id, name, description, skills_json, identity_id, receipt_count, room_count
       FROM public_directory_entries ORDER BY name ASC, agent_id ASC LIMIT ?`).all(cap + 1);
   }
+  // L3-D1 follow-up (directory counts): the stored receipt_count
+  // counts stored rows only (directoryCounts), so work an identity
+  // did in an opted-in current room — which never projects a row —
+  // counted nowhere on its directory card. Add the derived receipts
+  // crediting this entry's identities at read time, keyed exactly as
+  // directoryCounts keys its stored count (identity id, then the
+  // card's agent id), excluding any derived id a stored row already
+  // counted. The stored entries are not rewritten; with no derived
+  // receipts the counts return exactly as stored.
+  let derivedCredits = null;
+  try {
+    const credits = currentDerivedReceiptCredits(store);
+    if (credits.size) derivedCredits = [...credits.values()];
+  } catch { derivedCredits = null; }
+  const derivedFor = row => {
+    if (!derivedCredits) return 0;
+    const keys = new Set([row.identity_id, row.agent_id].filter(id => typeof id === "string" && id));
+    // One count per receipt, however many of the entry's keys it
+    // credits — the same EXISTS semantics directoryCounts applies
+    // to stored rows.
+    return derivedCredits.filter(ids => ids.some(id => keys.has(id))).length;
+  };
   const page = rows.slice(0, cap).map(row => ({
     agentId: row.agent_id,
     name: row.name,
     description: row.description,
     skills: parseJson(row.skills_json, []),
-    receiptCount: row.receipt_count,
+    receiptCount: row.receipt_count + derivedFor(row),
     roomCount: row.room_count,
   }));
   return { agents: page, nextCursor: rows.length > cap ? page.at(-1)?.agentId ?? null : null };
