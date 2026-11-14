@@ -160,14 +160,15 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   for (const id of ["claude-code", "codex", "cursor", "hermes", "opencode", "pi", "grok-bot", "grok-build", "instinct", "muse"]) {
     assert.equal(await catalog.locator(`[data-agent-type="${id}"]`).count(), 1, id);
   }
-  // UI calming #8 simplified the agent-type descriptions ("Best for local coding
-  // sessions with MCP tools" became "Best for local coding sessions"). The
-  // catalog text comes from innerText, which never contains markup, so assert
-  // the shortened copy positively and the old suffix negatively instead.
+  // The app picker keeps names and routes without marketing subtitles.
   assert.equal(await f.page.locator("#agent-other-types").evaluate(node => node.open), false);
   assert.equal(await catalog.locator("button:visible").count(), 4);
   const catalogText = await catalog.innerText();
-  assert.match(catalogText, /Best for local coding sessions/, 'the agent catalog keeps the shortened agent-type copy');
+  assert.doesNotMatch(await catalog.textContent(), /Best for/, 'all ten app choices omit marketing subtitles, including collapsed choices');
+  assert.deepEqual(await catalog.locator(".agent-type-copy strong").allTextContents(),
+    ["Claude Code", "Codex", "Cursor", "Grok Build", "Hermes", "OpenCode", "Pi", "Grok Bot", "Instinct", "Muse"]);
+  assert.deepEqual(await catalog.locator("[data-agent-type]").evaluateAll(nodes => nodes.map(node => [node.dataset.agentType, node.dataset.joinPath])),
+    [["claude-code", "mcp-url"], ["codex", "mcp-url"], ["cursor", "paste-prompt"], ["grok-build", "mcp-url"], ["hermes", "mcp-url"], ["opencode", "mcp-url"], ["pi", "invite-code"], ["grok-bot", "paste-prompt"], ["instinct", "packet"], ["muse", "paste-prompt"]]);
   assert.doesNotMatch(catalogText, /with MCP tools/, 'the old verbose agent-type suffix is gone');
   await f.page.locator('#agent-type-catalog button[data-agent-type="claude-code"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Claude Code");
