@@ -1,8 +1,20 @@
-// Hourly NDJSON export. AN-1b calls exportAnalytics from the hourly job.
-// The object key is the hour plus the row range, so a re-run rewrites the
-// same object. A null sink leaves exported_at null.
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+// Hourly NDJSON export — DISABLED by classification ruling (2026-10-18,
+// ANALYTICS-EXPORT-CLASSIFY; deep-map finding D-7).
+//
+// The export this module used to perform serialised analytics_events with
+// RAW account_id / actor_id / ref_member_id / viewer_key to an external
+// sink. It predates the data bright lines and breaches them as built:
+// U2 (extracts leave de-identified/pseudonymised, never with raw
+// identifiers), U1 (derived data only, never a raw event-level feed),
+// U5 (extracts pass the same filters as the public read model). It also
+// has no driver and no consumer in the repo: no job calls it, no sink is
+// configured in any deployment config, and nothing reads the objects it
+// would write.
+//
+// exportAnalytics therefore fails closed: it ignores any sink handed to
+// it, writes nothing, stamps nothing, and reports disabled. Re-enabling
+// an analytics egress requires a new extract built on the W4 anonymiser's
+// keyed-HMAC pseudonymisation (PR #4109) — never this raw line format.
 import { ensureAnalyticsSchema } from "./schema.mjs";
 
 export function hourWindow(hour) {
@@ -23,35 +35,6 @@ export function closedHour(now = Date.now()) {
   return hourWindow(now - 3600000);
 }
 
-function objectKey(window, firstId, lastId) {
-  return `analytics/v1/date=${window.date}/hour=${window.hour}/${firstId}-${lastId}.ndjson`;
-}
-
-function lineOf(row) {
-  return JSON.stringify({
-    id: row.id,
-    name: row.name,
-    v: row.v,
-    at: row.at,
-    room_id: row.room_id,
-    account_id: row.account_id,
-    actor_kind: row.actor_kind,
-    actor_id: row.actor_id,
-    source: row.source,
-    source_detail: row.source_detail,
-    agent_client: row.agent_client,
-    referrer_artifact_id: row.referrer_artifact_id,
-    ref_member_id: row.ref_member_id,
-    loop: row.loop,
-    viewer_key: row.viewer_key,
-    room_event_id: row.room_event_id,
-    room_seq: row.room_seq,
-    props: JSON.parse(row.props),
-    weight: row.weight,
-    backfilled: row.backfilled
-  });
-}
-
 export function nullSink() {
   return {
     kind: "null",
@@ -60,65 +43,12 @@ export function nullSink() {
   };
 }
 
-export function dirSink(root) {
-  return {
-    kind: "dir",
-    async put(key, body) {
-      const path = join(root, key);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, body);
-      return { stored: true, key };
-    },
-    async head(key) {
-      return null;
-    }
-  };
-}
-
-// Uses only put and head. A missing method throws; this does not invent one.
-export function r2Sink(bucket) {
-  if (!bucket || typeof bucket.put !== "function" || typeof bucket.head !== "function") {
-    throw new TypeError("R2 sink requires put and head");
-  }
-  return {
-    kind: "r2",
-    async put(key, body) {
-      await bucket.put(key, body, { httpMetadata: { contentType: "application/x-ndjson" } });
-      return { stored: true, key };
-    },
-    async head(key) {
-      return bucket.head(key);
-    }
-  };
-}
-
+// Disabled: see the header. The sink and window arguments are accepted
+// only so existing call sites keep their shape; both are ignored.
 export async function exportAnalytics(db, sink, { hour, now = Date.now() } = {}) {
+  void sink;
+  void hour;
+  void now;
   ensureAnalyticsSchema(db);
-  const target = sink ?? nullSink();
-  if (target.kind === "null") {
-    return { exported: 0, key: null, configured: false };
-  }
-  const window = hour == null ? closedHour(now) : hourWindow(hour);
-  const rows = db.prepare(`SELECT * FROM analytics_events WHERE at>=? AND at<? ORDER BY id ASC`).all(window.start, window.end);
-  if (!rows.length) return { exported: 0, key: null, configured: true, hour: window };
-  const firstId = rows[0].id;
-  const lastId = rows.at(-1).id;
-  const key = objectKey(window, firstId, lastId);
-  const body = rows.map(lineOf).join("\n") + "\n";
-  await target.put(key, body);
-  const stamped = now;
-  // Stamp only the rows that were actually exported (by id), not every row
-  // in the time window: a row backfilled into the same hour while the sink
-  // put awaited I/O was never sent, so it must stay unexported for a later
-  // run. Chunk the id list to stay under SQLite's bound-variable limit.
-  const exportedIds = rows.map(row => row.id);
-  for (let i = 0; i < exportedIds.length; i += 900) {
-    const chunk = exportedIds.slice(i, i + 900);
-    db.prepare(`UPDATE analytics_events SET exported_at=? WHERE id IN (${chunk.map(() => "?").join(",")})`).run(stamped, ...chunk);
-  }
-  db.prepare(`INSERT INTO analytics_daily(day, metric, value) VALUES(?,?,?)
-    ON CONFLICT(day, metric) DO UPDATE SET value = excluded.value`).run(window.date, "export_rows", rows.length);
-  db.prepare(`INSERT INTO analytics_daily(day, metric, value) VALUES(?,?,?)
-    ON CONFLICT(day, metric) DO UPDATE SET value = excluded.value`).run(window.date, "last_export_hour", window.start);
-  return { exported: rows.length, key, configured: true, hour: window };
+  return { exported: 0, key: null, configured: false, disabled: true };
 }
