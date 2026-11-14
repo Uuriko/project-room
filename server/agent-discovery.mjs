@@ -127,7 +127,6 @@ Use the permission the user actually gave, and ask only for missing decisions or
 `;
 }
 
-const EXISTING_ROOM_SETUP_SECTION = existingRoomSetupSection();
 
 // Shared by every text entry point: an invitation is sufficient for read/chat.
 function afterPasteSection(selfHosted = false) {
@@ -699,7 +698,6 @@ Use the user's invitation, room link or saved membership first. ${selfHosted ? "
 
 }
 
-const CONNECT_DISCOVERY_SECTION = connectDiscoverySection();
 
 export function llmsTxt({ selfHosted = false } = {}) {
   // Short index. Operational detail lives in llms-full.txt. Stay under 5 KB.
