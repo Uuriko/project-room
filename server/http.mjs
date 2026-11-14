@@ -867,6 +867,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const pageLinks = (requestUrl, pathname) => publicPageLinks(requestUrl, pathname, advertisedOrigin(expectedOrigin()));
   const advertise = text => advertisedText(text, expectedOrigin());
   const advertiseHtml = html => advertisedHtml(html, expectedOrigin());
+  const advertisedPageCache = new Map(); // `${asset path}\n${origin}` -> { source, payload }; at most one entry per static page
   // Avoid local-instance sign-in collisions; namespacing is not host isolation.
   const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
@@ -2729,7 +2730,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ? Buffer.from(frontDoorHtml(data, { githubConfigured: Boolean(githubAuth) }))
           : data;
         // Canonical/OG tags in marketing pages name this instance, not the hosted service.
-        const payload = type === "text/html" && !isHostedOrigin(expectedOrigin()) ? Buffer.from(advertiseHtml(frontDoor.toString("utf8"))) : frontDoor;
+        // The rewrite is memoised per page and origin (verified against the exact source bytes), so a self-hosted
+        // front door does not re-run a regex over the whole page on every request.
+        let payload = frontDoor;
+        if (type === "text/html" && !isHostedOrigin(expectedOrigin())) {
+          const cacheKey = `${path}\n${expectedOrigin()}`;
+          const hit = advertisedPageCache.get(cacheKey);
+          if (hit && hit.source.equals(frontDoor)) payload = hit.payload;
+          else {
+            payload = Buffer.from(advertiseHtml(frontDoor.toString("utf8")));
+            advertisedPageCache.set(cacheKey, { source: Buffer.from(frontDoor), payload }); // own copy: a later in-place change to the loader's buffer must not alias the snapshot
+          }
+        }
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : payload);
         }
