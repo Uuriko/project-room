@@ -419,6 +419,100 @@ test("the claimant cannot dispute their own submission; double disputes rejected
   expectConserved(escrow);
 });
 
+test("the poster cannot dispute a bounty whose acceptance is their own verdict (#3906 F6)", () => {
+  const { escrow } = makeEscrow();
+  // Human approval mode (the postBounty default): the poster JILL is the
+  // sole approver, and runToAccepted's acceptor IS the poster — so the
+  // acceptance verdict under challenge is the poster's own. At the sweep
+  // baseline the poster could still raise a dispute on it (only the
+  // claimant was excluded): the verifier upheld it, the poster was
+  // refunded in full, their own dispute bond round-tripped back, and the
+  // worker's claim bond was slashed — outcomes the poster's submitted-work
+  // reject path cannot reach on accepted work.
+  const bounty = runToAccepted(escrow, { verifier: INSTINCT });
+  const lanes = [JILL, GROK, INSTINCT, CODEX, "pool"];
+  const totalsBefore = Object.fromEntries(lanes.map(lane => [lane, bal(escrow, lane)]));
+  expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: JILL, bond: 2.5, grounds: "changed my mind" }), "not_authorized");
+  // The refusal fires before any bond is checked or locked: every lane's
+  // escrow totals are exactly as before, the bounty stays accepted with
+  // no dispute record, and conservation holds.
+  assert.deepEqual(Object.fromEntries(lanes.map(lane => [lane, bal(escrow, lane)])), totalsBefore);
+  const after = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(after.state, "accepted");
+  assert.equal(after.disputeId, null);
+  expectConserved(escrow);
+  // The exclusion is the poster's alone: a neutral challenger still
+  // disputes the same bounty and the designated verifier seats.
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work" });
+  assert.equal(dispute.decider, INSTINCT);
+  expectConserved(escrow);
+});
+
+test("sponsor protection preserved: the poster may dispute an agent-mode bounty the verifier accepted (#3906 scope)", () => {
+  const { escrow } = makeEscrow();
+  // Agent approval mode: the acceptance verdict is the designated
+  // verifier's, never the poster's — the poster is the sponsor whose
+  // money is at stake, not the approver, so their dispute inside the
+  // challenge window is the sponsor-protection shape (#3703), not F6.
+  const bounty = post(escrow, { verifierId: INSTINCT, approvalMode: "agent" });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: INSTINCT,
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: JILL, bond: 2.5, grounds: "accepted without my review" });
+  assert.equal(dispute.decider, INSTINCT);
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "disputed");
+  expectConserved(escrow);
+});
+
+test("settlement-rail link preserved: the poster may dispute a rail bounty whose acceptance records the rota verdict (#3906 scope, #3702/#3703)", () => {
+  const { escrow, db } = makeEscrow();
+  // Mirror the rail's link row (server/public-work-settlement.mjs schema):
+  // a rail bounty is human-mode in the escrow, but its acceptance records
+  // the public-work rota's verdict, settled through acceptWork under the
+  // poster lane — the poster did not render that verdict, so the
+  // sponsor's in-window dispute (the #3703 clawback) stays open. This
+  // in-memory leg proves the exception by execution; the full RoomStore
+  // rail suite is tests/public-work-settlement-disputes.test.js.
+  db.exec(`CREATE TABLE IF NOT EXISTS public_work_settlements (
+    offer_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, bounty_id TEXT NOT NULL UNIQUE,
+    poster_lane TEXT NOT NULL, claimant_lane TEXT, amount_millis INTEGER NOT NULL,
+    receipt_id TEXT, created_at INTEGER NOT NULL)`);
+  const bounty = runToAccepted(escrow, { verifier: INSTINCT });
+  db.prepare("INSERT INTO public_work_settlements VALUES (?,?,?,?,?,?,?,?)")
+    .run("offer-1", ROOM, bounty.bountyId, JILL, GROK, 10_000, "rcpt-1", nowMs);
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: JILL, bond: 2.5, grounds: "accepted without review" });
+  assert.equal(dispute.decider, INSTINCT);
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "disputed");
+  expectConserved(escrow);
+});
+
+test("legacy mode follows the acceptor of record: poster-accepted refuses, verifier-accepted opens (#3906)", () => {
+  const { escrow, db } = makeEscrow();
+  const runToLegacyAccepted = acceptor => {
+    // Legacy bounties are inherited rows only (postBounty accepts just
+    // human/agent): the schema migration stamps pre-mode rows 'legacy'.
+    const bounty = post(escrow, { verifierId: INSTINCT });
+    db.prepare("UPDATE bounty_records SET approval_mode='legacy' WHERE bounty_id=?").run(bounty.bountyId);
+    escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+    escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+    escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+      evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+    escrow.acceptWork(ROOM, bounty.bountyId, { acceptor,
+      verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+    return escrow.getBounty(ROOM, bounty.bountyId);
+  };
+  const ownVerdict = runToLegacyAccepted(JILL);
+  expectCode(() => escrow.disputeBounty(ROOM, ownVerdict.bountyId, { challenger: JILL, bond: 2.5, grounds: "changed my mind" }), "not_authorized");
+  assert.equal(escrow.getBounty(ROOM, ownVerdict.bountyId).state, "accepted");
+  const verifierVerdict = runToLegacyAccepted(INSTINCT);
+  const { dispute } = escrow.disputeBounty(ROOM, verifierVerdict.bountyId, { challenger: JILL, bond: 2.5, grounds: "sponsor challenge" });
+  assert.equal(dispute.decider, INSTINCT);
+  expectConserved(escrow);
+});
+
 test("no designated verifier: the dispute is refused before the bond locks (#3727)", () => {
   const { escrow } = makeEscrow();
   const bounty = runToAccepted(escrow, { amount: 4 }); // no verifierId
