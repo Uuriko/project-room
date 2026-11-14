@@ -3,7 +3,7 @@
 // Only explicitly configured origins opt in; an omitted origin retains legacy
 // fixture behavior. Custom-origin production remains unsigned and fails boot.
 import { createHash } from 'node:crypto';
-import { discoveryDoc, llmsTxt, llmsFullTxt, ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, agentCardSignatureState } from './agent-discovery.mjs';
+import { discoveryDoc, llmsTxt, llmsFullTxt, skillMd, joinPrompt, ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, agentCardSignatureState } from './agent-discovery.mjs';
 
 const REASON = 'Instance origin differs from the build-time signed hosted card; instance signing is not configured.';
 const ENVELOPE = ['keyId', 'signatureAgentId', 'publicKey', 'cardSignature', 'signedRevision', 'signatures'];
@@ -25,7 +25,9 @@ export function instanceDiscoveryBody(doc, origin) {
     .replaceAll(`${origin}/extensions/work-receipt/v1`, RECEIPT_URI)
     .replaceAll(ROOM_DOOR, `${origin}/room`).replaceAll(ROOM_PUBLIC_WWW, `${origin}/room`);
   const authoredBody = doc === discoveryDoc('/llms.txt') ? llmsTxt({ selfHosted: true })
-    : doc === discoveryDoc('/llms-full.txt') ? llmsFullTxt({ selfHosted: true }) : doc.body;
+    : doc === discoveryDoc('/llms-full.txt') ? llmsFullTxt({ selfHosted: true })
+    : doc === discoveryDoc('/SKILL.md') ? skillMd({ selfHosted: true })
+    : doc === discoveryDoc('/join.txt') ? joinPrompt({ selfHosted: true }) : doc.body;
   const body = rebase(authoredBody);
   if (doc === discoveryDoc('/.well-known/agent.json') || doc === discoveryDoc('/.well-known/agent-card.json')) {
     const card = JSON.parse(body);
@@ -58,7 +60,7 @@ export function instanceDiscoveryBody(doc, origin) {
   }
   if (doc === discoveryDoc('/.well-known/agent-skills/index.json')) {
     const index = JSON.parse(body);
-    index.skills[0].digest = `sha256:${createHash('sha256').update(rebase(discoveryDoc('/SKILL.md').body)).digest('hex')}`;
+    index.skills[0].digest = `sha256:${createHash('sha256').update(instanceDiscoveryBody(discoveryDoc('/SKILL.md'), origin)).digest('hex')}`;
     return JSON.stringify(index, null, 2) + '\n';
   }
   return body;

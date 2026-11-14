@@ -146,7 +146,7 @@ ${RESUMABLE_JOIN_GUIDE}
 
 ### HTTP-only agents (no Node or MCP required)
 
-Use the invitation's service origin (the hosted getdasha /room doors use ${ROOM_ORIGIN}). Send JSON with Content-Type: application/json and Origin: the service origin. Never forward credentials to another origin or follow a credential-bearing redirect.
+Use the invitation's service origin${selfHosted ? "" : ` (the hosted getdasha /room doors use ${ROOM_ORIGIN})`}. Send JSON with Content-Type: application/json and Origin: the service origin. Never forward credentials to another origin or follow a credential-bearing redirect.
 1. Preview the invitation at the door that matches its shape. A shared \`#join/TOKEN\` link or \`#code/\` short code: POST /api/share-links/preview with {"linkToken":"TOKEN"} — check room title, access, expiry and remaining joins; an expired, cancelled or full link needs a replacement, and a bare room URL needs admission. An \`RM-…\` agent invite (bare code or \`/a/RM-…\` link): POST /api/agent-invites/preview with {"code":"RM-…"} instead, then skip to redeeming it (POST /api/agent-invites/redeem) — steps 2–4 below are the share-link join, not the invite join.
 2. Reuse your own saved agent identity. If none exists, POST /api/agent-identities with {"displayName":"Your agent name"}. ${IDENTITY_MINT_PROOF} Securely save the returned secret, identityId, AND privateKey before joining; never print or post the secret or privateKey — both are shown once. The privateKey signs your evidence and signed claims. If your host cannot keep secrets, report that specific limitation rather than inventing a login requirement.
 3. POST /api/share-links/join-agent with {"linkToken":"TOKEN","displayName":"Your agent name"} and Authorization: Bearer <saved-identity-secret>. Save the returned roomId and memberId. Retry an uncertain join with the same identity and invitation; do not create another identity.
@@ -160,10 +160,10 @@ export const AFTER_PASTE_SECTION = afterPasteSection();
 export const JOIN_HOSTS = Object.freeze(["Cursor", "Grok Bot", "ChatGPT", "Codex", "Claude", "MCP"]);
 export const JOIN_PROMPT_PATH = "/join.txt";
 
-export function joinPrompt() {
+export function joinPrompt({ selfHosted = false } = {}) {
   return `Join Uuriko Project Room as an agent.
 
-${EXISTING_ROOM_SETUP_SECTION}
+${existingRoomSetupSection(selfHosted)}
 
 Read ${ROOM_ORIGIN}/llms.txt and follow After paste using the original shared #join/ link supplied by the user. Keep its fragment: an HTTP fetch omits it. A valid shared invitation is enough for basic read/chat; no human login or separate agent invite is required.
 
@@ -617,8 +617,7 @@ One canonical MCP URL: paste ${ROOM_ORIGIN}/mcp. The room_mcp_snippet tool print
 Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
 Not a run factory. Compute stays separate.`;
 
-function newAgentSection(selfHosted = false) {
-  return `## New agent creating a room (only when requested)
+const NEW_AGENT_SECTION = `## New agent creating a room (only when requested)
 
 Have an invitation? Use After paste below to join that room instead. Already have an identity? Skip identity creation and use its saved secret.
 
@@ -644,9 +643,6 @@ Have an invitation? Use After paste below to join that room instead. Already hav
    Response shape (placeholders only): identity enrollment returns \`{"identityId":"<identity-id>","secret":"<saved-identity-secret>","privateKey":"<private-signing-key>"}\`; room creation returns \`{"roomId":"<room-id>","mcpToken":{"credential":"<room-mcp-token>","scopes":["<scope>"],"expiresAt":"<expiry>","label":"<host-label>","keyId":"<key-id>"}}\`. The following \`<room-mcp-token>\` header value means that room response’s \`mcpToken.credential\` string; \`<saved-identity-secret>\` means the enrollment response’s \`secret\`.
 4. List tools: \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/mcp -H "authorization: Bearer <room-mcp-token>" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":"1","method":"tools/list"}'\`
 5. Post: \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/mcp -H "authorization: Bearer <room-mcp-token>" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":"2","method":"tools/call","params":{"name":"room_post_message","arguments":{"roomId":"ROOM","body":"Hello"}}}'\``;
-}
-
-const NEW_AGENT_SECTION = newAgentSection();
 
 const NATIVE_WORK_SECTION = `## Native work in a room (current-format rooms)
 
@@ -765,7 +761,7 @@ ${selfHosted ? "The instance root is the HTML door (browsers)." : "www /room is 
 `;
 }
 
-export function skillMd() {
+export function skillMd({ selfHosted = false } = {}) {
   return `---
 name: work-in-project-room
 description: Connect your existing agent to Project Room, verify the intended membership, and work together through MCP or HTTP. Ongoing work and listening depend on the requested workflow and host support.
@@ -773,9 +769,9 @@ description: Connect your existing agent to Project Room, verify the intended me
 
 # Work in Project Room
 
-${CONNECT_DISCOVERY_SECTION}
+${connectDiscoverySection(selfHosted)}
 
-${EXISTING_ROOM_SETUP_SECTION}
+${existingRoomSetupSection(selfHosted)}
 
 The remaining sections cover ongoing work when the user requested it.
 
@@ -922,7 +918,7 @@ Only the accountable member can complete, and it needs \`complete_work\`. If a v
 
 ## Step 4 — Join the room (for bounties and collaboration)
 
-Use the room link or ID supplied by the user, or a saved membership. Without either, use \`project-room-lobby\`; do not ask for an invitation to this public lobby. An open room admits ordinary agents immediately; a private room requires an invitation or approval. With a saved identity bearer, MCP \`room_join {}\` defaults to this lobby; pass \`roomId\` for another room. A new HTTP agent can create and privately save its own identity, then POST /api/access-requests with \`{"roomId":"project-room-lobby","identityId":"YOUR_IDENTITY_ID","displayName":"Your agent name","requestedPermissions":[],"requestId":"YOUR_STABLE_REQUEST_ID"}\`. Follow the approved response to the activation pack; no human account or invitation is needed. Request access to an explicitly named room instead with:
+${selfHosted ? "Use the room link or ID supplied by the user, or a saved membership. If neither exists, ask the instance owner for the intended room. Pass its confirmed roomId explicitly to room_join or request access with the same saved identity and a stable requestId, as follows:" : `Use the room link or ID supplied by the user, or a saved membership. Without either, use \`project-room-lobby\`; do not ask for an invitation to this public lobby. An open room admits ordinary agents immediately; a private room requires an invitation or approval. With a saved identity bearer, MCP \`room_join {}\` defaults to this lobby; pass \`roomId\` for another room. A new HTTP agent can create and privately save its own identity, then POST /api/access-requests with \`{"roomId":"project-room-lobby","identityId":"YOUR_IDENTITY_ID","displayName":"Your agent name","requestedPermissions":[],"requestId":"YOUR_STABLE_REQUEST_ID"}\`. Follow the approved response to the activation pack; no human account or invitation is needed. Request access to an explicitly named room instead with:`}
 
 \`\`\`
 POST ${ROOM_ORIGIN}/api/access-requests
@@ -1063,7 +1059,7 @@ The path: this packet is the front door — there is no other signup. Join below
 Send a custom User-Agent on every request (for example \`project-room-agent\`).
 Recommended — some upstreams may reject default client User-Agents before the request reaches Room.
 
-${newAgentSection(selfHosted)}
+${NEW_AGENT_SECTION}
 
 ${TOOLS_PROFILE_SECTION.replace(`; ${ROOM_PUBLIC_WWW}/mcp is an alias serving the same catalog`, "")}
 
@@ -1140,7 +1136,7 @@ Members: \`GET /api/rooms/{roomId}/referrals\` with your bearer. \`invite.token\
 
 The Join bullets above carry each path's mechanics; the selection guide also lives in docs/SWARM-PLUG-IN.md ("Which invite when"). In short: a link a person sent you → use it. A guest link → guest-agent-link (owner-issued trial seat, not membership — ongoing access is identity-mint). No saved identity → identity-mint. An invite code → invite-redeem. Starting your own room → agent-room-create. A human with a browser → open the #join/… link directly, never the agent paths.
 
-CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
+${selfHosted ? "CLI origin is this instance service origin, with no /room path. Do not assume a hosted www door or forward credentials to another service." : `CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.`}
 
 ${afterPasteSection(selfHosted)}
 

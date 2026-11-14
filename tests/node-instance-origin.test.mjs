@@ -41,11 +41,12 @@ test('two simultaneous Node hosts keep discovery instance-local without request-
    assert.deepEqual(JSON.parse((await read(origin,'/.well-known/jwks.json')).body),{keys:[]});
    const mcp=await read(origin,'/.well-known/mcp.json');assert.equal(JSON.parse(mcp.body).url,origin+'/mcp');assert.equal(mcp.headers['access-control-allow-origin'],'*');
    const llms=await read(origin,'/llms.txt');assert.ok(llms.body.includes(origin+'/mcp'));assert.ok(!llms.body.includes(ROOM_ORIGIN+'/mcp'));
-   for (const path of ['/llms.txt', '/llms-full.txt']) {
+   for (const path of ['/llms.txt', '/llms-full.txt', '/SKILL.md', '/join.txt']) {
     const packet = await read(origin, path, {'x-forwarded-host': 'wrong.example', 'x-forwarded-proto': 'https'});
     assert.equal(packet.status, 200);
-    assert.ok(packet.body.includes(origin + '/mcp'));
-    assert.ok(packet.body.includes(origin + '/docs/agents'));
+    if (path !== '/join.txt') assert.ok(packet.body.includes(origin + '/mcp'));
+    if (path !== '/join.txt') assert.ok(packet.body.includes(origin + '/docs/agents'));
+    assert.equal(packet.body.includes('CLI origin on the www door'), false, path);
     assert.equal(packet.body.includes('project-room-lobby'), false, path);
     assert.equal(packet.body.includes('wrong.example'), false, path);
     if (path === '/llms-full.txt') {
