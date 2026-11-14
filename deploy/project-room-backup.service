@@ -1,5 +1,5 @@
 [Unit]
-Description=Verify a fresh Project Room backup
+Description=Back up Project Room and verify the restore
 
 [Service]
 Type=oneshot
@@ -7,7 +7,11 @@ User=project-room
 Group=project-room
 WorkingDirectory=/opt/project-room/current
 EnvironmentFile=/etc/project-room/pilot.env
-ExecStart=/usr/bin/node /opt/project-room/current/scripts/backup-room.mjs --to /var/lib/project-room/backups
+# The timer is the schedule, so --force: without it the script's own
+# daily due-gate (state lastRun + 24h) plus the timer's randomized
+# delay can skip a day when a fire lands <24h after the previous run.
+# ROOM_DB comes from the EnvironmentFile, as it did for backup-room.mjs.
+ExecStart=/usr/bin/node /opt/project-room/current/scripts/backup-verify.mjs --to /var/lib/project-room/backups --schedule daily --force
 UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict

@@ -1,6 +1,6 @@
 # Durable Object backups
 
-The on-disk server still uses [scripts/backup-room.mjs](../scripts/backup-room.mjs), which copies the sqlite file and writes a watermark. The hosted room keeps that database inside a Durable Object, so the same checks run on an NDJSON export instead of a file copy.
+The on-disk server's scheduled backup is driven by `deploy/project-room-backup.timer` (daily), whose service runs [scripts/backup-verify.mjs](../scripts/backup-verify.mjs): one cycle backs up the sqlite file, writes a watermark, and runs the restore-verification pass below on the copy. [scripts/backup-room.mjs](../scripts/backup-room.mjs) remains the manual copy-only script. The hosted room keeps that database inside a Durable Object, so the same checks run on an NDJSON export instead of a file copy.
 
 ## What is in the export
 
