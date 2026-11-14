@@ -218,16 +218,16 @@ const RECONCILE_CLASSES = [
   { kind: "member", checkedKey: "rooms", examine(restored, current, stale) {
     const rooms = restored.db.prepare("SELECT id FROM rooms").all();
     for (const room of rooms) {
-      const restoredMembers = restored.room(room.id).state.members;
+      const restoredMembers = restored.recoveryMembers(room.id);
       // A room deleted from the current store after the backup is exactly the
-      // resurrection case this rehearsal exists to report: RoomStore.room()
+      // resurrection case this rehearsal exists to report: the member read
       // throws 404 room_not_found for it, and that must not abort the whole
       // reconciliation. Treat the missing room as having no current members,
       // so every active restored member is named stale below. Any other error
       // (storage, corruption) still propagates.
       let currentMembers;
       try {
-        currentMembers = current.room(room.id).state.members;
+        currentMembers = current.recoveryMembers(room.id);
       } catch (error) {
         if (error?.code !== "room_not_found") throw error;
         currentMembers = {};
@@ -645,7 +645,7 @@ const RECONCILE_CLASSES = [
 // row is classified into exactly one kind so a row is never named twice.
 function checkApiKeys(restored, current, stale, kind, onboarding) {
   if (!tableExists(restored.db, "agent_api_keys")) return 0;
-  const select = "SELECT key_id, identity_id, scopes_json, revoked FROM agent_api_keys";
+  const select = "SELECT key_id, key_hash, identity_id, scopes_json, revoked FROM agent_api_keys";
   const isOnboarding = row => {
     try {
       const scopes = JSON.parse(row.scopes_json);
@@ -663,6 +663,7 @@ function checkApiKeys(restored, current, stale, kind, onboarding) {
     const cur = now.get(row.key_id);
     if (cur === undefined) stale.push({ kind, id: row.key_id, detail: `${noun} for ${row.identity_id} unknown to the current store` });
     else if (cur.revoked) stale.push({ kind, id: row.key_id, detail: `${noun} for ${row.identity_id} was revoked after the backup` });
+    else if (cur.key_hash !== row.key_hash) stale.push({ kind, id: row.key_id, detail: `${noun} for ${row.identity_id} was rotated after the backup` });
   }
   return rows.length;
 }
