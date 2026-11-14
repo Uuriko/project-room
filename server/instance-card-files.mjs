@@ -6,7 +6,8 @@ export function readPublicInstanceFile(path, limit = 256 * 1024) {
   if (typeof path !== 'string' || !isAbsolute(path)) fail();
   let fd;
   try {
-    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // Do not wait for a FIFO writer before fstat can reject non-regular files.
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | constants.O_NONBLOCK);
     const before = fstatSync(fd);
     if (!before.isFile() || before.size < 1 || before.size > limit) fail();
     const buffer = Buffer.alloc(limit + 1);
