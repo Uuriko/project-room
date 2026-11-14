@@ -71,7 +71,7 @@ test("Dot round-2 1a: a v2-baselined room whose state row is missing does not ve
     await tick(fixture.store);
     await tick(fixture.store);
     const baseline = snapshotText(fixture.store);
-    assert.match(baseline, /^v2:/);
+    assert.match(baseline, /^v3:/);
     assert.ok(roomState(fixture.store, "alpha")?.hash, "the baseline carries a per-room hash before the loss");
     // Interrupted persistence / state loss: the snapshot is v2, but the
     // room's remembered row is gone entirely (not NULL — absent).
@@ -112,7 +112,7 @@ test("Dot round-2 1b: an empty-string room hash does not verify or adopt mutated
     await tick(fixture.store);
     await tick(fixture.store);
     const baseline = snapshotText(fixture.store);
-    assert.match(baseline, /^v2:/);
+    assert.match(baseline, /^v3:/);
     // A corrupted remembered row: the hash column holds an empty string,
     // which no writer in the codebase ever produces legitimately.
     fixture.store.db.prepare("UPDATE integrity_room_state SET projection_hash='' WHERE room_id='alpha'").run();
@@ -181,7 +181,7 @@ test("Dot round-2 2b (control): a genuinely new room created through the normal 
   try {
     await tick(fixture.store);
     await tick(fixture.store);
-    assert.match(snapshotText(fixture.store), /^v2:/);
+    assert.match(snapshotText(fixture.store), /^v3:/);
     fixture.store.initialize(initialRoom("beta"));
     const scan = await tick(fixture.store);
     assert.equal(scan.verified, 1, "the new room is fully checked and baselined, not reported unverifiable");
