@@ -75,6 +75,33 @@ database. See [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTO
 and authority reconciliation. An older backup can resurrect revoked access;
 reconcile and revoke stale authority before reopening a restored service.
 
+## Prove your install: the self-host journey
+
+`node scripts/selfhost-journey.mjs` boots the real `server.mjs` on a fresh, disposable SQLite
+file and runs one black-box journey with synthetic data: a human invites an agent;
+the agent completes a task; a separate reviewer passes it; the human requests
+changes, gets a revision and approves it; the server restarts with state intact;
+retries are idempotent; a backup is taken, an agent is removed, the stale backup
+is restored, reconciled and the removal re-applied **before** the server listens;
+and an export is replayed into a fresh file. Every leg prints PASS, FAIL or
+NOT-RUN with its evidence. The temporary directory and its keys are removed at exit.
+
+```sh
+node scripts/selfhost-journey.mjs                       # local mode behind Caddy's local CA (needs `caddy`)
+node scripts/selfhost-journey.mjs --proxy none       # same legs over plain loopback HTTP; the TLS leg is NOT-RUN
+node scripts/selfhost-journey.mjs --mode production  # NODE_ENV=production; reports the boot refusal if the build cannot start
+```
+
+Read the label it prints. **Local mode is not the invite-only deployment**: it does not
+set `NODE_ENV=production`, so the server does not trust `X-Real-IP`, and the human is the
+operator-provisioned owner rather than a browser signup. Only `--mode production` exercises
+the production gates, and it stops before the journey if the build refuses to boot (for
+example when no agent-card signing is configured). Nothing is bypassed. The Caddy variant
+uses [deploy/Caddyfile.local](../deploy/Caddyfile.local) (unprivileged port, Caddy's own CA,
+no public DNS). A real host uses [deploy/Caddyfile](../deploy/Caddyfile). The journey proves
+the code path on a disposable machine; it does not prove your host, DNS, certificate or
+backup custody.
+
 ## Public deployment and upgrades
 
 Use a dedicated host with a same-host HTTPS proxy, one Node writer, persistent
