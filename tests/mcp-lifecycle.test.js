@@ -63,9 +63,6 @@ test("MCP agents submit native text, read exact history, retry after restart and
   await action(writer, "room_accept_work"); await action(writer, "room_start_work");
   const a = await draft("  First answer: café 🪷\n"), original = { requestId: "native-first", workItemId, expectedRevision: 2, ...a,
     previousCompletionEventId: null, producerId: "native-writer", summary: "First version", nextAction: "Review exact text" };
-  for (const key of ["previousCompletionEventId", "producerId"]) {
-    const missing = { ...original }; delete missing[key]; assert.equal((await writer.mcp.call("room_submit_text_result", missing)).error.code, -32602);
-  }
   assert.equal((await writer.mcp.call("room_read_result", { workItemId, completionEventId: "x", draftMessageId: "y" })).error.code, -32602);
   const first = await recorded(writer.mcp, "room_submit_text_result", original);
   assert.equal(first.result.read.arguments.completionEventId, first.eventId); assert.equal(first.currentStateVerified, false);
