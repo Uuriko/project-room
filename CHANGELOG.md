@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0
+
+First semver release. Project Room is open-source infrastructure its
+community can run: the self-hosted Node/SQLite path documented in
+[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) is the release path, installable
+from a clean checkout with Node 24.19 or newer (`npm start` now checks the
+Node version first and names the remedy when it is too old). Packaging:
+`package.json` carries the 1.0.0 version, and [LICENSING.md](LICENSING.md)
+states the scope of the orphaned MIT licence file — the project's licence
+is Apache-2.0. The release tag is applied by the release owner; the notes
+under Unreleased at the tag point form the rest of this entry.
+
 ## Unreleased
 
 - First-room setup failure no longer reads as an empty account ("No rooms
