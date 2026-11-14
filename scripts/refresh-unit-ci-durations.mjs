@@ -21,7 +21,14 @@
 //   this refresh's source run ids / revisions and date;
 // - receipts without `fileDurationsMs` contribute nothing, and when no
 //   receipt carries any measured duration the table is left unchanged;
-// - malformed receipts fail closed (no output is written).
+// - malformed receipts fail closed (no output is written);
+// - the legacy measurement cap (MEASUREMENT_CAP_MS) is a lower bound, not
+//   a measurement: an entry still sitting at the cap that this refresh did
+//   not measure is listed in the provenance key's `cappedLowerBounds`, and
+//   an entry this refresh measured off the cap is listed in
+//   `uncappedFiles`. Hosted receipts carry per-testcase JUnit sums (see
+//   scripts/unit-ci.mjs), which have no per-file cap, so a measured value
+//   replaces a capped sentinel outright — it is never averaged with it.
 //
 // Output is deterministic: `milliseconds` keys sorted, 1-space indent
 // (the existing file's format), trailing newline. Re-running on the same
@@ -30,6 +37,27 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 export const PROVENANCE_KEY = "hostedReceiptsRefresh";
+
+// The 2026-10-06 measurement harness killed each file at 300 s and recorded
+// the cap itself as the duration (see the table's `_note`). An entry at
+// exactly this value is therefore a lower bound — the file ran AT LEAST
+// this long under that harness — never a measured duration. (Hosted JUnit
+// testcase sums routinely show the same files far below the cap: the cap
+// was a solo wall-clock timeout under 16-way contention, not test time.)
+export const MEASUREMENT_CAP_MS = 300000;
+
+/**
+ * Files whose recorded duration is a capped lower bound: at (or above) the
+ * measurement cap AND not freshly measured in this refresh. A file that WAS
+ * measured — even if its measured value lands near the cap — is a real
+ * measurement and is not flagged.
+ */
+export function cappedLowerBoundFiles(milliseconds, measuredFiles = new Set()) {
+  return Object.entries(milliseconds ?? {})
+    .filter(([file, ms]) => Number.isFinite(ms) && ms >= MEASUREMENT_CAP_MS && !measuredFiles.has(file))
+    .map(([file]) => file)
+    .sort();
+}
 
 export function validateReceipt(receipt, name = "receipt") {
   if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
@@ -64,6 +92,30 @@ export function loadReceipts(receiptsDir) {
     }
     return validateReceipt(parsed, name);
   });
+}
+
+// Generated-twin attribution: a test file that only materializes and
+// imports a generated sibling (tests/webhook-dispatch-store.test.js writes
+// tests/.webhook-dispatch-store.<hash>.generated.mjs and imports it) has
+// its testcases reported under the GENERATED file's path, which does not
+// exist in a fresh checkout. Without this rule the refresh drops that
+// measurement and the wrapper keeps whatever stale weight it had — for
+// that file, a 149,653 ms legacy weight against 3,085 ms of measured
+// hosted testcase time, the single largest distortion in the old table.
+// The rule is narrow: a dotfile basename `.<base>.<hex>.generated.<ext>`
+// is attributed to `<base>.test.<ext>` in the same directory, and only
+// when exactly one such sibling exists.
+const GENERATED_TWIN = /^\.(.+)\.[0-9a-f]{8,}\.generated\.([a-z]+)$/;
+export function generatedTwinTarget(file, fileExists) {
+  const slash = file.lastIndexOf("/");
+  const dir = slash >= 0 ? file.slice(0, slash) : "";
+  const base = slash >= 0 ? file.slice(slash + 1) : file;
+  const match = GENERATED_TWIN.exec(base);
+  if (!match) return null;
+  const candidates = ["js", "mjs", "cjs", "ts", "mts", "cts"]
+    .map((ext) => `${dir ? `${dir}/` : ""}${match[1]}.test.${ext}`)
+    .filter((candidate) => candidate !== file && fileExists(candidate));
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 // Max measured ms per file across all receipts.
@@ -105,22 +157,39 @@ export function refreshTable(existing, receipts, { fileExists = () => true, date
   const measured = measuredFromReceipts(receipts);
   if (!measured.size) return { table: existing, changed: false, measuredCount: 0 };
 
+  // Re-key measurements whose reported file is a generated twin of an
+  // existing test file (see generatedTwinTarget); other measurements for
+  // files absent from the tree are dropped as stale, as before.
+  const effectiveMeasured = new Map();
+  for (const [file, ms] of measured) {
+    const target = fileExists(file) ? file : generatedTwinTarget(file, fileExists);
+    if (target && (!effectiveMeasured.has(target) || ms > effectiveMeasured.get(target))) {
+      effectiveMeasured.set(target, ms);
+    }
+  }
+
   const entries = new Map();
   for (const [file, ms] of Object.entries(existing.milliseconds)) {
     if (fileExists(file)) entries.set(file, ms);
   }
-  for (const [file, ms] of measured) {
-    if (fileExists(file)) entries.set(file, ms);
+  for (const [file, ms] of effectiveMeasured) {
+    entries.set(file, ms);
   }
 
   const runIds = [...new Set(receipts.map((r) => r.runId).filter((v) => v !== undefined && v !== null && v !== "").map(String))].sort();
   const revisions = [...new Set(receipts.map((r) => r.revision).filter((v) => v !== undefined && v !== null && v !== "").map(String))].sort();
+  const cappedLowerBounds = cappedLowerBoundFiles(Object.fromEntries(entries), effectiveMeasured);
+  const uncappedFiles = [...effectiveMeasured.keys()]
+    .filter((file) => existing.milliseconds[file] >= MEASUREMENT_CAP_MS)
+    .sort();
   const provenance = {
     date,
     source: "hosted unit-shard receipts (fileDurationsMs written by scripts/unit-ci.mjs)",
     runIds,
     revisions,
-    filesMeasured: [...measured.keys()].filter((file) => fileExists(file)).length,
+    filesMeasured: effectiveMeasured.size,
+    cappedLowerBounds,
+    uncappedFiles,
     purpose: "Measured allocation only; test discovery remains authoritative. Timing allocates files only, not membership.",
   };
 
@@ -161,7 +230,8 @@ function main() {
     return;
   }
   writeFileSync(outPath, serializeTable(table));
-  console.log(`refresh-unit-ci-durations: refreshed ${measuredCount} measured file(s) from ${receipts.length} receipt(s) into ${outPath}`);
+  const capped = table[PROVENANCE_KEY]?.cappedLowerBounds ?? [];
+  console.log(`refresh-unit-ci-durations: refreshed ${measuredCount} measured file(s) from ${receipts.length} receipt(s) into ${outPath}; ${capped.length} capped lower-bound file(s) remain${capped.length ? `: ${capped.join(", ")}` : ""}`);
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) main();
