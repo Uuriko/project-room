@@ -85,6 +85,76 @@ function landQueueRow(store, at) {
     .run(at, at);
 }
 
+test("node scheduler outcomes agree with failure health across retries and recovery", async t => {
+  const store = storeFor(t);
+  let clock = Date.now();
+  landQueueRow(store, clock);
+  let result = { errors: 1 };
+  store.landQueue.refreshDue = async () => {
+    if (result instanceof Error) throw result;
+    return result;
+  };
+  const scheduler = startNodeScheduler({ store, env: { GROWTH_WATCH_INTERVAL_MS: "0" }, tickMs: 0, now: () => clock });
+  t.after(() => scheduler.stop());
+  const health = () => scheduler.jobHealth().find(j => j.name === "land-queue");
+  const run = async () => {
+    clock += HOUR_MS;
+    return (await scheduler.runOnce()).find(o => o.job === "land-queue");
+  };
+  for (const [summary, failures] of [[{ errors: 1 }, 1], [{ scanError: "scan failed" }, 2]]) {
+    result = summary;
+    const outcome = await run();
+    assert.equal(outcome.ok, false, "summary failure is not a successful outcome");
+    assert.deepEqual(outcome.result, summary);
+    assert.equal(outcome.grade, undefined);
+    assert.equal(health().consecutiveFailures, failures);
+    assert.equal(health().lastSuccessAt, null);
+  }
+  result = { checked: 1, errors: 0 };
+  assert.equal((await run()).ok, true);
+  assert.equal(health().consecutiveFailures, 0);
+  const lastSuccessAt = health().lastSuccessAt;
+  assert.equal(lastSuccessAt, new Date(clock).toISOString());
+  result = Error("synthetic scheduler failure");
+  assert.equal((await run()).ok, false);
+  assert.equal(health().consecutiveFailures, 1);
+  assert.equal(health().lastSuccessAt, lastSuccessAt);
+  result = { checked: 0, budgetExceeded: 1 };
+  const exhausted = await run();
+  assert.equal(exhausted.ok, true);
+  assert.equal(exhausted.grade, BUDGET_EXHAUSTED_NO_PROGRESS);
+  assert.equal(health().consecutiveFailures, 0);
+});
+
+test("node scheduler excludes overlapping passes and releases its gate after summary failure", async t => {
+  const store = storeFor(t);
+  const clock = Date.now();
+  landQueueRow(store, clock);
+  let entered, finish;
+  const started = new Promise(resolve => { entered = resolve; });
+  const pending = new Promise(resolve => { finish = resolve; });
+  let calls = 0;
+  store.landQueue.refreshDue = async () => {
+    calls += 1;
+    entered();
+    return pending;
+  };
+  const scheduler = startNodeScheduler({ store, env: { GROWTH_WATCH_INTERVAL_MS: "0" }, tickMs: 0, now: () => clock });
+  t.after(() => scheduler.stop());
+  const first = scheduler.runOnce();
+  await started;
+  try {
+    assert.deepEqual(await scheduler.runOnce(), []);
+    assert.equal(calls, 1);
+  } finally { finish({ errors: 1 }); }
+  assert.equal((await first).find(o => o.job === "land-queue").ok, false);
+  assert.equal(scheduler.jobHealth().find(j => j.name === "land-queue").consecutiveFailures, 1);
+  store.landQueue.refreshDue = async () => { calls += 1; return { checked: 1 }; };
+  assert.equal((await scheduler.runOnce()).find(o => o.job === "land-queue").ok, true);
+  assert.equal(calls, 2);
+  assert.equal(scheduler.jobHealth().find(j => j.name === "land-queue").consecutiveFailures, 0);
+});
+
 test("node scheduler gives a later job a full budget window from its own start", async t => {
   const store = storeFor(t);
   let clock = Date.now();

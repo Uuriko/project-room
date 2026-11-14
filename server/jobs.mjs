@@ -1264,7 +1264,7 @@ export function startNodeScheduler({
             grade,
             durationMs: now() - startedAt
           });
-          outcomes.push(grade ? { job: job.name, ok: true, grade, result } : { job: job.name, ok: true, result });
+          outcomes.push(grade ? { job: job.name, ok: true, grade, result } : { job: job.name, ok: !failed, result });
         } catch (error) {
           lastRan.set(job.name, at);
           record(job.name, at, false, { error: nodeJobErrorText(job, error), failure: failureDetailOf(error), durationMs: now() - startedAt });
