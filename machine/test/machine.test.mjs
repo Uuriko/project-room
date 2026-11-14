@@ -443,6 +443,8 @@ test.describe("room-machine", { concurrency: false }, () => {
     assert.equal(argv.includes(canary), false);
     assert.equal(childEnv.includes(canary), false);
     assert.equal(readFileSync(join(home, "security-stdin"), "utf8").includes(canary), true);
+    // Keychain holds the exact secret, not an empty entry.
+    assert.equal(readFileSync(join(home, "security-store", "machine"), "utf8"), canary);
     const file = join(home, "secrets", "machine");
     assert.equal(readFileSync(file, "utf8"), canary);
     assert.equal(statSync(file).mode & 0o777, 0o600);
@@ -696,4 +698,21 @@ test.describe("room-machine", { concurrency: false }, () => {
     rmSync(home, { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });
   });
+});
+
+test("Keychain gets the secret over stdin, a re-save replaces it, and a stale entry never shadows the file", async () => {
+  const home = homeDir();
+  const env = machineEnv(home);
+  const first = "tok-first-\"quoted\"\\slash";
+  await spawnContext.run({ env }, () => saveSecret("identity", first, home));
+  assert.equal(readFileSync(join(home, "security-store", "identity"), "utf8"), first);
+  assert.equal(readFileSync(join(home, "argv-log"), "utf8").includes("tok-first"), false, "secret stays off argv");
+  assert.equal(await spawnContext.run({ env }, () => readSecret("identity", home)), first);
+  await spawnContext.run({ env }, () => saveSecret("identity", "tok-second", home));
+  assert.equal(await spawnContext.run({ env }, () => readSecret("identity", home)), "tok-second");
+  // A value -i cannot carry: Keychain is cleared, the file wins.
+  await spawnContext.run({ env }, () => saveSecret("identity", "tok\nthird", home));
+  assert.equal(existsSync(join(home, "security-store", "identity")), false);
+  assert.equal(await spawnContext.run({ env }, () => readSecret("identity", home)), "tok\nthird");
+  rmSync(home, { recursive: true, force: true });
 });
