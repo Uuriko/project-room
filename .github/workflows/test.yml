@@ -677,8 +677,10 @@ jobs:
             if [ "$result" != "success" ]; then failed=1; fi
           done
           exit "$failed"
-  # Verdict naming. Reporting only: this job never gates, exits 0, and is
-  # not a required check. It runs on every pull-request event, including
+  # Verdict naming. Reporting only, with one exception: this job is not a
+  # required check and exits 0 in every case except the hollow-CI guard
+  # step below, which fails it when a non-draft pull request carrying
+  # ready-to-land concludes with a substantive job NOT-RUN. It runs on every pull-request event, including
   # the runs where the heavy jobs above skip, and writes one summary that
   # names the exact subject (pull request, head SHA, event) and every job
   # as PASSED, FAILED, or NOT-RUN. A skipped job is NOT-RUN here even
@@ -733,3 +735,56 @@ jobs:
               echo "| $name | $verdict |"
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
+      # Hollow-CI guard: the one case where this job gates. A non-draft
+      # pull request carrying ready-to-land is the landing decision point,
+      # and in that run every substantive job's own gate condition already
+      # passed, so a substantive job reporting skipped there did not run
+      # and must not read green. Legitimate skips are excused exactly as
+      # this workflow and the substantive-job manifest encode them: unit,
+      # visual-refresh-guard, and friend-agent-e2e skip on a docs-only
+      # diff; a browser-shards skip is excused only when the browser
+      # aggregator PASSED (it passes on the intentional browser=false or
+      # docs-only skip and fails closed on any other shard skip).
+      # coverage is not substantive on pull_request (it runs on schedule,
+      # workflow_dispatch, and merge_group only), and changes, safety-net,
+      # and this job are not substantive. Draft and unlabelled pull
+      # requests are untouched: their NOT-RUN state stays reporting-only,
+      # named in the summary above and in this check's name when the test
+      # aggregator itself was skipped.
+      - name: Fail when a ready-to-land PR left substantive jobs NOT-RUN
+        if: github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')
+        env:
+          CONTRACT: ${{ needs.contract.result }}
+          LINT: ${{ needs.lint.result }}
+          UNIT: ${{ needs.unit.result }}
+          BROWSER_SHARDS: ${{ needs.browser-shards.result }}
+          BROWSER: ${{ needs.browser.result }}
+          CLOUDFLARE: ${{ needs.cloudflare.result }}
+          CLOUDFLARE_SHARD_2: ${{ needs.cloudflare-shard-2.result }}
+          VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
+          FRIEND_AGENT_E2E: ${{ needs.friend-agent-e2e.result }}
+          TEST: ${{ needs.test.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+        run: |
+          not_run=""
+          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser-shards:$BROWSER_SHARDS" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "cloudflare-shard-2:$CLOUDFLARE_SHARD_2" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "friend-agent-e2e:$FRIEND_AGENT_E2E" "test:$TEST"; do
+            name=${pair%%:*}
+            result=${pair#*:}
+            [ "$result" = "skipped" ] || continue
+            # Docs-only diffs skip these three by design.
+            if [ "$DOCS_ONLY" = "true" ] && { [ "$name" = "unit" ] || [ "$name" = "visual-refresh-guard" ] || [ "$name" = "friend-agent-e2e" ]; }; then
+              continue
+            fi
+            # browser PASSED already proves an intentional shard skip
+            # (browser=false or docs-only); it fails closed otherwise.
+            if [ "$name" = "browser-shards" ] && [ "$BROWSER" = "success" ]; then
+              continue
+            fi
+            not_run="$not_run $name"
+          done
+          if [ -n "$not_run" ]; then
+            echo "::error::Hollow CI: this non-draft PR carries ready-to-land, but substantive jobs did not run:$not_run. A green run that tested nothing is not a landing signal."
+            echo "**HOLLOW CI — substantive jobs NOT-RUN on a ready-to-land PR:**$not_run" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "hollow-CI guard passed: every substantive job ran (or was excused) on this ready-to-land PR"
