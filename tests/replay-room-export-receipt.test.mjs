@@ -9,9 +9,11 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { exportNdjsonText } from '../server/room-export.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
+import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 
 const script = fileURLToPath(new URL('../scripts/replay-room-export.mjs', import.meta.url));
 const privateBody = 'Synthetic private message: do not include in the replay receipt';
+const integrationValue = 'synthetic receipt fixture';
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'replay-receipt-'));
@@ -22,7 +24,13 @@ function fixture(t) {
   store.command(key, 'commons', {
     id: 'synthetic-receipt-message', type: T.MESSAGE_POSTED, data: { body: privateBody }
   });
+  store.transaction(() => store.db.prepare(`INSERT INTO oauth_pending_states
+    (state_hash, provider, slot_token, expected_revision, verifier, expires_at, link, used, created_at)
+    VALUES (?, 'google', ?, 0, ?, 9999999999999, 0, 0, 1)`)
+    .run('ab'.repeat(32), integrationValue, integrationValue));
   const rows = exportNdjsonText(store.db).trimEnd().split('\n').map(line => JSON.parse(line));
+  // Runtime-only source markers are explicitly skipped rather than imported.
+  rows.push({ table: 'room_runtime_version', row: { singleton: 1, version: 41 } });
   return {
     rows,
     run(input) {
@@ -36,6 +44,7 @@ function fixture(t) {
         assert.equal(text.includes(privateBody), false);
         assert.equal(text.includes(directory), false);
         assert.equal(text.includes(key), false);
+        assert.equal(text.includes(integrationValue), false);
       }
       return result;
     }
@@ -59,13 +68,19 @@ for (const level of ['full', 'events-only', 'watermark-only']) {
     assert.equal(receipt.verified, true);
     assert.equal(receipt.contentVerification, level);
     assert.equal(receipt.trailer, level === 'watermark-only' ? 'absent' : 'verified');
-    assert.equal(receipt.audit.ok, true);
+    assert.deepEqual(receipt.audit, { ok: true });
     assert.equal(typeof receipt.events, 'number');
     assert.deepEqual(Object.keys(receipt).sort(), [
       'audit', 'contentVerification', 'events', 'sanitizedCells', 'skippedTables', 'trailer', 'verified', 'writeProofs'
     ].sort());
-    assert.equal(receipt.writeProofs.historicalVerification, 'unchanged');
-    assert.equal(typeof receipt.sanitizedCells, 'object');
+    assert.deepEqual(receipt.writeProofs, {
+      sourceSchemaVersion: STORE_SCHEMA_VERSION,
+      metadataProofsAdded: 0,
+      historicalVerification: 'unchanged'
+    });
+    assert.deepEqual(receipt.sanitizedCells.oauth_pending_states, { slot_token: 1, verifier: 1 });
+    assert.equal(receipt.skippedTables.room_runtime_version, 1);
+    for (const count of Object.values(receipt.skippedTables)) assert.ok(Number.isSafeInteger(count) && count >= 0);
   });
 }
 
