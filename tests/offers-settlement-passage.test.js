@@ -13,11 +13,18 @@ test("/offers carries the server-rendered settlement passage with every step", (
   for (const needle of ["not a funded bounty", "not configured", "submission is not acceptance", "challenge window", "settlement keeper", "not cash", "no cash-out", "public receipt"]) {
     assert.ok(html.includes(needle), `/offers passage missing: ${needle}`);
   }
-  // ATLAS-PUBLIC P-5: an offer locks no escrow — project-offers reports a
-  // credit reward's funding as not configured. The escrow-at-enable claim
-  // belongs to in-room bounties and must not come back onto this page.
-  assert.ok(!html.includes("locked in escrow from their existing balance when the offer is enabled"), "offers must not promise escrow at enable");
-  assert.ok(!html.includes("never listed unfunded"), "the never-unfunded claim is the bounty surface's, not the offers page's");
+  // A-01 single story (wave-2900 D5a): publishing an offer locks nothing,
+  // but enabling a credit-reward offer as a public task DOES lock escrow —
+  // server/public-work-claims.mjs enable() funds the settlement bounty in
+  // the enable transaction (server/public-work-settlement.mjs fund()), so
+  // this page must tell the same story as llms-full.txt, not the opposite.
+  // project-offers.mjs reports a credit reward's funding as ledger_only;
+  // "not configured" is the cash-reward case only.
+  assert.ok(html.includes("publishing an offer locks nothing"), "offers must state publishing alone locks nothing");
+  assert.ok(html.includes("locked in escrow from the poster"), "offers must state the escrow lock at public-task enable");
+  assert.ok(html.includes("never listed unfunded"), "offers must state a paid public task is never listed unfunded");
+  assert.ok(html.includes("ledger-only"), "offers must state credit funding is ledger-only");
+  assert.ok(!html.includes("no credits are locked in escrow when an offer is enabled"), "the stale no-escrow-at-enable claim must not return");
   // The passage is static HTML above the JS-driven list, not script text.
   const passageAt = html.indexOf("How paid work settles");
   assert.ok(passageAt > 0 && passageAt < html.indexOf("offer-list"), "passage precedes the JS offer list");
