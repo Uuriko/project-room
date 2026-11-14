@@ -4,17 +4,6 @@ import AuthenticationServices
 import CryptoKit
 import Security
 
-public enum RoomLocation {
-    public static func allowed(_ url: URL) -> Bool {
-        guard url.user == nil, url.password == nil else { return false }
-        return (url.scheme == "https" && url.host == "room.trydemigod.com" && (url.port == nil || url.port == 443))
-            || (url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? ""))
-    }
-    public static func sameOrigin(_ url: URL, _ origin: URL) -> Bool {
-        url.scheme == origin.scheme && url.host == origin.host && url.port == origin.port && url.user == nil && url.password == nil
-    }
-}
-
 @MainActor public protocol RoomAuthenticationSession: AnyObject {
     var presentationContextProvider: ASWebAuthenticationPresentationContextProviding? { get set }
     func start() -> Bool
@@ -57,8 +46,8 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public private(set) var completedDownloadCount = 0
     public private(set) var failedDownloadCount = 0
 
-    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil, acceptanceLocalToolsFactory: (() throws -> LocalToolsWindow)? = nil) {
-        precondition(RoomLocation.allowed(url))
+    public init(url: URL, selfHostedOrigin: URL? = nil, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil, acceptanceLocalToolsFactory: (() throws -> LocalToolsWindow)? = nil) {
+        precondition(RoomLocation.allowed(url, selfHostedOrigin: selfHostedOrigin))
         precondition(acceptanceLocalToolsFactory == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
         self.acceptanceLocalToolsFactory = acceptanceLocalToolsFactory
         // Destination overrides are restricted to isolated loopback acceptance.

@@ -144,3 +144,28 @@ for explicit computer-tool delegation to a dedicated Room runtime.
 After choosing an existing host configuration, stop the agent and choose **Connect Mac tools…** in My Mac. The dialog identifies the room and origin. Choose observation only or explicitly allow app control. The app writes a private managed runtime copy, preserving the dedicated profile and leaving the imported runtime unchanged. Repeated configuration replaces the previous generated copy. Enable local tools and grant the relevant macOS permissions, then start the agent.
 
 For an approval-blocked request, choose app control only if you intend to authorize it, restart the host, then resolve and resume the original request in the room. The app does not silently resume work or change global model policy. Initial host enrollment and provider sign-in still require the existing setup; this removes the separate manual Mac-tools JSON edit.
+
+### Explicit self-hosted destination
+
+A development build can select one self-hosted HTTPS origin explicitly at launch:
+
+```sh
+open -n 'build/Project Room.app' --args --self-hosted-origin https://room.example:8443
+```
+
+Optionally add `--url https://room.example:8443/r/commons` to open a room on that
+same exact origin. The origin must be HTTPS, with no credentials, path beyond `/`,
+query or fragment. The selected scheme, host and port scope the window; incoming
+links cannot select another server. Without this argument, the existing hosted
+and loopback-development policy is unchanged. This selection does not trust a
+certificate, bypass TLS verification, configure network access, or create a Room
+account. The server must already be reachable and trusted, and the user must have
+access on that instance. This is not a notarized-distribution or external-login
+qualification.
+
+Focused policy check (no network or accounts):
+
+```sh
+swiftc Sources/ProjectRoomKit/RoomLocation.swift Tests/RoomLocationCheck.swift -o /tmp/room-location-check
+/tmp/room-location-check
+```
