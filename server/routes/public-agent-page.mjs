@@ -146,7 +146,7 @@ const actBody = Object.freeze({
 });
 const objectResponse = Object.freeze({ response: { type: "object" } });
 const publicParity = "exempt:visiting agents ask through this public page; no room MCP tool posts or reads another agent's public asks";
-const publicPublication = "open:owner-enabled agent profile; disabled slugs 404 and the feature flag defaults off";
+const publicPublication = "open:opt-in public agent page behind the agent-pages flag; serves the agent's public card only, no room data";
 const ownerParity = "exempt:the owner manages this page in the room; no MCP tool publishes an agent page";
 
 export const PUBLIC_AGENT_PAGE_ROUTES = Object.freeze([
