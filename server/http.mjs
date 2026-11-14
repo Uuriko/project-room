@@ -2959,7 +2959,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         try { return probe() !== null; } catch { return false; }
       };
       if (url.pathname === "/api/auth/methods") {
-        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
         const session = requireAccountSession();
         return json(res, 200, {
           methods: store.accountLogins.listMethods(session.account.id),
@@ -2979,7 +2979,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return data.id;
       };
       if (url.pathname === "/api/auth/methods/disable") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         checkOrigin(req, true);
         rate(`auth-methods:${remoteAddress}`, 30);
         const session = requireAccountSession();
@@ -2988,7 +2988,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, { method });
       }
       if (url.pathname === "/api/auth/methods/enable") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         checkOrigin(req, true);
         rate(`auth-methods:${remoteAddress}`, 30);
         const session = requireAccountSession();
@@ -2997,7 +2997,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, { method });
       }
       if (url.pathname === "/api/auth/methods/remove") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         checkOrigin(req, true);
         rate(`auth-methods:${remoteAddress}`, 30);
         const session = requireAccountSession();
@@ -3006,7 +3006,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, removed);
       }
       if (url.pathname === "/api/auth/password/set") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         checkOrigin(req, true);
         rate(`password-set:${remoteAddress}`, 20);
         const session = requireAccountSession();
@@ -3028,7 +3028,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 201, { status: "ok", method: { id: method.id, type: "password" } });
       }
       if (url.pathname === "/api/auth/github/link/start") {
-        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
         // Auth first: anonymous callers get 401 without learning whether
         // GitHub is configured (slice 7 hardening).
         const session = requireAccountSession();
@@ -3046,7 +3046,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end();
       }
       if (url.pathname === "/api/auth/google/link/start") {
-        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
         // Auth first: anonymous callers get 401 without learning whether
         // Google is configured.
         const session = requireAccountSession();
@@ -3071,7 +3071,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const session = requireAccountSession();
           return json(res, 200, store.accountProfile(session.account.id));
         }
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
         checkOrigin(req, true);
         rate(`account-profile:${remoteAddress}`, 30);
         const session = requireAccountSession();
@@ -3079,12 +3079,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.updateAccountProfile(session.account.id, await body(req)));
       }
       if (url.pathname === "/api/account/onboarding") {
-        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
         const session = requireAccountSession();
         return json(res, 200, store.onboardingState(session.account.id));
       }
       if (url.pathname === "/api/account/onboarding/complete") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         checkOrigin(req, true);
         rate(`account-onboarding:${remoteAddress}`, 30);
         const session = requireAccountSession();
@@ -3092,12 +3092,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.completeOnboarding(session.account.id));
       }
       if (url.pathname === "/api/account/retention") {
-        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
         requireAccountSession();
         return json(res, 200, { policy: RETENTION_POLICY });
       }
       if (url.pathname === "/api/account/deletion/plan") {
-        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
         const session = requireAccountSession();
         rate(`account-deletion-plan:${remoteAddress}`, 10);
         const { plan, summary } = planAccountDeletion(store, session.account.id);
@@ -3109,7 +3109,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
       }
       if (url.pathname === "/api/account/delete") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         checkOrigin(req, true);
         rate(`account-delete:${remoteAddress}`, 5);
         const session = requireAccountSession();
