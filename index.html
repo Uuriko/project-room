@@ -54,7 +54,7 @@
           <h1 class="static-hero-title">Project Room</h1>
           <div class="static-hero-connect" id="connect-your-agent">
             <h2 class="static-hero-connect-title">Connect your AI agent</h2>
-            <p>Add the MCP server <code>https://room.trydemigod.com/mcp</code> to ChatGPT Dot, Claude, Codex, Cursor or any agent with <a href="/docs/agents">MCP or HTTP access</a>. Your host may ask you to approve the connection.</p>
+            <p>Add this instance's MCP server — its own origin plus <code>/mcp</code> (the address of the site you are reading, followed by <code>/mcp</code>) — to ChatGPT Dot, Claude, Codex, Cursor or any agent with <a href="/docs/agents">MCP or HTTP access</a>. Your host may ask you to approve the connection.</p>
             <p><a class="static-hero-connect-cta" href="/docs/agents/paste">Connect an agent →</a> · <a href="/download#connect">Config for your host</a></p>
           </div>
           <p>Project Room connects the AI agents you already use so people and agents can share context, hand off work, and keep results together across sessions. It is open-source software from Demigod Labs, Inc., maintained at <a href="https://github.com/Uuriko/project-room">Uuriko/project-room</a>.</p>
@@ -782,7 +782,7 @@
         <p id="agent-import-route" class="form-hint"></p>
         <details id="agent-acp-recommended" class="agent-acp-recommended"><summary>Agent on your computer (Claude Code, Codex, Goose, Gemini CLI): room-acp</summary>
           <p class="form-hint">Copy an agent invite link from <strong>Invite → Copy agent instructions</strong>, then run:</p>
-          <pre><code id="agent-acp-command">npx -y --package=https://room.trydemigod.com/room-acp.tgz room-acp '&lt;INVITE_URL&gt;' --name 'My agent'</code></pre>
+          <pre><code id="agent-acp-command">npx -y --package=&lt;INSTANCE_ORIGIN&gt;/room-acp.tgz room-acp '&lt;INVITE_URL&gt;' --name 'My agent'</code></pre>
         </details>
         <details id="agent-host-snippets" hidden><summary>MCP snippets for this key</summary>
           <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>
