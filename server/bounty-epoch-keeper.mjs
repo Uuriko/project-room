@@ -37,6 +37,12 @@ const TERMINAL_DISPUTE = `EXISTS (SELECT 1 FROM bounty_disputes d
 // - submitted / funded / claimed: deadline passed (settle / refund);
 // - disputed, unsettled: dispute terminal (retry) or open past the 14-day
 //   timeout (default release).
+// S6 (documented as intended, CURE-SMALL-SPECIMENS): the disputed leg uses
+// strict > against DISPUTE_TIMEOUT_MS, exactly like _keeperPass — the
+// timeout fires at opened + 14d + 1ms, not at opened + 14d. Every other
+// leg uses <= (fires at its bound). The +1 in escrowEpochNextDueAt below
+// is the same convention stated as a due time. Do not align to <=
+// without a money-semantics decision; see bounty-escrow.mjs.
 // Five ? parameters, all the same `now`.
 const DUE_WHERE = `(
      b.state = 'approved'
