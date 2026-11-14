@@ -7,14 +7,21 @@
 //
 // Contract resolution order (same as docs/INVARIANTS-TELEMETRY.md):
 //   results file: $INVARIANTS_RESULTS_FILE, else results/invariants.jsonl
+//   raw TAP file: $INVARIANTS_TAP_FILE, else the results path with .tap
 //   repo SHA:     $INVARIANTS_SHA > `git rev-parse HEAD` > "unknown"
+//
+// Failure evidence is part of the contract: every failure form Node emits
+// (assertion block scalars, plain-Error single-line scalars, file-level load
+// deaths) must land in the results file WITH its error text, and the raw TAP
+// stream is written next to the results file so any specimen can be re-read
+// without the parser's losses (#4262).
 //
 // Zero dependencies beyond node stdlib. TAP parsing is deliberately strict:
 // anything we cannot attribute to a named test fails the run closed.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, appendFileSync, realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
 
@@ -23,6 +30,8 @@ import { execSync } from "node:child_process";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const RESULTS_FILE =
   process.env.INVARIANTS_RESULTS_FILE || resolve(REPO_ROOT, "results/invariants.jsonl");
+const TAP_FILE =
+  process.env.INVARIANTS_TAP_FILE || RESULTS_FILE.replace(/\.jsonl$/, "") + ".tap";
 const MARKER = "<!-- invariants-ci -->";
 
 // ---------------------------------------------------------------------------
@@ -44,21 +53,61 @@ export function invariantName(raw) {
 
 export function isFileLevelTest(name) {
   const n = String(name).trim();
-  // Per-file aggregates ("ok 1 - /path/file.test.mjs") and the synthetic
+  // Per-file aggregates ("/path/file.test.mjs") and the synthetic
   // "test at <path>:line:col" failure attribution lines.
   return /\.test\.(mjs|js)(:\d+:\d+)?\s*$/.test(n) || /^test at \S+\.test\.(mjs|js)/.test(n);
 }
 
 const TAP_LINE = /^(\s*)(ok|not ok)\s+(\d+)\s+-\s+(.*?)\s*$/;
 
+// YAML scalars in TAP detail blocks arrive single-quoted ('...', with '' as
+// an escaped quote), double-quoted, or bare. Return the plain value.
+function unquoteYamlScalar(raw) {
+  const s = String(raw).trim();
+  if (s.length >= 2 && s.startsWith("'") && s.endsWith("'")) return s.slice(1, -1).replace(/''/g, "'");
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    try { return JSON.parse(s); } catch { return s.slice(1, -1); }
+  }
+  return s;
+}
+
+// From the TAP `#` diagnostic lines preceding a file-level failure, extract
+// the load error's headline: the `# Error: ...` line when present (that is
+// where a module-load death prints its real message), else the first
+// substantive diagnostic line. `# Subtest:` headers and the trailing summary
+// counts are structural, not diagnostics.
+function diagnosticHeadline(diagnostics) {
+  const substantive = diagnostics.filter(
+    l => !/^#\s*(Subtest:|tests\s+\d|suites\s+\d|pass\s+\d|fail\s+\d|cancelled\s+\d|skipped\s+\d|todo\s+\d|duration_ms\s)/.test(l),
+  );
+  const errLine = substantive.find(l => /^#\s*\S*Error[:\s]/.test(l));
+  return (errLine || substantive[0] || "").replace(/^#\s*/, "").trim().slice(0, 200);
+}
+
+function diagnosticStackFrame(diagnostics) {
+  const frame = diagnostics.find(l => /^#\s+at\s+/.test(l));
+  return frame ? frame.replace(/^#\s*/, "").trim().slice(0, 200) : "";
+}
+
 // Parse TAP from `node --test --test-reporter=tap` into invariant_result records.
 // Records every named test (top-level harness self-tests and nested invariant
-// scenarios alike); per-file aggregate lines are skipped. Returns
-// { records: [...], bailOut: string|null }.
+// scenarios alike). Per-file aggregate lines are skipped when they pass; a
+// FAILED file-level line becomes a named `file:<basename>` error record
+// carrying its YAML fields and the preceding `#` diagnostics — but only
+// when the file reported no named tests of its own: a file whose tests
+// merely failed also aggregates `not ok`, and those failures already have
+// their own records. A load death is the zero-named-records case (#4262).
+// Returns { records: [...], bailOut: string|null }.
 export function parseTap(tapText) {
   const lines = String(tapText).split("\n");
   const records = [];
   let bailOut = null;
+  let diagnostics = [];
+  // The file whose `# Subtest: <file>` block is currently open, and how
+  // many named records it has produced. Node always announces a file with
+  // that header before its aggregate line; without a header there is no
+  // attribution and the aggregate keeps the legacy skip behaviour.
+  let fileContext = null;
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -67,47 +116,131 @@ export function parseTap(tapText) {
       i++;
       continue;
     }
+    if (/^#/.test(line)) {
+      diagnostics.push(line);
+      const sub = /^#\s*Subtest:\s*(.+?)\s*$/.exec(line);
+      if (sub && isFileLevelTest(sub[1])) fileContext = { name: sub[1], named: 0 };
+      i++;
+      continue;
+    }
     const m = TAP_LINE.exec(line);
-    if (!m || isFileLevelTest(m[4])) { i++; continue; }
+    if (!m) { i++; continue; }
     const verdict = m[2];
     const name = m[4];
-    const rec = {
-      name: invariantName(name),
-      status: verdict === "ok" ? "pass" : "fail",
-      duration_ms: 0,
-      started_at: "",
-      finished_at: "",
-      message: "",
+    const fileLevel = isFileLevelTest(name);
+    // Consume the YAML-ish detail block that follows the test line.
+    const detail = {
+      duration_ms: 0, failureType: "", errorLines: [], errorCode: "",
+      stackFirst: "", exitCode: null, signal: "",
     };
-    if (/#\s*SKIP\b/i.test(name)) rec.status = "skip";
-    // Consume the YAML-ish detail block that follows an indented test line.
     let j = i + 1;
     let inBlock = false;
-    let errorCapture = false;
+    let keyIndent = null;
+    let blockKey = null; // "error" | "stack" while inside a |- scalar
     while (j < lines.length) {
       const dl = lines[j];
       if (/^\s*---\s*$/.test(dl)) { inBlock = true; j++; continue; }
       if (!inBlock) break;
       if (/^\s*\.\.\.\s*$/.test(dl)) break;
-      if (!/^\s{2,}\S/.test(dl) && !/^\s*$/.test(dl)) break;
-      const dm = /duration_ms:\s*([0-9.]+)/.exec(dl);
-      if (dm) rec.duration_ms = Math.max(0, Math.round(Number(dm[1])));
-      const ft = /failureType:\s*'([^']+)'/.exec(dl);
-      if (ft) rec.message = ft[1].slice(0, 160);
-      if (/^\s*error:\s*\|-\s*$/.test(dl)) { errorCapture = true; j++; continue; }
-      if (errorCapture) {
-        const t = dl.trim();
-        if (t) {
-          rec.message = (rec.message ? rec.message + " — " : "") + t.slice(0, 160);
-          errorCapture = false;
-        }
+      if (TAP_LINE.test(dl) || /^#/.test(dl)) break;
+      if (dl.trim() === "") {
+        // Blank lines occur inside block scalars (assertion messages);
+        // keep them as separators while capturing, ignore them otherwise.
+        if (blockKey === "error") detail.errorLines.push("");
         j++;
         continue;
       }
+      const indent = /^(\s*)/.exec(dl)[1].length;
+      if (keyIndent === null) keyIndent = indent;
+      if (indent > keyIndent) {
+        // Block-scalar content (indented past its key).
+        if (blockKey === "error") detail.errorLines.push(dl.trim());
+        else if (blockKey === "stack" && !detail.stackFirst) detail.stackFirst = dl.trim().slice(0, 200);
+        j++;
+        continue;
+      }
+      if (indent < keyIndent) break;
+      const km = /^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(dl.trim());
+      if (!km) break;
+      blockKey = null;
+      const key = km[1], rest = km[2].trim();
+      if (key === "duration_ms") {
+        const dm = /([0-9.]+)/.exec(rest);
+        if (dm) detail.duration_ms = Math.max(0, Math.round(Number(dm[1])));
+      } else if (key === "failureType") {
+        detail.failureType = unquoteYamlScalar(rest);
+      } else if (key === "error") {
+        if (/^\|[-+]?\s*$/.test(rest)) blockKey = "error";
+        else if (rest) detail.errorLines.push(unquoteYamlScalar(rest));
+      } else if (key === "code") {
+        detail.errorCode = unquoteYamlScalar(rest);
+      } else if (key === "stack") {
+        if (/^\|[-+]?\s*$/.test(rest)) blockKey = "stack";
+        else if (rest) detail.stackFirst = unquoteYamlScalar(rest).slice(0, 200);
+      } else if (key === "exitCode") {
+        const n = Number(rest);
+        if (Number.isFinite(n)) detail.exitCode = n;
+      } else if (key === "signal") {
+        if (rest && rest !== "~") detail.signal = unquoteYamlScalar(rest);
+      }
       j++;
     }
+    i = j > i + 1 && inBlock ? j : i + 1;
+
+    if (fileLevel) {
+      const isAggregate = !/^test at /.test(name.trim());
+      const loadDeath =
+        isAggregate && verdict === "not ok" &&
+        fileContext && fileContext.name === name && fileContext.named === 0;
+      if (!loadDeath) { diagnostics = []; fileContext = null; continue; }
+    }
+    const errorText = detail.errorLines.map(s => s.trim()).filter(Boolean).join(" / ").slice(0, 300);
+    if (fileLevel) {
+      // The file died before reporting any test (module-load failure). Its
+      // YAML error is the generic 'test failed'; the real message is in the
+      // `#` diagnostics printed before the file's result line.
+      const headline = diagnosticHeadline(diagnostics);
+      const parts = [
+        detail.failureType || "testCodeFailure",
+        detail.exitCode !== null ? `exit ${detail.exitCode}` : "",
+        detail.signal ? `signal ${detail.signal}` : "",
+        headline || (errorText && errorText !== "test failed" ? errorText : ""),
+      ].filter(Boolean);
+      const rec = {
+        name: `file:${basename(name.replace(/:\d+:\d+\s*$/, ""))}`,
+        status: "error",
+        duration_ms: detail.duration_ms,
+        started_at: "",
+        finished_at: "",
+        message: parts.join(" — ").slice(0, 400),
+      };
+      if (detail.errorCode) rec.error_code = detail.errorCode;
+      if (detail.exitCode !== null) rec.exit_code = detail.exitCode;
+      const frame = diagnosticStackFrame(diagnostics);
+      if (frame) rec.stack = frame;
+      records.push(rec);
+      diagnostics = [];
+      fileContext = null;
+      continue;
+    }
+    const rec = {
+      name: invariantName(name),
+      status: verdict === "ok" ? "pass" : "fail",
+      duration_ms: detail.duration_ms,
+      started_at: "",
+      finished_at: "",
+      message: "",
+    };
+    if (/#\s*SKIP\b/i.test(name)) rec.status = "skip";
+    if (rec.status === "fail") {
+      rec.message = [detail.failureType, errorText].filter(Boolean).join(" — ").slice(0, 400);
+      if (detail.errorCode) rec.error_code = detail.errorCode;
+      if (detail.stackFirst) rec.stack = detail.stackFirst;
+      if (detail.exitCode !== null) rec.exit_code = detail.exitCode;
+    }
     records.push(rec);
-    i++;
+    if (fileContext) fileContext.named++;
+    diagnostics = [];
   }
   return { records, bailOut };
 }
@@ -209,6 +342,22 @@ function runGate() {
 
   emit(buildRunStart({ runId, sha, startedAt: startedAtIso }));
 
+  // Warm-up (#4264): materialize the acceptance fixture's generated module
+  // once, serially, before the suite spawns its file processes in parallel.
+  // Combined with the fixture's atomic publish, no test process can import
+  // a torn module on a cold checkout. Best-effort: a genuinely broken
+  // fixture fails the suite itself, with evidence.
+  const fixtureModule = resolve(REPO_ROOT, "scripts/acceptance-fixture.mjs");
+  if (existsSync(fixtureModule)) {
+    try {
+      spawnSync(
+        process.execPath,
+        ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(fixtureModule).href)})`],
+        { cwd: REPO_ROOT, stdio: "ignore", timeout: 30000 },
+      );
+    } catch { /* the suite run below is the witness */ }
+  }
+
   const started = Date.now();
   const proc = spawnSync(
     process.execPath,
@@ -217,6 +366,15 @@ function runGate() {
   );
   const tap = (proc.stdout || "") + (proc.stderr || "");
   const wallMs = Date.now() - started;
+
+  // Preserve the raw TAP stream next to the results file (#4262): the
+  // parser is lossy by design, and a specimen must be re-readable without
+  // it. A TAP write failure is reported but does not flip the gate.
+  try {
+    writeFileSync(TAP_FILE, tap);
+  } catch (err) {
+    console.error(`invariants: warning — could not write raw TAP to ${TAP_FILE}: ${err.message}`);
+  }
 
   const { records, bailOut } = parseTap(tap);
   applyRunnerExitGuard(records, proc.status, wallMs, startedAtIso);
