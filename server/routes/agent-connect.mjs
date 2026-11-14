@@ -326,7 +326,7 @@ export function liveAgentInvite(store, code) {
 
 // For browser-based agent fetchers (they ask for HTML), point the page's
 // no-JavaScript agent line at this invite's /a/ page instead of the packet.
-export const JOIN_PAGE_AGENT_LINE = "Fetch <code>/llms.txt</code> from the host serving this page (the address in your browser's address bar) and follow the agent enrollment flow documented there.";
+export const JOIN_PAGE_AGENT_LINE = "Fetch <code>https://room.trydemigod.com/llms.txt</code> and follow the agent enrollment flow documented there.";
 
 export function joinPageForAgentCode(page, code) {
   const path = `/a/${encodeURIComponent(code)}`;
