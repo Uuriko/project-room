@@ -11,7 +11,13 @@
 // message. Streaming is not offered. Task push-notification config is not
 // implemented: those methods return -32003 PushNotificationNotSupported
 // (QA2 finding P2-5), which is the A2A error for a card that declares
-// capabilities.pushNotifications false.
+// capabilities.pushNotifications false. Same rule from A2A v1.0 section 3.3.4
+// (Capability Validation): with capabilities.streaming false, message/stream,
+// SendStreamingMessage, tasks/resubscribe and SubscribeToTask answer
+// UnsupportedOperationError (-32004), and so does the extended-card operation
+// when capabilities.extendedAgentCard is false or absent. JSON-RPC 2.0 batches
+// (request arrays) are answered with an array of responses; notifications
+// inside a batch contribute no entry, and an all-notification batch gets 204.
 
 import { createHash } from "node:crypto";
 import { ROOM_ORIGIN, joinPrompt } from "./agent-discovery.mjs";
@@ -22,6 +28,8 @@ export const isA2aPath = pathname => A2A_PATHS.includes(pathname);
 const SEND = new Set(["message/send", "SendMessage"]);
 const GET_TASK = new Set(["tasks/get", "GetTask"]);
 const CANCEL_TASK = new Set(["tasks/cancel", "CancelTask"]);
+const STREAM = new Set(["message/stream", "SendStreamingMessage", "tasks/resubscribe", "SubscribeToTask"]);
+const EXTENDED_CARD = new Set(["agent/getAuthenticatedExtendedCard", "GetExtendedAgentCard"]);
 
 // A2A 0.3 slash names and A2A 1.0 PascalCase names for Task push config.
 // A method in this family exists; the server refuses it instead of
@@ -58,7 +66,19 @@ function incomingText(message) {
 const replyId = (messageId, text) => `pr-${createHash("sha256").update(`${messageId}\n${text}`).digest("hex").slice(0, 32)}`;
 
 export function handleA2aRpc(message) {
-  if (message === null || typeof message !== "object" || Array.isArray(message)) {
+  // JSON-RPC 2.0 batch: an array of requests is answered with an array of
+  // responses; notifications contribute no entry, and an empty batch (or one
+  // where nothing answered) is a single -32600 Invalid Request.
+  if (Array.isArray(message)) {
+    // An empty batch is a single -32600 Invalid Request; a batch of only
+    // notifications yields an empty response array (the HTTP layer answers 204).
+    if (!message.length) return error(null, -32600, "Invalid Request: send one JSON-RPC 2.0 object");
+    // Batch entries must be request objects: a nested array is one -32600 entry.
+    return message
+      .map((item) => (Array.isArray(item) ? error(null, -32600, "Invalid Request: send one JSON-RPC 2.0 object") : handleA2aRpc(item)))
+      .filter((reply) => reply !== null);
+  }
+  if (message === null || typeof message !== "object") {
     return error(null, -32600, "Invalid Request: send one JSON-RPC 2.0 object");
   }
   const id = Object.hasOwn(message, "id") && validId(message.id) ? message.id : null;
@@ -83,6 +103,12 @@ export function handleA2aRpc(message) {
   if (isPushConfigMethod(message.method)) {
     return error(id, -32003, "PushNotificationNotSupported");
   }
+  if (STREAM.has(message.method)) {
+    return error(id, -32004, "UnsupportedOperationError: streaming is not offered; use message/send or SendMessage");
+  }
+  if (EXTENDED_CARD.has(message.method)) {
+    return error(id, -32004, "UnsupportedOperationError: no extended agent card is configured");
+  }
   return error(id, -32601, `Method not found: use message/send or SendMessage`);
 }
 
@@ -105,6 +131,11 @@ export function writeA2aNode(req, res, { bodyText } = {}) {
   try { message = JSON.parse(bodyText ?? ""); }
   catch { res.writeHead(400, headers); return res.end(JSON.stringify(error(null, -32700, "Parse error: send valid JSON"))); }
   const reply = handleA2aRpc(message);
+  if (Array.isArray(reply)) {
+    if (!reply.length) { res.writeHead(204, headers); return res.end(); }
+    res.writeHead(200, headers);
+    return res.end(JSON.stringify(reply));
+  }
   if (!reply) { res.writeHead(202, headers); return res.end(); }
   res.writeHead(200, headers);
   return res.end(JSON.stringify(reply));
