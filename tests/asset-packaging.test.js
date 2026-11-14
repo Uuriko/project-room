@@ -1,3 +1,4 @@
+import { advertisedHtml } from '../server/advertised-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, mkdir, symlink, readdir } from 'node:fs/promises';
@@ -90,7 +91,9 @@ test('the HTTP allowlist serves every packaged browser asset with exact bytes', 
     assert.equal(response.status, 200, path);
     const disk = await readFile(new URL(path, source));
     // The fixture server has no GitHub auth, so the front door omits that anchor.
-    const expected = path === 'index.html' ? Buffer.from(frontDoorHtml(disk, { githubConfigured: false })) : disk;
+    const door = path === 'index.html' ? Buffer.from(frontDoorHtml(disk, { githubConfigured: false })) : disk;
+    // A self-hosted origin advertises itself in canonical/OG tags of HTML pages.
+    const expected = path.endsWith('.html') ? Buffer.from(advertisedHtml(door.toString('utf8'), origin)) : door;
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, path);
   }
   // Absent generated pages are the designed package state (decision #36):

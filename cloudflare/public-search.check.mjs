@@ -124,8 +124,8 @@ test('actual Worker public search routes load packaged HTML and preserve private
       assert.doesNotMatch(response.headers.get('content-security-policy') ?? '', /cdn-cgi\/rum/);
     }
     const map = await call(present, '/sitemap.xml'); assert.equal(map.status, 200); assert.equal(map.headers.get('x-robots-tag'), 'all');
-    const sitemap = await map.text(); assert.match(sitemap, /\/about/); assert.match(sitemap, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
-    assert.match(sitemap, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/); assert.match(sitemap, /\/compare\/project-room-vs-slack/);
+    const sitemap = await map.text(); assert.match(sitemap, /\/about/); assert.ok(sitemap.includes(`<loc>${origin}/</loc>`));
+    assert.ok(sitemap.includes(`<loc>${origin}/offers</loc>`)); assert.match(sitemap, /\/compare\/project-room-vs-slack/);
   } finally { await present.dispose(); }
   const absent = start(true);
   try {
