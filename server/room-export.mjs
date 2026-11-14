@@ -628,15 +628,56 @@ export function storeDatabaseBytes(db) {
     const count = Number(db.prepare("PRAGMA page_count").get()?.page_count);
     const size = Number(db.prepare("PRAGMA page_size").get()?.page_size);
     if (Number.isSafeInteger(count) && count >= 0 && Number.isSafeInteger(size) && size > 0) {
-      const bytes = count * size;
+      // Free pages left by deletes (a swept staging table) are reusable and
+      // hold no data: the snapshot bound is about live bytes, and the file
+      // does not shrink after DELETE without a VACUUM.
+      let free = Number(db.prepare("PRAGMA freelist_count").get()?.freelist_count);
+      if (!Number.isSafeInteger(free) || free < 0 || free > count) free = 0;
+      const bytes = (count - free) * size;
       if (Number.isSafeInteger(bytes)) return bytes;
     }
   } catch { /* unknown size: reported as null below */ }
   return null;
 }
 
+// Staged rows one pre-guard sweep may delete. The sweep runs inside a single
+// synchronous transaction before the size guard, so its work must have a bound:
+// 16 rows is at most 16 x BACKUP_EXPORT_PART_BYTES (64 MiB) of blobs and 16
+// written rows. A store inflated by more orphans than that drains over
+// successive backup attempts (each refused attempt still removes up to the cap),
+// instead of one attempt doing unbounded delete work at the moment it is refused.
+export const PRE_GUARD_SWEEP_MAX_ROWS = 16;
+
+function sweepStaleExportPartsBounded(db, maxRows) {
+  const active = [...(activeExportIdsByDb.get(db) ?? [])];
+  const skip = active.length ? `WHERE export_id NOT IN (${active.map(() => "?").join(",")})` : "";
+  const result = db.prepare(`DELETE FROM "${BACKUP_EXPORT_PARTS_TABLE}" WHERE rowid IN (SELECT rowid FROM "${BACKUP_EXPORT_PARTS_TABLE}" ${skip} LIMIT ?)`).run(...active, maxRows);
+  return Number(result?.changes ?? 0);
+}
+
+// Reclaim staged exports nobody is streaming. materializeExportParts sweeps
+// them too, but only after the size guard below has let the export start, and
+// the guard measures the staging table itself: orphaned staging inflated the
+// store past the cap, the cap refused the export, and the refusal prevented
+// the sweep that would have brought the store back under it. Sweeping first
+// breaks that loop. A no-op when no staging table exists. Exports streaming in
+// this isolate are kept (activeExportIds), exactly as in the materialize sweep.
+// Bounded to maxRows deleted rows per call (see PRE_GUARD_SWEEP_MAX_ROWS);
+// returns how many rows it deleted.
+export function sweepOrphanedExportParts(store, { maxRows = PRE_GUARD_SWEEP_MAX_ROWS } = {}) {
+  if (!Number.isSafeInteger(maxRows) || maxRows < 1) return 0;
+  try {
+    const exists = store.db.prepare("SELECT 1 AS n FROM sqlite_master WHERE type='table' AND name=?").get(BACKUP_EXPORT_PARTS_TABLE);
+    if (!exists?.n) return 0;
+    const orphaned = store.db.prepare(`SELECT 1 AS n FROM "${BACKUP_EXPORT_PARTS_TABLE}" LIMIT 1`).get();
+    if (!orphaned?.n) return 0;
+    return store.transaction(() => sweepStaleExportPartsBounded(store.db, maxRows)) ?? 0;
+  } catch { return 0; /* best effort: the size guard below still decides, and materialize sweeps again */ }
+}
+
 export function exportNdjsonConsistentStream(store, options) {
   const maxBytes = options?.maxSnapshotBytes ?? BACKUP_SNAPSHOT_MAX_BYTES;
+  sweepOrphanedExportParts(store, { maxRows: options?.sweepMaxRows ?? PRE_GUARD_SWEEP_MAX_ROWS });
   const databaseBytes = storeDatabaseBytes(store.db);
   // Fail closed: a size we cannot measure is not a size of zero.
   if (databaseBytes === null) throw new Error(BACKUP_SNAPSHOT_SIZE_UNKNOWN);
