@@ -8,8 +8,8 @@ import { createHash, createPublicKey, randomBytes, randomUUID, scryptSync, timin
 import { ServiceError, PILOT_LIMITS } from "./store.mjs";
 import { agentProfilePermissions, isAgentProfile } from "./agent-connections.mjs";
 import { isValidPublicKey } from "./agent-card-signing.mjs";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import {
+  applyEvent,
   DISPLAY_NAME_POLICY_VERSION, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION,
   NEVER_GRANT, canInviteMembers, event, isRoomArchived, ownMember, validId
 } from "../src/events.js";
@@ -261,7 +261,7 @@ export class Pairing {
     if (isRoomArchived(room.state)) fail(409, "room_archived", "This room is archived");
     if (room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
     let state;
-    try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+    try { state = compactState(applyEvent(room.state, incoming)); }
     catch (error) { fail(422, "invalid_event", error.message); }
     const sequence = room.sequence + 1;
     const write = context ? prepareCurrentWrite(this.store, { roomId, previous: room, state, event: incoming, sequence, current: context.current }) : null;

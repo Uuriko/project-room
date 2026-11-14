@@ -9,7 +9,6 @@ import { createRoomServer } from "../server/http.mjs";
 import { seedStarter, starterTitleForIntent } from "../server/starter-room.mjs";
 import { runGuideStep } from "../server/room-guide.mjs";
 import { postReceiptCard } from "../server/receipt-cards.mjs";
-import { buildGrowthEvent } from "../src/growth-emit.js";
 import { roomUsageSummary } from "../server/usage-summary.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -161,8 +160,6 @@ test("a choice closes the starter with a result card, then the first agent is as
   const welcomeEvent = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.data.messageId')=?").get("script-room", welcome.id);
   const welcomeBody = JSON.parse(welcomeEvent.body);
   assert.equal(welcomeBody.data.actorKind, "system");
-  const growth = buildGrowthEvent(welcomeBody, store.room("script-room").state);
-  assert.equal(growth.actor.kind, "system");
   assert.equal(roomUsageSummary(store, ownerKey, "script-room").members.agents, 0);
   const identity = store.identities.create("Pair Agent");
   linkWithProof(store, ownerKey, "script-room", identity, { displayName: "Pair Agent", permissions: ["accept_work", "complete_work"] });

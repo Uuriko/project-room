@@ -10,7 +10,7 @@ test("node and worker job names match aside from single-runtime jobs", () => {
   const worker = new Map(jobsFor("worker").map(job => [job.name, job.cadenceMs]));
   const onlyNode = [...node.keys()].filter(name => !worker.has(name));
   const onlyWorker = [...worker.keys()].filter(name => !node.has(name));
-  assert.deepEqual(onlyNode, ["growth-watch"]);
+  assert.deepEqual(onlyNode, []);
   assert.deepEqual(onlyWorker, ["native-mcp-events", "room-backup"]);
   for (const name of [...onlyNode, ...onlyWorker]) {
     const job = JOBS.find(item => item.name === name);
@@ -25,7 +25,7 @@ test("node and worker job names match aside from single-runtime jobs", () => {
   }
   const names = JOBS.map(job => job.name);
   assert.equal(new Set(names).size, names.length);
-  for (const required of ["webhook-dispatch", "land-queue", "claim-prs", "retention", "integrity", "gmail-sync", "channel-drain", "growth-watch"]) {
+  for (const required of ["webhook-dispatch", "land-queue", "claim-prs", "retention", "integrity", "gmail-sync", "channel-drain"]) {
     assert.ok(names.includes(required), required);
   }
 });

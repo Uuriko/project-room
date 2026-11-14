@@ -10,9 +10,6 @@ import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./server/version.mjs";
-import { growthCollector } from "./src/growth-emit.js";
-import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
-import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
@@ -31,11 +28,9 @@ if (!paused && production && !havePilotDb) throw new Error("Provision a persiste
 // listen(); dev-mode warnings go to stderr so the stdout "server ready"
 // first line (C13) is untouched.
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
-// Single-instance lock: one server process per database. SQLite serializes
-// store writes, but the growth snapshot is a plain JSON file — a second
-// process would race it (last-writer-wins / torn write on concurrent
-// shutdown). Refusing to boot is the safe failure mode; override the path
-// for tests via ROOM_INSTANCE_LOCK_PATH.
+// Single-instance lock: one server process per database. Refusing to
+// boot is the safe failure mode; override the path for tests via
+// ROOM_INSTANCE_LOCK_PATH.
 const lockPath = process.env.ROOM_INSTANCE_LOCK_PATH || join(dirname(filename), ".project-room.lock");
 const instanceLock = paused ? null : acquireInstanceLock(lockPath);
 let store = null;
@@ -53,25 +48,11 @@ if (store) {
   store.featureEnv = process.env;
   store.landQueue.configure({ env: process.env });
 }
-// Track C C13/C14 — growth scheduler state. Declared before the server is
-// created so the C14 read-only HTTP surface can close over live status via
-// a getter evaluated per request (the scheduler itself starts after listen).
 let nodeJobs = null;
-let growthIntervalMs = 0;
 // Task 9 — channel drain scheduler state. Declared before the server is
 // created so the listen callback can report its status (same as growth).
 let channelDrainIntervalMs = 0;
-// Track C C14 — read-only growth HTTP surface (GET /growth/summary,
-// /growth/digest, /growth/health). Pure reads over the collector and the
-// scheduler-status getter: no emission, no mutation, no timers. Null in
-// paused (maintenance) mode, where the minimal handler takes over.
-const growthHttp = paused ? null : createGrowthHttp({
-  collector: growthCollector,
-  getSchedulerStatus: () => nodeJobs?.growthEnabled
-    ? { running: nodeJobs.isRunning(), tickCount: nodeJobs.getGrowthTickCount(), intervalMs: growthIntervalMs }
-    : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
-});
-const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp, production });
+const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), production });
 const server = paused ? createServer((req, res) => {
   try {
     const url = new URL(req.url, origin);
@@ -91,34 +72,10 @@ const server = paused ? createServer((req, res) => {
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
 }) : createRoomServer(serverArgs);
 server.on('close', () => nodeJobs?.stop());
-// Track C C11 — growth collector persistence. The snapshot lives in its own
-// JSON file next to the store file; it never touches the store schema. Any
-// failure here only costs analytics history, never boot or shutdown.
-const growthSnapshotPath = process.env.GROWTH_SNAPSHOT_PATH || join(dirname(filename), "growth-snapshot.json");
-if (!paused) {
-  try {
-    const { restored, collector, exportedAt } = loadFromFile(growthSnapshotPath);
-    if (restored) {
-      const stored = collector.query({ limit: collector.stats().capacity });
-      let replayed = 0;
-      for (const envelope of stored) {
-        if (growthCollector.record(envelope).ok) replayed += 1;
-      }
-      console.log(`[growth] restored ${replayed} events from snapshot${exportedAt ? ` (${exportedAt})` : ""}`);
-    }
-  } catch (error) {
-    console.warn(`[growth] snapshot restore skipped: ${error?.message ?? error}`);
-  }
-}
-// (growthScheduler / growthIntervalMs are declared above, before server creation,
-// so the C14 surface can close over them via a per-request status getter.)
 server.listen(port, host, () => {
   console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
   // C13 readiness note: the listen line above must stay the first stdout write,
   // because packaging tests treat first stdout data as "server ready".
-  if (!paused) console.log(nodeJobs?.growthEnabled && nodeJobs.isRunning()
-    ? `[growth] scheduler started (tick every ${growthIntervalMs}ms)`
-    : "[growth] scheduler disabled");
   if (!paused) console.log(nodeJobs?.channelEnabled && nodeJobs.isRunning()
     ? `[channel-drain] scheduler started (tick every ${channelDrainIntervalMs}ms)`
     : "[channel-drain] scheduler disabled");
@@ -133,7 +90,6 @@ if (!paused && store) {
       channelWebhooks: serverArgs.channelWebhooks,
       gmailAuth: serverArgs.gmailAuth
     });
-    growthIntervalMs = nodeJobs.growthIntervalMs;
     channelDrainIntervalMs = nodeJobs.channelIntervalMs;
   } catch (error) {
     nodeJobs = null;
@@ -147,8 +103,6 @@ function close() {
   if (!paused) {
     try { nodeJobs?.stop(); }
     catch (error) { console.warn(`[jobs] scheduler stop failed: ${error?.message ?? error}`); }
-    try { saveToFile(growthSnapshotPath, growthCollector); }
-    catch (error) { console.warn(`[growth] snapshot write failed: ${error?.message ?? error}`); }
   }
   server.closeStreams?.();
   server.close(() => { store?.close(); instanceLock?.release(); process.exit(0); });

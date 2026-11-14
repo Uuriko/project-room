@@ -40,10 +40,9 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // an owner notification. These imports follow the agent-invites.mjs
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
-import { event, EVENT_TYPES as T, isRoomArchived, memberCan, ownMember, publicPage, joinLink, canInviteMembers } from "../src/events.js";
+import { applyEvent, event, EVENT_TYPES as T, isRoomArchived, memberCan, ownMember, publicPage, joinLink, canInviteMembers } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { assertAdmissibleMemberName, assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
 // store.mjs here to break the circular dependency for the Workers bundle:
@@ -506,7 +505,7 @@ export class AccessRequests {
       },
     });
     let state;
-    try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+    try { state = compactState(applyEvent(room.state, incoming)); }
     catch (error) { fail(409, "access_rejected", error.message); }
     const { projection, write } = accessProjection(this.store, roomId, room, state, incoming);
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
@@ -711,7 +710,7 @@ export class AccessRequests {
       },
     });
     let state;
-    try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+    try { state = compactState(applyEvent(room.state, incoming)); }
     catch (error) {
       return { approved: false, pendingNote: `Auto-approve was rejected (${error.message}); the request waits for an owner decision.` };
     }

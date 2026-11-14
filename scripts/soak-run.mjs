@@ -109,7 +109,7 @@ let crashRecoveredAt = null;
 let runCrashed = unexpectedExit !== null;
 
 if (ready) {
-  const paths = ["/api/health", "/.well-known/agent-card.json", "/growth/health", "/"];
+  const paths = ["/api/health", "/.well-known/agent-card.json", "/"];
   const { Agent, get } = await import("node:http");
   const agent = new Agent({ keepAlive: true, maxSockets: 32 });
   const endAt = Date.now() + cfg.durationS * 1000;
