@@ -552,7 +552,25 @@ test('F3: half-open recovery works through connectSession (pre-check must not co
     const breakerStore = new Map();
     const env = makeEnv(mock);
     const config = readHerdrBridgeConfig(env);
-    const out = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500 });
+    // The breaker's clock is INJECTED and driven by hand. This test used to
+    // race wall time: it tripped the breaker, asserted a new session still
+    // saw circuit_open "because 500 ms have not elapsed", then slept 650 ms
+    // of real time to pass the window. On a loaded runner (the coverage job
+    // runs the whole unit suite in one process) well over 500 ms of wall
+    // time can pass between the trip and the "early" session, whose peek
+    // then legitimately finds the window elapsed, spends the probe against
+    // the still-failing bridge's ping route, and connects — early.backend
+    // came back 'herdr' (CI specimen run 39094298103; reproduced locally at
+    // this assertion under concurrent load). The product behaved per its
+    // wall-clock design; the test had invented a "<500 ms elapses here"
+    // assumption. With the injected clock the elapsed time at each step is
+    // exact by construction: 0 until the test advances it past the window.
+    // (Safe to freeze: adapter calls are attempt-bounded and their fetch
+    // timeouts run on real timers; the injected clock only drives breaker
+    // arithmetic and call deadlines, which it can only make more patient.)
+    const clock = { t: 1_000_000 };
+    const now = () => clock.t;
+    const out = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500, now });
     assert.equal(out.backend, 'herdr');
     const { adapter } = out;
     t.after(async () => { await adapter.disconnect().catch(() => {}); });
@@ -561,16 +579,17 @@ test('F3: half-open recovery works through connectSession (pre-check must not co
       await assert.rejects(adapter.readPane('pane-1', 'recent'), (e) => e instanceof TransportError || e instanceof ServerError);
     }
     await assert.rejects(adapter.readPane('pane-1', 'recent'), (e) => e.code === 'bridge_circuit_open');
-    // Window not yet elapsed: a new session still fails fast as circuit_open.
-    const early = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500 });
+    // Window not yet elapsed (0 ms on the injected clock): a new session
+    // still fails fast as circuit_open.
+    const early = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500, now });
     assert.equal(early.backend, 'legacy');
     assert.equal(early.reason, 'circuit_open');
-    await new Promise((r) => setTimeout(r, 650)); // pass the half-open window
+    clock.t += 650; // pass the half-open window — injected time, no sleeping
     mock.state.failTimes['/v1/read'] = 0;          // bridge recovers
     // Regression (#2853): connectSession's pre-check spent the single
     // half-open probe, so connect()'s own ping was refused and a tripped
     // bridge could never recover through connectSession.
-    const recovered = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500 });
+    const recovered = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500, now });
     assert.equal(recovered.backend, 'herdr', `expected recovery via connectSession, got ${recovered.backend}:${recovered.reason}`);
     t.after(async () => { await recovered.adapter.disconnect().catch(() => {}); });
     const pt = await recovered.adapter.readPane('pane-1', 'recent'); // normal traffic resumes
