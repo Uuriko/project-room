@@ -1,7 +1,13 @@
 // Production caller for the analytics and audit retention planners.
 // Default invocation records a plan and deletes nothing. Deletion runs only
 // when allowDeletion is exactly true and the caller supplies deleteRecord.
-// The scheduled tick never passes a deleter and never scans the live store.
+// scheduledRetentionTick below is plan-only — it never passes a deleter and
+// never scans the live store — and it is not the scheduled job: the
+// production retention job (runNodeRetention in server/jobs.mjs, mirrored
+// by the Worker alarm path in cloudflare/room.mjs) runs
+// runLiveStoreRetention from this module, which does scan the live store
+// and deletes by default, and the same tick prunes finished webhook
+// delivery records (pruneWebhookDeliveries in server/agent-plugin-store.mjs).
 import { createRetention } from "./retention.mjs";
 import { retentionDecisions } from "./audit-retention.mjs";
 
@@ -71,8 +77,9 @@ export function runRetention({ records = [], events = [], now, policies = DEFAUL
   return freezePlan({ ...plan, dryRun: false, deleted });
 }
 
-// Cron entry. Reads the deletion flag so the receipt can say it was requested,
-// then still plans in dry-run. A passed deleter is ignored.
+// Plan-only entry point; not wired into the production job path. Reads the
+// deletion flag so the receipt can say it was requested, then still plans in
+// dry-run. A passed deleter is ignored.
 export function scheduledRetentionTick({ env, now, record, deleteRecord } = {}) {
   const receipt = runRetention({ records: [], events: [], now, allowDeletion: false, record });
   return Object.freeze({
@@ -86,8 +93,11 @@ export function scheduledRetentionTick({ env, now, record, deleteRecord } = {}) 
 export { RetentionRunError };
 
 // Store-backed retention applies one disposable log per call. Room events,
-// commands, account_access_events, invitations, unread activity, and pending
-// or failed webhook deliveries are excluded. The batch stops at `limit` rows
+// commands, account_access_events, invitations, and unread activity are
+// excluded, and this call never touches webhook deliveries: the job's
+// separate webhook leg deletes only finished delivery records (delivered,
+// or dead-letter after its retries ran out), never ones still pending or
+// being retried. The batch stops at `limit` rows
 // or when `deadline` passes. A row is deleted only when its integer timestamp
 // is older than that table's policy. Set ROOM_RETENTION_ALLOW_DELETION=0 to
 // plan without deleting.
