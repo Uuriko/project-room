@@ -1,3 +1,4 @@
+import { readInstanceCardFiles } from './server/instance-card-runtime.mjs';
 import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { RoomStore } from "./server/store.mjs";
@@ -17,6 +18,7 @@ import { acquireInstanceLock } from "./server/instance-lock.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
+const instanceCard = paused ? undefined : readInstanceCardFiles(process.env);
 process.umask(0o077);
 let havePilotDb = false;
 try { havePilotDb = statSync(filename).isFile(); }
@@ -71,7 +73,7 @@ const growthHttp = paused ? null : createGrowthHttp({
     ? { running: nodeJobs.isRunning(), tickCount: nodeJobs.getGrowthTickCount(), intervalMs: growthIntervalMs }
     : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
 });
-const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp, production });
+const serverArgs = paused ? null : defaultServerArgs({ store, origin, instanceCard, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp, production });
 const server = paused ? createServer((req, res) => {
   try {
     const url = new URL(req.url, origin);
