@@ -22,4 +22,3 @@ public enum RoomLocation {
         url.scheme == origin.scheme && url.host == origin.host && url.port == origin.port && url.user == nil && url.password == nil
     }
 }
-
