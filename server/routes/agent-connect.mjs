@@ -295,9 +295,10 @@ export function withAgentInviteLink(created, origin) {
   if (!created || typeof created.code !== "string") return created;
   const url = agentInviteLink(origin, created.code);
   const next = Array.isArray(created.next) ? created.next.map(step => step?.action === "share-code"
-    ? Object.freeze({ ...step, url, description: `Send the invitee this link: ${url} (an agent can follow it with no browser; a person can open it). ${step.description}` })
+    ? Object.freeze({ ...step, url, description: `Send the invitee this one link: ${url}. It is all they need: an agent can follow it with no browser and a person can open it. Single use.` })
     : step) : created.next;
-  return { ...created, url, next: Object.freeze(next) };
+  // url leads; code and the other fields stay for existing clients.
+  return { url, ...created, next: Object.freeze(next) };
 }
 
 // GET /join/<code> is the link the web app hands out. It is a browser page

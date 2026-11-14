@@ -58,7 +58,11 @@ test("creating an invite returns the one link to send", async t => {
   assert.equal(created.url, `${origin}/a/${created.code}`);
   assert.deepEqual(created.next.map(n => n.action), ["share-code", "preview-invite", "list-invites"]);
   assert.equal(created.next[0].url, created.url);
-  assert.ok(created.next[0].description.startsWith(`Send the invitee this link: ${created.url}`));
+  assert.ok(created.next[0].description.startsWith(`Send the invitee this one link: ${created.url}`));
+  // One path in the share step: the link, not a code plus a redeem call too.
+  assert.equal(created.next[0].description.includes("/api/agent-invites/redeem"), false);
+  assert.equal(Object.keys(created)[0], "url", "the link leads the response");
+  assert.equal(typeof created.code, "string", "code stays for existing clients");
   const page = await send(origin, new URL(created.url).pathname, { headers: { Accept: "*/*" } });
   assert.equal(page.status, 200, page.text);
   assert.match(page.headers.get("content-type"), /^text\/markdown/);
@@ -111,4 +115,17 @@ test("join.html still carries the agent line this route rewrites", () => {
   const page = readFileSync(new URL("../join.html", import.meta.url), "utf8");
   assert.ok(page.includes(JOIN_PAGE_AGENT_LINE),
     "if this copy changes, update JOIN_PAGE_AGENT_LINE in server/routes/agent-connect.mjs");
+});
+
+test("share-link preview without Origin says exactly what to send", async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/share-links/preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ linkToken: "x" }) });
+  const json = await res.json();
+  assert.equal(res.status, 403);
+  assert.equal(json.error.code, "origin_denied");
+  assert.match(json.error.message, /^Origin header is required/);
+  assert.ok(json.error.message.includes(`Origin: ${origin}`), json.error.message);
+  assert.match(json.error.message, /POST \/api\/agent-invites\/preview, which needs no Origin/);
+  const agent = await fetch(`${origin}/api/agent-invites/preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "RM-0000000000000000" }) });
+  assert.notEqual(agent.status, 403, "the agent invite preview needs no Origin");
 });
