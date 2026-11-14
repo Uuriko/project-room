@@ -90,6 +90,8 @@ NOT-RUN with its evidence. The temporary directory and its keys are removed at e
 node scripts/selfhost-journey.mjs                       # local mode behind Caddy's local CA (needs `caddy`)
 node scripts/selfhost-journey.mjs --proxy none       # same legs over plain loopback HTTP; the TLS leg is NOT-RUN
 node scripts/selfhost-journey.mjs --mode production  # NODE_ENV=production; reports the boot refusal if the build cannot start
+node scripts/selfhost-journey.mjs --mode production --runtime-dir <stamped runtime> --instance-key-file <seed file>
+                                                        # production with a signed instance card (see SELF-HOST-SIGNING.md)
 ```
 
 Read the label it prints. **Local mode is not the invite-only deployment**: it does not
@@ -101,6 +103,12 @@ uses [deploy/Caddyfile.local](../deploy/Caddyfile.local) (unprivileged port, Cad
 no public DNS). A real host uses [deploy/Caddyfile](../deploy/Caddyfile). The journey proves
 the code path on a disposable machine; it does not prove your host, DNS, certificate or
 backup custody.
+
+With `--instance-key-file` (a base64 Ed25519 seed you hold) and `--runtime-dir` (a stamped
+runtime from `scripts/runtime-package.mjs`), production mode derives the public pin, signs a
+card for the run's own origin through `scripts/sign-instance-card.mjs` (seed on stdin, never
+printed) and passes the server only the two public files. The harness itself still runs from
+a normal checkout.
 
 ## Public deployment and upgrades
 

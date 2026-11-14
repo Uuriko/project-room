@@ -5,7 +5,7 @@
 // never claims more than the mode it ran in.
 //
 //   node scripts/selfhost-journey.mjs [--mode local|production] [--proxy caddy|none]
-//                                     [--caddy <binary>] [--json]
+//                                     [--caddy <binary>] [--instance-key-file <abs path>] [--runtime-dir <abs path>] [--json]
 //
 // Modes (always printed first, always labelled in the result):
 //   local       server.mjs without NODE_ENV=production, ROOM_ORIGIN=https://localhost:<port>
@@ -23,7 +23,7 @@
 // Synthetic only: random display names, example.test text, no network beyond loopback, no secrets
 // printed (keys stay in a private temp directory that is removed at exit).
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, randomUUID } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -38,15 +38,17 @@ import { reconcileRestoredAuthority } from "../server/backup.mjs";
 import { textVersion } from "../server/text-results.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const { values: opts } = parseArgs({ options: { mode: { type: "string", default: "local" }, proxy: { type: "string", default: "caddy" }, caddy: { type: "string" }, json: { type: "boolean", default: false }, help: { type: "boolean", default: false } } });
-if (opts.help) { process.stdout.write("Usage: node scripts/selfhost-journey.mjs [--mode local|production] [--proxy caddy|none] [--caddy <binary>] [--json]\n"); process.exit(0); }
+const { values: opts } = parseArgs({ options: { mode: { type: "string", default: "local" }, proxy: { type: "string", default: "caddy" }, caddy: { type: "string" }, "instance-key-file": { type: "string" }, "runtime-dir": { type: "string" }, json: { type: "boolean", default: false }, help: { type: "boolean", default: false } } });
+if (opts.help) { process.stdout.write("Usage: node scripts/selfhost-journey.mjs [--mode local|production] [--proxy caddy|none] [--caddy <binary>] [--instance-key-file <abs path>] [--runtime-dir <abs path>] [--json]\n"); process.exit(0); }
 if (!["local", "production"].includes(opts.mode) || !["caddy", "none"].includes(opts.proxy)) { process.stderr.write("Unknown --mode or --proxy\n"); process.exit(2); }
 
 const legs = [];
 const say = text => { if (!opts.json) process.stdout.write(`${text}\n`); };
 const dir = mkdtempSync(join(tmpdir(), "room-selfhost-journey-"));
 // Output hygiene: never print this run's temporary directory or the checkout path.
-const scrub = text => String(text).split(dir).join("<tmp>").split(root).join("<repo>");
+// --runtime-dir: a stamped runtime package (scripts/runtime-package.mjs) that runs server.mjs/provision/backup/sign.
+const rtRoot = opts["runtime-dir"] ? resolve(opts["runtime-dir"]) : root;
+const scrub = text => String(text).split(dir).join("<tmp>").split(rtRoot).join("<runtime>").split(root).join("<repo>");
 const record = (status, name, detail = "") => { legs.push({ status, name, detail: scrub(detail) }); say(`${status.padEnd(7)} ${name}${detail ? ` - ${scrub(detail)}` : ""}`); return status === "PASS"; };
 class Blocked extends Error {}
 class LegFailure extends Error {}
@@ -65,7 +67,7 @@ async function freePort() {
 // Processes
 // ---------------------------------------------------------------------------
 const children = new Set();
-function launch(command, args, { env, cwd = root } = {}) {
+function launch(command, args, { env, cwd = rtRoot } = {}) {
   const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   child.output = "";
   const keep = chunk => { child.output = (child.output + chunk).slice(-20000); };
@@ -82,10 +84,29 @@ process.on("exit", cleanup);
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { cleanup(); process.exit(130); });
 
 const baseEnv = { PATH: process.env.PATH, HOME: dir, TMPDIR: dir, NODE_OPTIONS: "" };
+let instanceCardEnv = {};
 function serverEnv({ db, port, origin }) {
   const env = { ...baseEnv, ROOM_DB: db, HOST: "127.0.0.1", PORT: String(port), ROOM_ORIGIN: origin, ROOM_STREAM_INTERVAL_MS: "100" };
-  if (opts.mode === "production") { env.NODE_ENV = "production"; env.ROOM_DEPLOYMENT = "invite-only"; }
+  if (opts.mode === "production") { env.NODE_ENV = "production"; env.ROOM_DEPLOYMENT = "invite-only"; Object.assign(env, instanceCardEnv); }
   return env;
+}
+
+// Production mode with an operator-held instance key (the #6202 flow): derive the PUBLIC pin from the seed
+// file, sign a card for THIS run's origin with scripts/sign-instance-card.mjs (seed piped on stdin, never
+// printed or written), and hand the server only the two public files. Needs a stamped runtime build.
+function prepareInstanceCard(origin) {
+  const keyFile = opts["instance-key-file"];
+  if (!keyFile) return {};
+  const seed = readFileSync(keyFile, "utf8").trim();
+  const seedBytes = Buffer.from(seed, "base64");
+  if (seedBytes.length !== 32 || seedBytes.toString("base64") !== seed) throw new Blocked("instance key file is not a canonical base64 32-byte Ed25519 seed");
+  const privateKey = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seedBytes]), format: "der", type: "pkcs8" });
+  const publicKey = createPublicKey(privateKey).export({ format: "der", type: "spki" }).subarray(-32).toString("base64");
+  const pinPath = join(dir, "instance-pin.json"), cardPath = join(dir, "instance-card.json");
+  writeFileSync(pinPath, JSON.stringify({ origin, keyId: "instance-ed25519-v1", agentId: "journey-instance", publicKey }), { mode: 0o600 });
+  const signed = spawnSync(process.execPath, ["scripts/sign-instance-card.mjs", pinPath, cardPath], { cwd: rtRoot, env: { ...baseEnv }, input: seed, encoding: "utf8" });
+  if (signed.status !== 0) throw new Blocked(`could not sign the instance card (needs a stamped runtime build): ${scrub(signed.stderr).trim().slice(0, 200)}`);
+  return { ROOM_INSTANCE_CARD_PATH: cardPath, ROOM_INSTANCE_CARD_PIN_PATH: pinPath };
 }
 
 async function startServer({ db, port, origin }) {
@@ -198,13 +219,14 @@ async function main() {
   const edgePort = opts.proxy === "caddy" ? await freePort() : appPort;
   origin = opts.proxy === "caddy" ? `https://localhost:${edgePort}` : `http://127.0.0.1:${appPort}`;
   base = origin;
+  if (opts.mode === "production" && opts["instance-key-file"]) { instanceCardEnv = prepareInstanceCard(origin); say("instance card signed for this run's origin with the operator key (seed via stdin; never printed)"); }
   mkdirSync(join(dir, "data"), { recursive: true, mode: 0o700 });
   db = join(dir, "data", "room.sqlite");
 
   // Provision a fresh room and an owner credential (private key file; never printed).
   const keyFile = join(dir, "owner.key");
   const provision = spawnSync(process.execPath, ["scripts/provision.mjs", "--init", "--room", roomId, "--member", "owner", "--account", "journey-owner", "--key-file", keyFile],
-    { cwd: root, env: { ...baseEnv, ROOM_DB: db }, encoding: "utf8" });
+    { cwd: rtRoot, env: { ...baseEnv, ROOM_DB: db }, encoding: "utf8" });
   if (provision.status !== 0) throw new Blocked(`provision failed: ${scrub(provision.stderr).slice(0, 300)}`);
   who.owner.token = readFileSync(keyFile, "utf8").trim();
   rmSync(keyFile);
@@ -385,7 +407,7 @@ async function main() {
   await leg(LEG_NAMES[10], async () => {
     const backups = join(dir, "backups");
     mkdirSync(backups, { mode: 0o700 });
-    const run = spawnSync(process.execPath, ["scripts/backup-room.mjs", "--db", db, "--to", backups], { cwd: root, env: { ...baseEnv }, encoding: "utf8" });
+    const run = spawnSync(process.execPath, ["scripts/backup-room.mjs", "--db", db, "--to", backups], { cwd: rtRoot, env: { ...baseEnv }, encoding: "utf8" });
     ensure(run.status === 0, `backup-room exited ${run.status}: ${scrub(run.stderr).slice(0, 200)}`);
     const result = JSON.parse(run.stdout);
     ensure(result.verified === true, "backup did not verify");
