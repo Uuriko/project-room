@@ -118,7 +118,7 @@ export function currentRoomReceiptState(store, roomId) {
 // that might not fit is deferred whole to the next window (where it
 // is that window's first item and is always examined), so the budget
 // is never thrown mid-room and no item is skipped.
-export function currentReceiptClaims(store, roomId) {
+function enumerateTerminal(store, roomId, project) {
   const db = store?.db;
   if (!db || !isCurrentRoom(db, roomId)) return null;
   const claims = [];
@@ -150,7 +150,7 @@ export function currentReceiptClaims(store, roomId) {
         if (!isTerminalCompletion(thin)) continue;
         const item = readCurrentWorkItem(db, roomId, id, budget);
         if (!isTerminalCompletion(item)) continue;
-        found.push(claimShapeOf(db, roomId, item));
+        found.push(project(db, roomId, item));
       }
       return { found, fetched: rows.length, examined, examinedAfter };
     }, { maxRecords: 1024 });
@@ -160,6 +160,34 @@ export function currentReceiptClaims(store, roomId) {
     if (window.examined === window.fetched && window.fetched < WORK_KEY_PAGE) break;
   }
   return claims;
+}
+
+export function currentReceiptClaims(store, roomId) {
+  return enumerateTerminal(store, roomId, claimShapeOf);
+}
+
+// The room's terminal work items themselves (not the claim projection),
+// or null when the room is not a current-format room. The public
+// receipts read model (L3-D1) projects these at read time for rooms
+// that recorded the public-receipts opt-in: current rooms never write
+// public_receipts rows (syncRoomPublication returns for them and the
+// native publication hook caches room metadata only), so the stored-row
+// surfaces can only serve a current room's receipts from this source.
+export function currentTerminalWorkItems(store, roomId) {
+  return enumerateTerminal(store, roomId, (db, id, item) => item);
+}
+
+// One member record of a current room by addressed read, or null when
+// the room is not current or the member does not exist. Public receipt
+// projection credits members by id; this keeps the read addressed
+// (one record) instead of hydrating the room.
+export function currentRoomMemberRecord(store, roomId, memberId) {
+  const db = store?.db;
+  if (!db || typeof memberId !== "string" || !memberId || !isCurrentRoom(db, roomId)) return null;
+  try {
+    return withCurrentReadContext(db, roomId, budget =>
+      readCurrentRecord(db, roomId, "members", memberId, budget) ?? null);
+  } catch { return null; }
 }
 
 // boardClaimId's "_e" encoding is reversible (see work-item-board.mjs);
