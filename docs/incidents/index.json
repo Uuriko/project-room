@@ -1,0 +1,23 @@
+{
+  "schema": "room.incidents/1",
+  "description": "Recorded incidents. Read incidents[] to list them. doc is the write-up and test is the regression.",
+  "incidents": [
+    {
+      "id": "2026-09-25-do-cpu-1101",
+      "date": "2026-09-25",
+      "title": "Durable Object CPU reset (1101)",
+      "doc": "docs/incidents/2026-09-25-do-cpu-1101.md",
+      "test": "tests/incidents/2026-09-25-do-cpu-1101.test.js",
+      "status": "resolved"
+    },
+    {
+      "id": "2026-10-24-writer-permit",
+      "date": "2026-10-24",
+      "title": "Writer permit stuck at 42",
+      "doc": "docs/incidents/2026-10-24-writer-permit.md",
+      "test": "tests/incidents/2026-10-24-writer-permit.test.js",
+      "status": "mitigated",
+      "pullRequest": 4878
+    }
+  ]
+}
