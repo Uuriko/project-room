@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {generateKeyPair, signCardJws} from '../server/agent-card-signing.mjs';
+import {generateKeyPair, signCard, signCardJws, verifyCardSignature, verifyCardJws} from '../server/agent-card-signing.mjs';
 import {signInstanceCardArtifact,verifyInstanceCardArtifact} from '../server/instance-card-artifact.mjs';
 import {discoveryDoc,ROOM_ORIGIN} from '../server/agent-discovery.mjs';
+import {instanceDiscoveryBody} from '../server/node-discovery-origin.mjs';
 const clone = value => JSON.parse(JSON.stringify(value));
 const fixtures = ['alpha','beta'].map(name=>({origin:`https://${name}.example.test`, keyId:`${name}-ed25519-v1`,agentId:`${name}-instance`,...generateKeyPair()}));
 
@@ -22,6 +23,38 @@ test('two independent offline keys produce pinned origin-specific public artifac
  assert.equal(discoveryDoc('/.well-known/agent.json').body,hosted);
  assert.throws(()=>signInstanceCardArtifact({...fixtures[0],origin:ROOM_ORIGIN}),/Hosted card/);
  assert.throws(()=>signInstanceCardArtifact({...fixtures[0],privateKey:fixtures[1].privateKey}),/does not match/);
+});
+test('instance join guidance is origin-scoped before signing and cannot be replaced by a signed lobby assumption',()=>{
+ const paths=['/.well-known/agent.json','/.well-known/agent-card.json'];
+ const hosted=paths.map(path=>discoveryDoc(path).body);
+ for(const input of fixtures){
+  const artifact=signInstanceCardArtifact(input);
+  const description=artifact.card.skills.find(skill=>skill.id==='join-existing-room').description;
+  assert.equal(description.includes('project-room-lobby'),false);
+  assert.ok(description.includes('ask the instance owner for the intended room'));
+  assert.ok(description.includes('Pass the confirmed roomId explicitly'));
+  assert.ok(description.includes(`this exact service origin (${input.origin})`));
+  assert.ok(description.includes('never forward them to another host'));
+  assert.ok(description.includes(input.origin+'/docs/agents'));
+  assert.equal(description.includes(fixtures.find(other=>other!==input).origin),false);
+  for(const path of paths){
+   const unsigned=JSON.parse(instanceDiscoveryBody(discoveryDoc(path),input.origin));
+   assert.equal(unsigned.skills.find(skill=>skill.id==='join-existing-room').description,description);
+  }
+  const changed=clone(artifact);
+  changed.card.skills.find(skill=>skill.id==='join-existing-room').description='Join project-room-lobby without an invitation.';
+  assert.equal(verifyInstanceCardArtifact(changed,input),false,'modified guidance invalidates the signatures');
+  changed.card.cardSignature=signCard({agentId:input.agentId,card:changed.card,privateKey:input.privateKey});
+  changed.card.signatures=[signCardJws({card:changed.card,privateKey:input.privateKey,keyId:input.keyId,jku:input.origin+'/.well-known/jwks.json'})];
+  assert.equal(verifyCardSignature({agentId:input.agentId,card:changed.card,publicKey:input.publicKey,signature:changed.card.cardSignature}),true);
+  assert.equal(verifyCardJws({card:changed.card,publicKey:input.publicKey,jws:changed.card.signatures[0]}),true);
+  assert.equal(verifyInstanceCardArtifact(changed,input),false,'even re-signed guidance must match this build instance card');
+ }
+ paths.forEach((path,index)=>{
+  assert.equal(discoveryDoc(path).body,hosted[index]);
+  assert.equal(instanceDiscoveryBody(discoveryDoc(path),ROOM_ORIGIN),hosted[index]);
+  assert.equal(instanceDiscoveryBody(discoveryDoc(path),undefined),hosted[index]);
+ });
 });
 test('mutations, foreign key discovery and wrong-origin re-signing are rejected offline',()=>{
  const input=fixtures[0], original=signInstanceCardArtifact(input);

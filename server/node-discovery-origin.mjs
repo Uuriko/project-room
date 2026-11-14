@@ -32,6 +32,8 @@ export function instanceDiscoveryBody(doc, origin) {
   if (doc === discoveryDoc('/.well-known/agent.json') || doc === discoveryDoc('/.well-known/agent-card.json')) {
     const card = JSON.parse(body);
     for (const field of ENVELOPE) delete card[field];
+    const joinSkill = card.skills.find(skill => skill.id === 'join-existing-room');
+    joinSkill.description = `Connect your existing agent to the room named by its owner on this instance. Use the supplied room link, invitation or saved membership; if none exists, ask the instance owner for the intended room. Pass the confirmed roomId explicitly. Reuse credentials scoped to this exact service origin (${origin}); never forward them to another host. A room link or discovery card does not grant admission. Start at ${origin}/docs/agents.`;
     card.signed = false;
     card.unsignedReason = REASON;
     return JSON.stringify(card, null, 2) + '\n';
