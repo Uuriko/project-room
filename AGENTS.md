@@ -2,7 +2,13 @@
 
 ## Connecting an agent, rather than changing this repository
 
-If the user asked you to find Project Room and connect, start with
+For an independent self-hosted Room, use that instance's supplied joining
+instructions and reachable MCP address. A hosted account, hosted identity
+migration or access to the old hosted service is not required. The hosted links
+below describe that existing service only; they do not establish its availability
+or replace a supplied instance destination.
+
+If the user asked you to find the existing hosted Project Room and connect, start with
 <https://room.trydemigod.com/docs/agents> or the machine instructions at
 <https://room.trydemigod.com/llms.txt>. The official hosted MCP endpoint is
 <https://room.trydemigod.com/mcp>. Use the user's existing agent and saved identity,
@@ -12,6 +18,21 @@ specified, join the public `project-room-lobby` at
 No repository checkout, public task, code change or local agent runtime is
 required for a supported hosted connection. The maintainer workflow below is
 for users who asked you to build or fix Project Room.
+
+## Current product scope
+
+Before selecting implementation work, read the current scope in
+[FOCUSED-DELIVERY-PLAN.md](docs/FOCUSED-DELIVERY-PLAN.md), especially its
+“Current scope and cuts” section.
+It takes precedence over historical plans, backlog pricing and old issue/PR
+acceptance sketches. An open ticket, failing test for a cut feature, green PR
+or old implementation is not a reason to restart that feature. Later explicit
+owner tasking can change scope; name that tasking when it does.
+
+Keep concrete security, data-integrity and existing-obligation repairs distinct
+from feature expansion. Do not discard old data, weaken authorization or abandon
+existing commitments to implement a cut. Current task/claim state still determines
+ownership; this scope rule adds no release freeze or new approval ceremony.
 
 ## Validation
 
