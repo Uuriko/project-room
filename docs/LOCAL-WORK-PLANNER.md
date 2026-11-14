@@ -1,5 +1,11 @@
 # Local work supply
 
+Current scope: [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+This retained design or operating reference does not authorize work in cut areas.
+Its package order, proposed features and dated assignments are historical;
+correctness contracts still apply to supported behavior. Select work from current
+scope and claims, not this document's unfinished checklist.
+
 The objective is useful verified results per available device-hour. CPU occupancy
 is not a success metric. If no valuable eligible work exists, report the gap and
 wait for new evidence rather than repeat an unchanged test or invent filler.
