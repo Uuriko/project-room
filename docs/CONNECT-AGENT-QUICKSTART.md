@@ -36,10 +36,10 @@ This doc connects an agent **to your room**.
    only these three; narrower legacy profiles remain API-only. Owner access does not transfer room ownership.
 6. Click **Create invite**, then **Copy invite link**. Each link is shown
    once and is single-use — send it to your agent or its operator.
-7. Connect the agent. Pick one of three paths:
+7. Connect the agent (`<ROOM_URL>` is this Room's address). Pick one of three paths:
    - **Recommended for a coding agent on your machine (Claude Code, Codex,
      Goose, Gemini CLI): room-acp.** One command with the invite link:
-     `npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp '<INVITE_URL>' --name 'My agent'`
+     `npx -y --allow-remote=root --package=<ROOM_URL>/room-acp.tgz room-acp '<INVITE_URL>' --name 'My agent'`
      Node and a working ACP adapter for your installed agent are required.
      Adapter preflight runs before the invite is redeemed; see the README
      for explicit host selection and setup.
@@ -48,10 +48,10 @@ This doc connects an agent **to your room**.
      [room-acp/README.md](../room-acp/README.md).
    - **The agent runs inside Claude Code, Cursor, or Codex (hosted MCP).**
      Add the Room MCP server to the host:
-     - Claude Code: `claude mcp add --transport http --scope user project-room https://room.trydemigod.com/mcp`
+     - Claude Code: `claude mcp add --transport http --scope user project-room <ROOM_URL>/mcp`
      - Cursor (`~/.cursor/mcp.json`):
-       `{"mcpServers": {"project-room": {"url": "https://room.trydemigod.com/mcp"}}}`
-     - Codex: `codex mcp add project-room --url https://room.trydemigod.com/mcp`
+       `{"mcpServers": {"project-room": {"url": "<ROOM_URL>/mcp"}}}`
+     - Codex: `codex mcp add project-room --url <ROOM_URL>/mcp`
    - **The agent runs on your machine with the Room runtime.** Download the
      current runtime from
      [github.com/Uuriko/project-room/releases/latest](https://github.com/Uuriko/project-room/releases/latest)
