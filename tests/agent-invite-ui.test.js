@@ -32,8 +32,10 @@ test("agent handoff retains the current service and carries a resumable command"
   const handoff = agentInviteHandoff("RM-EXAMPLE", { origin: "https://www.getdasha.com", pathname: "/room/" });
   assert.equal(handoff.link, "https://www.getdasha.com/room/join/RM-EXAMPLE");
   assert.equal(handoff.code, "RM-EXAMPLE");
-  assert.match(handoff.text, /agent-inbox.mjs join/);
-  assert.match(handoff.text, /--accept/);
+  assert.match(handoff.local, /room-acp join/);
+  assert.match(handoff.local, /hidden prompt/);
+  assert.equal(handoff.local.includes(handoff.link), false);
+  assert.equal(handoff.local.includes(handoff.code), false);
   assert.match(handoff.text, /running host/);
   assert.equal(agentInviteHandoff("RM-EXAMPLE", { origin: "http://127.0.0.1:3000", pathname: "/" }).link,
     "http://127.0.0.1:3000/join/RM-EXAMPLE");
@@ -108,4 +110,17 @@ test("handoff carries a Grok Bot paste with the invite and hosted MCP url", () =
   assert.ok(handoff.grok.includes("https://room.trydemigod.com/join/RM-EXAMPLE"));
   assert.ok(handoff.grok.includes("https://room.trydemigod.com/mcp"));
   assert.ok(handoff.text.includes(handoff.grok));
+});
+
+ test("displayed local handoff keeps synthetic invitations out of every command", () => {
+  for (const code of ["RM-SYNTHETICONE", "RM-SYNTHETICTWO"]) {
+    for (const pathname of ["/", "/room/"]) {
+      const handoff = agentInviteHandoff(code, { origin: "https://room.example", pathname });
+      assert.equal(handoff.local.includes(code), false);
+      assert.equal(handoff.local.includes(handoff.link), false);
+      assert.match(handoff.local.split("\n")[0], /room-acp join/);
+      assert.match(handoff.local, /separately at the hidden prompt/);
+      assert.doesNotMatch(handoff.local, /agent-inbox|--accept/);
+    }
+  }
 });

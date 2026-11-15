@@ -34,7 +34,7 @@ test('artifact and pin FIFOs refuse without waiting for a writer',{skip:process.
    const child=spawnSync(process.execPath,['--input-type=module','-e',`
     const {readInstanceCardFiles: readChildFiles}=await import(process.argv[1]);
     try{
-     readInstanceCardFiles({ROOM_INSTANCE_CARD_PATH:process.argv[2],ROOM_INSTANCE_CARD_PIN_PATH:process.argv[3]});
+     readChildFiles({ROOM_INSTANCE_CARD_PATH:process.argv[2],ROOM_INSTANCE_CARD_PIN_PATH:process.argv[3]});
      process.exitCode=2;
     }catch(error){
      if(!error.message.includes('bounded regular public artifact'))throw error;
