@@ -75,6 +75,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/agent-talk-policy.mjs'); // #5384
   paths.add('server/routes/talk-policy.mjs'); // #5384
   paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
+  paths.add('server/native-work-pr-sync.mjs'); // native work PR link and lease renewal by polling (imported by server/jobs.mjs)
   paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
   paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
   paths.add('server/spend-pricing.mjs'); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/spend-grants.mjs)
