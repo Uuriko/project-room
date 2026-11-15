@@ -182,7 +182,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
         }
       }
       const invite = await resolveInvite(options, { env, io });
-      const connection = await join({ link: invite.link, displayName: options.name ?? "Coding agent", agent: options.agent, permissionApproverId: options.permissionApprover === "none" ? null : options.permissionApprover ?? null, roomId: options.room, origin: invite.origin, env, fetchImpl: io.fetchImpl });
+      const connection = await join({ link: invite.link, displayName: options.name ?? (options.mcp ? null : "Coding agent"), agent: options.agent, permissionApproverId: options.permissionApprover === "none" ? null : options.permissionApprover ?? null, roomId: options.room, origin: invite.origin, env, fetchImpl: io.fetchImpl });
       print(`Joined room ${connection.roomId} as ${connection.displayName}. Credential saved privately; it is never printed.`);
       if (options.mcp !== undefined) { await mcpConfig(connection, options.mcp, { env, print }); return 0; }
       if (joinOnly) return 0;

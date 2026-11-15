@@ -112,3 +112,26 @@ test("doctor --connection confirms a working connection and reports a rejected o
   assert.equal(none.code, 1);
   assert.match(none.text, /No saved connection/);
 });
+
+test("unnamed native MCP joins get distinct names and reuse the original name on retry", async t => {
+  const room = await startRoom(t);
+  const first = room.invite();
+  const one = await run(["join", room.origin, "--mcp", "codex"], { env: room.env, readInvite: async () => first.link });
+  assert.equal(one.code, 0, one.text);
+  const saved = loadConnection({}, room.env);
+  assert.match(saved.displayName, /^Coding agent [a-f0-9]{8}$/);
+  const again = await run(["join", room.origin, "--mcp", "codex"], { env: room.env, readInvite: async () => first.link });
+  assert.equal(again.code, 0, again.text);
+  assert.equal(loadConnection({}, room.env).identityId, saved.identityId);
+  assert.equal(loadConnection({}, room.env).displayName, saved.displayName);
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const home = mkdtempSync(join(tmpdir(), "native-mcp-second-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const second = room.invite();
+  const env = { ...room.env, ROOM_ACP_HOME: home };
+  const two = await run(["join", room.origin, "--mcp", "claude"], { env, readInvite: async () => second.link });
+  assert.equal(two.code, 0, two.text);
+  assert.notEqual(loadConnection({}, env).displayName, saved.displayName);
+});
