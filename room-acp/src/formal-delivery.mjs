@@ -91,3 +91,21 @@ export async function deliverFormal(room, delivery, listenerToken) {
     || (message.workItemId??null)!==data.workItemId || message.deletedAt || message.body!==data.body)
     throw new RoomError(409,'formal_response_changed','Saved response content or binding changed; inspect without repeating execution');
 }
+
+// Safe diagnostics only: never return the model output or arbitrary stop text.
+// This classifier does not alter delivery, authorization, retries, or receipts.
+export function classifyFormalOutput(output, stopReason) {
+  const knownStops = new Set(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled']);
+  const stop = knownStops.has(stopReason) ? stopReason : 'other';
+  const outputChars = typeof output === 'string' ? output.length : null;
+  const result = reason => ({reason, stopReason:stop, outputChars});
+  if (stopReason !== 'end_turn') return result('interrupted');
+  let value;
+  try { value = JSON.parse(output); } catch { return result('invalid_json'); }
+  if (!value || Array.isArray(value) || typeof value !== 'object'
+    || Object.keys(value).some(key => !['outcome','body'].includes(key))
+    || !['answered','declined','pending'].includes(value.outcome)
+    || typeof value.body !== 'string' || !value.body.trim()) return result('invalid_shape');
+  if (value.body.length > 4096) return result('body_too_long');
+  return result('valid');
+}
