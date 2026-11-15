@@ -25,7 +25,7 @@ export async function run(options, { print, env = process.env, fetchImpl = fetch
     return 0;
   }
   const connection = loadConnection({ roomId: options.room }, env);
-  if (!connection) { print("Not joined. Run: room-acp <invite link>"); return 1; }
+  if (!connection) { print("Not joined. Run: room-acp join <room-url> (you will be asked for the invite)"); return 1; }
   if (receiverPolicy === 'notify-cloud') {
     const controller = new AbortController(), stop = () => controller.abort();
     process.once('SIGINT', stop); process.once('SIGTERM', stop);

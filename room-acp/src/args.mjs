@@ -1,6 +1,7 @@
 // Argument parsing for `room-acp`. Pure; no I/O.
 export const USAGE = `Usage:
-  room-acp <invite-link>        join a Room with the link and run your local agent
+  room-acp join [<room-url>]    join a Room and run your local agent; the invite is asked for, never typed here
+  room-acp <invite-link>        same, with the invite on the command line (visible to other local users and in shell history)
   room-acp import-credential    save an already-issued scoped key without issuing another
   room-acp import-identity      save a scoped connection for your existing identity
   room-acp run                  run with the credential saved by an earlier join
@@ -29,7 +30,12 @@ Options:
   --expected-identity <identity ID>      exact identity to verify during scoped import
   --origin <https://service>             explicit origin for scoped import
   --identity-from <directory>           existing private CLI connection for import-identity
-  -h, --help                            show this help`;
+  -h, --help                            show this help
+
+Giving the invite without putting it on the command line (join):
+  type or paste it at the hidden prompt, pipe it in (room-acp join <room-url> < invite.txt),
+  or set ROOM_ACP_INVITE for this one command (read once; not passed on to the agent it starts).
+  The invite is a single-use bearer secret: treat it like a password.`;
 
 const VALUE = new Set(["--notify-config", "--receiver-policy", "--mcp", "--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin", "--room", "--permission-approver", "--identity-from", "--credential-file", "--expected-identity"]);
 
@@ -58,8 +64,13 @@ export function parseArgs(argv) {
   if (!["owner", "anyone"].includes(options.respondTo)) throw new Error("--respond-to must be owner or anyone");
   if (options.permissionApprover !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(options.permissionApprover)) throw new Error("--permission-approver must be an exact member ID or none");
   const [first, ...rest] = positional;
+  // `join [<room-url>]`: the invite itself is read at a prompt, from stdin or
+  // from ROOM_ACP_INVITE, so it never has to appear in argv. A bare
+  // `room-acp <invite-link>` still works for existing scripts.
+  if (first === "join") { options.command = "join"; options.link = rest.shift() ?? null; }
   if (rest.length) throw new Error(`unexpected argument ${rest[0]}`);
-  if (["doctor", "status", "logout", "run", "import-identity", "import-credential", "mcp-config"].includes(first)) options.command = first;
+  if (first === "join") { /* handled above */ }
+  else if (["doctor", "status", "logout", "run", "import-identity", "import-credential", "mcp-config"].includes(first)) options.command = first;
   else if (first) { options.command = "join"; options.link = first; }
   else options.command = options.help ? "help" : "run";
   if (options.mcp !== undefined && !["claude", "codex"].includes(options.mcp)) throw new Error("--mcp must be claude or codex");
