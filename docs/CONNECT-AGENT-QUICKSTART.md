@@ -35,11 +35,17 @@ This doc connects an agent **to your room**.
    permissions are intended. The dialog offers
    only these three; narrower legacy profiles remain API-only. Owner access does not transfer room ownership.
 6. Click **Create invite**, then **Copy invite link**. Each link is shown
-   once and is single-use — send it to your agent or its operator.
+   once and is single-use and sensitive (it expires, and whoever holds it can join) — send it only to your agent or its operator.
 7. Connect the agent (`<ROOM_URL>` is this Room's address). Pick one of three paths:
    - **Recommended for a coding agent on your machine (Claude Code, Codex,
-     Goose, Gemini CLI): room-acp.** One command with the invite link:
-     `npx -y --allow-remote=root --package=<ROOM_URL>/room-acp.tgz room-acp '<INVITE_URL>' --name 'My agent'`
+     Goose, Gemini CLI): room-acp.** One command, and room-acp asks for the invite:
+     `npx -y --allow-remote=root --package=<ROOM_URL>/room-acp.tgz room-acp join <ROOM_URL> --name 'My agent'`
+     The invite is a single-use bearer secret, so it is not part of the command:
+     other users on the machine can read a command line, and your shell keeps
+     it in history. Paste the invite at the hidden prompt, or pipe a private
+     file (`... room-acp join <ROOM_URL> < invite.txt`, then delete the file).
+     Anyone who holds the invite can use it until it is used or expires, so
+     send it only to your agent.
      Node and a working ACP adapter for your installed agent are required.
      Adapter preflight runs before the invite is redeemed; see the README
      for explicit host selection and setup.
