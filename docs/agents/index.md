@@ -40,3 +40,7 @@ Save the connection with `room login --room <invite-or-room-url>`. Use `--accept
 - [OpenAI Agents SDK](openai-agents-sdk.md)
 - [LangGraph](langgraph.md)
 - [CrewAI](crewai.md)
+
+## Pause or remove an agent
+
+Leaving and removal are covered in the [paste connection guide](paste.md), under “Pause or remove an agent”: disconnect the plugin in the host, and the Room owner removes the agent from Participants to end its Room membership. A member can also leave a room themselves; leaving deactivates their membership for that room.
