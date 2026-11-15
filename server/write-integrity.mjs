@@ -78,50 +78,255 @@ export function recordMessageWrite(db,roomId,messageId) {
   const row=db.prepare(`SELECT ${MESSAGE_PROOF_SELECT} FROM messages WHERE room_id=? AND message_id=?`).get(roomId,messageId);
   if (row) db.prepare('UPDATE messages SET entity_hash=? WHERE room_id=? AND message_id=?').run(messageProofHash(row),roomId,messageId);
 }
-// One traversal can validate independent write proofs and reproduce the exact
-// existing v2 content digest. Streaming bounds memory, not total scan CPU.
-function scanServingContent(db,roomId,sequence,projection,{verify,hashContent}) {
-  const hash=hashContent ? createHash('sha256').update(roomId).update('\0').update(String(sequence)).update('\0').update(projection ?? '') : null;
-  const state=JSON.parse(projection);
-  let drift=false;
-  if(verify) {
-    const proof=db.prepare('SELECT metadata_hash FROM integrity_room_state WHERE room_id=?').get(roomId);
-    drift=Boolean(proof?.metadata_hash && proof.metadata_hash!==projectionDigest(projection));
-    if(drift && !hash)return {drift};
-  }
-  if(hasMessageAuthority(state)) {
-    hash?.update('\0canonical-messages-v1\0');
-    const archive=state.messagesArchive,retained=new Set(archive?.retainedIds ?? []);
-    let count=0,visible=0;
-    for(const row of db.prepare(`SELECT ${MESSAGE_PROOF_SELECT},entity_hash FROM messages WHERE room_id=? ORDER BY message_id`).iterate(roomId)) {
-      if(verify && !messageProofMatches(row)){drift=true;if(!hash)return {drift};}
-      if(hash) {
-        const text=JSON.stringify(MESSAGE_PROOF_FIELDS.map(key=>row[key]));
-        hash.update(String(Buffer.byteLength(text))).update(':').update(text);
+// ---------------------------------------------------------------------------
+// P1 (design §3.2/§3.3, lane B2): the content proof's drift-verdict leg is a
+// chunked, resumable scan over the room's messages in message-id order,
+// driven by the same stepper idiom as #5625's parity engine (chunk ->
+// check deadline -> yieldBetween -> commit cursor). Dual bound per chunk:
+// rows AND fetched bytes. Body-bearing queries are paged by key range
+// under §3.3's fetch discipline: a LENGTH-only probe chooses each page's
+// take before any body is fetched (fetch-then-count is banned for this
+// leg), the page size adapts (start 50, halve when a page overshoots,
+// floor 1), and the byte counter is per visit segment (one chunk step) —
+// accumulated across every page of the segment and never reset inside
+// one. A single row larger than the byte bound is processed alone and
+// reported (fetchOversize), mirroring the parity engine's
+// checkpointOversize. The metadata-digest and work-entity legs run once
+// per scan, not per chunk.
+//
+// Progress representation (B2 scope): the scanner object holds the scan
+// bound (room sequence captured at scan start), the range cursor (last
+// message id banked), counts and the live digest state in memory, and
+// progress() exposes them under the design's checkpoint vocabulary
+// (scan_bound / range_cursor plus aliases) so a caller can bank them.
+// The DURABLE checkpoint table, attempt fencing and the adoption write
+// are lane B4's scope: no table is created here, no verdict is ever
+// issued from a partial scan, and the live sha256 state cannot be
+// serialized into a durable row until B3's ranged-digest composition
+// replaces the single-stream digest — that composition friction is
+// B4/B9's reconciliation point, recorded in this lane's STATE.md.
+// The ranged-digest composition + snapshot v3 themselves are B3's scope
+// (same file, different concern): the digest stream below is byte-for-
+// byte the existing v2 stream, only its traversal is chunked.
+// ---------------------------------------------------------------------------
+export const CONTENT_SCAN_CHUNK_ROWS = 200;
+export const CONTENT_SCAN_CHUNK_BYTES = 256 * 1024;
+export const CONTENT_SCAN_VISIT_BYTES = CONTENT_SCAN_CHUNK_BYTES;
+const CONTENT_SCAN_PAGE_ROWS = 50;
+const CONTENT_SCAN_PHASES = Object.freeze(['messages', 'work', 'done']);
+const SCAN_AGAIN = Symbol('content-scan-again');
+// Step driver, the #5625 parity idiom: run step() synchronously until it
+// produces an outcome instead of AGAIN. Only when a yield hook was
+// provided does the first AGAIN cross into an async continuation that
+// yields between steps — so callers that never ask for a yield (the
+// synchronous exports, the existing tests) stay fully synchronous, and
+// a scan that completes in one chunk completes synchronously even for
+// callers that do ask.
+function driveContentScanSteps(step, yieldBetween) {
+  for (;;) {
+    const outcome = step();
+    if (outcome !== SCAN_AGAIN) return outcome;
+    if (!yieldBetween) continue;
+    return (async () => {
+      for (;;) {
+        await yieldBetween();
+        const next = step();
+        if (next !== SCAN_AGAIN) return next;
       }
-      count++;
-      if(!archive || row.seq>archive.throughSeq || retained.has(row.message_id))visible++;
-    }
-    if(verify && (visible!==state.messageAuthority.count || count!==state.messageAuthority.count+(archive?.count ?? 0)))drift=true;
-    if(drift && !hash)return {drift};
+    })();
   }
-  const references=state.workItems ?? {};
-  if(Object.values(references).some(record=>record?._workEntity===1)) {
-    hash?.update('\0canonical-work-v1\0');
-    const seen=new Set();
-    for(const row of db.prepare('SELECT work_id,revision,digest,body FROM work_entities WHERE room_id=? ORDER BY work_id').iterate(roomId)) {
-      if(hash) {
-        const text=JSON.stringify(Object.values(row));
-        hash.update(String(Buffer.byteLength(text))).update(':').update(text);
+}
+const rowFetchedBytes = row => {
+  let bytes = 0;
+  for (const key of [...MESSAGE_PROOF_FIELDS, 'entity_hash']) {
+    const value = row[key];
+    if (typeof value === 'string') bytes += Buffer.byteLength(value);
+    else if (value !== null && value !== undefined) bytes += String(value).length;
+  }
+  return bytes;
+};
+const MESSAGE_PROBE_SELECT = MESSAGE_PROOF_FIELDS.map(key => `COALESCE(LENGTH(${key}),0)`).join('+')
+  + '+COALESCE(LENGTH(entity_hash),0)';
+
+export function createServingContentScanner(db, roomId, sequence, projection, { verify, hashContent, chunkRows = CONTENT_SCAN_CHUNK_ROWS, chunkBytes = CONTENT_SCAN_CHUNK_BYTES, pageRows = CONTENT_SCAN_PAGE_ROWS } = {}) {
+  if (!Number.isSafeInteger(chunkRows) || chunkRows < 1) throw new RangeError('content scan chunkRows must be a positive integer');
+  if (!Number.isSafeInteger(chunkBytes) || chunkBytes < 1) throw new RangeError('content scan chunkBytes must be a positive integer');
+  if (!Number.isSafeInteger(pageRows) || pageRows < 1) throw new RangeError('content scan pageRows must be a positive integer');
+  const scanner = {
+    roomId, sequence, verify: Boolean(verify), hashContent: Boolean(hashContent),
+    chunkRows, chunkBytes, pageSize: pageRows,
+    phase: 'messages', cursor: '', count: 0, visible: 0, drift: false,
+    done: false, outcome: null, authority: false, archive: null, retained: new Set(),
+    state: null, hash: null, fetchedBytes: 0, lastSegmentBytes: 0, maxSegmentBytes: 0,
+    fetchOversize: 0, scanDiscards: 0, chunks: 0,
+  };
+  const initScan = () => {
+    scanner.hash = scanner.hashContent
+      ? createHash('sha256').update(roomId).update('\0').update(String(sequence)).update('\0').update(projection ?? '') : null;
+    scanner.state = JSON.parse(projection);
+    scanner.drift = false;
+    // Metadata-digest leg: once per scan, at scan start.
+    if (scanner.verify) {
+      const proof = db.prepare('SELECT metadata_hash FROM integrity_room_state WHERE room_id=?').get(roomId);
+      scanner.drift = Boolean(proof?.metadata_hash && proof.metadata_hash !== projectionDigest(projection));
+      if (scanner.drift && !scanner.hash) { finish({ drift: true }); }
+    }
+    if (scanner.done) return;
+    scanner.authority = hasMessageAuthority(scanner.state);
+    if (scanner.authority) {
+      scanner.hash?.update('\0canonical-messages-v1\0');
+      scanner.archive = scanner.state.messagesArchive;
+      scanner.retained = new Set(scanner.archive?.retainedIds ?? []);
+    }
+    scanner.phase = 'messages'; scanner.cursor = ''; scanner.count = 0; scanner.visible = 0;
+  };
+  const finish = outcome => { scanner.done = true; scanner.phase = 'done'; scanner.outcome = outcome; return outcome; };
+  // One chunk of the messages leg. Returns SCAN_AGAIN when a chunk was
+  // banked (cursor committed on the scanner) and more work remains, or
+  // the final outcome. The segment byte counter starts here and is
+  // never reset between this chunk's pages.
+  const stepMessages = () => {
+    if (!scanner.authority) { scanner.phase = 'work'; return SCAN_AGAIN; }
+    let segmentBytes = 0, chunkCount = 0;
+    const noteSegment = bytes => {
+      segmentBytes += bytes; scanner.fetchedBytes += bytes;
+      scanner.lastSegmentBytes = segmentBytes;
+      if (segmentBytes > scanner.maxSegmentBytes) scanner.maxSegmentBytes = segmentBytes;
+    };
+    for (;;) {
+      if (chunkCount >= scanner.chunkRows) break;
+      const limit = Math.min(scanner.pageSize, scanner.chunkRows - chunkCount);
+      const probed = db.prepare(`SELECT message_id, (${MESSAGE_PROBE_SELECT}) AS cost FROM messages WHERE room_id=? AND message_id>? ORDER BY message_id LIMIT ?`)
+        .all(roomId, scanner.cursor, limit);
+      if (!probed.length) {
+        // Messages leg complete: the count verdict runs once, here.
+        if (scanner.verify && (scanner.visible !== scanner.state.messageAuthority.count
+          || scanner.count !== scanner.state.messageAuthority.count + (scanner.archive?.count ?? 0))) scanner.drift = true;
+        if (scanner.drift && !scanner.hash) return finish({ drift: true });
+        scanner.phase = 'work';
+        break;
       }
-      const reference=references[row.work_id];
-      if(!verify || reference?._workEntity!==1)continue;
-      seen.add(row.work_id);
-      if(reference.digest!==row.digest || reference.revision!==row.revision || projectionDigest(row.body)!==row.digest){drift=true;if(!hash)return {drift};}
+      let take = 0, probedBytes = 0;
+      for (const probe of probed) {
+        const cost = Number.isSafeInteger(probe.cost) && probe.cost >= 0 ? probe.cost : 0;
+        if (cost > scanner.chunkBytes) scanner.fetchOversize = 1;
+        if (take > 0 && segmentBytes + probedBytes + cost > scanner.chunkBytes) break;
+        probedBytes += cost; take += 1;
+      }
+      if (take === 0) take = 1; // one oversize row, processed alone
+      const lastId = probed[take - 1].message_id;
+      const pageStartBytes = segmentBytes;
+      const rows = db.prepare(`SELECT ${MESSAGE_PROOF_SELECT},entity_hash FROM messages WHERE room_id=? AND message_id>? AND message_id<=? ORDER BY message_id`)
+        .all(roomId, scanner.cursor, lastId);
+      let pageBytes = 0;
+      for (const row of rows) {
+        const bytes = rowFetchedBytes(row); pageBytes += bytes; noteSegment(bytes);
+        if (scanner.verify && !messageProofMatches(row)) {
+          scanner.drift = true;
+          if (!scanner.hash) { scanner.cursor = row.message_id; return finish({ drift: true }); }
+        }
+        if (scanner.hash) {
+          const text = JSON.stringify(MESSAGE_PROOF_FIELDS.map(key => row[key]));
+          scanner.hash.update(String(Buffer.byteLength(text))).update(':').update(text);
+        }
+        scanner.count++;
+        if (!scanner.archive || row.seq > scanner.archive.throughSeq || scanner.retained.has(row.message_id)) scanner.visible++;
+        scanner.cursor = row.message_id; // commit cursor per row, banked per chunk
+      }
+      chunkCount += rows.length;
+      if (scanner.pageSize > 1 && pageBytes > Math.max(1, (scanner.chunkBytes - pageStartBytes) / 2)) {
+        scanner.pageSize = Math.max(1, Math.floor(scanner.pageSize / 2));
+      }
+      if (rows.length === 0) break; // defensive: probe/fetch disagreement must not spin
+      if (take < probed.length) break; // byte bound: bank this chunk and yield
+      if (probed.length < limit) {
+        if (scanner.verify && (scanner.visible !== scanner.state.messageAuthority.count
+          || scanner.count !== scanner.state.messageAuthority.count + (scanner.archive?.count ?? 0))) scanner.drift = true;
+        if (scanner.drift && !scanner.hash) return finish({ drift: true });
+        scanner.phase = 'work';
+        break;
+      }
+      if (segmentBytes >= scanner.chunkBytes) break;
     }
-    if(verify && Object.entries(references).some(([id,record])=>record?._workEntity===1&&!seen.has(id)))drift=true;
-  }
-  return {drift,...(hash ? {hash:hash.digest('hex')} : {})};
+    scanner.chunks++;
+    return SCAN_AGAIN;
+  };
+  // Work-entity leg: once per scan, after the messages leg completes.
+  const stepWork = () => {
+    const references = scanner.state.workItems ?? {};
+    if (Object.values(references).some(record => record?._workEntity === 1)) {
+      scanner.hash?.update('\0canonical-work-v1\0');
+      const seen = new Set();
+      for (const row of db.prepare('SELECT work_id,revision,digest,body FROM work_entities WHERE room_id=? ORDER BY work_id').iterate(roomId)) {
+        if (scanner.hash) {
+          const text = JSON.stringify(Object.values(row));
+          scanner.hash.update(String(Buffer.byteLength(text))).update(':').update(text);
+        }
+        const reference = references[row.work_id];
+        if (!scanner.verify || reference?._workEntity !== 1) continue;
+        seen.add(row.work_id);
+        if (reference.digest !== row.digest || reference.revision !== row.revision || projectionDigest(row.body) !== row.digest) {
+          scanner.drift = true;
+          if (!scanner.hash) return finish({ drift: true });
+        }
+      }
+      if (scanner.verify && Object.entries(references).some(([id, record]) => record?._workEntity === 1 && !seen.has(id))) scanner.drift = true;
+    }
+    return finish({ drift: scanner.drift, ...(scanner.hash ? { hash: scanner.hash.digest('hex') } : {}) });
+  };
+  scanner.step = () => {
+    if (scanner.done) return scanner.outcome;
+    if (!CONTENT_SCAN_PHASES.includes(scanner.phase)) {
+      // Unknown phase: the in-memory analogue of the design's corrupt-
+      // checkpoint rule — discard, count it, restart the scan; no
+      // verdict is ever issued from untrusted progress state.
+      scanner.scanDiscards++;
+      scanner.done = false; scanner.outcome = null; scanner.chunks = 0; scanner.fetchedBytes = 0;
+      scanner.lastSegmentBytes = 0; scanner.maxSegmentBytes = 0; scanner.fetchOversize = 0;
+      initScan();
+      return scanner.done ? scanner.outcome : SCAN_AGAIN;
+    }
+    return scanner.phase === 'messages' ? stepMessages() : stepWork();
+  };
+  scanner.progress = () => ({
+    done: false, inProgress: 1, roomId, phase: scanner.phase,
+    scanBound: sequence, scan_bound: sequence, bound_seq: sequence, bound: sequence, sequence,
+    range_cursor: scanner.cursor, last_message_id: scanner.cursor, cursor: scanner.cursor,
+    scannedRows: scanner.count, count: scanner.count, visible: scanner.visible,
+    fetchedBytes: scanner.fetchedBytes, lastSegmentBytes: scanner.lastSegmentBytes,
+    maxSegmentBytes: scanner.maxSegmentBytes, fetchOversize: scanner.fetchOversize,
+    scanDiscards: scanner.scanDiscards, chunks: scanner.chunks,
+  });
+  scanner.result = () => scanner.done ? scanner.outcome : { ...scanner.progress(), budgetExceeded: 1 };
+  // Drive this scanner chunk by chunk: check the deadline before each
+  // chunk after the first (the first chunk always runs, so a drive on a
+  // spent budget still banks one chunk of progress instead of nothing —
+  // the parity engine's first-room rule), yield between chunks, and
+  // return a progress result (never a verdict) when the budget stops
+  // the drive. With no yield hook and no deadline this is the fully
+  // synchronous drive the legacy exports use.
+  scanner.drive = ({ deadline = Infinity, yieldBetween = null } = {}) => {
+    let chunksThisDrive = 0;
+    const step = () => {
+      if (scanner.done) return scanner.outcome;
+      if (chunksThisDrive > 0 && Date.now() > deadline) return scanner.result();
+      const outcome = scanner.step();
+      chunksThisDrive++;
+      return scanner.done ? scanner.outcome : SCAN_AGAIN;
+    };
+    return driveContentScanSteps(step, yieldBetween);
+  };
+  initScan();
+  return scanner;
+}
+export function driveServingContentScan(scanner, { deadline = Infinity, yieldBetween = null } = {}) {
+  return scanner.drive({ deadline, yieldBetween });
+}
+function scanServingContent(db, roomId, sequence, projection, { verify, hashContent }) {
+  // The synchronous contract: drive the chunked scanner to completion
+  // in one call, exactly as checkMessagesParity's direct callers were
+  // preserved in part 2.
+  return createServingContentScanner(db, roomId, sequence, projection, { verify, hashContent }).drive();
 }
 export function projectionContentHash(db,roomId,sequence,projection) {
   return scanServingContent(db,roomId,sequence,projection,{verify:false,hashContent:true}).hash;
