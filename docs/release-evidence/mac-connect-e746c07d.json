@@ -1,0 +1,373 @@
+{
+  "claim": "Qualified for the authorized Mac Node deployment; not a green cross-platform release or a PR merge approval",
+  "source": "e746c07d732359e62f0ebb5d3105ecc9b554d2a4",
+  "tree": "11584419facaf61e82f9a8499c0788f6c7ece3a9",
+  "prs": [
+    {
+      "number": 6217,
+      "head": "2ccd103a6d6293c3d6ad5c64e6c6fc9a2e24c12a",
+      "tree": "36d1f72260a16eb3a7ba2f1ba59ee5d6a5778dfe"
+    },
+    {
+      "number": 6218,
+      "head": "3419da16cae2d11f5c6e98ee294220b3173acfea",
+      "tree": "945d416cb6ef8b52dbd6376bf6b4c0f631f6b9ed"
+    },
+    {
+      "number": 6216,
+      "head": "501d9472ad39d547e589c83d6d78bf01c33655cc",
+      "tree": "61aaa750193447bc2e9a4854de1c51bacec91b44"
+    },
+    {
+      "number": 6219,
+      "head": "76137e40c5ed34ca58cc62500d56fba4d2ec11d9",
+      "tree": "876d05eeeb9bf9003ccf43ac5517701b9b0667e4"
+    },
+    {
+      "number": 6220,
+      "head": "a04129b9a6736f2be298d78d1057d734ba151033",
+      "tree": "2ae83fd01a8e98470074ca8fa7fc895a11eb69bf"
+    }
+  ],
+  "run": 43713896042,
+  "ci": [
+    {
+      "id": 132811171367,
+      "name": "coverage",
+      "result": "success"
+    },
+    {
+      "id": 132811171555,
+      "name": "cloudflare",
+      "result": "success"
+    },
+    {
+      "id": 132811171571,
+      "name": "unit",
+      "result": "success"
+    },
+    {
+      "id": 132811171578,
+      "name": "friend-agent-e2e",
+      "result": "success"
+    },
+    {
+      "id": 132811171603,
+      "name": "visual-refresh-guard",
+      "result": "success"
+    },
+    {
+      "id": 132811171629,
+      "name": "lint",
+      "result": "success"
+    },
+    {
+      "id": 132811171631,
+      "name": "browser shard 3/6",
+      "result": "success"
+    },
+    {
+      "id": 132811171640,
+      "name": "browser shard 2/6",
+      "result": "success"
+    },
+    {
+      "id": 132811171644,
+      "name": "cloudflare-shard-2",
+      "result": "failure"
+    },
+    {
+      "id": 132811171659,
+      "name": "contract",
+      "result": "success"
+    },
+    {
+      "id": 132811171666,
+      "name": "browser shard 1/6",
+      "result": "success"
+    },
+    {
+      "id": 132811171694,
+      "name": "browser shard 5/6",
+      "result": "success"
+    },
+    {
+      "id": 132811171703,
+      "name": "browser shard 4/6",
+      "result": "success"
+    },
+    {
+      "id": 132811171913,
+      "name": "browser shard 6/6",
+      "result": "success"
+    },
+    {
+      "id": 132811172287,
+      "name": "changes",
+      "result": "NOT-RUN"
+    },
+    {
+      "id": 132811211585,
+      "name": "safety-net",
+      "result": "NOT-RUN"
+    },
+    {
+      "id": 132813058768,
+      "name": "browser",
+      "result": "success"
+    },
+    {
+      "id": 132822593517,
+      "name": "test",
+      "result": "failure"
+    },
+    {
+      "id": 132822616970,
+      "name": "needs.test.result == 'skipped' && 'ci-verdict (NOTHING RAN - add ready-to-land)' || 'ci-verdict'",
+      "result": "NOT-RUN"
+    }
+  ],
+  "coverage": {
+    "machine": 82.7,
+    "server": 96.3,
+    "src": 56.3,
+    "thresholds": [
+      79.6,
+      95.4,
+      51.7
+    ]
+  },
+  "nativeJoin": {
+    "candidate": "e746c07d732359e62f0ebb5d3105ecc9b554d2a4",
+    "tree": "11584419facaf61e82f9a8499c0788f6c7ece3a9",
+    "ready": 200,
+    "versionMatches": true,
+    "packStatus": 200,
+    "literalOwnerCommand": true,
+    "joinExit": 0,
+    "argvSafe": true,
+    "fullCatalogEmitted": true,
+    "configHelper": true,
+    "configNoSecret": true,
+    "headerMode": "600",
+    "accessHttp": 200,
+    "accessToolError": false,
+    "joinToAccessSeconds": 1.456,
+    "doctorExit": 0,
+    "cliOutputNoSecret": true,
+    "doctorOutput": "ok   room join-rehearsal: connected as Coding agent e7b31161\n",
+    "workCreated": 201,
+    "freshAgentExit": 0,
+    "freshAgentCalledAccess": true,
+    "freshAgentOutputSafe": true,
+    "freshAgentTimedSeconds": 55.854,
+    "workReadStatus": 200,
+    "workState": "completed",
+    "agentCompletionMention": false,
+    "agentToolNames": [],
+    "actualWorkState": "completed",
+    "savedResultPresent": true,
+    "resultEvidenceVersion": "sha256:30d3ed821e88f77e2cb29477dec7658459d993523ec07ee4a5b5a79b969c453d",
+    "ownerResultReadStatus": 200,
+    "ownerResultHasAudit": true,
+    "workRecordKeys": [
+      "id",
+      "accountableMemberId",
+      "externalWriteGrantBy",
+      "externalWriteGrantFor",
+      "verifierMemberId",
+      "independentVerificationRequired",
+      "ownerDecisionRequired",
+      "humanDecisionMakerId",
+      "mode",
+      "sourceMessageId",
+      "proposedById",
+      "state",
+      "revision",
+      "claim",
+      "receipt",
+      "receiptHistory",
+      "verification",
+      "verificationHistory",
+      "decision",
+      "decisionHistory",
+      "blocker",
+      "supersededBy",
+      "createdAt",
+      "updatedAt",
+      "round_count",
+      "tool_calls",
+      "suspended_by"
+    ],
+    "syntheticWriteGrantStatus": 201,
+    "leaseBeginHttp": 200,
+    "leaseBeginToolError": false,
+    "leaseVisible": true,
+    "leaseMinutes": 30,
+    "claudeJoinExit": 0,
+    "claudeHeaderMode": "600",
+    "claudeConfigHelper": true,
+    "claudeConfigNoSecret": true,
+    "claudeExit": 0,
+    "claudeSeconds": 3.664,
+    "claudeOutputSafe": true,
+    "claudeAccessReported": true,
+    "oauthAuthorizationProduced": true,
+    "oauthConsentStatus": 302,
+    "oauthExit": 0,
+    "oauthCompleted": true,
+    "oauthOutputNoCredential": true,
+    "noShellHistoryWritten": true,
+    "oauthLogoutExit": 0,
+    "oauthLogoutReported": true,
+    "allObservedArgvSafe": true
+  },
+  "tlsJourney": {
+    "mode": "production",
+    "proxy": "caddy",
+    "label": "production mode",
+    "node": "v24.22.1",
+    "pass": 15,
+    "fail": 0,
+    "notRun": 0,
+    "blocked": null,
+    "legs": [
+      {
+        "status": "PASS",
+        "name": "TLS: HTTPS answers with a private-CA certificate; untrusted client is refused; HSTS set",
+        "detail": "health 200 over TLS, HSTS present, no-CA client refused (UNABLE_TO_GET_ISSUER_CERT_LOCALLY)"
+      },
+      {
+        "status": "PASS",
+        "name": "Human: provisioned owner credential reads the room; anonymous read is refused",
+        "detail": "owner (human) 200; anonymous 401. The human is the operator-provisioned owner; browser signup is not exercised here"
+      },
+      {
+        "status": "PASS",
+        "name": "Invite: human mints invites; agent and reviewer redeem them",
+        "detail": "two invite codes minted by the owner and redeemed; agent has accept_work+complete_work, reviewer has verify only"
+      },
+      {
+        "status": "PASS",
+        "name": "Task: agent accepts, starts, posts a result and completes the work item",
+        "detail": "state=completed with in-room text evidence from the agent"
+      },
+      {
+        "status": "PASS",
+        "name": "Review: a separate reviewer records an exact-version PASS (independence confirmed)",
+        "detail": "verifier is the separate reviewer; independenceConfirmed=true"
+      },
+      {
+        "status": "PASS",
+        "name": "Changes: the human requests changes on the exact completion",
+        "detail": "state=blocked, decision=changes_requested on completion of v1"
+      },
+      {
+        "status": "PASS",
+        "name": "Revision: the agent restarts, delivers a new result version, the reviewer passes it",
+        "detail": "new completion event and evidence version; prior receipt kept in history; v2 PASS recorded"
+      },
+      {
+        "status": "PASS",
+        "name": "Accept: the human approves the revised version",
+        "detail": "approved on the exact v2 completion; changes_requested kept in decision history"
+      },
+      {
+        "status": "PASS",
+        "name": "Restart: graceful stop and boot on the same SQLite file preserves state and credentials",
+        "detail": "exit 0 on SIGTERM; sequence 28 and state digest unchanged; owner, agent and reviewer credentials still valid"
+      },
+      {
+        "status": "PASS",
+        "name": "Retry: redeem with the same requestId and a command with the same id are idempotent (across the restart)",
+        "detail": "redeem replay: same member and identity (201), duplicate=true, identity secret rotated and accepted (200); earlier room token now 401; new requestId on the burned code: 409; command retry: duplicate=true, same event id, one event added in total"
+      },
+      {
+        "status": "PASS",
+        "name": "Backup: backupRoom snapshot of the live database verifies",
+        "detail": "verified=true, watermark events=29"
+      },
+      {
+        "status": "PASS",
+        "name": "Revoke: after the backup the human removes the reviewer; the live server refuses its credential",
+        "detail": "reviewer now 403 on the live server; live sequence 31 is past the backup"
+      },
+      {
+        "status": "PASS",
+        "name": "Restore: the stale backup brings the reviewer back; reconcile names it; it is re-applied before the server listens",
+        "detail": "negative control (unreconciled throwaway copy booted): removed reviewer served again, 200; stale backup resurrected the reviewer; reconcile named 1 stale row(s) [member]; withdrawal re-applied offline; second reconcile clean; no server was listening on the restored file"
+      },
+      {
+        "status": "PASS",
+        "name": "Reopen: the restored Room refuses the revoked reviewer, keeps the agent and the approved work, and lacks post-backup chat",
+        "detail": "reviewer 403/403 (read/write); agent 200; approved v2 work present; post-backup chat absent (expected data loss: 2 event(s))"
+      },
+      {
+        "status": "PASS",
+        "name": "Import: export then replay into a fresh SQLite file verifies and boots with the same work state",
+        "detail": "replay verified=true events=30 sanitizedCells={}; imported state digest equals the source; imported Room booted. OBSERVED (not asserted) old credentials on the import: owner 200, agent 200, revoked reviewer 403"
+      }
+    ]
+  },
+  "discovery": {
+    "candidate": "e746c07d732359e62f0ebb5d3105ecc9b554d2a4",
+    "tree": "11584419facaf61e82f9a8499c0788f6c7ece3a9",
+    "ready": 200,
+    "versionMatches": true,
+    "canonicalStatus": 200,
+    "aliases": [
+      {
+        "alias": "/room",
+        "status": 200,
+        "sameBytes": true
+      },
+      {
+        "alias": "/room/skill",
+        "status": 200,
+        "sameBytes": true
+      },
+      {
+        "alias": "/room/llms.txt",
+        "status": 200,
+        "sameBytes": true
+      }
+    ],
+    "instanceOriginPresent": true,
+    "unwantedHostedLobbyInstruction": false,
+    "allObservedArgvSafe": true
+  },
+  "archiveMeasurementScope": {
+    "payloads": 2,
+    "archivePayloads": 1,
+    "archiveProductionUrls": 3,
+    "eligibleOriginalUrlsInArchiveChild": 0,
+    "parentEligibleOriginalUrls": 4,
+    "moduleMeasurementsUnchanged": true,
+    "qualificationExit": 0,
+    "source": "e746c07d732359e62f0ebb5d3105ecc9b554d2a4",
+    "controlEnabled": true
+  },
+  "versions": {
+    "node": "24.22.1",
+    "codex": "0.159.2",
+    "claudeCode": "2.1.259",
+    "npm": "11.19.1"
+  },
+  "localFocusedTests": {
+    "passed": 209,
+    "failed": 0,
+    "skipped": 0
+  },
+  "limits": [
+    "Workers shard 2 FAILED at http.check.mjs:133 discovery text parity; Node package equivalents independently pass. Aggregate test FAILED. No claim all CI green.",
+    "Root/Dot broader disposition not received; operator owns bounded Mac-only qualification decision.",
+    "Jill scoped independent measurement-boundary PASS is not a full release approval.",
+    "Native loopback OAuth does not qualify hosted client callbacks.",
+    "Primary useful-task rehearsal read-only; 30-minute write lease exercised only in separately owner-authorized disposable fixture.",
+    "Rehearsal configured disposable client homes; no live outside membership or task completion proved.",
+    "Legacy alternative documentation entry points not all secret-safe; primary owner/UI/native path qualified.",
+    "No automatic rollback authorization inferred."
+  ],
+  "liveChangeApplied": false,
+  "at": "2026-11-15T13:22:11.077731+00:00"
+}
