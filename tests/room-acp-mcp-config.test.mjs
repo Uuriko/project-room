@@ -4,7 +4,6 @@ import test from "node:test";
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { parseArgs } from "../room-acp/src/args.mjs";
 import { main, mcpHostLines } from "../room-acp/src/cli.mjs";
 import { loadConnection, mcpHeadersFile } from "../room-acp/src/credentials.mjs";
