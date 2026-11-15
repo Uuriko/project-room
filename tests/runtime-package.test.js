@@ -113,26 +113,22 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   assert.equal(await buildAssets(pathToFileURL(assets + "/")), packagedAssets.length);
   for (const path of packagedAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
   const committedFixture = await frozenRecoveryFixture(repository, destination, commit);
-  // The fail-loud boot gate (server/boot-config.mjs) refuses a production boot
-  // with an unsigned card. This synthetic package is built from an unsigned dev
-  // tree, so fixture-sign the packaged card for the packaged revision (the
-  // candidate's version.mjs is unstamped, so packaged deployedInfo().revision
-  // is "dev") and update the manifest hash. A real production build goes
-  // through scripts/sign-agent-card.mjs, which fails closed without the key.
-  {
-    const signedPath = "server/agent-card-signed.mjs";
-    const module = `// Fixture-signed by tests/runtime-package.test.js for the packaged\n// production boot probe — not a real signature (see scripts/sign-agent-card.mjs).\nexport const AGENT_CARD_SIGNATURE = "fixture-signature";\nexport const AGENT_CARD_SIGNED_REVISION = "dev";\nexport const AGENT_CARD_UNSIGNED_REASON = null;\nexport const AGENT_CARD_JWS_SIGNATURES = null;\n`;
-    writeFileSync(join(destination, signedPath), module);
-    const manifestPath = join(destination, "runtime-manifest.json");
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    const entry = manifest.files.find(file => file.path === signedPath);
-    entry.bytes = Buffer.byteLength(module);
-    entry.sha256 = createHash("sha256").update(module, "utf8").digest("hex");
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
-  }
-  // Re-baseline: the boot/data probes below must not mutate the package
-  // relative to this fixture-signed state.
-  receipt = verifyRuntimePackage(destination);
+  // The custom-origin production probe needs a genuinely signed instance card.
+  // Keep the exact-source archive untouched; derive a separately declared build
+  // and send a disposable seed only through the offline signer's stdin.
+  const bootDestination = join(directory, "signed-runtime");
+  const bootReceipt = createRuntimePackage({ repository, commit, destination: bootDestination, buildId: "synthetic-cold-instance" });
+  const { generateKeyPair } = await import(pathToFileURL(join(bootDestination, "server/agent-card-signing.mjs")));
+  const disposable = generateKeyPair();
+  const pinPath = join(directory, "public-pin.json"), cardPath = join(directory, "public-card.json");
+  writeFileSync(pinPath, JSON.stringify({ origin: "https://room.example.test", agentId: "synthetic-cold-instance",
+    keyId: "synthetic-cold-key", publicKey: disposable.publicKey }));
+  const signed = spawnSync(process.execPath, [join(bootDestination, "scripts/sign-instance-card.mjs"), pinPath, cardPath], {
+    cwd: directory, input: disposable.privateKey, encoding: "utf8", env: { PATH: "/unavailable" }
+  });
+  assert.equal(signed.status, 0, "offline instance signing must succeed");
+  assert.equal((signed.stdout + signed.stderr).includes(disposable.privateKey), false);
+  assert.equal(readFileSync(cardPath, "utf8").includes(disposable.privateKey), false);
   const { auditRecovery } = await import(pathToFileURL(join(destination, "server/recovery.mjs")));
   const f = committedFixture(join(directory, "fixture.sqlite"));
   try {
@@ -183,9 +179,9 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
     const modes = existsSync(join(destination, "server/maintenance.mjs")) ? ["1", "0"] : ["0"];
     for (const pause of modes) {
-      const child = spawn(process.execPath, [join(destination, "server.mjs")], { cwd: directory,
+      const child = spawn(process.execPath, [join(bootDestination, "server.mjs")], { cwd: directory,
         env: { PATH: "/unavailable", NODE_ENV: "production", ROOM_DEPLOYMENT: "invite-only", ROOM_DB: f.filename,
-          ROOM_ORIGIN: "https://room.example.test", ROOM_MAINTENANCE: pause, HOST: "127.0.0.1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] });
+          ROOM_ORIGIN: "https://room.example.test", ROOM_INSTANCE_CARD_PATH: cardPath, ROOM_INSTANCE_CARD_PIN_PATH: pinPath, ROOM_MAINTENANCE: pause, HOST: "127.0.0.1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] });
       const stopped = new Promise(resolve => child.once("exit", resolve));
       try {
         await new Promise((resolve, reject) => {
@@ -207,6 +203,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     }
   } finally { f.store.close(); }
   assert.deepEqual(verifyRuntimePackage(destination), receipt, "all generated state stays outside the immutable package");
+  assert.deepEqual(verifyRuntimePackage(bootDestination), bootReceipt, "signed production archive stays immutable");
 
   // A manifest whose hashes match an unsupported schema must still refuse.
   // Rehashing here is deliberate synthetic corruption, not a release stamp.
