@@ -1,7 +1,8 @@
 // Public /download. Honest per-platform status. No Mac app download is offered.
 import { DARK_DECLARATIONS } from "../src/design-tokens.js";
 import { escapeHtml } from "./html-escape.mjs";
-import { publicPageCsp } from "./public-search.mjs";
+import { publicPageCsp, addCspSources } from "./public-search.mjs";
+import { advertisedOrigin } from "./advertised-origin.mjs";
 import { deployedInfo, ROOM_ORIGIN, ROOM_SOURCE } from "./agent-discovery.mjs";
 import { BUILD_ID, PACKAGE_VERSION, SOURCE_REVISION } from "./version.mjs";
 import { oneClickEnabled, oneClickSectionHtml } from './one-click-connect.mjs';
@@ -16,13 +17,13 @@ import { HOSTED_MCP_URL, snippetById } from "./connect-snippets.mjs";
 export const DOWNLOAD_CONNECT_HOSTS = Object.freeze(["claude-code", "codex", "cursor", "vscode"]);
 const COPY_SCRIPT = "document.querySelectorAll('[data-copy]').forEach(b=>{b.hidden=false;b.addEventListener('click',()=>{const f=document.getElementById(b.dataset.copy);navigator.clipboard.writeText(f.value).then(()=>{b.textContent='Copied';},()=>{f.select();});});});";
 export const DOWNLOAD_COPY_SCRIPT_HASH = createHash("sha256").update(COPY_SCRIPT).digest("base64");
-const snippetText = (id) => { const value = snippetById(id).snippet(HOSTED_MCP_URL); return typeof value === "string" ? value : JSON.stringify(value, null, 2); };
-function connectSection() {
+const snippetText = (id, url = HOSTED_MCP_URL) => { const value = snippetById(id).snippet(url); return typeof value === "string" ? value : JSON.stringify(value, null, 2); };
+function connectSection(url = HOSTED_MCP_URL) {
   const field = (id, label, value, rows = 1) => `<label for="${id}">${escapeHtml(label)}</label>
 <textarea id="${id}" readonly rows="${rows}" spellcheck="false">${escapeHtml(value)}</textarea>
 <button type="button" data-copy="${id}" aria-label="Copy ${escapeHtml(label)}" hidden>Copy</button>`;
   const hosts = DOWNLOAD_CONNECT_HOSTS.map(id => {
-    const tool = snippetById(id), text = snippetText(id);
+    const tool = snippetById(id), text = snippetText(id, url);
     return `<details><summary>${escapeHtml(tool.label)}</summary>
 ${field(`connect-${id}`, `${tool.label} config`, text, Math.min(10, text.split("\n").length + 1))}
 <p><a href="${escapeHtml(tool.docsPath)}">${escapeHtml(tool.label)} guide</a></p>
@@ -31,7 +32,7 @@ ${field(`connect-${id}`, `${tool.label} config`, text, Math.min(10, text.split("
   return `<section id="connect" aria-labelledby="connect-title">
 <h2 id="connect-title">Connect your AI agent</h2>
 <p>Nothing to install. Add this MCP server to your agent's host and approve the connection when asked.</p>
-${field("connect-mcp-url", "MCP server URL", HOSTED_MCP_URL)}
+${field("connect-mcp-url", "MCP server URL", url)}
 <p>Easiest: <a href="/docs/agents/paste">copy the connect prompt into your agent</a>. It sets itself up.</p>
 <h3>Config for your host</h3>
 <p>Snippets read your saved credential from the <code>PROJECT_ROOM_SECRET</code> environment variable. Never paste a secret into chat.</p>
@@ -39,7 +40,7 @@ ${hosts}
 <p>ChatGPT Dot, Claude.ai and other hosts: <a href="/docs/agents">connection guide</a>.</p>
 </section>`;
 }
-export const downloadPageCsp = (origin) => publicPageCsp(origin).replace(/script-src ([^;]*)/, (_, sources) => `script-src ${sources} 'sha256-${DOWNLOAD_COPY_SCRIPT_HASH}'`);
+export const downloadPageCsp = (origin) => addCspSources(publicPageCsp(origin), "script-src", `'sha256-${DOWNLOAD_COPY_SCRIPT_HASH}'`);
 
 export const RUNTIME_RELEASE_URL = "https://github.com/Uuriko/project-room/releases/latest";
 export const MAC_APP_STATUS = "No public Mac app yet. Use the web app and the Node agent runtime; record desktop install as pending.";
@@ -57,7 +58,8 @@ export function downloadFacts() {
   };
 }
 
-export function downloadPageHtml({ oneClick = oneClickEnabled() } = {}) {
+// `origin` is the origin this instance advertises; it defaults to the hosted service.
+export function downloadPageHtml({ oneClick = oneClickEnabled(), origin = ROOM_ORIGIN } = {}) {
   const facts = downloadFacts();
   const revision = facts.revision
     ? `Deployed SHA ${escapeHtml(facts.revision)}.`
@@ -95,10 +97,10 @@ summary{cursor:pointer;padding:.3rem 0}
 <main>
 <p><a href="/">Project Room</a></p>
 <h1>Download</h1>
-${oneClick ? oneClickSectionHtml() + '\n' : ''}${connectSection()}
+${oneClick ? oneClickSectionHtml(`${origin}/mcp`) + '\n' : ''}${connectSection(`${origin}/mcp`)}
 <p>${escapeHtml(MAC_APP_STATUS)}</p>
 <h2>Web</h2>
-<p>Ready. <a href="${escapeHtml(ROOM_ORIGIN)}">Open the web app</a>.</p>
+<p>Ready. <a href="${escapeHtml(origin)}">Open the web app</a>.</p>
 <h2>Node agent runtime</h2>
 <p>Version ${escapeHtml(facts.packageVersion)}. ${revision} ${when} Requires Node 24.19+.</p>
 <p><a href="${escapeHtml(RUNTIME_RELEASE_URL)}">Download the latest runtime</a> (project-room-runtime.tar.gz).</p>
@@ -114,7 +116,7 @@ ${oneClick ? oneClickSectionHtml() + '\n' : ''}${connectSection()}
 
 export function downloadRoute(ctx) {
   ctx.rate(`acquisition:${ctx.remoteAddress}`, 120);
-  const bytes = Buffer.from(downloadPageHtml());
+  const bytes = Buffer.from(downloadPageHtml({ origin: advertisedOrigin(ctx.expectedOrigin()) }));
   ctx.res.setHeader("X-Robots-Tag", "all");
   ctx.res.setHeader("Cache-Control", "public, max-age=60");
   ctx.res.setHeader("Content-Security-Policy", downloadPageCsp(ctx.expectedOrigin()));
