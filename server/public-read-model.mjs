@@ -1584,6 +1584,21 @@ export function listPublicReceiptSitemap(store, limit = 1000) {
   if (derived.length) {
     const byId = new Map();
     for (const row of stored) byId.set(row.id, row);
+    // Stored-row precedence must hold for a derived id's stored twin
+    // even when that twin falls beyond the capped stored page above:
+    // without this, the twin is absent from byId, so its derived copy
+    // enters with the derived (newer) timestamp and can displace a
+    // receipt that should win under stored precedence. The lookup is
+    // bounded by the derived id set (the same json_each shape
+    // currentDerivedReceiptCredits uses), never a corpus scan, and
+    // applies this surface's own visibility legs, so only a twin this
+    // sitemap could serve suppresses the derived copy. The final
+    // ordering and cap are applied after this merge, below.
+    try {
+      const twins = store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility}${sourceAgreementSql(store.db)} AND id IN (SELECT value FROM json_each(?))`)
+        .all(JSON.stringify(derived.map(row => row.id)));
+      for (const row of twins) byId.set(row.id, row);
+    } catch { /* no readable twins: the capped stored page stands */ }
     for (const row of derived) if (!byId.has(row.id)) byId.set(row.id, { id: row.id, at: row.at });
     merged = [...byId.values()].sort(byAtDescIdAsc).slice(0, cap);
   }

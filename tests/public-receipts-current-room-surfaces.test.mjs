@@ -112,6 +112,37 @@ test("sitemap: opted-in current room's verified receipt is listed, unverified is
     "an unverified completion is not a receipt and must not be derived");
 });
 
+test("sitemap: a stored twin beyond the SQL cap still wins over its derived copy (cap-1 regression)", async t => {
+  const f = directoryFixture(t);
+  f.cmd("owner", "optin-1", "room.public_receipts_set", { enabled: true });
+  const derived = collectPublicReceipts(f.s).find(row => row.id === WIR);
+  assert.ok(derived, "the native fixture produces its opted-in derived receipt");
+  // The stored twin is OLDER than another stored receipt, so with a
+  // cap of 1 the twin falls outside the sitemap's first stored page.
+  // Stored-row precedence must still hold for it: the derived copy
+  // (dated by the room's own clock, far newer) must not enter the
+  // sitemap in its place and displace the newer stored receipt.
+  const insert = f.s.db.prepare(`INSERT INTO public_receipts
+    (id,title,source,origin_room_id,agents_json,humans_json,hashes_json,at,start_href,agent_ids_json)
+    VALUES (?,?,?,'commons','[]','[]','[]',?,'https://example.invalid','[]')`);
+  insert.run(WIR, "Stored older twin", "work-item", "2000-01-01T00:00:00.000Z");
+  const other = publicWorkItemReceiptId("commons", "other-stored");
+  insert.run(other, "Stored newer winner", "work-item", "2001-01-01T00:00:00.000Z");
+  const collected = collectPublicReceipts(f.s);
+  assert.equal(collected.find(row => row.id === WIR)?.title, "Stored older twin");
+  assert.equal(collected.find(row => row.id === WIR)?.at, "2000-01-01T00:00:00.000Z");
+  const expected = collected.slice(0, 1).map(row => `/receipts/${row.id}`);
+  const actual = listPublicReceiptSitemap(f.s, 1).map(row => row.path);
+  assert.deepEqual(actual, expected,
+    "the capped sitemap order equals collectPublicReceipts' capped order");
+  assert.deepEqual(actual, [`/receipts/${other}`]);
+  // At cap 2 the twin itself appears, carrying the STORED row's date,
+  // not the derived copy's newer date.
+  const pair = listPublicReceiptSitemap(f.s, 2);
+  assert.deepEqual(pair.map(row => row.path), [`/receipts/${other}`, `/receipts/${WIR}`]);
+  assert.equal(pair.find(row => row.path === `/receipts/${WIR}`)?.lastmod, "2000-01-01");
+});
+
 test("collectPublicReceipts: opted-in current room's verified receipt is collected", async t => {
   const f = verifiedFixture(t);
   assert.deepEqual(collectPublicReceipts(f.s), []);
