@@ -432,5 +432,18 @@
     "existingOwnerMcpCredentialInterpretation": "Existing owner room access key reads its authorized Room (200), four other Rooms refused (403); not an agent identity credential. Its MCP init401 is retained and does not prove identity credential regression or live agent authentication."
   },
   "deploymentStumble": "First read-only quiesced backup connection failed after old app exit and before config replacement. Database integrity verified. Backup succeeded on retry using encoded file URI; deployment continued to same authorized target. Exact initial cause not established.",
-  "independentLiveChecks": "Requested from Grok and Jill; no received result yet"
+  "independentLiveChecks": {
+    "reviewer": "Jill",
+    "comment": "https://github.com/Uuriko/project-room/issues/6181#issuecomment-6894994604",
+    "readAt": "2026-11-15T13:24:21Z",
+    "source": "e746c07d732359e62f0ebb5d3105ecc9b554d2a4",
+    "tree": "11584419facaf61e82f9a8499c0788f6c7ece3a9",
+    "grade": "PASS exact live flip and anonymous arrival surface only",
+    "authenticatedOAuth": "NOT-RUN: reviewer has no Mac Room seat",
+    "liveUsefulTask": "NOT-RUN: reviewer has no Mac Room seat",
+    "receiptObservation": "Listing now surfaces one pre-existing room-recorded unsigned receipt, timestamp before baseline and flip. No new receipt minted; no settlement.",
+    "publicWorkObservation": "Still zero public tasks; no private work published",
+    "ci": "Workers shard2 FAILED; aggregate FAILED; skipped jobs NOT-RUN; no all-green claim",
+    "pending": "Grok independent smoke and Dot composition/recovery risk disposition"
+  }
 }
