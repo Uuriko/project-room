@@ -5,6 +5,7 @@
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
 import { staleSweepDueAt, syncClaimPullRequests, publicNamespaceSqlExclusion } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
+import { nativeRenewDueAt, renewNativeLeasesFromPulls } from "./native-work-pr-sync.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
@@ -495,10 +496,10 @@ export const JOBS = Object.freeze([
     enabled(_env, store) {
       if (!store) return true;
       const now = Date.now();
-      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null || staleSweepDueAt(store, now) != null;
+      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null || staleSweepDueAt(store, now) != null || nativeRenewDueAt(store, now) != null;
     },
     disabledReason: () => "No open pull request or stale board sweep is waiting",
-    nextDueAt: (store, now) => earliestDueAt(claimDueAt(store, now), autolinkDueAt(store, now), staleSweepDueAt(store, now)),
+    nextDueAt: (store, now) => earliestDueAt(claimDueAt(store, now), autolinkDueAt(store, now), staleSweepDueAt(store, now), nativeRenewDueAt(store, now)),
     async run(store, ctx) {
       if (ctx.room?.refreshClaimPullRequests) return ctx.room.refreshClaimPullRequests();
       const out = await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
@@ -508,7 +509,8 @@ export const JOBS = Object.freeze([
       try {
         const found = await discoverUnlinkedPulls(store, { env: ctx.env, deadline: ctx.deadline, nowMs: Date.now() });
         const deployed = linkDeployToSettledClaims(store, { revision: SOURCE_REVISION, nowMs: Date.now() });
-        return { ...out, autolink: { discovered: found, deployed } };
+        const native = await renewNativeLeasesFromPulls(store, { env: ctx.env, deadline: ctx.deadline, nowMs: Date.now() });
+        return { ...out, autolink: { discovered: found, deployed }, nativeRenewals: native };
       } catch (error) {
         console.error("claim autolink follow-up failed:", error?.message ?? error);
         return out;
