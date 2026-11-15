@@ -22,6 +22,7 @@ export function defaultServerArgs({ store, env = process.env, ...rest }) {
   return {
     googleAuth, githubAuth, gmailAuth,
     mcpOAuthClients: env.ROOM_MCP_OAUTH_CLIENTS ? JSON.parse(env.ROOM_MCP_OAUTH_CLIENTS) : [],
+    mcpOAuthLoopback: /^(1|true|yes)$/i.test(String(env.ROOM_MCP_OAUTH_LOOPBACK ?? "").trim()),
     publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === "1",
     ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null, magicLinkMailer,
   };
