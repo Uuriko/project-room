@@ -1,5 +1,6 @@
 import {ServiceError} from './service-error.mjs';
 import {readCurrentPublicWork, currentPublicPageListed} from './current-public-work.mjs';
+import {currentRoomReceiptState, currentTerminalWorkItems, currentRoomMemberRecord} from './current-receipts.mjs';
 import { hydrateWorkItems } from "./work-repository.mjs";
 // Public pages read explicit publication plus protected selected current tasks,
 // never rooms.projection or unrelated private work/conversation payloads.
@@ -965,6 +966,122 @@ const receiptFilter = (room, needle) => {
   return { clauses, params };
 };
 
+// --- L3-D1: read-time receipts for current-format rooms ---
+// A current (normalized) room never gets public_receipts rows:
+// syncRoomPublication returns as soon as current_room_head names the
+// room, and the native publication hook (syncCurrentRoomPublication)
+// caches room metadata only — its own header says receipt listings
+// remain unavailable. The stored-row surfaces below therefore served
+// an opted-in current room's verified receipts nowhere, however the
+// owner set room.public_receipts_set. Following the native public-work
+// pattern (readCurrentPublicWork qualifies selected tasks at read
+// time, never from a projection), this section derives the room's
+// work-item receipts at read time from its canonical records — the
+// same terminal completions the in-room receipts surface counts
+// (server/current-receipts.mjs) — but only while the room's recorded
+// opt-in is on, read from the bounded metadata record
+// (currentRoomReceiptState), never from rooms.projection. The derived
+// rows carry exactly the fields optedInRows projects for a legacy
+// room's work-item receipts, and the shared visibility legs that can
+// apply to a row-less receipt are applied here: operator unpublish
+// (receipt or room) and the owner's directory public-receipts toggle;
+// a recorded opt-out cannot coexist with the opt-in this derivation
+// requires. Candidate rooms are pre-filtered in SQL on the recorded
+// opt-in and bounded per request; a derivation failure yields no
+// derived rows, never an error and never a leak.
+const CURRENT_DERIVED_ROOM_CAP = 100;
+
+function currentDerivedReceipts(store, { room = null } = {}) {
+  // Candidate rooms are pre-filtered in SQL on the metadata record's
+  // recorded opt-in, so a store with no opted-in current room pays one
+  // query for this whole section; the bounded reader below remains
+  // the authority — a candidate whose metadata record does not confirm
+  // the opt-in is skipped.
+  let roomIds;
+  try {
+    roomIds = store.db.prepare(`SELECT room_id FROM current_room_records
+        WHERE domain='metadata' AND record_key='room'
+          AND json_extract(payload, '$.publicReceipts.enabled')=1
+          ${room != null ? "AND room_id=?" : ""}
+        ORDER BY room_id LIMIT ?`)
+      .all(...(room != null ? [room] : []), CURRENT_DERIVED_ROOM_CAP).map(row => row.room_id);
+  } catch { return []; }
+  const rows = [];
+  for (const roomId of roomIds) {
+    const roomState = currentRoomReceiptState(store, roomId);
+    if (!roomState?.room || publicReceipts(roomState).enabled !== true) continue;
+    const items = currentTerminalWorkItems(store, roomId);
+    if (!items?.length) continue;
+    const listed = isListed(store, roomId);
+    const roomFields = listedRoomFields(store, { room: roomState.room }, listed);
+    const memberIds = new Set([roomState.room.ownerId]);
+    for (const item of items) {
+      for (const id of [item.receipt?.reportedById, item.receipt?.producerId, item.accountableMemberId]) {
+        if (typeof id === "string") memberIds.add(id);
+      }
+    }
+    const members = {};
+    for (const id of memberIds) {
+      const member = currentRoomMemberRecord(store, roomId, id);
+      if (member) members[id] = member;
+    }
+    const state = { room: roomState.room, members };
+    const href = startHref(credit(state, roomState.room.ownerId)?.name);
+    const identityByMember = new Map();
+    try {
+      for (const link of store.db.prepare("SELECT member_id AS memberId, identity_id AS identityId FROM identity_links WHERE room_id=?").all(roomId)) {
+        if (!identityByMember.has(link.memberId)) identityByMember.set(link.memberId, link.identityId);
+      }
+    } catch { /* a store predating identity links credits nobody by id */ }
+    for (const item of items) {
+      const id = publicWorkItemReceiptId(roomId, item.id);
+      if (isUnpublished(store.db, "receipt", id) || isUnpublished(store.db, "room", roomId)) continue;
+      try {
+        const toggle = store.db.prepare("SELECT public_receipts FROM room_directory_settings WHERE room_id=?").get(roomId);
+        if (toggle && toggle.public_receipts === 0) continue;
+      } catch { continue; } // an unreadable owner toggle fails closed
+      const people = [credit(state, item.receipt.reportedById), credit(state, item.receipt.producerId), credit(state, item.accountableMemberId)];
+      const { agents, humans } = creditsFrom(people);
+      const version = typeof item.receipt.evidenceVersion === "string" && SHA256.test(item.receipt.evidenceVersion)
+        ? item.receipt.evidenceVersion : null;
+      rows.push(receiptWithOutcome(store, {
+        id,
+        title: cleanName(item.title) ?? "Receipt",
+        source: "work-item",
+        origin_room_id: roomId,
+        room_id: roomFields.roomId,
+        room_title: roomFields.roomTitle,
+        agents_json: JSON.stringify(agents),
+        humans_json: JSON.stringify(humans),
+        pull_request: pullRequestUrl(item.receipt.evidenceUrl),
+        merged_at: null,
+        verification_state: "room_recorded",
+        hashes_json: JSON.stringify(hashList(version ? [version] : [])),
+        at: iso(item.updatedAt) ?? new Date(0).toISOString(),
+        start_href: href,
+      }));
+    }
+  }
+  return rows;
+}
+
+// Every stored row this list could serve, unpaginated — the merge
+// input when derived current-room rows join the list. Applies the
+// same visibility composition as the paginated query below.
+function storedVisibleReceiptRows(store, { room, needle }) {
+  const filter = receiptFilter(room, needle);
+  const taskRoomLeg = publicWorkTablesReadable(store.db);
+  const visibility = ownerToggleReadable(store.db)
+    ? [HIDDEN_RECEIPT, ownerHiddenReceiptSql({ taskRoomLeg })]
+    : [HIDDEN_RECEIPT];
+  if (recordedSettingReadable(store.db)) visibility.push(recordedOptOutReceiptSql({ taskRoomLeg }));
+  if (taskRoomLeg) visibility.push(SOURCE_AGREEMENT);
+  const clauses = [...filter.clauses, ...visibility];
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC`)
+    .all(...filter.params).map(row => receiptWithOutcome(store, row));
+}
+
 export function queryPublicReceipts(store, { room = null, agent = null, cursor = null, limit = 20 } = {}) {
   if (room != null && (typeof room !== "string" || !room || room.length > 128)) {
     return { error: { status: 422, code: "invalid_receipt_query", message: "room filter must be a room id" } };
@@ -976,6 +1093,33 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     return { error: { status: 422, code: "invalid_receipt_query", message: "limit must be an integer from 1 to 50" } };
   }
   const needle = agent ? agent.trim().toLowerCase() : null;
+  // L3-D1: current-format rooms hold no stored rows (see
+  // currentDerivedReceipts above). When an opted-in current room has
+  // terminal receipts, merge its derived rows with the stored list
+  // and paginate the union; with no derived rows the stored-row query
+  // below runs exactly as before.
+  {
+    let derived = [];
+    try { derived = currentDerivedReceipts(store, { room }); } catch { derived = []; }
+    if (needle) derived = derived.filter(row => row.agents.some(name => name.toLowerCase().includes(needle)));
+    if (derived.length) {
+      const byId = new Map();
+      for (const row of storedVisibleReceiptRows(store, { room, needle })) byId.set(row.id, row);
+      for (const row of derived) if (!byId.has(row.id)) byId.set(row.id, row);
+      const all = [...byId.values()].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      let start = 0;
+      if (cursor != null) {
+        if (typeof cursor !== "string" || !cursor) {
+          return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
+        }
+        const index = all.findIndex(row => row.id === cursor);
+        if (index < 0) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
+        start = index + 1;
+      }
+      const page = all.slice(start, start + limit);
+      return { receipts: page, nextCursor: start + limit < all.length ? page.at(-1)?.id ?? null : null };
+    }
+  }
   const filter = receiptFilter(room, needle);
   // The rows this list could serve: filter matches, minus both kinds of
   // hidden (operator-unpublished, owner-toggled-off). The page query and
@@ -1028,7 +1172,17 @@ export function publicReceiptById(store, id) {
   if (LOT_RECEIPT_ID.test(id)) return publicLotReceiptById(store, id);
   const visibility = receiptVisibilitySqlFor(store.db);
   const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${visibility}${sourceAgreementSql(store.db)}`).get(id);
-  if (!row) return null;
+  if (!row) {
+    // L3-D1: a current-format room's work-item receipt has no stored
+    // row; resolve it from the read-time derivation above (which
+    // itself requires the room's recorded opt-in and applies the
+    // visibility legs). Unknown or hidden ids stay the same 404.
+    if (id.startsWith("wir_")) {
+      try { return currentDerivedReceipts(store, {}).find(candidate => candidate.id === id) ?? null; }
+      catch { return null; }
+    }
+    return null;
+  }
   const pub = receiptWithOutcome(store, row);
   if (typeof id === "string" && id.startsWith("pwr_")) {
     try {
