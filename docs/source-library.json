@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "buzz-canvas-save",
+      "name": "Buzz canvas save and verification states",
+      "status": "candidate",
+      "owner": "Project Docs integration lane",
+      "purpose": "Avoid false saved states and lost drafts during conflicting or uncertain saves.",
+      "target": "Project Docs editor save state and revision-conflict handling",
+      "nextAction": "Build a Room-specific save-state trial using structured server errors; compare lost-response and concurrent-write flows against the simple editor.",
+      "acceptance": "Rejected stale update preserves draft; unknown outcome is reconciled; history-preserved status is shown only with an actual receipt.",
+      "reviewTrigger": "Before trial integration and on upstream security or relevant canvas changes",
+      "upstream": {
+        "repository": "https://github.com/block/buzz",
+        "revision": "27f0fe75276f93d56cdf878643a4d676f99dc618",
+        "files": [
+          {
+            "path": "desktop/src/features/channels/canvasConflict.ts",
+            "gitBlob": "79b777ec53397a6de3771a2ca44da813de952651"
+          },
+          {
+            "path": "desktop/src/features/channels/canvasConflict.test.mjs",
+            "gitBlob": "eeff467b91a1c5d063b9ce12d29e5fa114063681"
+          },
+          {
+            "path": "desktop/src/shared/api/canvasTypes.ts",
+            "gitBlob": "723566a49e948ce38af9e20153f745df35471370"
+          }
+        ]
+      },
+      "license": {
+        "expression": "Apache-2.0",
+        "path": "LICENSE",
+        "review": "Root license inspected at pinned revision; no root NOTICE in complete Git tree. Per-file dependency/asset review remains before import."
+      },
+      "evidence": [
+        "https://github.com/block/buzz/blob/27f0fe75276f93d56cdf878643a4d676f99dc618/desktop/src/features/channels/canvasConflict.ts",
+        "https://github.com/block/buzz/blob/27f0fe75276f93d56cdf878643a4d676f99dc618/desktop/src/features/channels/canvasConflict.test.mjs",
+        "https://github.com/block/buzz/blob/27f0fe75276f93d56cdf878643a4d676f99dc618/desktop/src/shared/api/canvasTypes.ts"
+      ],
+      "localPaths": [],
+      "integration": null,
+      "notices": [],
+      "localChanges": "No upstream code imported; source-inspection candidates only."
+    },
+    {
+      "id": "buzz-empty-page-navigation",
+      "name": "Buzz empty canvas visibility",
+      "status": "candidate",
+      "owner": "Project Docs integration lane",
+      "purpose": "Keep saved empty documents discoverable for read-only users.",
+      "target": "Project Docs reader/sidebar fixture",
+      "nextAction": "Apply the persisted-id versus body-length distinction in the other laptop read-only fixture and test empty document navigation.",
+      "acceptance": "Reader can open existing empty document by link and sidebar; missing document differs from empty; creation control obeys edit permission.",
+      "reviewTrigger": "Before trial integration and on upstream security or relevant canvas changes",
+      "upstream": {
+        "repository": "https://github.com/block/buzz",
+        "revision": "27f0fe75276f93d56cdf878643a4d676f99dc618",
+        "files": [
+          {
+            "path": "desktop/src/features/channels/ui/canvasIngress.ts",
+            "gitBlob": "56d41984f794ada941fa9e045a4b7f1b59b529f7"
+          },
+          {
+            "path": "desktop/src/features/channels/ui/ChannelCanvasEmptyExistence.test.mjs",
+            "gitBlob": "db6f6794cc29d1150cc75908741963bec09c3275"
+          }
+        ]
+      },
+      "license": {
+        "expression": "Apache-2.0",
+        "path": "LICENSE",
+        "review": "Root license inspected at pinned revision; no root NOTICE in complete Git tree. Per-file dependency/asset review remains before import."
+      },
+      "evidence": [
+        "https://github.com/block/buzz/blob/27f0fe75276f93d56cdf878643a4d676f99dc618/desktop/src/features/channels/ui/canvasIngress.ts",
+        "https://github.com/block/buzz/blob/27f0fe75276f93d56cdf878643a4d676f99dc618/desktop/src/features/channels/ui/ChannelCanvasEmptyExistence.test.mjs"
+      ],
+      "localPaths": [],
+      "integration": null,
+      "notices": [],
+      "localChanges": "No upstream code imported; source-inspection candidates only."
+    }
+  ]
+}

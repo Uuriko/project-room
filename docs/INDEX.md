@@ -27,6 +27,9 @@ current work and release records. See [maintaining this handbook](ROOM-PROCEDURE
 
 Grok adapter: [maintained setup and operating guidance](GROK-BOT.md).
 
+Reusable upstream code: [Source library](SOURCE-LIBRARY.md) tracks pinned
+candidates, integration evidence, attribution and maintenance next actions.
+
 Incident follow-through: [November 1 storage outage](incidents/outage-2026-11-01.md) and [Claude reconnect verification](incidents/claude-reconnect-2026-11-01.md).
 
 Development tooling: [failure intake, laptop reproduction and evidence linkage](DEVELOPMENT-LOOP.md).
