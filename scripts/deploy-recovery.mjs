@@ -55,7 +55,16 @@ export function schemaAt(revision, git = args => command(['git', ...args])) {
       if (shaPattern.test(proof)) messageReaderBlob = proof;
     } catch { /* absent reader evidence cannot authorize automatic rollback */ }
     if (messageReaderBlob) pinned.push(['server/current-room-repository.mjs', messageReaderBlob]);
-    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob, replyContractBlob, messageReaderBlob, definitions: pinned.map(([path, sha]) => `${path}@${sha}`).join('\n') };
+    // OAuth scopes and grant readers can change at the same storage floor.
+    // Missing historical evidence remains unknown, not an equal empty proof.
+    const [oauthClientContractBlob, oauthProviderBlob] = ['server/oauth-client-contract.mjs', 'server/oauth-provider.mjs'].map(path => {
+      try {
+        const proof = git(['rev-parse', `${revision}:${path}`]).trim();
+        if (shaPattern.test(proof)) { pinned.push([path, proof]); return proof; }
+      } catch { /* absent OAuth evidence cannot authorize automatic rollback */ }
+      return null;
+    });
+    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob, replyContractBlob, messageReaderBlob, oauthClientContractBlob, oauthProviderBlob, definitions: pinned.map(([path, sha]) => `${path}@${sha}`).join('\n') };
   } catch { return null; }
 }
 export function allocation(status) {
@@ -98,9 +107,17 @@ export function automaticRollbackDecision(previous, candidateSchema, candidateSo
     return { eligible: false, reason: 'exact canonical-message reader source proof missing or inconsistent' };
   if (prior.messageReaderBlob !== candidateSource.messageReaderBlob)
     return { eligible: false, reason: 'canonical-message reader changed; prior code may reject newly accepted entities' };
+  if (!shaPattern.test(prior.oauthClientContractBlob ?? '') || !shaPattern.test(candidateSource.oauthClientContractBlob ?? ''))
+    return { eligible: false, reason: 'exact OAuth client-contract source proof missing or inconsistent' };
+  if (prior.oauthClientContractBlob !== candidateSource.oauthClientContractBlob)
+    return { eligible: false, reason: 'OAuth client contract changed; prior code may reject newly issued scopes' };
+  if (!shaPattern.test(prior.oauthProviderBlob ?? '') || !shaPattern.test(candidateSource.oauthProviderBlob ?? ''))
+    return { eligible: false, reason: 'exact OAuth grant-reader source proof missing or inconsistent' };
+  if (prior.oauthProviderBlob !== candidateSource.oauthProviderBlob)
+    return { eligible: false, reason: 'OAuth grant reader changed; prior code may reject newly persisted grants' };
   if (prior.blob !== candidateSource.blob || prior.definitions !== candidateSource.definitions)
     return { eligible: false, reason: 'writer-fence or reply-contract definitions changed; prior recovery or readers may be incompatible' };
-  return { eligible: true, reason: 'schema floor, exact writer-fence definitions, reply contract and canonical-message reader match; other row/runtime compatibility is not established by this check' };
+  return { eligible: true, reason: 'schema floor, exact writer-fence definitions, reply contract, canonical-message reader and OAuth contract/readers match; other row/runtime compatibility is not established by this check' };
 }
 export async function observeWorker({ status, readVersion, schema = schemaAt }) {
   const before = allocation(await status());
@@ -184,7 +201,7 @@ export async function recoverWorkers(snapshot, attempted, { status, rollback, re
   }
   const rows = Object.values(workers);
   const statusValue = rows.some(row => row.disposition === 'roll_forward_required') ? 'ROLL FORWARD REQUIRED' : rows.some(row => row.disposition === 'rollback_unverified') ? 'ROLLBACK NOT VERIFIED' : rows.some(row => row.disposition === 'rollback_verified') ? 'ROLLBACK VERIFIED' : 'NO DEPLOYMENT CHANGE OBSERVED';
-  return { status: statusValue, targetSha: snapshot.targetSha, candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion, compatibilityLimit: 'Code-schema floor, exact writer-fence definitions, reply contract and canonical-message reader only; this does not prove prior code understands other new rows, semantics or retained runtime. Manual rollback requires separate explicit compatibility qualification.', recordedAt: new Date().toISOString(), workers };
+  return { status: statusValue, targetSha: snapshot.targetSha, candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion, compatibilityLimit: 'Code-schema floor, exact writer-fence definitions, reply contract, canonical-message reader and OAuth contract/readers only; this does not prove prior code understands other new rows, semantics or retained runtime. Manual rollback requires separate explicit compatibility qualification.', recordedAt: new Date().toISOString(), workers };
 }
 export function recoveryDescription(report) {
   if (!report) return 'Recovery not attempted or report unavailable; no rollback is claimed.';
