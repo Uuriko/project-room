@@ -1,0 +1,291 @@
+{
+  "at": "2026-11-15T11:38:15.722505+00:00",
+  "claim": "Exact repaired-package rehearsal passes; fresh full CI pending, live not deployed.",
+  "source": {
+    "commit": "e47cd0c289f5b80cf45f23d1143c59f45f2e456d",
+    "tree": "23ed94013e282d59fc4dcc2f1afc90904fbdb6ff",
+    "includedPRs": {
+      "6216": {
+        "head": "501d9472ad39d547e589c83d6d78bf01c33655cc",
+        "tree": "61aaa750193447bc2e9a4854de1c51bacec91b44"
+      },
+      "6217": {
+        "head": "2ccd103a6d6293c3d6ad5c64e6c6fc9a2e24c12a",
+        "tree": "36d1f72260a16eb3a7ba2f1ba59ee5d6a5778dfe"
+      },
+      "6218": {
+        "head": "3419da16cae2d11f5c6e98ee294220b3173acfea",
+        "tree": "945d416cb6ef8b52dbd6376bf6b4c0f631f6b9ed"
+      },
+      "6219": {
+        "head": "76137e40c5ed34ca58cc62500d56fba4d2ec11d9",
+        "tree": "876d05eeeb9bf9003ccf43ac5517701b9b0667e4"
+      },
+      "6220": {
+        "head": "a04129b9a6736f2be298d78d1057d734ba151033",
+        "tree": "2ae83fd01a8e98470074ca8fa7fc895a11eb69bf"
+      }
+    }
+  },
+  "package": {
+    "manifestSha256": "a58491b9298a84b0cc8d23567b1d0047aab7e6d64120f4ea267f7d646a45b46e",
+    "clientArchiveSha256": "980bc5bdf5930ab53a21bcf57da3907e29c39d5c5f8902b979ab9db3fde24afd",
+    "files": 804,
+    "schemaVersion": 46
+  },
+  "clients": {
+    "node": "24.22.1",
+    "codex": "0.159.2",
+    "claudeCode": "2.1.259",
+    "npm": "11.19.1"
+  },
+  "sourceQualification": {
+    "passed": 176,
+    "failed": 0,
+    "skipped": 0,
+    "reproducedFailureRepairCheck": {
+      "passed": 61,
+      "failed": 0
+    },
+    "contract": "PASSED",
+    "secretScan": "PASSED"
+  },
+  "nativeRehearsal": {
+    "candidate": "e47cd0c289f5b80cf45f23d1143c59f45f2e456d",
+    "tree": "23ed94013e282d59fc4dcc2f1afc90904fbdb6ff",
+    "ready": 200,
+    "versionMatches": true,
+    "packStatus": 200,
+    "literalOwnerCommand": true,
+    "joinExit": 0,
+    "argvSafe": true,
+    "fullCatalogEmitted": true,
+    "configHelper": true,
+    "configNoSecret": true,
+    "headerMode": "600",
+    "accessHttp": 200,
+    "accessToolError": false,
+    "joinToAccessSeconds": 1.192,
+    "doctorExit": 0,
+    "cliOutputNoSecret": true,
+    "doctorOutput": "ok   room join-rehearsal: connected as Coding agent 1f0710bf\n",
+    "workCreated": 201,
+    "freshAgentExit": 0,
+    "freshAgentCalledAccess": true,
+    "freshAgentOutputSafe": true,
+    "freshAgentTimedSeconds": 54.319,
+    "workReadStatus": 200,
+    "workState": "completed",
+    "agentCompletionMention": false,
+    "actualWorkState": "completed",
+    "savedResultPresent": true,
+    "resultEvidenceVersion": "sha256:83ae1078504693047e2e40cc3cbb2d9b8a657443b1e9f7d3acc9ba24661c485b",
+    "ownerResultReadStatus": 200,
+    "ownerResultHasAudit": true,
+    "syntheticWriteGrantStatus": 201,
+    "leaseBeginHttp": 200,
+    "leaseBeginToolError": false,
+    "leaseVisible": true,
+    "leaseMinutes": 30,
+    "claudeJoinExit": 0,
+    "claudeHeaderMode": "600",
+    "claudeConfigHelper": true,
+    "claudeConfigNoSecret": true,
+    "claudeExit": 0,
+    "claudeSeconds": 3.35,
+    "claudeOutputSafe": true,
+    "claudeAccessReported": true,
+    "oauthAuthorizationProduced": true,
+    "oauthConsentStatus": 302,
+    "oauthExit": 0,
+    "oauthCompleted": true,
+    "oauthOutputNoCredential": true,
+    "noShellHistoryWritten": true,
+    "oauthLogoutExit": 0,
+    "oauthLogoutReported": true,
+    "allObservedArgvSafe": true
+  },
+  "lifecycleJourney": {
+    "mode": "production",
+    "proxy": "caddy",
+    "label": "production mode",
+    "node": "v24.22.1",
+    "pass": 15,
+    "fail": 0,
+    "notRun": 0,
+    "blocked": null,
+    "legs": [
+      {
+        "status": "PASS",
+        "name": "TLS: HTTPS answers with a private-CA certificate; untrusted client is refused; HSTS set",
+        "detail": "health 200 over TLS, HSTS present, no-CA client refused (UNABLE_TO_GET_ISSUER_CERT_LOCALLY)"
+      },
+      {
+        "status": "PASS",
+        "name": "Human: provisioned owner credential reads the room; anonymous read is refused",
+        "detail": "owner (human) 200; anonymous 401. The human is the operator-provisioned owner; browser signup is not exercised here"
+      },
+      {
+        "status": "PASS",
+        "name": "Invite: human mints invites; agent and reviewer redeem them",
+        "detail": "two invite codes minted by the owner and redeemed; agent has accept_work+complete_work, reviewer has verify only"
+      },
+      {
+        "status": "PASS",
+        "name": "Task: agent accepts, starts, posts a result and completes the work item",
+        "detail": "state=completed with in-room text evidence from the agent"
+      },
+      {
+        "status": "PASS",
+        "name": "Review: a separate reviewer records an exact-version PASS (independence confirmed)",
+        "detail": "verifier is the separate reviewer; independenceConfirmed=true"
+      },
+      {
+        "status": "PASS",
+        "name": "Changes: the human requests changes on the exact completion",
+        "detail": "state=blocked, decision=changes_requested on completion of v1"
+      },
+      {
+        "status": "PASS",
+        "name": "Revision: the agent restarts, delivers a new result version, the reviewer passes it",
+        "detail": "new completion event and evidence version; prior receipt kept in history; v2 PASS recorded"
+      },
+      {
+        "status": "PASS",
+        "name": "Accept: the human approves the revised version",
+        "detail": "approved on the exact v2 completion; changes_requested kept in decision history"
+      },
+      {
+        "status": "PASS",
+        "name": "Restart: graceful stop and boot on the same SQLite file preserves state and credentials",
+        "detail": "exit 0 on SIGTERM; sequence 28 and state digest unchanged; owner, agent and reviewer credentials still valid"
+      },
+      {
+        "status": "PASS",
+        "name": "Retry: redeem with the same requestId and a command with the same id are idempotent (across the restart)",
+        "detail": "redeem replay: same member and identity (201), duplicate=true, identity secret rotated and accepted (200); earlier room token now 401; new requestId on the burned code: 409; command retry: duplicate=true, same event id, one event added in total"
+      },
+      {
+        "status": "PASS",
+        "name": "Backup: backupRoom snapshot of the live database verifies",
+        "detail": "verified=true, watermark events=29"
+      },
+      {
+        "status": "PASS",
+        "name": "Revoke: after the backup the human removes the reviewer; the live server refuses its credential",
+        "detail": "reviewer now 403 on the live server; live sequence 31 is past the backup"
+      },
+      {
+        "status": "PASS",
+        "name": "Restore: the stale backup brings the reviewer back; reconcile names it; it is re-applied before the server listens",
+        "detail": "negative control (unreconciled throwaway copy booted): removed reviewer served again, 200; stale backup resurrected the reviewer; reconcile named 1 stale row(s) [member]; withdrawal re-applied offline; second reconcile clean; no server was listening on the restored file"
+      },
+      {
+        "status": "PASS",
+        "name": "Reopen: the restored Room refuses the revoked reviewer, keeps the agent and the approved work, and lacks post-backup chat",
+        "detail": "reviewer 403/403 (read/write); agent 200; approved v2 work present; post-backup chat absent (expected data loss: 2 event(s))"
+      },
+      {
+        "status": "PASS",
+        "name": "Import: export then replay into a fresh SQLite file verifies and boots with the same work state",
+        "detail": "replay verified=true events=30 sanitizedCells={}; imported state digest equals the source; imported Room booted. OBSERVED (not asserted) old credentials on the import: owner 200, agent 200, revoked reviewer 403"
+      }
+    ]
+  },
+  "discovery": {
+    "candidate": "e47cd0c289f5b80cf45f23d1143c59f45f2e456d",
+    "tree": "23ed94013e282d59fc4dcc2f1afc90904fbdb6ff",
+    "ready": 200,
+    "versionMatches": true,
+    "canonicalStatus": 200,
+    "aliases": [
+      {
+        "alias": "/room",
+        "status": 200,
+        "sameBytes": true
+      },
+      {
+        "alias": "/room/skill",
+        "status": 200,
+        "sameBytes": true
+      },
+      {
+        "alias": "/room/llms.txt",
+        "status": 200,
+        "sameBytes": true
+      }
+    ],
+    "instanceOriginPresent": true,
+    "unwantedHostedLobbyInstruction": false,
+    "allObservedArgvSafe": true
+  },
+  "stagedLaunch": {
+    "health": 200,
+    "ready": 200,
+    "version": 200,
+    "sourceRevision": "e47cd0c289f5b80cf45f23d1143c59f45f2e456d"
+  },
+  "workflow": {
+    "runId": 43708466427,
+    "unit": "IN-PROGRESS",
+    "coverage": "IN-PROGRESS",
+    "browser": "PASSED",
+    "browserShards": "6 PASSED",
+    "contract": "PASSED",
+    "lint": "PASSED",
+    "friendAgent": "PASSED",
+    "visualGuard": "PASSED",
+    "workersMain": "PASSED",
+    "workersShard2": "FAILED (new-head cause not yet reread; historical discovery assertion remains separately recorded)",
+    "changes": "NOT-RUN (skipped)",
+    "safetyNet": "NOT-RUN (skipped)"
+  },
+  "independentReviews": {
+    "jillDisplayedCommands": "issue6181 comment6892817763 (historical385 scoped expressions)",
+    "jillDefaultName": "issue6181 comment6893141982 (exact4b40 four isolated expression cases; not full join or concurrency)",
+    "nativeClaudeStatic": "Two excerpt-based source claims supported; not a complete source review or live qualification. Two earlier wider attempts timed out and are NOT-RUN.",
+    "rootDot": "No composition/recovery disposition received yet.",
+    "jillPackageGuard": "issue6181 comment6893580166, exacte47:16 synthetic assertionsPASS, including every individual Markdown refusal. Not a real archive or cold boot test.",
+    "nativeClaudePackageGuard": "APPROVE bounded current direct-import graph, source-only. Future indirect or non-server importer patterns require renewed review."
+  },
+  "stumbles": [
+    "Legacy displayed command still exposed the invitation in argv; repaired.",
+    "Signing FIFO fixture referenced the old import name; corrected.",
+    "Initial source push targeted a local clone; corrected explicit GitHub push and readback.",
+    "A test initially supplied a missing native-host switch; generated instruction repaired and literal execution rerun.",
+    "Default native catalog omitted required work tools; emitted configuration now selects full authorized catalog.",
+    "Two unnamed native clients collided on a shared default name; new default persisted per invitation, retry identity preserved.",
+    "Harness initially inspected the wrong result field and shell quoting; corrected and owner-read result verified.",
+    "Agent once invented a Begin request id; server refused it and returned the correct retry context.",
+    "An empty attention list did not enumerate assigned work; activation/work reads were needed.",
+    "Full unit run exposed stale generated-guide404/UIcommand assertions and documentation citation; corrected against current behavior.",
+    "Runtime verifier wrongly required current guide inputs for a historical unused builder; repaired and real committedv38 upgrade/credential retention test passed."
+  ],
+  "limits": [
+    "Disposable Room and synthetic work; does not prove a successful live outside-agent arrival.",
+    "Header-helper host configuration was applied by the harness. Isolated Codex host explicitly allowed tools for this authorized rehearsal; ordinary host approval preferences may require confirmation.",
+    "Codex full task completed; Claude native access only. Claude OAuth and Claude task completion NOT-RUN.",
+    "Thirty-minute lease required an explicit disposable-owner write grant; contribute alone does not grant external write authority. No external work executed.",
+    "Process listings were sampled; child arguments were additionally checked against known secrets. No shell executed invitations.",
+    "Browser clipboard behavior not independently exercised in this rehearsal.",
+    "Some legacy documentation still teaches invitation arguments; no blanket all-documentation secrecy claim.",
+    "Workers shard2 remains FAILED; Node parity passes only the checked discovery paths.",
+    "Root/Dot full composition/recovery response not yet received.",
+    "All disposable exercise servers, keys, databases, and client homes were removed. Recovery data and staged runtimes retained.",
+    "Hosted Dot, Muse or Claude.ai callback flows NOT-RUN; loopback opt-in does not enable non-loopback hosted callbacks.",
+    "Historical coverage failed before evaluating thresholds; no coverage percentage or all-green claim.",
+    "Package-guard independent review covers current literal direct server imports, not hypothetical future computed loaders."
+  ],
+  "ownership": "Codex is sole Mac restart/composition writer; no live flip yet. Grok owns PR landing; Jill independent arrival grading; Dot recovery review.",
+  "next": "Finish new exact-head unit/coverage and named risk dispositions; sole Codex application flip only after qualification.",
+  "historicalFullRunFailures": {
+    "source": "4b40bd7ceec85c9e43c51c7f75d92172ded8697b",
+    "runId": 43704860421,
+    "unit": "FAILED: four reproduced cases, subsequently repaired in e47",
+    "unitArtifact": 14158499605,
+    "unitArtifactDigest": "sha256:1ad48787bfab5f2fc4f6261d7bec3b9e919d9c55f1255c1108cce8a115451acb",
+    "coverage": "FAILED: same four cases plus packaged Workers restore qualification child timed out after 300000ms",
+    "coverageThresholds": "NOT-RUN: suite failed before evaluation",
+    "intentionalProbe": "Declared runner fixture, not an additional real failure"
+  }
+}

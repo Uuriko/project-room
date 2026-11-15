@@ -616,7 +616,13 @@ function literalModuleSpecifiers(source) {
 
 // Shared by exact-package verification and the cheap working-tree preflight.
 export function verifyRuntimeImports(files) {
-  if (files.has("scripts/build-agent-docs.mjs")) {
+  // Historical packages may include the standalone docs builder before Node
+  // imported it at runtime. Require cold-rendering inputs only for runtimes
+  // that actually depend on that renderer.
+  const rendersGuidance = [...files].some(([path, bytes]) => path.startsWith("server/")
+    && /\.m?js$/.test(path) && literalModuleSpecifiers(bytes.toString()).some(specifier =>
+      posix.normalize(posix.join(posix.dirname(path), specifier)) === "scripts/build-agent-docs.mjs"));
+  if (rendersGuidance) {
     for (const name of ["index", "paste", "claude-code", "codex", "cursor", "cline", "vscode", "aider", "openai-agents-sdk", "langgraph", "crewai"]) {
       check(files.has(`docs/agents/${name}.md`), `runtime guidance source is missing: docs/agents/${name}.md`);
     }
