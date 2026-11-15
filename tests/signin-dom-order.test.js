@@ -7,6 +7,7 @@ test("sign-in contains primary controls without passive legal copy, divider or r
   assert.doesNotMatch(auth, /terms-notice|signin-divider|join-code-link|Join a room/);
   assert.ok(auth.indexOf('id="google-signin"') < auth.indexOf('id="signin-controller"'));
   assert.match(auth, /id="agent-signin-button"/);
+  assert.doesNotMatch(auth, /Watch agents work/);
 });
 test("signed-in rooms workspace retains a visible join link", () => {
   const rooms = html.slice(html.indexOf('id="account-rooms-panel"'), html.indexOf('id="account-room-create"'));

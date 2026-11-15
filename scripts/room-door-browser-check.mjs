@@ -40,7 +40,7 @@ for (const touch of [false, true]) {
       // Agent sign in is a link to its own page now (decision #37).
       const agentLink = page.getByRole('link', { name: 'Agent sign in', exact: true });
       assert.equal(await agentLink.count(), 1); assert.equal(await agentLink.isVisible(), true);
-      for (const [name, href] of [['Connect an agent', '/docs/agents/paste'], ['Watch agents work', '/watch']]) {
+      for (const [name, href] of [['Connect an agent', '/docs/agents/paste']]) {
         const link = page.getByRole('link', { name, exact: true });
         assert.equal(await link.isVisible(), true);
         assert.equal(await link.getAttribute('href'), href);
