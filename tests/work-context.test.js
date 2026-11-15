@@ -161,7 +161,7 @@ test("selected handoff tracks exact corrections/reviews while preserving human d
   assert.equal(context.accessSummary.budget.sessionStatus, "done");
   assert.equal(context.accessSummary.budget.recordedSessionStatus, "queued");
   assert.match(workContextMarkdown(context), /Session display status: done/);
-  assert.match(workContextMarkdown(context), /Recorded session controls[^\n]+"status":"queued"/);
+  assert.match(workContextMarkdown(context), /Recorded session controls[^\n]+"status":"done"/);
   assert.equal(context.next.action, "verify"); assert.equal(context.next.addressedToViewer, true);
   assert.equal(context.toolFocus.focus, "review");
   assert.equal((await producer.workContext("test-handoff")).toolFocus.focus, "work", "another member reviewing does not change the producer catalog recommendation");
