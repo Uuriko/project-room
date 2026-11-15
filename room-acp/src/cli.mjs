@@ -42,7 +42,7 @@ export async function doctor(options, { print = console.log, env = process.env }
 // What to type into an MCP host. The command contains the path of a private
 // file, never the credential itself.
 export function mcpHostLines(connection, host, headersPath, platform = process.platform) {
-  const url = `${connection.apiBase.replace(/\/$/, "")}/mcp`;
+  const url = `${connection.apiBase.replace(/\/$/, "")}/mcp?profile=full`;
   const reader = platform === "win32" ? `type "${headersPath}"` : `cat '${headersPath.replaceAll("'", "'\\''")}'`;
   if (host === "claude") {
     const json = JSON.stringify({ type: "http", url, headersHelper: reader });

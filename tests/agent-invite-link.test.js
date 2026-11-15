@@ -76,8 +76,10 @@ test("the create response carries a paste block that marks the invite sensitive 
   // The one command the block gives names the Room, never the invite.
   const command = lines.filter(line => /room-acp join/.test(line));
   assert.equal(command.length, 1);
-  assert.match(command[0], new RegExp(`npx -y --allow-remote=root --package=${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/room-acp\\.tgz room-acp join ${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+  assert.match(command[0], new RegExp(`npx -y --allow-remote=root --package=${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/room-acp\\.tgz room-acp join ${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} --mcp codex$`));
   for (const secret of [created.code, created.url, encodeURIComponent(created.code)]) assert.ok(!command[0].includes(secret), "the join command text contains no invite");
+  assert.match(lines[5], /replace --mcp codex with --mcp claude/);
+  assert.match(lines[5], /header-helper configuration/);
   // The invite appears once, on its own line, and nowhere else in the block.
   assert.equal(created.pasteBlock.split(created.code).length - 1, 1);
   // No room token, identity secret or key.

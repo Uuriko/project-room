@@ -94,7 +94,7 @@ test("bulk mints call one request per invite with distinct display names", async
 test("roomAcpCommand keeps invitation secrets out of argv and quotes the name", () => {
   const loc = new URL("https://room.trydemigod.com/");
   const link = "https://room.trydemigod.com/join/RM-ABC123";
-  assert.equal(roomAcpCommand(link, "", loc), "npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp join 'https://room.trydemigod.com'");
+  assert.equal(roomAcpCommand(link, "", loc), "npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp join 'https://room.trydemigod.com' --mcp codex");
   for (const invitation of [link, "https://room.trydemigod.com/#join/SYNTHETIC_SHARE_INVITE_NOT_A_REAL_SECRET"]) {
     const command = roomAcpCommand(invitation, "", loc);
     assert.equal(command.includes(invitation), false);

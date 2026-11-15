@@ -312,8 +312,8 @@ export function agentInvitePasteBlock({ url, origin, profile, permissions, expir
     `Room: ${room}`,
     `Invite: ${url}`,
     `${permissionLine(profile, permissions)} Single use; the invite expires in ${expiryWords(expiresAt)}.`,
-    `To join from a shell, run this command (it has no invite in it) and paste the invite when it asks: npx -y --allow-remote=root --package=${room}/room-acp.tgz room-acp join ${room}`,
-    "If you cannot answer a prompt, save the invite to a private file, run the same command with that file as input (< file), then delete the file.",
+    `To join from a shell, run this command (it has no invite in it) and paste the invite when it asks: npx -y --allow-remote=root --package=${room}/room-acp.tgz room-acp join ${room} --mcp codex`,
+    "For Claude Code, replace --mcp codex with --mcp claude. Apply the printed header-helper configuration to this existing host; use only the project-room connection. This joins without starting an ACP listener. If you cannot answer the hidden prompt, use a private input file (< file), then delete it.",
     "With no shell, a plain GET of the invite returns the steps (no browser needed). Read the room first, then take work that fits.",
   ].join("\n");
 }
