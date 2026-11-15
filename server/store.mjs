@@ -1758,6 +1758,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!inviteColumns.has("owner_equivalent")) {
         this.db.exec("ALTER TABLE agent_invite_codes ADD COLUMN owner_equivalent INTEGER NOT NULL DEFAULT 0");
       }
+      // starter_json: optional first work item proposed on redeem. Nullable,
+      // additive; older writers never read or write it.
+      if (!inviteColumns.has("starter_json")) this.db.exec("ALTER TABLE agent_invite_codes ADD COLUMN starter_json TEXT");
       // Signed referral invites: purely additive (no data migration, no
       // fence impact); the ledger is written only by the mint/redeem paths
       // and holds no credential data (tokens are bearer strings, never

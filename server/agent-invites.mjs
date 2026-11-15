@@ -106,6 +106,69 @@ const INVITE_ID_LENGTH = 8;
 const INVITE_ID_PATTERN = new RegExp(`^[a-f0-9]{${INVITE_ID_LENGTH}}$`);
 const inviteId = storedHash => storedHash.slice(0, INVITE_ID_LENGTH);
 
+// Optional starter work item: when the invite carries one, a successful
+// redemption proposes it to the new member (accountable: the member) so the
+// first thing a newcomer sees is a concrete task. Off unless set. The inviter
+// proposes it (needs steer, which the owner always holds); the new member
+// needs accept_work to take it (contribute has it). The item is read mode, so
+// it never needs a write grant.
+export const STARTER_TITLE_MAX = 120;
+export const STARTER_DONE_MAX = 500;
+const normalizeStarterWork = (starter, permissions, inviterCanSteer) => {
+  if (starter === undefined || starter === null) return null;
+  if (typeof starter !== "object" || Array.isArray(starter)
+    || Object.keys(starter).some(key => !["title", "definitionOfDone"].includes(key))) {
+    fail(422, "invalid_starter_work", "starterWork must be { title, definitionOfDone }");
+  }
+  const title = typeof starter.title === "string" ? starter.title.trim() : "";
+  const done = typeof starter.definitionOfDone === "string" ? starter.definitionOfDone.trim() : "";
+  if (!title || title.length > STARTER_TITLE_MAX) fail(422, "invalid_starter_work", `starterWork.title must be 1-${STARTER_TITLE_MAX} characters`);
+  if (!done || done.length > STARTER_DONE_MAX) fail(422, "invalid_starter_work", `starterWork.definitionOfDone must be 1-${STARTER_DONE_MAX} characters`);
+  if (!Array.isArray(permissions) || !permissions.includes("accept_work")) {
+    fail(422, "invalid_starter_work", "starterWork needs a profile that can accept work (for example contribute)");
+  }
+  if (!inviterCanSteer) fail(403, "invite_scope_exceeded", "starterWork proposes work as you, so it needs the steer grant");
+  return { title, definitionOfDone: done };
+};
+const parseStarterWork = row => {
+  if (typeof row.starter_json !== "string") return null;
+  try { const value = JSON.parse(row.starter_json); return value && typeof value.title === "string" ? value : null; }
+  catch { return null; }
+};
+const starterWorkItemId = codeHashValue => `starter-${inviteId(codeHashValue)}`;
+// Best effort, in its own savepoint: a refused proposal (room limit, archived
+// room, review policy, the inviter losing steer) never undoes the join. The
+// inviter is the proposer, applied through the same reducer and persistence as
+// the join itself, so every normal admission rule holds and no authority is
+// borrowed: the grant is re-read at redemption like the invite's own.
+const proposeStarterWork = (invites, row, memberId, starter, at) => {
+  const store = invites.store;
+  try {
+    store.transaction(() => {
+      const { room, context } = inviteRoom(store, row.room_id, [row.created_by, memberId]);
+      if (!memberCan(room.state, row.created_by, "steer")) throw new Error("inviter cannot steer");
+      const incoming = event({
+        id: randomUUID(),
+        idempotencyKey: hash(`agent-invite-starter:${row.code_hash}`),
+        type: T.WORK_PROPOSED,
+        roomId: row.room_id,
+        actorId: row.created_by,
+        at: new Date(at).toISOString(),
+        data: {
+          workItemId: starterWorkItemId(row.code_hash),
+          title: starter.title,
+          definitionOfDone: starter.definitionOfDone,
+          accountableMemberId: memberId,
+          labels: ["starter"],
+        },
+      });
+      const state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state);
+      saveInviteEvent(store, row.room_id, room, context, state, incoming);
+    }, { isolated: true });
+    return true;
+  } catch { return false; }
+};
+
 export const agentInviteSchema = `
   CREATE TABLE IF NOT EXISTS agent_invite_codes (
     code_hash TEXT PRIMARY KEY,
@@ -118,7 +181,8 @@ export const agentInviteSchema = `
     redeemed_at INTEGER,
     redeemed_identity_id TEXT,
     revoked_at INTEGER,
-    owner_equivalent INTEGER NOT NULL DEFAULT 0
+    owner_equivalent INTEGER NOT NULL DEFAULT 0,
+    starter_json TEXT
   );
   CREATE INDEX IF NOT EXISTS agent_invite_codes_room ON agent_invite_codes(room_id);
   -- G1 idempotent redeem (PRODUCT-200 D7): a client-kept requestId makes an
@@ -406,7 +470,7 @@ export class AgentInvites {
   // permissions list or a standing profile name
   // (chat/contribute/review/collaborate); the profile maps server-side to
   // a fixed set, so editing the request cannot widen authority.
-  create(token, roomId, { permissions, profile, ownerEquivalent, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null,
+  create(token, roomId, { permissions, profile, ownerEquivalent, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName, starterWork } = {}, expectedSessionBinding = null,
     { emailVerificationUnachievable = false } = {}) {
     // Owner delegates (server/owner-delegates.mjs) arrive via
     // store.authenticate with the delegate flag stamped on the member copy.
@@ -481,14 +545,17 @@ export class AgentInvites {
     if (displayName !== undefined && typeof displayName !== "string") fail(422, "invalid_invite", "displayName must be text");
     const name = displayName === undefined ? null : displayName.trim();
     if (name !== null && (!name || name.length > 80)) fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
+    const starter = normalizeStarterWork(starterWork, permissions,
+      auth.member.id === authority.ownerId || Boolean(issuer?.permissions?.includes("steer")));
     // Generate and hash before taking the write lock: scrypt is deliberately slow.
     const code = CODE_PREFIX + randomSymbols(CODE_LENGTH, CODE_ALPHABET);
     const stored = codeHash(code);
     return this.store.transaction(() => {
       const now = this.store.now();
       const expiresAt = now + expiresInMinutes * 60000;
-      this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at,owner_equivalent)
-        VALUES(?,?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt, ownerLevel ? 1 : 0);
+      this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at,owner_equivalent,starter_json)
+        VALUES(?,?,?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt, ownerLevel ? 1 : 0,
+        starter ? JSON.stringify(starter) : null);
       if (ownerLevel) {
         // Room log of who minted the grant. inviteId is the public 8-hex
         // handle; the raw code and the stored hash never enter the event.
@@ -501,7 +568,8 @@ export class AgentInvites {
           data: { inviteId: inviteId(stored), ownerEquivalent: true },
         }));
       }
-      return { code, inviteId: inviteId(stored), roomId, permissions, profile: ownerLevel ? "owner" : profileName, ownerEquivalent: ownerLevel, displayName: name, createdAt: now, expiresAt, next: createNext(roomId, code) };
+      return { code, inviteId: inviteId(stored), roomId, permissions, profile: ownerLevel ? "owner" : profileName, ownerEquivalent: ownerLevel, displayName: name, createdAt: now, expiresAt,
+        ...(starter ? { starterWork: starter } : {}), next: createNext(roomId, code) };
     });
   }
 
@@ -577,7 +645,7 @@ export class AgentInvites {
       // journal event written in the same transaction. A one-slot check would
       // admit the member at the last slot and then fail journaling the
       // referral, rolling the whole join back after the fact.
-      if (room.sequence + 1 >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) {
+      if (room.sequence + (row.starter_json ? 2 : 1) >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) {
         fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       }
       const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
@@ -690,7 +758,10 @@ export class AgentInvites {
       const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
         identityId: identity.identityId, roomId: row.room_id, label: name
       });
+      const starter = parseStarterWork(row);
+      const starterProposed = starter ? proposeStarterWork(this, row, memberId, starter, now) : false;
       return withConnect(this.store, row.room_id, memberId, { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : { identitySecret: identity.secret }), mcpToken,
+        ...(starterProposed ? { starterWorkItemId: starterWorkItemId(row.code_hash) } : {}),
         roomId: row.room_id, memberId, displayName: name, permissions,
         next: redeemNext(row.room_id, name), nextActions: nextActionsForInviteRedeem(row.room_id) });
     });
