@@ -645,7 +645,7 @@
       }
     },
     "room_accept_work": {
-      "inputSchema": "16a8651de12f83a5",
+      "inputSchema": "28f888c522fa6a1d",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1105,7 +1105,7 @@
       }
     },
     "room_propose_work": {
-      "inputSchema": "b21245e92696cb37",
+      "inputSchema": "7c76b31b73ed14df",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1557,7 +1557,7 @@
       }
     },
     "room_accept_work": {
-      "inputSchema": "16a8651de12f83a5",
+      "inputSchema": "28f888c522fa6a1d",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1827,7 +1827,7 @@
       }
     },
     "room_propose_work": {
-      "inputSchema": "b21245e92696cb37",
+      "inputSchema": "7c76b31b73ed14df",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
