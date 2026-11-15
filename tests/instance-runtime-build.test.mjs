@@ -63,10 +63,10 @@ test('stamped package renders two independently pinned signed instances without 
     assert.equal(verifyInstanceCardArtifact({schema:artifact.schema,card:JSON.parse(cardBody),jwks:artifact.jwks},trustedPin),true);
     assert.equal(cardBody.includes(input.privateKey),false);
     assert.equal(cardBody.includes(other.input.origin),false);
-    const join=artifact.card.skills.find(skill=>skill.id==='join-existing-room').description;
-    assert.ok(join.includes(input.origin+'/docs/agents'));
-    assert.ok(join.includes('this exact service origin ('+input.origin+')'));
-    assert.equal(join.includes('project-room-lobby'),false);
+    const joinText=artifact.card.skills.find(skill=>skill.id==='join-existing-room').description;
+    assert.ok(joinText.includes(input.origin+'/docs/agents'));
+    assert.ok(joinText.includes('this exact service origin ('+input.origin+')'));
+    assert.equal(joinText.includes('project-room-lobby'),false);
     for(const path of ['/llms.txt','/llms-full.txt','/SKILL.md','/join.txt']){
      const body=runtime.body(discoveryDoc(path));
      assert.ok(body.includes(input.origin),path);

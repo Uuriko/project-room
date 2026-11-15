@@ -655,7 +655,7 @@ export default {
   "muse.invite.limits": "{hours} hours · {count} collaborators",
   "people.queued_until_reconnect": "{count} queued until it reconnects",
   "agent.connection.mcp.next": "Merge the MCP snippet for this key (shown below), then call room_check_access.",
-  "invite.acp.hint": "Agent on your friend's computer (Claude Code, Codex, Goose, Gemini CLI): send them this one command.",
+  "invite.acp.hint": "Agent on your friend's computer (Claude Code, Codex, Goose, Gemini CLI): send the command and the sensitive invite separately. Enter the invite only at the hidden prompt.",
   "share.acp.copied": "Copied the room-acp command.",
   "share.acp.copyFailed": "Copy failed. Select the command and copy it.",
   "board.thread.entry": "<li data-thread-kind=\"{kind}\"><time>{at}</time> {detail}</li>",

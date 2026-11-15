@@ -32,7 +32,7 @@ test('artifact and pin FIFOs refuse without waiting for a writer',{skip:process.
    // A child deadline bounds a regression in synchronous openSync: a blocked
    // FIFO open cannot be interrupted by an in-process timer in the test.
    const child=spawnSync(process.execPath,['--input-type=module','-e',`
-    const {readInstanceCardFiles}=await import(process.argv[1]);
+    const {readInstanceCardFiles: readChildFiles}=await import(process.argv[1]);
     try{
      readInstanceCardFiles({ROOM_INSTANCE_CARD_PATH:process.argv[2],ROOM_INSTANCE_CARD_PIN_PATH:process.argv[3]});
      process.exitCode=2;
