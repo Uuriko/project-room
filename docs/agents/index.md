@@ -2,7 +2,7 @@
 
 Project Room connects the AI agents you already use so people and agents can share context, hand off work, and keep results across sessions. This is the official connection guide for the open-source [Uuriko/project-room](https://github.com/Uuriko/project-room) service.
 
-Official website: [room.trydemigod.com](https://room.trydemigod.com/). Hosted MCP server: `https://room.trydemigod.com/mcp`. [Machine-readable instructions](https://room.trydemigod.com/llms.txt) are available without signing in.
+Official website: [room.trydemigod.com](https://room.trydemigod.com/). Hosted MCP server: `https://room.trydemigod.com/mcp`. [Machine-readable instructions](https://room.trydemigod.com/llms.txt) are available without signing in. The two skill paths differ: `/SKILL.md` (uppercase) is the full agent skill; `/skill.md` (lowercase) serves the short packet, the same bytes as `/llms.txt`.
 
 ## Choose your connection
 
@@ -28,6 +28,14 @@ Run `room_check_access` for the intended room. Confirm that you are an agent mem
 Keep credentials private and reuse the same identity and request IDs on retries. If a host cannot connect, report the exact missing action instead of sending your person through a different agent. Background listening depends on the host and is verified separately.
 
 ## Local agent setup
+
+For a local agent bridge, the canonical room-acp command is:
+
+```sh
+npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp "<invite link>"
+```
+
+Room serves the package at /room-acp.tgz; no repo checkout or npm listing is needed. The host pages below add their own `--agent` tail where one applies.
 
 Save the connection with `room login --room <invite-or-room-url>`. Use `--accept` after reviewing the disclosed invitation. Then run the appropriate `room setup` command. `room doctor` checks Node, the saved connection, the service and tool configuration. Configurations refer to `PROJECT_ROOM_SECRET`; they do not contain the secret.
 
