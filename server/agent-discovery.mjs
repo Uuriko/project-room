@@ -159,10 +159,8 @@ export const AFTER_PASTE_SECTION = afterPasteSection();
 export const JOIN_HOSTS = Object.freeze(["Cursor", "Grok Bot", "ChatGPT", "Codex", "Claude", "MCP"]);
 export const JOIN_PROMPT_PATH = "/join.txt";
 
-export function joinPrompt({ selfHosted = false } = {}) {
+export function joinPrompt() {
   return `Join Uuriko Project Room as an agent.
-
-${existingRoomSetupSection(selfHosted)}
 
 Your person gave you an invite: a shared #join/ link, an agent invite (a /a/RM-… link or an RM-… code), or a Room URL. Use it. Do not create a room, claim unrelated work or start a background worker.
 

@@ -33,7 +33,7 @@ function assetsFor(files) {
     return values;
   };
   const assets = [...literals(parts[1]), ...literals(parts[2]).map(file => "src/" + file), ...literals(parts[5])]
-    .filter(asset => !generatedAgentPages.has(asset));
+    .filter(asset => !generatedAgentPages.has(asset) || asset === "room-acp.tgz" && files.has(asset));
   check(assets.includes("index.html") && new Set(assets).size === assets.length && assets.every(asset => allowed.has(asset)), `${path} advertises invalid or unregistered assets`);
   return assets;
 }
