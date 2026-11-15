@@ -188,3 +188,16 @@ for (const [label, origin] of [["hosted", ROOM_ORIGIN], ["configured self-hosted
     if (own !== ROOM_ORIGIN) assert.equal(listed.text.includes(ROOM_ORIGIN), false, "no hosted origin appears in a self-hosted invite list");
   });
 }
+
+test("self-hosted: repeated requests for a static page return identical advertised bytes (memoised rewrite)", async t => {
+  const origin = "https://room.example";
+  const { send } = await start(t, origin);
+  const host = new URL(origin).host;
+  for (const path of ["/", "/about"]) {
+    const first = await send("GET", path, { host });
+    const second = await send("GET", path, { host });
+    assert.equal(first.status, 200, path);
+    assert.equal(second.text, first.text, `${path} must be byte-identical across requests`);
+    assert.ok(!discoveryTags(first.text).includes(HOSTED_HOST), `${path} discovery tags must name the instance origin`);
+  }
+});

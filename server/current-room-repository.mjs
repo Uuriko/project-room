@@ -499,6 +499,15 @@ export function currentRoomAuthority(db,roomId,{memberId=null,activeOnly=false}=
   if(memberId!==null)return currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
   return activeOnly?currentActiveAuthorityFromHead(db,roomId,head,b):currentAuthorityFromHead(db,roomId,head,b);
 }
+// Recovery needs a complete census, including inactive history, rather than
+// addressed serving authority. Never borrow or reset a live serving budget.
+// Keep the same protected census, 100-total-member cap and finite read budget;
+// callers must accept a refusal instead of treating a subset as recovery proof.
+export function currentRoomRecoveryMembers(db,roomId) {
+  if(contextBudgets.has(db))refuse('Recovery membership census requires a separate read context');
+  const b=budget(),head=readCurrentHead(db,roomId,b);
+  return head?currentAuthorityFromHead(db,roomId,head,b).members:null;
+}
 // Owner-only authority: protected head and room record, no member census.
 // For callers that need only ownerId/sequence; cost is constant in member count.
 export function currentRoomOwnerAuthority(db,roomId) {

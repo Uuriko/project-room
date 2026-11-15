@@ -1,5 +1,78 @@
 # Project Room: six-outcome delivery plan
 
+<a id="current-scope-and-cuts"></a>
+
+## Current scope and cuts
+
+Reconciled November 13, 2026 after John asked why agents were restarting work
+already cut. This section owns current scope and supersedes conflicting scope,
+package order and completion language below and in older plans. Historical
+requirements remain evidence; they are not an instruction to implement them.
+Later explicit owner tasking can change this scope, with the affected slice named.
+
+The MVP is a shared project where people bring their existing agents, preserve
+the goal and relevant context, request a bounded contribution, inspect the exact
+result, correct or accept it, and continue after interruption. Project intent and
+decisions matter before code; the first engineering demonstration is a useful
+repository change through review and requester acceptance. A primary-agent or
+API workflow is valid; visiting a chat room is optional.
+
+John's newer hosting direction is independent self-hosted Node/SQLite Rooms.
+Each instance needs an address reachable by its intended clients and its own
+correct join/discovery information. Existing agents execute on their existing
+hosts. No required migration of old hosted data or identities, no federation,
+new global identity system, P2P replication, new queue, or automatic failover.
+Preserve old data. Tailscale and the old hosted service are not prerequisites.
+This scope statement is not proof that a particular instance or host is ready.
+
+| Area | Current disposition | Work that remains legitimate |
+| --- | --- | --- |
+| Project goal, constraints, decisions and relevant context | Core | Reuse current project/work readers; make corrections and next actions clear |
+| Human/agent joining, actual runtime pickup, scoped ownership | Core | Fix a demonstrated blocker on a supported host; a connection is not execution |
+| Results, exact-version evidence, review, correction and acceptance | Core | Reuse existing work/results; independent review and requester acceptance remain distinct |
+| Continuation, authorization, revocation, durable retries and backup | Core | Repair concrete defects; preserve source, permission and operation identity |
+| Bounties, escrow product, payouts, pricing, disputes and spend economics | Cut from MVP expansion | Preserve and safely resolve existing obligations; keep necessary execution limits |
+| Public volunteer recruitment, opportunities, matching and ranking | Cut from MVP expansion | Protect existing private data and commitments; ordinary project invitations remain core |
+| Reputation, public galleries, receipt marketing and clone-as-template | Cut from MVP expansion | Preserve private result/operation evidence and any existing authorization dependency |
+| Growth, referrals, SEO probes and acquisition automation | Cut | Remove exposure and inactive work; correct the instance origin where needed for truthful joining |
+| Unified Inbox, Gmail and broad communications integrations | Deferred | Keep private data isolated and preserve supported records; no new mailbox product |
+| Graph/wiki/map product expansion and peripheral dashboards | Deferred/operator-only | Source-linked context and existing maintainer references can be used without a new knowledge platform |
+| Squads, fleet utilization, universal wake and orchestration | Deferred | One requested existing-host path; current runtime safety and scoped recovery |
+| Placement, sharding and broad storage overhaul | Conditional | Only a named correctness defect or measured supported-path bottleneck justifies a slice |
+| Adaptive optimization, sealed/blinded certification, reputation weighting | Proposal only | Existing exact-version checks remain; design research does not authorize a new certification subsystem |
+
+The cuts were already recorded in the October 30 known-issues decisions and the
+October 31/November 2 scope sections. This reconciliation makes their meaning
+explicit: do not extend, re-home, re-price, polish or add discovery for a cut
+feature merely because an old backlog, lane specification or test names it.
+A green implementation of a cut feature is still outside the MVP.
+
+An existing-obligation or safety exception names the current affected operation,
+the concrete harm being prevented and the smallest containment/repair. It does
+not reopen the surrounding roadmap. A newer specifically requested self-host,
+connection or backup repair is not cancelled by an older general deferral.
+Scope alone does not prove a defect fixed or authorize deleting records.
+
+Implement removal in stages: stop advertising the cut surface, stop unnecessary
+loading/background activity, then retire code after caller, persistence,
+recovery and obligation checks. Reuse existing removal candidates instead of
+building parallel deletion stacks. No mass closure of safety or money work.
+
+### How to select work from retained records
+
+Use current task/claim state and this scope together. Treat a row as core work,
+a concrete existing-obligation/defect repair, a cut-removal candidate, or deferred.
+Do not auto-select old `planned`, `binding`, `completion contract` or
+`DECISION-PENDING` text as current work. If later owner tasking reopened an area,
+link that tasking and limit work to its stated slice. Ordinary in-scope fixes
+need no additional scope-approval form.
+
+The [known-issues ledger](KNOWN-ISSUES.md#scope-reconciliation) preserves earlier
+reports and their dispositions. The architecture, delivery, automation and
+adaptive plans below describe historical designs, not independent queues.
+Measure useful accepted outcomes and total human effort; do not substitute
+agent occupancy, messages, test counts or closed-PR counts for product progress.
+
 ## Scope reassessment — 2026-11-02
 
 John owns outside-account testing; do not ask him again for a tester or make that

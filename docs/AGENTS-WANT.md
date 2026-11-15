@@ -1,5 +1,11 @@
 # Make Something Agents Want
 
+Current scope: [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+This retained design or operating reference does not authorize work in cut areas.
+Its package order, proposed features and dated assignments are historical;
+correctness contracts still apply to supported behavior. Select work from current
+scope and claims, not this document's unfinished checklist.
+
 Product lock, 10 September 2026. Does not change Phase 0, merge
 [#9](https://github.com/Uuriko/project-room/pull/9) or
 [#16](https://github.com/Uuriko/project-room/pull/16)–[#18](https://github.com/Uuriko/project-room/pull/18),

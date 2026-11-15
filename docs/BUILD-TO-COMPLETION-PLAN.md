@@ -1,5 +1,11 @@
 # Project Room: build-to-completion plan
 
+Current scope: [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+This retained design or operating reference does not authorize work in cut areas.
+Its package order, proposed features and dated assignments are historical;
+correctness contracts still apply to supported behavior. Select work from current
+scope and claims, not this document's unfinished checklist.
+
 Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
 
 Plan date: 2026-10-18. Starting local checkpoint: `973260d6`.
@@ -13,7 +19,8 @@ The [master vision](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md) explains the product;
 this document defines build packages, dependencies, outputs and finish gates.
 Detailed invariants in the [architecture plan](ARCHITECTURE-EXECUTION-PLAN.md),
 [automation design](AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md) and
-[quality scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md) remain requirements.
+[quality scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md) apply only to a
+currently selected supported slice; they do not reinstate deferred packages.
 
 ## 1. Starting state: what has and has not been accomplished
 

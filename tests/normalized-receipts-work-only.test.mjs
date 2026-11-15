@@ -8,7 +8,16 @@ import { createRoomServer } from '../server/http.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { publicWorkItemReceiptId } from '../server/public-read-model.mjs';
 
-for (const result of ['pass', 'fail']) test(`receipts-on work completes and verifies ${result} without publishing`, async t => {
+// L3-D1 (#6204): an opted-in current-format room's verified receipt
+// must resolve on the public .json face at read time, even though
+// current rooms never write public_receipts rows. The stale assertion
+// "no anonymous receipt publication" expected 404 after opt-in + pass
+// and went red on main 5fd9e41b. Leakage guards that remain valid:
+// not-opted-in stays 404, a failed verification is not a receipt and
+// stays 404, and opt-out hides again. The table stays empty in every
+// case — no write path.
+
+async function setup(t, { receiptsOn = false, result = 'pass' } = {}) {
   const store = new RoomStore(':memory:');
   t.after(() => store.close());
   const log = initialRoom();
@@ -20,7 +29,7 @@ for (const result of ['pass', 'fail']) test(`receipts-on work completes and veri
   const keys = Object.fromEntries(['owner', 'worker', 'checker'].map(id => [id, store.issueAccessKey('commons', id)]));
   const cmd = (who, id, type, data) => store.command(keys[who], 'commons', { id, type, data });
   const work = () => JSON.parse(store.db.prepare('SELECT body FROM work_entities WHERE work_id=?').get('task').body);
-  cmd('owner', 'on', T.ROOM_PUBLIC_RECEIPTS_SET, { enabled: true });
+  if (receiptsOn) cmd('owner', 'on', T.ROOM_PUBLIC_RECEIPTS_SET, { enabled: true });
   cmd('owner', 'p', T.WORK_PROPOSED, { workItemId: 'task', title: 'Private task', definitionOfDone: 'Saved text reviewed',
     accountableMemberId: 'worker', verifierMemberId: 'checker', independentVerificationRequired: true, mode: 'read' });
   assert.throws(() => cmd('checker', 'wrong-owner', T.WORK_ACCEPTED, { workItemId: 'task', expectedRevision: 0 }));
@@ -43,10 +52,33 @@ for (const result of ['pass', 'fail']) test(`receipts-on work completes and veri
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const url = `http://127.0.0.1:${server.address().port}/receipts/${publicWorkItemReceiptId('commons', 'task')}.json`;
-  assert.equal((await fetch(url)).status, 404, 'no anonymous receipt publication');
+  return { store, cmd, data, url };
+}
+
+test('verified work is not public before the opt-in', async t => {
+  const { url } = await setup(t, { receiptsOn: false, result: 'pass' });
+  assert.equal((await fetch(url)).status, 404, 'a verified receipt is not public without the recorded opt-in');
+});
+
+test('receipts-on work completes and verifies fail without publishing', async t => {
+  const { store, cmd, data, url } = await setup(t, { receiptsOn: true, result: 'fail' });
+  assert.equal((await fetch(url)).status, 404, 'a failed verification is not a receipt and stays unpublished');
   cmd('owner', 'off', T.ROOM_PUBLIC_RECEIPTS_SET, { enabled: false });
   assert.equal(cmd('worker', 'c', T.WORK_COMPLETED, data).duplicate, true);
   assert.equal(store.db.prepare('SELECT count(*) n FROM public_receipts').get().n, 0);
   assert.equal((await fetch(url)).status, 404);
+  assert.doesNotThrow(() => auditRecovery(store));
+});
+
+test('opted-in verified receipt resolves publicly and opt-out hides it', async t => {
+  // L3-D1 (#6204): the recorded opt-in is the publication decision.
+  // Current rooms still write no public_receipts rows; the public face
+  // derives the terminal receipt at read time.
+  const { store, cmd, data, url } = await setup(t, { receiptsOn: true, result: 'pass' });
+  assert.equal((await fetch(url)).status, 200, 'opted-in verified receipt resolves on the public face');
+  cmd('owner', 'off', T.ROOM_PUBLIC_RECEIPTS_SET, { enabled: false });
+  assert.equal(cmd('worker', 'c', T.WORK_COMPLETED, data).duplicate, true);
+  assert.equal(store.db.prepare('SELECT count(*) n FROM public_receipts').get().n, 0);
+  assert.equal((await fetch(url)).status, 404, 'opt-out hides the derived receipt again');
   assert.doesNotThrow(() => auditRecovery(store));
 });
