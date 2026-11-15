@@ -426,7 +426,10 @@ test("verified offline archive runs the actual Native durable restore qualificat
   const result=spawnSync(process.execPath,["--test",join(worker,"durable-coverage.check.mjs")],{
     // Leave time for the inner qualification and its cleanup after its 300s cap.
     cwd:harness,encoding:"utf8",timeout:330000,maxBuffer:16*1024*1024,
-    env:{PATH:process.env.PATH,...(process.env.MINIFLARE_WORKERD_PATH?{MINIFLARE_WORKERD_PATH:process.env.MINIFLARE_WORKERD_PATH}:{})}
+    // Node propagates coverage even through an environment whitelist. Copied
+    // archive URLs are outside the configured source-module measurements.
+    // Keep parent coverage and every qualification assertion/deadline intact.
+    env:{PATH:process.env.PATH,NODE_V8_COVERAGE:"",...(process.env.MINIFLARE_WORKERD_PATH?{MINIFLARE_WORKERD_PATH:process.env.MINIFLARE_WORKERD_PATH}:{})}
   });
   assert.equal(result.status,0,result.stdout+"\n"+result.stderr);
   assert.match(result.stdout,/DURABLE_COVERAGE_WORKER /);
