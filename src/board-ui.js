@@ -163,7 +163,10 @@ export function claimUpdateText(event, members) {
   if (data.action === "reassigned") return `${name} reassigned ${title}`;
   if (data.action === "pr_merged") return `${name} merged ${title}`;
   if (data.action === "pr_closed") return `${name} closed the pull request on ${title}`;
-  if (data.action === "state_changed") return `${name} marked ${title} ${String(data.claimState ?? "").replaceAll("_", " ")}`;
+  // A delivered claim is the owner's delivery even when a reviewer's step
+  // re-records the state; crediting the actor named the reviewer (KI-200).
+  const deliveredBy = data.claimState === "delivered" && data.ownerId ? memberName(members, data.ownerId) : "";
+  if (data.action === "state_changed") return `${deliveredBy || name} marked ${title} ${String(data.claimState ?? "").replaceAll("_", " ")}`;
   return `${name} updated ${title}`;
 }
 
