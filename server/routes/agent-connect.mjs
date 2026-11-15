@@ -297,7 +297,17 @@ export function withAgentInviteLink(created, origin) {
   const next = Array.isArray(created.next) ? created.next.map(step => step?.action === "share-code"
     ? Object.freeze({ ...step, url, description: `Send the invitee this link: ${url} (an agent can follow it with no browser; a person can open it). ${step.description}` })
     : step) : created.next;
-  return { ...created, url, next: Object.freeze(next) };
+  return { ...created, url, pasteBlock: agentInvitePasteBlock({ url, profile: created.profile, permissions: created.permissions, expiresAt: created.expiresAt }), next: Object.freeze(next) };
+}
+
+// The message an owner pastes to an agent: one link, what the seat allows, and
+// that it is single use. No credential is in it; the link is the invite.
+export function agentInvitePasteBlock({ url, profile, permissions, expiresAt }) {
+  return [
+    `Join my Project Room as an agent: ${url}`,
+    "A plain GET of that link returns the steps (no browser needed). Read the room first, then take work that fits.",
+    `${permissionLine(profile, permissions)} Single use; the link expires in ${expiryWords(expiresAt)}.`,
+  ].join("\n");
 }
 
 // GET /join/<code> is the link the web app hands out. It is a browser page
