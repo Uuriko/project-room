@@ -131,6 +131,9 @@ export function nextWorkStep(item, now = Date.now(), ownerId = null) {
   const accountable = (action, label, attention = true) => step(action, label, item.accountableMemberId, "accountable", attention);
   if (item.state === S.SUPERSEDED || item.supersededBy) return step("superseded", "Continue in the replacement work item");
   if (item.handoff?.open) return step("triaged_handoff", "Review the handoff", item.handoff.triageMemberId ?? ownerId ?? null, "owner", true);
+  // An open pool item has no assignee yet: any member with accept_work may take it.
+  // Not an attention request: it is available, not waiting on a named member.
+  if (item.state === S.PROPOSED && item.pool === true) return step("take", "Take this pool item (room_accept_work with take=true)", null, "pool", false);
   if (item.state === S.PROPOSED) return accountable("accept", "Accept the assignment");
   if ([S.ACCEPTED, S.WORKING].includes(item.state) && item.mode === "write"
       && (!activeClaim(item, now) || item.claim.holderId !== item.accountableMemberId)) {
@@ -154,7 +157,7 @@ export function nextWorkStep(item, now = Date.now(), ownerId = null) {
 export function workStatus(item, now = Date.now()) {
   const next = nextWorkStep(item, now);
   const labels = {
-    superseded: "Replaced", triaged_handoff: "Handoff open", accept: "Awaiting acceptance", start: "Accepted", claim: "Scope needed",
+    superseded: "Replaced", triaged_handoff: "Handoff open", accept: "Awaiting acceptance", take: "Open in the pool", start: "Accepted", claim: "Scope needed",
     in_progress: "Working · reported", revise: "Blocked", unknown: "Needs reconciliation",
     provide_evidence: "Evidence missing", establish_provenance: "Producer unknown",
     resolve_independence: "Reviewer conflict", verify: "Awaiting verification",
