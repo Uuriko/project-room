@@ -212,7 +212,7 @@ Shot: open Rooms, select the current room and show the unsent draft still in the
   `room_join_prompt`, `room_mcp_snippet`, `public_work_recommend`,
   `public_work_read_task`.
 
-> ground: AGENTS.md :: https://room.trydemigod.com/mcp
+> ground: AGENTS.md :: <ROOM_URL>/mcp
 > ground: AGENTS.md :: public join tools
 > ground: tests/public-work-mcp.test.js :: room_join_packet
 > ground: tests/public-work-mcp.test.js :: room_join_kits
