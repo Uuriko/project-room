@@ -6,7 +6,8 @@ import { parseArgs, USAGE } from "./args.mjs";
 import { adapterHints, candidates, probe } from "./agents.mjs";
 import { join } from "./join.mjs";
 import { importIdentity, importCredential } from "./import-identity.mjs";
-import { loadConnection, forgetConnection, publicView } from "./credentials.mjs";
+import { loadConnection, listConnections, forgetConnection, publicView, saveMcpHeaders } from "./credentials.mjs";
+import { RoomClient } from "./room.mjs";
 import { redact } from "./redact.mjs";
 import { run, selectAgent } from "./run.mjs";
 import { nodeSatisfies, unsupportedNodeMessage } from "./node-version.mjs";
@@ -35,6 +36,41 @@ export async function doctor(options, { print = console.log, env = process.env }
   return ok ? 0 : 1;
 }
 
+// What to type into an MCP host. The command contains the path of a private
+// file, never the credential itself.
+export function mcpHostLines(connection, host, headersPath, platform = process.platform) {
+  const url = `${connection.apiBase.replace(/\/$/, "")}/mcp`;
+  const reader = platform === "win32" ? `type "${headersPath}"` : `cat '${headersPath.replaceAll("'", "'\\''")}'`;
+  if (host === "claude") {
+    const json = JSON.stringify({ type: "http", url, headersHelper: reader });
+    return [`Claude Code (run once):`, `  claude mcp add-json project-room '${json.replaceAll("'", "'\\''")}' --scope user`];
+  }
+  return [`Codex (add to ~/.codex/config.toml):`, "  [mcp_servers.project-room]", `  url = ${JSON.stringify(url)}`, `  http_headers_helper = ${JSON.stringify(reader)}`];
+}
+
+export async function mcpConfig(connection, host, { env = process.env, print = console.log } = {}) {
+  const headersPath = saveMcpHeaders(connection, env);
+  print(["Connect your MCP host to this Room. The commands below hold no secret; the host reads its Authorization header from a private file.",
+    ...mcpHostLines(connection, host, headersPath), "Then ask your agent to call room_activation_pack."].join("\n"));
+}
+
+// Connection health only: one authenticated read per saved room. No model prompt, no secret printed.
+export async function doctorConnections(options, { print = console.log, env = process.env, fetchImpl = fetch } = {}) {
+  const all = options.room ? [loadConnection({ roomId: options.room }, env)].filter(Boolean) : listConnections(env);
+  if (!all.length) { print("No saved connection. Join with: room-acp <invite link> --no-listen"); return 1; }
+  let ok = 0;
+  for (const connection of all) {
+    try {
+      await new RoomClient({ ...connection, credential: connection.credential, fetchImpl }).checkConnection();
+      ok++; print(`ok   room ${connection.roomId}: connected as ${connection.displayName ?? connection.memberId}`);
+    } catch (error) {
+      const hint = error.status === 401 || error.status === 403 ? "the credential was rejected; ask the owner for a new invite" : "could not confirm the connection";
+      print(`fail room ${connection.roomId}: ${hint} (${redact(error.message)})`);
+    }
+  }
+  return ok === all.length ? 0 : 1;
+}
+
 export async function main(argv = process.argv.slice(2), io = {}) {
   const print = io.print ?? console.log;
   let options;
@@ -48,6 +84,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     print(unsupportedNodeMessage(nodeVersion));
     return 1;
   }
+  if (options.command === "doctor" && options.connection) return doctorConnections(options, { print, env: io.env ?? process.env, fetchImpl: io.fetchImpl });
   if (options.command === "doctor") return doctor(options, io);
   const env = io.env ?? process.env;
   let candidate = null;
@@ -64,8 +101,15 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       print(`Connected existing identity to room ${connection.roomId}. Scoped credential saved privately; run room-acp run --room ${connection.roomId} to start your adapter.`);
       return 0;
     }
+    if (options.command === "mcp-config") {
+      const connection = loadConnection({ roomId: options.room }, env);
+      if (!connection) { print("Not joined. Run: room-acp <invite link> --mcp " + options.mcp); return 1; }
+      await mcpConfig(connection, options.mcp, { env, print });
+      return 0;
+    }
     if (options.command === "join") {
-      if (!io.joinOnly) {
+      const joinOnly = io.joinOnly || options.noListen || options.mcp !== undefined;
+      if (!joinOnly) {
         let needsLogin = false;
         candidate = await selectAgent(options, { env, onFailure: result => {
           if (/authentication required/i.test(result.error ?? "")) needsLogin = true;
@@ -78,7 +122,8 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       }
       const connection = await join({ link: options.link, displayName: options.name ?? "Coding agent", agent: options.agent, permissionApproverId: options.permissionApprover === "none" ? null : options.permissionApprover ?? null, roomId: options.room, origin: options.origin, env, fetchImpl: io.fetchImpl });
       print(`Joined room ${connection.roomId} as ${connection.displayName}. Credential saved privately; it is never printed.`);
-      if (io.joinOnly) return 0;
+      if (options.mcp !== undefined) { await mcpConfig(connection, options.mcp, { env, print }); return 0; }
+      if (joinOnly) return 0;
       options.command = "run";
       options.room = connection.roomId;
     }
