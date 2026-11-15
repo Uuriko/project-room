@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { appJwt, githubAppCredentials, installationToken } from "../server/github-app/auth.mjs";
-import { MANIFEST_EVENTS, MANIFEST_PERMISSIONS, MANIFEST_SETUP_URL, MANIFEST_WEBHOOK_URL } from "../server/github-app/index.mjs";
+import { MANIFEST_EVENTS, MANIFEST_PERMISSIONS, MANIFEST_SETUP_URL, MANIFEST_WEBHOOK_URL, githubAppManifest, manifestUrls } from "../server/github-app/index.mjs";
 import { shouldPost } from "../server/github-app/policy.mjs";
 import { renderPrComment } from "../server/github-app/render.mjs";
 import { fetchRepoConfig, parseRepoConfig } from "../server/github-app/repo-config.mjs";
@@ -76,6 +76,27 @@ test("the shared manifest matches the permissions and URLs later GitHub App slic
   assert.equal(manifest.redirect_url, MANIFEST_SETUP_URL);
   assert.equal(manifest.hook_attributes.url, MANIFEST_WEBHOOK_URL);
   assert.equal(manifest.request_oauth_on_install, true);
+});
+
+test("the hosted manifest file is exactly what the generator renders for the hosted origin", () => {
+  const file = JSON.parse(readFileSync(new URL("../github-app/manifest.json", import.meta.url), "utf8"));
+  assert.deepEqual(githubAppManifest(), file);
+  assert.deepEqual(githubAppManifest("https://room.trydemigod.com/"), file);
+});
+
+test("a self-hosted manifest names only that instance's origin", () => {
+  const manifest = githubAppManifest("https://room.example");
+  assert.equal(manifest.url, "https://room.example");
+  assert.equal(manifest.setup_url, "https://room.example/github/setup");
+  assert.equal(manifest.redirect_url, "https://room.example/github/setup");
+  assert.deepEqual(manifest.callback_urls, ["https://room.example/github/setup"]);
+  assert.equal(manifest.hook_attributes.url, "https://room.example/api/github/webhook");
+  assert.doesNotMatch(JSON.stringify(manifest), /trydemigod/);
+  assert.deepEqual(manifest.default_permissions, { ...MANIFEST_PERMISSIONS });
+  assert.deepEqual(manifest.default_events, [...MANIFEST_EVENTS]);
+  assert.equal(manifest.request_oauth_on_install, true);
+  for (const bad of ["http://room.example", "https://room.example/path", "https://room.example/?q=1", "https://u:p@room.example", "https://room.example/#x", "not a url"])
+    assert.throws(() => manifestUrls(bad), bad);
 });
 
 test("webhook signature accepts a matching body and refuses tampering, the wrong secret, a missing header, and an oversized body", async () => {

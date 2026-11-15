@@ -341,7 +341,7 @@ test("public receipts JSON allows any origin and the public pages allow the anal
   for (const path of ["/receipts", "/agents", "/r/public-room"]) {
     const page = await fetch(`${origin}${path}`);
     const csp = page.headers.get("content-security-policy");
-    assert.match(csp, /https:\/\/static\.cloudflareinsights\.com/);
-    assert.match(csp, /https:\/\/cloudflareinsights\.com/);
+    assert.doesNotMatch(csp, /cloudflareinsights|cdn-cgi/, path);
+    assert.match(csp, /script-src 'none'|script-src 'sha256-/, path);
   }
 });

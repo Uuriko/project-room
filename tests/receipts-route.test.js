@@ -50,8 +50,8 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   assert.equal(hidden.status, 200);
   assert.equal(hidden.headers.get("x-robots-tag"), "all");
   const publicPolicy = hidden.headers.get("content-security-policy");
-  assert.equal(publicPolicy.split("; ").find(d => d.startsWith("connect-src ")), `connect-src https://cloudflareinsights.com ${origin}/cdn-cgi/rum`);
-  assert.doesNotMatch(publicPolicy, /connect-src 'self'|script-src 'self'|\*/);
+  assert.equal(publicPolicy.split("; ").find(d => d.startsWith("connect-src ")), `connect-src 'none'`);
+  assert.doesNotMatch(publicPolicy, /connect-src 'self'|script-src 'self'|cloudflareinsights|cdn-cgi|\*/);
   assert.equal(hidden.text.includes("Ship the door"), false);
   assert.equal(hidden.text.includes("Project Room Commons"), false);
   assert.match(hidden.text, /Public task/);
@@ -101,7 +101,7 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   const copyScript = /<script>([\s\S]*?)<\/script>/.exec(roomPage.text)?.[1];
   assert.ok(copyScript);
   const copyHash = createHash("sha256").update(copyScript).digest("base64");
-  assert.equal(roomPage.headers.get("content-security-policy"), publicPolicy.replace("script-src ", `script-src 'sha256-${copyHash}' `));
+  assert.equal(roomPage.headers.get("content-security-policy"), publicPolicy.replace("script-src 'none'", `script-src 'sha256-${copyHash}'`));
   const named = await raw(origin, `/receipts/${id}`);
   assert.match(named.text, /Project Room Commons/);
   const off = await raw(origin, "/api/rooms/commons/commands", {

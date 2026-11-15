@@ -30,8 +30,8 @@ function assertPublicPolicy(response, origin) {
     const [name, ...values] = part.trim().split(/\s+/); return [name, values.join(" ")];
   }));
   assert.deepEqual(policy, {
-    "default-src": "'none'", "script-src": "https://static.cloudflareinsights.com",
-    "style-src": "'unsafe-inline'", "connect-src": `https://cloudflareinsights.com ${origin}/cdn-cgi/rum`,
+    "default-src": "'none'", "script-src": "'none'",
+    "style-src": "'unsafe-inline'", "connect-src": "'none'",
     "img-src": "'self'", "manifest-src": "'self'", "base-uri": "'none'",
     "form-action": "'none'", "frame-ancestors": "'none'"
   });
@@ -45,8 +45,8 @@ function assertAboutPolicy(response, origin) {
     const [name, ...values] = part.trim().split(/\s+/); return [name, values.join(" ")];
   }));
   assert.deepEqual(policy, {
-    "default-src": "'none'", "script-src": `${origin}/src/front-door.js https://static.cloudflareinsights.com`,
-    "style-src": "'unsafe-inline'", "connect-src": `${origin}/api/public/front-door https://cloudflareinsights.com ${origin}/cdn-cgi/rum`,
+    "default-src": "'none'", "script-src": `${origin}/src/front-door.js`,
+    "style-src": "'unsafe-inline'", "connect-src": `${origin}/api/public/front-door`,
     "img-src": "'self'", "manifest-src": "'self'", "base-uri": "'none'",
     "form-action": "'none'", "frame-ancestors": "'none'"
   });
@@ -58,8 +58,9 @@ test("public doors are indexable while credentials and unknown pages keep privat
   assert.equal(about.status, 200); assert.match(about.headers.get("content-type"), /text\/html/);
   assert.equal(about.headers.get("x-robots-tag"), "all");
   assertAboutPolicy(about, origin);
-  assert.match(about.headers.get("content-security-policy"), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
-  assert.match(about.headers.get("content-security-policy"), /connect-src \S+\/api\/public\/front-door https:\/\/cloudflareinsights\.com/);
+  assert.match(about.headers.get("content-security-policy"), /script-src \S+\/src\/front-door\.js;/);
+  assert.match(about.headers.get("content-security-policy"), /connect-src \S+\/api\/public\/front-door;/);
+  assert.doesNotMatch(about.headers.get("content-security-policy"), /cloudflareinsights|cdn-cgi/);
   assert.match(about.headers.get("content-security-policy"), /style-src 'unsafe-inline'/);
   assert.doesNotMatch(about.headers.get("content-security-policy"), /script-src[^;]*'self'/);
   assert.doesNotMatch(about.headers.get("content-security-policy"), /connect-src[^;]*'self'/);

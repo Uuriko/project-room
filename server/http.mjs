@@ -374,11 +374,15 @@ export function touchLruEntry(map, key, makeValue, capacity) {
 // lifetime. Retain its successful bytes for BOTH page serving and sitemap
 // probes, so the map never advertises bytes the loader cannot actually serve.
 // The finite reviewed catalog bounds this cache; failed reads are not retained.
-function defaultAssetLoader(assetRoot) {
+// `fallbacks` maps an asset path to an async function that supplies its bytes
+// when the file is absent (ENOENT only). The Node boot path uses it to build
+// room-acp.tgz for a checkout that never ran the hosted deploy.
+function defaultAssetLoader(assetRoot, fallbacks = {}) {
   const cacheable = new Set([...publicSearchAssets(publicAssetPaths)]
     .filter(([path]) => reviewedPublicSearchPaths.includes(path)).map(([, file]) => file));
   const loaded = new Map();
   return path => {
+    if (Object.hasOwn(fallbacks, path)) return readFile(new URL(path, assetRoot)).catch(error => { if (error?.code !== "ENOENT") throw error; return fallbacks[path](); });
     if (!cacheable.has(path)) return readFile(new URL(path, assetRoot));
     if (!loaded.has(path)) {
       const pending = readFile(new URL(path, assetRoot));
@@ -403,7 +407,7 @@ export const CREDENTIAL_WRITE_REFILL_PER_SECOND = 1;
 export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
 export function createRoomServer({ store, origin, instanceCard, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
-  loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
+  assetFallbacks = {}, loadAsset = defaultAssetLoader(assetRoot, assetFallbacks), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, gmailAuth = null, directSendFetch = null, enableDeferredInbox = false,
@@ -1297,9 +1301,8 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
     // NOTE: no includeSubDomains - unverified that all trydemigod.com
     // subdomains are HTTPS-only; dropping it is the safe default.
     res.setHeader("Strict-Transport-Security", "max-age=31536000");
-    // Cloudflare Web Analytics injects its beacon at the edge. The app does not
-    // add that script; this document policy is what lets the beacon run.
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    // No third-party analytics host is allowed by this policy.
+    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     // SEC-1: lock unused powerful features and cross-origin window access.
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
@@ -2702,7 +2705,7 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
           // contain, so their absence is the designed state — fall through
           // to the standard not-found handling below (404), never a 500.
           // Any other missing or failed asset stays fail-closed.
-          if (error?.code !== "ENOENT" || !generatedAgentPages.includes(path)) throw error;
+          if (error?.code !== "ENOENT" || !(generatedAgentPages.includes(path) || path === "room-acp.tgz")) throw error;
         }
         if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
@@ -2728,8 +2731,9 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
           try { res.writeEarlyHints({ link: ["</src/styles.css>; rel=preload; as=style"] }); }
           catch { /* this platform has no early hints */ }
         }
-        const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
-        if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2" || type === "application/gzip";
+        if (type === "application/gzip") res.setHeader("Cache-Control", "no-cache"); // the pack follows the running revision
+        else if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
         // This URL is not content-hashed; fresh markup must not use an hour-old stylesheet.
         else if (path === "src/styles.css") res.setHeader("Cache-Control", "no-cache");
         else if (shell) res.setHeader("Cache-Control", "public, max-age=60");

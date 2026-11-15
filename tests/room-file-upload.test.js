@@ -40,8 +40,9 @@ test("room file routes stage a composer upload and commit it onto a message", as
   });
 
   const page = await request("/", { token: null });
-  assert.match(page.headers.get("content-security-policy"), /https:\/\/static\.cloudflareinsights\.com/);
-  assert.match(page.headers.get("content-security-policy"), /connect-src 'self' https:\/\/cloudflareinsights\.com/);
+  assert.doesNotMatch(page.headers.get("content-security-policy"), /cloudflareinsights/);
+  assert.match(page.headers.get("content-security-policy"), /script-src 'self';/);
+  assert.match(page.headers.get("content-security-policy"), /connect-src 'self';/);
   assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
 
   const anon = await request("/api/rooms/commons/files", { token: null });
