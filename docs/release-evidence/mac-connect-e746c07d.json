@@ -368,6 +368,69 @@
     "Legacy alternative documentation entry points not all secret-safe; primary owner/UI/native path qualified.",
     "No automatic rollback authorization inferred."
   ],
-  "liveChangeApplied": false,
-  "at": "2026-11-15T13:22:11.077731+00:00"
+  "liveChangeApplied": true,
+  "at": "2026-11-15T13:26:55.489281+00:00",
+  "postflip": {
+    "candidate": "e746c07d732359e62f0ebb5d3105ecc9b554d2a4",
+    "tree": "11584419facaf61e82f9a8499c0788f6c7ece3a9",
+    "at": "2026-11-15T13:25:05.644433+00:00",
+    "health": {
+      "node": {
+        "health": 200,
+        "ready": 200,
+        "version": 200,
+        "versionMatches": true
+      },
+      "front": {
+        "health": 200,
+        "ready": 200,
+        "version": 200,
+        "versionMatches": true
+      },
+      "tailnet": {
+        "health": 200,
+        "ready": 200,
+        "version": 200,
+        "versionMatches": true
+      }
+    },
+    "pages": {
+      "/": 200,
+      "/join": 200,
+      "/docs/agents": 200,
+      "/llms.txt": 200,
+      "/room-acp.tgz": 200,
+      "/.well-known/oauth-authorization-server": 200,
+      "/.well-known/oauth-protected-resource": 200,
+      "/room": {
+        "status": 200,
+        "canonicalBytes": true
+      },
+      "/room/skill": {
+        "status": 200,
+        "canonicalBytes": true
+      },
+      "/room/llms.txt": {
+        "status": 200,
+        "canonicalBytes": true
+      }
+    },
+    "rootEarlyHintsClientWorkaround": true,
+    "discoveryUsesIntendedOrigin": true,
+    "cliPackageSha256": "980bc5bdf5930ab53a21bcf57da3907e29c39d5c5f8902b979ab9db3fde24afd",
+    "anonymousMcpInit": 401,
+    "oauthMetadataChallenge": true,
+    "bogusBearerMcp": 401,
+    "anonymousPrivateApi": 401,
+    "existingOwnerMcpInit": 401,
+    "existingOwnerMcpInitError": true,
+    "existingOwnerCredentialAccepted": false,
+    "existingOwnerRoomApiStatusCounts": {
+      "200": 1,
+      "403": 4
+    },
+    "existingOwnerMcpCredentialInterpretation": "Existing owner room access key reads its authorized Room (200), four other Rooms refused (403); not an agent identity credential. Its MCP init401 is retained and does not prove identity credential regression or live agent authentication."
+  },
+  "deploymentStumble": "First read-only quiesced backup connection failed after old app exit and before config replacement. Database integrity verified. Backup succeeded on retry using encoded file URI; deployment continued to same authorized target. Exact initial cause not established.",
+  "independentLiveChecks": "Requested from Grok and Jill; no received result yet"
 }
