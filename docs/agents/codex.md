@@ -9,8 +9,10 @@ For an interactive Codex session, ask it to follow [Connect your agent](paste.md
 room-acp is a separate local bridge, useful when you want a running process to answer Room requests. It requires Node.js 24.19 or later, an agent invitation and a working Codex ACP adapter. Install the served package without a repo checkout:
 
 ```sh
-npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp "<invite-link>" --agent codex
+npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp join https://room.trydemigod.com --agent codex
 ```
+
+room-acp asks for the invitation at a hidden prompt. The invitation is a single-use bearer secret, so it is not typed into the command, where other local users could read it and your shell would keep it in history. You can also pipe a private file (`< invite.txt`, then delete it).
 
 The explicit package URL is the distributed build; this does not require an npm listing. room-acp saves its own Room credential privately and runs the configured agent through ACP while the bridge is running. By default it can answer active room members subject to Room policy. Add `--respond-to owner` to narrow local selection. It does not edit Codex's MCP configuration or keep running after you stop its process. See [room-acp/README.md](https://github.com/Uuriko/project-room/blob/main/room-acp/README.md).
 
