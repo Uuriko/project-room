@@ -165,3 +165,49 @@ test("end to end: a native client registers its loopback callback, joins with an
   assert.equal(store.db.prepare("SELECT count(*) n FROM accounts").get().n, accountsBefore, "no human account is created");
   assert.equal(store.db.prepare("SELECT count(*) n FROM agent_invite_codes WHERE redeemed_at IS NOT NULL").get().n, 1, "the one-time code was spent");
 });
+
+const seedClients = (store, count, expiresAt, prefix) => {
+  store.db.exec("CREATE TABLE IF NOT EXISTS oauth_provider_clients (client_id TEXT PRIMARY KEY, name TEXT NOT NULL, redirect_uris_json TEXT NOT NULL, expires_at INTEGER NOT NULL)");
+  const insert = store.db.prepare("INSERT INTO oauth_provider_clients(client_id,name,redirect_uris_json,expires_at) VALUES(?,?,?,?)");
+  store.db.exec("BEGIN");
+  for (let i = 0; i < count; i++) insert.run(`${prefix}${i}`, "Seeded", JSON.stringify(["http://127.0.0.1:1/cb"]), expiresAt);
+  store.db.exec("COMMIT");
+};
+const clientCount = store => store.db.prepare("SELECT count(*) n FROM oauth_provider_clients").get().n;
+
+test("a full registry of expired clients is pruned, not a 503", async t => {
+  const { store, call } = await fixture(t, { mcpOAuthLoopback: true });
+  seedClients(store, 1024, Date.now() - 60_000, "expired-");
+  assert.equal(clientCount(store), 1024);
+  const created = await register(call, "http://127.0.0.1:53124/callback");
+  assert.equal(created.status, 201, created.text);
+  assert.equal(clientCount(store), 1, "all 1,024 expired records are gone and the new one is stored");
+  assert.ok(store.db.prepare("SELECT 1 FROM oauth_provider_clients WHERE client_id=?").get(created.body.client_id));
+});
+
+test("only expired clients are pruned: live ones stay, and a registry full of live clients still answers 503", async t => {
+  const { store, call } = await fixture(t, { mcpOAuthLoopback: true });
+  seedClients(store, 1000, Date.now() + 3_600_000, "live-");
+  seedClients(store, 24, Date.now() - 1, "dead-");
+  assert.equal(clientCount(store), 1024);
+  const created = await register(call, "http://127.0.0.1:53124/callback");
+  assert.equal(created.status, 201, created.text);
+  assert.equal(store.db.prepare("SELECT count(*) n FROM oauth_provider_clients WHERE client_id LIKE 'live-%'").get().n, 1000);
+  assert.equal(store.db.prepare("SELECT count(*) n FROM oauth_provider_clients WHERE client_id LIKE 'dead-%'").get().n, 0);
+
+  // 1,001 live (1,000 + the one just registered) plus 23 more live: now genuinely full.
+  seedClients(store, 23, Date.now() + 3_600_000, "more-");
+  assert.equal(clientCount(store), 1024);
+  const refused = await register(call, "http://127.0.0.1:53125/callback");
+  assert.equal(refused.status, 503);
+  assert.deepEqual(refused.body, { error: "temporarily_unavailable" });
+  assert.equal(clientCount(store), 1024, "a refused registration deletes nothing live");
+});
+
+test("pruning runs only on a valid registration: a refused redirect deletes nothing", async t => {
+  const { store, call } = await fixture(t, { mcpOAuthLoopback: true });
+  seedClients(store, 5, Date.now() - 1000, "expired-");
+  const refused = await register(call, "https://evil.example/callback");
+  assert.equal(refused.status, 400);
+  assert.equal(clientCount(store), 5);
+});

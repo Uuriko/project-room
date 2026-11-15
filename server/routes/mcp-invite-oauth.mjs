@@ -72,8 +72,14 @@ async function handleMcpRegistration(ctx) {
         // The provider creates its tables on first use. With no configured clients (loopback-only
         // self-host) nothing has used it yet, so a missing table means an empty registry, not a failure.
         const registryTable = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='oauth_provider_clients'").get();
-        if (registryTable && store.db.prepare("SELECT count(*) n FROM (SELECT 1 FROM oauth_provider_clients LIMIT 1025)").get().n >= 1024)
-          return json(res, 503, {error:"temporarily_unavailable"});
+        // The registry holds at most 1,024 clients. Registrations expire on their own, but nothing
+        // else deletes the rows in between, so drop the expired ones first: a full table of dead
+        // records must not turn away a new client. Only expired rows go, and only here.
+        if (registryTable) {
+          store.db.prepare("DELETE FROM oauth_provider_clients WHERE expires_at <= ?").run(Date.now());
+          if (store.db.prepare("SELECT count(*) n FROM (SELECT 1 FROM oauth_provider_clients LIMIT 1025)").get().n >= 1024)
+            return json(res, 503, {error:"temporarily_unavailable"});
+        }
         const name = data.client_name ?? "MCP connector";
         if (typeof name !== "string" || !name.trim() || name.length > 80)
           return json(res, 400, {error:"invalid_client_metadata"});
