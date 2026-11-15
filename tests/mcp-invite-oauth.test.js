@@ -21,7 +21,7 @@ const fetch = (url, options = {}) => new Promise((resolve, reject) => {
     res.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })));
   }); req.on('error', reject); req.end(options.body?.toString());
 });
-async function setup(t, { client = CLIENT, clients = [client] } = {}) {
+async function setup(t, { client = CLIENT, clients = [client], scopes = 'rooms:read chat:read chat:write work:read work:write' } = {}) {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom());
   const owner = store.issueAccessKey('commons', 'owner');
   const invitation = store.invites.create(owner, 'commons', { profile: 'member' });
@@ -30,7 +30,7 @@ async function setup(t, { client = CLIENT, clients = [client] } = {}) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const start = () => fetch(base + '/oauth/authorize?' + new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0], scope: 'rooms:read chat:read chat:write work:read work:write', state: 'native-state', code_challenge: challenge, code_challenge_method: 'S256', resource, connection: 'invite' }));
+  const start = () => fetch(base + '/oauth/authorize?' + new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0], scope: scopes, state: 'native-state', code_challenge: challenge, code_challenge_method: 'S256', resource, connection: 'invite' }));
   const initial = await start(); assert.equal(initial.status, 200);
   const html = await initial.text(); assert.match(html, /No Project Room signup/);
   const nonce = html.match(/name="nonce" value="([^"]+)"/)[1];
@@ -552,4 +552,17 @@ test('native public guest completes a reviewed first task after explicit contrib
   const result=await call('room_read_result',{workItemId,completionEventId:done.eventId});
   assert.equal(result.result.text.body,body);assert.equal(result.result.text.evidenceVersion,evidenceVersion);
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM accounts').get().n,accountsBefore);
+});
+
+test('invitation file consent names every file tool and price before any grant is issued', async t => {
+  const f=await setup(t,{scopes:'rooms:read chat:read chat:write files:read files:write'});
+  for(const page of [await f.start(),await f.submit('preview')]) {
+    assert.equal(page.status,200);
+    const html=await page.text();
+    for(const name of ['room_get_file','room_list_files','room_put_file','room_commit_file']) assert.ok(html.includes(name),name);
+    assert.match(html,/5 room-cents/);
+    assert.match(html,/existing spend authorization required/);
+  }
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n,0);
+  assert.equal(f.store.db.prepare('SELECT redeemed_at FROM agent_invite_codes').get().redeemed_at,null);
 });

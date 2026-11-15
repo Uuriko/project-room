@@ -9,6 +9,8 @@ export const OAUTH_SCOPES = Object.freeze([
   "rooms:read",
   "chat:read",
   "chat:write",
+  "files:read",
+  "files:write",
   "work:read",
   "work:write",
   "members:invite",
@@ -32,3 +34,9 @@ export function validateOAuthClient({ clientId, name, redirectUris }) {
     check(!parsed.hash, "redirectUri must not contain a fragment");
   }
 }
+
+// Shared by account and invitation consent. Scopes never grant spending rights.
+export const OAUTH_FILE_SCOPE_LABELS = Object.freeze({
+  "files:read": "Read room files with room_get_file and room_list_files (also requires chat:read)",
+  "files:write": "Stage room files with room_put_file (5 room-cents per call; existing spend authorization required) and attach them with room_commit_file (also requires chat:write). No file deletion",
+});
