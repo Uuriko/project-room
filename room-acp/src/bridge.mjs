@@ -41,6 +41,7 @@ export const CLAIM_WAKE_REASONS = Object.freeze(["assigned"]);
 // (reassign-after-done, admin re-wake, wake regeneration) has no receipt.
 export const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
 export const CLAIM_KEY = "work-claim:";
+const MIN_RENEW_MS = 30_000, MAX_RENEW_MS = 15 * 60_000, DEFAULT_RENEW_MS = 10 * 60_000, MAX_LEASE_RENEWALS = 48;
 export const MAX_CLAIM_NOTE = 1500;
 export const ORDINARY_REPLY_WINDOW_MS = 60000;
 // The person who put the claim on the Board is who asked for the work.
@@ -144,6 +145,8 @@ export class Bridge {
     this.host.onExit?.(info => this.onAgentExit(info));
     this.approverController = new AbortController();
     this.fencingToken = null; this.seen = new Set(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0 };
+    // Lease keep-alive pacing for claim turns (see keepClaimLease); a property so tests can shrink it.
+    this.leaseRenew = { min: MIN_RENEW_MS, max: MAX_RENEW_MS, fallback: DEFAULT_RENEW_MS, limit: MAX_LEASE_RENEWALS };
   }
 
   // Agent process died: restart with backoff; CRASH_LIMIT crashes inside
@@ -381,6 +384,42 @@ export class Bridge {
     this.queue.push(CLAIM_KEY + claim.id, { signalId: signal.signalId, claim, author: this.members[authorId]?.displayName ?? authorId });
   }
 
+  // Renew a claim's lease while its turn runs. One bare heartbeat every third of
+  // the remaining lease (never faster than 30 s or slower than 15 min), each
+  // answer moving the clock to the new expiry. Any refusal (lapsed, released,
+  // reassigned, rate limited) ends renewal quietly: the server stays the judge
+  // of ownership and this loop never retries or backs off into a flood. At most
+  // MAX_LEASE_RENEWALS per turn, so a hung agent cannot hold work forever.
+  keepClaimLease(claimId, claim) {
+    let stopped = false, timer = null, renewals = 0;
+    const pace = this.leaseRenew, clamp = ms => Math.min(Math.max(ms, pace.min), pace.max);
+    const after = expiresAt => {
+      const left = Date.parse(expiresAt) - Date.now();
+      return Number.isFinite(left) && left > 0 ? clamp(left / 3) : pace.fallback;
+    };
+    const stop = () => { stopped = true; if (timer) clearTimeout(timer); timer = null; };
+    const schedule = ms => {
+      if (stopped || this.controller.signal.aborted) return;
+      timer = setTimeout(tick, ms);
+      timer.unref?.();
+    };
+    const tick = async () => {
+      timer = null;
+      if (stopped || this.controller.signal.aborted || renewals >= pace.limit) return;
+      try {
+        const renewed = await this.room.renewClaim(claimId, this.fencingToken);
+        renewals++;
+        this.stats.renewed = (this.stats.renewed ?? 0) + 1;
+        schedule(after(renewed?.leaseExpiresAt));
+      } catch (error) {
+        this.log(`claim ${claimId} lease not renewed (${error.code ?? error.message}); no further renewals this turn`);
+      }
+    };
+    // A claim with no lease (leaseExpiresAt null) is not time-boxed: nothing to keep alive.
+    if (claim?.leaseExpiresAt) schedule(after(claim.leaseExpiresAt));
+    return { stop, get renewals() { return renewals; } };
+  }
+
   async claimTurn(threadKey, batch) {
     // Receipt identity is per wake, independent of how polling batches it.
     for (const item of batch) await this.claimSignalTurn(threadKey, item);
@@ -411,7 +450,13 @@ export class Bridge {
             this.claimReceipts.save(key, receipt);
             await this.ack(signalIds); return;
           }
-          const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author }), { sessionId });
+          // The turn can outlast the lease: keep it alive while the agent is
+          // actually working, and stop the moment the turn ends.
+          const lease = this.keepClaimLease(claimId, item.claim);
+          let prompted;
+          try { prompted = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author }), { sessionId }); }
+          finally { lease.stop(); }
+          const { recorder, stopReason } = prompted;
           body = renderTurn(recorder, { stopReason });
           this.stats.turns++;
         } catch (error) {
