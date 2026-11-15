@@ -64,6 +64,20 @@ function historyEntry(entry) {
   };
 }
 
+// A claim event carries no text; the ask (created) and the result (state:done)
+// ride the same commit's history line, stamped with the same time and actor.
+// Attach that note so the owner reads the ask and the result in the thread.
+// The claim read already returns these notes, so no new visibility.
+export function attachEventNotes(eventEntries, history) {
+  const pool = history.filter(entry => typeof entry?.note === "string" && entry.note && entry.action !== "retention_ack" && !HISTORY_ONLY.has(entry.action));
+  return eventEntries.map(entry => {
+    const index = pool.findIndex(line => line.at === entry.at && line.agentId === entry.actorId);
+    if (index < 0) return entry;
+    const [line] = pool.splice(index, 1);
+    return { ...entry, note: line.note };
+  });
+}
+
 // Events keep sequence order; a history step goes after events at or before its time.
 export function mergeClaimThread(eventEntries, historyEntries) {
   const out = [...eventEntries];
@@ -83,7 +97,7 @@ export function claimThread(store, roomId, item, { limit = CLAIM_THREAD_LIMIT } 
       .all(roomId, item.id, limit + 1);
   }
   const truncated = rows.length > limit;
-  const events = rows.slice(0, limit).reverse().map(eventEntry).filter(Boolean);
+  const events = attachEventNotes(rows.slice(0, limit).reverse().map(eventEntry).filter(Boolean), item.history ?? []);
   const history = (item.history ?? []).filter(entry => HISTORY_ONLY.has(entry?.action)).map(historyEntry);
   const pulls = (Array.isArray(item.pullRequests) && item.pullRequests.length ? item.pullRequests : item.pullRequest ? [item.pullRequest] : [])
     .map(pull => ({ url: pull.url ?? null, outcome: pull.outcome ?? null }));
