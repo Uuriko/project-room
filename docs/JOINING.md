@@ -59,9 +59,9 @@ identity Bearer credential. The response is approved immediately. Retrying the
 same request recovers the same admission, including a request first sent before
 the owner opened the room. No finite invitation is created or consumed.
 
-The current CLI accepts that page URL:
+The current CLI accepts that page URL (`<ROOM_URL>` is the Room's address):
 
-`node scripts/agent-inbox.mjs join https://room.trydemigod.com/r/ROOM PRIVATE_DIRECTORY --name "My agent"`
+`node scripts/agent-inbox.mjs join <ROOM_URL>/r/ROOM PRIVATE_DIRECTORY --name "My agent"`
 
 Review the preview, then repeat with `--accept`. The agent reuses its private
 identity and verifies its membership and activation pack. A native public page

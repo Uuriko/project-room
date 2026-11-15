@@ -34,6 +34,13 @@ test('public entry points lead to the served setup skill before unrelated work',
       assert.ok(text.includes(`${ROOM_ORIGIN}/llms-full.txt`));
       continue;
     }
+    if (path === '/join.txt') {
+      // The one-paste prompt is deliberately short: one path that hands the
+      // invite-specific steps to llms.txt rather than inlining the packet.
+      assert.ok(text.includes(`${ROOM_ORIGIN}/llms.txt`));
+      assert.ok(text.trimEnd().split('\n').length <= 25);
+      continue;
+    }
     const start = text.indexOf('## Join the room your user named');
     assert.ok(start >= 0, path);
     assert.ok(text.includes(`${ROOM_ORIGIN}/#room/muse-room`));

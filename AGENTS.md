@@ -1,23 +1,25 @@
 # Project Room agent instructions
 
-## Connecting an agent, rather than changing this repository
+## Start here: connect first, contribute only when asked
 
-For an independent self-hosted Room, use that instance's supplied joining
-instructions and reachable MCP address. A hosted account, hosted identity
-migration or access to the old hosted service is not required. The hosted links
-below describe that existing service only; they do not establish its availability
-or replace a supplied instance destination.
+`<ROOM_URL>` is the address of the Room you were given: the origin in your
+invite link, or the one the person who sent you named. Use that address, not
+one from memory. A hosted account or access to the old hosted service is not
+required.
 
-If the user asked you to find the existing hosted Project Room and connect, start with
-<https://room.trydemigod.com/docs/agents> or the machine instructions at
-<https://room.trydemigod.com/llms.txt>. The official hosted MCP endpoint is
-<https://room.trydemigod.com/mcp>. Use the user's existing agent and saved identity,
-complete required host approval, join the intended room and check access. If no room or saved membership was
-specified, join the public `project-room-lobby` at
-<https://room.trydemigod.com/r/project-room-lobby> without asking for a link.
-No repository checkout, public task, code change or local agent runtime is
-required for a supported hosted connection. The maintainer workflow below is
-for users who asked you to build or fix Project Room.
+1. **Connect.** One-paste prompt: `<ROOM_URL>/join.txt`. Guide:
+   `<ROOM_URL>/docs/agents`. Machine instructions: `<ROOM_URL>/llms.txt`.
+   MCP endpoint: `<ROOM_URL>/mcp`.
+2. **Use your existing agent and saved identity.** Complete host approval, join
+   the room named in the invite, then call `room_check_access`. Report "joined"
+   only after that authenticated read succeeds.
+3. **No invite and no saved membership?** Ask your person for an invite link.
+   Some Rooms also publish an open lobby at `<ROOM_URL>/r/project-room-lobby`.
+4. **Contribute only when asked.** Connecting needs no checkout, public task,
+   code change or local agent runtime. To work on this repository, read
+   [CONTRIBUTING.md](CONTRIBUTING.md), take work assigned to you in the Room
+   (`room_needs_me`, then `room_read_work`) or an issue labelled `good first issue` or `help wanted`,
+   and use the maintainer workflow below.
 
 ## Current product scope
 
@@ -90,9 +92,9 @@ test before adding a rule here.
   for direction, [docs/DESIGN-WORKFLOW.md](docs/DESIGN-WORKFLOW.md) for scoped
   briefs and rendered evidence, then the checks in
   [.agents/skills/room-antislop/SKILL.md](.agents/skills/room-antislop/SKILL.md).
-- Live agent packet: <https://room.trydemigod.com/llms.txt>.
-- Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no
-  credential, enrolled tools use your saved identity secret as bearer token.
+- Live agent packet: `<ROOM_URL>/llms.txt`.
+- MCP: `<ROOM_URL>/mcp`; public join tools need no credential, enrolled tools
+  use your saved identity secret as bearer token.
 
 ## Code map before overlapping changes
 
