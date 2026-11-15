@@ -142,6 +142,7 @@ import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   frontDoorHtml, GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider } from "./oauth-provider.mjs";
+import { isLoopbackRedirectUri } from "./oauth-client-contract.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
 
@@ -420,6 +421,7 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
   githubToken = undefined,
   mcpEventTransport, mcpEventDnsResolvers, mcpEventExternalScheduler = false,
   mcpOAuthClients = [], // Explicit verified public-client registrations; empty disables native MCP OAuth.
+  mcpOAuthLoopback = false, // Self-host opt-in: also accept dynamic registration of loopback redirect URIs (RFC 8252 7.3), so native MCP clients can connect without a configured client list.
   accountAgentEnrollmentEnabled = false, // Readers-first rollout: explicit server opt-in only.
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
@@ -610,7 +612,7 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
     if(refusal)throw refusal;
     return result;
   };
-  const oauthResource = mcpOAuthClients.length ? new URL("/mcp", origin).href : null;
+  const oauthResource = mcpOAuthClients.length || mcpOAuthLoopback === true ? new URL("/mcp", origin).href : null;
   if (oauthResource) mcpOAuthResourceMetadata(oauthResource, origin);
   const accountAgentEnrollment = createAccountAgentEnrollment({store,resource:oauthResource,preferences:mcpOAuthClients,enabled:accountAgentEnrollmentEnabled===true&&Boolean(oauthResource)});
   // ROOM_CONNECT_FUNNEL (off): aggregate-only connect funnel in /api/health.
@@ -619,7 +621,7 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
   const mcpClientIds = new Set(mcpOAuthClients.map(client => client.clientId));
   const mcpRedirects = new Set(mcpOAuthClients.flatMap(client => client.redirectUris));
   const isMcpClient = id => mcpClientIds.has(id) || typeof id === "string" && id.startsWith("mcp_dcr_")
-    && Boolean(oauthProvider.getClient(id)?.redirectUris.every(uri => mcpRedirects.has(uri)));
+    && Boolean(oauthProvider.getClient(id)?.redirectUris.every(uri => mcpRedirects.has(uri) || mcpOAuthLoopback === true && isLoopbackRedirectUri(uri)));
   const isClaudeClient = id => isMcpClient(id) && oauthProvider.getClient(id)?.redirectUris
     .includes("https://claude.ai/api/mcp/auth_callback");
 
@@ -1474,7 +1476,7 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
         roomAuth, roomCredentials, expectedBinding, accountBinding,
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
         accountCookieName, roomCookieName, tokenPattern, accountView: sessionAccountView,
-        signInSlotToken, magicMailer, magicEmailLimit, passkeys, oauthProvider, inviteOAuth, oauthResource, mcpRedirects,
+        signInSlotToken, magicMailer, magicEmailLimit, passkeys, oauthProvider, inviteOAuth, oauthResource, mcpRedirects, mcpOAuthLoopback,
         githubClient: github, googleClient: google,
         magicRequestEmailLimiter, magicConsumeEmailLimiter,
         resetRequestEmailLimiter, resetConsumeEmailLimiter, signupEmailLimiter,
