@@ -5,6 +5,8 @@ export const USAGE = `Usage:
   room-acp import-identity      save a scoped connection for your existing identity
   room-acp run                  run with the credential saved by an earlier join
   room-acp doctor               list detected ACP agents and their capabilities
+  room-acp doctor --connection  check that each saved connection still works (no model prompt)
+  room-acp mcp-config --mcp <claude|codex>  print how to add the saved Room to that MCP host (no secret in it)
   room-acp status               show the saved connection (never the credential)
   room-acp logout               forget the saved credential
 Options:
@@ -15,6 +17,9 @@ Options:
   --receiver-policy <respond|disabled|notify-cloud>  explicit receiver role (default respond)
   --observe-stages                     print metadata-only timing events for run/respond (default off)
   --notify-config <file>                private existing-cloud config; required for notify-cloud
+  --no-listen                           join and save the connection only; do not start an agent
+  --mcp <claude|codex>                  after joining, set up this MCP host (implies --no-listen)
+  --connection                          with doctor: check saved connections instead of ACP adapters
   --max-sessions <n>                    concurrent agent sessions (default 4)
   --respond-to <owner|anyone>           whose mentions start a turn (default anyone; Room policy still applies)
   --permission-approver <member-id|none>  explicitly trust a Room human for host tool approvals (default disabled)
@@ -26,7 +31,7 @@ Options:
   --identity-from <directory>           existing private CLI connection for import-identity
   -h, --help                            show this help`;
 
-const VALUE = new Set(["--notify-config", "--receiver-policy", "--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin", "--room", "--permission-approver", "--identity-from", "--credential-file", "--expected-identity"]);
+const VALUE = new Set(["--notify-config", "--receiver-policy", "--mcp", "--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin", "--room", "--permission-approver", "--identity-from", "--credential-file", "--expected-identity"]);
 
 export function parseArgs(argv) {
   const options = { command: null, link: null, agent: null, agentCmd: null, cwd: null, mode: null, maxSessions: 4, receiverPolicy: "respond", respondTo: "anyone", name: null, origin: null, room: null, help: false };
@@ -34,6 +39,8 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--observe-stages") { options.observeStages = true; continue; }
+    if (arg === "--no-listen") { options.noListen = true; continue; }
+    if (arg === "--connection") { options.connection = true; continue; }
     if (arg === "-h" || arg === "--help") { options.help = true; continue; }
     if (VALUE.has(arg)) {
       const value = argv[++i];
@@ -52,9 +59,14 @@ export function parseArgs(argv) {
   if (options.permissionApprover !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(options.permissionApprover)) throw new Error("--permission-approver must be an exact member ID or none");
   const [first, ...rest] = positional;
   if (rest.length) throw new Error(`unexpected argument ${rest[0]}`);
-  if (["doctor", "status", "logout", "run", "import-identity", "import-credential"].includes(first)) options.command = first;
+  if (["doctor", "status", "logout", "run", "import-identity", "import-credential", "mcp-config"].includes(first)) options.command = first;
   else if (first) { options.command = "join"; options.link = first; }
   else options.command = options.help ? "help" : "run";
+  if (options.mcp !== undefined && !["claude", "codex"].includes(options.mcp)) throw new Error("--mcp must be claude or codex");
+  if (options.noListen && options.command !== "join" && !options.help) throw new Error("--no-listen applies only to joining with an invite link");
+  if (options.connection && options.command !== "doctor" && !options.help) throw new Error("--connection applies only to doctor");
+  if (options.command === "mcp-config" && options.mcp === undefined && !options.help) throw new Error("mcp-config needs --mcp claude or --mcp codex");
+  if (options.mcp !== undefined && !["join", "mcp-config"].includes(options.command) && !options.help) throw new Error("--mcp applies only to joining or mcp-config");
   if (options.receiverPolicy !== "respond" && options.command !== "run" && !options.help)
     throw new Error("--receiver-policy disabled or notify-cloud applies only to run; it does not join, import or change saved access");
   if (!options.help && (options.receiverPolicy === "notify-cloud") !== (typeof options.notifyConfig === "string"))
