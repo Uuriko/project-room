@@ -1,7 +1,9 @@
 # Agent-first work, with a small human view
 
-Comparison checkpoint: November 16, 2026 UTC. Room baseline is the deployed
-`8f1caea3cecacb1e756911dc3800a253e36bbcf3`. This is a primary-document/source
+Comparison checkpoint: November 16, 2026 UTC. The initial comparison used
+`8f1caea3cecacb1e756911dc3800a253e36bbcf3`; the follow-up source audit below uses
+merged checkpoint `84027d7c2`. These are dated baselines, not current deployment
+discovery. This is a primary-document/source
 comparison plus a real Room contribution trial, not a timed cross-product test.
 Competitor features below are documented behavior, not independently qualified
 on this Mac. Missing evidence is not evidence that a competitor lacks a feature.
@@ -161,6 +163,7 @@ proof that a product requirement works.
 | [`server/available-work.mjs`](../server/available-work.mjs) | Board availability checks unmet dependencies and supersession; accepted work is mapped onto board records | Some legacy callers catch a board read failure as an empty list. A future pickup answer must preserve unknown versus verified empty |
 | [`server/work-item-board.mjs`](../server/work-item-board.mjs) | Work/result gates map onto board state; board-native CI/deploy enrichments are preserved | Existing receipt fields are not proof that a live external integration observes every relevant change |
 | [`server/room-activation-pack.mjs`](../server/room-activation-pack.mjs), `briefActivationPack` | Bounded onboarding; `pickUp` considers available claims then unclaimed open work, with a first-item suggestion | It does not use the member-specific attention ordering. “Top open” is not a supported claim of highest project value or a personal assignment |
+| [`server/project-state.mjs`](../server/project-state.mjs), `buildProjectState` and `readProjectState` | An existing bounded, viewer-scoped project read already composes work, attention, serving-build identity and receipt observations | At the audit checkpoint it skips `delivered` items before constructing `needsYou`/`needsHuman`, hiding pending review/decision roles. It is not in saved-member core discovery. Fix this existing path before adding a new project-read tool |
 | [`server/orient.mjs`](../server/orient.mjs) and activation pack normalized branches | Windowed current reads explicitly report omissions, including board claims and some older next-action data | Absence from a window or an omitted source cannot establish that the whole project has no useful work |
 | [`client/work-preparation.mjs`](../client/work-preparation.mjs), `workContinuation` | Selected work yields a supported tool, known arguments and explicit missing inputs for pickup, correction and review | Not every lifecycle step has a callable hint. Null must remain honest; do not fabricate an operation |
 | [`server/work-context.mjs`](../server/work-context.mjs), [`src/work-packet.js`](../src/work-packet.js) | Relevant current evidence, role/scope, source pointers and explicit context omissions | Repository setup and current external state still require selected authoritative reads |
@@ -355,3 +358,60 @@ The main risk is adding more state that agents must keep current. The simpler
 alternative is the existing core loop with better task framing and consistent
 selected reads. Start there. Missing goals or subjective tradeoffs still require
 human/agent judgment; a mechanically neat task list cannot solve those by itself.
+
+### Reconciliation of the November 16 independent critiques
+
+John supplied three independent critiques, including the published
+[carrying-work-forward report](https://project-room-carrying-work-forward-after-qoqp.pages.grok.bot/).
+They converge on cross-item continuation, external delivery observations and
+interruption recovery. Their proposals are inputs to this design, not new
+assignments or proof that every claimed gap exists on the supported path.
+
+The first useful correction to this audit is the existing `room_project_state`:
+it should be evaluated before introducing a `room_next` tool or another frontier
+surface. A regression reproduced the `delivered` omission described in the table
+above. A bounded repair is being tested separately; do not infer its merge or
+deployment from this design document.
+
+Other source checks narrow the recommendations:
+
+- Work proposals already preserve `dependsOn`; the remaining question is its
+  identifier space, propagation and enforcement across current readers and the
+  board bridge. Do not add a duplicate dependency field or call an accepted
+  item ready solely because its task-level continuation says start.
+- At the baseline, the saved-member default is 20 tools and the unfiltered core
+  snapshot includes four additional join helpers. `room_project_state` has
+  common focus membership, not just work/review membership. Byte counts require
+  the exact discovery variant and serialization method; different totals alone
+  do not establish drift.
+- A live read of the existing Node job-health endpoint showed `claim-prs`
+  registered but idle, with no relevant work waiting and no recorded run. A
+  read-only Commons database query found no deploy-receipt messages. These facts
+  do not prove either successful sync or a missing scheduler; qualify a selected
+  real PR rather than add a competing poller.
+- `SOURCE_REVISION` and Room's `/api/version` identify the Room service itself.
+  A project may have another repository, artifact and environment. Any delivery
+  observation must bind those sources before suggesting integration/deployment
+  status. Receipt order and abbreviated SHA matching must not become general
+  proofs of ancestry or artifact inclusion.
+- A disconnected runtime or expired write scope does not authorize a different
+  member to take its assignment. Prefer truthful lease/progress information and
+  existing triage/reassignment actions before a new reaper or automatic reclaim.
+  Investigate the published inactivity norm separately from fixed lease expiry.
+- The metrics adaptation's exact source is `buzz-app`'s
+  `src/features/developer/client-metrics.ts`, as recorded in
+  [`third_party/buzz-metrics/NOTICE`](../third_party/buzz-metrics/NOTICE).
+  A critique's inferred Rust turn-metric provenance is incorrect. Broader OSS
+  imports and licensing claims require checking exact source/NOTICE files;
+  this review selects no additional import.
+
+Keep the implementation order bounded: repair current attention/discovery,
+then demonstrate dependency readiness and selected source/environment evidence
+on the real supported path. An optional structured result envelope, explicit
+decision supersession or a lease-notice repair may follow a demonstrated
+consumer need. Do not bundle a ranker, new work states, typed activity system,
+sweeper and automatic follow-up creation into one supposedly small read change.
+Results still finish according to their actual goal: accepted design or research
+does not need a deployment rung. A meaningful next experiment should reproduce
+one failure, repair it and exercise a real continuation before a large task
+battery; equalize review effort when comparing workflows.
