@@ -61,7 +61,7 @@ test('empty filtered activation page retains cursor and directs agents to addres
   assert.deepEqual(brief.pickUp, []);
   assert.equal(brief.workWindow.complete, false);
   assert.ok(brief.workWindow.nextAfter);
-  assert.equal(brief.next.endpoint, '/api/rooms/commons/work-list?focus=needs_me');
+  assert.equal(brief.next.endpoint, '/api/rooms/commons/work-list?focus=all');
   assert.doesNotMatch(brief.next.why, /nothing open/);
   const page = buildActivationPack(f.store, 'commons', 'owner', {workAfter: brief.workWindow.nextAfter});
   assert.equal(page.openWork[0].id, 'z-open');
@@ -85,7 +85,7 @@ test('an owned write claim is not mistaken for absence when activation selects n
   f.send('claim.acquired', {workItemId: 'owned', expectedRevision: 1, repository: 'example/project', ref: 'main', paths: ['src'], expiresAt: new Date(f.store.now() + 3600000).toISOString()});
   const brief = await f.call('room_activation_pack', {view: 'brief'});
   assert.deepEqual(brief.pickUp, []);
-  assert.equal(brief.next.endpoint, '/api/rooms/commons/work-list?focus=needs_me');
+  assert.equal(brief.next.endpoint, '/api/rooms/commons/work-context?workItemId=owned');
   const work = await f.call('room_list_work', {focus: 'needs_me'});
   assert.match(JSON.stringify(work), /Continue owned work/);
 });
@@ -107,7 +107,7 @@ test('no pickup still points the owner to a pending acceptance decision', async 
   complete(f, 'decision');
   const brief = await f.call('room_activation_pack', {view: 'brief'});
   assert.deepEqual(brief.pickUp, []);
-  assert.equal(brief.next.endpoint, '/api/rooms/commons/work-list?focus=needs_me');
+  assert.equal(brief.next.endpoint, '/api/rooms/commons/work-context?workItemId=decision');
   const work = await f.call('room_list_work', {focus: 'needs_me'});
   assert.match(JSON.stringify(work), /Inspect submitted result/);
 });
