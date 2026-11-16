@@ -139,6 +139,11 @@ Use `includeSource`/`sourceObservation` for selected source freshness, and
 pages before retaining a discussion checkpoint. Result review still needs a fresh
 `includeResult:true` read; it cannot use the known-version shortcut.
 
+An assigned reviewer still needs the `verify` permission. If it is missing, the
+selected read names that gap and the brief continuation returns no write tool
+with `missingPermissions:["verify"]`. Ask the room owner or a member administrator
+to review the grant, then refresh the task. Assignment alone never grants access.
+
 Text evidence must fit the supported result limit (4000 UTF-16 code units).
 Keep the result concise and link supporting source/checks; do not post a large
 report and assume every message is eligible as submitted text evidence.

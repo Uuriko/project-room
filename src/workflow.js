@@ -2,6 +2,13 @@ import { uiText } from "./strings.js";
 import { workProgress } from "./work-packet.js";
 import { EVENT_TYPES as T, WORK_STATES as S, validId, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass } from "./events.js";
 
+// Assignment identifies who should review; it does not grant permission.
+export const REVIEW_PERMISSION_GUIDANCE = "You are the assigned reviewer but are missing the verify permission. Ask the room owner or a member administrator to review that permission grant, then read this task again. Do not attempt to record a verdict until access is confirmed.";
+export function missingReviewPermission(next, member) {
+  return next.action === "verify" && next.memberId === member.id && member.active !== false
+    && Array.isArray(member.permissions) && !member.permissions.includes("verify");
+}
+
 // Reuse content, never a prior assignment, permission, result or source relationship.
 export function reusableWorkDefinition(work) {
   if (!work || typeof work !== "object" || Array.isArray(work)) throw new Error("Choose an existing work definition");

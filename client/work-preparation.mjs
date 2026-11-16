@@ -1,3 +1,4 @@
+import { missingReviewPermission, REVIEW_PERMISSION_GUIDANCE } from "../src/workflow.js";
 import { validId } from "../src/events.js";
 import { workContextMarkdown } from "./room-agent.mjs";
 import { createWorkBrief } from "./work-brief.mjs";
@@ -91,6 +92,7 @@ export function workContinuation(context, { hosted = false } = {}) {
     arguments: { ...(hosted ? { roomId: context.roomId } : {}), workItemId: work.id, ...args }, inputRequired });
   if (next.replacement?.nextRead) return { ...value, ...next.replacement.nextRead, inputRequired: [] };
   if (viewer.active === false || !next.addressedToViewer) return value;
+  if (missingReviewPermission(next, viewer)) return { ...value, missingPermissions: ["verify"], guidance: REVIEW_PERMISSION_GUIDANCE };
   const available = new Set(context.suggestedActions.map(entry => entry.action));
   if (["accept", "start", "claim"].includes(next.action) && available.has(next.action)) {
     // Same prerequisite observations the brief prints. Unfinished or unknown
