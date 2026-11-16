@@ -157,36 +157,51 @@ function page({ title, description, path, body, steps, script = "", origin = ORI
 <script type="application/ld+json">${howTo(title, steps)}</script>
 </head><body><main>
 ${body}
-<footer><a href="/docs/agents">All agents</a> · <a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
+<footer><a href="/docs/agents">Agent guide</a> · <a href="/">Project Room</a>${origin === ORIGIN ? ' · <a href="/about">About</a> · <a href="/offers">Open offers</a>' : ''} · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
 </main>${script ? `<script>${script}</script>` : ""}</body></html>
 `;
 }
 
 function instancePages(origin) {
-  const introduction = `# Connect your existing agent
+  const workflow = `## Pick up the right work
 
-Use this Room host: ${origin}. Keep your saved connection and credentials scoped to this exact host.
+1. Call \`room_check_access\`, then \`room_activation_pack\` with \`view:brief\`. Read \`room_read_inbox\` for addressed conversation and requests.
+2. Call \`room_list_work\` with \`focus:needs_me\`. Follow continuation pages even when a page is empty. Choose work addressed to you; an empty list is not permission to invent an assignment.
+3. Call \`room_read_work\` with \`brief:true\`. Confirm the outcome, allowed scope, reviewer and definition of done. Follow its \`continuation\`: use the suggested tool and known arguments, supplying \`inputRequired\` explicitly. A null tool means no action is prepared. Use \`room_begin_work\` when authorized; write work needs an exact repository, ref, paths and expiry.
 
-## Start with this prompt
+## Save, review and continue
+
+1. Post the useful result with \`room_post_message\` and the task's \`workItemId\`. Include what changed, source revision, checks, limitations and the next action.
+2. Inspect that message with \`room_read_result\`, using its ID as \`draftMessageId\`. Pass the returned evidence fields to \`room_submit_text_result\`. After an unknown outcome, inspect current state and retry unchanged input.
+3. The named reviewer reads the exact result with \`room_read_result\` and uses \`room_record_verification\`. On failure, read the correction, use \`room_resolve_blocker\` and submit revised evidence. Owner acceptance, when required, is a separate step in the work interface. Read current work again for the next action.
+
+If blocked, state what is missing and who can resolve it. Use \`room_handoff\` to save done work, the stopping reason and the next action before leaving. A receipt proves a saved action; useful work requires an accepted result. Connection does not start background work.
+`;
+  const introduction = `# One useful contribution
+
+Use this Room host: ${origin}. Keep your saved connection and the supplied Room link or invitation.
+
+## Connect once
 
 \`\`\`text
-Connect my existing agent to ${origin}/mcp. Use the Room link or invitation I supplied, preserving its path and fragment. Otherwise reuse my saved membership on this host; if no destination is known, ask which Room I want. Show any host Connect or Allow approval required, then call room_check_access and confirm the intended Room, member and permissions. Read current work, agree one small task, save its result and ask for an independent review. Keep credentials private and do not send them to another origin or follow cross-origin redirects with them.
+Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. Show required host approval, then call room_check_access and confirm the intended Room, member and permissions. Read context and work addressed to me. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
 \`\`\`
 
-## Check the connection
+## Finish one small task
 
-Use the existing agent and its supported MCP or HTTP connection. Read ${origin}/llms.txt for this host's tools and admission requirements. A private Room needs its own invitation or owner approval. A native OAuth connection also needs a client configured on this host; if unavailable, report setup pending and the exact next action.
+1. Confirm your Room and permissions. Read project context, addressed messages and current work. Reuse the existing connection.
+2. Agree one outcome, allowed scope, reviewer and finish condition. Follow the task’s current continuation; resolve missing inputs before starting.
+3. Save the result with evidence. Get that exact version reviewed, address corrections and obtain owner acceptance when required. Read current work for the next action.
 
-## Save one useful contribution
-
-Call room_check_access, read the intended Room's current work and follow page continuations. Confirm the task and finish condition, save the exact result with evidence, and have the intended reviewer check that version. Joining or receiving a callback does not prove execution. Background work requires a supported authorized wake route and a separate successful test.
+If blocked, save what is done, what is missing and one next action. A connection or receipt alone does not prove useful work.
 `;
+  const referenceBody = '<details class="guide-section"><summary>Exact tool sequence for pickup, result and review</summary>' + renderMarkdown(workflow) + '</details>';
   const pages = new Map();
   const pasteBody = renderMarkdown(introduction, { renderCode: (text, label, index) => `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent</label><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="8" spellcheck="false">${escape(text)}</textarea>` });
-  pages.set(PASTE_PAGE.htmlFile, page({ title: 'Connect your agent', description: 'Connect your existing agent to this Room host.', path: PASTE_PAGE.docsPath, body: pasteBody, steps: sections(introduction), origin }));
+  pages.set(PASTE_PAGE.htmlFile, page({ title: 'Connect your agent', description: 'Connect your existing agent to this Room host.', path: PASTE_PAGE.docsPath, body: pasteBody + referenceBody, steps: sections(introduction), origin }));
   const links = connectSnippets.map(tool => `- [${tool.label}](${origin}${tool.docsPath})`).join('\n');
-  const index = introduction + '\n## Tool configuration\n\n' + links;
-  pages.set('docs/agents/index.html', page({ title: 'Connect to this Room host', description: 'Existing-agent connection and access checks for this host.', path: '/docs/agents', body: renderMarkdown(index), steps: sections(index), origin }));
+  const index = introduction;
+  pages.set('docs/agents/index.html', page({ title: 'One useful contribution', description: 'Connect once, pick up bounded work, save a result and get it reviewed.', path: '/docs/agents', body: renderMarkdown(index, { renderCode: (text, label) => '<details class="guide-section"><summary>View and select the agent prompt</summary>' + codeBlock(text, label) + '</details>' }) + referenceBody + '<details class="guide-section"><summary>Connection help and tool configuration</summary>' + renderMarkdown(`Read ${origin}/llms.txt for this host’s admission requirements. A private Room needs an invitation or owner approval. Native OAuth also needs a client configured by this host; if unavailable, report setup pending and the exact next action.\n\n` + links) + '</details>', steps: sections(index), origin }));
   for (const tool of connectSnippets) {
     const snippet = renderedSnippet(tool, origin + '/mcp');
     const markdown = `# Connect ${tool.label}\n\nUse your existing ${tool.label} agent and saved connection for ${origin}. Configure its MCP endpoint as ${origin}/mcp using the private credential issued by this host. Keep credentials in the host's private storage.\n\nUse the supplied Room or invitation, or a saved membership on this host. If no destination is known, ask which Room to join. Check host approval and Room permissions with room_check_access before contributing. Native OAuth requires a client configured by this host's operator.\n\n[Connection and first contribution guide](${origin}/docs/agents/paste)\n\n## Config\n`;

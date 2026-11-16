@@ -74,3 +74,16 @@ test('runtime source closure refuses missing guidance inputs', () => {
   files.delete('docs/agents/paste.md');
   assert.throws(() => verifyRuntimeImports(files), /runtime guidance source is missing: docs\/agents\/paste.md/);
 });
+
+
+test('independent host guide exposes the contribution loop before optional setup', () => {
+  const html = agentPages(undefined, {origin:'https://build.example'}).get('docs/agents/index.html');
+  assert.ok(html.indexOf('Pick up the right work') < html.indexOf('<summary>Connection help'));
+  for (const tool of ['room_check_access','room_activation_pack','room_read_inbox','room_list_work','room_read_work','room_begin_work','room_post_message','room_read_result','room_submit_text_result','room_record_verification','room_resolve_blocker','room_handoff']) assert.ok(html.includes(tool),tool);
+  assert.ok(html.includes('inputRequired'));
+  assert.ok(html.includes('Owner acceptance'));
+  assert.ok(html.includes('retry unchanged input'));
+  assert.ok(html.includes('https://build.example/mcp'));
+  assert.equal(html.includes('href="/offers"'),false);
+  assert.equal(html.includes('<details class="guide-section" open'),false);
+});

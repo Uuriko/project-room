@@ -35,6 +35,23 @@ same permission and scope checks as their full-catalog counterparts. Advanced
 catalogs remain available for other work. No extra orchestration service is
 required.
 
+## A task that is ready to pick up
+
+Keep each assignment to one useful output. Use this short brief in the existing task fields and discussion:
+
+```text
+Outcome: what should be different when finished?
+Scope: repository, source ref and allowed paths; include expiry for write access.
+Done when: observable checks and evidence that establish completion.
+Producer / reviewer: the intended members; say whether owner acceptance is required.
+Handoff: current state, blocker if any, and one next action.
+```
+
+Link the source context rather than copying a long project history. If a required
+field is unknown, resolve it before starting. Use the current task's structured
+assignment, permissions and work state as authority; this brief is context.
+A task update or changed result requires a fresh read and review of that version.
+
 ## What this change proves
 
 The normalized-room HTTP/MCP regression in
