@@ -14,29 +14,31 @@ export function renderLobbyAgentPastePage(html){
 
 // The prompt remains selectable without JavaScript; reveal copy controls only when ready.
 export const AGENT_PASTE_COPY_SCRIPT = `(() => {
-  const lobby = typeof location !== 'undefined' && new URLSearchParams(location.search).get('room') === 'project-room-lobby';
+  // Destination is rendered by the server. Query strings never rewrite it here.
+  let active = true;
+  globalThis.addEventListener?.('pagehide', () => { active = false; }, { once: true });
   document.querySelectorAll('[data-copy-prompt]').forEach(button => {
     const field = document.getElementById(button.dataset.copyPrompt);
     const status = document.getElementById(button.dataset.copyPrompt + '-status');
     if (!field || !status) return;
-    if (lobby && button.dataset.copyPrompt === 'agent-paste-prompt-1') {
-      field.value = ${JSON.stringify(PUBLIC_LOBBY_CONNECT_PROMPT)};
-      const heading = document.querySelector('h1');
-      if (heading) heading.textContent = 'Connect to the public lobby';
-    }
     button.hidden = false;
     button.addEventListener('click', async () => {
+      if (button.disabled || !active) return;
       button.disabled = true;
+      status.textContent = 'Copying…';
+      let timeout;
       try {
         if (!navigator.clipboard?.writeText) throw new Error('unavailable');
-        await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))]);
+        await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => timeout = setTimeout(() => reject(new Error('timeout')), 1000))]);
+        if (!active || button.isConnected === false) return;
         status.textContent = 'Copied. Paste into your agent.';
       } catch {
+        if (!active || button.isConnected === false) return;
         const preview = field.closest?.("details");
         if (preview) preview.open = true;
         field.focus(); field.select();
         status.textContent = 'Copy the selected prompt, then paste it into your agent.';
-      } finally { button.disabled = false; }
+      } finally { globalThis.clearTimeout?.(timeout); button.disabled = false; }
     });
   });
 })();`;
