@@ -1,0 +1,14 @@
+Block Buzz client performance metrics
+Copyright 2026 Block, Inc.
+Licensed under the Apache License, Version 2.0; see LICENSE in this directory.
+
+Source: block/buzz-app
+Revision: 3fca4520a53dc5618c908361e332b84ff45dba6a
+Path: src/features/developer/client-metrics.ts
+https://github.com/block/buzz-app/blob/3fca4520a53dc5618c908361e332b84ff45dba6a/src/features/developer/client-metrics.ts
+
+client/operation-metrics.mjs adapts the percentile calculation, bounded push
+buffer and numeric request-record/summary approach. Room removes channel/session
+identifiers, browser observers, timers, user-agent and URLs, adds fixed operation
+labels and input validation, reports p95 and dropped records, and defaults off.
+No Buzz artwork, fonts, branding or bundled third-party product assets are used.

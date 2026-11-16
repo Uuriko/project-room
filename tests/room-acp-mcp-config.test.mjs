@@ -48,7 +48,7 @@ test("join --mcp claude writes a private header file and prints a command with n
   for (const secret of [saved.credential, saved.identitySecret, inviteCode]) assert.ok(!text.includes(secret), "the printed setup must not contain a secret");
   assert.match(text, /claude mcp add-json project-room /);
   assert.match(text, /headersHelper/);
-  assert.ok(text.includes(`${room.origin}/mcp?profile=full`));
+  assert.ok(text.includes(`${room.origin}/mcp`));
   // The header file is not mistaken for a saved connection.
   assert.equal(readdirSync(room.home).filter(name => name.endsWith(".json")).length, 1);
   assert.equal(loadConnection({}, room.env).roomId, "commons");
@@ -56,6 +56,12 @@ test("join --mcp claude writes a private header file and prints a command with n
   const response = await fetch(`${room.origin}/mcp`, { method: "POST", headers: { ...headers, "content-type": "application/json", accept: "application/json, text/event-stream" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } }) });
   assert.equal(response.status, 200);
+  const toolsResponse = await fetch(`${room.origin}/mcp`, { method: "POST", headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }) });
+  const tools = (await toolsResponse.json()).result.tools.map(tool => tool.name);
+  for (const name of ["room_begin_work", "room_submit_text_result", "room_read_result", "room_record_verification"])
+    assert.ok(tools.includes(name), `${name} must be available without the full profile`);
+  assert.ok(tools.length < 30, "new native connections use the compact complete-work catalog");
 });
 
 test("mcp-config codex prints a TOML block and reuses the saved connection; logout removes the header file", async t => {
@@ -66,7 +72,7 @@ test("mcp-config codex prints a TOML block and reuses the saved connection; logo
   assert.equal(code, 0, text);
   assert.match(text, /\[mcp_servers\.project-room\]/);
   assert.match(text, /http_headers_helper = /);
-  assert.ok(text.includes(`${room.origin}/mcp?profile=full`));
+  assert.ok(text.includes(`${room.origin}/mcp`));
   assert.ok(!text.includes(loadConnection({}, room.env).identitySecret));
   assert.ok(statSync(mcpHeadersFile("commons", room.env)).isFile());
   assert.equal((await run(["logout"], { env: room.env })).code, 0);
@@ -83,7 +89,7 @@ test("mcp-config without a saved connection says how to join instead of failing 
 test("mcpHostLines quotes a path with spaces and a single quote safely", () => {
   const connection = { apiBase: "https://room.example.net/" };
   const [, line] = mcpHostLines(connection, "claude", "/home/a b/it's/x.headers.json", "linux");
-  assert.ok(line.includes("https://room.example.net/mcp?profile=full"));
+  assert.ok(line.includes("https://room.example.net/mcp"));
   assert.ok(!line.includes("net//mcp"));
   // Round trip through a real shell: the JSON the host receives must hold the exact reader command.
   if (process.platform !== "win32") {

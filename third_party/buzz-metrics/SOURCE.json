@@ -1,0 +1,9 @@
+{
+  "repository": "block/buzz-app",
+  "revision": "3fca4520a53dc5618c908361e332b84ff45dba6a",
+  "path": "src/features/developer/client-metrics.ts",
+  "gitBlob": "2d56d03a6cbfd25ac5381077386026fc1051f35c",
+  "sourceUrl": "https://github.com/block/buzz-app/blob/3fca4520a53dc5618c908361e332b84ff45dba6a/src/features/developer/client-metrics.ts",
+  "adaptation": "client/operation-metrics.mjs",
+  "license": "Apache-2.0"
+}

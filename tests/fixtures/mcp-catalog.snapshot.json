@@ -263,7 +263,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "1698c672b1be94ee",
+      "inputSchema": "b37379c75391f016",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1255,7 +1255,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "1698c672b1be94ee",
+      "inputSchema": "b37379c75391f016",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1937,7 +1937,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "1698c672b1be94ee",
+      "inputSchema": "b37379c75391f016",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2571,7 +2571,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "1698c672b1be94ee",
+      "inputSchema": "b37379c75391f016",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -3247,7 +3247,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "1698c672b1be94ee",
+      "inputSchema": "b37379c75391f016",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

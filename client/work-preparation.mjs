@@ -107,9 +107,17 @@ export function workContinuation(context, { hosted = false } = {}) {
   return value;
 }
 
+export function validKnownWorkBrief(args) {
+  return args.knownBriefVersion === undefined || typeof args.knownBriefVersion === "string"
+    && /^[a-f0-9]{64}$/.test(args.knownBriefVersion) && args.brief === true
+    && args.workItemIds === undefined && args.includeResult !== true && args.includeDiscussion !== true
+    && args.discussionSince === undefined;
+}
+
 // A single selection keeps its existing response. Batches reuse the same reads,
 // preserve caller order and fail closed; no partial successful packet is returned.
 export async function readWorkSelection(client, args, { signal, hosted = false } = {}) {
+  if (!validKnownWorkBrief(args)) throw new Error("knownBriefVersion requires one brief task read without result or discussion preparation");
   const batch = args.workItemIds !== undefined;
   const ids = batch ? args.workItemIds : [args.workItemId];
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > 4 || !ids.every(validId)
@@ -134,10 +142,18 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
       for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = context.roomId;
       if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = context.roomId;
     }
-    return (args.brief ?? batch) ? { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
+    if (!(args.brief ?? batch)) return context;
+    const brief = await createWorkBrief(context);
+    const identity = { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
-      continuation: workContinuation(context, { hosted }),
-      brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } }), briefVersion: (await createWorkBrief(context)).version, ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) } : context;
+      continuation: workContinuation(context, { hosted }), briefVersion: brief.version };
+    if (args.knownBriefVersion === brief.version) return { ...identity, briefUnchanged: true,
+      evaluatedAt: context.evaluatedAt,
+      guidance: "Reuse your retained brief for this identity and task. Authority and continuation were freshly read; omitted source, discussion and external evidence are not certified unchanged. Read without knownBriefVersion if that brief is unavailable." };
+    return { ...identity,
+      brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } }),
+      ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) };
+
   };
   const worker = async () => {
     try {
