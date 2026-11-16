@@ -12,6 +12,7 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { availableBoardRows } from '../server/available-work.mjs';
 import { replay, event, PERMISSIONS } from '../src/events.js';
 import { assertDependsOnKnown } from '../server/work-claim-integrity.mjs';
+import { readWorkSelection } from '../client/work-preparation.mjs';
 
 async function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'room-dependencies-'));
@@ -230,7 +231,16 @@ test('native HTTP selected dependency and read start agree before and after save
   const data={workItemId:'reader',expectedRevision:f.item('reader').revision};
   const before=f.store.headSequence('commons');await assert.rejects(client.command({id:'blocked-start',type:'work.started',data}),e=>e.code==='work_claim_dependencies_unmet');assert.equal(f.store.headSequence('commons'),before);
   assert.equal((await client.workContext('reader')).dependencies[0].satisfied,false);
+  const waitingBrief=await readWorkSelection(client,{workItemId:'reader',brief:true});
+  assert.match(waitingBrief.brief,/Do not claim or start/);
   f.start('base');const saved=f.complete('base');assert.deepEqual((await client.workContext('reader')).dependencies,[{id:'base',state:'done',satisfied:true}]);
+  const releasedBrief=await readWorkSelection(client,{workItemId:'reader',brief:true,knownBriefVersion:waitingBrief.briefVersion});
+  assert.equal(releasedBrief.revision,waitingBrief.revision,'prerequisite release does not mutate the dependent');
+  assert.notEqual(releasedBrief.briefVersion,waitingBrief.briefVersion,'dependency-only changes must invalidate cached brief text');
+  assert.equal(releasedBrief.briefUnchanged,undefined);
+  assert.match(releasedBrief.brief,/base: done \(satisfied\)/);
+  const unchanged=await readWorkSelection(client,{workItemId:'reader',brief:true,knownBriefVersion:releasedBrief.briefVersion});
+  assert.equal(unchanged.briefUnchanged,true,'unchanged dependencies retain the shortcut');
   const command={id:'start-reader',type:'work.started',data};const first=await client.command(command),retry=await client.command(command);assert.equal(retry.duplicate,true);assert.equal(retry.sequence,first.sequence);assert.equal(f.item('reader').state,'working');
   assert.equal(f.store.workResult(f.key,'commons','base').result.receipt.eventId,saved.event.id);
 });

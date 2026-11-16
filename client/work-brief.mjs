@@ -16,6 +16,8 @@ export async function createWorkBrief(context) {
       .map(key => [key, context[key] ?? null])) };
   const sections = {
     objective: pick(work, 'title definitionOfDone state supersededBy'),
+    prerequisites: (context.dependencies ?? []).map(dep => pick(dep, 'id state satisfied'))
+      .sort((a, b) => a.id.localeCompare(b.id)),
     authority: { viewer: pick(context.viewer, 'id active revision permissions'),
       assignment: pick(work, 'accountableMemberId verifierMemberId humanDecisionMakerId independentVerificationRequired ownerDecisionRequired claim'),
       roomOwnerId: context.context.roomOwnerId,
