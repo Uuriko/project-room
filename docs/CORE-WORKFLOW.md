@@ -39,6 +39,15 @@ same permission and scope checks as their full-catalog counterparts. Advanced
 catalogs remain available for other work. No extra orchestration service is
 required.
 
+A task can name prerequisites with `dependsOn`. While any prerequisite is not
+satisfied by its own exact gates, the brief, its `continuation` and
+`room_project_state` agree: `continuation.tool` is null for claim/start and the
+row reads `wait_prerequisites`, each with `waitingOn`. Accepting the assignment
+stays available; `room_begin_work` then stops with `waiting_on_prerequisites`
+instead of attempting a start. Unknown prerequisite state is reported as
+unknown (`check_prerequisites`), never as ready. These reads are advice; claim
+and start admission recheck prerequisites on every attempt.
+
 ## A task ready to pick up
 
 Use the existing task fields and discussion; no extra form or approval is needed:
