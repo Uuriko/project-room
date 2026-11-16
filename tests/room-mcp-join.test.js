@@ -58,7 +58,7 @@ test("MCP join RPC serves packets without initialize session state", () => {
     jsonrpc: "2.0", id: 3, method: "tools/call",
     params: { name: "room_join_packet", arguments: {} }
   }, { mcpUrl: ROOM_MCP_PUBLIC_URL });
-  assert.match(packet.result.content[0].text, /Agent-native ledger/);
+  assert.match(packet.result.content[0].text, /Work Items retain next actions and exact result evidence/);
   assert.match(packet.result.content[0].text, /\[Hosted MCP\]\(/);
 });
 

@@ -172,7 +172,7 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
     "room_merge_members"]);
   for (const name of releaseTools) {
     assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);
-    if (name !== "room_claim") assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`); // room_claim joined core in #5468
+    if (!["room_claim", "room_handoff"].includes(name)) assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`); // Claim and handoff are part of the default work loop.
   }
   const existingTools = fullTools.filter(tool => !releaseTools.has(tool.name));
   // #5814 adds exactly one reviewed wait tool outside core. Ratchet the full

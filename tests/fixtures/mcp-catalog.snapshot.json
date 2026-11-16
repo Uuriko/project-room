@@ -92,6 +92,26 @@
         "title": "Dm Posted"
       }
     },
+    "room_activation_pack": {
+      "inputSchema": "264247a0b03c9db6",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Activation Pack"
+      }
+    },
+    "room_begin_work": {
+      "inputSchema": "dfbf4a6b79964c4e",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Begin Work"
+      }
+    },
     "room_check_access": {
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
@@ -110,6 +130,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Claim, renew, or release work"
+      }
+    },
+    "room_handoff": {
+      "inputSchema": "8dc85cb8015fc9c5",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Hand off work"
       }
     },
     "room_join": {
@@ -222,6 +252,16 @@
         "title": "Read Request"
       }
     },
+    "room_read_result": {
+      "inputSchema": "1bce941b196804cb",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Read Result"
+      }
+    },
     "room_read_work": {
       "inputSchema": "1698c672b1be94ee",
       "annotations": {
@@ -230,6 +270,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Read Work"
+      }
+    },
+    "room_record_verification": {
+      "inputSchema": "1e2a38ead28d7003",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Record evidence review"
       }
     },
     "room_reply": {
@@ -242,6 +292,16 @@
         "title": "Reply"
       }
     },
+    "room_resolve_blocker": {
+      "inputSchema": "6b7d442c05060284",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Resolve blocker"
+      }
+    },
     "room_respond_to_request": {
       "inputSchema": "3889671b4210df76",
       "annotations": {
@@ -250,6 +310,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Respond To Request"
+      }
+    },
+    "room_submit_text_result": {
+      "inputSchema": "2505ad8e4eae4293",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Save room text as result"
       }
     }
   },
@@ -3006,6 +3076,26 @@
         "title": "Dm Posted"
       }
     },
+    "room_activation_pack": {
+      "inputSchema": "264247a0b03c9db6",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Activation Pack"
+      }
+    },
+    "room_begin_work": {
+      "inputSchema": "dfbf4a6b79964c4e",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Begin Work"
+      }
+    },
     "room_check_access": {
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
@@ -3024,6 +3114,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Claim, renew, or release work"
+      }
+    },
+    "room_handoff": {
+      "inputSchema": "8dc85cb8015fc9c5",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Hand off work"
       }
     },
     "room_join": {
@@ -3136,6 +3236,16 @@
         "title": "Read Request"
       }
     },
+    "room_read_result": {
+      "inputSchema": "1bce941b196804cb",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Read Result"
+      }
+    },
     "room_read_work": {
       "inputSchema": "1698c672b1be94ee",
       "annotations": {
@@ -3144,6 +3254,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Read Work"
+      }
+    },
+    "room_record_verification": {
+      "inputSchema": "1e2a38ead28d7003",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Record evidence review"
       }
     },
     "room_reply": {
@@ -3156,6 +3276,16 @@
         "title": "Reply"
       }
     },
+    "room_resolve_blocker": {
+      "inputSchema": "6b7d442c05060284",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Resolve blocker"
+      }
+    },
     "room_respond_to_request": {
       "inputSchema": "3889671b4210df76",
       "annotations": {
@@ -3164,6 +3294,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Respond To Request"
+      }
+    },
+    "room_submit_text_result": {
+      "inputSchema": "2505ad8e4eae4293",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Save room text as result"
       }
     }
   }
