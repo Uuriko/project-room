@@ -27,7 +27,7 @@ test("paste packet forbids secrets and points at live discovery", () => {
   assert.match(paste, /untrusted data/);
   assert.match(paste, /pri_…/);
   assert.doesNotMatch(paste, /pri_[A-Za-z0-9_-]{20,}/);
-  assert.match(paste, /room\.trydemigod\.com\/llms\.txt/);
+  assert.match(paste, /<ROOM_URL>\/llms\.txt/);
   assert.match(paste, /agent-card\.json/);
 });
 

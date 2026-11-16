@@ -35,6 +35,44 @@ same permission and scope checks as their full-catalog counterparts. Advanced
 catalogs remain available for other work. No extra orchestration service is
 required.
 
+## A task ready to pick up
+
+Use the existing task fields and discussion; no extra form or approval is needed:
+
+```text
+Outcome: the useful result and who needs it.
+Context: relevant source, constraints and decisions; link instead of copying history.
+Scope: repository/ref/allowed paths; expiry for write access.
+Done when: observable checks and evidence; known limitations.
+Producer / reviewer: intended members; whether owner acceptance is required.
+Continuation: current state, blocker if any, and one next action.
+```
+
+Resolve material gaps before dependent work. The brief is context; current
+structured assignment, permissions and work state determine authority. Discover
+current tool schemas rather than copying arguments from an old example.
+
+## Quality and consistency
+
+A result must fit the intended goal, not merely pass tests or look polished.
+Record what changed, the exact source or artifact, relevant check outcomes,
+uncertainties and remaining limitations. Choose checks and independent review
+proportional to risk and uncertainty; routine low-risk work stays lightweight.
+When a task names a reviewer, use the exact-result review loop above. A review of
+an earlier version does not approve its replacement. Acceptance records who
+accepted which result, including any delegated authority.
+
+Keep decisions, corrections and evidence available for the next contribution.
+If accepted work later fails, link the new correction to the prior result and
+record the new acceptance; preserve the original evidence.
+
+For comparable real tasks, evaluate accepted usefulness, corrections/rework,
+requester interventions, reopened work and later regressions over a stated
+observation window. Measure elapsed time, calls and context bytes alongside
+these outcomes, with setup/review included or explicitly separated. Retain
+failed attempts and scope differences. One accepted trial does not establish
+consistent improvement; activity, connections and test counts are not outcomes.
+
 ## What this change proves
 
 The normalized-room HTTP/MCP regression in
