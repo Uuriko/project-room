@@ -149,6 +149,22 @@ test(`${representation}: a successor reads what GitHub reports for the exact hea
   read = await f.observe(f.producer, 'fix');
   assert.equal(read.github.assessment, 'reported_checks_succeeded'); assert.equal(read.github.checks.counts.failure, 0);
 
+  // Overlapping reruns: an older run that finished late does not outrank a newer one, finished or still running.
+  later(); world.runs[SHA_A] = [run('unit', 'success', { started_at: '2026-11-16T11:00:00Z', completed_at: '2026-11-16T11:50:00Z' }),
+    run('unit', 'failure', { started_at: '2026-11-16T11:30:00Z', completed_at: '2026-11-16T11:40:00Z' })];
+  read = await f.observe(f.producer, 'fix');
+  assert.equal(read.github.assessment, 'checks_failing', 'older success 11:00-11:50 must not hide the failure that started 11:30');
+  later(); world.runs[SHA_A] = [run('unit', 'success', { started_at: '2026-11-16T11:00:00Z', completed_at: '2026-11-16T11:50:00Z' }),
+    run('unit', null, { started_at: '2026-11-16T11:30:00Z' })];
+  read = await f.observe(f.producer, 'fix');
+  assert.equal(read.github.assessment, 'checks_pending', 'a newer pending run stays pending'); assert.equal(read.github.checks.counts.success, 0);
+
+  // A realistic page of check runs is larger than the claim poll's 64 KiB body cap and must still be read.
+  later(); world.runs[SHA_A] = Array.from({ length: 40 }, (_, index) => run('job-' + index, 'success', { output: { text: 'x'.repeat(4000) } }));
+  read = await f.observe(f.producer, 'fix');
+  assert.equal(read.github.checks.complete, true); assert.equal(read.github.checks.counts.success, 40); assert.equal(read.github.checks.itemsOmitted, 15);
+  assert.doesNotMatch(JSON.stringify(read), /xxxxxxxx/, 'check output text is not carried');
+
   // F. More results than one page, or a run for another revision: incomplete, never a pass.
   later(); world.runs[SHA_A] = [run('unit', 'success')]; world.runTotal[SHA_A] = 140;
   read = await f.observe(f.producer, 'fix');
@@ -255,8 +271,10 @@ test(`${representation}: a private task's GitHub evidence reaches its parties an
   world.pulls = [{ number: 11, head: SHA_A, repo: 'acme/private-repo', ref: 'secret-branch' }]; world.runs[SHA_A] = [run('secret-check-name', 'failure')];
   const leak = /private-repo|secret-branch|secret-check-name|pull\/11|a{40}|SENTINEL/;
   // The new fields only. What the selected read itself already shows an unrelated member is a separate, existing boundary.
-  const added = async args => { const answer = (await f.raw(f.observer, 'room_read_work', args)).result?.structuredContent ?? {};
-    return JSON.stringify({ github: answer.github ?? null, observed: answer.continuation?.observed ?? null }); };
+  // Either this read answers not_visible_to_this_member, or (once selected reads of private work are refused) the whole read is refused.
+  const added = async args => { const body = await f.raw(f.observer, 'room_read_work', args), answer = body.result?.structuredContent ?? {};
+    return answer.github ? JSON.stringify({ github: answer.github, observed: answer.continuation?.observed ?? null })
+      : body.error || body.result?.isError === true ? 'refused:not_visible_to_this_member' : 'missing'; };
 
   // Before any party has read it: the unrelated member triggers no GitHub call and learns nothing from the new fields.
   const cold = await added({ workItemId: 'secret-fix', brief: true, observeGithub: true });

@@ -63,12 +63,14 @@ never an input to it and never overrides it.
 - **Checks.** Each check run and commit status is listed with its own status
   and conclusion, counted as success, failure, pending, cancelled, skipped,
   neutral or unknown. When one check name appears more than once, the entry that
-  started last is current. `state` is failure, pending, cancelled, incomplete,
+  started last is current; completion time is not used, so an older run that
+  finished late never outranks a newer run, finished or still running. `state` is failure, pending, cancelled, incomplete,
   success, none_substantive, none or unknown, in that order of precedence.
   Skipped and neutral never count as a pass. `requiredChecksKnown` is false:
   Room does not read branch protection, so success means "the reported checks
   succeeded", not "the required checks are satisfied". One page (100) of runs
-  and of statuses is read; more is `incomplete` and is not a pass.
+  and of statuses is read, up to 2 MiB each; more, or a larger response, is
+  `incomplete` and is not a pass.
 - **Freshness.** Fresh for 60 seconds, the existing floor between polls of one
   pull. Inside that window reads make no GitHub call. After it a read refreshes
   with at most three calls. A failed refresh returns the last observation with

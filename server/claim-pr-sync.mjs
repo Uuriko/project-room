@@ -1575,6 +1575,10 @@ const FAILURE_REASON = Object.freeze({ missing: "not_found_or_no_access", unconf
 
 // One bounded GitHub read. The provider's body and headers never leave this
 // function except as parsed JSON on success; failures carry a kind only.
+// A page of check runs is far larger than one pull body (each run carries its
+// app and output), so the observation has its own stated ceiling instead of
+// the claim poll's 64 KiB. Over the ceiling is reported, never truncated.
+export const GITHUB_OBSERVATION_MAX_BODY = 2 * 1024 * 1024;
 async function githubRead(url, { fetchImpl, token, nowMs }) {
   let response;
   try { response = await fetchImpl(url, { headers: githubHeaders(token), signal: AbortSignal.timeout(5000) }); }
@@ -1583,8 +1587,13 @@ async function githubRead(url, { fetchImpl, token, nowMs }) {
   if (response.status === 401) return { kind: "unconfigured" };
   if (response.status === 403 || response.status === 429) return rateLimitResult(response, token, nowMs);
   if (!response.ok) return { kind: "error" };
-  const read = await readJson(response);
-  return read.error ? { kind: "error" } : { kind: "ok", body: read.body };
+  const length = responseHeader(response, "content-length");
+  if (length && /^\d+$/.test(length) && Number(length) > GITHUB_OBSERVATION_MAX_BODY) return { kind: "tooLarge" };
+  try {
+    const text = await response.text();
+    if (text.length > GITHUB_OBSERVATION_MAX_BODY) return { kind: "tooLarge" };
+    return { kind: "ok", body: JSON.parse(text) };
+  } catch { return { kind: "error" }; }
 }
 
 // The observed identity of one pull request, or null when the body cannot
@@ -1632,14 +1641,16 @@ async function observeHeadChecks(repository, headSha, options, budget) {
     if (Number(runsRead.body.total_count) > runs.length) incomplete.push("more_check_runs_than_one_page");
     for (const run of runs) {
       if (run?.head_sha !== headSha) { otherHead += 1; continue; }
-      const key = `run:${run?.app?.slug ?? ""}:${run?.name ?? ""}`, at = Math.max(timeOf(run?.started_at), timeOf(run?.completed_at));
+      // Current means started last. Completion time is not used: an older run
+      // that finished late must not outrank a newer run, finished or not.
+      const key = `run:${run?.app?.slug ?? ""}:${run?.name ?? ""}`, started = timeOf(run?.started_at), at = started >= 0 ? started : timeOf(run?.completed_at);
       const prior = latest.get(key);
       if (prior && (prior.at > at || prior.at === at && prior.id >= Number(run?.id ?? 0))) continue;
       latest.set(key, { at, id: Number(run?.id ?? 0), kind: "check_run", name: String(run?.name ?? "").slice(0, 120),
         status: typeof run?.status === "string" ? run.status : "unknown", conclusion: typeof run?.conclusion === "string" ? run.conclusion : null,
         result: run?.status !== "completed" ? "pending" : RUN_RESULT[run?.conclusion] ?? "unknown" });
     }
-  } else incomplete.push("check_runs_not_read");
+  } else incomplete.push(runsRead.kind === "tooLarge" ? "check_runs_response_too_large" : "check_runs_not_read");
   if (statusRead.kind === "ok" && statusRead.body && typeof statusRead.body === "object") {
     const statuses = Array.isArray(statusRead.body.statuses) ? statusRead.body.statuses : [];
     if (statusRead.body.sha !== undefined && statusRead.body.sha !== headSha) incomplete.push("status_is_for_another_revision");
@@ -1652,12 +1663,12 @@ async function observeHeadChecks(repository, headSha, options, budget) {
           status: typeof entry?.state === "string" ? entry.state : "unknown", conclusion: null, result: STATUS_RESULT[entry?.state] ?? "unknown" });
       }
     }
-  } else incomplete.push("statuses_not_read");
+  } else incomplete.push(statusRead.kind === "tooLarge" ? "statuses_response_too_large" : "statuses_not_read");
   if (otherHead) incomplete.push("check_runs_for_another_revision_ignored");
   const counts = { success: 0, failure: 0, pending: 0, cancelled: 0, skipped: 0, neutral: 0, unknown: 0 };
   const entries = [...latest.values()];
   for (const entry of entries) counts[entry.result] += 1;
-  const nothingRead = incomplete.includes("check_runs_not_read") && incomplete.includes("statuses_not_read");
+  const nothingRead = runsRead.kind !== "ok" && statusRead.kind !== "ok";
   const complete = incomplete.length === 0;
   // The aggregate, in this order. A failure or pending result is established
   // even by a partial read; a pass is not.
