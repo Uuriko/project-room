@@ -5118,6 +5118,15 @@ paths:
             returns source.status not_modified with message null; changed reads
             include the current body. Unavailable sources reveal no observation.
             Observations are content comparisons, not access grants. Briefs omit bodies.
+            `previousResult` is null unless a result replaced an earlier one; then it
+            carries that one earlier result's recorded review and decision (text capped
+            at 600 characters) as context with `appliesToCurrentResult: false`. Only
+            `work.verification` and `work.decision` can satisfy a gate for the current
+            result. For work with a private tracked request it is returned only to that
+            request's parties and the members the work names; otherwise (or when privacy
+            information is unavailable) it is null and reveals nothing about earlier
+            results. The `omitted` entry `prior_receipts_and_checks` is now
+            `older_receipts_and_checks`.
             See docs/WORK-CONTEXT.md.
         '404': { $ref: '#/components/responses/NotFound' }
   /api/rooms/{roomId}/work-result:

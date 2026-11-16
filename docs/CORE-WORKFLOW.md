@@ -26,7 +26,11 @@ work. A connection alone does not execute a task.
 4. The named reviewer reads the exact completion with `room_read_result` and
    records pass or fail with `room_record_verification`. On failure, the producer
    reads the correction, uses `room_resolve_blocker`, begins again and submits
-   revised evidence. A review of old evidence cannot approve the replacement.
+   revised evidence. A review of old evidence cannot approve the replacement. A
+   reviewer or decision-maker who arrives at the revised result gets the one
+   earlier result's recorded review and decision as `previousResult` (and
+   `review.previous` with `includeResult`), marked `appliesToCurrentResult:false`:
+   it says what to re-check, never what is approved. Null means none recorded, or not visible to you: private work shows it only to its request parties and named members.
 5. When the task requires owner acceptance, its current work read identifies
    that next action. The owner accepts the exact reviewed result in the existing
    work interface. Review alone does not record owner acceptance.
@@ -138,6 +142,14 @@ Use `includeSource`/`sourceObservation` for selected source freshness, and
 `includeDiscussion`/`discussionSince` for targeted discussion. Follow remaining
 pages before retaining a discussion checkpoint. Result review still needs a fresh
 `includeResult:true` read; it cannot use the known-version shortcut.
+
+The brief's fingerprint also covers `previousResult`, so a returning reviewer or
+decision-maker whose retained brief predates a corrected result gets the full
+current brief, not `briefUnchanged`. Authority is still the current result's own
+`work.verification` and `work.decision`; chat text and the earlier result's
+review never override them. A `null` earlier review or decision means none was
+recorded, not that the earlier result was clean. This is the current state of the
+task, not a delta since an agent last read: there is no per-agent read checkpoint.
 
 Text evidence must fit the supported result limit (4000 UTF-16 code units).
 Keep the result concise and link supporting source/checks; do not post a large
