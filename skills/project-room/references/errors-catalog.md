@@ -1176,6 +1176,7 @@ response's own `hint`/`next` when it names something more specific.
 | `work_not_delivered` | 422 | Review policy "${policy}" not satisfied for "${item.id}": finish it to "delivered" first — its reviewer then verifies it to "done" | follow hint | Follow this error's hint and next steps. |
 | `work_not_found` | 404 | Work no longer exists | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `work_not_owner` | 403 | Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it | follow hint | Follow this error's hint and next steps. |
+| `work_private` | 403 | This work is private to its participants | no | Stop: this work is private to its request parties and named roles. Ask a participant or the owner; do not retry the same call unchanged. |
 | `work_reassign_unknown_member` | 422 | newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `work_resolved` | 409 | This work is resolved; no reminder was scheduled. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `work_review_rejected` | 403 | Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work | follow hint | Follow this error's hint and next steps. |

@@ -122,7 +122,7 @@ import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-sch
 import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
-import { selectedWorkContext, currentWorkRecord, workRoleHolder } from "./work-context.mjs";
+import { selectedWorkContext, currentWorkRecord, workRoleHolder, withheldWorkItem } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { assertDependsOnKnown } from "./work-claim-integrity.mjs";
 import { normalizeWorkDependencies } from "../src/work-dependencies.js";
@@ -5458,7 +5458,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const workRecordForViewer = (id, item) => {
           const parties = privatePartiesByWork.get(id);
           if (!parties || parties.has(auth.member.id) || workRoleHolder(item, auth.member.id)) return currentWorkRecord(item);
-          return currentWorkRecord({ ...item, title: null, definitionOfDone: null });
+          return currentWorkRecord(withheldWorkItem(item));
         };
         return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),

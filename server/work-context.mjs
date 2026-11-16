@@ -40,6 +40,30 @@ const pick = (value, fields) => value == null ? null
   : Object.fromEntries(fields.split(" ").filter(key => Object.hasOwn(value, key)).map(key => [key, structuredClone(value[key])]));
 
 // Shared current record; no prior receipts/checks, conversation text or event log.
+// The record a member outside private work receives where a collection read
+// lists every item: a minimal redacted copy, never the stored object. It keeps
+// what a listing needs to stay truthful (identity, state, the members the task
+// names, and the opaque identifiers the shared next-step derivation compares)
+// and drops everything a participant wrote or reserved: title, definition,
+// source pointer, labels, claim scope, result summary and checks, evidence
+// links and text, review and decision prose, blocker text, the open handoff's
+// text and every retained handoff. The caller decides who is outside, with the
+// existing rule (private request parties plus workRoleHolder); this grants
+// nothing and stores nothing.
+export function withheldWorkItem(item) {
+  const keep = (value, keys) => value == null ? value : pick(value, keys);
+  const { helpWanted: _helpScope, ...rest } = item; // a help invitation's scope text is participant-written
+  return { ...rest, title: null, definitionOfDone: null, sourceMessageId: null, labels: [],
+    ...(Object.hasOwn(item, "claim") ? { claim: keep(item.claim, "holderId status acquiredAt expiresAt releasedAt") } : {}),
+    ...(Object.hasOwn(item, "receipt") ? { receipt: keep(item.receipt, "reportedById producerId producerAttribution evidenceVersion eventId") } : {}),
+    ...(Object.hasOwn(item, "receiptHistory") ? { receiptHistory: [] } : {}),
+    ...(Object.hasOwn(item, "verification") ? { verification: keep(item.verification, "verifierId result completionEventId evidenceVersion independenceConfirmed eventId") } : {}),
+    ...(Object.hasOwn(item, "decision") ? { decision: keep(item.decision, "actorId decision completionEventId evidenceVersion eventId") } : {}),
+    ...(Object.hasOwn(item, "blocker") ? { blocker: keep(item.blocker, "eventId") } : {}),
+    ...(Object.hasOwn(item, "handoff") ? { handoff: keep(item.handoff, "open eventId at actorId triageMemberId haltAll") } : {}),
+    ...(Object.hasOwn(item, "handoffHistory") ? { handoffHistory: [] } : {}) };
+}
+
 export function currentWorkRecord(item) {
   const work = pick(item, "id title definitionOfDone revision state mode sourceMessageId proposedById externalWriteGrantBy externalWriteGrantFor accountableMemberId verifierMemberId humanDecisionMakerId independentVerificationRequired ownerDecisionRequired supersededBy createdAt updatedAt");
   const session = sessionRecord(item);
