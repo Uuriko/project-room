@@ -102,6 +102,6 @@ test("latency read carries ship from real receipts, and the whole document stays
   assert.equal(doc.ship.oldestPendingMin, 5);
   assert.equal(doc.wake, undefined, "receipts alone add no wake section");
   assert.ok(Buffer.byteLength(JSON.stringify(doc)) <= 6144);
-  assert.equal(latencyLine(doc).unshipped, 1);
+  assert.equal(latencyLine(doc).unshipped, undefined, "project state does not restate message-order merge→deploy pairing as fact; the full latency read keeps ship");
   assert.equal(buildWakeContext([{ type: "turn.completed", ts_ms: 1, detail: JSON.stringify({ rp: 1 }) }]).turns.completed, 1);
 });

@@ -31,7 +31,7 @@ test("receipts parse by format and nothing else", () => {
 const items = (n, extra = {}) => Array.from({ length: n }, (_, i) => ({ id: `w${i}`, title: `Task ${i} ${"t".repeat(120)}`, state: "working", mode: "read",
   revision: 1, accountableMemberId: "producer", updatedAt: new Date(Date.UTC(2026, 10, 12, 0, 0) - i * 60000).toISOString(), ...extra }));
 
-test("builder: merged-not-deployed is the merges after the last good deploy; unknown is null, never zero", () => {
+test("builder: reported merges after the last reported good deploy; unknown is null, never zero", () => {
   const base = { roomId: "r", viewerId: "producer", ownerId: "owner", sequence: 100, now: Date.UTC(2026, 10, 12, 1, 0), live: { sourceRevision: "234527c7" + "a".repeat(32), buildId: "2026-11-12T03:34:30.452Z" },
     items: [], itemsComplete: true, members: { producer: { displayName: "Producer", kind: "agent" }, owner: { displayName: "Owner", kind: "human" } }, attention: [] };
   const at = n => new Date(Date.UTC(2026, 10, 12, 0, n)).toISOString();
@@ -43,16 +43,17 @@ test("builder: merged-not-deployed is the merges after the last good deploy; unk
     { seq: 50, at: at(5), actorId: "owner", body: "CI #4 dddddddd PASSED 3/3 jobs" }
   ];
   const s = buildProjectState({ ...base, receipts });
-  assert.equal(s.live.smoke, "ok");
-  assert.equal(s.live.deployedAt, at(3));
-  assert.equal(s.mergedNotDeployed.count, 1);
-  assert.deepEqual(s.mergedNotDeployed.items.map(i => i.pr), [3]);
+  assert.equal(s.delivery.deploy.reportedSmoke, "ok");
+  assert.equal(s.delivery.deploy.postedAt, at(3), "when the report was posted, not when anything deployed");
+  assert.equal(s.delivery.mergesPostedAfterDeployReport.count, 1);
+  assert.deepEqual(s.delivery.mergesPostedAfterDeployReport.items.map(i => i.pr), [3]);
   assert.deepEqual(s.receipts.map(r => r.kind), ["ci", "merged", "deploy", "merged"], "newest four");
   const unknown = buildProjectState({ ...base, receipts: [] });
-  assert.equal(unknown.mergedNotDeployed.count, null);
-  assert.equal(unknown.live.smoke, "no-receipt");
+  assert.equal(unknown.delivery.mergesPostedAfterDeployReport.count, null);
+  assert.equal(unknown.delivery.status, "unknown");
   const rolled = buildProjectState({ ...base, live: { sourceRevision: "f".repeat(40), buildId: null }, receipts });
-  assert.equal(rolled.live.smoke, "receipt-sha-differs", "a live sha the last receipt does not name is flagged, not trusted");
+  assert.equal(rolled.roomService.revision, "f".repeat(40));
+  assert.doesNotMatch(JSON.stringify(rolled), /differs/, "the Room service build is not compared with a project receipt");
 });
 
 test("builder: stays inside the byte budget with 128 busy items, sheds rows and says so, counts stay exact", () => {
@@ -83,14 +84,14 @@ test("state read: REST and MCP agree on a real room, are bounded, and stay read-
   const rest = await fetch(`${origin}/api/rooms/commons/state`, { headers: { Authorization: `Bearer ${f.keys.producer}` } });
   assert.equal(rest.status, 200, await rest.clone().text());
   const state = await rest.json();
-  assert.equal(state.contractVersion, 1);
+  assert.equal(state.contractVersion, 2);
   assert.ok(Buffer.byteLength(JSON.stringify(state)) <= PROJECT_STATE_MAX_BYTES);
   assert.equal(state.work.scanned, 4, "the fixture's own item plus the three proposed here");
   assert.deepEqual(state.work.counts, { proposed: 3, accepted: 1 });
   assert.deepEqual(state.inProgress.map(row => row.id), ["alpha"]);
   assert.ok(state.needsYou.length >= 1, "the proposed items name the producer as the next actor");
-  assert.equal(state.mergedNotDeployed.count, null, "no deploy receipt: what is undeployed is unknown, not zero");
-  assert.equal(state.mergedNotDeployed.mergesSeen, 1);
+  assert.equal(state.delivery.mergesPostedAfterDeployReport.count, null, "no deploy receipt: what is undeployed is unknown, not zero");
+  assert.equal(state.delivery.mergesPostedAfterDeployReport.mergesSeen, 1);
   assert.deepEqual(state.receipts.map(r => r.kind), ["merged"], "only receipt-shaped posts are receipts");
   assert.equal(f.store.room("commons").sequence, before, "reading state appends nothing");
 
@@ -129,8 +130,8 @@ test("MCP twin on a normalized agent room: same document, bounded, unknown argum
   assert.equal(state.truncated.needsYou, 4);
   const listedRow = state.needsYou.find(row => state.inProgress.some(other => other.id === row.id));
   assert.ok(!listedRow || !("title" in listedRow), "a row already listed in full under inProgress is a pointer in needsYou");
-  assert.equal(state.live.lastDeploy.sha, "234527c7");
-  assert.equal(state.mergedNotDeployed.count, 1);
+  assert.equal(state.delivery.deploy.shaPrefix, "234527c7");
+  assert.equal(state.delivery.mergesPostedAfterDeployReport.count, 1);
   assert.ok(Buffer.byteLength(JSON.stringify(state)) <= PROJECT_STATE_MAX_BYTES + 256);
   const rest = await fetch(`${origin}/api/rooms/ps/state`, { headers: { authorization: `Bearer ${bob.secret}` } });
   const twin = await rest.json();

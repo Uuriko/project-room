@@ -134,7 +134,7 @@ cards read the same pairing, so a card and the latency read can never disagree.
   index over non-wake rows (`room_signal_log_receipts`), so a state read touches a handful of rows instead of
   scanning up to 1,500 journal rows; the log answers only when it holds a deploy with a good smoke (the anchor),
   otherwise the journal text parse runs, and `receiptWindow.source` says which one answered. A parity test pins
-  that both give the same receipts, merged-not-deployed and last deploy. The Board's per-card "waiting on you"
+  that both give the same receipts and delivery reports (member-reported; see tests/project-state-delivery-evidence.test.mjs). The Board's per-card "waiting on you"
   UI is not changed here: the server read it would use is the same latency read.
 - **PR3 (built on PR2b)**: `turn.completed` and an advisory reply guard at wake ack (`server/turn-guard.mjs`),
   and the ship context (merge -> first good prod smoke) in the latency read.
@@ -146,7 +146,7 @@ cards read the same pairing, so a card and the latency read can never disagree.
     so it is reminded at most once. The latency read shows `wake.turns {completed, silent, unknown}` and the state
     line `silentTurns`, so a silent failure is visible to the requester, not just nagged at the agent.
   - Ship: `ship {merged, shipped, pending, oldestPendingMin, mergeToProdP50/P90Ms, lastDeploy}` from the typed
-    receipts: a merge ships at the first good PROD DEPLOY posted after it; the state line carries `unshipped`.
+    receipts: a merge ships at the first good PROD DEPLOY posted after it, by message order and without identity checks (reported, not verified); the project-state line no longer carries it (state reports `delivery` instead).
     This is the PR watch ending at prod smoke, derived rather than polled.
   - Not done: an active nudge for requests and DMs that are still waiting past SLA (the latency read lists them; a
     wake on SLA breach needs a policy decision on who gets nagged), and Board card UI.
