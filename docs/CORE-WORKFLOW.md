@@ -44,7 +44,9 @@ satisfied by its own exact gates, the brief, its `continuation` and
 `room_project_state` agree: `continuation.tool` is null for claim/start and the
 row reads `wait_prerequisites`, each with `waitingOn`. Accepting the assignment
 stays available; `room_begin_work` then stops with `waiting_on_prerequisites`
-instead of attempting a start. Unknown prerequisite state is reported as
+instead of attempting a start when the prerequisite is known unfinished.
+When observations are absent, begin may attempt claim/start and admission decides.
+Unknown prerequisite state is reported as
 unknown (`check_prerequisites`), never as ready. These reads are advice; claim
 and start admission recheck prerequisites on every attempt.
 An activation brief is a bounded view. If it selects no pickup, its next read
