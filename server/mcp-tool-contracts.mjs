@@ -88,7 +88,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
   webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" },
   // AUX-08b batch 8: the work lifecycle tools, help offers, reply requests.
-  room_accept_work: { access: `write, assigned room member with accept_work; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.accepted)` },
+  room_accept_work: { access: `write, assigned room member with accept_work (or any member with accept_work for an open pool item, take=true); hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.accepted)` },
   room_acquire_claim: { access: `write, assigned member with Board write access (eligible human, contribute/review/collaborate agent profile, or room owner); hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (claim.acquired)` },
   room_begin_work: { access: `write, assigned room member with accept_work; write mode also needs write authority; acquiring a claim needs Board write access; hidden from guest and read-only-tier agents`, cost: "runs the next verified Room operations, starts no AI", rest: `${COMMANDS} (work.accepted, claim.acquired, work.started)` },
   room_block_work: { access: `write, room member with assigned accept_work; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.blocked)` },

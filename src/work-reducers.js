@@ -74,6 +74,16 @@ function proposeWork(state, incoming) {
     throw new Error("Source message must exist in this Room");
   }
 
+  // Optional pool flag: an unassigned item any accept_work holder may take
+  // (acceptWork with take: true). Until taken, the proposer holds it, so it is
+  // never assigned to someone else's seat. Only a true value is stored, so
+  // every item recorded without the field replays exactly as before.
+  const pool = incoming.data.pool;
+  if (pool !== undefined && typeof pool !== "boolean") throw new Error("pool must be true or false");
+  if (pool === true && incoming.data.accountableMemberId !== incoming.actorId) {
+    throw new Error("A pool item is held by its proposer until someone takes it: set accountableMemberId to yourself");
+  }
+
   // Option D stamp: born with the item iff the proposer is the room owner or
   // holds write_external at proposal time. Only proposals admitted under the
   // policy carry writeGrantPolicyVersion (stamped by the store at admission,
@@ -98,6 +108,7 @@ function proposeWork(state, incoming) {
     mode: incoming.data.mode || "read",
     sourceMessageId: incoming.data.sourceMessageId || null,
     ...(labels !== undefined ? { labels } : {}),
+    ...(pool === true ? { pool: true } : {}),
     ...(incoming.data.dependsOn !== undefined ? { dependsOn: normalizeWorkDependencies(incoming.data.dependsOn) } : {}),
     // The proposer is the envelope actor alone (disposition 5557850637): replay recovers it
     // wherever the envelope exists; it is never read from data and never inferred from the
@@ -119,7 +130,43 @@ function proposeWork(state, incoming) {
   };
 }
 
+// Taking a pooled item is the one accept that does not come from the named
+// accountable member: any accept_work holder may take an item that is open,
+// meaning it was never taken, its holder recorded an open handoff, or the
+// holder's write claim lapsed (expired or released). The taker becomes the
+// accountable member and the item returns to accepted; the lapsed claim and
+// the handoff stay on the item as history, and the taker must acquire a fresh
+// claim for write work like anyone else. The item's write grant stamp names the
+// original proposer's choice of holder, so it never follows the item to a
+// taker: write-mode work still needs the taker's own write authority.
+function takeFromPool(state, incoming) {
+  const item = mutableWorkItem(state, incoming, [WORK_STATES.PROPOSED, WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
+  if (item.pool !== true) throw new Error("Only a pool item can be taken");
+  requirePermission(state, incoming.actorId, "accept_work");
+  if (incoming.actorId === item.accountableMemberId) throw new Error("You already hold this work item");
+  const open = item.state === WORK_STATES.PROPOSED
+    || item.handoff?.open === true
+    || Boolean(item.claim && !claimIsActive(item.claim, incoming.at));
+  if (!open) throw new Error("This pool item is held: its holder has a current lease. Take it after the lease lapses or the holder hands it off");
+  if (item.independentVerificationRequired && incoming.actorId === item.verifierMemberId) {
+    throw new Error("Independent verification requires a different accountable member and verifier");
+  }
+  // Same Trust rule as an assignment from the proposer to the taker.
+  assertRoomTrust(state, item.proposedById, incoming.actorId);
+  item.takenFromId = item.accountableMemberId;
+  item.takenAt = incoming.at;
+  item.accountableMemberId = incoming.actorId;
+  item.state = WORK_STATES.ACCEPTED;
+  item.blocker = null;
+  if (item.handoff) item.handoff.open = false;
+  commitMutation(item, incoming);
+}
+
 function acceptWork(state, incoming) {
+  if (incoming.data.take !== undefined) {
+    if (incoming.data.take !== true) throw new Error("take must be true");
+    return takeFromPool(state, incoming);
+  }
   const item = mutableWorkItem(state, incoming, [WORK_STATES.PROPOSED]);
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may accept work");
   requirePermission(state, incoming.actorId, "accept_work");

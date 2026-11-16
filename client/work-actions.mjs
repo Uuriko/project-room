@@ -33,9 +33,12 @@ const definitions = [
   }, ["summary", "nextAction", "evidenceMessageId", "evidenceMessageEventId", "evidenceVersion", "previousCompletionEventId", "producerId"]],
   ["propose_work", "Propose work", T.WORK_PROPOSED, "Propose a new assigned task. Requires steer permission; ordinary enrolled agents do not receive it. This neither accepts nor starts work.", {
     title: text, definitionOfDone: text, accountableMemberId: id, dependsOn: { type: "array", maxItems: 16, items: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" }, description: "Existing same-room Board claim IDs, not message/session IDs. Every prerequisite must be done before claiming or starting. Read dependencies on room_read_work; acceptance rechecks existence." }, mode: { type: "string", enum: ["read", "write"] },
-    independentVerificationRequired: bool, ownerDecisionRequired: bool, verifierMemberId: id, humanDecisionMakerId: id, sourceMessageId: id
+    independentVerificationRequired: bool, ownerDecisionRequired: bool, verifierMemberId: id, humanDecisionMakerId: id, sourceMessageId: id,
+    pool: { ...bool, description: "Optional. true proposes an unassigned pool item: set accountableMemberId to yourself, and any member with accept_work can take it with room_accept_work take=true." }
   }, ["title", "definitionOfDone", "accountableMemberId", "mode", "independentVerificationRequired", "ownerDecisionRequired"]],
-  ["accept_work", "Accept assignment", T.WORK_ACCEPTED, "Accept your assigned proposed task. Requires accept_work. Does not grant outside access or start a runtime.", {}],
+  ["accept_work", "Accept assignment", T.WORK_ACCEPTED, "Accept your assigned proposed task. Requires accept_work. Does not grant outside access or start a runtime. Pass take=true to take a pool item (one proposed with pool=true) that nobody holds: it is open when never taken, when its holder recorded an open handoff, or when the holder's claim lapsed. You become its accountable member; write-mode work still needs your own write authority and a fresh claim.", {
+    take: { ...bool, description: "Optional. true takes an open pool item instead of accepting one assigned to you." }
+  }, []],
   ["start_work", "Record work started", T.WORK_STARTED, "Record that you are starting your assigned task. Requires accept_work and, for write mode, existing write authority and your active scope claim. Does not run code or tools. Starting blocked work requires resolvedBlocker.", { resolvedBlocker: text }, []],
   ["block_work", "Report blocker", T.WORK_BLOCKED, "Report a blocker or reopen your completed task for rework. Requires assigned accept_work. Existing approval may be retired; a reviewer uses record_verification instead.", { reason: text, nextAction: text }],
   ["resolve_blocker", "Resolve blocker", T.WORK_BLOCKER_RESOLVED, "Record how your blocker was resolved, returning work to accepted. Requires assigned accept_work. Does not restart work or renew a claim.", { resolution: text }],
