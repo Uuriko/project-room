@@ -115,7 +115,7 @@ import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJ
 import { renderOgPng } from "./og-render.mjs";
 import { receiptBadgeSvg, receiptOgFields } from "./receipt-share.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
-import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
+import { githubTokenFromEnv, configureGithubObservation } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
 import { templatesIndex, templatePage, publicRoomView, publicTaskPageExpired, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP, PUBLIC_ROOM_SETUP_CSP } from "./public-rooms.mjs";
@@ -445,6 +445,8 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   // a matching instance pin/artifact for custom-origin production.
   if (hostedDiscovery && (instanceCard !== undefined || production && origin !== undefined && origin !== ROOM_ORIGIN))
     throw new Error("Hosted discovery cannot replace custom-origin production instance signing");
+  // Same seams as the claim poll, for the selected-work GitHub observation.
+  if (fetchPullRequest || githubToken !== undefined) configureGithubObservation(store, { ...(fetchPullRequest ? { fetchImpl: fetchPullRequest } : {}), ...(githubToken !== undefined ? { token: githubToken } : {}) });
   const instanceRuntime = hostedDiscovery ? null : loadInstanceCardRuntime({ origin, instanceCard });
   const discoveryBody = doc => hostedDiscovery ? doc.body : instanceRuntime ? instanceRuntime.body(doc) : instanceDiscoveryBody(doc, origin);
   const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: hostedDiscovery ? instanceCardSignatureState() : instanceRuntime?.signatureState ?? instanceCardSignatureState(origin) });

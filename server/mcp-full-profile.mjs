@@ -1,3 +1,4 @@
+import { observeWorkGithubEvidence } from "./claim-pr-sync.mjs";
 import { digestMessagePage } from "../src/message-digest.js";
 import { experimentArm } from "./experiments.mjs";
 import { filterMessagePage } from "../src/message-query.js";
@@ -409,7 +410,8 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       const value = await readWorkSelection({
         workContext: (id, options) => store.workContext(secret, roomId, id, options),
         workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options),
-        workResult: (id, options) => store.workResult(secret, roomId, id, options)
+        workResult: (id, options) => store.workResult(secret, roomId, id, options),
+        workGithubEvidence: id => observeWorkGithubEvidence(store, secret, roomId, id)
       }, rest, { hosted: true });
       return { value, isError: false };
     } catch (error) {

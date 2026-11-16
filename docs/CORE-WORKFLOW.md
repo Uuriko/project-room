@@ -48,6 +48,18 @@ instead of attempting a start. Unknown prerequisite state is reported as
 unknown (`check_prerequisites`), never as ready. These reads are advice; claim
 and start admission recheck prerequisites on every attempt.
 
+For a write task, `room_read_work` with `observeGithub: true` adds `github`: what
+GitHub reports for the pull request of the task's claimed repository and branch
+(or a pull request linked in the claim scope): state, full head SHA, merge commit
+and checks for that exact head, with the observation time. It is independently
+observed, unlike a member's report, and it is observation only: it does not
+complete work, satisfy review or acceptance, or show deployment. Unknown stays
+unknown (`status: "unavailable"` with a reason). An observation is fresh for 60
+seconds, the existing floor between polls of one pull request; within that
+window reads make no GitHub call, a refresh makes at most three, and a failed
+refresh returns the last observation marked `fresh: false`. A new head starts
+with no checks. `continuation.observed` carries the short form.
+
 ## A task ready to pick up
 
 Use the existing task fields and discussion; no extra form or approval is needed:

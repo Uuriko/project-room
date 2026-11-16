@@ -29,7 +29,7 @@ import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, ClaimErro
 import { SOURCE_REVISION } from "./version.mjs";
 import { notifyLeaseExpired } from "./agent-collisions.mjs";
 import {
-  PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
+  PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, PULL_POLL_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
   batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
   pullVerificationDue, pullsReadyToSettle, rateLimitUntil, recordPullOutcome, rememberPoll, rollupClaimCi, settlePullRequest,
   stampVerifiedPullOutcome, usableEtag
@@ -1500,4 +1500,188 @@ export async function readRoomDeployStatus(store, { fetchImpl = fetch, token = n
   const next = { sha, behind, checkedAt };
   writeMainCache(store, next, nowMs);
   return { live, main: sha, behind, checkedAt };
+}
+
+// --- Independently observed GitHub evidence for one selected work item -----
+// A read-only observation for the selected-work read (room_read_work with
+// observeGithub). It reuses this module's pull lookup, repository guard,
+// commit-CI reads and shared rate-limit hold. It never settles a claim, never
+// changes work state and never satisfies a Room review or acceptance gate.
+//
+// Association comes from records a member already wrote with authority: the
+// latest claim scope for the work item (repository + ref, and any pull links).
+// With no explicit link, the pull request is the newest one whose head branch
+// is the claimed ref in the claimed repository (same repository only).
+//
+// Freshness: an observation is fresh for PULL_POLL_BACKOFF_MS, the existing
+// floor between two polls of one pull. Inside that window a read is a cache
+// hit and makes no GitHub call. After it, a read refreshes with at most
+// GITHUB_OBSERVATION_MAX_CALLS calls. If the refresh cannot complete, the last
+// good observation is returned marked fresh:false with the reason.
+export const GITHUB_OBSERVATION_FRESH_MS = PULL_POLL_BACKOFF_MS;
+export const GITHUB_OBSERVATION_MAX_CALLS = 3;
+const OBSERVATION_VERSION = 1;
+const observationSeams = new WeakMap();
+// Test and embedding seam, same shape as the claim poll's (fetchImpl, token).
+export function configureGithubObservation(store, value) { if (store && value) observationSeams.set(store, value); }
+const observationKey = (roomId, workItemId) => `_github-observation:${roomId}:${workItemId}`;
+const BRANCH = /^[A-Za-z0-9._/-]{1,200}$/;
+
+function readObservationCache(store, key) {
+  try {
+    const row = store.db.prepare("SELECT config_json FROM work_claim_config WHERE room_id=?").get(key);
+    const parsed = row ? JSON.parse(row.config_json) : null;
+    return parsed?.version === OBSERVATION_VERSION ? parsed : null;
+  } catch { return null; }
+}
+function writeObservationCache(store, key, value, nowMs) {
+  try {
+    store.db.prepare(`INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)
+      ON CONFLICT(room_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`)
+      .run(key, JSON.stringify({ ...value, version: OBSERVATION_VERSION }), nowMs);
+  } catch { /* A cache that cannot be written only costs a later re-read. */ }
+}
+
+// The scope a member recorded when reserving this work: one indexed-by-room
+// read of the newest claim.acquired event. Legacy rooms also carry Board links.
+function recordedWorkScope(store, roomId, workItemId) {
+  let data = null;
+  try {
+    const row = store.db.prepare(`SELECT json_extract(body,'$.data') AS data FROM events WHERE room_id=?
+      AND json_extract(body,'$.type')='claim.acquired' AND json_extract(body,'$.data.workItemId')=?
+      ORDER BY sequence DESC LIMIT 1`).get(roomId, workItemId);
+    data = row?.data ? JSON.parse(row.data) : null;
+  } catch { data = null; }
+  const links = new Set(Array.isArray(data?.pullRequests) ? data.pullRequests : []);
+  let board = null;
+  try { board = store.workClaims?.get(roomId, workItemId) ?? null; } catch { board = null; }
+  for (const pull of board?.pullRequests ?? []) if (typeof pull?.url === "string") links.add(pull.url);
+  const repository = normalizeObservedRepository(data?.repository ?? board?.repo ?? null);
+  const ref = typeof (data?.ref ?? board?.branch) === "string" && BRANCH.test(data?.ref ?? board.branch) ? (data?.ref ?? board.branch) : null;
+  return { repository, ref, links: [...links].map(parsePullRequestUrl).filter(Boolean) };
+}
+function normalizeObservedRepository(value) {
+  if (typeof value !== "string") return null;
+  const match = /^(?:https:\/\/github\.com\/)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(value.trim());
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+const unavailable = (reason, extra = {}) => ({ status: "unavailable", reason, ...extra });
+const FAILURE_REASON = Object.freeze({ missing: "not_found_or_no_access", unconfigured: "github_access_not_configured",
+  rateLimited: "rate_limited", budget: "network_or_timeout", error: "network_or_timeout_or_unexpected_response" });
+
+// Newest pull whose head is the claimed branch of the claimed repository.
+async function discoverPullByHead(repository, ref, { fetchImpl, token, nowMs }) {
+  const [owner, name] = repository.split("/");
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls?head=${encodeURIComponent(`${owner}:${ref}`)}&state=all&sort=updated&direction=desc&per_page=5`;
+  const read = await fetchCommitDocument(url, { fetchImpl, token, nowMs });
+  if (read.kind !== "ok") return read;
+  const list = Array.isArray(read.body) ? read.body : null;
+  if (!list) return { kind: "error" };
+  for (const body of list) {
+    const parsed = parsePullRequestUrl(body?.html_url);
+    // Same repository on both sides and the exact branch: a fork's branch of
+    // the same name, or another repository's pull, is not this contribution.
+    if (!parsed || parsed.repo.toLowerCase() !== repository.toLowerCase()) continue;
+    if (body?.head?.ref !== ref || String(body?.head?.repo?.full_name ?? "").toLowerCase() !== repository.toLowerCase()) continue;
+    if (!pullBodyMatchesRequest(body, parsed)) continue;
+    const headSha = SHA.test(body?.head?.sha ?? "") ? body.head.sha : null;
+    const merged = typeof body.merged_at === "string" && body.merged_at.length > 0;
+    return { kind: merged ? "merged" : body.state === "closed" ? "closed" : "open", pull: parsed, headSha,
+      mergedSha: merged && SHA.test(body.merge_commit_sha ?? "") ? body.merge_commit_sha : null };
+  }
+  return { kind: "none" };
+}
+
+function assessObservation(pull, checks) {
+  if (pull.state === "merged") return { assessment: "merged", meaning: "GitHub reports this pull request merged. That is not a deployment, not observed product behavior and not Room acceptance." };
+  if (pull.state === "closed") return { assessment: "closed_unmerged", meaning: "GitHub reports this pull request closed without a merge. The change is not integrated." };
+  if (!checks || checks.headSha !== pull.headSha || checks.state === "unknown") return { assessment: "checks_unknown", meaning: "Check results for the current head were not observed." };
+  if (checks.state === "failure") return { assessment: "checks_failing", meaning: "GitHub reports at least one failing check or status on the current head." };
+  if (checks.state === "pending") return { assessment: "checks_pending", meaning: "GitHub reports checks still running or queued on the current head." };
+  if (checks.state === "success") return { assessment: "checks_passing_observed", meaning: "Every check and status GitHub reported for the current head passed. Whether those are the required checks is not known here." };
+  return { assessment: "no_checks_reported", meaning: "GitHub reported no checks or statuses for the current head. That is not a pass." };
+}
+
+function presentObservation(cache, nowMs, { cacheHit, calls, refreshFailure = null }) {
+  const ageMs = Math.max(0, nowMs - cache.observedAtMs), fresh = !refreshFailure && ageMs < GITHUB_OBSERVATION_FRESH_MS;
+  const pull = cache.pull, checks = cache.checks?.headSha === pull.headSha ? cache.checks : null;
+  return {
+    contractVersion: 1, status: "observed", evidenceKind: "independently_observed", source: "github_rest_api",
+    authority: "Observation only. It does not complete work, satisfy a Room review or acceptance, or show deployment.",
+    association: cache.association,
+    pullRequest: { repository: pull.repository, number: pull.number, url: pull.url, state: pull.state, headSha: pull.headSha, mergeCommitSha: pull.mergeCommitSha ?? null },
+    checks: checks ? { headSha: checks.headSha, state: checks.state, requiredChecksKnown: false }
+      : { headSha: pull.headSha, state: "unknown", requiredChecksKnown: false },
+    ...assessObservation(pull, checks),
+    observedAt: new Date(cache.observedAtMs).toISOString(), ageSeconds: Math.round(ageMs / 1000), fresh,
+    freshForSeconds: GITHUB_OBSERVATION_FRESH_MS / 1000,
+    ...(cache.previousHeadSha ? { headChanged: { from: cache.previousHeadSha, to: pull.headSha, observedAt: new Date(cache.headChangedAtMs).toISOString(),
+      note: "Checks and reviews of the earlier head do not apply to this head." } } : {}),
+    ...(refreshFailure ? { refresh: unavailable(refreshFailure) } : {}),
+    cost: { cacheHit, githubCalls: calls, maxCallsPerRefresh: GITHUB_OBSERVATION_MAX_CALLS }
+  };
+}
+
+export async function observeWorkGithubEvidence(store, token, roomId, workItemId, { expectedSessionBinding = null } = {}) {
+  // Authorization and visibility are the selected read's own: a member who
+  // cannot read this task's definition gets no repository or pull details.
+  const context = store.workContext(token, roomId, workItemId, { expectedSessionBinding });
+  if (context?.work?.title == null) return unavailable("task_not_visible_to_this_member");
+  const seams = observationSeams.get(store) ?? {};
+  const fetchImpl = seams.fetchImpl ?? fetch, nowMs = typeof seams.now === "function" ? seams.now() : Date.now();
+  const ghToken = seams.token === undefined ? githubToken(globalThis.process?.env ?? {}) : seams.token;
+  const scope = recordedWorkScope(store, roomId, workItemId);
+  if (!scope.repository) return unavailable("no_repository_recorded", { next: "Reserve write scope for this task with its repository and branch; Room observes the pull request for that branch." });
+  // A linked pull in another repository cannot stand for this contribution.
+  const linked = scope.links.filter(pull => pull.repo.toLowerCase() === scope.repository.toLowerCase());
+  const foreign = scope.links.length - linked.length;
+  const explicit = linked.at(-1) ?? null;
+  if (!explicit && scope.links.length) return unavailable("linked_pull_request_is_in_another_repository", { repository: scope.repository });
+  if (!explicit && !scope.ref) return unavailable("no_branch_or_pull_request_recorded", { repository: scope.repository });
+  const key = observationKey(roomId, workItemId);
+  const selector = explicit ? `pull:${explicit.number}` : `head:${scope.ref}`;
+  let cache = readObservationCache(store, key);
+  if (cache && (cache.selector !== selector || cache.pull?.repository?.toLowerCase() !== scope.repository.toLowerCase())) cache = null;
+  if (cache && nowMs - cache.observedAtMs < GITHUB_OBSERVATION_FRESH_MS) return presentObservation(cache, nowMs, { cacheHit: true, calls: 0 });
+  const stale = reason => cache ? presentObservation(cache, nowMs, { cacheHit: false, calls, refreshFailure: reason })
+    : unavailable(reason, { repository: scope.repository, cost: { cacheHit: false, githubCalls: calls, maxCallsPerRefresh: GITHUB_OBSERVATION_MAX_CALLS } });
+  let calls = 0;
+  if (readClaimPullBudget(store) > nowMs) return stale("rate_limited");
+  calls += 1;
+  let looked;
+  try {
+    looked = explicit ? await lookupPull({ ...explicit, etag: cache?.etag ?? null }, { fetchImpl, token: ghToken, nowMs })
+      : await discoverPullByHead(scope.repository, scope.ref, { fetchImpl, token: ghToken, nowMs });
+  } catch { looked = { kind: "error" }; }
+  if (looked.kind === "rateLimited") { writeClaimPullBudget(store, looked.rateLimitedUntil, nowMs); return stale("rate_limited"); }
+  if (looked.kind === "none") return unavailable("no_pull_request_found_for_branch", { repository: scope.repository, ref: scope.ref,
+    cost: { cacheHit: false, githubCalls: calls, maxCallsPerRefresh: GITHUB_OBSERVATION_MAX_CALLS } });
+  if (FAILURE_REASON[looked.kind]) return stale(FAILURE_REASON[looked.kind]);
+  const target = explicit ?? looked.pull;
+  let pull;
+  if (looked.kind === "notModified" && cache) pull = cache.pull;
+  else if (["open", "closed", "merged"].includes(looked.kind) && SHA.test(looked.headSha ?? "")) pull = { repository: target.repo, number: target.number, url: target.url,
+    state: looked.kind, headSha: looked.headSha, mergeCommitSha: looked.mergedSha ?? null };
+  else return stale("network_or_timeout_or_unexpected_response");
+  const headChanged = cache && cache.pull.headSha !== pull.headSha;
+  // Checks belong to one exact head. A new head starts with none.
+  let checks = !headChanged && cache?.checks?.headSha === pull.headSha ? cache.checks : null;
+  if (!checks || checks.state !== "success" && checks.state !== "failure") {
+    const budget = { remaining: GITHUB_OBSERVATION_MAX_CALLS - calls };
+    let ci;
+    try { ci = await readCommitCi({ repo: target.repo, url: target.url, ciCursor: "status" }, pull.headSha, { fetchImpl, token: ghToken, nowMs, budget }); }
+    catch { ci = { partial: true }; }
+    calls = GITHUB_OBSERVATION_MAX_CALLS - budget.remaining;
+    if (ci?.kind === "rateLimited") writeClaimPullBudget(store, ci.rateLimitedUntil, nowMs);
+    const state = ci?.ci?.headSha === pull.headSha ? (ci.ci.state === "neutral" ? "none" : ci.ci.state) : "unknown";
+    checks = { headSha: pull.headSha, state };
+  }
+  cache = { selector, etag: explicit ? looked.etag ?? cache?.etag ?? null : null, pull, checks, observedAtMs: nowMs,
+    association: explicit ? { from: "pull_request_linked_in_claim_scope", repository: scope.repository, ...(foreign ? { ignoredLinksInOtherRepositories: foreign } : {}) }
+      : { from: "newest_pull_request_for_claimed_branch", repository: scope.repository, ref: scope.ref },
+    ...(headChanged ? { previousHeadSha: cache.pull.headSha, headChangedAtMs: nowMs }
+      : cache?.previousHeadSha ? { previousHeadSha: cache.previousHeadSha, headChangedAtMs: cache.headChangedAtMs } : {}) };
+  writeObservationCache(store, key, cache, nowMs);
+  return presentObservation(cache, nowMs, { cacheHit: false, calls });
 }
