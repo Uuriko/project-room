@@ -5,7 +5,7 @@ import { RoomAgentClient, assertServiceOrigin, createAgentIdentity, previewAgent
 import { readAgentConnection } from "./agent-connection.mjs";
 import { openSetupJournal, privateDirectory, atomicPrivateJson } from "./setup-journal.mjs";
 import { edgeDoorApiPath, ROOM_ORIGIN } from "../src/service-origin.js";
-import { parseShareInviteCode } from "../src/share-invite-code.js";
+import { formatShareInviteCode } from "../src/share-invite-code.js";
 import { ACCESS_PRESETS } from "../src/access-presets.js";
 import { validId } from "../src/events.js";
 import { agentConnectionReadiness } from "../src/agent-connection-readiness.js";
@@ -13,6 +13,9 @@ import { agentConnectionReadiness } from "../src/agent-connection-readiness.js";
 const canonicalOrigin = value => {
   const origin = assertServiceOrigin(value);
   return ["https://getdasha.com", "https://www.getdasha.com"].includes(origin) ? ROOM_ORIGIN : origin;
+};
+const shortInviteCode = value => {
+  try { return formatShareInviteCode(decodeURIComponent(value)); } catch { return ""; }
 };
 export function setupTarget(value, origin) {
   if (typeof value !== "string") throw new Error("Choose an invite or Room URL");
@@ -31,25 +34,48 @@ export function setupTarget(value, origin) {
       return { origin: canonicalOrigin(url.origin), publicRoom: page[1] };
     }
   }
-  const shortCode = parseShareInviteCode(value);
-  if (shortCode) return { origin: canonicalOrigin(url?.origin ?? origin), sharedToken: shortCode };
-  if (!url) throw new Error("Choose an invite or Room URL");
+  // The shared display parser deliberately extracts codes from arbitrary text.
+  // Setup must instead validate the complete destination before normalizing it.
+  if (!url) {
+    const shortCode = shortInviteCode(value);
+    if (shortCode) return { origin: canonicalOrigin(origin), sharedToken: shortCode };
+    throw new Error("Choose an invite or Room URL");
+  }
+  const entryPath = ["", "/", "/room", "/room/"].includes(url.pathname);
   // Self-serve join links: /join/RM-XXX (or /room/join/RM-XXX on the www door),
   // and the /a/RM-XXX agent steps link the join page tells agents to read.
   const joinPath = /^(?:\/room)?\/(?:join|a)\/(RM-[a-z0-9]+)\/?$/i.exec(url.pathname);
   // Only the share-analytics ?ref= is allowed; any other query (say a pasted token) is refused.
-  if (joinPath && !url.hash && [...url.searchParams.keys()].every(key => key === "ref")) {
+  if (joinPath) {
+    if (url.hash || [...url.searchParams.keys()].some(key => key !== "ref")) throw new Error("Use the agent invitation URL");
     if (origin && canonicalOrigin(origin) !== canonicalOrigin(url.origin)) throw new Error("URL and configured origin disagree");
     return { origin: canonicalOrigin(url.origin), code: joinPath[1].toUpperCase() };
   }
-  if (url.username || url.password || url.search || !["", "/", "/room", "/room/"].includes(url.pathname)) throw new Error("Use the Room entry URL");
+  if (url.searchParams.has("code")) {
+    const codes = url.searchParams.getAll("code");
+    const code = codes.length === 1 ? formatShareInviteCode(codes[0]) : "";
+    if (!entryPath || url.hash || !code || [...url.searchParams.keys()].some(key => !["code", "ref"].includes(key)))
+      throw new Error("Use one unambiguous Room invitation");
+    return { origin: canonicalOrigin(url.origin), sharedToken: code };
+  }
+  if (!entryPath) {
+    const code = shortInviteCode(url.pathname.split("/").filter(Boolean).at(-1));
+    if (code) {
+      if (url.hash || [...url.searchParams.keys()].some(key => key !== "ref")) throw new Error("Use one unambiguous Room invitation");
+      return { origin: canonicalOrigin(url.origin), sharedToken: code };
+    }
+  }
+  if (url.username || url.password || (!url.hash && url.search) || [...url.searchParams.keys()].some(key => key !== "ref") || !entryPath) throw new Error("Use the Room entry URL");
   if (origin && canonicalOrigin(origin) !== canonicalOrigin(url.origin)) throw new Error("URL and configured origin disagree");
   if (!url.hash) return { origin: canonicalOrigin(url.origin) };
-  const [kind, id, extra, focus, trailing] = url.hash.slice(1).split("/");
-  if (["join", "code"].includes(kind) && (/^[A-Za-z0-9_-]{43}$/.test(id ?? "") || parseShareInviteCode(id)) && !trailing
-    && (!extra || ["work", "message"].includes(extra) && validId(focus))) return { origin: canonicalOrigin(url.origin), sharedToken: parseShareInviteCode(id) || id };
-  if (!extra && kind === "agent-invite" && /^RM-[a-z0-9]+$/i.test(id ?? "")) return { origin: canonicalOrigin(url.origin), code: id.toUpperCase() };
-  if (!extra && kind === "room" && validId(id)) return { origin: canonicalOrigin(url.origin), roomId: id };
+  const parts = url.hash.slice(1).split("/");
+  const [kind, id, extra, focus] = parts;
+  const shortCode = shortInviteCode(id ?? "");
+  if (["join", "code"].includes(kind) && (/^[A-Za-z0-9_-]{43}$/.test(id ?? "") || shortCode)
+    && (parts.length === 2 || parts.length === 4 && ["work", "message"].includes(extra) && validId(focus)))
+    return { origin: canonicalOrigin(url.origin), sharedToken: shortCode || id };
+  if (parts.length === 2 && kind === "agent-invite" && /^RM-[a-z0-9]+$/i.test(id ?? "")) return { origin: canonicalOrigin(url.origin), code: id.toUpperCase() };
+  if (parts.length === 2 && kind === "room" && validId(id)) return { origin: canonicalOrigin(url.origin), roomId: id };
   throw new Error("Use a shared invitation, agent invite or room link; an account sign-in link is not agent access");
 }
 const signature = preview => JSON.stringify({ roomId: preview.roomId, permissions: [...preview.permissions].sort(), expiresAt: preview.expiresAt });

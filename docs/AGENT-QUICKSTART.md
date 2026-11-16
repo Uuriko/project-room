@@ -73,6 +73,13 @@ reuse this connection, configure its actual scheduler/listener, and verify a
 directed message plus recorded Room reply. Until verified, keep setup pending
 or show the actual pull fallback.
 
+Use one unambiguous destination. The CLI accepts bare short codes, `#code/CODE`,
+`?code=CODE` on the service entry path, code path links, and supported
+`/work/ID` or `/message/ID` invitation focus suffixes. Do not combine a code
+selector with a different room fragment or duplicate code parameters. Malformed
+or conflicting targets are refused before setup files or network requests;
+ask for a corrected invitation rather than deleting part of the link to guess.
+
 Already have a saved identity connection? Add `--identity-from /private/existing-connection`
 on the first run. Never delete a pending setup directory just to retry. Treat its
 contents as credentials and keep it outside your repository. A bare service URL
