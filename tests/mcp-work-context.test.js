@@ -48,8 +48,14 @@ test("hosted and bound stdio selected-work hints and briefs expose callable part
   const hostedBatchPointer = hostedBatch.items[0].replyRequestContext.requests.find(q => q.id === "pending").nextRead;
   assert.deepEqual(hostedBatchPointer.arguments, { roomId: "test-room", requestMessageId: "pending" });
   assert.equal((await call(hostedBatchPointer.tool, hostedBatchPointer.arguments)).structuredContent.selection.requestMessageId, "pending");
-  const boundBrief = (await stdio.call("room_read_work", { workItemId: "task", brief: true })).result.structuredContent.brief;
+  const boundPacket = (await stdio.call("room_read_work", { workItemId: "task", brief: true })).result.structuredContent;
+  const boundBrief = boundPacket.brief;
   assert.match(boundBrief, /Pending linked reply requests: 26/); assert.match(boundBrief, /pending/);
   assert.equal(boundBrief.includes("PRIVATE-BODY-SENTINEL"), false);
   assert.equal(store.roomAuthority("test-room", { memberId: identity.identityId }).sequence, before);
+  assert.equal(boundPacket.continuation.tool, "room_begin_work");
+  assert.deepEqual(boundPacket.continuation.arguments, { workItemId: "task" });
+  const begun = await stdio.call(boundPacket.continuation.tool, boundPacket.continuation.arguments);
+  assert.notEqual(begun.result?.isError, true, JSON.stringify(begun));
+  assert.equal(begun.result.structuredContent.working, true, "bound hint must be callable without a hosted roomId");
 });
