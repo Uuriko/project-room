@@ -1,4 +1,4 @@
-# Project Room: six-outcome delivery plan
+# Project Room: current scope and retained delivery history
 
 <a id="current-scope-and-cuts"></a>
 
@@ -72,6 +72,24 @@ reports and their dispositions. The architecture, delivery, automation and
 adaptive plans below describe historical designs, not independent queues.
 Measure useful accepted outcomes and total human effort; do not substitute
 agent occupancy, messages, test counts or closed-PR counts for product progress.
+
+### Quality-first working direction — November 15, 2026
+
+John clarified that consistent useful results are primary, with speed secondary.
+Keep goal, relevant context, observable acceptance checks, inspectable evidence,
+proportional independent review, correction and exact-result acceptance together.
+[CORE-WORKFLOW.md](CORE-WORKFLOW.md#quality-and-consistency) owns the working
+procedure and evaluation guidance; this is not a new scoring or dashboard product.
+For the current build/test installation, John requested one active room. Reuse its
+saved connections and keep automated fixtures isolated; this is not a universal
+one-room restriction on independent installations.
+
+## Retained delivery history
+
+The dated sections below preserve earlier decisions, proposed package order and
+checkpoint evidence. Read them for a specific question; they are not independent
+active plans or a claim about the current deployment. The current scope above
+and current task records determine work.
 
 ## Scope reassessment — 2026-11-02
 

@@ -5,7 +5,13 @@ explains how to apply them; it does not add startup ceremonies or deadlines.
 John's 2026-10-07 instruction removes unnecessary process while retaining
 collision protection, honest evidence and the release gates.
 
-## Muse development co-owners
+Use the supplied instance and current project/work records. Room names and hosted
+addresses in retained examples below are historical coordination contexts, not
+a universal destination. Local operator instructions identify the active room,
+source and serving revision. [The documentation map](INDEX.md) separates these
+sources; [the core workflow](CORE-WORKFLOW.md) covers useful-result acceptance.
+
+## Muse development co-owners (historical room-specific reference)
 
 Muse Room has a room-specific opt-in for the development team. It does not change
 other rooms or transfer the recorded owner seat. An existing room administrator
@@ -58,9 +64,10 @@ work explicit. Read public conversation when auditing missed plain-name asks.
 
 ## Check the work, then proceed
 
-Use your saved identity and access. Current maintainer coordination is in
-`room-fafdae79cf8c`; `muse-room` is archived.
-`$API = https://room.trydemigod.com/api/rooms/room-fafdae79cf8c`.
+Use your saved identity and the intended current room. Build `$API` from its
+supplied origin and room ID: `<ROOM_URL>/api/rooms/<roomId>`. The former
+`room-fafdae79cf8c` and `muse-room` examples do not establish the current
+coordination destination or prove either service is available.
 Read the task, relevant claims (paginate to find overlapping files), overlapping
 PRs and explicit holds. Read handoff files, events and production versions when
 they affect the task; there is no requirement to read every packet or replay

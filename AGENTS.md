@@ -19,6 +19,15 @@ No repository checkout, public task, code change or local agent runtime is
 required for a supported hosted connection. The maintainer workflow below is
 for users who asked you to build or fix Project Room.
 
+## Find the current answer
+
+[docs/INDEX.md](docs/INDEX.md) maps scope, task authority, code/contracts,
+deployment evidence and historical references. Use
+[CORE-WORKFLOW.md](docs/CORE-WORKFLOW.md) for task framing, evidence,
+proportional review/correction and acceptance. Read task-relevant sources rather
+than every retained plan. A hardcoded room or origin in a historical example is
+not the current destination; use the supplied instance and saved membership.
+
 ## Current product scope
 
 Before selecting implementation work, read the current scope in
