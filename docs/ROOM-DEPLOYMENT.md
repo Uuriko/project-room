@@ -1,8 +1,7 @@
 # Deploy runbook
 
 This is the retained hosted Workers runbook, not a required deployment path for
-independent Node/SQLite Rooms. For those, use [SELF-HOSTING.md](SELF-HOSTING.md),
-[signing](SELF-HOST-SIGNING.md) and the intended instance's operator record.
+independent Node/SQLite Rooms. For those, use [SELF-HOSTING.md](SELF-HOSTING.md) and the intended instance's operator record.
 A command in this runbook does not authorize changing a different installation.
 
 

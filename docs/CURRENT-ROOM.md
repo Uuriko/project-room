@@ -1,4 +1,4 @@
-# Current Project Room
+# Checkout map and retained hosted history
 
 This file retains a source map and an October hosted-service checkpoint; it is
 not the current deployment record for every Room. Use the intended instance's
