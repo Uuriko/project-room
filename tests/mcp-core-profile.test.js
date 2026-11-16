@@ -91,7 +91,9 @@ test("default tools/list is the short core profile and every listed name is lega
   console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
   // Core includes the complete task/correction/review loop. Keep a bounded
   // catalog instead of requiring the 129-tool full profile to finish a task.
-  assert.ok(coreBytes < 30 * 1024, `core tools/list is ${coreBytes} bytes`);
+  // The existing project-state read is now discoverable too: 21 tools rather
+  // than 20. Allow one more KiB while retaining the relative full-catalog cap.
+  assert.ok(coreBytes < 31 * 1024, `core tools/list is ${coreBytes} bytes`);
 
   const aliased = await rpc(origin, "tools/list", { aliases: 1, profile: "full" }, ada.secret);
   const aliasBody = await aliased.json();

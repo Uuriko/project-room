@@ -5,6 +5,19 @@ import { createHash } from "node:crypto";
 import { activeClaim } from "../src/workflow.js";
 
 const SCOPE_NEEDS = Object.freeze(["repository", "ref", "paths", "expiresAt"]);
+// Read-side interpretation of prerequisite observations ({id,state,satisfied})
+// from a selected-work read. Advisory only: claim/start admission rechecks.
+// Anything not established as satisfied holds an execution recommendation;
+// a missing list is unknown, never ready. Returns null when nothing is awaited.
+export const PREREQUISITE_GATED_STEPS = Object.freeze(["claim", "start"]);
+export function prerequisiteHold(dependencies) {
+  if (!Array.isArray(dependencies)) return { known: false, waitingOn: [], more: 0 };
+  const unmet = dependencies.filter(dep => dep?.satisfied !== true);
+  if (!unmet.length) return null;
+  return { known: true, waitingOn: unmet.slice(0, 3).map(dep => ({ id: dep.id, state: typeof dep.state === "string" ? dep.state : "unknown" })),
+    more: Math.max(0, unmet.length - 3) };
+}
+
 
 function canonicalBeginInput(input) {
   const scope = input || {};
@@ -248,6 +261,15 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
         });
       }
       pending = null;
+    }
+    // Known unfinished prerequisites: stop before a claim/start that admission
+    // would refuse. Accept still runs; an absent observation is left to admission.
+    const hold = plan.stage.action !== "room_accept_work" && Array.isArray(context.dependencies)
+      ? prerequisiteHold(context.dependencies) : null;
+    if (hold) {
+      return { ...stoppedResult(context, { confirmed, stopped: "waiting_on_prerequisites", next: plan.next,
+        resume: { tool: "room_read_work", workItemId: context.work.id } }),
+        waitingOn: hold.waitingOn, ...(hold.more ? { waitingOnMore: hold.more } : {}) };
     }
     if (seen.has(plan.stage.requestId)) {
       return stoppedResult(context, { confirmed, stopped: "unknown", resume: plan.stage });

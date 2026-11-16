@@ -126,6 +126,7 @@ import { selectedWorkContext, currentWorkRecord, workRoleHolder } from "./work-c
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { assertDependsOnKnown } from "./work-claim-integrity.mjs";
 import { normalizeWorkDependencies } from "../src/work-dependencies.js";
+import { nativePrerequisiteState, boardPrerequisiteState, observePrerequisites } from "./work-item-state.mjs";
 import { backfillAllRoomsWorkItemBoard, boardClaimId, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES, liveClaim, boardStateForWorkItem } from "./work-item-board.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
@@ -6545,10 +6546,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         delete value.help;
         const ids=item.dependsOn??[];
         if(ids.length>16)fail(409,'current_room_context_unavailable','Selected dependency list exceeds bounded context');
-        const dependencies=ids.map(id=>{
-          const dep=readWorkItem(this.db,roomId,id),state=dep?boardStateForWorkItem(dep,this.now()):'missing';
-          return {id,state,satisfied:Boolean(dep?.receipt?.eventId&&dep.receipt.evidenceVersion&&!dep.supersededBy&&state==='done')};
-        });
+        const now=this.now(),dependencies=observePrerequisites(ids,id=>readWorkItem(this.db,roomId,id),dep=>nativePrerequisiteState(dep,now));
         return {...value,dependencies,viewerId:auth.member.id,viewerAccountId:auth.account?.id??null,viewerAuthEpoch:auth.account?.authEpoch??null,
           viewerSessionBinding:auth.sessionBinding,viewerSessionRevision:auth.sessionRevision??null};
       }
@@ -6575,14 +6573,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const target = room.state.workItems[workItemId].supersededBy;
           return validId(target) && target !== workItemId && Boolean(readWorkItem(this.db, roomId, target));
         })() }),
-        dependencies: (() => {
-          const claim = this.workClaims.get(roomId, boardClaimId(workItemId));
-          const ids = claim?.dependsOn ?? room.state.workItems[workItemId].dependsOn ?? [];
-          return ids.map(id => {
-            const dep = this.workClaims.get(roomId, id);
-            return { id, state: dep?.state ?? "missing", satisfied: Boolean(dep && dep.state === "done" && !dep.premiseFlag && !dep.supersededBy) };
-          });
-        })(),
+        dependencies: observePrerequisites(this.workClaims.get(roomId, boardClaimId(workItemId))?.dependsOn ?? room.state.workItems[workItemId].dependsOn ?? [],
+          id => this.workClaims.get(roomId, id), boardPrerequisiteState),
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     // Selected work shares this reservation with OAuth, protected participants,
@@ -7467,8 +7459,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if ([T.CLAIM_ACQUIRED, T.WORK_STARTED].includes(incoming.type)) {
           const unmet = deps.filter(id => {
             const dep = get(id);
-            return native ? !dep?.receipt?.eventId||!dep.receipt.evidenceVersion||Boolean(dep.supersededBy)||boardStateForWorkItem(dep,this.now())!=='done'
-              : !dep || dep.state !== "done" || dep.premiseFlag || dep.supersededBy;
+            return !(native ? nativePrerequisiteState(dep,this.now()) : boardPrerequisiteState(dep)).satisfied;
           });
           if (unmet.length) fail(409, "work_claim_dependencies_unmet", `Dependencies not done: ${unmet.join(", ")}`);
         }

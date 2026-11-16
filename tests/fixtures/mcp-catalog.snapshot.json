@@ -232,6 +232,16 @@
         "title": "Post Message"
       }
     },
+    "room_project_state": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Project State"
+      }
+    },
     "room_read_messages": {
       "inputSchema": "21c7b4eb969a9392",
       "annotations": {
@@ -3214,6 +3224,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Post Message"
+      }
+    },
+    "room_project_state": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Project State"
       }
     },
     "room_read_messages": {
