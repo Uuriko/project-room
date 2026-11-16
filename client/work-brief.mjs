@@ -1,3 +1,4 @@
+import { missingReviewPermission, REVIEW_PERMISSION_GUIDANCE } from "../src/workflow.js";
 // Derived from an authenticated selected-work read. No retrieval, persistence or authority.
 const pick = (value, keys) => value == null ? null : Object.fromEntries(keys.split(' ')
   .filter(key => Object.hasOwn(value, key)).map(key => [key, structuredClone(value[key])]));
@@ -37,6 +38,9 @@ export async function createWorkBrief(context) {
       ...(context.context.source?.freshness ? { observation: structuredClone(context.context.source.observation) } : {}) },
     conversations: structuredClone(context.replyRequestContext ?? null)
   };
+  if (missingReviewPermission(context.next, context.viewer)) {
+    sections.progress.next = { ...sections.progress.next, missingPermissions: ['verify'], guidance: REVIEW_PERMISSION_GUIDANCE };
+  }
   const sectionVersions = Object.fromEntries(await Promise.all(Object.entries(sections)
     .map(async ([key, value]) => [key, await fingerprint(value)])));
   const brief = { contractVersion: 1, scope, version: await fingerprint({ scope, sectionVersions }), sectionVersions,

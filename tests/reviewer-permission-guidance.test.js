@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { RoomStore } from '../server/store.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { readWorkItem } from '../server/work-repository.mjs';
+import { textVersion } from '../server/text-results.mjs';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
+import { workContextMarkdown } from '../client/room-agent.mjs';
+import { createWorkBrief, compareWorkBriefs } from '../client/work-brief.mjs';
+import { workContinuation } from '../client/work-preparation.mjs';
+
+for (const representation of ['legacy', 'normalized-current-v1']) {
+  test(`${representation}: assigned reviewer sees permission remedy before a refused verdict; a fresh grant clears it`, async t => {
+    const store = new RoomStore(':memory:');
+    store.initialize(initialRoom(), representation === 'legacy' ? {} : { representation });
+    t.after(() => store.close());
+    const owner = store.issueAccessKey('commons', 'owner');
+    const member = (name, permissions) => {
+      const identity = store.identities.create(name);
+      linkWithProof(store, owner, 'commons', identity, { displayName: name, permissions });
+      return identity;
+    };
+    const producer = member('Producer', ['accept_work', 'complete_work']);
+    const reviewer = member('Reviewer', ['accept_work', 'complete_work']);
+    const send = (key, type, data) => store.command(key, 'commons', { id: crypto.randomUUID(), type, data });
+    const workItemId = 'review';
+    const item = () => readWorkItem(store.db, 'commons', workItemId);
+    send(owner, 'work.proposed', { workItemId, title: 'Review repaired recovery', definitionOfDone: 'Independent exact-result check', mode: 'read', accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true, ownerDecisionRequired: false });
+    send(producer.secret, 'work.accepted', { workItemId, expectedRevision: 0 });
+    send(producer.secret, 'work.started', { workItemId, expectedRevision: 1 });
+    const body = 'Reviewed operator artifacts and their limitations';
+    const post = send(producer.secret, 'message.posted', { workItemId, messageId: 'result', body });
+    const done = send(producer.secret, 'work.completed', { workItemId, expectedRevision: 2, evidenceKind: 'room_text', evidenceMessageId: 'result', evidenceMessageEventId: post.event.id, evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: producer.identityId, summary: 'Ready for review', nextAction: 'Independent review' });
+    const verdict = { workItemId, expectedRevision: 3, result: 'pass', summary: 'Checked', completionEventId: done.event.id, evidenceVersion: textVersion(body) };
+    assert.throws(() => send(reviewer.secret, 'verification.recorded', verdict), /lacks verify/);
+    const before = store.workContext(reviewer.secret, 'commons', workItemId);
+    assert.equal(before.next.action, 'verify');
+    assert.equal(before.suggestedActions.some(x => x.action === 'verify'), false);
+    assert.match(before.scope.guidance, /missing.*verify.*permission/i);
+    assert.match(workContextMarkdown(before), /room owner or a member administrator/i);
+    const briefBefore = await createWorkBrief(before);
+    assert.deepEqual(briefBefore.sections.progress.next.missingPermissions, ['verify']);
+    assert.match(briefBefore.sections.progress.next.guidance, /room owner or a member administrator/i);
+    const blocked = workContinuation(before);
+    assert.equal(blocked.tool, null);
+    assert.deepEqual(blocked.missingPermissions, ['verify']);
+    assert.doesNotMatch(store.workContext(producer.secret, 'commons', workItemId).scope.guidance, /missing.*verify.*permission/i);
+    const stateBefore = JSON.stringify(item());
+    const m = store.roomAuthority('commons').members[reviewer.identityId];
+    send(owner, 'member.access_changed', { memberId: m.id, expectedMemberRevision: m.revision, permissions: [...m.permissions, 'verify'], active: true });
+    const after = store.workContext(reviewer.secret, 'commons', workItemId);
+    assert.equal(JSON.stringify(item()), stateBefore, 'permission change must not edit work or its result');
+    assert.doesNotMatch(after.scope.guidance, /missing.*verify.*permission/i);
+    assert.equal(workContinuation(after).tool, 'room_read_work');
+    const briefAfter = await createWorkBrief(after);
+    assert.equal(briefAfter.sections.progress.next.missingPermissions, undefined);
+    assert.equal(compareWorkBriefs(briefBefore, briefAfter).status, 'changed');
+    assert.ok(compareWorkBriefs(briefBefore, briefAfter).changedSections.includes('progress'));
+    send(reviewer.secret, 'verification.recorded', verdict);
+    assert.equal(store.workContext(reviewer.secret, 'commons', workItemId).next.action, 'complete');
+  });
+}
