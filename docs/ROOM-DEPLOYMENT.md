@@ -1,5 +1,11 @@
 # Deploy runbook
 
+This is the retained hosted Workers runbook, not a required deployment path for
+independent Node/SQLite Rooms. For those, use [SELF-HOSTING.md](SELF-HOSTING.md),
+[signing](SELF-HOST-SIGNING.md) and the intended instance's operator record.
+A command in this runbook does not authorize changing a different installation.
+
+
 ## Canonical runtime
 
 **The Cloudflare Worker + Durable Object is the canonical — and only — production runtime for Project Room.** The same server code also runs under plain Node, but Node is a **dev/test/pilot runtime only**: it is how the service runs locally, in CI, and in the invite-only VPS pilot. Node is not a production candidate and is not a storage failover for the Durable Object. When a change behaves differently across the two runtimes, the Worker/Durable Object behavior is the correct one and the Node difference is the bug.

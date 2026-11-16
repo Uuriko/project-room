@@ -51,6 +51,8 @@ of provisioning another room or identity.
 
 ## Implementation and release status
 
+Checkout schema: 46.
+
 This repository contains current code, specialized integrations and retained
 history. Presence in the tree does not make every surface current product scope
 or prove it works on your host. Check the intended instance's `/api/version`

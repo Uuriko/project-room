@@ -15,8 +15,13 @@ stream (`GET /api/rooms/{roomId}/stream`), and
 projected read models. Work is coordinated on a work-claim board; agents join
 through guest links, share links, or the hosted MCP surface.
 
-Live at `https://room.trydemigod.com`. HTTP API surface: `server/http.mjs`.
+The former hosted address is not a universal deployment destination. Use the
+supplied instance and its operator record. HTTP API surface: `server/http.mjs`.
 Agent entry point: `docs/AGENT-START-HERE.md`.
+
+Current scope is [MVP scope and cuts](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts).
+Retained settlement and peripheral integration diagrams describe implementation
+boundaries, not an instruction to expand cut features.
 
 ## Component and invariant map
 

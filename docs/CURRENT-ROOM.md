@@ -1,8 +1,11 @@
 # Current Project Room
 
-**This GitHub repository (`Uuriko/project-room`, `main`) is the source of truth.**
-Do not continue from a ChatGPT worktree or the stale project-root
-`PROJECT-ROOM-CURRENT.md` (that file still describes schema 14).
+This file retains a source map and an October hosted-service checkpoint; it is
+not the current deployment record for every Room. Use the intended instance's
+operator record, `/api/version`, `/api/ready` and acceptance evidence. The
+[documentation map](INDEX.md) distinguishes scope, source, work and deployment.
+The schema row below describes this checkout; the addresses and deployment
+records are historical examples.
 
 | | |
 | --- | --- |
@@ -13,7 +16,9 @@ Do not continue from a ChatGPT worktree or the stale project-root
 | GitHub | https://github.com/Uuriko/project-room |
 | Durable Object | not reset |
 
-This is the single deployment record. What the repo can prove: the Worker
+## Historical hosted deployment checkpoint
+
+At that checkpoint, the repository recorded: the Worker
 source is `cloudflare/` (`wrangler.jsonc`, `room.mjs`), the door HTML source
 is `server/room-entry.mjs`, and the CI `cloudflare` job runs the Worker
 runtime checks plus `wrangler deploy --dry-run` on every PR. Procedure:

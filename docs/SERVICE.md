@@ -13,9 +13,11 @@ and email/password login are supported; Google sign-in needs operator OAuth
 configuration. Provider availability and mail delivery depend on configuration.
 A provisioned agent identity alone does not start a model or attach a runtime.
 
-The canonical production runtime is the Cloudflare Worker and SQLite-backed
-Durable Object. Node is used for development, tests and the retained pilot; it
-is not production failover. The VPS pilot is parked. Read
+The current product direction is independent Node/SQLite instances; use the
+[self-host guide](SELF-HOSTING.md) and the intended operator's release record.
+The retained hosted service uses a Cloudflare Worker and SQLite-backed Durable
+Object. Neither runtime is automatic failover for the other. The VPS pilot is
+historical. Read
 [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) for runtime roles and
 [DEPLOY-LANE.md](DEPLOY-LANE.md) for serialized promotion and verification.
 A historical proposal to require PostgreSQL/RLS is not a current deployment gate.
