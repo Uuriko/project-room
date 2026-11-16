@@ -3896,8 +3896,8 @@ function revealLocationHash() {
   }
 }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
-function actions(i, scopeOnly = false, now = Date.now()) {
-  if (!scopeOnly) return renderWorkActions(i, state.members[session.member.id], { now, busy, esc, workId: i.id });
+function actions(i, scopeOnly = false, now = Date.now(), next) {
+  if (!scopeOnly) return renderWorkActions(i, state.members[session.member.id], { now, busy, esc, workId: i.id, next });
   return workActions(i, state.members[session.member.id], now).filter(([action]) => ["release", "renew"].includes(action)).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
 function helpView(item, now = Date.now()) {
@@ -4053,12 +4053,15 @@ function claimOverlapHtml(i) {
   return `<p class="claim-overlap">Already claimed by others. Talk before you both edit:</p><ul class="claim-overlap-list">${rows}</ul>`;
 }
 function workCard(i, now, drafts, messages = []) {
-  const next = nextWorkStep(i, now), status = workStatus(i, now), help = helpView(i, now);
+  const next = nextWorkStep(i, now, state.room.ownerId), status = workStatus(i, now, next), help = helpView(i, now);
   // Derived read-time signal only: a pause hint, never a block or a dispatch.
   const loops = coordinationLoops(i, messages);
   const loopNotice = loops.length ? `<p class="loop-warning" data-loop-kind="${esc(loops[0].kind)}"><strong>Possible coordination loop.</strong> ${esc(loops[0].label)}</p>` : "";
   const nextFor = next.memberId ? ` for ${esc(name(next.memberId))}` : "";
   const quietNext = session.member.kind === "human" && !document.body.classList.contains("human-advanced") && ["in_progress", "complete"].includes(next.action);
+  const preview = value => { const chars = [...value]; return chars.slice(0, 240).join("") + (chars.length > 240 ? "…" : ""); };
+  const goal = uiText("work.focus.goalHtml", { definition: esc(preview(i.definitionOfDone)) });
+  const resultSummary = i.receipt ? uiText("work.focus.resultHtml", { summary: esc(preview(i.receipt.summary)) }) : "";
   const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${esc(status.next)}</p>`;
   const replacement = i.supersededBy && i.supersededBy !== i.id
     ? Object.hasOwn(state.workItems, i.supersededBy)
@@ -4088,7 +4091,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${replacement}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${goal}${resultSummary}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${replacement}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now, next)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -6368,6 +6371,7 @@ function syncWorkPolicy() {
 }
 function openWork(sourceId = null, reuseId = null) {
   if (!can("steer") || busy) return;
+  $("#work-brief-help").textContent = uiText("work.focus.briefHelp");
   if (!$("#new-work-form").hidden) { $(workRetryLocked ? "#retry-work-button" : "#work-title-input").focus(); return; }
   let definition;
   if (reuseId) {
