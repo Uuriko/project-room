@@ -87,9 +87,10 @@ function observedSummary(github) {
   if (github.status !== "observed") return { source: "github", status: "unavailable", reason: github.reason ?? "unknown",
     note: "GitHub state for this task is unknown. Do not treat that as passing or merged." };
   return { source: "github", status: "observed", assessment: github.assessment, pullRequest: github.pullRequest.url,
-    headSha: github.pullRequest.headSha, checks: github.checks.state, fresh: github.fresh, observedAt: github.observedAt,
-    ...(github.headChanged ? { headChangedFrom: github.headChanged.from } : {}),
-    note: github.fresh ? github.meaning : `Last observed ${github.ageSeconds}s ago and not refreshed (${github.refresh?.reason ?? "stale"}). ` + github.meaning };
+    headSha: github.pullRequest.headSha, checks: github.checks.state, checksComplete: github.checks.complete === true,
+    requiredChecksKnown: false, fresh: github.fresh, observedAt: github.observedAt,
+    ...(github.superseded ? { supersededHeadSha: github.superseded.headSha } : {}),
+    note: github.fresh ? github.meaning : `Last known observation, ${github.ageSeconds}s old; current state unknown (${github.refresh?.reason ?? "stale"}). ` + github.meaning };
 }
 
 export function workContinuation(context, { hosted = false } = {}) {
