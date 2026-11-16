@@ -463,7 +463,10 @@ test("selected work HTTP lists only viewer-participant open linked requests with
   assert.equal(JSON.stringify(view).includes("unrelated-open"), false);
   assert.equal(view.evaluatedThrough, before.sequence);
   assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before);
-  await assert.rejects(f.client("guest").workContext("test-handoff"), { status: 403, code: "work_private" });
+  // The work carries a private request, so a member outside it (not a request party, not a member the
+  // task names) is refused the selected read outright instead of receiving a copy with zero requests.
+  await assert.rejects(f.client("guest").workContext("test-handoff"), error => error.status === 403 && error.code === "work_private");
+  assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before, "a refused read writes nothing");
   f.send("owner", "reply_request.cancelled", { requestMessageId: "incoming-linked", expectedRequestRevision: 0, reason: "Test complete" });
   const after = await f.client("producer").workContext("test-handoff");
   assert.deepEqual(after.replyRequestContext.requests.map(q => q.id), ["outgoing-linked"]);

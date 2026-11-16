@@ -1,7 +1,7 @@
 import {isCurrentRoom} from './current-room-repository.mjs';
 import {readCurrentWorkSnapshot} from './current-work-snapshot.mjs';
 import { charterContext } from "../src/room-charter.js";
-import { currentWorkRecord, workRoleHolder } from "./work-context.mjs";
+import { currentWorkRecord, withheldWorkItem, workRoleHolder } from "./work-context.mjs";
 
 // Default SDK orientation includes full current evidence records and bounded
 // handoff history. Keep that contract separate from the current-only work view.
@@ -23,9 +23,10 @@ export function readAgentOrientation(store, token, roomId, fence, {cursor=null}=
     const recordForViewer = (id, item) => {
       const parties = privatePartiesByWork.get(id);
       return orientationRecord(!parties || parties.has(auth.member.id) || workRoleHolder(item, auth.member.id)
-        ? item : { ...item, title: null, definitionOfDone: null,
-          claim: null, receipt: null, verification: null, decision: null,
-          blocker: null, handoff: null, handoffHistory: null });
+        // Outside private work: the minimal redacted record. Orientation copies
+        // claim, receipt, verification, decision, blocker, handoff and its history,
+        // so nulling the title alone left all of those readable.
+        ? item : withheldWorkItem(item));
     };
     return {
       snapshotView: "orientation", snapshotVersion: 1, roomId, sequence: room.sequence,

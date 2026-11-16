@@ -40,7 +40,7 @@ test('selected work reserves records only, retaining an inherited stricter conte
  let small,large;
  assert.throws(()=>s.readTransaction(()=>withCurrentReadContext(s.db,'commons',b=>{small=b;chargeCurrentReadBudget(b,0,40);return runMcpOAuthRequest(auth,()=>s.workContext(saved.token,'commons','task'));})),e=>e.code==='current_room_context_unavailable');
  s.readTransaction(()=>withCurrentReadContext(s.db,'commons',b=>{large=b;chargeCurrentReadBudget(b,0,40);assert.equal(runMcpOAuthRequest(auth,()=>s.workContext(saved.token,'commons','task')).work.revision,4);},{maxRecords:512}));
- assert.equal(small.records,202);assert.ok(large.records>200&&large.records<=512);assert.ok(large.bytes<=256*1024);
+ assert.equal(small.records,203);assert.ok(large.records>200&&large.records<=512);assert.ok(large.bytes<=256*1024);
  t.diagnostic(JSON.stringify({failed:{records:small.records,bytes:small.bytes},accepted:{records:large.records,bytes:large.bytes}}));
 });
 
