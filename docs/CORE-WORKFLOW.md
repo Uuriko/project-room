@@ -30,7 +30,7 @@ work. A connection alone does not execute a task.
    reviewer or decision-maker who arrives at the revised result gets the one
    earlier result's recorded review and decision as `previousResult` (and
    `review.previous` with `includeResult`), marked `appliesToCurrentResult:false`:
-   it says what to re-check, never what is approved. Null means none recorded.
+   it says what to re-check, never what is approved. Null means none recorded, or not visible to you: private work shows it only to its request parties and named members.
 5. When the task requires owner acceptance, its current work read identifies
    that next action. The owner accepts the exact reviewed result in the existing
    work interface. Review alone does not record owner acceptance.
@@ -42,6 +42,11 @@ These actions are available in the default member MCP catalog, subject to the
 same permission and scope checks as their full-catalog counterparts. Advanced
 catalogs remain available for other work. No extra orchestration service is
 required.
+
+An activation brief is a bounded view. If it selects no pickup, its next read
+opens work addressed to you; this is not a claim that the project has no work.
+Follow continuation pages even when a filtered page is empty. The normalized
+brief includes the current charter purpose and its context-only revision source.
 
 A task can name prerequisites with `dependsOn`. While any prerequisite is not
 satisfied by its own exact gates, the brief, its `continuation` and
@@ -149,3 +154,11 @@ task, not a delta since an agent last read: there is no per-agent read checkpoin
 Text evidence must fit the supported result limit (4000 UTF-16 code units).
 Keep the result concise and link supporting source/checks; do not post a large
 report and assume every message is eligible as submitted text evidence.
+
+### Activation: continue before pickup
+
+Activation briefs show up to three `yourWork` records in stable ID order before unrelated pickup: current assignments/ongoing work, corrections, exact-result review and authorized decisions. These are read suggestions, not execution grants or global priority scores. `permission_required` directs the named member to read the task without implying they may perform its next action. Normalized Rooms reuse bounded addressed-role indexes, never retired Board mirrors or whole-room hydration.
+
+`yourWorkCoverage.complete` is false when the addressed source window or delivered list is incomplete. Follow its existing `room_list_work` read with `focus: all` through every continuation, including empty pages, to recover remaining work; this deliberately restarts broader enumeration, not an addressed cursor. It includes ongoing work that `needs_me` does not select. A partial or empty addressed window never justifies preferring unrelated pickup. Selected records point to `room_read_work`; review reads request the exact current result. Re-read before acting. Source/charter provenance stays context-only.
+
+Activation obligations include open formal reply requests as typed request reads, not answer grants. Ordinary conversation replies do not close those requests. Bounded discovery is ID-ordered, not a global priority ranking. If coverage is incomplete, follow both `yourWorkCoverage.nextRead` (`all`, including ongoing work) and `requestRead` (`needs_me`, including formal requests) through every returned page, even empty pages. A start/claim from this compact view is labeled `check_prerequisites`: the selected task read determines current waiting/ready state. Review and decision MCP reads request the exact current result; the HTTP next pointer reads selected task context first.

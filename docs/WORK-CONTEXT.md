@@ -51,6 +51,12 @@ Contract version 1 includes:
   current result. A review recorded after the replacement carries
   `recordedAfterReplacement: true`; a retired approval carries `retiredBecause`.
   `null` fields mean none was recorded, not that the earlier result was clean.
+  `previousResult` follows the task's privacy: when the task has a private tracked
+  request it is returned only to that request's parties and the members the task
+  names (proposer, accountable member, reviewer, decision-maker, claim holder).
+  Anyone else, or a read whose privacy information is unavailable, gets `null`,
+  with no review text, decision text, identities or predecessor ids; so `null`
+  there does not mean no earlier result existed. The stored history is unchanged.
   A brief carries it in `evidence.previous`, and `includeResult` returns it as
   `review.previous`. Added to contract version 1; readers that ignore it are unaffected.
 - `viewer`: your authenticated current membership and permissions. Small
