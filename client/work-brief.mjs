@@ -32,6 +32,7 @@ export async function createWorkBrief(context) {
     evidence: { receipt: pick(work.receipt, 'eventId reportedById producerId summary evidenceUrl evidenceVersion nextAction'),
       verification: pick(work.verification, 'eventId verifierId result completionEventId evidenceVersion summary independenceConfirmed'),
       decision: pick(work.decision, 'eventId actorId decision completionEventId evidenceVersion reason'),
+      previous: structuredClone(context.previousResult ?? null),
       references: structuredClone(context.accessSummary.evidence.records), retrieved: false },
     source: { ...structuredClone(context.accessSummary.conversation), contentObserved: ["included", "not_modified"].includes(context.context.source?.status),
       ...(context.context.source?.freshness ? { observation: structuredClone(context.context.source.observation) } : {}) },

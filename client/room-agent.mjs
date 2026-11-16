@@ -1643,6 +1643,12 @@ export class RoomAgentClient {
 }
 
 // Compact authenticated view, distinct from the opt-in portable export.
+function previousResultMarkdown(previous) {
+  const review = previous.review ? `${previous.review.result} by ${previous.review.verifierId}${previous.review.summary ? ` — "${previous.review.summary}${previous.review.summaryTruncated ? "…" : ""}"` : ""}` : "none recorded";
+  const decision = previous.decision ? `${previous.decision.decision} by ${previous.decision.actorId}${previous.decision.retiredBecause ? ` (retired: ${previous.decision.retiredBecause})` : ""}` : "none recorded";
+  return `Earlier result ${previous.completionEventId} (replaced) · review: ${review} · decision: ${decision}. Neither the earlier review nor the earlier decision applies to the current result.`;
+}
+
 export function workContextMarkdown(result) {
   if (!result.resume) throw new Error("This service does not provide a resume brief; use work without --brief");
   return [`# ${result.work.title}`, result.work.definitionOfDone,
@@ -1657,6 +1663,7 @@ export function workContextMarkdown(result) {
       ? "Worker session: no start reported (task progress shown above; recorded controls below)"
       : "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),
+    ...(result.previousResult ? [previousResultMarkdown(result.previousResult)] : []),
     ...(result.dependencies?.length ? [
       "Prerequisites (checked again before claim/start): " + result.dependencies.map(dep => `${dep.id}: ${dep.state}${dep.satisfied ? " (satisfied)" : " (not satisfied)"}`).join(", "),
       ...(result.dependencies.some(dep => !dep.satisfied) ? ["Prerequisites are not satisfied. Do not claim or start this work yet."] : [])

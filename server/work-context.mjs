@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { matchesReceipt } from "../src/events.js";
 import { nextWorkStep, workActions, workCollaboration, workResume } from "../src/workflow.js";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
@@ -8,7 +9,7 @@ import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 
 // The exact omissions every selected read reports; the access summary repeats the same list.
-export const WORK_CONTEXT_OMISSIONS = Object.freeze(["other_work", "other_messages", "event_history", "prior_receipts_and_checks", "private_reminders", "read_marker"]);
+export const WORK_CONTEXT_OMISSIONS = Object.freeze(["other_work", "other_messages", "event_history", "older_receipts_and_checks", "private_reminders", "read_marker"]);
 const EVIDENCE_RECORDS = Object.freeze(["receipt", "verification", "decision", "handoff"]);
 
 export function workRoleHolder(item, memberId) {
@@ -64,6 +65,32 @@ export function currentWorkRecord(item) {
   work.handoff = pick(item.handoff, "open eventId at actorId triageMemberId doneSummary nextAction limitReason evidenceUrl evidenceVersion haltAll");
   if (Object.hasOwn(item, "helpWanted")) work.helpWanted = structuredClone(validateHelp(item.helpWanted));
   return work;
+}
+
+// The one result this one replaced, with the review and decision that were
+// recorded for that exact result. Taken from the stored histories already on
+// the work item, never from chat. It is context for the next reader: only the
+// current result's own review and decision (work.verification, work.decision)
+// can satisfy a gate, so appliesToCurrentResult is always false. Older results
+// stay omitted; text is capped so one long earlier summary cannot crowd out the read.
+const PREVIOUS_TEXT_LIMIT = 600;
+const capped = value => typeof value !== "string" ? null
+  : value.length <= PREVIOUS_TEXT_LIMIT ? { value, truncated: false } : { value: value.slice(0, PREVIOUS_TEXT_LIMIT), truncated: true };
+export function previousResultRecord(item, viewerId = null) {
+  const previous = item.receiptHistory?.at(-1);
+  if (!item.receipt?.eventId || !previous?.eventId) return null;
+  const latest = history => (history ?? []).findLast(entry => matchesReceipt(entry, previous)) ?? null;
+  const verification = latest(item.verificationHistory), decision = latest(item.decisionHistory);
+  const text = (record, field) => { const out = capped(record[field]); return { [field]: out?.value ?? null, ...(out?.truncated ? { [field + "Truncated"]: true } : {}) }; };
+  return {
+    completionEventId: previous.eventId, evidenceVersion: previous.evidenceVersion ?? null,
+    review: verification ? markIfOther({ result: verification.result, verifierId: verification.verifierId, eventId: verification.eventId,
+      ...text(verification, "summary"), ...(verification.historical ? { recordedAfterReplacement: true } : {}) }, viewerId, verification.verifierId) : null,
+    decision: decision ? markIfOther({ decision: decision.decision, actorId: decision.actorId, eventId: decision.eventId,
+      ...text(decision, "reason"), ...(decision.invalidatedReason ? { retiredBecause: decision.invalidatedReason } : {}) }, viewerId, decision.actorId) : null,
+    appliesToCurrentResult: false,
+    guidance: "Context only; satisfies no gate for the current result (work.verification and work.decision do). Older results are omitted."
+  };
 }
 
 // C2: what an agent can access before it starts, derived from the same committed
@@ -141,6 +168,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     viewer: pick(member, "id displayName kind active revision permissions"), work,
     replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor),
     resume: workResume(work, now, state.room.ownerId),
+    previousResult: previousResultRecord(item, viewerId),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
     toolFocus: {
       focus: next.memberId === viewerId && ["verify", "decide", "triaged_handoff"].includes(next.action) ? "review" : "work",
