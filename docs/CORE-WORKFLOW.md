@@ -35,6 +35,11 @@ same permission and scope checks as their full-catalog counterparts. Advanced
 catalogs remain available for other work. No extra orchestration service is
 required.
 
+An activation brief is a bounded view. If it selects no pickup, its next read
+opens work addressed to you; this is not a claim that the project has no work.
+Follow continuation pages even when a filtered page is empty. The normalized
+brief includes the current charter purpose and its context-only revision source.
+
 ## A task ready to pick up
 
 Use the existing task fields and discussion; no extra form or approval is needed:

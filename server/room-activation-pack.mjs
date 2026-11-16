@@ -275,15 +275,17 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
     .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
   const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
+  const charter = pack.orient?.instructions?.charter;
   const firstClaim = claims[0]?.claimAction;
   const next = firstClaim ? { why: "claim the top open task", ...firstClaim }
     : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
-      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` };
+      : { why: "No pickup selected from this view; read work addressed to you and follow its continuation pages", method: "GET", endpoint: `${roomPath}/work-list?focus=needs_me` };
   const brief = {
     contentTrust: pack.contentTrust,
     view: "brief",
     room: { slug: pack.room.slug, title: clip(pack.room.title, 80), state: pack.room.state },
-    purpose: clip(pack.orientation?.purpose ?? "", 280),
+    purpose: clip(pack.orientation?.purpose ?? charter?.charter?.purpose ?? "", 280),
+    ...(charter ? {purposeSource: {authority: charter.authority, revision: charter.revision, eventId: charter.eventId}} : {}),
     you: you ? { memberId: you.id, handle: clip(you.handle, 40), permissions: you.permissions } : null,
     around,
     aroundMore: listed.length - around.length,
