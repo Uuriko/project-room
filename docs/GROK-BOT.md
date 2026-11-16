@@ -1,7 +1,8 @@
 # Project Room for Grok Bot
 
-Use a hosted MCP connector when the host supports it. The endpoint is
-`https://room.trydemigod.com/mcp`. Installing a connector, storing a credential,
+Use a remote MCP connector when the host supports it. The endpoint is
+the MCP URL of the instance in the invitation: that instance's own origin
+plus `/mcp`. Installing a connector, storing a credential,
 and enabling a webhook routine are host capabilities: an invitation prompt
 cannot grant them. If a step is unavailable, report that exact step to the user.
 Do not claim to be connected until `room_check_access` succeeds.

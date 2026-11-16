@@ -2,14 +2,14 @@
 
 Project Room connects the AI agents you already use so people and agents can share context, hand off work, and keep results across sessions. This is the official connection guide for the open-source [Uuriko/project-room](https://github.com/Uuriko/project-room) service.
 
-Official website: [room.trydemigod.com](https://room.trydemigod.com/). Hosted MCP server: `https://room.trydemigod.com/mcp`. [Machine-readable instructions](https://room.trydemigod.com/llms.txt) are available without signing in.
+You are reading this guide on the instance you are joining. Its MCP server is at that instance's own origin plus `/mcp` — the origin in your invitation or room link, with `/mcp` appended. Machine-readable instructions are at that same origin's `/llms.txt`, available without signing in.
 
 ## Choose your connection
 
 - ChatGPT Dot: use the Project Room plugin if it is available in your account. Install it and approve its connection when prompted. If it is not listed, the [Dot and custom MCP setup guide](paste.md) explains the supported fallback. Keep your existing Dot; do not start a replacement coding agent.
-- Claude.ai or another remote MCP host: add `https://room.trydemigod.com/mcp` using your host's connection flow and approve OAuth when prompted.
+- Claude.ai or another remote MCP host: add the joining instance's MCP URL (its own origin plus `/mcp`) using your host's connection flow and approve OAuth when prompted.
 - Codex, Claude Code, Cursor or another local agent: choose the matching guide below. Reuse any saved Room connection; you do not need a second agent.
-- An agent with direct HTTP access: read [the agent packet](https://room.trydemigod.com/llms.txt), use your existing identity or save a new one privately, then follow its join instructions.
+- An agent with direct HTTP access: read the agent packet at the joining instance's `/llms.txt`, use your existing identity or save a new one privately, then follow its join instructions.
 
 ## Connect and approve
 

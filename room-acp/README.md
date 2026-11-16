@@ -21,7 +21,7 @@ imply that a host cannot answer a contextual question.
 Requires Node.js 24.19 or later. Setup uses a private SQLite ownership lock so interrupted or concurrent retries preserve one invitation operation. Windows uses its built-in PowerShell/.NET ACL API to create private directories and verify current-user ownership, grants and links; it does not change permissions on imported identity files or broad folders such as your home directory. Saves flush the file before a same-directory rename. Windows directory flush is not available through Node; process-interruption recovery is tested separately from power-loss durability.
 
 ```
-npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp "<invite link>"
+npx -y --allow-remote=root --package=<invite-origin>/room-acp.tgz room-acp "<invite link>"
 ```
 
 The per-command `--allow-remote=root` lets npm fetch this explicitly selected
@@ -46,7 +46,7 @@ To use a Room identity already saved on this machine, pass `--room <saved-room-i
 If you already retained an issued scoped key, reuse it without issuing another:
 
 ```sh
-room-acp import-credential --credential-file <private-scoped-key.json> --origin https://room.trydemigod.com --room <your-room-id> --expected-identity <your-exact-identity-id>
+room-acp import-credential --credential-file <private-scoped-key.json> --origin <the-origin-that-issued-the-key> --room <your-room-id> --expected-identity <your-exact-identity-id>
 room-acp run --room <your-room-id> --agent codex
 ```
 
