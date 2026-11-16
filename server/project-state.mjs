@@ -1,9 +1,13 @@
 // Project state: one bounded, derived read of "where is the project" for a
 // Room, for people and for agents. Nothing here is hand-written: it composes
-//   - the serving build (SOURCE_REVISION / BUILD_ID, the /api/version door),
+//   - the Room service's own build (SOURCE_REVISION / BUILD_ID, the /api/version
+//     door): an observed fact about this application, not about any project,
 //   - the room's work items (state, owner, handoff, blocker, age, next step),
 //   - receipts that automation already posts to the room (PROD DEPLOY,
-//     PROD ROLLBACK, MERGED #n, CI #n), parsed by format, and
+//     PROD ROLLBACK, MERGED #n, CI #n), parsed by format. They are member-posted
+//     text: no repository, environment or deploy source is bound to them and no
+//     provider has confirmed them, so they are reported as reports (author,
+//     position, claimed values), never as a verified delivery state, and
 //   - the viewer's own attention items (the same slice the digest uses).
 // Agents read this instead of posting or re-reading status recaps. Every list
 // is capped; `truncated` names what was shed and `complete` says whether the
@@ -17,7 +21,7 @@ import { parseReceipt } from "./receipts.mjs";
 import { readReceiptSignals } from "./receipt-signals.mjs";
 import { readResponseLatency, latencyLine } from "./response-latency.mjs";
 
-export const PROJECT_STATE_VERSION = 1;
+export const PROJECT_STATE_VERSION = 2; // 2: `live`/`mergedNotDeployed` replaced by `roomService`/`delivery`; receipts are labelled reports
 export const PROJECT_STATE_MAX_BYTES = 6144;
 // Receipt scan: the latest message events only, never the whole journal.
 export const RECEIPT_SCAN_EVENTS = 1500;
@@ -69,37 +73,43 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
   const byQuiet = (a, b) => a._t - b._t || (a.id < b.id ? -1 : 1);
   for (const list of [inProgress, blocked, needsYou, needsHuman]) list.sort(byQuiet);
 
-  // Receipts → what is live and what merged since.
+  // Receipts → what members reported. Nothing here is confirmed: a receipt is a
+  // post by whoever wrote it, names no repository, environment or deploy source,
+  // and carries an 8-hex sha prefix (not a commit identity). Posting order is
+  // the only order the Room observed; it is not merge or deploy chronology. So
+  // nothing is joined by sha prefix, and the Room service's own build is never
+  // compared with a project receipt.
   const rows = (receipts ?? []).map(r => ({ ...r, parsed: r.parsed ?? parseReceipt(r.body) })).filter(r => r.parsed);
   const deploys = rows.filter(r => r.parsed.kind === "deploy" || r.parsed.kind === "rollback").sort((a, b) => b.seq - a.seq);
   const lastOkDeploy = deploys.find(r => r.parsed.smoke === "ok" && r.parsed.kind === "deploy") ?? null;
   const merges = rows.filter(r => r.parsed.kind === "merged").sort((a, b) => a.seq - b.seq);
-  // Main is linear and merges are posted in order, so a deploy of sha X covers
-  // every merge up to the MERGED receipt for X; with no matching receipt the
-  // deploy receipt's own position is the watermark.
-  const tip = lastOkDeploy ? merges.find(r => r.parsed.sha === lastOkDeploy.parsed.sha) : null;
-  const watermark = tip?.seq ?? lastOkDeploy?.seq ?? 0;
-  const pending = merges.filter(r => r.seq > watermark);
-  const liveSha = /^[0-9a-f]{40}$/.test(live?.sourceRevision ?? "") ? live.sourceRevision.slice(0, 8) : null;
-  const deployMatchesLive = lastOkDeploy && liveSha && lastOkDeploy.parsed.sha === liveSha;
+  const pending = lastOkDeploy ? merges.filter(r => r.seq > lastOkDeploy.seq) : [];
+  const serviceRevision = /^[0-9a-f]{40}$/.test(live?.sourceRevision ?? "") ? live.sourceRevision : null;
+  const report = r => ({ kind: r.parsed.kind, ...(r.parsed.sha ? { shaPrefix: r.parsed.sha } : {}), reportedSmoke: r.parsed.smoke, by: name(r.actorId), seq: r.seq, postedAt: iso(Date.parse(r.at)) });
   const state = {
     contractVersion: PROJECT_STATE_VERSION, roomId, viewerId, through: sequence, evaluatedAt: iso(nowMs), untrusted: true,
-    live: {
-      sha: liveSha, build: Number.isFinite(Date.parse(live?.buildId)) ? live.buildId : null,
-      deployedAt: deployMatchesLive ? iso(Date.parse(lastOkDeploy.at)) : (Number.isFinite(Date.parse(live?.buildId)) ? iso(Date.parse(live.buildId)) : null),
-      smoke: deployMatchesLive ? "ok" : lastOkDeploy ? "receipt-sha-differs" : "no-receipt",
-      lastDeploy: deploys[0] ? { kind: deploys[0].parsed.kind, sha: deploys[0].parsed.sha ?? null, smoke: deploys[0].parsed.smoke, at: iso(Date.parse(deploys[0].at)), seq: deploys[0].seq } : null
+    // The Room application's own stamped build. It says nothing about any project hosted here.
+    roomService: { revision: serviceRevision, build: Number.isFinite(Date.parse(live?.buildId)) ? live.buildId : null },
+    // Delivery of the project being developed. Every value is a member's report: `verified` is false until a deploy
+    // provider or GitHub is read for it, which this read does not do. No receipts: unknown.
+    delivery: {
+      evidence: "member-reported", verified: false, status: deploys[0] ? "reported" : "unknown",
+      deploy: deploys[0] ? report(deploys[0]) : null,
+      ...(lastOkDeploy && lastOkDeploy !== deploys[0] ? { lastReportedOk: report(lastOkDeploy) } : {}),
+      mergesPostedAfterDeployReport: lastOkDeploy
+        ? { count: pending.length, items: pending.slice(-CAPS.mergedNotDeployed).reverse().map(r => ({ pr: r.parsed.pr, shaPrefix: r.parsed.sha, title: r.parsed.title, by: name(r.actorId), postedAt: iso(Date.parse(r.at)) })) }
+        : { count: null, note: "no reported good deploy in the scan window, so what is undeployed is unknown, not zero", mergesSeen: merges.length }
     },
-    mergedNotDeployed: lastOkDeploy
-      ? { count: pending.length, items: pending.slice(-CAPS.mergedNotDeployed).reverse().map(r => ({ pr: r.parsed.pr, sha: r.parsed.sha, title: r.parsed.title, at: iso(Date.parse(r.at)) })) }
-      : { count: null, note: "no good PROD DEPLOY receipt in the scan window, so what is undeployed is unknown, not zero", mergesSeen: merges.length },
     work: { counts, scanned: items.length, complete: Boolean(itemsComplete) },
     inProgress: inProgress.slice(0, CAPS.inProgress).map(strip),
     blocked: blocked.slice(0, CAPS.blocked).map(strip),
     needsYou: needsYou.slice(0, CAPS.needsYou).map(strip),
     needsHuman: needsHuman.slice(0, CAPS.needsHuman).map(strip),
     attention: (attention ?? []).slice(0, CAPS.attention).map(a => ({ kind: a.kind, seq: a.seq, id: a.id, summary: clip(a.summary, 80) })),
-    receipts: rows.sort((a, b) => b.seq - a.seq).slice(0, CAPS.receipts).map(r => ({ seq: r.seq, at: iso(Date.parse(r.at)), by: name(r.actorId), ...r.parsed })),
+    receipts: rows.sort((a, b) => b.seq - a.seq).slice(0, CAPS.receipts).map(r => {
+      const { sha, ...parsed } = r.parsed;
+      return { evidence: "member-reported", seq: r.seq, postedAt: iso(Date.parse(r.at)), by: name(r.actorId), ...parsed, ...(sha ? { shaPrefix: sha } : {}) };
+    }),
     receiptWindow: receiptWindow ?? null,
     ...(latency ? { latency } : {}),
     truncated: {}
@@ -110,7 +120,7 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
   state.needsHuman = state.needsHuman.map(row => (listed.has(row.id) ? pointer(row) : row));
   const shed = { inProgress: inProgress.length - state.inProgress.length, blocked: blocked.length - state.blocked.length,
     needsYou: needsYou.length - state.needsYou.length, needsHuman: needsHuman.length - state.needsHuman.length,
-    mergedNotDeployed: pending.length - (state.mergedNotDeployed.items?.length ?? 0) };
+    merges: pending.length - (state.delivery.mergesPostedAfterDeployReport.items?.length ?? 0) };
   for (const [k, v] of Object.entries(shed)) if (v > 0) state.truncated[k] = v;
   // Hard byte budget: shed the lowest-value rows first; counts are never shed.
   const size = () => Buffer.byteLength(JSON.stringify(state));
@@ -162,7 +172,10 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
     // log answers (a few indexed rows, no journal scan). Anything else falls back
     // to the text parse over the journal tail, so history before the log still reads.
     let receipts = null, receiptSource = "journal";
-    const typed = readReceiptSignals(store.db, roomId, { floorSeq: floor });
+    // A deleted post is redacted in the journal but its typed row outlives it: drop rows whose source post was redacted,
+    // so a deleted receipt is not resurrected as a delivery claim (the text fallback already cannot match it).
+    const redacted = store.db.prepare("SELECT 1 FROM events WHERE room_id=? AND sequence=? AND json_extract(body,'$.data.redacted')=1");
+    const typed = readReceiptSignals(store.db, roomId, { floorSeq: floor })?.filter(r => !redacted.get(roomId, r.seq));
     if (typed?.some(r => r.parsed.kind === "deploy" && r.parsed.smoke === "ok")) { receipts = typed; receiptSource = "log"; }
     if (!receipts) receipts = store.db.prepare(
       `SELECT sequence AS seq, json_extract(body,'$.at') AS at, json_extract(body,'$.actorId') AS actorId, json_extract(body,'$.data.body') AS body
