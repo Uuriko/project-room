@@ -81,10 +81,23 @@ export function workReadRefusal(error) {
 
 // A hint derived from the same authorized read as the brief. Missing input is
 // explicit; this never executes a tool, invents scope, or supplies a verdict.
+// What GitHub was observed to report, next to the Room step it does not replace.
+function observedSummary(github) {
+  if (!github) return null;
+  if (github.status !== "observed") return { source: "github", status: "unavailable", reason: github.reason ?? "unknown",
+    note: "GitHub state for this task is unknown. Do not treat that as passing or merged." };
+  return { source: "github", status: "observed", assessment: github.assessment, pullRequest: github.pullRequest.url,
+    headSha: github.pullRequest.headSha, checks: github.checks.state, checksComplete: github.checks.complete === true,
+    requiredChecksKnown: false, fresh: github.fresh, observedAt: github.observedAt,
+    ...(github.superseded ? { supersededHeadSha: github.superseded.headSha } : {}),
+    note: github.fresh ? github.meaning : `Last known observation, ${github.ageSeconds}s old; current state unknown (${github.refresh?.reason ?? "stale"}). ` + github.meaning };
+}
+
 export function workContinuation(context, { hosted = false } = {}) {
   const { work, viewer, next } = context;
+  const observed = observedSummary(context.github);
   const value = { action: next.action, label: next.label, memberId: next.memberId,
-    addressedToViewer: next.addressedToViewer, workRevision: work.revision,
+    addressedToViewer: next.addressedToViewer, workRevision: work.revision, ...(observed ? { observed } : {}),
     tool: null, arguments: null, inputRequired: [],
     guidance: "Read-only suggestion from this observation. Recheck current authority when acting; keep original write input unchanged after an unknown outcome." };
   const point = (tool, args, inputRequired = []) => ({ ...value, tool,
@@ -137,6 +150,7 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     || new Set(ids).size !== ids.length || batch && (args.workItemId !== undefined || args.discussionSince !== undefined || args.includeResult === true || args.sourceObservation !== undefined)) {
     throw new Error("Choose one workItemId or 1–4 unique workItemIds; discussionSince and includeResult require one task");
   }
+  if (args.observeGithub !== undefined && (typeof args.observeGithub !== "boolean" || batch && args.observeGithub)) throw new Error("observeGithub reads GitHub for one selected task; use it with workItemId");
   const stop = new AbortController();
   const readSignal = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
   const results = new Array(ids.length);
@@ -148,6 +162,11 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
       : await client.workContext(id, options);
     readSignal.throwIfAborted();
     if (args.includeResult) context = await prepareReview(client, id, context, options);
+    // Opt-in GitHub observation for the selected task: fetched after the
+    // authorized read, outside the retained brief, so it is current on every
+    // request and never alters the brief version or any gate.
+    if (args.observeGithub === true) context = { ...context, github: typeof client.workGithubEvidence === "function"
+      ? await client.workGithubEvidence(id, { signal: readSignal }) : { status: "unavailable", reason: "not_supported_on_this_connection" } };
     if (hosted) {
       if (context.context?.source?.nextRead) context.context.source.nextRead.arguments.roomId = context.roomId;
       if (context.next?.replacement?.nextRead) context.next.replacement.nextRead.arguments.roomId = context.roomId;
@@ -159,7 +178,8 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     const brief = await createWorkBrief(context);
     const identity = { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
-      continuation: workContinuation(context, { hosted }), briefVersion: brief.version };
+      continuation: workContinuation(context, { hosted }), briefVersion: brief.version,
+      ...(context.github ? { github: context.github } : {}) };
     if (args.knownBriefVersion === brief.version) return { ...identity, briefUnchanged: true,
       evaluatedAt: context.evaluatedAt,
       guidance: "Reuse your retained brief for this identity and task. Authority and continuation were freshly read; omitted source, discussion and external evidence are not certified unchanged. Read without knownBriefVersion if that brief is unavailable." };

@@ -53,6 +53,47 @@ instead of attempting a start. Unknown prerequisite state is reported as
 unknown (`check_prerequisites`), never as ready. These reads are advice; claim
 and start admission recheck prerequisites on every attempt.
 
+For a write task, `room_read_work` with `observeGithub: true` (one task) adds
+`github`: what GitHub's API reported, at `observedAt`, for the pull request of
+the task's claimed repository and branch, or a pull request linked in that claim
+scope. This is independently observed evidence. It is kept apart from anything a
+member posts or submits (MERGED, CI, a commit hash in a result): member text is
+never an input to it and never overrides it.
+
+- **Binding.** Repository, pull number, full head SHA, base ref and SHA, and the
+  merge commit only once merged. Checks are read for that exact head; a run that
+  names another revision is ignored and reported. A linked pull in another
+  repository, a fork's branch, or a body that cannot establish the repository
+  is not used.
+- **Checks.** Each check run and commit status is listed with its own status
+  and conclusion, counted as success, failure, pending, cancelled, skipped,
+  neutral or unknown. When one check name appears more than once, the entry that
+  started last is current; completion time is not used, so an older run that
+  finished late never outranks a newer run, finished or still running. `state` is failure, pending, cancelled, incomplete,
+  success, none_substantive, none or unknown, in that order of precedence.
+  Skipped and neutral never count as a pass. `requiredChecksKnown` is false:
+  Room does not read branch protection, so success means "the reported checks
+  succeeded", not "the required checks are satisfied". One page (100) of runs
+  and of statuses is read, up to 2 MiB each; more, or a larger response, is
+  `incomplete` and is not a pass.
+- **Freshness.** Fresh for 60 seconds, the existing floor between polls of one
+  pull. Inside that window reads make no GitHub call. After it a read refreshes
+  with at most three calls. A failed refresh returns the last observation with
+  its original time, `fresh: false` and `current: "unknown"`; a failed attempt
+  is also remembered for the window. A new head moves the old one to
+  `superseded` and starts with no checks. Observations live in process memory
+  only, per room and task; they are not stored, exported or shared across rooms.
+- **Unknowns.** `status: "unavailable"` with a reason: no repository recorded,
+  no pull request for the branch, linked pull in another repository, not found
+  or no access (GitHub does not distinguish these), rate limited, network or
+  timeout, access not configured, identity not established.
+- **Viewer.** Room access is rechecked on every read. For private work only the
+  private request's parties and the members the task names receive it; anyone
+  else gets `not_visible_to_this_member` and no GitHub call is made.
+- **Authority.** Observation only. It does not complete work, satisfy review or
+  owner acceptance, show that the code is correct, or show deployment.
+  `continuation.observed` carries the short form; the Room step is unchanged.
+
 ## A task ready to pick up
 
 Use the existing task fields and discussion; no extra form or approval is needed:
