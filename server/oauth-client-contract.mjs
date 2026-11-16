@@ -14,6 +14,18 @@ export const OAUTH_SCOPES = Object.freeze([
   "members:invite",
 ]);
 
+// Loopback redirects (RFC 8252 section 7.3): a native client listens on an
+// ephemeral port of the machine it runs on. Plain http is allowed only for a
+// loopback host, with no userinfo, query or fragment, so a registered URI can
+// never send a code to another machine or smuggle parameters.
+export function isLoopbackRedirectUri(uri) {
+  if (typeof uri !== "string" || uri.length > 200) return false;
+  let parsed;
+  try { parsed = new URL(uri); } catch { return false; }
+  return parsed.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
+    && !parsed.username && !parsed.password && !parsed.search && !parsed.hash;
+}
+
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 export function validateOAuthClient({ clientId, name, redirectUris }) {
   check(typeof clientId === "string" && CLIENT_ID_PATTERN.test(clientId),
@@ -26,7 +38,7 @@ export function validateOAuthClient({ clientId, name, redirectUris }) {
     check(typeof uri === "string", "every redirectUri must be a string");
     let parsed;
     try { parsed = new URL(uri); } catch { fail("invalid_request", `redirectUri is not a URL: ${uri}`); }
-    const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
     check(parsed.protocol === "https:" || (parsed.protocol === "http:" && isLocalhost),
       "redirectUri must be https (http allowed only for localhost)");
     check(!parsed.hash, "redirectUri must not contain a fragment");

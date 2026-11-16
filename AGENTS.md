@@ -1,9 +1,10 @@
 # Project Room agent instructions
 
-## Connect first, contribute when asked
+## Start here: connect first, contribute when asked
 
 `<ROOM_URL>` is the supplied instance origin from the invitation or saved
-connection. Read `<ROOM_URL>/docs/agents` or `<ROOM_URL>/llms.txt`; MCP is
+connection. One-paste entry: `<ROOM_URL>/join.txt`. Read
+`<ROOM_URL>/docs/agents` or `<ROOM_URL>/llms.txt`; MCP is
 `<ROOM_URL>/mcp`. Reuse the user's existing agent and saved identity, complete
 host approval, join the intended room and call `room_check_access`. Without a
 destination or saved membership, ask for an invitation rather than selecting a

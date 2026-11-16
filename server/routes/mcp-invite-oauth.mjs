@@ -1,5 +1,6 @@
 import { randomBytes, createHash } from "node:crypto";
 import { ServiceError } from "../store.mjs";
+import { isLoopbackRedirectUri } from "../oauth-client-contract.mjs";
 import { inviteOAuthPage, MCP_INVITE_RECOVERY, PUBLIC_LOBBY_PROOF_SCRIPT } from "../mcp-invite-oauth.mjs";
 
 export function renderInviteOAuthPage(res, view, request) {
@@ -58,18 +59,27 @@ export const MCP_INVITE_OAUTH_ROUTES = [{
 // Public client metadata registration shares the configured native OAuth
 // callbacks. It never creates membership, sponsorship or a token grant.
 async function handleMcpRegistration(ctx) {
-  const {req,res,store,remoteAddress,rate,body,json,reject,oauthResource,mcpRedirects,oauthProvider,inviteOAuth}=ctx;
+  const {req,res,store,remoteAddress,rate,body,json,reject,oauthResource,mcpRedirects,mcpOAuthLoopback,oauthProvider,inviteOAuth}=ctx;
   if(!oauthResource)return reject(404,"not_found","Not found");
         rate(`oauth-register:${remoteAddress}`, 20);
         const data = await body(req);
         if (!Array.isArray(data.redirect_uris) || !data.redirect_uris.length || data.redirect_uris.length > 5
-          || data.redirect_uris.some(uri => typeof uri !== "string" || !mcpRedirects.has(uri))
+          || data.redirect_uris.some(uri => typeof uri !== "string" || !(mcpRedirects.has(uri) || mcpOAuthLoopback === true && isLoopbackRedirectUri(uri)))
           || data.token_endpoint_auth_method && data.token_endpoint_auth_method !== "none"
           || data.grant_types && (!Array.isArray(data.grant_types) || data.grant_types.some(type => !["authorization_code", "refresh_token"].includes(type)))
           || data.response_types && (!Array.isArray(data.response_types) || data.response_types.some(type => type !== "code")))
           return json(res, 400, {error:"invalid_client_metadata"});
-        if (store.db.prepare("SELECT count(*) n FROM (SELECT 1 FROM oauth_provider_clients LIMIT 1025)").get().n >= 1024)
-          return json(res, 503, {error:"temporarily_unavailable"});
+        // The provider creates its tables on first use. With no configured clients (loopback-only
+        // self-host) nothing has used it yet, so a missing table means an empty registry, not a failure.
+        const registryTable = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='oauth_provider_clients'").get();
+        // The registry holds at most 1,024 clients. Registrations expire on their own, but nothing
+        // else deletes the rows in between, so drop the expired ones first: a full table of dead
+        // records must not turn away a new client. Only expired rows go, and only here.
+        if (registryTable) {
+          store.db.prepare("DELETE FROM oauth_provider_clients WHERE expires_at <= ?").run(Date.now());
+          if (store.db.prepare("SELECT count(*) n FROM (SELECT 1 FROM oauth_provider_clients LIMIT 1025)").get().n >= 1024)
+            return json(res, 503, {error:"temporarily_unavailable"});
+        }
         const name = data.client_name ?? "MCP connector";
         if (typeof name !== "string" || !name.trim() || name.length > 80)
           return json(res, 400, {error:"invalid_client_metadata"});

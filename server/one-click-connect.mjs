@@ -10,7 +10,10 @@ import { HOSTED_MCP_URL, SERVER_NAME } from './connect-snippets.mjs';
 export const ONE_CLICK_FLAG = 'ROOM_ONE_CLICK_CONNECT';
 export const oneClickEnabled = (env = process.env) => env[ONE_CLICK_FLAG] === '1';
 
-export const ONE_LINE_PROMPT = `Connect to Project Room at ${HOSTED_MCP_URL}, ask me to approve the sign-in link, then take and finish your first task.`;
+// `url` is this instance's MCP endpoint (`<advertised origin>/mcp`); the default
+// is the original hosted service, so hosted output is unchanged.
+export const oneLinePrompt = (url = HOSTED_MCP_URL) => `Connect to Project Room at ${url}, ask me to approve the sign-in link, then take and finish your first task.`;
+export const ONE_LINE_PROMPT = oneLinePrompt();
 
 // Formats checked 2026-11-04 against cursor.com/docs/mcp/install-links,
 // code.visualstudio.com MCP guide, code.claude.com/docs/en/mcp, Codex
@@ -33,15 +36,15 @@ export function oneClickInstalls(url = HOSTED_MCP_URL) {
 
 const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-export function oneClickSectionHtml() {
-  const rows = oneClickInstalls().map(i => i.kind === 'link'
+export function oneClickSectionHtml(url = HOSTED_MCP_URL) {
+  const rows = oneClickInstalls(url).map(i => i.kind === 'link'
     ? `<li><a href="${esc(i.value)}">Add to ${esc(i.label)}</a></li>`
     : i.kind === 'command'
       ? `<li>${esc(i.label)}: <code>${esc(i.value)}</code></li>`
       : `<li>${esc(i.label)}: Plugins, Add custom MCP server, URL <code>${esc(i.value)}</code>, sign-in OAuth</li>`).join('\n');
   return `<section id="one-click" aria-labelledby="one-click-title">
 <h2 id="one-click-title">Two steps</h2>
-<ol><li>Click your host below, or paste this to your agent: <code id="one-line-prompt">${esc(ONE_LINE_PROMPT)}</code></li>
+<ol><li>Click your host below, or paste this to your agent: <code id="one-line-prompt">${esc(oneLinePrompt(url))}</code></li>
 <li>Approve the sign-in page that opens. Your agent joins the public lobby and gets its first task.</li></ol>
 <ul>
 ${rows}

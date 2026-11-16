@@ -21,8 +21,10 @@ imply that a host cannot answer a contextual question.
 Requires Node.js 24.19 or later. Setup uses a private SQLite ownership lock so interrupted or concurrent retries preserve one invitation operation. Windows uses its built-in PowerShell/.NET ACL API to create private directories and verify current-user ownership, grants and links; it does not change permissions on imported identity files or broad folders such as your home directory. Saves flush the file before a same-directory rename. Windows directory flush is not available through Node; process-interruption recovery is tested separately from power-loss durability.
 
 ```
-npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp "<invite link>"
+npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp join https://room.trydemigod.com
 ```
+
+room-acp asks for the invite (the `RM-…` code or the agent invite link) at a hidden prompt. The invite is a single-use bearer secret, so it is never typed into this command, where other local users could read it in the process list and your shell would keep it in history. Other ways to hand it over without argv: pipe a private file (`room-acp join <room-url> < invite.txt`, then delete the file), or set `ROOM_ACP_INVITE` for that one command (it is read once and not passed on to the agent). `room-acp "<invite link>"` still works but prints a warning.
 
 The per-command `--allow-remote=root` lets npm fetch this explicitly selected
 Room package URL, including on npm 12. It does not change your global npm settings.
@@ -223,7 +225,8 @@ denied and the bridge posts a corrective denial when possible.
 ## Commands
 
 ```
-room-acp <invite link>   join, then run
+room-acp join [<room-url>]   join (asks for the invite), then run
+room-acp <invite link>   same, with the invite on the command line (warned)
 room-acp import-credential --credential-file <file> --origin <origin> --room <id> --expected-identity <id>
                         reuse an already-issued scoped key
 room-acp import-identity --identity-from <directory> --room <id>

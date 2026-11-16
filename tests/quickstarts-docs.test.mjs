@@ -102,7 +102,7 @@ test("agent-connect quickstart cites the real join command", () => {
 
 test("agent-connect quickstart hosted-MCP commands match the product's own snippet", async () => {
   const { roomMcpSnippets } = await import("../src/room-mcp-join.js");
-  const snippet = roomMcpSnippets("https://room.trydemigod.com/mcp");
+  const snippet = roomMcpSnippets("<ROOM_URL>/mcp");
   const doc = connectDoc();
   assert.ok(
     doc.includes(snippet.claude),
@@ -112,7 +112,7 @@ test("agent-connect quickstart hosted-MCP commands match the product's own snipp
     doc.includes(snippet.codex),
     "the Codex hosted-MCP command drifted from roomMcpSnippets()",
   );
-  assert.ok(doc.includes("https://room.trydemigod.com/mcp"), "hosted MCP URL is missing");
+  assert.ok(doc.includes("<ROOM_URL>/mcp"), "MCP URL placeholder is missing");
 });
 
 test("agent-connect quickstart hosted join path matches the live agent packet", async () => {

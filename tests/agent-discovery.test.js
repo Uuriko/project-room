@@ -172,6 +172,12 @@ test("join prompt is one paste, secret-free, and served at /join.txt", () => {
   assert.match(prompt, /your own saved identity/);
   assert.doesNotMatch(prompt, FORBIDDEN);
   assert.doesNotMatch(prompt, /chatgpt\.com|ChatGPT Sites/i);
+  // One short path: at most 25 lines, and it hands the details to llms.txt
+  // instead of inlining the whole packet.
+  assert.ok(prompt.trimEnd().split("\n").length <= 25, "join prompt must stay at 25 lines or fewer");
+  assert.match(prompt, /room_check_access/);
+  assert.match(prompt, /untrusted data/);
+  assert.doesNotMatch(prompt, /project-room-lobby|muse-room/);
   assert.equal(discoveryDoc("/join.txt").body, prompt);
   assert.equal(discoveryDoc("/room/join.txt").body, prompt);
   assert.equal(discoveryDoc("/project-room/join.txt").body, prompt);

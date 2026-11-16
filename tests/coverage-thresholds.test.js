@@ -24,7 +24,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, realpathSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { discoverUnitTests } from "../scripts/unit-shards.mjs";
 
 import {
@@ -42,7 +42,7 @@ import {
   subtractIntervals,
 } from "../scripts/coverage-thresholds.mjs";
 
-const scriptUrl = (root, rel) => `file://${root}/${rel}`;
+const scriptUrl = (root, rel) => pathToFileURL(join(root, rel)).href;
 const payload = (url, functions) => ({ result: [{ url, functions }] });
 const fn = (name, ranges) => ({ functionName: name, ranges });
 const range = (start, end, count) => ({ startOffset: start, endOffset: end, count });
@@ -306,7 +306,7 @@ test("real V8: split-process coverage equals single-process coverage", () => {
       const grouped = groupFunctionsByUrl(payloads, dir);
       const text = readFileSync(mod, "utf8");
       const union = new Set();
-      for (const fns of grouped.get(`file://${dir}/target.mjs`) || []) {
+      for (const fns of grouped.get(pathToFileURL(mod).href) || []) {
         for (const i of coveredLinesForPayload(text, fns)) union.add(i);
       }
       return union;
@@ -482,4 +482,41 @@ test("streaming evaluator does not retain raw ranges across thousands of payload
     assert.equal(measured.payloadCount, 2000);
     assert.equal(measured.results.mod.pct, 100);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("real archive-copy coverage contributes no configured source-module lines", t => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "coverage-archive-scope-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const config = loadConfig(new URL("../coverage-thresholds.json", import.meta.url));
+  const sourceUrls = [], archiveUrls = [];
+  for (const mod of Object.values(config.modules)) {
+    const source = join(root, mod.dir, "measured.mjs");
+    const archived = join(root, ".tmp", "archive", mod.dir, "measured.mjs");
+    mkdirSync(join(root, mod.dir), { recursive: true });
+    mkdirSync(join(root, ".tmp", "archive", mod.dir), { recursive: true });
+    const body = "export function used(){return 7;}\nused();\n";
+    writeFileSync(source, body); writeFileSync(archived, body);
+    sourceUrls.push(pathToFileURL(source).href);
+    archiveUrls.push(pathToFileURL(archived).href);
+  }
+  const capture = (urls, name) => {
+    const dir = join(root, name); mkdirSync(dir);
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e",
+      `await Promise.all(${JSON.stringify(urls)}.map(url => import(url)));`],
+      { encoding: "utf8", env: { ...process.env, NODE_V8_COVERAGE: dir } });
+    assert.equal(result.status, 0, result.stderr);
+    return [...readCoveragePayloads(dir)];
+  };
+  const original = capture(sourceUrls, "original-coverage");
+  const archived = capture(archiveUrls, "archive-coverage");
+  assert.ok(archived.some(payload => payload.result.some(script => archiveUrls.includes(script.url))),
+    "the archive control really executed under V8 coverage");
+  const baseline = evaluatePayloads(root, config, original).results;
+  const archiveOnly = evaluatePayloads(root, config, archived).results;
+  const combined = evaluatePayloads(root, config, [...original, ...archived]).results;
+  for (const name of Object.keys(config.modules)) {
+    assert.ok(baseline[name].covered > 0, "original source must be measured");
+    assert.equal(archiveOnly[name].covered, 0, "copied archive URL is not the configured source URL");
+    assert.deepEqual(combined[name], baseline[name], "archive payloads cannot change source-module measurements");
+  }
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { oneClickEnabled, oneClickInstalls, oneClickSectionHtml, ONE_LINE_PROMPT } from '../server/one-click-connect.mjs';
+import { oneClickEnabled, oneClickInstalls, oneClickSectionHtml, ONE_LINE_PROMPT, oneLinePrompt } from '../server/one-click-connect.mjs';
 import { downloadPageHtml } from '../server/download-page.mjs';
 
 test('flag is off by default and only "1" turns it on', () => {
@@ -73,4 +73,49 @@ test('hosts can start OAuth: bare initialize gets 401 + resource_metadata, then 
   const auth = await go(new URL(as.authorization_endpoint).pathname + '?' + q);
   assert.equal(auth.status, 200);
   assert.match(auth.text, /<title>Connect to Project Room<\/title>/);
+});
+
+test('a self-hosted instance advertises its own MCP URL, never the hosted service', () => {
+  const url = 'https://room.example/mcp';
+  const installs = oneClickInstalls(url);
+  assert.equal(installs.length, 6);
+  for (const i of installs) {
+    const config = i.id === 'cursor' ? Buffer.from(new URL(i.value).searchParams.get('config'), 'base64').toString() : '';
+    const text = decodeURIComponent(i.value) + config;
+    assert.doesNotMatch(text, /trydemigod/, i.id);
+    assert.match(text, /room\.example\/mcp/, i.id);
+  }
+  assert.equal(oneLinePrompt(url), 'Connect to Project Room at https://room.example/mcp, ask me to approve the sign-in link, then take and finish your first task.');
+  const html = downloadPageHtml({ oneClick: true, origin: 'https://room.example' });
+  assert.match(html, /id="one-line-prompt">Connect to Project Room at https:\/\/room\.example\/mcp,/);
+  assert.match(html, /id="connect-mcp-url"[^>]*>https:\/\/room\.example\/mcp</);
+  assert.match(html, /<a href="https:\/\/room\.example">Open the web app<\/a>/);
+  assert.doesNotMatch(html, /trydemigod/);
+  // Hosted output is unchanged by the new parameter.
+  assert.equal(downloadPageHtml({ oneClick: true }), downloadPageHtml({ oneClick: true, origin: 'https://room.trydemigod.com' }));
+  assert.match(downloadPageHtml({ oneClick: true }), /Connect to Project Room at https:\/\/room\.trydemigod\.com\/mcp,/);
+});
+
+test('/download on a self-hosted server serves that server\'s own MCP URL', async t => {
+  const { RoomStore } = await import('../server/store.mjs');
+  const { createRoomServer } = await import('../server/http.mjs');
+  const previous = process.env.ROOM_ONE_CLICK_CONNECT;
+  process.env.ROOM_ONE_CLICK_CONNECT = '1';
+  const store = new RoomStore(':memory:');
+  const server = createRoomServer({ store, origin: 'https://room.example' });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(async () => {
+    if (previous === undefined) delete process.env.ROOM_ONE_CLICK_CONNECT; else process.env.ROOM_ONE_CLICK_CONNECT = previous;
+    server.closeStreams(); server.closeAllConnections(); await new Promise(r => server.close(r)); store.close();
+  });
+  const { request } = await import('node:http');
+  const page = await new Promise((resolve, reject) => {
+    const req = request(`http://127.0.0.1:${server.address().port}/download`, { headers: { Host: 'room.example' } }, res => {
+      const chunks = []; res.on('data', c => chunks.push(c)); res.on('end', () => resolve(Buffer.concat(chunks).toString()));
+    });
+    req.on('error', reject); req.end();
+  });
+  assert.match(page, /id="one-click"/);
+  assert.match(page, /https:\/\/room\.example\/mcp/);
+  assert.doesNotMatch(page, /room\.trydemigod\.com\/mcp/);
 });

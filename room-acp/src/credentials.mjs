@@ -39,10 +39,35 @@ export function loadConnection({ roomId = null } = {}, env = process.env) {
   return all[0] ?? null;
 }
 
-export function forgetConnection(roomId, env = process.env) { rmSync(fileFor(roomId, env), { force: true }); }
+export function forgetConnection(roomId, env = process.env) {
+  rmSync(fileFor(roomId, env), { force: true });
+  rmSync(mcpHeadersFile(roomId, env), { force: true });
+}
 
 // What `status` may show: everything except secrets.
 export function publicView(connection) {
   const { credential: _credential, identitySecret: _identitySecret, ...rest } = connection;
   return { ...rest, credential: connection.credential ? "saved" : "missing" };
+}
+
+// MCP hosts read their Authorization header from a command, so the secret never
+// lands in the host's own config, argv or shell history. This file holds the one
+// JSON object such a command prints. It lives in a subdirectory so the connection
+// list above (which reads only *.json files directly in the config directory)
+// never mistakes it for a connection. Same 0700 directory, 0600 file.
+export function mcpHeadersFile(roomId, env = process.env) {
+  return join(configDir(env), "mcp", `${roomId.replace(/[^A-Za-z0-9._-]/g, "_")}.headers.json`);
+}
+
+export function saveMcpHeaders(connection, env = process.env) {
+  const secret = typeof connection.identitySecret === "string" && connection.identitySecret.startsWith("pri_")
+    ? connection.identitySecret : connection.credential;
+  if (typeof secret !== "string" || !secret) throw new Error("The saved connection has no credential to put in an MCP header");
+  registerSecret(secret);
+  const dir = join(configDir(env), "mcp");
+  ensurePrivateDirectory(configDir(env), {recursive: true});
+  ensurePrivateDirectory(dir, {recursive: true});
+  const path = mcpHeadersFile(connection.roomId, env);
+  atomicPrivateJson(path, { Authorization: `Bearer ${secret}` });
+  return path;
 }

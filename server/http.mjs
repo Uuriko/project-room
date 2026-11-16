@@ -1,3 +1,6 @@
+import { loadInstanceCardRuntime } from './instance-card-runtime.mjs';
+import { agentPages } from '../scripts/build-agent-docs.mjs';
+import { instanceDiscoveryBody, instanceCardSignatureState } from './node-discovery-origin.mjs';
 import { connectFunnelEnabled, createConnectFunnel } from "./connect-funnel.mjs";
 import {createAccountAgentEnrollment} from './account-agent-enrollment.mjs';
 import { writeStoreRoute } from "./store-pages.mjs";
@@ -59,7 +62,7 @@ import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventRows, redactMessageTree } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
+import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { advertisedOrigin, advertisedText, advertisedHtml, isHostedOrigin } from "./advertised-origin.mjs";
 import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
@@ -139,6 +142,7 @@ import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   frontDoorHtml, GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider } from "./oauth-provider.mjs";
+import { isLoopbackRedirectUri } from "./oauth-client-contract.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
 
@@ -371,11 +375,15 @@ export function touchLruEntry(map, key, makeValue, capacity) {
 // lifetime. Retain its successful bytes for BOTH page serving and sitemap
 // probes, so the map never advertises bytes the loader cannot actually serve.
 // The finite reviewed catalog bounds this cache; failed reads are not retained.
-function defaultAssetLoader(assetRoot) {
+// `fallbacks` maps an asset path to an async function that supplies its bytes
+// when the file is absent (ENOENT only). The Node boot path uses it to build
+// room-acp.tgz for a checkout that never ran the hosted deploy.
+function defaultAssetLoader(assetRoot, fallbacks = {}) {
   const cacheable = new Set([...publicSearchAssets(publicAssetPaths)]
     .filter(([path]) => reviewedPublicSearchPaths.includes(path)).map(([, file]) => file));
   const loaded = new Map();
   return path => {
+    if (Object.hasOwn(fallbacks, path)) return readFile(new URL(path, assetRoot)).catch(error => { if (error?.code !== "ENOENT") throw error; return fallbacks[path](); });
     if (!cacheable.has(path)) return readFile(new URL(path, assetRoot));
     if (!loaded.has(path)) {
       const pending = readFile(new URL(path, assetRoot));
@@ -399,8 +407,8 @@ export const CREDENTIAL_WRITE_REFILL_PER_SECOND = 1;
 // Per-credential write budget for routes that carry no user-authored content.
 export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
-export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
-  loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
+export function createRoomServer({ store, origin, instanceCard, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
+  assetFallbacks = {}, loadAsset = defaultAssetLoader(assetRoot, assetFallbacks), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, gmailAuth = null, directSendFetch = null, enableDeferredInbox = false,
@@ -413,6 +421,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   githubToken = undefined,
   mcpEventTransport, mcpEventDnsResolvers, mcpEventExternalScheduler = false,
   mcpOAuthClients = [], // Explicit verified public-client registrations; empty disables native MCP OAuth.
+  mcpOAuthLoopback = false, // Self-host opt-in: also accept dynamic registration of loopback redirect URIs (RFC 8252 7.3), so native MCP clients can connect without a configured client list.
   accountAgentEnrollmentEnabled = false, // Readers-first rollout: explicit server opt-in only.
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
@@ -430,7 +439,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // mailer warning below follows the same once-per-process rule). The
   // Worker entry's card is additionally covered at build time by
   // scripts/sign-agent-card.mjs, which fails closed without the key.
-  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: agentCardSignatureState() });
+  let renderedAgentPages;
+  const instanceRuntime = loadInstanceCardRuntime({ origin, instanceCard });
+  const discoveryBody = doc => instanceRuntime ? instanceRuntime.body(doc) : instanceDiscoveryBody(doc, origin);
+  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: instanceRuntime?.signatureState ?? instanceCardSignatureState(origin) });
   for (const warning of bootConfigWarnings) warnBootConfigOnce(warning);
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
@@ -600,7 +612,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if(refusal)throw refusal;
     return result;
   };
-  const oauthResource = mcpOAuthClients.length ? new URL("/mcp", origin).href : null;
+  const oauthResource = mcpOAuthClients.length || mcpOAuthLoopback === true ? new URL("/mcp", origin).href : null;
   if (oauthResource) mcpOAuthResourceMetadata(oauthResource, origin);
   const accountAgentEnrollment = createAccountAgentEnrollment({store,resource:oauthResource,preferences:mcpOAuthClients,enabled:accountAgentEnrollmentEnabled===true&&Boolean(oauthResource)});
   // ROOM_CONNECT_FUNNEL (off): aggregate-only connect funnel in /api/health.
@@ -609,7 +621,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const mcpClientIds = new Set(mcpOAuthClients.map(client => client.clientId));
   const mcpRedirects = new Set(mcpOAuthClients.flatMap(client => client.redirectUris));
   const isMcpClient = id => mcpClientIds.has(id) || typeof id === "string" && id.startsWith("mcp_dcr_")
-    && Boolean(oauthProvider.getClient(id)?.redirectUris.every(uri => mcpRedirects.has(uri)));
+    && Boolean(oauthProvider.getClient(id)?.redirectUris.every(uri => mcpRedirects.has(uri) || mcpOAuthLoopback === true && isLoopbackRedirectUri(uri)));
   const isClaudeClient = id => isMcpClient(id) && oauthProvider.getClient(id)?.redirectUris
     .includes("https://claude.ai/api/mcp/auth_callback");
 
@@ -1291,9 +1303,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // NOTE: no includeSubDomains - unverified that all trydemigod.com
     // subdomains are HTTPS-only; dropping it is the safe default.
     res.setHeader("Strict-Transport-Security", "max-age=31536000");
-    // Cloudflare Web Analytics injects its beacon at the edge. The app does not
-    // add that script; this document policy is what lets the beacon run.
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    // No third-party analytics host is allowed by this policy.
+    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     // SEC-1: lock unused powerful features and cross-origin window access.
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
@@ -1465,7 +1476,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         roomAuth, roomCredentials, expectedBinding, accountBinding,
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
         accountCookieName, roomCookieName, tokenPattern, accountView: sessionAccountView,
-        signInSlotToken, magicMailer, magicEmailLimit, passkeys, oauthProvider, inviteOAuth, oauthResource, mcpRedirects,
+        signInSlotToken, magicMailer, magicEmailLimit, passkeys, oauthProvider, inviteOAuth, oauthResource, mcpRedirects, mcpOAuthLoopback,
         githubClient: github, googleClient: google,
         magicRequestEmailLimiter, magicConsumeEmailLimiter,
         resetRequestEmailLimiter, resetConsumeEmailLimiter, signupEmailLimiter,
@@ -2214,7 +2225,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const packet = discoveryDoc("/llms.txt");
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks(url));
-        const packetBytes = Buffer.from(packet.body);
+        const packetBytes = Buffer.from(discoveryBody(packet));
         res.writeHead(200, { "Content-Type": packet.type, "Content-Length": packetBytes.length });
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
       }
@@ -2233,7 +2244,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
           for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
         }
-        let docBody = discovery.body;
+        let docBody = discoveryBody(discovery);
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy
         // asset carries the base catalog; the node server injects the live
@@ -2686,18 +2697,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const [path, type] = assets.get(url.pathname);
         let data = null;
         try {
-          data = await loadAsset(path);
+          if (path.startsWith('docs/agents/') && generatedAgentPages.includes(path)) {
+            renderedAgentPages ??= agentPages(undefined, { origin: origin ?? ROOM_ORIGIN });
+            data = Buffer.from(renderedAgentPages.get(path));
+          } else data = await loadAsset(path);
         } catch (error) {
           // Decision #36 (#3254, Option A): the generated agent pages are
           // build output an exact-commit package deliberately does not
           // contain, so their absence is the designed state — fall through
           // to the standard not-found handling below (404), never a 500.
           // Any other missing or failed asset stays fail-closed.
-          if (error?.code !== "ENOENT" || !generatedAgentPages.includes(path)) throw error;
+          if (error?.code !== "ENOENT" || !(generatedAgentPages.includes(path) || path === "room-acp.tgz")) throw error;
         }
         if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
-        if(canonical==='/docs/agents/paste'&&url.searchParams.get('room')==='project-room-lobby')data=Buffer.from(renderLobbyAgentPastePage(data.toString('utf8')));
+        if((origin===undefined||origin===ROOM_ORIGIN)&&canonical==='/docs/agents/paste'&&url.searchParams.get('room')==='project-room-lobby')data=Buffer.from(renderLobbyAgentPastePage(data.toString('utf8')));
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
         if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicSearchPageCsp(canonical, expectedOrigin()));
         // JDOT-PUBLIC-CSP-RUM end
@@ -2719,8 +2733,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           try { res.writeEarlyHints({ link: ["</src/styles.css>; rel=preload; as=style"] }); }
           catch { /* this platform has no early hints */ }
         }
-        const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
-        if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2" || type === "application/gzip";
+        if (type === "application/gzip") res.setHeader("Cache-Control", "no-cache"); // the pack follows the running revision
+        else if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
         // This URL is not content-hashed; fresh markup must not use an hour-old stylesheet.
         else if (path === "src/styles.css") res.setHeader("Cache-Control", "no-cache");
         else if (shell) res.setHeader("Cache-Control", "public, max-age=60");

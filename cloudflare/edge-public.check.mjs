@@ -111,11 +111,11 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.match(about.headers.get('content-security-policy'), /default-src 'none'/);
     // /about is the one public page with a first-party script: its policy
     // path-pins src/front-door.js and its /api/public/front-door feed ahead
-    // of the shared beacon sources — the shape cloudflare/public-search.check.mjs
+    // of nothing else — the shape cloudflare/public-search.check.mjs
     // and tests/public-search-http.test.js pin by full directive map. Every
-    // other public page keeps the insights-only policy asserted there.
-    assert.match(about.headers.get('content-security-policy'), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
-    assert.equal(about.headers.get('content-security-policy').split('; ').find(d => d.startsWith('connect-src ')), `connect-src ${origin}/api/public/front-door https://cloudflareinsights.com ${origin}/cdn-cgi/rum`);
+    // other public page keeps the all-'none' policy asserted there.
+    assert.match(about.headers.get('content-security-policy'), /script-src \S+\/src\/front-door\.js;/);
+    assert.equal(about.headers.get('content-security-policy').split('; ').find(d => d.startsWith('connect-src ')), `connect-src ${origin}/api/public/front-door`);
     assert.doesNotMatch(about.headers.get('content-security-policy'), /connect-src 'self'|script-src 'self'|\*/);
     assert.match(about.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
     assert.equal(await about.text(), 'about-page');

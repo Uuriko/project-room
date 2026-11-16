@@ -57,6 +57,8 @@ persistent deployment or substitute it for these provisioning commands.
 
 A friend can connect an existing agent without a Room human account through invitation-backed OAuth. The deployment operator must configure `ROOM_MCP_OAUTH_CLIENTS` as a JSON array of verified public-client registrations (`clientId`, `name`, `redirectUris`). Obtain the actual registration and exact callback from the supported host installation flow; do not guess them. An empty configuration disables native OAuth. The normal Node boot path and Workers both read this setting.
 
+For a self-hosted Room that only needs Claude Code, Codex or another desktop MCP client on the owner's own machine, set `ROOM_MCP_OAUTH_LOOPBACK=1` instead of listing clients (Node boot path only; off by default; the Worker is unchanged). It turns on the OAuth discovery documents and `POST /oauth/register`, and the registration accepts only loopback callbacks: `http://localhost`, `http://127.0.0.1` or `http://[::1]` on any port, with no credentials, query or fragment, for public clients using PKCE S256. Registering grants nothing. "Loopback" is the machine the *client's browser* runs on, not necessarily the Room operator's machine: the callback only has to be reachable from where the person signs in, and the authorization code is delivered to that exact registered callback and nowhere else. Registration is open to anyone who can reach the Room, so it is capped: the registry holds at most 1,024 client records, each expires on its own, and expired records are deleted when a new client registers (a full table of expired records does not block registration; a table of 1,024 live records answers `503 temporarily_unavailable` until some expire). Client display names are whatever the registering client asserted; do not treat a name as proof of which application it is. The client still has to be authorized in the browser by redeeming a one-time agent invitation (or by a signed-in account with its own agent), and the code is delivered only to the exact callback that was registered. Then `claude mcp add --transport http project-room <ROOM_URL>/mcp` followed by `/mcp` in Claude Code is the whole setup; no secret is copied by hand.
+
 Native automatic wake delivery currently runs on the Node service with its persistent SQLite database and HTTPS origin. On Workers, missing `ROOM_MCP_EVENT_CALLBACK_ORIGINS` disables Events; an explicit JSON `[]` enables discovery but denies all callbacks; independently verified exact HTTPS origins enable the restricted provider transport and durable alarm delivery. This adapter trusts the approved provider origin rather than providing arbitrary callback DNS pinning. Actual Dot wake remains unproven until the live subscription and response are observed. A local HTTP success is not a ChatGPT installation or wake test. Qualify the actual host with the [agent onboarding acceptance checks](AGENT-ONBOARDING-ACCEPTANCE.md) before inviting external collaborators. The Codex ACP adapter starts a separate runtime and cannot attach an existing ChatGPT Dot.
 
 ## Back up and verify
@@ -74,6 +76,41 @@ use synthetic data to exercise recovery behavior; they do not restore your live
 database. See [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTOMATION.md) for scheduling, retention
 and authority reconciliation. An older backup can resurrect revoked access;
 reconcile and revoke stale authority before reopening a restored service.
+
+## Prove your install: the self-host journey
+
+`node scripts/selfhost-journey.mjs` boots the real `server.mjs` on a fresh, disposable SQLite
+file and runs one black-box journey with synthetic data: a human invites an agent;
+the agent completes a task; a separate reviewer passes it; the human requests
+changes, gets a revision and approves it; the server restarts with state intact;
+retries are idempotent; a backup is taken, an agent is removed, the stale backup
+is restored, reconciled and the removal re-applied **before** the server listens;
+and an export is replayed into a fresh file. Every leg prints PASS, FAIL or
+NOT-RUN with its evidence. The temporary directory and its keys are removed at exit.
+
+```sh
+node scripts/selfhost-journey.mjs                       # local mode behind Caddy's local CA (needs `caddy`)
+node scripts/selfhost-journey.mjs --proxy none       # same legs over plain loopback HTTP; the TLS leg is NOT-RUN
+node scripts/selfhost-journey.mjs --mode production  # NODE_ENV=production; reports the boot refusal if the build cannot start
+node scripts/selfhost-journey.mjs --mode production --runtime-dir <stamped runtime> --instance-key-file <seed file>
+                                                        # production with a signed instance card (see SELF-HOST-SIGNING.md)
+```
+
+Read the label it prints. **Local mode is not the invite-only deployment**: it does not
+set `NODE_ENV=production`, so the server does not trust `X-Real-IP`, and the human is the
+operator-provisioned owner rather than a browser signup. Only `--mode production` exercises
+the production gates, and it stops before the journey if the build refuses to boot (for
+example when no agent-card signing is configured). Nothing is bypassed. The Caddy variant
+uses [deploy/Caddyfile.local](../deploy/Caddyfile.local) (unprivileged port, Caddy's own CA,
+no public DNS). A real host uses [deploy/Caddyfile](../deploy/Caddyfile). The journey proves
+the code path on a disposable machine; it does not prove your host, DNS, certificate or
+backup custody.
+
+With `--instance-key-file` (a base64 Ed25519 seed you hold) and `--runtime-dir` (a stamped
+runtime from `scripts/runtime-package.mjs`), production mode derives the public pin, signs a
+card for the run's own origin through `scripts/sign-instance-card.mjs` (seed on stdin, never
+printed) and passes the server only the two public files. The harness itself still runs from
+a normal checkout.
 
 ## Public deployment and upgrades
 

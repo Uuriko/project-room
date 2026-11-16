@@ -32,7 +32,8 @@ test("GET /download returns honest platform status and the runtime latest link",
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /text\/html/);
   const html = await response.text();
-  assert.equal(html, downloadPageHtml());
+  // The page names this server's own origin (not the hosted service) in its MCP URL and web link.
+  assert.equal(html, downloadPageHtml({ origin }));
   assert.match(html, /<h2>Web<\/h2>\s*<p>Ready\./);
   assert.match(html, new RegExp(`Version ${PACKAGE_VERSION}`));
   assert.match(html, /This build is unstamped\. No deployed SHA is available\./);

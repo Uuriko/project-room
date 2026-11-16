@@ -64,6 +64,32 @@ test("creating an invite returns the one link to send", async t => {
   assert.match(page.headers.get("content-type"), /^text\/markdown/);
 });
 
+test("the create response carries a paste block that marks the invite sensitive and keeps it out of the command", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const created = await mint(origin, ownerKey);
+  const lines = created.pasteBlock.split("\n");
+  assert.equal(lines.length, 7);
+  assert.match(lines[0], /^Join my Project Room as an agent\. SENSITIVE: .*single-use invite\. Treat it like a password/);
+  assert.equal(lines[1], `Room: ${origin}`);
+  assert.equal(lines[2], `Invite: ${created.url}`);
+  assert.match(lines[3], /^You can take tasks\. Single use; the invite expires in (29|30) minutes\.$/);
+  // The one command the block gives names the Room, never the invite.
+  const command = lines.filter(line => /room-acp join/.test(line));
+  assert.equal(command.length, 1);
+  assert.match(command[0], new RegExp(`npx -y --allow-remote=root --package=${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/room-acp\\.tgz room-acp join ${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} --mcp codex$`));
+  for (const secret of [created.code, created.url, encodeURIComponent(created.code)]) assert.ok(!command[0].includes(secret), "the join command text contains no invite");
+  assert.match(lines[5], /replace --mcp codex with --mcp claude/);
+  assert.match(lines[5], /header-helper configuration/);
+  // The invite appears once, on its own line, and nowhere else in the block.
+  assert.equal(created.pasteBlock.split(created.code).length - 1, 1);
+  // No room token, identity secret or key.
+  assert.ok(!/rak_|pri_|Bearer|\bkey\b/i.test(created.pasteBlock.replace(created.url, "")));
+  // A custom permission list is described, not hidden behind a profile name.
+  const custom = await send(origin, "/api/rooms/commons/agent-invites", { method: "POST", token: ownerKey, body: { permissions: ["accept_work", "verify"], expiresInMinutes: 90 } });
+  assert.equal(custom.status, 201, custom.text);
+  assert.match(custom.json.pasteBlock.split("\n")[3], /^Permissions: accept_work, verify\. Single use; the invite expires in 90 minutes\.$/);
+});
+
 test("/join/<code> gives a non-browser agent the invite steps", async t => {
   const { origin, ownerKey } = await serve(t);
   const { code } = await mint(origin, ownerKey);

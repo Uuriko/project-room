@@ -32,8 +32,10 @@ test("agent handoff retains the current service and carries a resumable command"
   const handoff = agentInviteHandoff("RM-EXAMPLE", { origin: "https://www.getdasha.com", pathname: "/room/" });
   assert.equal(handoff.link, "https://www.getdasha.com/room/join/RM-EXAMPLE");
   assert.equal(handoff.code, "RM-EXAMPLE");
-  assert.match(handoff.text, /agent-inbox.mjs join/);
-  assert.match(handoff.text, /--accept/);
+  assert.match(handoff.local, /room-acp join/);
+  assert.match(handoff.local, /hidden prompt/);
+  assert.equal(handoff.local.includes(handoff.link), false);
+  assert.equal(handoff.local.includes(handoff.code), false);
   assert.match(handoff.text, /running host/);
   assert.equal(agentInviteHandoff("RM-EXAMPLE", { origin: "http://127.0.0.1:3000", pathname: "/" }).link,
     "http://127.0.0.1:3000/join/RM-EXAMPLE");
@@ -89,10 +91,16 @@ test("bulk mints call one request per invite with distinct display names", async
   assert.equal(new Set(links.map(entry => entry.code)).size, 5);
 });
 
-test("roomAcpCommand fills the real invite link and quotes the name", () => {
+test("roomAcpCommand keeps invitation secrets out of argv and quotes the name", () => {
   const loc = new URL("https://room.trydemigod.com/");
   const link = "https://room.trydemigod.com/join/RM-ABC123";
-  assert.equal(roomAcpCommand(link, "", loc), "npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp 'https://room.trydemigod.com/join/RM-ABC123'");
+  assert.equal(roomAcpCommand(link, "", loc), "npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp join 'https://room.trydemigod.com' --mcp codex");
+  for (const invitation of [link, "https://room.trydemigod.com/#join/SYNTHETIC_SHARE_INVITE_NOT_A_REAL_SECRET"]) {
+    const command = roomAcpCommand(invitation, "", loc);
+    assert.equal(command.includes(invitation), false);
+    assert.equal(command.includes("RM-ABC123"), false);
+    assert.match(command, /room-acp join/);
+  }
   assert.equal(roomAcpCommand(link, " Sam's agent ", loc).endsWith("--name 'Sam'\\''s agent'"), true);
 });
 
@@ -102,4 +110,17 @@ test("handoff carries a Grok Bot paste with the invite and hosted MCP url", () =
   assert.ok(handoff.grok.includes("https://room.trydemigod.com/join/RM-EXAMPLE"));
   assert.ok(handoff.grok.includes("https://room.trydemigod.com/mcp"));
   assert.ok(handoff.text.includes(handoff.grok));
+});
+
+ test("displayed local handoff keeps synthetic invitations out of every command", () => {
+  for (const code of ["RM-SYNTHETICONE", "RM-SYNTHETICTWO"]) {
+    for (const pathname of ["/", "/room/"]) {
+      const handoff = agentInviteHandoff(code, { origin: "https://room.example", pathname });
+      assert.equal(handoff.local.includes(code), false);
+      assert.equal(handoff.local.includes(handoff.link), false);
+      assert.match(handoff.local.split("\n")[0], /room-acp join/);
+      assert.match(handoff.local, /separately at the hidden prompt/);
+      assert.doesNotMatch(handoff.local, /agent-inbox|--accept/);
+    }
+  }
 });

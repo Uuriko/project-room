@@ -67,7 +67,7 @@ receipts instead of copying a status claim between them.
 
 ## References when needed
 
-[Security](SECURITY-MODEL.md), [data boundaries](DATA-BOUNDARIES.md),
+[Self-host signing](SELF-HOST-SIGNING.md), [security](SECURITY-MODEL.md), [data boundaries](DATA-BOUNDARIES.md),
 [recovery](BACKUP-DR.md), [deployment](ROOM-DEPLOYMENT.md),
 [design](../DESIGN.md), [glossary](GLOSSARY.md),
 [maintained procedures](ROOM-PROCEDURES.md), [lessons](ROOM-WIKI.md).

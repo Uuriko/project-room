@@ -25,7 +25,7 @@ async function serious(page) {
     .map(item => `${item.impact} ${item.id} ${item.nodes.slice(0, 3).map(node => node.target.join(" ")).join(" | ")}`);
 }
 
-test("public pages permit only the intended analytics connection and remain axe-clean at 390 and 1280", { timeout: 180000 }, async t => {
+test("public pages permit no analytics script or connection and remain axe-clean at 390 and 1280", { timeout: 180000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "public-pages-polish-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   const server = createRoomServer({ store });
@@ -97,16 +97,15 @@ test("public pages permit only the intended analytics connection and remain axe-
       assert.ok(await page.locator("html").getAttribute("lang"), path);
       assert.ok((await page.title()).length > 0, path);
       if (path !== "/no-such-page") {
+        // No analytics host is named by the policy: the beacon script is refused by CSP
+        // before any request is made, and the same-origin collector path is not a
+        // permitted connection either.
         analyticsRequests.length = 0;
-        await page.addScriptTag({ url: "https://static.cloudflareinsights.com/beacon.min.js" });
-        const result = await page.evaluate(() => globalThis.rumProbe);
-        assert.deepEqual(result, { delivered: true, status: 204 }, `${path}@${viewport.width}: injected analytics POST must reach same-origin /cdn-cgi/rum`);
-        assert.deepEqual(analyticsRequests, [{ url: `${origin}/cdn-cgi/rum?`, method: "POST" }]);
-        assert.deepEqual(csp, [], `${path} ${viewport.width}`);
-        // Direct unrelated paths, foreign origins, and foreign redirect targets
-        // remain blocked. CSP deliberately ignores path constraints after a
-        // redirect; do not claim it confines same-origin redirect destinations.
-        for (const target of ["/__csp-denied", "/cdn-cgi/rum/extra", "https://csp-denied.example/cdn-cgi/rum", "/cdn-cgi/rum?redirect=1"]) {
+        await assert.rejects(page.addScriptTag({ url: "https://static.cloudflareinsights.com/beacon.min.js" }), /Content Security Policy/, `${path}@${viewport.width}: the analytics beacon must be refused`);
+        assert.deepEqual(analyticsRequests, [], `${path}@${viewport.width}: no analytics request`);
+        // Every connection target is refused: the former collector path, unrelated
+        // paths, foreign origins and a redirecting collector path.
+        for (const target of ["/cdn-cgi/rum?", "/__csp-denied", "/cdn-cgi/rum/extra", "https://csp-denied.example/cdn-cgi/rum", "/cdn-cgi/rum?redirect=1"]) {
           analyticsRequests.length = 0;
           const violationsBefore = await page.evaluate(() => globalThis.cspViolations.length);
           const blocked = await page.evaluate(async target => {
@@ -125,8 +124,7 @@ test("public pages permit only the intended analytics connection and remain axe-
             : [requested.href, requested.origin];
           assert.ok(violations.some(v => v.directive === "connect-src" && reportedUrls.includes(v.blocked)), `${target}: CSP-specific denial, not a network failure`);
           assert.deepEqual(redirectedRequests, [], "no redirect reached the foreign-origin local collector");
-          assert.deepEqual(analyticsRequests, target.includes("redirect=")
-            ? [{ url: `${origin}/cdn-cgi/rum?redirect=1`, method: "POST" }] : [], target);
+          assert.deepEqual(analyticsRequests, [], target);
         }
       }
       assert.deepEqual(await serious(page), [], `${path} ${viewport.width}`);

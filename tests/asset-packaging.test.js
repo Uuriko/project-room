@@ -1,3 +1,4 @@
+import { agentPages } from "../scripts/build-agent-docs.mjs";
 import { advertisedHtml } from '../server/advertised-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -86,21 +87,28 @@ test('the HTTP allowlist serves every packaged browser asset with exact bytes', 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`;
+  const renderedGuides = agentPages();
   for (const path of assetPaths.filter(file => produced.includes(file))) {
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 200, path);
-    const disk = await readFile(new URL(path, source));
+    const disk = path.startsWith("docs/agents/") && generatedAgentPages.includes(path)
+      ? Buffer.from(renderedGuides.get(path))
+      : await readFile(new URL(path, source));
     // The fixture server has no GitHub auth, so the front door omits that anchor.
     const door = path === 'index.html' ? Buffer.from(frontDoorHtml(disk, { githubConfigured: false })) : disk;
     // A self-hosted origin advertises itself in canonical/OG tags of HTML pages.
     const expected = path.endsWith('.html') ? Buffer.from(advertisedHtml(door.toString('utf8'), origin)) : door;
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, path);
   }
-  // Absent generated pages are the designed package state (decision #36):
-  // the server answers 404 for them, never a 500.
+  // Exact packages omit prebuilt guides; the current Node runtime renders
+  // those allowlisted pages from its reviewed Markdown inputs on demand.
   for (const path of assetPaths.filter(file => generatedAgentPages.includes(file) && !produced.includes(file))) {
     const response = await fetch(origin + '/' + path);
-    assert.equal(response.status, 404, path);
+    if (path.startsWith('docs/agents/')) {
+      assert.equal(response.status, 200, path);
+      assert.match(response.headers.get('content-type'), /text\/html/);
+      assert.equal(await response.text(), advertisedHtml(renderedGuides.get(path), origin), path);
+    } else assert.equal(response.status, 404, path);
   }
 });
 test('asset build rejects unknown files without uploading or deleting them', async t => {
