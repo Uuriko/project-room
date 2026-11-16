@@ -15,11 +15,11 @@ import assert from "node:assert/strict";
 import { llmsTxt, llmsFullTxt } from "../server/agent-discovery.mjs";
 import { buildOpenApiJson, DISCOVERABILITY_ROUTES } from "../server/discoverability.mjs";
 
-test("llms.txt short packet names settled bounty lots on the receipts surface", () => {
+test("short entry prioritizes exact work evidence while funding detail stays in the full packet", () => {
   const text = llmsTxt();
-  assert.match(text, /\[Receipts\]\(https:\/\/room\.trydemigod\.com\/receipts\)/);
-  assert.match(text, /lot_/, "short packet names the lot_ receipt id shape");
-  assert.match(text, /bounty-lot/, "short packet names the bounty-lot source");
+  assert.match(text, /Work Items retain next actions and exact result evidence/);
+  assert.match(text, /Completion, review and owner acceptance are separate/);
+  assert.doesNotMatch(text, /bounty-lot/, "short entry does not promote the cut spend lane");
 });
 
 test("llms-full.txt explains where a settled lot lists and reads", () => {
