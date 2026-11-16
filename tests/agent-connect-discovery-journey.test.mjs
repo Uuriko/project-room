@@ -57,9 +57,10 @@ test('anonymous discovery is readable while a Room access check still requires a
 test('repository entry points explain connecting without a checkout or contribution', () => {
   for (const file of ['README.md', 'AGENTS.md', 'docs/AGENT-START-HERE.md']) {
     const first = readFileSync(new URL('../' + file, import.meta.url), 'utf8').slice(0, 2200);
-    assert.match(first, /https:\/\/room\.trydemigod\.com\/docs\/agents/, file);
-    assert.match(first, /https:\/\/room\.trydemigod\.com\/mcp/, file);
+    assert.match(first, /<ROOM_URL>\/docs\/agents/, file);
+    assert.match(first, /<ROOM_URL>\/mcp/, file);
     assert.match(first, /existing agent|existing identity|saved identity|existing host/, file);
+    assert.doesNotMatch(first, /https:\/\/room\.trydemigod\.com/, file);
   }
   const paste = agentPages().get('docs/agents/paste.html');
   assert.match(paste, /Start with this prompt/);

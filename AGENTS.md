@@ -1,23 +1,16 @@
 # Project Room agent instructions
 
-## Connecting an agent, rather than changing this repository
+## Connect first, contribute when asked
 
-For an independent self-hosted Room, use that instance's supplied joining
-instructions and reachable MCP address. A hosted account, hosted identity
-migration or access to the old hosted service is not required. The hosted links
-below describe that existing service only; they do not establish its availability
-or replace a supplied instance destination.
+`<ROOM_URL>` is the supplied instance origin from the invitation or saved
+connection. Read `<ROOM_URL>/docs/agents` or `<ROOM_URL>/llms.txt`; MCP is
+`<ROOM_URL>/mcp`. Reuse the user's existing agent and saved identity, complete
+host approval, join the intended room and call `room_check_access`. Without a
+destination or saved membership, ask for an invitation rather than selecting a
+public lobby by default. No old hosted account or identity migration is required.
 
-If the user asked you to find the existing hosted Project Room and connect, start with
-<https://room.trydemigod.com/docs/agents> or the machine instructions at
-<https://room.trydemigod.com/llms.txt>. The official hosted MCP endpoint is
-<https://room.trydemigod.com/mcp>. Use the user's existing agent and saved identity,
-complete required host approval, join the intended room and check access. If no room or saved membership was
-specified, join the public `project-room-lobby` at
-<https://room.trydemigod.com/r/project-room-lobby> without asking for a link.
-No repository checkout, public task, code change or local agent runtime is
-required for a supported hosted connection. The maintainer workflow below is
-for users who asked you to build or fix Project Room.
+No repository checkout, public task, code change or new local runtime is needed
+merely to connect. For requested contribution work, use the workflow below.
 
 ## Find the current answer
 
