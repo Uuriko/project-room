@@ -1094,6 +1094,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     invalidInput(reject, `leaseHours greater than 0 and at most ${MAX_LEASE_HOURS}; null is only for the room owner or manage_claims`);
   };
 
+  // Read responses only: Board rows that mirror private work are withheld from
+  // a caller outside it. Writes keep using the registry rows directly.
+  const seen = rows => store?.workClaimsForViewer?.(roomId, caller, rows) ?? rows;
   const load = id => {
     const item = registry.get(roomId, id);
     if (!item) reject(404, "work_claim_not_found", `No work claim "${id}" in this room`);
@@ -1160,7 +1163,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (!saved) reject(404, "unknown_view", "No such saved Board view in this room");
       listParams = withSavedView(listParams, saved);
     }
-    return json(res, 200, withProjectMapOverlap(store, roomId, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
+    return json(res, 200, withProjectMapOverlap(store, roomId, { ...buildWorkClaimPage(seen(registry.list(roomId)), roomId, caller,
       listParams, nowMs), swept: sweptIds }));
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
@@ -1188,7 +1191,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // N20-01: current-format rooms never write Board rows (the sync is
     // gated off by design), so their receipts are projected read-side
     // from the canonical work items; legacy rooms keep the registry.
-    const ranked = (currentReceiptClaims(store, roomId) ?? registry.list(roomId))
+    const ranked = (currentReceiptClaims(store, roomId) ?? seen(registry.list(roomId)))
       .filter(item => item.state === "done")
       .filter(matches)
       .sort((a, b) => doneAtMsOf(b) - doneAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -1213,7 +1216,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // that one work item, not a full-room enumeration (which 409s in
     // mature rooms); legacy rooms keep the registry find unchanged.
     const nativeClaim = currentReceiptClaim(store, roomId, workClaimId);
-    const item = nativeClaim !== null ? nativeClaim : registry.list(roomId)
+    const item = nativeClaim !== null ? nativeClaim : seen(registry.list(roomId))
       .find(entry => entry.state === "done" && `rc_${entry.id}` === workClaimId);
     if (!item) reject(404, "receipt_not_found", `No receipt "${workClaimId}" in this room`);
     return json(res, 200, stampReceipts({
@@ -1271,7 +1274,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     let duplicates;
     try {
-      duplicates = findDuplicates(registry.list(roomId), q, { limit });
+      duplicates = findDuplicates(seen(registry.list(roomId)), q, { limit });
     } catch (error) {
       if (error instanceof DuplicateError) reject(422, error.code, error.message);
       throw error;
@@ -1350,7 +1353,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // SEC-2: member-authored text is marked untrusted for the reader.
     // #3661: the single-claim read carries the same derived pull
     // settlement state as the board page.
-    return json(res, 200, withProjectMapOverlap(store, roomId, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller))));
+    return json(res, 200, withProjectMapOverlap(store, roomId, withContentTrust(stampClaim(withPullSettlement(seen([load(claimIdOf(reject, workClaimId))])[0]), caller))));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
@@ -2034,7 +2037,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     load(id); // 404 when the claim does not exist
     let walk;
     try {
-      walk = walkProvenance(registry.list(roomId), id);
+      walk = walkProvenance(seen(registry.list(roomId)), id);
     } catch (error) {
       if (error instanceof ClaimError) reject(422, error.code, error.message);
       throw error;

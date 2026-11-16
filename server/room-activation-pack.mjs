@@ -173,12 +173,19 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
       orient:buildOrient(store,roomSlug,viewerId,{text:false,workAfter:options.workAfter??''})});
   }
   // Unknown rooms fail here with the store's 404 (room_not_found).
-  const { sequence, state } = store.room(roomSlug);
+  const { sequence, state: storedState } = store.room(roomSlug);
+  // Every section below reads work through the viewer's boundary: private
+  // work the viewer is outside appears as its withheld record.
+  const state = store.privateWorkStateForViewer?.(roomSlug, storedState, viewerId) ?? storedState;
   // PERF-10X L4: one decoded board per request, shared by the pack's
   // openClaims and the embedded orient (which shares it onward to its
   // next-actions / fleet consumers). A caller composing reads in one
   // request may pass its own memo in as options.boardList.
-  const boardList = options.boardList ?? memoizeBoardList(store);
+  const sharedBoardList = options.boardList ?? memoizeBoardList(store), viewerBoards = new Map();
+  const boardList = slug => {
+    if (!viewerBoards.has(slug)) { const rows = sharedBoardList(slug); viewerBoards.set(slug, store.workClaimsForViewer?.(slug, viewerId, rows) ?? rows); }
+    return viewerBoards.get(slug);
+  };
   if (!state.room) throw new Error("Room projection is missing its room record");
   const now = new Date(store.now()).toISOString();
   const members = Object.values(state.members ?? {})

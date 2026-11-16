@@ -10,7 +10,8 @@ import {ownMember} from '../src/events.js';
 // whose own contract bounds how much source one call may examine (the native
 // inbox's coverage.examined) passes boundedWindow:true to keep the original
 // single-window page.
-import {currentRoomAuthority,readCurrentWorkSummaryForViewer,readCurrentRecord,readCurrentHead,readCurrentMessage,readCurrentHistoryFloor,withCurrentReadContext,chargeCurrentReadBudget,CurrentReadBudgetExceeded} from './current-room-repository.mjs';
+import {withheldWorkEvent,privateWorkEvent} from './work-context.mjs';
+import {currentRoomAuthority,currentWorkWithheldFromViewer,readCurrentRecord,readCurrentHead,readCurrentMessage,readCurrentHistoryFloor,withCurrentReadContext,chargeCurrentReadBudget,CurrentReadBudgetExceeded} from './current-room-repository.mjs';
 import {dmEventVisibility,dmConsentEventVisible,DM_FOLLOW_UP_TYPES} from './dm-event-visibility.mjs';
 import {peerEventVisible} from './bonds.mjs';
 import {rowInHistory,messageInHistory} from './history-visibility.mjs';
@@ -109,13 +110,12 @@ function readCurrentEventChunk(store,roomId,viewerId,ctx,{after,source}){
   if(chips.length)e.mentions=chips.map(chip=>({memberId:chip.memberId,state:effectiveMentionState(chip,store.now()),displayName:chipMember(chip.memberId)?.displayName??chip.memberId}));
  }
  const next=selected.length?selected.at(-1).sequence:after;
- const workDefinitions=new Map();
+ const workDefinitions=ctx.privateWork??=new Map(); // one decision per work item for the whole call, not per window
  const privateWorkEvents=visible.map(row=>{
   const e=row.event,id=e.data?.workItemId;
-  if(typeof id!=='string'||!Object.hasOwn(e.data,'title')&&!Object.hasOwn(e.data,'definitionOfDone'))return row;
-  if(!workDefinitions.has(id))workDefinitions.set(id,readCurrentWorkSummaryForViewer(db,roomId,id,viewerId,b));
-  if(workDefinitions.get(id).title!==null)return row;
-  return {...row,event:{...e,data:{...e.data,...(Object.hasOwn(e.data,'title')?{title:null}:{}),...(Object.hasOwn(e.data,'definitionOfDone')?{definitionOfDone:null}:{})}}};
+  if(!privateWorkEvent(e)||typeof id!=='string')return row;
+  if(!workDefinitions.has(id))workDefinitions.set(id,currentWorkWithheldFromViewer(db,roomId,id,viewerId,b));
+  return workDefinitions.get(id)?{...row,event:withheldWorkEvent(e)}:row;
  });
  const events=redactEventPage({events:privateWorkEvents,next,hasMore:next<ceiling},[...messages.values()].filter(Boolean)).events;
  return {events,messages:[...messages.values()].filter(Boolean),next,hasMore:next<ceiling};

@@ -9,7 +9,7 @@ import {emptyWorkPrivacy,validateWorkPrivacy,applyWorkPrivacyRequest,deriveWorkP
 import {CURRENT_LEGACY_WORK_INDEXES,CURRENT_LEGACY_WORK_GUARDS,assertLegacyWorkReconciled} from './current-legacy-work-gate.mjs';
 import {currentWorkCapacity,assertCurrentWorkCapacity,CURRENT_WORK_CAPACITY_INDEXES} from './current-work-capacity.mjs';
 import {CURRENT_WRITER_FORMAT} from './current-room-format.mjs';
-import {workRoleHolder} from './work-context.mjs';
+import {workRoleHolder,withheldWorkItem} from './work-context.mjs';
 import {currentWorkSummary} from './current-work-summary.mjs';
 import {archiveRetains,recoverArchiveMarker} from './current-room-archive.mjs';
 import {messageRowForWrite} from './messages-store.mjs';
@@ -1493,7 +1493,8 @@ export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{inclu
   const prefix=workRequestPrefix(workId),requests=db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='workRequest' AND present=1 AND record_key>=? AND record_key<? ORDER BY record_key LIMIT 9").all(roomId,prefix,prefix+'\uffff');
   charge(b,requests.length*256,requests.length);if(requests.length!==privacy.requests)corrupt('selected request index count differs');
   for(const {record_key:key} of requests){const link=readCurrentRecord(db,roomId,'workRequest',key,b);if(!link||link.workItemId!==workId||workRequestKey(workId,link.requestId)!==key)corrupt('selected request index binding differs');const request=readCurrentRecord(db,roomId,'replyRequests',link.requestId,b);if(request?.workItemId!==workId)corrupt('selected private request missing');Object.defineProperty(replyRequests,link.requestId,{value:request,enumerable:true});}
-  return {sequence:head.sequence,state:{room,members,workItems:{[workId]:privateWorkForViewer(db,roomId,workId,item,viewerId,b)},replyRequests}};
+  // privateParties: the parties this read already observed (null when the work has no private request), so the caller's refusal check needs no second privacy read.
+  return {sequence:head.sequence,state:{room,members,workItems:{[workId]:privateWorkForViewer(db,roomId,workId,item,viewerId,b)},replyRequests},privateParties:privacy.requests?new Set(Object.keys(privacy.parties)):null};
 }
 
 export {currentWorkSummary} from './current-work-summary.mjs';
@@ -1587,6 +1588,17 @@ export function readCurrentWorkSummaryForViewer(db,roomId,id,viewerId,b=contextB
   const result=privateWorkForViewer(db,roomId,id,summary.work,viewerId,b);
   if(reuse?.roomId===roomId&&reuse.viewerId===viewerId&&reuse.values.size<8)reuse.values.set(id,structuredClone(result));
   return result;
+}
+// Whether this viewer is outside the private work an event names. A summary
+// this transaction already read for the viewer answers for free; otherwise the
+// privacy record alone settles public work and request parties, and only a
+// non-party on private work needs the summary for the named-role check.
+export function currentWorkWithheldFromViewer(db,roomId,id,viewerId,b=contextBudgets.get(db)??budget()){
+  const reuse=workSummaryReuseScopes.get(db);
+  if(reuse?.roomId===roomId&&reuse.viewerId===viewerId&&reuse.values.has(id))return reuse.values.get(id).title===null;
+  const privacy=readCurrentWorkPrivacy(db,roomId,id,b);
+  if(!privacy.requests||Object.hasOwn(privacy.parties,viewerId))return false;
+  return readCurrentWorkSummaryForViewer(db,roomId,id,viewerId,b).title===null;
 }
 
 // Bound source examination before parsing event bodies. Long excluded tails
@@ -1687,7 +1699,7 @@ function privateWorkForViewer(db,roomId,workId,item,viewerId,b) {
   // nor its references (evidence URL/version, author, triage addressee).
   // Being named as the handoff's triage addressee does not by itself
   // authorize a member; access follows the same party / work-role rule.
-  const result={...item,title:null,definitionOfDone:null};
+  const result=withheldWorkItem(item);
   if(Object.hasOwn(item,'handoff'))result.handoff=null;
   if(Object.hasOwn(item,'handoffHistory'))result.handoffHistory=null;
   return result;

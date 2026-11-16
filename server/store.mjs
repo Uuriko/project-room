@@ -122,7 +122,7 @@ import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-sch
 import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
-import { selectedWorkContext, currentWorkRecord, workRoleHolder, withheldWorkItem } from "./work-context.mjs";
+import { selectedWorkContext, currentWorkRecord, workRoleHolder, withheldWorkItem, withheldWorkEvent, privateWorkEvent, privateWorkEventId, withheldBoardRow, outsidePrivateWork } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { assertDependsOnKnown } from "./work-claim-integrity.mjs";
 import { normalizeWorkDependencies } from "../src/work-dependencies.js";
@@ -425,9 +425,9 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // already apply). A selected read carries the claim scope, evidence, source and
 // discussion, so anyone else is refused rather than served a partly redacted
 // copy. An unreadable privacy record withholds. No new permission is involved.
-function assertSelectedWorkVisible(store, roomId, workItemId, item, viewerId) {
-  let parties;
-  try { parties = store.privateWorkParties(roomId, { workIds: [workItemId] })?.get(workItemId) ?? null; }
+function assertSelectedWorkVisible(store, roomId, workItemId, item, viewerId, observed = undefined) {
+  let parties = observed;
+  if (observed === undefined) try { parties = store.privateWorkParties(roomId, { workIds: [workItemId] })?.get(workItemId) ?? null; }
   catch { parties = new Set(); }
   if (parties && !parties.has(viewerId) && !workRoleHolder(item, viewerId)) fail(403, "work_private", "This work is private to its participants");
 }
@@ -5432,6 +5432,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     return privatePartiesByWork;
   }
+  // A room state as one member may read it: private work the member is outside
+  // becomes its withheld record. Returns the same object when nothing changes.
+  privateWorkStateForViewer(roomId, state, viewerId) {
+    if (!state?.workItems) return state;
+    const parties = this.privateWorkParties(roomId);
+    if (!parties?.size) return state;
+    let changed = false;
+    const workItems = Object.fromEntries(Object.entries(state.workItems).map(([id, item]) => {
+      if (!item || !outsidePrivateWork(parties.get(id), item, viewerId)) return [id, item];
+      changed = true;
+      return [id, withheldWorkItem(item)];
+    }));
+    return changed ? { ...state, workItems } : state;
+  }
+  // Decides, per event, whether it is about private work the viewer is outside.
+  // Lazy: a page with no work event reads nothing. A Board mirror event names
+  // the Board row, whose id is derived from the work id, so both are matched.
+  privateWorkEventOutside(roomId, viewerId, { parties = null, workItems = null } = {}) {
+    let byClaim = null;
+    return event => {
+      if (!privateWorkEvent(event)) return false;
+      parties ??= this.privateWorkParties(roomId);
+      if (!parties.size) return false;
+      let workItemId = privateWorkEventId(event);
+      if (event.data.workItemId === undefined && !parties.has(workItemId)) {
+        byClaim ??= new Map([...parties.keys()].map(id => [boardClaimId(id), id]));
+        workItemId = byClaim.get(workItemId);
+      }
+      const held = parties.get(workItemId);
+      if (!held) return false;
+      workItems ??= this.workProjection(roomId).state.workItems ?? {};
+      return outsidePrivateWork(held, workItems[workItemId], viewerId);
+    };
+  }
+  // Board rows as one member may read them. Legacy storage mirrors every work
+  // item onto the Board, so a row that mirrors private work is withheld from a
+  // member outside it. Read-only: never pass the result to a registry write.
+  workClaimsForViewer(roomId, viewerId, rows = this.workClaims.list(roomId)) {
+    if (!Array.isArray(rows) || !rows.some(row => row?.workItemId) || isCurrentRoom(this.db, roomId)) return rows;
+    const parties = this.privateWorkParties(roomId);
+    if (!parties.size) return rows;
+    const workItems = this.workProjection(roomId).state.workItems ?? {};
+    return rows.map(row => row?.workItemId && outsidePrivateWork(parties.get(row.workItemId), workItems[row.workItemId], viewerId) ? withheldBoardRow(row) : row);
+  }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null, fullHistory = false, workCursor = null) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
@@ -5516,18 +5560,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const privatePartiesByWork = this.privateWorkParties(roomId);
       const workItems = room.state.workItems ? Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => {
         const parties = privatePartiesByWork.get(id);
-        if (!parties || parties.has(auth.member.id) || workRoleHolder(item, auth.member.id)) return [id, item];
-        return [id, { ...item, title: null, definitionOfDone: null }];
+        return [id, outsidePrivateWork(parties, item, auth.member.id) ? withheldWorkItem(item) : item];
       })) : room.state.workItems;
+      const outsideEvent = this.privateWorkEventOutside(roomId, auth.member.id, { parties: privatePartiesByWork, workItems: room.state.workItems ?? {} });
       const eventLog = rawEventLog.map(event => {
-        const workItemId = event?.data?.workItemId;
-        if (typeof workItemId !== "string") return event;
-        const parties = privatePartiesByWork.get(workItemId);
-        if (!parties || parties.has(auth.member.id) || workRoleHolder(room.state.workItems?.[workItemId], auth.member.id)) return event;
-        if (!Object.hasOwn(event.data, "title") && !Object.hasOwn(event.data, "definitionOfDone")) return event;
-        return { ...event, data: { ...event.data,
-          ...(Object.hasOwn(event.data, "title") ? { title: null } : {}),
-          ...(Object.hasOwn(event.data, "definitionOfDone") ? { definitionOfDone: null } : {}) } };
+        return outsideEvent(event) ? withheldWorkEvent(event) : event;
       });
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
       return { ...room, roomId, ...(messagesWindow ? {messagesWindow} : {}), ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, workItems, messages, ...(pins === undefined ? {} : {pins}), eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
@@ -5784,9 +5821,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return{members,coverage:{membership:'complete-current-roster',connection:'observed',execution:'not-evaluated',heldWork:'not-evaluated',queuedWakes:'not-evaluated'},next};
     },{maxRecords:512}));
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const evidence = {};
-      const listed = this.presenceMembers(roomId, watcherMemberIds, evidence);
+      const listed = this.presenceMembers(roomId, watcherMemberIds, evidence, auth.member.id);
       // Suggested DM targets require current connection/execution observations.
       // Holding a live claim is NOT such an observation: it never keys
       // dm-member (REGISTER row 59).
@@ -5818,8 +5855,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }).sort((a,b)=>a.memberId.localeCompare(b.memberId,'en'));
     },{maxRecords:512});
   }
-  presenceMembers(roomId, watcherMemberIds, evidenceOut = null) {
+  presenceMembers(roomId, watcherMemberIds, evidenceOut = null, viewerId = undefined) {
     if(isCurrentRoom(this.db,roomId))return this.currentPresenceMembers(roomId,watcherMemberIds);
+    const outsideEvent = viewerId === undefined ? null : this.privateWorkEventOutside(roomId, viewerId);
+    const outsideTitle = outsideEvent && (workItemId => outsideEvent({ type: "work.presence", data: { workItemId } }));
     const { members, ownerId } = this.roomAuthority(roomId);
     const room = this.room(roomId);
     const now = this.now();
@@ -5973,8 +6012,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const sessionWork = working.get(m.id) ?? [];
         // Claim entries follow session entries; an item with a fresh
         // executing session is listed once, by its session entry.
+        // Held private work stays listed for a viewer outside it, untitled.
         const workingOn = [...sessionWork,
-          ...(held.get(m.id) ?? []).filter(entry => !sessionWork.some(s => s.workItemId === entry.workItemId))];
+          ...(held.get(m.id) ?? []).filter(entry => !sessionWork.some(s => s.workItemId === entry.workItemId))]
+          .map(entry => outsideTitle?.(entry.workItemId) ? { ...entry, title: null } : entry);
         const isWatching = watching.has(m.id);
         return {
           memberId: m.id, displayName: m.displayName, kind: m.kind,
@@ -6060,7 +6101,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const ownerMember = ownerId ? ownMember(members, ownerId) : null;
         const ownerStanding = !!ownerMember && ownerMember.identityId === caller.identityId;
         if (!memberStanding && !ownerStanding) continue;
-        const row = this.presenceMembers(seat.roomId, [])
+        const row = this.presenceMembers(seat.roomId, [], null, callerSeat?.memberId ?? null)
           .find(entry => entry.memberId === seat.memberId);
         if (row) rooms.push({ roomId: seat.roomId, ...row });
       }
@@ -6364,10 +6405,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // each provider is currently working on. Members-only read.
   providerHeartbeats(token, roomId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const viewerId = this.authenticate(token, roomId, expectedSessionBinding).member.id;
       const { members } = this.roomAuthority(roomId);
       const room = this.room(roomId);
       const now = this.now();
+      const outsideEvent = this.privateWorkEventOutside(roomId, viewerId, { workItems: room.state.workItems ?? {} });
       const providers = [];
       for (const member of Object.values(members)) {
         if (member.kind !== "agent" || member.active === false) continue;
@@ -6378,7 +6420,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (session.worker_member_id !== member.id || !session.heartbeat_at) continue;
           if (!lastHeartbeatAt || session.heartbeat_at > lastHeartbeatAt) lastHeartbeatAt = session.heartbeat_at;
           if (sessionWorker(item, now) === member.id) {
-            workingOn.push({ workItemId: item.id, title: item.title, heartbeat_at: session.heartbeat_at });
+            workingOn.push({ workItemId: item.id, title: outsideEvent({ type: "work.presence", data: { workItemId: item.id } }) ? null : item.title, heartbeat_at: session.heartbeat_at });
           }
         }
         const stale = !lastHeartbeatAt || now - Date.parse(lastHeartbeatAt) > SESSION_HEARTBEAT_STALE_MS;
@@ -6415,7 +6457,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room=overview??this.room(roomId);
       const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
       const builtRaw = buildRoomContext({
-        state: room.state, sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
+        state: overview ? room.state : this.privateWorkStateForViewer(roomId, room.state, auth.member.id), sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
       });
       // F-S6c-3: evaluatedThrough here has the same semantics as the
       // reply-list surface — it must stop at the viewer's visible
@@ -6463,7 +6505,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const floor = this.historyFloor(roomId, viewerId, through);
       const effectiveSince = floor ? Math.max(since, floor.sequence - 1) : since;
       const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, viewerId)?.sequence ?? 0;
-      const context = buildRoomContext({ state: room.state, sequence: through, viewerId, caughtUp, now: this.now() });
+      const context = buildRoomContext({ state: this.privateWorkStateForViewer(roomId, room.state, viewerId), sequence: through, viewerId, caughtUp, now: this.now() });
       // Group the journal window once; retain exact known-type coverage and
       // coalesce future event types into the same `other` compatibility bucket.
       // File-backed Node and Workers read-only transactions are parity-tested.
@@ -6488,10 +6530,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ).all(roomId, effectiveSince, through);
       const seenClaims = new Set();
       const workChanged = [];
+      const outsideWork = this.privateWorkEventOutside(roomId, viewerId, { workItems: room.state.workItems ?? {} });
       for (const row of workRows) {
         if (seenClaims.has(row.claimId)) continue;
         seenClaims.add(row.claimId);
-        if (workChanged.length < 25) workChanged.push({ id: row.claimId, seq: row.seq, action: row.action, state: row.state, title: row.title });
+        if (workChanged.length < 25) workChanged.push({ id: row.claimId, seq: row.seq, action: row.action, state: row.state,
+          title: outsideWork({ type: "work_claim.updated", data: { workClaim: row.claimId } }) ? null : row.title });
       }
       const decisions = this.db.prepare(
         `SELECT sequence AS seq, json_extract(body,'$.type') AS type, json_extract(body,'$.actorId') AS actorId FROM events
@@ -6548,7 +6592,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if(current) {
         if(!Object.hasOwn(current.state.workItems,workItemId))fail(404,'work_not_found','Work item not found in this Room');
         const item=current.state.workItems[workItemId],target=item.supersededBy;
-        assertSelectedWorkVisible(this,roomId,workItemId,item,auth.member.id);
+        assertSelectedWorkVisible(this,roomId,workItemId,item,auth.member.id,current.privateParties);
         const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now:this.now(),includeSource,includeOffers,sourceObservation,
           floor:this.historyFloor(roomId,auth.member.id,current.sequence),messageRecords:{get:id=>selectedMessageRecord(this,roomId,id,false)},
           replacementAvailable:validId(target)&&target!==workItemId&&Boolean(readWorkItem(this.db,roomId,target))});
@@ -6738,9 +6782,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // SEC-19: thunk keeps the zero-decode polling optimization: the full
       // projection only decodes if the page actually holds a follow-up event.
       const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events, this.archivedDmPartiesReader(roomId));
-      const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
+      const inHistory = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, viewerId, isOwner)
         && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
+      // Private work: a member outside it keeps each event's place in the
+      // feed and loses its payload text. Nothing is read unless the page
+      // holds a work event, so an ordinary poll costs what it did.
+      const outside = this.privateWorkEventOutside(roomId, viewerId);
+      const visible = inHistory.map(row => outside(row.event) ? { ...row, event: withheldWorkEvent(row.event) } : row);
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
       const messageIds = visible.filter(({ event }) => event?.type === T.MESSAGE_POSTED).map(({ event }) => event.id);

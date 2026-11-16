@@ -789,17 +789,16 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   }
   if (name === "room_work_claim_thread") {
     // #5378: same data as GET /api/rooms/:roomId/work-claims/:claimId/thread.
-    store.authenticate(secret, roomId);
+    const viewerId = store.authenticate(secret, roomId).member.id;
     const item = store.workClaims.get(roomId, args.claimId);
     if (!item) throw new ServiceError(404, "work_claim_not_found", `No work claim "${args.claimId}" in this room`);
-    return claimThread(store, roomId, item);
+    return claimThread(store, roomId, store.workClaimsForViewer(roomId, viewerId, [item])[0]);
   }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET
     // /api/rooms/:roomId/work-claims/:claimId/provenance, read over the
     // room's claim registry. Read-only; any room member may walk.
-    store.authenticate(secret, roomId);
-    const items = store.workClaims.list(roomId);
+    const items = store.workClaimsForViewer(roomId, store.authenticate(secret, roomId).member.id);
     try {
       return { roomId, claimId: args.claimId, ...walkProvenance(items, args.claimId) };
     } catch (error) {
