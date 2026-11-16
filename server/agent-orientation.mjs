@@ -23,7 +23,9 @@ export function readAgentOrientation(store, token, roomId, fence, {cursor=null}=
     const recordForViewer = (id, item) => {
       const parties = privatePartiesByWork.get(id);
       return orientationRecord(!parties || parties.has(auth.member.id) || workRoleHolder(item, auth.member.id)
-        ? item : { ...item, title: null, definitionOfDone: null });
+        ? item : { ...item, title: null, definitionOfDone: null,
+          claim: null, receipt: null, verification: null, decision: null,
+          blocker: null, handoff: null, handoffHistory: null });
     };
     return {
       snapshotView: "orientation", snapshotVersion: 1, roomId, sequence: room.sequence,

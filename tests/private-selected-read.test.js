@@ -73,6 +73,17 @@ test(`${representation}: selected reads of private work reach its parties and na
   const rest = await fetch(`${f.origin}/api/rooms/commons/work-context?workItemId=secret`, { headers: { Authorization: 'Bearer ' + f.observer.secret } });
   assert.equal(rest.status, 403); assert.doesNotMatch(await rest.text(), SECRETS);
 
+  if (representation === 'legacy') {
+    const orientation = async identity => {
+      const response = await fetch(`${f.origin}/api/rooms/commons?view=orientation`, { headers: { Authorization: 'Bearer ' + identity.secret } });
+      assert.equal(response.status, 200);
+      return response.text();
+    };
+    assert.doesNotMatch(await orientation(f.observer), SECRETS, 'orientation withholds private claim and result');
+    assert.match(await orientation(f.producer), /PRIVATE-SUMMARY-SENTINEL/, 'producer keeps orientation result');
+    assert.match(await orientation(f.reviewer), /PRIVATE-SUMMARY-SENTINEL/, 'reviewer keeps orientation result');
+  }
+
   // Positive controls: the accountable producer (also a party) and the named reviewer (a role, not a party) keep every read.
   for (const viewer of [f.producer, f.reviewer]) {
     const full = await f.call(viewer, 'room_read_work', { workItemId: 'secret' });
