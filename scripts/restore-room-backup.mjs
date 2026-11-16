@@ -5,19 +5,27 @@
 //
 //   node scripts/restore-room-backup.mjs --kv 2026-10-08 --to /tmp/restore/room.sqlite --room muse-room
 //   node scripts/restore-room-backup.mjs --from room-export.ndjson --to /tmp/restore/room.sqlite
+//   node scripts/restore-room-backup.mjs --from-parts chunked-export-dir --to /tmp/restore/room.sqlite
 //
 // --kv reads the KV manifest and its parts with `wrangler kv key get --remote`
 // (the caller's wrangler login), checks every part's sha256 and the whole
 // file's sha256, then replays. --save writes the reassembled NDJSON (mode 0600).
+// --from-parts reads a chunked export directory (server/chunked-export.mjs):
+// the manifest is verified, every part's sha256 and the whole stream's
+// sha256 are checked during assembly, and the reassembled stream replays
+// through exactly the same path as --from. That is the import route for a
+// store too large for the single-snapshot export guard.
 // --audit report restores even when the recovery audit flags drift between a
 // stored projection and the current reducer, and prints the audit result.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
 import { replayNdjson } from "../server/room-export.mjs";
+import { assembleChunkedExport } from "../server/chunked-export.mjs";
 import { continueRemoteRestore } from "./restore-remote-continuation.mjs";
 import { backupObjectKey } from "../cloudflare/room-backup.mjs";
 
@@ -77,14 +85,14 @@ const restoreOutcome = { promoted: false, cleanupFailed: false };
 
 async function main() {
   const { values } = parseArgs({ options: {
-    from: { type: "string" }, kv: { type: "string" }, "namespace-id": { type: "string" },
+    from: { type: "string" }, "from-parts": { type: "string" }, kv: { type: "string" }, "namespace-id": { type: "string" },
     to: { type: "string" }, room: { type: "string", multiple: true }, save: { type: "string" }, audit: { type: "string" }, "source-schema-version": { type: "string" },
     "continue-receipt": { type: "string" }, origin: { type: "string" }, checkpoint: { type: "string" }, "run-ms": { type: "string" }
   } });
   if (values["continue-receipt"] || values.origin || values.checkpoint || values["run-ms"]) {
     restoreOutcome.remote = true;
     if (!values["continue-receipt"] || !values.origin || !values.checkpoint
-      || ["from", "kv", "namespace-id", "to", "room", "save", "audit", "source-schema-version"].some(key => values[key] !== undefined)) throw new Error("remote_restore_invalid_options");
+      || ["from", "from-parts", "kv", "namespace-id", "to", "room", "save", "audit", "source-schema-version"].some(key => values[key] !== undefined)) throw new Error("remote_restore_invalid_options");
     const result = await continueRemoteRestore({ receiptFile: values["continue-receipt"], origin: values.origin, checkpointFile: values.checkpoint,
       ...(values["run-ms"] === undefined ? {} : { runMs: Number(values["run-ms"]) }) });
     process.stdout.write(JSON.stringify(result) + "\n");process.exitCode = result.status === "complete" ? 0 : 2;return;
@@ -95,9 +103,21 @@ async function main() {
   process.umask(0o077);
   if (!values.to) throw new Error("Pass --to <new sqlite path>");
   if (existsSync(values.to)) throw new Error("Refusing to restore over an existing file");
-  if (Boolean(values.from) === Boolean(values.kv)) throw new Error("Pass exactly one of --from <ndjson> or --kv <YYYY-MM-DD>");
-  let ndjson, manifest = null;
+  if ([values.from, values.kv, values["from-parts"]].filter(Boolean).length !== 1) throw new Error("Pass exactly one of --from <ndjson>, --kv <YYYY-MM-DD> or --from-parts <chunked export directory>");
+  let ndjson, manifest = null, chunked = null;
   if (values.from) ndjson = readFileSync(values.from, "utf8");
+  else if (values["from-parts"]) {
+    // Assemble in a private temp dir, verify against the chunked
+    // manifest, and remove the intermediate single file as soon as it
+    // has been read — the replay below is the same one --from runs.
+    const assembly = mkdtempSync(join(tmpdir(), ".room-chunked-assemble-"));
+    try {
+      const assembledPath = join(assembly, "assembled.ndjson");
+      const assembled = assembleChunkedExport(values["from-parts"], assembledPath);
+      chunked = { exportId: assembled.manifest.exportId, bytes: assembled.bytes, parts: assembled.manifest.parts.length, sha256: assembled.sha256 };
+      ndjson = readFileSync(assembledPath, "utf8");
+    } finally { rmSync(assembly, { recursive: true, force: true }); }
+  }
   else {
     const namespaceId = values["namespace-id"] ?? DEFAULT_NAMESPACE_ID;
     const key = backupObjectKey(new Date(`${values.kv}T00:00:00Z`));
@@ -135,6 +155,7 @@ async function main() {
     verified: result.verified, events: result.events, trailer: result.trailer, contentVerification: result.contentVerification, writeProofs: result.writeProofs, audit: result.audit, skippedTables: result.skippedTables, sanitizedCells: result.sanitizedCells, roomsInBackup: watermark.rooms?.length ?? null,
     backedUpAt: watermark.backedUpAt ? new Date(watermark.backedUpAt).toISOString() : null,
     manifest: manifest && { key: manifest.key, bytes: manifest.bytes, parts: manifest.parts.length, sha256: manifest.sha256 },
+    chunked,
     rooms
   }, null, 2)}\n`);
 }
