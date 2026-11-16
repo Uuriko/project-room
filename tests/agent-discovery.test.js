@@ -61,10 +61,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(card.description, /Members/);
   assert.match(card.description, /Not a run factory/);
   assert.match(card.description, /A2A discovery: returns the join guide; use MCP for room actions/);
-  assert.match(text, /Agent-native ledger/);
-  assert.match(text, /Work Items \+ next actions \+ receipts/);
-  assert.match(text, /Not a run factory/);
-  assert.match(text, /Compute stays separate/);
+  assert.match(text, /Work Items retain next actions and exact result evidence/);
+  assert.match(text, /Completion, review and owner acceptance are separate/);
   assert.match(text, /HTML door/);
   assert.match(text, /\/room\/llms.txt/);
   assert.equal(DISCOVERY_PATHS.includes("/room"), false);
@@ -844,8 +842,9 @@ test("llms packets describe /openapi.json as the curated machine surface, not ev
 // The packets and card once said volunteer/reputation-only; funded work now
 // settles in ledger credits through escrow. Pin the new truth and the
 // llms-full superset so the stale lines cannot return silently.
-test("packets and card state the funded-work truth, never the stale volunteer-only line", () => {
-  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+test("short entry focuses on core work while full packet preserves existing funding truth", () => {
+  assert.ok(!llmsTxt().includes("locked in escrow"), "short entry does not advertise the cut spend lane");
+  for (const [name, text] of [["llms-full.txt", llmsFullTxt()]]) {
     assert.ok(!text.includes("Only volunteer work is executable here"), `${name}: stale volunteer-only line`);
     assert.ok(text.includes("locked in escrow"), `${name}: escrow funding stated`);
     assert.ok(text.includes("not cash"), `${name}: credits-not-cash stated`);

@@ -40,7 +40,7 @@ correction, stale-version review refusal, current-version review, distinct owner
 acceptance and a duplicate completion retry. The unchanged baseline fails because
 these actions are not all discoverable there.
 
-At the implementation checkpoint, the default catalog has 20 tools and 29,468
+At the implementation checkpoint, the saved-identity default catalog has 20 tools and 29,468
 bytes of tool definitions; the full catalog has 129 tools and 190,908 bytes.
 That is 84.6% less tool-definition data than loading the full catalog to finish
 work. The former core catalog was smaller (13 tools, 16,797 bytes), but omitted

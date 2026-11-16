@@ -32,13 +32,14 @@ import { createRoomServer } from "../server/http.mjs";
 // The four anonymous join readers, in packet order.
 const JOIN_READERS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
-// The 10 essential tools the packet names for the member core profile
-// (trimmed to conversation tools in fc5a0ea2; the rest are focus/full).
-const CORE_10 = [
+// Independent enumeration of the complete default conversation/task loop.
+const CORE_WORKFLOW = [
   "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
   "room_list_requests", "room_read_request", "room_respond_to_request",
   "dm_posted", "room_check_access", "room_join",
-  "room_list_work", "room_read_work", "room_claim",
+  "room_list_work", "room_activation_pack", "room_read_result", "room_read_work",
+  "room_begin_work", "room_submit_text_result", "room_resolve_blocker",
+  "room_record_verification", "room_claim", "room_handoff",
 ];
 
 // Every snake_case tool the hosted-mcp bullet promises on the bearer URL.
@@ -133,10 +134,10 @@ test("outside identity gets join readers, access and join tools, and public-work
   assert.match(llmsFullTxt(), /Outside identities get the four join tools, room_check_access and room_join, plus seven public-work tools/, "packet must describe the actual outside catalog");
 });
 
-test("member core profile is the packet's 13 core tools; join readers drop once joined (#5468)", async () => {
+test("member core profile is the packet's 20 core tools; join readers drop once joined (#5468)", async () => {
   const names = await toolsList(undefined, memberSecret);
-  assert.equal(names.length, 13, `core profile must be 13 tools, got ${names.length}`);
-  assert.deepEqual(names, CORE_10);
+  assert.equal(names.length, 20, `core profile must be 20 tools, got ${names.length}`);
+  assert.deepEqual(names, CORE_WORKFLOW);
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {
@@ -160,14 +161,14 @@ test("canonical MCP URL is one URL across packet, card, and skill", () => {
     "packet keeps the www door as a documented alias");
 });
 
-test("Routes compact core set names the same tools as the 10-tool paragraph", () => {
+test("Routes compact core set names the same tools as the default workflow", () => {
   for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
     const match = packet.match(/Their compact core set: ([^.]+)\./);
     assert.ok(match, `${label} must have a compact core set list`);
     const listed = match[1].split(/,\s*/).map(s => s.trim());
-    const missing = CORE_10.filter(n => !listed.includes(n));
+    const missing = CORE_WORKFLOW.filter(n => !listed.includes(n));
     assert.deepEqual(missing, [],
-      `${label} compact core set is missing tools the 10-tool paragraph promises: ${missing.join(",")}`);
+      `${label} compact core set is missing tools the default workflow promises: ${missing.join(",")}`);
   }
 });
 
