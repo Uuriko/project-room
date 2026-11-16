@@ -52,6 +52,7 @@ test('unrelated room traffic and read time preserve version; objective changes i
 test('fresh charter, permissions, handoff and result observations invalidate their own sections', async t => {
   const f = fixture(t), context = f.read(), first = await createWorkBrief(context);
   const mutations = {
+    prerequisites: c => { c.dependencies = [{ id: 'base', state: 'blocked', satisfied: false }]; },
     instructions: c => { c.context.charter = { revision: 2, charter: { purpose: 'New purpose' } }; },
     authority: c => { c.viewer.permissions = []; c.viewer.revision++; },
     progress: c => { c.work.handoff = { open: true, eventId: 'h', nextAction: 'Inspect unknown outcome' }; },
@@ -63,6 +64,20 @@ test('fresh charter, permissions, handoff and result observations invalidate the
     assert.deepEqual(diff.changedSections, [section]);
     assert.equal(diff.requiresFreshRead, true);
     assert.equal(diff.authorityGranted, false);
+  }
+});
+
+test('dependency observations invalidate only prerequisites and ignore list ordering', async t => {
+  const f = fixture(t), context = f.read();
+  context.dependencies = [{ id: 'base', state: 'done', satisfied: true }, { id: 'other', state: 'done', satisfied: true }];
+  const first = await createWorkBrief(context);
+  const reordered = structuredClone(context); reordered.dependencies.reverse();
+  assert.equal((await createWorkBrief(reordered)).version, first.version);
+  for (const dependencies of [[], [{ id: 'base', state: 'blocked', satisfied: false }, context.dependencies[1]],
+    [{ id: 'base', state: 'missing', satisfied: false }, context.dependencies[1]]]) {
+    const changed = await createWorkBrief({ ...context, dependencies });
+    assert.deepEqual(compareWorkBriefs(first, changed).changedSections, ['prerequisites']);
+    assert.equal(changed.observed.workRevision, first.observed.workRevision);
   }
 });
 
