@@ -15,9 +15,9 @@ import { setTier } from '../server/autonomy-tiers.mjs';
 const SENTINEL = /PRIVATE-[A-Z]+-SENTINEL|acme\/private-repo|secret-branch|private-path/g;
 const found = text => [...new Set(text.match(SENTINEL) ?? [])];
 
-async function fixture(t) {
+async function fixture(t, representation) {
   const store = new RoomStore(':memory:');
-  store.initialize(initialRoom());
+  store.initialize(initialRoom(), representation === 'legacy' ? {} : {representation});
   const owner = store.issueAccessKey('commons', 'owner');
   const member = (name, permissions) => { const identity = store.identities.create(name);
     linkWithProof(store, owner, 'commons', identity, { displayName: name, permissions });
@@ -59,11 +59,11 @@ async function fixture(t) {
   return { store, producer, reviewer, observer, triage, read, item };
 }
 
-for (const view of ['orientation', 'work']) {
-test(`legacy ${view} view: private work is a minimal record for members outside it, and intact for its parties and named roles`, async t => {
-  const f = await fixture(t);
-  assert.equal(f.store.privateWorkParties('commons').get('secret')?.has(f.observer.identityId), false, 'fixture: the observer is not a party');
-  assert.equal(f.store.privateWorkParties('commons').get('secret')?.has(f.reviewer.identityId), false, 'fixture: the reviewer is a named role, not a party');
+for (const representation of ['legacy', 'normalized-current-v1']) for (const view of ['orientation', 'work']) {
+test(`${representation} ${view} view: private work is a minimal record for members outside it, and intact for its parties and named roles`, async t => {
+  const f = await fixture(t, representation);
+  assert.equal(f.store.privateWorkParties('commons', {workIds:['secret']}).get('secret')?.has(f.observer.identityId), false, 'fixture: the observer is not a party');
+  assert.equal(f.store.privateWorkParties('commons', {workIds:['secret']}).get('secret')?.has(f.reviewer.identityId), false, 'fixture: the reviewer is a named role, not a party');
   const stored = JSON.stringify([f.item('secret'), f.item('open')]);
 
   // Outside the private work: the whole serialized response carries none of its text, however broad the member's permissions,
@@ -78,7 +78,9 @@ test(`legacy ${view} view: private work is a minimal record for members outside 
     assert.deepEqual(Object.keys(record.receipt).sort(), ['eventId', 'evidenceVersion', 'producerAttribution', 'producerId', 'reportedById']);
     assert.equal(Object.hasOwn(record.verification, 'summary'), false); assert.equal(record.verification.result, 'fail');
     // The closed handoff is retained on the record. Its text is gone; so is any retained history list a later revision adds.
-    assert.equal(record.handoff.open, false); assert.equal(Object.hasOwn(record.handoff, 'doneSummary'), false); assert.equal(record.handoff.triageMemberId, f.triage.identityId);
+    if (representation === 'legacy') {
+      assert.equal(record.handoff.open, false); assert.equal(Object.hasOwn(record.handoff, 'doneSummary'), false); assert.equal(record.handoff.triageMemberId, f.triage.identityId);
+    } else assert.equal(record.handoff, null);
     if (view === 'orientation') assert.deepEqual(record.handoffHistory ?? [], []);
     // Public work is unchanged for the same member.
     const open = JSON.parse(text).state.workItems.open;
