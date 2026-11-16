@@ -39,30 +39,65 @@ function openWorkReplies(state, workItemId, viewerId, floor) {
 const pick = (value, fields) => value == null ? null
   : Object.fromEntries(fields.split(" ").filter(key => Object.hasOwn(value, key)).map(key => [key, structuredClone(value[key])]));
 
-// Shared current record; no prior receipts/checks, conversation text or event log.
 // The record a member outside private work receives where a collection read
-// lists every item: a minimal redacted copy, never the stored object. It keeps
-// what a listing needs to stay truthful (identity, state, the members the task
-// names, and the opaque identifiers the shared next-step derivation compares)
-// and drops everything a participant wrote or reserved: title, definition,
-// source pointer, labels, claim scope, result summary and checks, evidence
-// links and text, review and decision prose, blocker text, the open handoff's
-// text and every retained handoff. The caller decides who is outside, with the
-// existing rule (private request parties plus workRoleHolder); this grants
-// nothing and stores nothing.
+// lists every item: a minimal copy, never the stored object. It is built from
+// an allowlist, so a field added to work items later is withheld until someone
+// decides it is safe. Kept: identity, state, the members the task names, and
+// what the shared next-step derivation needs. Dropped: everything a
+// participant wrote or reserved (title, definition, source pointer, labels,
+// claim scope, result text and checks, evidence links, review and decision
+// prose, blocker text, handoff text, and every retained history entry).
+// Receipts, checks, decisions and blockers are null: their evidence versions
+// may be arbitrary private strings, and partial records fail SDK validation.
+// The caller decides who is outside, with the existing rule (private request parties plus
+// workRoleHolder); this grants nothing and stores nothing.
+const WITHHELD_ITEM_KEYS = "id revision state mode proposedById accountableMemberId verifierMemberId humanDecisionMakerId externalWriteGrantBy externalWriteGrantFor independentVerificationRequired ownerDecisionRequired supersededBy dependsOn createdAt updatedAt round_count tool_calls suspended_by";
+const WITHHELD_HISTORY_KEYS = ["receiptHistory", "verificationHistory", "decisionHistory", "handoffHistory"];
 export function withheldWorkItem(item) {
   const keep = (value, keys) => value == null ? value : pick(value, keys);
-  const { helpWanted: _helpScope, ...rest } = item; // a help invitation's scope text is participant-written
-  return { ...rest, title: null, definitionOfDone: null, sourceMessageId: null, labels: [],
-    ...(Object.hasOwn(item, "claim") ? { claim: keep(item.claim, "holderId status acquiredAt expiresAt releasedAt") } : {}),
+  const part = (key, keys) => Object.hasOwn(item, key) ? { [key]: keep(item[key], keys) } : {};
+  return { ...pick(item, WITHHELD_ITEM_KEYS), title: null, definitionOfDone: null,
+    ...(Object.hasOwn(item, "sourceMessageId") ? { sourceMessageId: null } : {}), ...(Object.hasOwn(item, "labels") ? { labels: [] } : {}),
+    ...part("claim", "holderId status acquiredAt expiresAt releasedAt"),
     ...(Object.hasOwn(item, "receipt") ? { receipt: null } : {}),
-    ...(Object.hasOwn(item, "receiptHistory") ? { receiptHistory: [] } : {}),
-    ...(Object.hasOwn(item, "verification") ? { verification: keep(item.verification, "verifierId result completionEventId evidenceVersion independenceConfirmed eventId") } : {}),
-    ...(Object.hasOwn(item, "decision") ? { decision: keep(item.decision, "actorId decision completionEventId evidenceVersion eventId") } : {}),
+    ...(Object.hasOwn(item, "verification") ? { verification: null } : {}),
+    ...(Object.hasOwn(item, "decision") ? { decision: null } : {}),
     ...(Object.hasOwn(item, "blocker") ? { blocker: null } : {}),
-    ...(Object.hasOwn(item, "handoff") ? { handoff: keep(item.handoff, "open eventId at actorId triageMemberId haltAll") } : {}),
-    ...(Object.hasOwn(item, "handoffHistory") ? { handoffHistory: [] } : {}) };
+    ...part("handoff", "open eventId at actorId triageMemberId haltAll"),
+    ...Object.fromEntries(WITHHELD_HISTORY_KEYS.filter(key => Object.hasOwn(item, key)).map(key => [key, []])) };
 }
+
+// The same boundary for one event about private work, for a viewer outside
+// it. The event stays in its place (id, type, actor, time, sequence), so
+// cursors and counts are unchanged; its payload keeps only identifiers and
+// enumerated values. Messages are a separate contract: a message posted to
+// the room is public, and a direct message is filtered before this point.
+const WITHHELD_EVENT_KEYS = "workItemId expectedRevision accountableMemberId verifierMemberId humanDecisionMakerId mode independentVerificationRequired ownerDecisionRequired result decision completionEventId previousCompletionEventId producerId toMemberId expiresAt haltAll evidenceKind evidenceMessageId evidenceMessageEventId dependsOn workClaim action claimState ownerId leaseExpiresAt";
+export const privateWorkEvent = event => typeof event?.type === "string" && !event.type.startsWith("message.")
+  && typeof (event.data?.workItemId ?? (event.type.startsWith("work_claim.") ? event.data?.workClaim : undefined)) === "string";
+export const privateWorkEventId = event => event.data.workItemId ?? event.data.workClaim;
+export function withheldWorkEvent(event) {
+  if (!privateWorkEvent(event)) return event;
+  const data = pick(event.data, WITHHELD_EVENT_KEYS);
+  for (const key of ["title", "definitionOfDone"]) if (Object.hasOwn(event.data, key)) data[key] = null;
+  return { ...event, data: { ...data, withheld: true } };
+}
+// Legacy storage mirrors each work item onto a Board row and reports the
+// mirror in work_claim.* events. Both carry the task's title, paths, notes
+// and review text, so the same boundary applies to them.
+const WITHHELD_BOARD_KEYS = "id state owner claimedAt leaseStartAt leaseExpiresAt deliveryMode reviewPolicy reviewedBy dependsOn parentClaimId updatedAt supersededBy workItemId squadId kind revision deliveryGeneration claimRound";
+const BOARD_MAP_KEYS = new Set(["fileBlocks", "readingAcks", "requestOutcomes"]);
+export function withheldBoardRow(row) {
+  const kept = pick(row, WITHHELD_BOARD_KEYS);
+  for (const [key, value] of Object.entries(row)) {
+    if (Object.hasOwn(kept, key)) continue;
+    kept[key] = Array.isArray(value) ? [] : BOARD_MAP_KEYS.has(key) ? {} : typeof value === "number" || typeof value === "boolean" ? value : null;
+  }
+  return kept;
+}
+// The one statement of who is outside private work: not a party to a private
+// request linked to it and not a member the task names in a role.
+export const outsidePrivateWork = (parties, item, viewerId) => Boolean(parties) && !parties.has(viewerId) && !workRoleHolder(item, viewerId);
 
 export function currentWorkRecord(item) {
   const work = pick(item, "id title definitionOfDone revision state mode sourceMessageId proposedById externalWriteGrantBy externalWriteGrantFor accountableMemberId verifierMemberId humanDecisionMakerId independentVerificationRequired ownerDecisionRequired supersededBy createdAt updatedAt");

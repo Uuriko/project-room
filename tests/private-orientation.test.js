@@ -82,7 +82,7 @@ test(`${representation} ${view} view: private work is a minimal record for membe
     assert.equal(record.state, f.item('secret').state); assert.equal(record.accountableMemberId, f.producer.identityId); assert.equal(record.verifierMemberId, f.reviewer.identityId);
     assert.equal(record.claim.holderId, f.producer.identityId); assert.equal(Object.hasOwn(record.claim, 'repository'), false); assert.equal(Object.hasOwn(record.claim, 'paths'), false);
     assert.equal(record.receipt, null); assert.equal(record.blocker, null);
-    assert.equal(Object.hasOwn(record.verification, 'summary'), false); assert.equal(record.verification.result, 'fail');
+    assert.equal(record.verification, null); assert.equal(record.decision, null);
     // The closed handoff is retained on the record. Its text is gone; so is any retained history list a later revision adds.
     if (representation === 'legacy') {
       assert.equal(record.handoff.open, false); assert.equal(Object.hasOwn(record.handoff, 'doneSummary'), false); assert.equal(record.handoff.triageMemberId, f.triage.identityId);

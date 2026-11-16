@@ -10,7 +10,7 @@
 // work scan reached every item.
 import { nextWorkStep, terminalWork } from "../src/workflow.js";
 import { ownMember } from "../src/events.js";
-import { workRoleHolder } from "./work-context.mjs";
+import { withheldWorkItem, outsidePrivateWork } from "./work-context.mjs";
 import { isCurrentRoom } from "./current-room-repository.mjs";
 import { readWorkItem } from "./work-repository.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
@@ -177,7 +177,7 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
       const parties = store.privateWorkParties(roomId);
       items = Object.entries(room.state.workItems ?? {}).map(([id, item]) => {
         const held = parties.get(id);
-        return !held || held.has(viewerId) || workRoleHolder(item, viewerId) ? item : { ...item, title: null, definitionOfDone: null };
+        return outsidePrivateWork(held, item, viewerId) ? withheldWorkItem(item) : item;
       });
     }
     // Prerequisite observations for not-yet-started work, by the same rule the

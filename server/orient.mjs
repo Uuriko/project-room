@@ -25,7 +25,7 @@ import { ServiceError } from "./store.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 import { availableClaimsFromBoard, memoizeBoardList } from "./available-work.mjs";
 import { contextVersion } from "./room-context.mjs";
-import { workRoleHolder } from "./work-context.mjs";
+import { withheldBoardRow } from "./work-context.mjs";
 
 // Context embeds current Board orientation as well as formal work. Decide
 // conditional freshness only after composing both under the same read view.
@@ -64,16 +64,7 @@ export function readComposedRoomContext(store, token, roomId, { sinceVersion = n
 }
 
 function withPrivateDefinitionsWithheld(store, roomSlug, state, viewerId) {
-  const privatePartiesByWork = typeof store.privateWorkParties === "function" ? store.privateWorkParties(roomSlug) : null;
-  if (!privatePartiesByWork?.size || !state.workItems) return state;
-  let changed = false;
-  const workItems = Object.fromEntries(Object.entries(state.workItems).map(([id, item]) => {
-    const parties = privatePartiesByWork.get(id);
-    if (!item || !parties || parties.has(viewerId) || workRoleHolder(item, viewerId)) return [id, item];
-    changed = true;
-    return [id, { ...item, title: null, definitionOfDone: null }];
-  }));
-  return changed ? { ...state, workItems } : state;
+  return typeof store.privateWorkStateForViewer === "function" ? store.privateWorkStateForViewer(roomSlug, state, viewerId) : state;
 }
 
 // Work states that count as open; completed and superseded work is history,
@@ -229,9 +220,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   const boardList = withheldIds.size === 0 ? sharedBoardList : slug => {
     const rows = sharedBoardList(slug);
     if (slug !== roomSlug || !Array.isArray(rows)) return rows;
-    return rows.map(row => (row && withheldIds.has(row.workItemId)
-      ? { ...row, title: null, ...(row.definitionOfDone !== undefined ? { definitionOfDone: null } : {}) }
-      : row));
+    return rows.map(row => (row && withheldIds.has(row.workItemId) ? withheldBoardRow(row) : row));
   };
   // Internal version checks need only the structural fields. Defer transient
   // attention, fleet and action reads until a full response is actually sent.

@@ -13,7 +13,7 @@ import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { readAgentOrientation } from "./agent-orientation.mjs";
-import { workRoleHolder } from "./work-context.mjs";
+import { withheldWorkItem, withheldWorkEvent, privateWorkEvent, privateWorkEventId, outsidePrivateWork } from "./work-context.mjs";
 
 export const SNAPSHOT_WINDOW_MESSAGES = 100;
 export const SNAPSHOT_WINDOW_BYTES = 30 * 1024;
@@ -205,11 +205,10 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
     privatePartiesByWork.get(request.workItemId).add(request.requesterId).add(request.recipientId);
   }
   const workItemsForViewer = (itemId, item) => {
-    const parties = privatePartiesByWork.get(itemId);
-    return parties && !parties.has(snapshot.viewerId) && !workRoleHolder(item, snapshot.viewerId);
+    return outsidePrivateWork(privatePartiesByWork.get(itemId), item, snapshot.viewerId);
   };
   const workItems = snapshot.state.workItems ? Object.fromEntries(Object.entries(snapshot.state.workItems).map(([id, item]) =>
-    workItemsForViewer(id, item) ? [id, { ...item, title: null, definitionOfDone: null }] : [id, item])) : snapshot.state.workItems;
+    workItemsForViewer(id, item) ? [id, withheldWorkItem(item)] : [id, item])) : snapshot.state.workItems;
   const replyRequests = Object.fromEntries(Object.entries(snapshot.state.replyRequests ?? {}).filter(([, request]) =>
     [request.requesterId, request.recipientId].includes(snapshot.viewerId)
     && messageInHistory({ id: request.id, createdAt: request.createdAt }, historyFloor)));
@@ -219,12 +218,9 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
     messages: shown,
     ...(snapshot.state.replyRequests === undefined ? {} : { replyRequests }),
     eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible).map(event => {
-      const workItemId = event?.data?.workItemId;
-      if (typeof workItemId !== "string" || !workItemsForViewer(workItemId, snapshot.state.workItems?.[workItemId])) return event;
-      if (!Object.hasOwn(event.data, "title") && !Object.hasOwn(event.data, "definitionOfDone")) return event;
-      return { ...event, data: { ...event.data,
-        ...(Object.hasOwn(event.data, "title") ? { title: null } : {}),
-        ...(Object.hasOwn(event.data, "definitionOfDone") ? { definitionOfDone: null } : {}) } };
+      if (!privateWorkEvent(event)) return event;
+      const workItemId = privateWorkEventId(event);
+      return workItemsForViewer(workItemId, snapshot.state.workItems?.[workItemId]) ? withheldWorkEvent(event) : event;
     }),
     pins: windowed ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId))
   };
