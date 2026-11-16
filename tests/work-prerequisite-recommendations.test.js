@@ -5,7 +5,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { readWorkItem } from '../server/work-repository.mjs';
 import { textVersion } from '../server/text-results.mjs';
-import { buildProjectState } from '../server/project-state.mjs';
+import { buildProjectState, readProjectState, PREREQUISITE_READS } from '../server/project-state.mjs';
 import { workContinuation } from '../client/work-preparation.mjs';
 import { beginSelectedWork, prerequisiteHold } from '../client/begin-work.mjs';
 import { event, PERMISSIONS } from '../src/events.js';
@@ -221,4 +221,57 @@ test('unknown or withheld prerequisite information is never reported as ready', 
   assert.equal(row('free').next, 'start');
   // Pure callers that supply no observations keep the previous document.
   assert.deepEqual(buildProjectState({ ...base, items: [work('free')] }), buildProjectState({ ...base, items: [work('free')], prerequisites: new Map([['free', []]]) }));
+});
+
+test('accept guidance matches what begin does with known, absent and no prerequisite observations', async () => {
+  const context = { roomId: 'commons', viewer: { id: 'producer', active: true }, work: { id: 'task', revision: 0, mode: 'read' },
+    next: { action: 'accept', label: 'Accept the assignment', memberId: 'producer', addressedToViewer: true }, suggestedActions: [{ action: 'accept' }] };
+  const unmet = [{ id: 'base', state: 'delivered', satisfied: false }];
+  const run = async dependencies => {
+    const executed = []; let state = 'proposed', revision = 0;
+    const result = await beginSelectedWork({ connected: true,
+      read: async () => ({ work: { id: 'task', revision, state, mode: 'read', accountableMemberId: 'producer' },
+        viewer: { id: 'producer', active: true, permissions: ['accept_work', 'complete_work'] }, ...(dependencies ? { dependencies } : {}) }),
+      execute: async stage => { executed.push(stage.action);
+        if (stage.action === 'room_accept_work') { state = 'accepted'; revision = 1; return { status: 'recorded', eventId: 'accepted' }; }
+        return { status: 'refused', code: 'work_claim_dependencies_unmet' }; } });
+    return { executed, result };
+  };
+  const known = workContinuation({ ...context, dependencies: unmet });
+  assert.equal(known.tool, 'room_begin_work');
+  assert.match(known.guidance, /^Accepts the assignment only/);
+  assert.deepEqual((await run(unmet)).executed, ['room_accept_work'], 'begin stops after the accept, as the guidance says');
+  const absent = workContinuation(context);
+  assert.equal(absent.tool, 'room_begin_work');
+  assert.equal(absent.waitingOn, 'unknown');
+  assert.doesNotMatch(absent.guidance, /Accepts the assignment only/);
+  assert.match(absent.guidance, /then attempts claim\/start; admission decides/);
+  const attempted = await run(null);
+  assert.deepEqual(attempted.executed, ['room_accept_work', 'room_start_work'], 'with no observation begin defers to admission, as the guidance says');
+  assert.equal(attempted.result.stopped, 'refused');
+  assert.equal(Object.hasOwn(workContinuation({ ...context, dependencies: [] }), 'waitingOn'), false);
+});
+
+test('legacy project state charges every Board lookup, including the claim lookup, to the prerequisite read budget', async t => {
+  const store = new RoomStore(':memory:'); t.after(() => store.close());
+  const identity = store.identities.create('Owen');
+  store.initialize([event({ type: 'room.created', roomId: 'test-room', actorId: identity.identityId, data: { roomId: 'test-room', ownerId: identity.identityId, title: 'Budget', purpose: 'Historical Board' } }),
+    event({ type: 'member.added', roomId: 'test-room', actorId: identity.identityId, data: { memberId: identity.identityId, identityId: identity.identityId, displayName: 'Owen', kind: 'agent', permissions: [...PERMISSIONS] } })]);
+  store.db.prepare('INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('test-room', identity.identityId, identity.identityId, store.now());
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'test-room', token: identity.secret });
+  const bases = ['b1', 'b2', 'b3', 'b4', 'b5'];
+  for (const id of bases) await client.workClaimCreate({ id, reviewPolicy: 'self_attested' });
+  // 20 waiting tasks x (1 claim lookup + 5 prerequisites) = 120 lookups if unbounded.
+  for (let i = 0; i < 20; i += 1) store.command(identity.secret, 'test-room', { id: crypto.randomUUID(), type: 'work.proposed',
+    data: { workItemId: 'task-' + i, title: 'task ' + i, definitionOfDone: 'Done', accountableMemberId: identity.identityId, mode: 'read', dependsOn: bases } });
+  const get = store.workClaims.get.bind(store.workClaims); let lookups = 0;
+  store.workClaims.get = (...args) => { lookups += 1; return get(...args); };
+  const state = readProjectState(store, identity.secret, 'test-room');
+  store.workClaims.get = get;
+  assert.ok(lookups > 0 && lookups <= PREREQUISITE_READS, `${lookups} Board lookups for one read`);
+  const waiting = state.needsYou.map(entry => entry.waitingOn);
+  assert.ok(waiting.length > 0 && waiting.every(value => value === 'unknown' || Array.isArray(value)), 'examined rows name prerequisites; the rest are unknown, never ready');
 });

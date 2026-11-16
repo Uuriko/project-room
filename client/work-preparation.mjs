@@ -102,7 +102,11 @@ export function workContinuation(context, { hosted = false } = {}) {
         : "Prerequisite state was not returned; readiness is unknown. Read this task again before claiming or starting." };
     const begin = point("room_begin_work", {}, work.mode === "write" && ["accept", "claim"].includes(next.action)
       ? ["repository", "ref", "paths", "expiresAt"] : []);
-    return hold ? { ...begin, ...waiting, guidance: "Accepts the assignment only; claim/start waits for its prerequisites. " + value.guidance } : begin;
+    // Begin stops after the accept only when it can see an unfinished
+    // prerequisite. With no observation it goes on to claim/start and admission decides.
+    return !hold ? begin : { ...begin, ...waiting, guidance: (hold.known
+      ? "Accepts the assignment only; claim/start waits for its prerequisites. "
+      : "Prerequisite state was not returned. This accepts the assignment and then attempts claim/start; admission decides and may refuse it. ") + value.guidance };
   }
   if (next.action === "revise" && available.has("resolve")) {
     return point("room_resolve_blocker", { expectedRevision: work.revision }, ["resolution"]);
