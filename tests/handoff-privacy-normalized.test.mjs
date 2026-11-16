@@ -185,6 +185,32 @@ test("viewer-scoped reads do not mutate stored state", async t => {
   assert.equal(stored(), before, "no read path writes or redacts the stored records");
 });
 
+test("fresh reads reflect changed privacy state: becoming a private-request party grants access on the next read, and only then", t => {
+  const f = fixture(t);
+  // Before the change the observer is unrelated and the read is redacted.
+  const before = f.summaryFor("observer");
+  assert.equal(before.title, null);
+  assert.equal(before.handoff, null);
+  f.noPrivateLeak(before, "observer summary before party change");
+  // The owner opens a private reply request to the observer on the same
+  // work; under the existing rule the observer becomes a private-request
+  // party. No read result is cached across the change.
+  f.send(f.keys.owner, "ask-observer", "message.posted", { messageId: "ask-observer",
+    toMemberId: "observer", workItemId: "private-handoff", requestKind: "reply",
+    body: "SECOND-REQUEST-SENTINEL" });
+  // A fresh read reflects the new state immediately: no stale redaction.
+  const after = f.summaryFor("observer");
+  assert.equal(after.title, SENTINELS.title);
+  assert.equal(after.handoff.doneSummary, SENTINELS.doneSummary);
+  assert.equal(after.handoff.evidenceUrl, SENTINELS.evidenceUrl);
+  // The change is scoped to the new party: the triage addressee, still
+  // neither a party nor a role holder, stays redacted on a fresh read.
+  const successor = f.summaryFor("successor");
+  assert.equal(successor.title, null);
+  assert.equal(successor.handoff, null);
+  f.noPrivateLeak(successor, "successor summary after party change");
+});
+
 test("a later block closes the handoff and the current next action comes from task state, not the old suggestion", async t => {
   const f = fixture(t);
   f.send(f.keys.producer, "block-private", "work.blocked", { workItemId: "private-handoff", expectedRevision: 3,
