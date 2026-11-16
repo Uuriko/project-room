@@ -22,3 +22,17 @@ export function liveClaim(item, nowMs) {
   return claim;
 }
 
+
+// One prerequisite observation rule per storage representation, shared by the
+// selected-work read, project state and the claim/start admission gate, so a
+// recommendation and the gate cannot drift apart. Observations, not authority.
+// Native rooms: an exact saved result whose required gates are complete and
+// which is not superseded. Legacy rooms: the Board card owns the dependency.
+export function nativePrerequisiteState(dep, now) {
+  const state = dep ? boardStateForWorkItem(dep, now) : "missing";
+  return { state, satisfied: Boolean(dep?.receipt?.eventId && dep.receipt.evidenceVersion && !dep.supersededBy && state === "done") };
+}
+export function boardPrerequisiteState(dep) {
+  return { state: dep?.state ?? "missing", satisfied: Boolean(dep && dep.state === "done" && !dep.premiseFlag && !dep.supersededBy) };
+}
+export const observePrerequisites = (ids, read, stateOf) => ids.map(id => ({ id, ...stateOf(read(id)) }));

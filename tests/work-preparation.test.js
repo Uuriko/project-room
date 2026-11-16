@@ -8,7 +8,7 @@ test('continuation keeps write scope explicit and respects the viewer and availa
   const context = { roomId: 'commons', viewer: { id: 'producer', active: true },
     work: { id: 'task', revision: 7, mode: 'write' },
     next: { action: 'claim', label: 'Reserve scope', memberId: 'producer', addressedToViewer: true },
-    suggestedActions: [{ action: 'claim' }] };
+    suggestedActions: [{ action: 'claim' }], dependencies: [] };
   const before = structuredClone(context);
   const local = workContinuation(context);
   assert.equal(local.tool, 'room_begin_work');

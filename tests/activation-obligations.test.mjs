@@ -107,3 +107,33 @@ test('max-length obligation identifiers retain exact selected read and context-o
   const b=f.brief();assert.equal(b.yourWork[0].id,id);assert.equal(b.yourWork[0].nextRead.arguments.workItemId,id);
   assert.equal(b.purposeSource.authority,'context_only');assert.equal(b.purpose,'Context, not a grant');assert.ok(Buffer.byteLength(JSON.stringify(b))<=BRIEF_BYTES);
 });
+
+for (const current of [true, false]) test(`formal incoming requests precede pickup and survive ordinary reply and disappear after cancellation (${current?'native':'legacy'})`, t => {
+  const f=fixture(t,current);f.propose('unrelated',{accountableMemberId:'owner'});
+  f.send('message.posted',{messageId:'request',toMemberId:'worker',requestKind:'reply',body:'SECRET REQUEST BODY'});
+  f.forbidHydration();const b=f.brief();
+  assert.equal(b.yourWork[0]?.reason,'reply_requested');assert.equal(b.yourWork[0].nextRead.tool,'room_read_request');
+  assert.match(b.next.endpoint,/reply-context\?requestMessageId=request$/);assert.doesNotMatch(JSON.stringify(b),/SECRET REQUEST BODY/);
+  assert.ok(!f.brief('reader').yourWork.some(x=>x.id==='request'));
+  f.send('message.posted',{messageId:'reply',replyToId:'request',body:'Answer'},'worker');
+  assert.ok(f.brief().yourWork.some(x=>x.id==='request'));
+  f.send('reply_request.cancelled',{requestMessageId:'request',expectedRequestRevision:0,reason:'Resolved'});
+  assert.ok(!f.brief().yourWork.some(x=>x.id==='request'));
+});
+
+test('request overflow exposes both recovery enumerations and preserves all returned cursors', t => {
+  const f=fixture(t); for(let i=0;i<7;i++)f.send('message.posted',{messageId:`req-${i}`,toMemberId:'worker',requestKind:'reply',body:'Private'});
+  f.propose('ongoing');f.step('work.accepted','ongoing');f.step('work.started','ongoing');f.forbidHydration();
+  const before=f.store.headSequence('commons'),b=f.brief();assert.equal(b.yourWorkCoverage.complete,false);
+  assert.equal(b.yourWorkCoverage.requestRead.arguments.focus,'needs_me');assert.equal(b.yourWorkCoverage.nextRead.arguments.focus,'all');
+  const ids=[];let args=b.yourWorkCoverage.requestRead.arguments,pages=0;
+  do {const page=f.store.currentWorkListing(f.keys.worker,'commons',args);ids.push(...page.replyRequests.map(x=>x.id));args=page.page.nextRead?.arguments;pages++;} while(args);
+  assert.equal(new Set(ids).size,7);assert.ok(pages>1);assert.equal(f.store.headSequence('commons'),before);
+  assert.ok(Buffer.byteLength(JSON.stringify(b))<=BRIEF_BYTES);
+});
+
+test('prerequisite-bearing start is an observation check, not a readiness claim', t=>{
+  const f=fixture(t);f.propose('prereq',{accountableMemberId:'owner'});f.propose('dependent',{dependsOn:['prereq']});
+  f.step('work.accepted','dependent');f.forbidHydration();
+  assert.equal(f.brief().yourWork[0].reason,'check_prerequisites');assert.equal(f.brief().yourWork[0].nextRead.tool,'room_read_work');
+});

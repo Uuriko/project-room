@@ -1,4 +1,4 @@
-import {activationObligations, currentActivationObligations} from './activation-obligations.mjs';
+import {activationObligations, activationRequests, obligationOrder, currentActivationObligations} from './activation-obligations.mjs';
 import {readCurrentPinsWindow} from './current-pins.mjs';
 // Room activation pack (quill lane, RC-2026-09-18-040).
 //
@@ -190,7 +190,8 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
     .map(item => workOf(item, now));
   const floor = summaryHistoryFloor(store, roomSlug, viewerId, sequence); // QA4 Q4-SEC-1
-  const obligations = activationObligations(Object.values(state.workItems ?? {}), ownMember(state.members, viewerId), state.room.ownerId, store.now());
+  const obligations = [...activationObligations(Object.values(state.workItems ?? {}), ownMember(state.members, viewerId), state.room.ownerId, store.now()),
+    ...activationRequests(Object.values(state.replyRequests ?? {}), viewerId, floor)].sort(obligationOrder);
   const pack = withContentTrust({
     room: {
       slug: state.room.id,
@@ -286,9 +287,10 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   const yourWork = own.slice(0, BRIEF_ITEMS).map(item => ({...item, title: clip(item.title, 80)}));
   const coverage = {complete: pack.obligations?.complete === true && own.length <= BRIEF_ITEMS,
     order: 'id', nextRead: {tool: 'room_list_work', arguments: {focus: 'all'}},
-    guidance: 'ID order, not priority. Incomplete: list all work through every page, even empty pages. Reads grant no authority.'};
+    requestRead: {tool: 'room_list_work', arguments: {focus: 'needs_me'}},
+    guidance: 'ID order, not priority. Follow BOTH reads through every page, even empty. Reads grant no authority.'};
   const first = yourWork[0];
-  const next = first ? {why: `read your ${first.reason} work`, method: 'GET', endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(first.id)}`}
+  const next = first ? {why: `read your ${first.reason} work`, method: 'GET', endpoint: first.kind === 'request' ? `${roomPath}/reply-context?requestMessageId=${encodeURIComponent(first.id)}` : `${roomPath}/work-context?workItemId=${encodeURIComponent(first.id)}`}
     : !coverage.complete ? {why: 'Addressed work coverage is incomplete; inspect remaining work before choosing pickup', method: 'GET', endpoint: `${roomPath}/work-list?focus=all`}
     : claims[0] ? {why: 'inspect an available claim before choosing work', method: 'GET', endpoint: `${roomPath}/work-claims/${encodeURIComponent(claims[0].id)}/thread`}
     : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
@@ -308,7 +310,7 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     recentWindowMs: BRIEF_ACTIVE_MS,
     yourWork,
     yourWorkCoverage: coverage,
-    pickUp: [...claims, ...unclaimed].filter(item => !own.some(work => work.id === item.id)),
+    pickUp: [...claims, ...unclaimed].filter(item => !own.some(work => work.kind !== 'request' && work.id === item.id)),
     openWorkTotal: pack.workWindow ? null : pack.openWork.length,
     ...(pack.workWindow ? {workWindow: pack.workWindow, workScope: pack.workScope, omitted: pack.omitted} : {}),
     recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)
