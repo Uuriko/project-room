@@ -14,6 +14,7 @@ import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
+import { ensureAgentDocs } from "./server/agent-docs-boot.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -71,6 +72,21 @@ const growthHttp = paused ? null : createGrowthHttp({
     ? { running: nodeJobs.isRunning(), tickCount: nodeJobs.getGrowthTickCount(), intervalMs: growthIntervalMs }
     : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
 });
+// Self-hosted instances start from a checkout with no build step, so the
+// generated /docs/agents pages (build output, never committed) are absent
+// and would 404 even though /llms.txt names /docs/agents as the connection
+// guide. Generate any missing pages from their committed docs/agents/*.md
+// sources before serving (server/agent-docs-boot.mjs). A failure here —
+// a read-only tree or a partial package — must not stop the boot: warn
+// and let those URLs keep the designed 404 for missing generated pages.
+if (!paused) {
+  try {
+    const generatedAgentDocs = await ensureAgentDocs();
+    if (generatedAgentDocs) console.warn(`[agent-docs] generated ${generatedAgentDocs} missing /docs/agents page(s) from docs/agents/*.md at boot`);
+  } catch (error) {
+    console.warn(`[agent-docs] generation skipped: ${error?.message ?? error}`);
+  }
+}
 const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp, production });
 const server = paused ? createServer((req, res) => {
   try {
