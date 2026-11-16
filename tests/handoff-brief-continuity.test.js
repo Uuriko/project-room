@@ -106,7 +106,7 @@ test("later progress closes the handoff marker; the brief reports current state,
   assert.equal(brief.sections.progress.blocker.nextAction, "Owner supplies adapter credentials");
 });
 
-test("brief text (resume) names the handoff's source, time, addressee and evidence; ownership is unchanged by the handoff", async t => {
+test("structured resume preserves handoff source, time, addressee and evidence; rendered text adds only the timestamp; ownership is unchanged by the handoff", async t => {
   const f = fixture(t);
   assert.equal(f.item().claim, null, "a handoff records no claim and transfers no ownership");
   assert.equal(f.item().accountableMemberId, "producer");
@@ -117,17 +117,24 @@ test("brief text (resume) names the handoff's source, time, addressee and eviden
   assert.equal(progress.handoff.evidenceUrl, "https://example.invalid/partial-parse");
   assert.equal(progress.handoff.evidenceVersion, "partial-v1");
   assert.ok(Number.isFinite(Date.parse(progress.handoff.at)));
+  // The rendered text contract is deliberately narrower than the structured
+  // resume: it adds the handoff timestamp line only. Author, addressee and
+  // the evidence reference stay structured fields and are not rendered.
   const text = resumeMarkdown(progress);
   assert.match(text, /Handoff recorded at: /);
-  // The portable packet stays narrower than this authenticated resume:
-  // its text and progress carry no handoff author, addressee or evidence URL.
+  assert.equal(text.includes("https://example.invalid/partial-parse"), false, "rendered text does not print the evidence reference");
+  // The portable packet keeps the exact pre-widening handoff field set:
+  // no author, addressee, evidence reference, event id or timestamp,
+  // in its structured progress or its rendered text.
   const state = f.store.room("commons").state;
   const packet = workPacket(state, "handoff-demo", { includeProgress: true });
   const packetText = packetMarkdown(packet);
   assert.equal(packetText.includes("https://example.invalid/partial-parse"), false);
   assert.equal(packet.progress.handoff.actorId, undefined);
+  assert.equal(packet.progress.handoff.triageMemberId, undefined);
   assert.equal(packet.progress.handoff.evidenceUrl, undefined);
-  assert.match(packetText, /Handoff recorded at: /);
+  assert.equal(packet.progress.handoff.at, undefined);
+  assert.equal(packetText.includes("Handoff recorded at:"), false);
   // After later progress the same text demotes the handoff to history.
   f.send(f.keys.producer, "block-2", T.WORK_BLOCKED, { workItemId: "handoff-demo", expectedRevision: f.item().revision,
     reason: "Adapter feed credentials missing", nextAction: "Owner supplies adapter credentials" });

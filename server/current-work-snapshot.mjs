@@ -19,7 +19,7 @@ export function readCurrentWorkSnapshot(store,token,roomId,{expectedSessionBindi
     const scalar=store.db.prepare('SELECT length(CAST(body AS BLOB)) AS bytes FROM work_entities WHERE room_id=? AND work_id=?').get(roomId,id);
     if(Object.keys(workItems).length&&b.bytes+(scalar?.bytes??0)+16384>256*1024)break;
     const item=readCurrentWorkItem(store.db,roomId,id),withheld=parties.has(id)&&summary.title===null;
-    workItems[id]=currentWorkRecord(withheld?{...item,title:null,definitionOfDone:null}:item);examinedAfter=id;
+    workItems[id]=currentWorkRecord(withheld?{...item,title:null,definitionOfDone:null,handoff:null}:item);examinedAfter=id;
    }
    const more=Object.keys(workItems).length<Object.keys(overview.state.workItems).length||overview.workWindow.nextAfter!==null;
    const nextCursor=more?codec.encode({...binding,after:examinedAfter}):null;

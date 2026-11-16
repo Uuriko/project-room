@@ -1681,7 +1681,16 @@ export function readCurrentWorkPrivacy(db,roomId,workId,b=contextBudgets.get(db)
 function privateWorkForViewer(db,roomId,workId,item,viewerId,b) {
   const privacy=readCurrentWorkPrivacy(db,roomId,workId,b);
   if(!privacy.requests||Object.hasOwn(privacy.parties,viewerId)||workRoleHolder(item,viewerId))return item;
-  return {...item,title:null,definitionOfDone:null};
+  // The handoff is member-authored content of this private work, in the same
+  // class as its title and definition of done: a viewer who is neither a
+  // private-request party nor a work-role holder receives neither its text
+  // nor its references (evidence URL/version, author, triage addressee).
+  // Being named as the handoff's triage addressee does not by itself
+  // authorize a member; access follows the same party / work-role rule.
+  const result={...item,title:null,definitionOfDone:null};
+  if(Object.hasOwn(item,'handoff'))result.handoff=null;
+  if(Object.hasOwn(item,'handoffHistory'))result.handoffHistory=null;
+  return result;
 }
 export function readCurrentPrivateWorkParties(store,roomId,workIds) {
   if(!Array.isArray(workIds)||workIds.length>8||workIds.some(id=>typeof id!=='string'))refuse('Use bounded addressed work IDs for current private-work context');

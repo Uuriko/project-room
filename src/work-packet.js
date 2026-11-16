@@ -184,7 +184,7 @@ export function workPacket(state, workItemId, { includeSource = false, includePr
     const progress = workProgress(work, Date.parse(exportedAt));
     // Keep external export narrower than the authenticated read.
     progress.supersededBy = progress.supersededBy ? "replacement" : null;
-    if (progress.handoff) progress.handoff = Object.fromEntries(["open", "at", "doneSummary", "nextAction", "limitReason", "haltAll"]
+    if (progress.handoff) progress.handoff = Object.fromEntries(["open", "doneSummary", "nextAction", "limitReason", "haltAll"]
       .filter(key => Object.hasOwn(progress.handoff, key)).map(key => [key, progress.handoff[key]]));
     packet.progress = progress;
   }
