@@ -1,6 +1,7 @@
 import { validId } from "../src/events.js";
 import { workContextMarkdown } from "./room-agent.mjs";
 import { createWorkBrief } from "./work-brief.mjs";
+import { PREREQUISITE_GATED_STEPS, prerequisiteHold } from "./begin-work.mjs";
 
 const readScope = value => JSON.stringify(["roomId", "viewerId", "viewerAccountId", "viewerAuthEpoch", "viewerSessionBinding", "viewerSessionRevision"].map(key => value[key] ?? null));
 const changedReview = () => new WorkReviewRefused("review_changed", "Work, result or membership changed during review preparation. Read this task again; no review packet was returned.");
@@ -92,8 +93,16 @@ export function workContinuation(context, { hosted = false } = {}) {
   if (viewer.active === false || !next.addressedToViewer) return value;
   const available = new Set(context.suggestedActions.map(entry => entry.action));
   if (["accept", "start", "claim"].includes(next.action) && available.has(next.action)) {
-    return point("room_begin_work", {}, work.mode === "write" && ["accept", "claim"].includes(next.action)
+    // Same prerequisite observations the brief prints. Unfinished or unknown
+    // prerequisites withhold an execution hint; admission still rechecks.
+    const hold = prerequisiteHold(context.dependencies);
+    const waiting = hold ? { waitingOn: hold.known ? hold.waitingOn : "unknown", ...(hold.more ? { waitingOnMore: hold.more } : {}) } : {};
+    if (hold && PREREQUISITE_GATED_STEPS.includes(next.action)) return { ...value, ...waiting,
+      guidance: hold.known ? "Prerequisites are not satisfied; do not claim or start yet. Read this task again after they finish. Claim/start admission rechecks them."
+        : "Prerequisite state was not returned; readiness is unknown. Read this task again before claiming or starting." };
+    const begin = point("room_begin_work", {}, work.mode === "write" && ["accept", "claim"].includes(next.action)
       ? ["repository", "ref", "paths", "expiresAt"] : []);
+    return hold ? { ...begin, ...waiting, guidance: "Accepts the assignment only; claim/start waits for its prerequisites. " + value.guidance } : begin;
   }
   if (next.action === "revise" && available.has("resolve")) {
     return point("room_resolve_blocker", { expectedRevision: work.revision }, ["resolution"]);
