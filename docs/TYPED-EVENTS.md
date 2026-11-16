@@ -16,7 +16,7 @@ The brief assumed a missing event table. The code says otherwise:
 | Formal requests | reply requests with `acknowledgedAt`, `acceptedAt`, `workingAt`, `closedAt`; `ACK_WINDOW_MS` 10 s, `STALE_AFTER_MS` 30 min (`server/request-states.mjs`) | the request to ack to answer contract |
 | Wake fabric | `agent_wake_signals` (created_at, delivered_at), `wake_queue`, `agent_wake_counters`/`agent_wake_failures` (`server/wake-metrics.mjs`) | wake sent and acked per signal; counters have no per-event time |
 | Receipts | `PROD DEPLOY`, `PROD ROLLBACK`, `MERGED #n`, `CI #n` posts parsed by `server/project-state.mjs` `parseReceipt` | deploy, smoke, rollback, merge as text |
-| State read | `GET /api/rooms/{id}/state`, MCP `room_project_state` (#6173) | board and prod state, 6 KB cap |
+| State read | `GET /api/rooms/{id}/state`, MCP `room_project_state` (#6173) | board work plus member-reported delivery (receipts are unverified; the Room build is separate), 6 KB cap |
 
 So "every action is an event" is already true for conversation, work, claims and requests.
 The real gaps are narrower, and that decides the plan:
@@ -137,7 +137,7 @@ cards read the same pairing, so a card and the latency read can never disagree.
   that both give the same receipts and delivery reports (member-reported; see tests/project-state-delivery-evidence.test.mjs). The Board's per-card "waiting on you"
   UI is not changed here: the server read it would use is the same latency read.
 - **PR3 (built on PR2b)**: `turn.completed` and an advisory reply guard at wake ack (`server/turn-guard.mjs`),
-  and the ship context (merge -> first good prod smoke) in the latency read.
+  and (first cut, since corrected, see below) a merge-to-deploy context in the latency read.
   - `turn.completed`: a wake ack by an agent over REST or MCP (never the stale-prune cron) appends one row per room:
     signals acked, kinds, `rp` (1 replied, 0 silent, -1 unknown), door.
   - Reply guard: for mention/DM signals, did the agent post in that room since the oldest acked signal was created
@@ -145,8 +145,11 @@ cards read the same pairing, so a card and the latency read can never disagree.
     silence; if the window does not reach back to the signal, the verdict is unknown, never silent. A signal acks once,
     so it is reminded at most once. The latency read shows `wake.turns {completed, silent, unknown}` and the state
     line `silentTurns`, so a silent failure is visible to the requester, not just nagged at the agent.
-  - Ship: `ship {merged, shipped, pending, oldestPendingMin, mergeToProdP50/P90Ms, lastDeploy}` from the typed
-    receipts: a merge ships at the first good PROD DEPLOY posted after it, by message order and without identity checks (reported, not verified); the project-state line no longer carries it (state reports `delivery` instead).
-    This is the PR watch ending at prod smoke, derived rather than polled.
+  - Delivery reports (latency contract 2): the first cut paired each merge post with the next good deploy post and
+    reported `ship {shipped, pending, mergeToProdP50/P90Ms}`. Posting order carries no repository, environment or
+    commit identity, so that was not a delivery measurement and is withheld. The read now carries
+    `reportedDelivery {evidence: member-reported, verified: false, mergeReports, deployReports, lastDeployReport,
+    mergeReportsAfterGoodDeployReport (null = no good deploy post), oldestMergeReportAfterGoodDeployMin}`: counts of
+    posts, nothing paired or timed. Deleted posts are excluded.
   - Not done: an active nudge for requests and DMs that are still waiting past SLA (the latency read lists them; a
     wake on SLA breach needs a policy decision on who gets nagged), and Board card UI.
