@@ -232,6 +232,7 @@ export class ProjectRoom extends DurableObject {
     // records are absent in the Durable Object, so the list was empty here).
     this.jobHealthSnapshot = null;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
+      hostedDiscovery: true,
       deployment,
       accountAgentEnrollmentEnabled: env.ROOM_ACCOUNT_AGENT_ENROLLMENT_ENABLED === '1',
       mcpOAuthClients: env.ROOM_MCP_OAUTH_CLIENTS ? JSON.parse(env.ROOM_MCP_OAUTH_CLIENTS) : [],

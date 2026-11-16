@@ -407,7 +407,7 @@ export const CREDENTIAL_WRITE_REFILL_PER_SECOND = 1;
 // Per-credential write budget for routes that carry no user-authored content.
 export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
-export function createRoomServer({ store, origin, instanceCard, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
+export function createRoomServer({ store, origin, instanceCard, hostedDiscovery = false, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
   assetFallbacks = {}, loadAsset = defaultAssetLoader(assetRoot, assetFallbacks), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
@@ -440,9 +440,14 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
   // Worker entry's card is additionally covered at build time by
   // scripts/sign-agent-card.mjs, which fails closed without the key.
   let renderedAgentPages;
-  const instanceRuntime = loadInstanceCardRuntime({ origin, instanceCard });
-  const discoveryBody = doc => instanceRuntime ? instanceRuntime.body(doc) : instanceDiscoveryBody(doc, origin);
-  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: instanceRuntime?.signatureState ?? instanceCardSignatureState(origin) });
+  // The Worker adapter serves its build-signed hosted artifacts and bundled
+  // pages. Node boot never sets this internal adapter option; it still requires
+  // a matching instance pin/artifact for custom-origin production.
+  if (hostedDiscovery && (instanceCard !== undefined || production && origin !== undefined && origin !== ROOM_ORIGIN))
+    throw new Error("Hosted discovery cannot replace custom-origin production instance signing");
+  const instanceRuntime = hostedDiscovery ? null : loadInstanceCardRuntime({ origin, instanceCard });
+  const discoveryBody = doc => hostedDiscovery ? doc.body : instanceRuntime ? instanceRuntime.body(doc) : instanceDiscoveryBody(doc, origin);
+  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: hostedDiscovery ? instanceCardSignatureState() : instanceRuntime?.signatureState ?? instanceCardSignatureState(origin) });
   for (const warning of bootConfigWarnings) warnBootConfigOnce(warning);
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
@@ -2697,7 +2702,7 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
         const [path, type] = assets.get(url.pathname);
         let data = null;
         try {
-          if (path.startsWith('docs/agents/') && generatedAgentPages.includes(path)) {
+          if (!hostedDiscovery && path.startsWith('docs/agents/') && generatedAgentPages.includes(path)) {
             renderedAgentPages ??= agentPages(undefined, { origin: origin ?? ROOM_ORIGIN });
             data = Buffer.from(renderedAgentPages.get(path));
           } else data = await loadAsset(path);
@@ -2711,7 +2716,7 @@ export function createRoomServer({ store, origin, instanceCard, assetRoot = new 
         }
         if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
-        if((origin===undefined||origin===ROOM_ORIGIN)&&canonical==='/docs/agents/paste'&&url.searchParams.get('room')==='project-room-lobby')data=Buffer.from(renderLobbyAgentPastePage(data.toString('utf8')));
+        if((hostedDiscovery||origin===undefined||origin===ROOM_ORIGIN)&&canonical==='/docs/agents/paste'&&url.searchParams.get('room')==='project-room-lobby')data=Buffer.from(renderLobbyAgentPastePage(data.toString('utf8')));
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
         if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicSearchPageCsp(canonical, expectedOrigin()));
         // JDOT-PUBLIC-CSP-RUM end

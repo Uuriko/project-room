@@ -57,7 +57,7 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   await page.locator('#message-input').fill('Keep this draft while the room changes.');
   const work = page.locator('[data-work-record-id="test-handoff"]');
   await work.locator('.work-details > summary').click();
-  const selection = await work.locator('.definition').evaluate(el => {
+  const selection = await work.locator('.work-details .definition').evaluate(el => {
     window.retainedWork = el.closest('[data-work-record-id]');
     const range = document.createRange(); range.selectNodeContents(el);
     const selected = window.getSelection(); selected.removeAllRanges(); selected.addRange(range);

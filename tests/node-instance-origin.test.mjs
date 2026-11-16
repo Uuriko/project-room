@@ -77,3 +77,11 @@ test('hosted bytes remain exact; production cannot use an unsigned custom-origin
  try{assert.throws(()=>createRoomServer({store,origin:'https://private.example',production:true}),/Refusing to boot/);}finally{store.close();}
  assert.throws(()=>instanceDiscoveryBody(discoveryDoc('/llms.txt'),'https://evil.example/path'),/configured HTTP/);
 });
+
+test('hosted adapter cannot bypass custom-origin Node production signing', () => {
+ const store=new RoomStore(':memory:');
+ try {
+  assert.throws(()=>createRoomServer({store,origin:'https://unsigned.example.test',production:true,hostedDiscovery:true}),/cannot replace custom-origin production instance signing/);
+  assert.throws(()=>createRoomServer({store,hostedDiscovery:true,instanceCard:{}}),/cannot replace custom-origin production instance signing/);
+ } finally {store.close();}
+});
