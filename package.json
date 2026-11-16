@@ -1,13 +1,13 @@
 {
   "name": "project-room",
-  "version": "0.1.0",
-  "private": true,
+  "version": "1.0.0",
   "type": "module",
   "bin": {
     "room": "bin/room.mjs"
   },
   "description": "Executable v0 contract for a shared human and agent project room",
   "scripts": {
+    "prestart": "node scripts/check-node-version.mjs",
     "start": "node server.mjs",
     "pretest": "node scripts/verify-preflight.mjs && node scripts/build-agent-docs.mjs && node scripts/openapi-gen.mjs --write",
     "test": "node --test",

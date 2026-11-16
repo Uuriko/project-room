@@ -7,7 +7,8 @@ path, not a managed installer or a high-availability guarantee.
 
 ## Persistent local room
 
-Install Git and Node **24.19 or newer**, then:
+Install Git and Node **24.19 or newer**, then (`npm start` checks the Node
+version first and stops with the remedy if it is too old):
 
 ```sh
 git clone https://github.com/Uuriko/project-room.git
