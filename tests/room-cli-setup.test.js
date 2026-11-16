@@ -149,7 +149,7 @@ read:
 `);
   const notes = readFileSync(join(project, ".project-room", "CONVENTIONS.md"), "utf8");
   assert.match(notes, /# project-room:begin/);
-  assert.match(notes, /Before you edit, claim the task on the room Board/);
+  assert.match(notes, /Write work requires the current authorized bounded claim/);
   assert.equal(notes.includes(TOKEN), false);
   const generic = await run(["setup", "generic", "--project", project], { env, cwd: project, platform: "linux" });
   assert.equal(generic.code, 0, generic.err);
@@ -405,4 +405,28 @@ test("choose_room directory boundary: valid row kept, malformed envelopes unavai
   assert.deepEqual(nested.directory, { rooms: [{ roomId: "pub", title: null, purpose: null, kind: null, memberCount: null, listedAt: null }], nextCursor: null });
   assert.equal(nested.memberships[0].archivedAt, null);
   assert.equal(chooseRoomLists({ memberships: "nope", directory: null }).memberships, null);
+});
+
+test("Aider setup installs bounded contribution instructions, not an implied live Room connection", async t => {
+  const { home, project, cleanup } = layout(); t.after(cleanup);
+  const env = envFor(home);
+  let requests = 0;
+  const io = { env, cwd: project, fetchImpl: async () => { requests++; throw Error('setup must stay local'); } };
+  const result = await run(['setup', 'aider'], io);
+  assert.equal(result.code, 0, result.err);
+  const path = join(project, '.project-room', 'CONVENTIONS.md');
+  const content = readFileSync(path, 'utf8');
+  assert.match(content, /does not connect Aider to Room/);
+  assert.match(content, /room_check_access/);
+  assert.match(content, /room_read_work/);
+  assert.match(content, /exact repository, ref, paths/);
+  assert.match(content, /review and acceptance/);
+  assert.match(content, /PR link alone/);
+  assert.doesNotMatch(content, /room Board|close the claim/i);
+  assert.ok(!content.includes(TOKEN));
+  const before = freeze(path);
+  const repeated = await run(['setup', 'aider'], io);
+  assert.equal(repeated.code, 0, repeated.err);
+  assert.equal(statSync(path).mtimeMs, before);
+  assert.equal(requests, 0);
 });
