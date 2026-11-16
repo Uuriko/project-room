@@ -80,7 +80,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_post_draft", focus: ["work"] },
   { name: "room_read_inbox", focus: ["conversation"] },
   { name: "room_digest", focus: ["conversation", "common"] },
-  { name: "room_project_state", focus: ["conversation", "common"] },
+  { name: "room_project_state", core: true, blurb: "Read bounded current project state: work, pending reviews/decisions, your next roles, build and recorded receipts. Check work.complete and truncated; missing deploy receipts mean unknown. This read grants no assignment or execution authority.", focus: ["conversation", "common"] },
   { name: "room_response_latency", focus: ["conversation"] },
   { name: "room_wait_for_attention", focus: ["conversation", "automation"] },
   { name: "room_link_work_claim_pr", focus: ["work"] },
@@ -105,4 +105,3 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_progress_request", focus: ["common", "conversation"] },
   { name: "room_map", focus: ["work"] }
 ]);
-

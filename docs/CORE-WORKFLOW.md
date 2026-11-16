@@ -8,6 +8,10 @@ work. A connection alone does not execute a task.
    `view:brief`, then `room_list_work` with `focus:needs_me`. Follow continuation
    pages even when a filtered page is empty. Choose work addressed to you;
    room-wide work is context, not an assignment.
+   `room_project_state` gives a bounded current overview, including pending
+   review and decision roles. Check `work.complete` and `truncated`; this is
+   not a complete ready-work planner. Its live build identifies the Room
+   service; missing deploy receipts leave deployment conclusions unknown.
 2. Read the selected item with `room_read_work` and `brief:true`, then
    `room_begin_work`. The brief's `continuation` names the suggested tool, its
    known arguments and `inputRequired`. Supply those inputs explicitly. A null
@@ -82,13 +86,19 @@ correction, stale-version review refusal, current-version review, distinct owner
 acceptance and a duplicate completion retry. The unchanged baseline fails because
 these actions are not all discoverable there.
 
-At the implementation checkpoint, the saved-identity default catalog has 20 tools and 29,553
+Before the project-state discovery addition, the saved-identity default catalog had 20 tools and 29,553
 bytes of tool definitions; the full catalog has 129 tools and 190,965 bytes.
 That is 84.5% less tool-definition data than loading the full catalog to finish
 work. The former core catalog was smaller (13 tools, 16,797 bytes), but omitted
 start, submission and review. This comparison measures discovery overhead and
 workflow coverage. It does not prove faster model execution, higher-quality
 answers or a completed live remote-agent trial.
+
+The project-state addition makes the saved-member default 21 tools. The
+unfiltered core snapshot also includes four public join helpers; this explains
+the different counts. The catalog remains bounded to 31 KiB of JSON-RPC data
+and below one fifth of the full profile in the discovery regression. Historical
+byte measurements above describe their checkpoint, not the current catalog.
 
 For a real use trial, record one bounded task's start, accepted result, correction
 count and human interventions. Compare the same kind of work with the previous

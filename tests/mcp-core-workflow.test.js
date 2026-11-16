@@ -59,6 +59,18 @@ test('default catalog supports task pickup, correction, exact review and owner a
     return body.result.structuredContent;
   };
   const workItemId = 'core-contribution';
+  const attention = async (identity, expected) => {
+    const state = await call(identity, 'room_project_state');
+    assert.equal(state.work.complete, true);
+    assert.deepEqual(state.needsYou.filter(row => row.id === workItemId).map(row => row.next), expected);
+    return state;
+  };
+  const ownerAttention = async expected => {
+    const response = await fetch(origin + '/api/rooms/commons/state', { headers: { Authorization: 'Bearer ' + owner } });
+    assert.equal(response.status, 200);
+    const state = await response.json();
+    assert.deepEqual(state.needsYou.filter(row => row.id === workItemId).map(row => row.next), expected);
+  };
   const command = (id, type, data) => store.command(owner, 'commons', { id, type, data });
   command('propose-core', 'work.proposed', { workItemId, title: 'Review the contribution brief',
     definitionOfDone: 'One useful next step with a reconnect check', accountableMemberId: producer.identityId,
@@ -107,6 +119,9 @@ test('default catalog supports task pickup, correction, exact review and owner a
     return { input, exact: await call(reviewer, 'room_read_result', { workItemId }) };
   };
   const first = await submit('first-draft', 'Read the shared brief and choose one bounded next step.');
+  await attention(reviewer, ['verify']);
+  await attention(producer, []);
+  await ownerAttention([]);
   const reviewRead = (await call(reviewer, 'room_read_work', { workItemId, brief: true })).continuation;
   assert.equal(reviewRead.tool, 'room_read_work');
   assert.equal(reviewRead.arguments.includeResult, true, 'review hint first fetches exact evidence');
@@ -127,6 +142,8 @@ test('default catalog supports task pickup, correction, exact review and owner a
   await call(reviewer, prepared.continuation.tool, { ...prepared.continuation.arguments,
     result: 'fail', summary: 'Missing the required reconnect check', nextAction: 'Include a reconnect check' });
   assert.equal((await read()).work.state, 'blocked');
+  await attention(producer, ['revise']);
+  await attention(reviewer, []);
   await stop(); store = new RoomStore(database); await start();
   const resumed = await call(producer, 'room_read_work', { workItemId, brief: true });
   assert.match(resumed.brief, /Missing the required reconnect check/);
@@ -138,14 +155,20 @@ test('default catalog supports task pickup, correction, exact review and owner a
   const revised = await submit('revised-draft', 'Reconnect the existing agent, select one bounded task, and verify its exact saved result appears once.');
   await verify(first.exact, 'pass', 'Old evidence cannot approve the revised result');
   assert.equal((await read()).work.verification, null);
+  await attention(reviewer, ['verify']);
   await verify(revised.exact, 'pass', 'Exact revised text includes the reconnect check');
   assert.equal((await read()).next.action, 'decide');
   assert.equal((await read()).work.decision, null, 'review must not impersonate owner acceptance');
+  await attention(reviewer, []);
+  await ownerAttention(['decide']);
   command('owner-rationale', 'message.posted', { messageId: 'owner-rationale', body: 'Accepted the exact revised result.' });
   command('owner-accept', 'owner.decision_recorded', { workItemId, expectedRevision: (await read()).work.revision,
     decision: 'approved', completionEventId: revised.exact.result.receipt.eventId,
     evidenceVersion: revised.exact.result.text.evidenceVersion, reason: 'Accepted the exact revised result.', sourceMessageId: 'owner-rationale' });
   assert.equal((await read()).work.decision.decision, 'approved');
+  await attention(producer, []);
+  await attention(reviewer, []);
+  await ownerAttention([]);
   const before = store.room('commons').sequence;
   assert.equal((await call(producer, 'room_submit_text_result', revised.input)).duplicate, true);
   assert.equal(store.room('commons').sequence, before, 'reconnect retry must not duplicate completion');
