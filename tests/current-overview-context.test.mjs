@@ -18,7 +18,7 @@ test('actual default context and Begin enumerate bounded work summaries with hon
  assert.equal(ids.length,19);assert.equal(new Set(ids).size,19);assert.equal(pages,3);
  const orient=buildOrient(store,'commons','owner');assert.equal(orient.workTotal,null);assert.equal(orient.workWindow.complete,false);
  const pack=buildActivationPack(store,'commons','owner');assert.equal(pack.openWork.length,8);
- const brief=briefActivationPack(pack,[],store.now(),'owner');assert.equal(brief.you.memberId,'owner');assert.ok(brief.pickUp.length>0);assert.equal(brief.openWorkTotal,null);assert.deepEqual(brief.workWindow,pack.workWindow);assert.deepEqual(brief.omitted,pack.omitted);
+ const brief=briefActivationPack(pack,[],store.now(),'owner');assert.equal(brief.you.memberId,'owner');assert.ok(brief.yourWork.length>0);assert.equal(brief.openWorkTotal,null);assert.deepEqual(brief.workWindow,pack.workWindow);assert.deepEqual(brief.omitted,pack.omitted);
  assert.throws(()=>buildOrient(store,'commons','owner',{q:'Useful'}),/indexed query/);
  assert.ok(!sql.some(query=>/SELECT.*(?:payload|record_json|projection).*FROM work_entities/i.test(query)),'overview must never load work bodies');
  assert.ok(!sql.some(query=>/^SELECT projection FROM rooms/i.test(query)),'overview must not load room blob');

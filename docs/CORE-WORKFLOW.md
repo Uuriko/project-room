@@ -39,6 +39,11 @@ same permission and scope checks as their full-catalog counterparts. Advanced
 catalogs remain available for other work. No extra orchestration service is
 required.
 
+An activation brief is a bounded view. If it selects no pickup, its next read
+opens work addressed to you; this is not a claim that the project has no work.
+Follow continuation pages even when a filtered page is empty. The normalized
+brief includes the current charter purpose and its context-only revision source.
+
 A task can name prerequisites with `dependsOn`. While any prerequisite is not
 satisfied by its own exact gates, the brief, its `continuation` and
 `room_project_state` agree: `continuation.tool` is null for claim/start and the
@@ -141,3 +146,11 @@ report and assume every message is eligible as submitted text evidence.
 ### Self-host connection prompt
 
 The same-host `/docs/agents/paste` page provides **Copy prompt** with status feedback. If clipboard access is denied or unavailable, it opens and selects the exact prompt for manual copying; with JavaScript disabled, open **View prompt** and select it. Copying a prompt is not connection approval or task execution. Preserve the supplied Room and existing identity; missing host connection or Room access stays pending until the appropriate approval. Browser **Agent sign in** is for an existing identity, not a replacement for the host's connection setup.
+
+### Activation: continue before pickup
+
+Activation briefs show up to three `yourWork` records in stable ID order before unrelated pickup: current assignments/ongoing work, corrections, exact-result review and authorized decisions. These are read suggestions, not execution grants or global priority scores. `permission_required` directs the named member to read the task without implying they may perform its next action. Normalized Rooms reuse bounded addressed-role indexes, never retired Board mirrors or whole-room hydration.
+
+`yourWorkCoverage.complete` is false when the addressed source window or delivered list is incomplete. Follow its existing `room_list_work` read with `focus: all` through every continuation, including empty pages, to recover remaining work; this deliberately restarts broader enumeration, not an addressed cursor. It includes ongoing work that `needs_me` does not select. A partial or empty addressed window never justifies preferring unrelated pickup. Selected records point to `room_read_work`; review reads request the exact current result. Re-read before acting. Source/charter provenance stays context-only.
+
+Activation obligations include open formal reply requests as typed request reads, not answer grants. Ordinary conversation replies do not close those requests. Bounded discovery is ID-ordered, not a global priority ranking. If coverage is incomplete, follow both `yourWorkCoverage.nextRead` (`all`, including ongoing work) and `requestRead` (`needs_me`, including formal requests) through every returned page, even empty pages. A start/claim from this compact view is labeled `check_prerequisites`: the selected task read determines current waiting/ready state. Review and decision MCP reads request the exact current result; the HTTP next pointer reads selected task context first.

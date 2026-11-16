@@ -252,6 +252,7 @@ optional.push("server/inbox-collab-store.mjs"); // Lane C: collab sub-store (imp
 optional.push("server/inbox-collab-routes.mjs"); // Lane C: collab HTTP routes (imported by server/http.mjs; created by the collab worker, may be absent here)
 optional.push("server/work-list-page.mjs"); // Shared hosted/stdio work pagination
 optional.push("server/content-trust.mjs"); // structured untrusted markers for member-authored text (leaf; imported by store, http surfaces, MCP)
+optional.push("server/activation-obligations.mjs"); // Bounded activation projection; retained from integration 8f981b341.
 optional.push("server/room-activation-pack.mjs"); // quill lane RC-2026-09-18-040: room activation pack (imported by server/http.mjs)
 optional.push("server/orient.mjs"); // jill lane RC-2026-09-28: orient endpoint builder (imported by server/http.mjs; pure, imports ../src/* only)
 optional.push("server/available-work.mjs"); // E1 AvailableWork projection (imported by server/orient.mjs and server/room-activation-pack.mjs; pure read projection, imports ../src/events.js + server/work-claim-routes.mjs)

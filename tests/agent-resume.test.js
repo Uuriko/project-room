@@ -94,18 +94,22 @@ test('partial unavailable attention is explicit and current obligations survive'
 });
 
 test('final changed projection replaces stale obligations', async () => {
+  const prior = await resumeAgent({connection,fetchImpl:transport().fetchImpl});
   const f = transport(url => url.includes('since_version=') ? context({ context_version: 'c'.repeat(64), focusWork: [] }) : undefined);
   const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
   assert.deepEqual(result.obligations, []);
-  assert.equal(result.contextVersion, 'c'.repeat(64));
+  assert.match(result.contextVersion,/^[a-f0-9]{64}$/);
+  assert.notEqual(result.contextVersion, prior.contextVersion);
 });
 
 test('unchanged context keeps fresh cursors and directs reuse rather than inventing an empty queue', async () => {
   const f = transport(url => url.includes('since_version=') ? context({ not_modified: true, contractVersion: undefined, focusWork: undefined, locks: undefined, roster: undefined }) : undefined);
-  const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl, sinceVersion: version });
+  const first = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
+  const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl, sinceVersion: first.contextVersion });
   assert.ok(result.nextReads.some(x => x.action === 'reuse_same_version_local_context'));
   assert.equal(result.observedThroughBySource.context.evaluatedThrough, 10);
-  assert.equal(result.contextVersion, version);
+  assert.equal(result.contextVersion, first.contextVersion);
+  assert.ok(f.calls.filter(c=>c.url.includes('since_version=')).every(c=>new URL(c.url).searchParams.get('since_version')===version),'server conditional read keeps the server version, not the local token');
 });
 
 test('oversized responses and never-settling transport are bounded', async () => {
@@ -504,4 +508,53 @@ test('compact resume retains validated native coverage without claiming global a
   assert.equal(result.observedThroughBySource.attention.hasMore, false);
   assert.deepEqual(result.observedThroughBySource.attention.nativeCoverage, [row(true)]);
   assert.equal(result.observedThroughBySource.attention.nativeCoverage[0].globalAttentionComplete, false);
+});
+
+test('public resume CLI never reuses replies-only context for full work or another origin',async t=>{
+  const store=new RoomStore(':memory:');const rooms=new AgentRooms(store),owner=store.identities.create('Owen'),worker=store.identities.create('Mira');
+  rooms.create(owner.secret,{roomId:'commons',title:'Resume scope',purpose:'Return safely',kind:'personal'});
+  linkWithProof(store,owner.secret,'commons',worker,{displayName:'Mira',permissions:['verify']});
+  store.command(owner.secret,'commons',{id:'scope-work',type:'work.proposed',data:{workItemId:'scope-work',title:'Owned follow-up',definitionOfDone:'Inspect',accountableMemberId:worker.identityId,mode:'read'}});
+  const servers=[createRoomServer({store}),createRoomServer({store})];
+  for(const server of servers)await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  t.after(async()=>{for(const server of servers){server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));}store.close();});
+  const origins=servers.map(s=>'http://127.0.0.1:'+s.address().port);
+  const invoke=async(args,origin=origins[0])=>{let value;await main(args,{env:{ROOM_AGENT_ORIGIN:origin,ROOM_AGENT_ROOM:'commons',ROOM_AGENT_MEMBER:worker.identityId,ROOM_AGENT_TOKEN:worker.secret},write:text=>{value=JSON.parse(text);}});return value;};
+  const before=store.headSequence('commons');
+  const replies=await invoke(['--focus','replies']);assert.equal(replies.connection.status,'credential_accepted');assert.deepEqual(replies.obligations,[]);
+  const full=await invoke(['--since-version',replies.contextVersion]);console.log(JSON.stringify({firstRepliesCalls:replies.metrics.requests,returnFullCalls:full.metrics.requests,returnFullObligations:full.obligations.length}));assert.ok(full.obligations.some(x=>x.id==='scope-work'),'reply-only output is not a full-work cache');
+  assert.ok(!full.nextReads.some(x=>x.action==='reuse_same_version_local_context'));
+  const repeat=await invoke(['--since-version',full.contextVersion]);assert.ok(repeat.nextReads.some(x=>x.action==='reuse_same_version_local_context'));
+  const other=await invoke(['--since-version',full.contextVersion],origins[1]);assert.ok(other.obligations.some(x=>x.id==='scope-work'),'another origin needs its own current context');
+  assert.notEqual(other.contextVersion,full.contextVersion);assert.equal(store.headSequence('commons'),before);
+  assert.ok(!JSON.stringify({replies,full,repeat,other}).includes(worker.secret));
+  console.log(JSON.stringify({resumeScopeCalls:{replies:replies.metrics.requests,full:full.metrics.requests,repeat:repeat.metrics.requests,otherOrigin:other.metrics.requests},outputBytes:{full:Buffer.byteLength(JSON.stringify(full)),repeat:Buffer.byteLength(JSON.stringify(repeat))}}));
+});
+
+test('resume version binds credential and treats old unscoped server hash as fresh context',async()=>{
+  const first=await resumeAgent({connection,fetchImpl:transport().fetchImpl});
+  const rotated=await resumeAgent({connection:{...connection,token:'C'.repeat(43)},fetchImpl:transport().fetchImpl,sinceVersion:first.contextVersion});
+  assert.notEqual(rotated.contextVersion,first.contextVersion);assert.equal(rotated.obligations[0].id,'task');
+  const legacy=await resumeAgent({connection,fetchImpl:transport().fetchImpl,sinceVersion:version});
+  assert.equal(legacy.obligations[0].id,'task');assert.ok(!legacy.nextReads.some(x=>x.action==='reuse_same_version_local_context'));
+});
+
+test('missing service origin cannot reuse a context token or send credentials',async()=>{
+  let calls=0;await assert.rejects(resumeAgent({connection:{...connection,origin:undefined},sinceVersion:version,fetchImpl:()=>{calls++;}}));assert.equal(calls,0);
+});
+
+import {initialRoom} from '../server/bootstrap.mjs';
+import {event} from '../src/events.js';
+test('normalized HTTP resume also refreshes full work after replies-only output',async t=>{
+  const store=new RoomStore(':memory:'),worker=store.identities.create('Mira');
+  const events=initialRoom();events.push(event({roomId:'commons',actorId:'owner',type:'member.added',data:{memberId:'reader',displayName:'Mira',kind:'agent',permissions:['verify'],identityId:worker.identityId}}));
+  events.push(event({roomId:'commons',actorId:'owner',type:'work.proposed',data:{workItemId:'task',title:'Inspect',definitionOfDone:'Read',accountableMemberId:'reader',mode:'read'}}));
+  store.initialize(events,{representation:'normalized-current-v1'});
+  store.db.prepare('INSERT OR IGNORE INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('commons',worker.identityId,'reader',new Date().toISOString());
+  const server=createRoomServer({store});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));store.close();});
+  const config={origin:'http://127.0.0.1:'+server.address().port,roomId:'commons',memberId:'reader',token:worker.secret};
+  const replies=await resumeAgent({connection:config,focus:'replies'});
+  const full=await resumeAgent({connection:config,sinceVersion:replies.contextVersion});
+  assert.equal(full.connection.status,'credential_accepted');assert.ok(full.obligations.some(w=>w.id==='task'));assert.notEqual(full.contextVersion,replies.contextVersion);
 });

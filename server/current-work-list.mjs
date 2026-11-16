@@ -47,7 +47,7 @@ export function stalledAssignmentStep(item,now,viewerId,thresholdMs=STALLED_ASSI
     memberId:viewerId,role:'proposer',needsAttention:true,workItemId:item.id,workRevision:item.revision,
     completionEventId:null,evidenceVersion:null,assigneeId:item.accountableMemberId,stalledForMs:age};
 }
-function addressedWorkWindow(store,roomId,memberId,ownerId,after,limit,b) {
+export function addressedWorkWindow(store,roomId,memberId,ownerId,after,limit,b) {
   const candidates=new Set(); let examinedKeys=0;
   for (const [role,path] of INBOX_WORK_ROLES) {
     const rows=store.db.prepare(`SELECT record_key FROM current_room_records INDEXED BY current_inbox_work_${role}
@@ -78,7 +78,7 @@ function addressedWorkWindow(store,roomId,memberId,ownerId,after,limit,b) {
   const selected=keys.slice(0,limit),items=selected.map(id=>readCurrentWorkSummaryForViewer(store.db,roomId,id,memberId,b));
   return {items,hasMore:keys.length>selected.length,after:selected.at(-1)??after,examinedKeys};
 }
-function addressedRequestWindow(store,roomId,memberId,after,limit,b) {
+export function addressedRequestWindow(store,roomId,memberId,after,limit,b) {
   const rows=store.db.prepare(`SELECT record_key FROM current_room_records INDEXED BY current_inbox_open_requests
     WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.status')='open'
       AND json_extract(payload,'$.recipientId')=? AND record_key>? ORDER BY record_key LIMIT ?`)
