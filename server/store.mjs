@@ -6563,8 +6563,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const [workItems, replyRequests, helpOffers, messagesArchive] = includeOffers ? fields.slice(2)
         : [selected ? { [workItemId]: selected } : {}, fields[2], null, fields[3]];
       const state = includeOffers ? hydrateWorkItems(this.db, roomId, { room: metadata, members, workItems,
-        ...(replyRequests ? { replyRequests } : {}), ...(helpOffers ? { helpOffers } : {}) })
-        : { room: metadata, members, workItems, ...(replyRequests ? { replyRequests } : {}) };
+        replyRequests: replyRequests ?? {}, ...(helpOffers ? { helpOffers } : {}) })
+        : { room: metadata, members, workItems, replyRequests: replyRequests ?? {} };
       const room = { sequence: row.sequence, state }, now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, sourceObservation, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },

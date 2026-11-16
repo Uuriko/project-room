@@ -8,7 +8,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { linkWithProof } from './helpers/link-with-proof.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
-import { previousResultRecord } from '../server/work-context.mjs';
+import { previousResultRecord, viewerMayReadPrivateHistory } from '../server/work-context.mjs';
 
 // Agent A corrects a result; Agent B arrives to review or decide. Everything
 // below is read through the same MCP tools and default catalog an agent uses.
@@ -20,8 +20,9 @@ for (const representation of ['legacy', 'normalized-current-v1']) {
     const owner = store.issueAccessKey('commons', 'owner');
     const producer = store.identities.create('Producer');
     const reviewer = store.identities.create('Reviewer');
-    for (const [identity, permissions] of [[producer, ['accept_work', 'complete_work']], [reviewer, ['verify']]]) {
-      linkWithProof(store, owner, 'commons', identity, { displayName: identity === producer ? 'Producer' : 'Reviewer', permissions });
+    const observer = store.identities.create('Observer');
+    for (const [identity, permissions, displayName] of [[producer, ['accept_work', 'complete_work'], 'Producer'], [reviewer, ['verify'], 'Reviewer'], [observer, [], 'Observer']]) {
+      linkWithProof(store, owner, 'commons', identity, { displayName, permissions });
       setTier(store.db, 'commons', identity.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
     }
     const server = createRoomServer({ store });
@@ -59,7 +60,15 @@ for (const representation of ['legacy', 'normalized-current-v1']) {
     const verify = (exact, result, summary) => call(reviewer, 'room_record_verification', { workItemId, result, summary,
       completionEventId: exact.result.receipt.eventId, evidenceVersion: exact.result.text.evidenceVersion, nextAction: 'Address the finding' });
     const revision = async () => (await call(producer, 'room_read_work', { workItemId })).work.revision;
-    return { store, producer, reviewer, call, command, workItemId, submit, verify, revision };
+    // A read that may be refused outright (a stricter selected-read guard may do so): returns what the caller would see either way.
+    const attempt = async (identity, name, args = {}) => {
+      const response = await fetch(origin + '/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + credentialOf(identity) },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: { roomId: 'commons', ...args } } }) });
+      const body = await response.json();
+      const refused = Boolean(body.error || body.result?.isError);
+      return { refused, value: refused ? null : body.result.structuredContent, serialized: JSON.stringify(body) };
+    };
+    return { store, producer, reviewer, observer, call, attempt, command, workItemId, submit, verify, revision };
   }
 
   test(`${representation}: a reviewer of a corrected result is told what the earlier review found and that it does not apply`, async t => {
@@ -137,6 +146,77 @@ for (const representation of ['legacy', 'normalized-current-v1']) {
     assert.equal(chained.previousResult.decision, null, 'no decision was recorded for the second result');
     assert.notEqual(third.result.receipt.eventId, second.result.receipt.eventId);
   });
+
+  // The earlier review sits behind the same boundary as the rest of the selected read:
+  // a task with a private tracked request is open only to that request's parties and
+  // the members the task names. The sentinels are unique strings no other field holds.
+  const REVIEW_SENTINEL = 'sentinel-earlier-review-finding-7c1';
+  const correctedWork = async (f, { privateRequest }) => {
+    const first = await f.submit('first', 'First draft sentinel-first-body-3e9.');
+    // An observer's brief retained while only the first result existed.
+    const retained = (await f.attempt(f.observer, 'room_read_work', { workItemId: f.workItemId, brief: true })).value;
+    await f.verify(first, 'fail', REVIEW_SENTINEL);
+    const blocked = await f.call(f.producer, 'room_read_work', { workItemId: f.workItemId, brief: true });
+    await f.call(f.producer, 'room_resolve_blocker', { workItemId: f.workItemId, expectedRevision: blocked.revision, resolution: 'Added the check' });
+    await f.call(f.producer, 'room_begin_work', { workItemId: f.workItemId });
+    const second = await f.submit('second', 'Second draft with the check.');
+    if (privateRequest) f.command('private-question', 'message.posted', { messageId: 'private-question', toMemberId: f.producer.identityId,
+      workItemId: f.workItemId, requestKind: 'reply', body: 'Private task discussion' });
+    return { first, second, retained };
+  };
+  const leaks = (f, first, serialized) => [REVIEW_SENTINEL, first.result.text.evidenceVersion, 'sentinel-first-body-3e9']
+    .filter(value => serialized.includes(value));
+
+  test(`${representation}: an unrelated viewer of private work gets no predecessor review text, ids or reviewer identity in any read shape`, async t => {
+    const f = await fixture(t);
+    const { first, retained } = await correctedWork(f, { privateRequest: true });
+    const shapes = [{}, { brief: true }, { brief: true, includeResult: true }, ...(retained ? [{ brief: true, knownBriefVersion: retained.briefVersion }] : [])];
+    for (const shape of shapes) {
+      const read = await f.attempt(f.observer, 'room_read_work', { workItemId: f.workItemId, ...shape });
+      assert.deepEqual(leaks(f, first, read.serialized), [], 'no predecessor content in ' + JSON.stringify(shape));
+      assert.equal(read.serialized.includes(f.reviewer.identityId) && /"verifierId"/.test(read.serialized), false, 'no reviewer identity through a history field');
+      if (read.value) {
+        assert.ok(!read.value.previousResult, 'previousResult withheld');
+        assert.ok(!read.value.review?.previous, 'review.previous withheld');
+      }
+    }
+    // The stored history is intact: the authorized reviewer still gets it.
+    const reviewer = await f.call(f.reviewer, 'room_read_work', { workItemId: f.workItemId, brief: true, includeResult: true });
+    assert.equal(reviewer.review.previous.review.summary, REVIEW_SENTINEL);
+  });
+
+  test(`${representation}: authorized parties and role holders keep the predecessor context of private work`, async t => {
+    const f = await fixture(t);
+    const { first } = await correctedWork(f, { privateRequest: true });
+    for (const [who, label] of [[f.reviewer, 'named reviewer (role, not a party)'], [f.producer, 'producer (request recipient and role)']]) {
+      const full = await f.call(who, 'room_read_work', { workItemId: f.workItemId });
+      assert.equal(full.previousResult.completionEventId, first.result.receipt.eventId, label);
+      assert.equal(full.previousResult.review.summary, REVIEW_SENTINEL, label);
+      assert.equal(full.previousResult.appliesToCurrentResult, false);
+      assert.equal(full.work.verification, null);
+    }
+    const reviewRead = await f.call(f.reviewer, 'room_read_work', { workItemId: f.workItemId, brief: true, includeResult: true });
+    assert.equal(reviewRead.review.previous.review.verifierId, f.reviewer.identityId);
+    assert.match(reviewRead.brief, new RegExp(REVIEW_SENTINEL));
+    assert.equal(reviewRead.continuation.tool, 'room_record_verification');
+  });
+
+  test(`${representation}: public work still gives every member the predecessor context, and a retained brief refreshes after a correction`, async t => {
+    const f = await fixture(t);
+    const { first, second, retained } = await correctedWork(f, { privateRequest: false });
+    const observer = await f.call(f.observer, 'room_read_work', { workItemId: f.workItemId });
+    assert.equal(observer.previousResult.review.summary, REVIEW_SENTINEL, 'hiding history from everyone would fail here');
+    assert.equal(observer.previousResult.completionEventId, first.result.receipt.eventId);
+    const stale = await f.call(f.observer, 'room_read_work', { workItemId: f.workItemId, brief: true, knownBriefVersion: retained.briefVersion });
+    assert.equal(stale.briefUnchanged, undefined, 'a brief retained before the correction is replaced');
+    assert.notEqual(stale.briefVersion, retained.briefVersion);
+    assert.match(stale.brief, new RegExp(REVIEW_SENTINEL));
+    assert.equal(second.result.receipt.eventId !== first.result.receipt.eventId, true);
+    // The current action still names the current result, never the predecessor.
+    const reviewRead = await f.call(f.reviewer, 'room_read_work', { workItemId: f.workItemId, brief: true, includeResult: true });
+    assert.equal(reviewRead.continuation.arguments.completionEventId, second.result.receipt.eventId);
+    assert.equal(reviewRead.review.previous.appliesToCurrentResult, false);
+  });
 }
 
 test('previousResultRecord reports absent, retired, late and long records without inventing any', () => {
@@ -160,4 +240,18 @@ test('previousResultRecord reports absent, retired, late and long records withou
   const bare = previousResultRecord({ receipt: receipt('e2', 'v2'), receiptHistory: [receipt('e1', 'v1')], verificationHistory: [], decisionHistory: [] });
   assert.equal(bare.review, null);
   assert.equal(bare.decision, null);
+});
+
+test('viewerMayReadPrivateHistory: parties and named members only; unreadable privacy information is private', () => {
+  const item = { id: 'w', proposedById: 'owner', accountableMemberId: 'producer', verifierMemberId: 'reviewer', humanDecisionMakerId: null, claim: null };
+  const request = { workItemId: 'w', requesterId: 'asker', recipientId: 'producer' };
+  const state = { replyRequests: { r1: request, r2: { workItemId: 'other', requesterId: 'x', recipientId: 'y' } } };
+  assert.equal(viewerMayReadPrivateHistory(state, item, 'observer'), false);
+  assert.equal(viewerMayReadPrivateHistory(state, item, 'asker'), true, 'request party');
+  assert.equal(viewerMayReadPrivateHistory(state, item, 'reviewer'), true, 'named role holder');
+  assert.equal(viewerMayReadPrivateHistory(state, item, 'owner'), true, 'proposer');
+  assert.equal(viewerMayReadPrivateHistory({ replyRequests: { r2: state.replyRequests.r2 } }, item, 'observer'), true, 'no private request on this task');
+  assert.equal(viewerMayReadPrivateHistory({}, item, 'observer'), false, 'missing request map fails closed');
+  assert.equal(viewerMayReadPrivateHistory(null, item, 'observer'), false);
+  assert.equal(viewerMayReadPrivateHistory(state, item, undefined), false, 'no viewer');
 });
