@@ -1191,7 +1191,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // N20-01: current-format rooms never write Board rows (the sync is
     // gated off by design), so their receipts are projected read-side
     // from the canonical work items; legacy rooms keep the registry.
-    const ranked = (currentReceiptClaims(store, roomId) ?? seen(registry.list(roomId)))
+    const ranked = (currentReceiptClaims(store, roomId, caller) ?? seen(registry.list(roomId)))
       .filter(item => item.state === "done")
       .filter(matches)
       .sort((a, b) => doneAtMsOf(b) - doneAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -1215,7 +1215,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // B7: on current rooms the named receipt is an addressed read of
     // that one work item, not a full-room enumeration (which 409s in
     // mature rooms); legacy rooms keep the registry find unchanged.
-    const nativeClaim = currentReceiptClaim(store, roomId, workClaimId);
+    const nativeClaim = currentReceiptClaim(store, roomId, workClaimId, caller);
     const item = nativeClaim !== null ? nativeClaim : seen(registry.list(roomId))
       .find(entry => entry.state === "done" && `rc_${entry.id}` === workClaimId);
     if (!item) reject(404, "receipt_not_found", `No receipt "${workClaimId}" in this room`);
