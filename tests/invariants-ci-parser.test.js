@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -93,6 +93,121 @@ not ok 1 - /repo/tests/invariants/retry.test.mjs
   assert.match(records[0].message, /strictly equal/);
 });
 
+test("parseTap captures the plain-Error single-line error form with code and stack (#4262)", () => {
+  // Shape executed from Node v24's TAP reporter for a test body that throws
+  // a plain Error (e.g. the fixture boot exploding): the error arrives as a
+  // single-line quoted scalar, NOT the |- block an AssertionError gets. The
+  // old parser dropped it, recording a bare "testCodeFailure".
+  const tap = `TAP version 13
+# Subtest: invariant boot-death: fixture boot throws instantly
+not ok 1 - invariant boot-death: fixture boot throws instantly
+  ---
+  duration_ms: 0.4821
+  type: 'test'
+  location: '/repo/tests/invariants/boot-death.test.mjs:7:1'
+  failureType: 'testCodeFailure'
+  error: 'fixture boot exploded: simulated EPERM opening store'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    boot (file:///repo/tests/invariants/boot-death.test.mjs:5:25)
+    TestContext.<anonymous> (file:///repo/tests/invariants/boot-death.test.mjs:8:13)
+  ...
+1..1
+`;
+  const { records } = parseTap(tap);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].name, "boot-death");
+  assert.equal(records[0].status, "fail");
+  assert.match(records[0].message, /testCodeFailure/);
+  assert.match(records[0].message, /fixture boot exploded: simulated EPERM opening store/);
+  assert.equal(records[0].error_code, "ERR_TEST_FAILURE");
+  assert.match(records[0].stack, /boot \(file:/);
+});
+
+test("parseTap names a file-level load death with diagnostics and exit code (#4262)", () => {
+  // Shape executed from Node v24: a file whose module graph throws at load
+  // prints its real error as `#` diagnostics, then aggregates `not ok` with
+  // exitCode in the YAML and only the generic 'test failed' as its error.
+  const tap = `TAP version 13
+# file:///repo/tests/invariants/load-death.test.mjs:3
+# throw new Error("simulated module load failure");
+#       ^
+# Error: simulated module load failure
+#     at file:///repo/tests/invariants/load-death.test.mjs:3:7
+#     at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+# Node.js v24.20.0
+# Subtest: /repo/tests/invariants/load-death.test.mjs
+not ok 1 - /repo/tests/invariants/load-death.test.mjs
+  ---
+  duration_ms: 317.204485
+  type: 'test'
+  location: '/repo/tests/invariants/load-death.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  signal: ~
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: /repo/tests/invariants/healthy.test.mjs
+    # Subtest: invariant healthy-one: passes
+    ok 1 - invariant healthy-one: passes
+      ---
+      duration_ms: 12.0
+      type: 'test'
+      ...
+    1..1
+ok 2 - /repo/tests/invariants/healthy.test.mjs
+  ---
+  duration_ms: 40.0
+  type: 'test'
+  ...
+1..2
+`;
+  const { records } = parseTap(tap);
+  assert.equal(records.length, 2);
+  const death = records.find(r => r.name === "file:load-death.test.mjs");
+  assert.ok(death, "load death is a named record");
+  assert.equal(death.status, "error");
+  assert.match(death.message, /exit 1/);
+  assert.match(death.message, /Error: simulated module load failure/);
+  assert.equal(death.exit_code, 1);
+  assert.match(death.stack, /at file:/);
+  const healthy = records.find(r => r.name === "healthy-one");
+  assert.ok(healthy, "the healthy file's test is recorded");
+  assert.equal(healthy.status, "pass");
+});
+
+test("parseTap does not double-report a file whose named test failed (#4262)", () => {
+  // A file containing a failing test also aggregates `not ok`; the failure
+  // already has its own record, so no file: record may be synthesized.
+  const tap = `TAP version 13
+# Subtest: /repo/tests/invariants/retry.test.mjs
+    # Subtest: invariant retry-idempotent: retry must not duplicate work
+    not ok 1 - invariant retry-idempotent: retry must not duplicate work
+      ---
+      duration_ms: 12.5
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal: 2 !== 1
+      code: 'ERR_ASSERTION'
+      ...
+    1..1
+not ok 1 - /repo/tests/invariants/retry.test.mjs
+  ---
+  duration_ms: 30.1
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..1
+`;
+  const { records } = parseTap(tap);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].name, "retry-idempotent");
+  assert.equal(records[0].error_code, "ERR_ASSERTION");
+});
+
 test("parseTap records skips and bail-outs", () => {
   const { records } = parseTap("    ok 1 - invariant slow-flaky: maybe later # SKIP not tonight\n");
   assert.equal(records[0].status, "skip");
@@ -167,6 +282,64 @@ test("gate actually runs when the checkout path contains spaces", { timeout: 300
     assert.match(results, /"type":\s*"run_start"/);
     assert.match(results, /"name":\s*"smoke-space"/);
     assert.match(results, /"type":\s*"run_end"/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("gate records plain-Error and load-death failures with their error text, and keeps the raw TAP (#4262)", { timeout: 60000 }, () => {
+  const root = mkdtempSync(join(tmpdir(), "invariants-gate-evidence-"));
+  try {
+    mkdirSync(join(root, "scripts"), { recursive: true });
+    mkdirSync(join(root, "tests", "invariants"), { recursive: true });
+    copyFileSync(
+      fileURLToPath(new URL("../scripts/invariants-ci.mjs", import.meta.url)),
+      join(root, "scripts", "invariants-ci.mjs"),
+    );
+    writeFileSync(
+      join(root, "tests", "invariants", "boot-death.test.mjs"),
+      'import test from "node:test";\ntest("invariant boot-death: fixture boot throws instantly", () => { throw new Error("fixture boot exploded: simulated EPERM opening store"); });\n',
+    );
+    writeFileSync(
+      join(root, "tests", "invariants", "load-death.test.mjs"),
+      'throw new Error("simulated module load failure");\n',
+    );
+    writeFileSync(
+      join(root, "tests", "invariants", "healthy.test.mjs"),
+      'import test from "node:test";\ntest("invariant healthy-one: passes", () => {});\n',
+    );
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    delete env.NODE_TEST_WORKER_ID;
+    const proc = spawnSync(process.execPath, [join(root, "scripts", "invariants-ci.mjs")], {
+      cwd: root,
+      encoding: "utf8",
+      env,
+    });
+    assert.equal(proc.status, 1, proc.stdout + proc.stderr);
+    assert.match(proc.stdout, /invariants: FAIL/);
+    const results = readFileSync(join(root, "results", "invariants.jsonl"), "utf8");
+    const lines = results.trim().split("\n").map(l => JSON.parse(l));
+    const recs = lines.filter(l => l.type === "invariant_result");
+    const boot = recs.find(r => r.name === "boot-death");
+    assert.ok(boot, "boot-throw test is a named record");
+    assert.equal(boot.status, "fail");
+    assert.match(boot.message, /fixture boot exploded: simulated EPERM opening store/);
+    assert.equal(boot.error_code, "ERR_TEST_FAILURE");
+    const death = recs.find(r => r.name === "file:load-death.test.mjs");
+    assert.ok(death, "load death is a named file: record");
+    assert.equal(death.status, "error");
+    assert.equal(death.exit_code, 1);
+    assert.match(death.message, /simulated module load failure/);
+    assert.ok(recs.some(r => r.name === "healthy-one" && r.status === "pass"));
+    const end = lines.find(l => l.type === "run_end");
+    assert.equal(end.status, "fail");
+    // The raw TAP stream is preserved beside the results file.
+    const tapPath = join(root, "results", "invariants.tap");
+    assert.ok(existsSync(tapPath), "raw TAP file written");
+    const tap = readFileSync(tapPath, "utf8");
+    assert.match(tap, /not ok/);
+    assert.match(tap, /simulated module load failure/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
