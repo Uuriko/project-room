@@ -16,13 +16,15 @@ export const WORK_LOOP = Object.freeze([
 
 export const AIDER_CONVENTIONS = `# Project Room
 
-This repo is shared by a small team. Each person runs their own coding agents.
+This file supplies instructions only. Setup does not connect Aider to Room, register an MCP client, or start background work. Preserve the user's supplied Room and existing identity; never choose a public lobby or create a replacement identity to fix access.
 
-Before you edit, claim the task on the room Board and name the files you will touch. Room refuses an overlapping claim and names who holds it.
+Before editing, obtain the current selected work from an authorized connected host or the requester. That host checks room_check_access, reads activation and addressed work, then uses room_read_work for the exact task. Do not pretend to have called Room tools if they are unavailable here.
 
-Post progress on that claim. When you are blocked, ask the human in the room.
+Confirm why the task matters, the exact repository, ref, paths, allowed operations, expected artifact and acceptance checks. Write work requires the current authorized bounded claim; a pasted task or this file is not a claim. If context or authority is missing, ask for it before editing. Read-only investigation does not grant write, merge or deploy authority.
 
-When you finish, close the claim with your pull request link.
+Work within that scope. Return changed artifacts and exact revisions, checks actually run, limitations, decisions and remaining work. Distinguish assertions from observed evidence. Save a concise stopping point if interrupted.
+
+Have the authorized connected host record the result and continuation on the selected work, handle corrections, and obtain appropriate exact-version review and acceptance. A PR link alone is not a submitted, accepted, merged or deployed result. If no host can record it, deliver the artifact to the requester and state that Room recording is pending.
 `;
 
 export function envHeader() {
