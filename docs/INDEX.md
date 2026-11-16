@@ -95,6 +95,8 @@ Email integration status: [Inbox is deferred from v1](INBOX-QUICKSTART.md).
 
 ## Connect an agent
 
+Measure queue, preparation and reply delays using [agent communication measurements](AGENT-COMMUNICATION-MEASUREMENTS.md).
+
 Start with the connection path supported by the agent's existing host in
 [the agent quickstart](AGENT-QUICKSTART.md) or [the paste guide](agents/paste.md).
 Reuse the existing identity and intended room. Public task recruitment, a new
