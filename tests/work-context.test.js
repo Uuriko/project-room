@@ -463,7 +463,7 @@ test("selected work HTTP lists only viewer-participant open linked requests with
   assert.equal(JSON.stringify(view).includes("unrelated-open"), false);
   assert.equal(view.evaluatedThrough, before.sequence);
   assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before);
-  assert.equal((await f.client("guest").workContext("test-handoff")).replyRequestContext.total, 0);
+  await assert.rejects(f.client("guest").workContext("test-handoff"), { status: 403, code: "work_private" });
   f.send("owner", "reply_request.cancelled", { requestMessageId: "incoming-linked", expectedRequestRevision: 0, reason: "Test complete" });
   const after = await f.client("producer").workContext("test-handoff");
   assert.deepEqual(after.replyRequestContext.requests.map(q => q.id), ["outgoing-linked"]);

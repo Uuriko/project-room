@@ -124,14 +124,8 @@ test("summary read: request parties and work-role holders keep the full handoff;
 
 test("selected read and retained brief: observer sees no handoff; authorized producer keeps it in full", async t => {
   const f = fixture(t);
-  const observerContext = f.store.workContext(f.keys.observer, "commons", "private-handoff");
-  assert.equal(observerContext.work.title, null);
-  assert.equal(observerContext.work.handoff, null);
-  assert.equal(observerContext.resume.handoff, null);
-  f.noPrivateLeak(observerContext, "observer selected read");
-  const observerBrief = await createWorkBrief(observerContext);
-  assert.equal(observerBrief.sections.progress.handoff, null);
-  f.noPrivateLeak(observerBrief, "observer brief");
+  assert.throws(() => f.store.workContext(f.keys.observer, "commons", "private-handoff"),
+    { status: 403, code: "work_private" });
 
   const producerContext = f.store.workContext(f.keys.producer, "commons", "private-handoff");
   assert.equal(producerContext.work.handoff.doneSummary, SENTINELS.doneSummary);
@@ -179,7 +173,8 @@ test("viewer-scoped reads do not mutate stored state", async t => {
     f.summaryFor(viewer);
     readCurrentWorkSummaryForViewer(f.store.db, "commons", "public-handoff", viewer);
   }
-  await createWorkBrief(f.store.workContext(f.keys.observer, "commons", "private-handoff"));
+  assert.throws(() => f.store.workContext(f.keys.observer, "commons", "private-handoff"),
+    { status: 403, code: "work_private" });
   await createWorkBrief(f.store.workContext(f.keys.producer, "commons", "private-handoff"));
   readCurrentWorkSnapshot(f.store, f.keys.observer, "commons", { view: "work" });
   assert.equal(stored(), before, "no read path writes or redacts the stored records");
