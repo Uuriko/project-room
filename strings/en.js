@@ -672,7 +672,7 @@ export default {
   "connection.tools.missing": "Room access granted. Host tools missing.",
   "connection.tools.available": "Access ready. Can read and post.",
   "mcp.core.room_list_work": "List open Board work in a room, newest first. Pass roomId, or omit it with a room-pinned key.",
-  "mcp.core.room_read_work": "Read one Board task (workItemId) or up to 4 (workItemIds): state, owner, next step.",
+  "mcp.core.room_read_work": "Read a task (workItemId) or up to 4 (workItemIds). Set brief:true for context and a continuation tool/input hint; includeResult:true prepares exact evidence for review.",
   "mcp.core.room_claim": "Claim a Board work item so others see you own it. Pass roomId (or a room-pinned key) and the item id.",
   "agentError.invalid_work_page.hint": "Use limit 1–100 and a returned cursor.",
   "agentError.invalid_work_page.recovery": "Restart room_list_work with a valid limit and without cursor.",

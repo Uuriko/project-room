@@ -1,7 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prepareWork, readWorkSelection } from '../client/work-preparation.mjs';
+import { prepareWork, readWorkSelection, workContinuation } from '../client/work-preparation.mjs';
 import { attentionPreview } from '../src/work-selectors.js';
+
+test('continuation keeps write scope explicit and respects the viewer and available actions', () => {
+  const context = { roomId: 'commons', viewer: { id: 'producer', active: true },
+    work: { id: 'task', revision: 7, mode: 'write' },
+    next: { action: 'claim', label: 'Reserve scope', memberId: 'producer', addressedToViewer: true },
+    suggestedActions: [{ action: 'claim' }] };
+  const before = structuredClone(context);
+  const local = workContinuation(context);
+  assert.equal(local.tool, 'room_begin_work');
+  assert.deepEqual(local.arguments, { workItemId: 'task' });
+  assert.deepEqual(local.inputRequired, ['repository', 'ref', 'paths', 'expiresAt']);
+  assert.deepEqual(workContinuation(context, { hosted: true }).arguments, { roomId: 'commons', workItemId: 'task' });
+  assert.deepEqual(context, before, 'hint cannot mutate work or fill a guessed scope');
+  for (const change of [{ viewer: { active: false } }, { suggestedActions: [] },
+    { next: { ...context.next, memberId: 'someone-else', addressedToViewer: false } }]) {
+    assert.equal(workContinuation({ ...context, ...change }).tool, null);
+  }
+  for (const action of ['in_progress', 'complete', 'decide', 'unknown', 'triaged_handoff']) {
+    assert.equal(workContinuation({ ...context, next: { ...context.next, action } }).tool, null,
+      `${action} must not invent an executable action or owner decision`);
+  }
+});
 
 test('preparation follows frozen pages, refreshes work and reports changes without writing', async () => {
   let reads = 0;

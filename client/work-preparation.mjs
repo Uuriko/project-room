@@ -78,6 +78,35 @@ export function workReadRefusal(error) {
     message: "Read fewer tasks or omit source/discussion. The structured task payload is limited to 128 KiB; no partial content was returned." } : null;
 }
 
+// A hint derived from the same authorized read as the brief. Missing input is
+// explicit; this never executes a tool, invents scope, or supplies a verdict.
+export function workContinuation(context, { hosted = false } = {}) {
+  const { work, viewer, next } = context;
+  const value = { action: next.action, label: next.label, memberId: next.memberId,
+    addressedToViewer: next.addressedToViewer, workRevision: work.revision,
+    tool: null, arguments: null, inputRequired: [],
+    guidance: "Read-only suggestion from this observation. Recheck current authority when acting; keep original write input unchanged after an unknown outcome." };
+  const point = (tool, args, inputRequired = []) => ({ ...value, tool,
+    arguments: { ...(hosted ? { roomId: context.roomId } : {}), workItemId: work.id, ...args }, inputRequired });
+  if (next.replacement?.nextRead) return { ...value, ...next.replacement.nextRead, inputRequired: [] };
+  if (viewer.active === false || !next.addressedToViewer) return value;
+  const available = new Set(context.suggestedActions.map(entry => entry.action));
+  if (["accept", "start", "claim"].includes(next.action) && available.has(next.action)) {
+    return point("room_begin_work", {}, work.mode === "write" && ["accept", "claim"].includes(next.action)
+      ? ["repository", "ref", "paths", "expiresAt"] : []);
+  }
+  if (next.action === "revise" && available.has("resolve")) {
+    return point("room_resolve_blocker", { expectedRevision: work.revision }, ["resolution"]);
+  }
+  if (next.action === "verify" && available.has("verify")) {
+    if (!context.review) return point("room_read_work", { brief: true, includeResult: true });
+    return point("room_record_verification", { expectedRevision: work.revision,
+      completionEventId: context.review.completionEventId,
+      evidenceVersion: context.review.result.receipt.evidenceVersion }, ["result", "summary"]);
+  }
+  return value;
+}
+
 // A single selection keeps its existing response. Batches reuse the same reads,
 // preserve caller order and fail closed; no partial successful packet is returned.
 export async function readWorkSelection(client, args, { signal, hosted = false } = {}) {
@@ -107,6 +136,7 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     }
     return (args.brief ?? batch) ? { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
+      continuation: workContinuation(context, { hosted }),
       brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } }), briefVersion: (await createWorkBrief(context)).version, ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) } : context;
   };
   const worker = async () => {
