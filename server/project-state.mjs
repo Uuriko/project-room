@@ -49,7 +49,9 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
     if (item.state === "superseded" || item.supersededBy) continue;
     const board = item.state === "completed" ? (terminalWork(item) ? "done" : "delivered") : item.state;
     counts[board] = (counts[board] ?? 0) + 1;
-    if (board === "done" || board === "delivered") continue;
+    // Submitted evidence is not terminal while its exact review or decision
+    // is outstanding. Keep it in the same role-derived attention read.
+    if (board === "done") continue;
     const step = nextWorkStep(item, nowMs, ownerId);
     const owner = name(item.claim?.status === "active" ? item.claim.holderId : item.accountableMemberId);
     const nextFor = step.memberId == null ? null : name(step.memberId);

@@ -67,6 +67,29 @@ test("builder: stays inside the byte budget with 128 busy items, sheds rows and 
   assert.ok(s.inProgress[0].quietMin >= s.inProgress.at(-1).quietMin, "longest-quiet first");
 });
 
+test("submitted work remains actionable for its reviewer and decision maker until exact gates finish", () => {
+  const receipt = { eventId: "completion-1", evidenceVersion: "sha256:one", producerId: "producer", producerAttribution: "reported" };
+  const item = { ...items(1)[0], state: "completed", receipt, verifierMemberId: "reviewer",
+    independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner" };
+  const base = { roomId: "r", ownerId: "owner", sequence: 20, now: Date.UTC(2026, 10, 12, 1), live: {},
+    itemsComplete: true, members: { producer: { kind: "agent" }, reviewer: { kind: "agent" }, owner: { kind: "human" } }, receipts: [], attention: [] };
+  const state = (viewerId, work) => buildProjectState({ ...base, viewerId, items: [work] });
+  assert.equal(state("reviewer", item).needsYou[0]?.next, "verify");
+  assert.deepEqual(state("producer", item).needsYou, []);
+  assert.deepEqual(state("owner", item).needsHuman, [], "review must precede the owner decision");
+  const reviewed = { ...item, verification: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion,
+    result: "pass", independenceConfirmed: true, verifierId: "reviewer" } };
+  assert.equal(state("owner", reviewed).needsYou[0]?.next, "decide");
+  assert.equal(state("reviewer", reviewed).needsHuman[0]?.next, "decide");
+  assert.deepEqual(state("reviewer", reviewed).needsYou, []);
+  const replacement = { ...reviewed, receipt: { ...receipt, eventId: "completion-2", evidenceVersion: "sha256:two" } };
+  assert.equal(state("reviewer", replacement).needsYou[0]?.next, "verify", "a PASS on old evidence cannot hide current review");
+  const accepted = { ...reviewed, decision: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion, decision: "approved" } };
+  assert.deepEqual(state("owner", accepted).needsYou, []);
+  assert.deepEqual(state("reviewer", accepted).needsHuman, []);
+  assert.equal(state("owner", accepted).work.counts.done, 1);
+});
+
 test("state read: REST and MCP agree on a real room, are bounded, and stay read-only", async t => {
   const f = createAcceptanceFixture();
   const server = createRoomServer({ store: f.store });

@@ -22,6 +22,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_wait_for_attention: {access: `read, ${MEMBER}; same scopes as room_read_inbox`, cost: "read only, at most four bounded inbox probes and one pending wait, starts no AI", rest: "none; use GET /api/rooms/{roomId}/agent-inbox for immediate reads"},
   room_work_claim_thread: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims/{claimId}/thread" },
   room_digest: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/digest" },
+  room_activation_pack: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/activation-pack" },
+  room_read_result: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-result" },
   room_project_state: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/state" },
   room_response_latency: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/latency" },
   room_needs_me: { access: `read, ${ANY_OR_ROOM}`, cost: READ, rest: "GET /api/needs-me" },
@@ -90,7 +92,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   // AUX-08b batch 8: the work lifecycle tools, help offers, reply requests.
   room_accept_work: { access: `write, assigned room member with accept_work; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.accepted)` },
   room_acquire_claim: { access: `write, assigned member with Board write access (eligible human, contribute/review/collaborate agent profile, or room owner); hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (claim.acquired)` },
-  room_begin_work: { access: `write, assigned room member with accept_work; write mode also needs write authority; acquiring a claim needs Board write access; hidden from guest and read-only-tier agents`, cost: "runs the next verified Room operations, starts no AI", rest: `${COMMANDS} (work.accepted, claim.acquired, work.started)` },
+  room_begin_work: { access: `write, assigned room member with accept_work; write mode also needs write authority; acquiring a claim needs Board write access; hidden from guest and read-only-tier agents`, cost: "runs the next verified Room operations, starts no AI", rest: `${COMMANDS} (work.accepted), (claim.acquired), (work.started)` },
   room_block_work: { access: `write, room member with assigned accept_work; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.blocked)` },
   room_clear_halt: { access: `write, room member with steer or decide and the exact halt event; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.halt_cleared)` },
   room_close_work_claim: { access: `write, Board writer who is the claim holder or a claim manager (room owner or manage_claims); cancel also the item's creator while it is still unclaimed; hidden from guest and read-only-tier agents`, cost: WRITE, rest: "POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel" },

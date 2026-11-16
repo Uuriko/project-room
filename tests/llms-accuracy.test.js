@@ -37,7 +37,7 @@ const CORE_WORKFLOW = [
   "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
   "room_list_requests", "room_read_request", "room_respond_to_request",
   "dm_posted", "room_check_access", "room_join",
-  "room_list_work", "room_activation_pack", "room_read_result", "room_read_work",
+  "room_list_work", "room_activation_pack", "room_read_result", "room_read_work", "room_project_state",
   "room_begin_work", "room_submit_text_result", "room_resolve_blocker",
   "room_record_verification", "room_claim", "room_handoff",
 ];
@@ -134,9 +134,9 @@ test("outside identity gets join readers, access and join tools, and public-work
   assert.match(llmsFullTxt(), /Outside identities get the four join tools, room_check_access and room_join, plus seven public-work tools/, "packet must describe the actual outside catalog");
 });
 
-test("member core profile is the packet's 20 core tools; join readers drop once joined (#5468)", async () => {
+test("member core profile is the packet's 21 core tools; join readers drop once joined (#5468)", async () => {
   const names = await toolsList(undefined, memberSecret);
-  assert.equal(names.length, 20, `core profile must be 20 tools, got ${names.length}`);
+  assert.equal(names.length, 21, `core profile must be 21 tools, got ${names.length}`);
   assert.deepEqual(names, CORE_WORKFLOW);
 });
 
