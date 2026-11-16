@@ -1,4 +1,5 @@
 // Read-only host coordination. Source cursors are observations, never acknowledgements.
+import { createHmac } from 'node:crypto';
 import { RoomAgentClient, RoomClientError } from './room-agent.mjs';
 import { connectionDiagnostic } from './agent-connection.mjs';
 import { parseNeedsMeBody } from './grok-host.mjs';
@@ -74,7 +75,11 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
   const client = new RoomAgentClient({ ...connection, memberId: undefined, fetchImpl: boundedFetch });
   // agent-work authenticates and pins its own principal, so it needs the expected member.
   const workClient = new RoomAgentClient({ ...connection, fetchImpl: boundedFetch });
-  const out = { version: 1, scope: { roomId: connection.roomId, memberId: connection.memberId, readOnly: true },
+  // Resume tokens identify the local projection, not merely the server context.
+  // A replies-only view or another service/credential cannot supply a full-work cache.
+  const localVersion = serverVersion => createHmac('sha256', connection.token)
+    .update(JSON.stringify(['room-resume-context-v1', connection.origin, connection.roomId, connection.memberId, focus ?? 'all', serverVersion])).digest('hex');
+  const out = { version: 1, scope: { origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId, readOnly: true },
     connection: { status: 'unconfirmed' }, toolProfile: { transport: 'hosted_mcp', profile: 'full' }, contextVersion: null, authoritySummary: null,
     observedThroughBySource: {}, attention: [], ownClaims: [], obligations: [], pendingReconciliations: { status: 'not_read' },
     incompleteSources: [], nextReads: [], openRequests: [], optionalConversations: [], metrics };
@@ -98,7 +103,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
   try { initial = await contextRead(undefined); }
   catch (error) { incomplete('connection', error); return safe(); }
   const project = value => {
-    out.contextVersion = value.context_version;
+    out.contextVersion = localVersion(value.context_version);
     out.observedThroughBySource.context = { evaluatedThrough: value.evaluatedThrough, cursors: value.cursors, notModified: value.not_modified === true };
     if (value.not_modified) return;
     out.authoritySummary = pick(value.roster.find(member => member.id === connection.memberId), ['id', 'kind', 'active', 'permissions']);
