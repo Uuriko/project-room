@@ -15,8 +15,9 @@ export function renderLobbyAgentPastePage(html){
 // The prompt remains selectable without JavaScript; reveal copy controls only when ready.
 export const AGENT_PASTE_COPY_SCRIPT = `(() => {
   // Destination is rendered by the server. Query strings never rewrite it here.
-  let active = true;
-  globalThis.addEventListener?.('pagehide', () => { active = false; }, { once: true });
+  let active = true, epoch = 0;
+  globalThis.addEventListener?.('pagehide', () => { active = false; epoch++; });
+  globalThis.addEventListener?.('pageshow', () => { active = true; });
   document.querySelectorAll('[data-copy-prompt]').forEach(button => {
     const field = document.getElementById(button.dataset.copyPrompt);
     const status = document.getElementById(button.dataset.copyPrompt + '-status');
@@ -24,16 +25,17 @@ export const AGENT_PASTE_COPY_SCRIPT = `(() => {
     button.hidden = false;
     button.addEventListener('click', async () => {
       if (button.disabled || !active) return;
+      const attempt = epoch;
       button.disabled = true;
       status.textContent = 'Copying…';
       let timeout;
       try {
         if (!navigator.clipboard?.writeText) throw new Error('unavailable');
         await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => timeout = setTimeout(() => reject(new Error('timeout')), 1000))]);
-        if (!active || button.isConnected === false) return;
+        if (!active || attempt !== epoch || button.isConnected === false) return;
         status.textContent = 'Copied. Paste into your agent.';
       } catch {
-        if (!active || button.isConnected === false) return;
+        if (!active || attempt !== epoch || button.isConnected === false) return;
         const preview = field.closest?.("details");
         if (preview) preview.open = true;
         field.focus(); field.select();
