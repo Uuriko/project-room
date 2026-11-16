@@ -19,8 +19,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseRoomWork } from "./github-work-sync.mjs";
+import { gradeJobs, jobIdOfName, loadManifest, worstConclusion } from "./ci-verdict.mjs";
 
-const OK = new Set(["success", "skipped", "neutral"]);
 const JOB_NAME = /^[\w .()/:+-]{1,60}$/;
 
 export function receiptId(repo, prNumber, headSha, verdict) {
@@ -29,18 +29,27 @@ export function receiptId(repo, prNumber, headSha, verdict) {
 }
 
 // jobs: [{ name, conclusion }] from the run. Returns null when nothing should be posted.
-export function verdictOf(run, jobs) {
+// The verdict is the manifest-bound grade from ci-verdict.mjs — the same
+// grading the ci-verdict workflow job reports — never the run's own
+// conclusion: a skipped required or substantive job is NOT-RUN and fails the
+// verdict even when GitHub rolls the run up as success.
+export function verdictOf(run, jobs, manifest) {
   if (run?.event !== "pull_request") return null;
   if (!["success", "failure", "timed_out"].includes(run.conclusion)) return null;
-  const real = (jobs ?? []).filter(job => !/^ci-verdict/.test(job.name));
-  const ran = real.filter(job => job.conclusion !== "skipped");
+  if (!manifest) throw new Error("ci-receipt: verdict requires the ci-substantive manifest");
+  const results = {};
+  for (const job of jobs ?? []) {
+    const jobId = jobIdOfName(job.name);
+    results[jobId] = worstConclusion(results[jobId], job.conclusion ?? null);
+  }
+  const grade = gradeJobs(manifest, results);
+  const gating = grade.table.filter(row => row.required || row.substantive);
+  const ran = gating.filter(row => row.verdict === "PASSED" || row.verdict === "FAILED");
   // `changes` runs first and gates every suite; with nothing else run the green
   // check is not a test result (see ci-verdict), so say nothing.
-  if (run.conclusion === "success" && !ran.some(job => job.name !== "changes")) return null;
-  const failed = real.filter(job => !OK.has(job.conclusion) && job.conclusion !== "cancelled" && job.conclusion != null)
-    .map(job => job.name).filter(name => JOB_NAME.test(name));
-  const failedAny = run.conclusion !== "success";
-  return { verdict: failedAny ? "FAILED" : "PASSED", failed, ran: ran.length, total: real.length };
+  if (run.conclusion === "success" && !ran.some(row => row.job_id !== "changes")) return null;
+  const failed = [...grade.failed, ...grade.notRun, ...grade.unmanifested].filter(name => JOB_NAME.test(name));
+  return { verdict: grade.verdict, failed, ran: ran.length, total: gating.length };
 }
 
 export function receiptBody({ prNumber, headSha, result, runUrl }) {
@@ -66,7 +75,10 @@ export async function runCiReceipt({ event, repo, env = process.env, fetchImpl =
   const token = env.GITHUB_TOKEN;
   const jobs = (await gh(`/repos/${repo}/actions/runs/${run.id}/jobs?per_page=100&filter=latest`, { token, fetchImpl })).jobs
     .map(job => ({ name: String(job.name), conclusion: job.conclusion }));
-  const result = verdictOf(run, jobs);
+  // The manifest ships in this checkout (default branch; workflow_run never
+  // checks out pull-request code). A missing or malformed manifest fails
+  // loud here rather than posting a verdict graded by a weaker standard.
+  const result = verdictOf(run, jobs, loadManifest());
   if (!result) return { skipped: `no verdict worth posting (${run.conclusion})` };
   // Resolve the pull request from the head commit; workflow_run.pull_requests is empty for forks.
   const pulls = (await gh(`/repos/${repo}/commits/${run.head_sha}/pulls?per_page=5`, { token, fetchImpl })).filter(pull => pull.state === "open");
