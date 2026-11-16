@@ -5,7 +5,7 @@ import { EVENT_TYPES as T, WORK_STATES as S, validId, receiptHasKnownProducer, m
 // Assignment identifies who should review; it does not grant permission.
 export const REVIEW_PERMISSION_GUIDANCE = "You are the assigned reviewer but are missing the verify permission. Ask the room owner or a member administrator to review that permission grant, then read this task again. Do not attempt to record a verdict until access is confirmed.";
 export function missingReviewPermission(next, member) {
-  return next.action === "verify" && next.memberId === member.id && member.active !== false
+  return next?.action === "verify" && next.memberId === member.id && member.active !== false
     && Array.isArray(member.permissions) && !member.permissions.includes("verify");
 }
 

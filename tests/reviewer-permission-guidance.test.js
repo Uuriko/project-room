@@ -6,10 +6,11 @@ import { readWorkItem } from '../server/work-repository.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { linkWithProof } from './helpers/link-with-proof.mjs';
 import { workContextMarkdown } from '../client/room-agent.mjs';
+import { createWorkBrief, compareWorkBriefs } from '../client/work-brief.mjs';
 import { workContinuation } from '../client/work-preparation.mjs';
 
 for (const representation of ['legacy', 'normalized-current-v1']) {
-  test(`${representation}: assigned reviewer sees permission remedy before a refused verdict; a fresh grant clears it`, t => {
+  test(`${representation}: assigned reviewer sees permission remedy before a refused verdict; a fresh grant clears it`, async t => {
     const store = new RoomStore(':memory:');
     store.initialize(initialRoom(), representation === 'legacy' ? {} : { representation });
     t.after(() => store.close());
@@ -37,6 +38,9 @@ for (const representation of ['legacy', 'normalized-current-v1']) {
     assert.equal(before.suggestedActions.some(x => x.action === 'verify'), false);
     assert.match(before.scope.guidance, /missing.*verify.*permission/i);
     assert.match(workContextMarkdown(before), /room owner or a member administrator/i);
+    const briefBefore = await createWorkBrief(before);
+    assert.deepEqual(briefBefore.sections.progress.next.missingPermissions, ['verify']);
+    assert.match(briefBefore.sections.progress.next.guidance, /room owner or a member administrator/i);
     const blocked = workContinuation(before);
     assert.equal(blocked.tool, null);
     assert.deepEqual(blocked.missingPermissions, ['verify']);
@@ -48,6 +52,10 @@ for (const representation of ['legacy', 'normalized-current-v1']) {
     assert.equal(JSON.stringify(item()), stateBefore, 'permission change must not edit work or its result');
     assert.doesNotMatch(after.scope.guidance, /missing.*verify.*permission/i);
     assert.equal(workContinuation(after).tool, 'room_read_work');
+    const briefAfter = await createWorkBrief(after);
+    assert.equal(briefAfter.sections.progress.next.missingPermissions, undefined);
+    assert.equal(compareWorkBriefs(briefBefore, briefAfter).status, 'changed');
+    assert.ok(compareWorkBriefs(briefBefore, briefAfter).changedSections.includes('progress'));
     send(reviewer.secret, 'verification.recorded', verdict);
     assert.equal(store.workContext(reviewer.secret, 'commons', workItemId).next.action, 'complete');
   });

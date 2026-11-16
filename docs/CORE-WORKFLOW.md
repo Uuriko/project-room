@@ -141,7 +141,8 @@ pages before retaining a discussion checkpoint. Result review still needs a fres
 
 An assigned reviewer still needs the `verify` permission. If it is missing, the
 selected read names that gap and the brief continuation returns no write tool
-with `missingPermissions:["verify"]`. Ask the room owner or a member administrator
+with `missingPermissions:["verify"]`. Structured briefs used for linked work in
+reply-request preparation carry the same warning in `sections.progress.next`. Ask the room owner or a member administrator
 to review the grant, then refresh the task. Assignment alone never grants access.
 
 Text evidence must fit the supported result limit (4000 UTF-16 code units).
