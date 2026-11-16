@@ -19,7 +19,7 @@ import { isCurrentRoom } from "./current-room-repository.mjs";
 import { readWorkItem } from "./work-repository.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { parseReceipt } from "./receipts.mjs";
-import { readReceiptSignals } from "./receipt-signals.mjs";
+import { readReceiptSignals, withoutRedactedPosts } from "./receipt-signals.mjs";
 import { readResponseLatency, latencyLine } from "./response-latency.mjs";
 import { PREREQUISITE_GATED_STEPS, prerequisiteHold } from "../client/begin-work.mjs";
 import { nativePrerequisiteState, boardPrerequisiteState, observePrerequisites } from "./work-item-state.mjs";
@@ -223,10 +223,7 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
     // log answers (a few indexed rows, no journal scan). Anything else falls back
     // to the text parse over the journal tail, so history before the log still reads.
     let receipts = null, receiptSource = "journal";
-    // A deleted post is redacted in the journal but its typed row outlives it: drop rows whose source post was redacted,
-    // so a deleted receipt is not resurrected as a delivery claim (the text fallback already cannot match it).
-    const redacted = store.db.prepare("SELECT 1 FROM events WHERE room_id=? AND sequence=? AND json_extract(body,'$.data.redacted')=1");
-    const typed = readReceiptSignals(store.db, roomId, { floorSeq: floor })?.filter(r => !redacted.get(roomId, r.seq));
+    const typed = withoutRedactedPosts(store.db, roomId, readReceiptSignals(store.db, roomId, { floorSeq: floor }));
     if (typed?.some(r => r.parsed.kind === "deploy" && r.parsed.smoke === "ok")) { receipts = typed; receiptSource = "log"; }
     if (!receipts) receipts = store.db.prepare(
       `SELECT sequence AS seq, json_extract(body,'$.at') AS at, json_extract(body,'$.actorId') AS actorId, json_extract(body,'$.data.body') AS body
