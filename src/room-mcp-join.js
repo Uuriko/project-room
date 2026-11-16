@@ -166,7 +166,7 @@ export const MCP_TOOL_ALIASES = Object.freeze(Object.fromEntries(
     .map(entry => [entry.alias, entry.name])
 ));
 
-// Default Bearer tools/list. About fifteen tools for the first session.
+// Default Bearer tools/list. Conversation and the complete task/review loop.
 // tools/list { profile: "full" } (or ?profile=full) returns HOSTED_ROOM_MCP_TOOLS.
 export const CORE_MCP_TOOLS = Object.freeze(
   MCP_TOOL_META.filter(entry => entry.core).map(entry => entry.name)

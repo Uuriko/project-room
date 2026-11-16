@@ -70,7 +70,7 @@ test("default tools/list is the short core profile and every listed name is lega
   // A joined member does not get the four join helpers in its default list.
   assert.deepEqual(names, [...CORE_MCP_TOOLS]);
   assert.equal(JOIN_TOOLS.some(tool => names.includes(tool)), false);
-  // Core is trimmed to conversation for hosted/cloud agents: create, files,
+  // Core covers conversation and the task loop: create, files,
   // land queue, wake and bond tools move to focus/full profiles.
   for (const moved of ["room_create", "room_put_file", "add_land_item", "wake_pause", "bond_propose"]) assert.equal(names.includes(moved), false, moved);
   assert.ok(names.every(name => MCP_TOOL_NAME_RE.test(name)));
@@ -89,12 +89,14 @@ test("default tools/list is the short core profile and every listed name is lega
   const coreBytes = Buffer.byteLength(JSON.stringify(body));
   const coreResultBytes = Buffer.byteLength(JSON.stringify(body.result));
   console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
-  // QA7-04 added the latest flag to room_read_messages' schema: the core
-  // profile stays small for cold agents, with headroom for one more flag.
-  assert.ok(coreBytes < 17 * 1024, `core tools/list is ${coreBytes} bytes`);
+  // Core includes the complete task/correction/review loop. Keep a bounded
+  // catalog instead of requiring the 129-tool full profile to finish a task.
+  assert.ok(coreBytes < 30 * 1024, `core tools/list is ${coreBytes} bytes`);
 
   const aliased = await rpc(origin, "tools/list", { aliases: 1, profile: "full" }, ada.secret);
   const aliasBody = await aliased.json();
+  assert.ok(coreBytes < Buffer.byteLength(JSON.stringify(aliasBody)) / 5,
+    "the complete core workflow must stay under one fifth of the full catalog");
   assert.ok(namesOf(aliasBody).every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(aliasBody.result.tools.find(tool => tool.name === "bond_propose").aliases[0], "bond.propose");
   assert.equal(aliasBody.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
