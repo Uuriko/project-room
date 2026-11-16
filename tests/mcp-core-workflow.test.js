@@ -8,12 +8,15 @@ import { setTier } from '../server/autonomy-tiers.mjs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isCurrentRoom } from '../server/current-room-repository.mjs';
 
-test('default catalog supports task pickup, correction, exact review and owner acceptance', async t => {
+for (const representation of ['legacy', 'normalized-current-v1']) {
+test(`${representation}: default catalog supports task pickup, correction, exact review and owner acceptance`, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'room-core-continuation-'));
   const database = join(directory, 'room.sqlite');
   let store = new RoomStore(database);
-  store.initialize(initialRoom());
+  store.initialize(initialRoom(), representation === 'legacy' ? {} : { representation });
+  assert.equal(isCurrentRoom(store.db, 'commons'), representation === 'normalized-current-v1');
   const owner = store.issueAccessKey('commons', 'owner');
   const producer = store.identities.create('Producer');
   const reviewer = store.identities.create('Reviewer');
@@ -169,12 +172,13 @@ test('default catalog supports task pickup, correction, exact review and owner a
   await attention(producer, []);
   await attention(reviewer, []);
   await ownerAttention([]);
-  const before = store.room('commons').sequence;
+  const before = store.headSequence('commons');
   assert.equal((await call(producer, 'room_submit_text_result', revised.input)).duplicate, true);
-  assert.equal(store.room('commons').sequence, before, 'reconnect retry must not duplicate completion');
+  assert.equal(store.headSequence('commons'), before, 'reconnect retry must not duplicate completion');
   const finalBrief = await call(producer, 'room_read_work', {workItemId,brief:true});
-  const member = store.room('commons').state.members[producer.identityId];
+  const member = store.authenticate(producer.secret, 'commons').member;
   command('revoke-after-completion','member.access_changed',{memberId:producer.identityId,expectedMemberRevision:member.revision,permissions:[],active:false});
   const revokedRead = await invoke(producer,'room_read_work',{workItemId,brief:true,knownBriefVersion:finalBrief.briefVersion});
   assert.ok(revokedRead.error || revokedRead.result?.isError, 'known content never bypasses fresh membership checks');
 });
+}
