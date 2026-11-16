@@ -5,9 +5,14 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { linkWithProof } from './helpers/link-with-proof.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 test('default catalog supports task pickup, correction, exact review and owner acceptance', async t => {
-  const store = new RoomStore(':memory:');
+  const directory = mkdtempSync(join(tmpdir(), 'room-core-continuation-'));
+  const database = join(directory, 'room.sqlite');
+  let store = new RoomStore(database);
   store.initialize(initialRoom());
   const owner = store.issueAccessKey('commons', 'owner');
   const producer = store.identities.create('Producer');
@@ -16,13 +21,20 @@ test('default catalog supports task pickup, correction, exact review and owner a
     linkWithProof(store, owner, 'commons', identity, { displayName: identity === producer ? 'Producer' : 'Reviewer', permissions });
     setTier(store.db, 'commons', identity.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   }
-  const server = createRoomServer({ store });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(async () => {
+  let server, origin;
+  const start = async () => {
+    server = createRoomServer({ store });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    origin = `http://127.0.0.1:${server.address().port}`;
+  };
+  const stop = async () => {
     server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve)); store.close();
+  };
+  await start();
+  t.after(async () => {
+    await stop(); rmSync(directory, { recursive: true, force: true });
   });
-  const origin = `http://127.0.0.1:${server.address().port}`;
   const rpc = async (identity, method, params) => {
     const response = await fetch(origin + '/mcp', { method: 'POST', headers: {
       'Content-Type': 'application/json', Authorization: 'Bearer ' + identity.secret,
@@ -57,8 +69,13 @@ test('default catalog supports task pickup, correction, exact review and owner a
   assert.ok((await call(producer, 'room_list_work', { focus: 'needs_me' })).work.some(work => work.id === workItemId));
   const read = () => call(producer, 'room_read_work', { workItemId });
   assert.equal((await read()).next.action, 'accept');
-  await call(producer, 'room_begin_work', { workItemId });
+  const pickup = (await call(producer, 'room_read_work', { workItemId, brief: true })).continuation;
+  assert.equal(pickup.tool, 'room_begin_work');
+  assert.deepEqual(pickup.inputRequired, []);
+  await call(producer, pickup.tool, pickup.arguments);
   assert.equal((await read()).work.state, 'working');
+  assert.equal((await call(producer, 'room_read_work', { workItemId, brief: true })).continuation.tool, null,
+    'Room working state must not invent or execute host work');
   const submit = async (id, text) => {
     await call(producer, 'room_post_message', { id, workItemId, body: text });
     const preview = await call(producer, 'room_read_result', { workItemId, draftMessageId: id });
@@ -71,6 +88,14 @@ test('default catalog supports task pickup, correction, exact review and owner a
     return { input, exact: await call(reviewer, 'room_read_result', { workItemId }) };
   };
   const first = await submit('first-draft', 'Read the shared brief and choose one bounded next step.');
+  const reviewRead = (await call(reviewer, 'room_read_work', { workItemId, brief: true })).continuation;
+  assert.equal(reviewRead.tool, 'room_read_work');
+  assert.equal(reviewRead.arguments.includeResult, true, 'review hint first fetches exact evidence');
+  const prepared = await call(reviewer, reviewRead.tool, reviewRead.arguments);
+  assert.equal(prepared.continuation.tool, 'room_record_verification');
+  assert.deepEqual(prepared.continuation.inputRequired, ['result', 'summary']);
+  assert.equal(prepared.continuation.arguments.evidenceVersion, first.exact.result.text.evidenceVersion);
+  assert.equal(Object.hasOwn(prepared.continuation.arguments, 'result'), false, 'read must not invent a verdict');
   const verify = (exact, result, summary) => call(reviewer, 'room_record_verification', {
     workItemId, result, completionEventId: exact.result.receipt.eventId,
     evidenceVersion: exact.result.text.evidenceVersion, summary, nextAction: 'Include a reconnect check',
@@ -80,9 +105,16 @@ test('default catalog supports task pickup, correction, exact review and owner a
     evidenceVersion: first.exact.result.text.evidenceVersion, summary: 'Self review must fail',
   });
   assert.ok(selfReview.error || selfReview.result?.isError);
-  await verify(first.exact, 'fail', 'Missing the required reconnect check');
+  await call(reviewer, prepared.continuation.tool, { ...prepared.continuation.arguments,
+    result: 'fail', summary: 'Missing the required reconnect check', nextAction: 'Include a reconnect check' });
   assert.equal((await read()).work.state, 'blocked');
-  await call(producer, 'room_resolve_blocker', { workItemId, resolution: 'Add reconnect and duplicate-result checks' });
+  await stop(); store = new RoomStore(database); await start();
+  const resumed = await call(producer, 'room_read_work', { workItemId, brief: true });
+  assert.match(resumed.brief, /Missing the required reconnect check/);
+  assert.equal(resumed.continuation.tool, 'room_resolve_blocker');
+  assert.deepEqual(resumed.continuation.inputRequired, ['resolution']);
+  await call(producer, resumed.continuation.tool, { ...resumed.continuation.arguments,
+    resolution: 'Add reconnect and duplicate-result checks' });
   await call(producer, 'room_begin_work', { workItemId });
   const revised = await submit('revised-draft', 'Reconnect the existing agent, select one bounded task, and verify its exact saved result appears once.');
   await verify(first.exact, 'pass', 'Old evidence cannot approve the revised result');
