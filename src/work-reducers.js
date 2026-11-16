@@ -356,6 +356,19 @@ function renewClaim(state, incoming) {
     requireProgressCheckin(state, item.claim, incoming.actorId, incoming.data.progressMessageId);
     item.claim.progressMessageId = incoming.data.progressMessageId;
   }
+  // Optional link to the pull request whose new push justified this renewal
+  // (written by the room's PR poller, which saw the push on GitHub). Evidence
+  // for readers, not authority: the renewal rules above are unchanged. Flat
+  // keys, because the event envelope reserves `pullRequest` for work_claim.updated.
+  if (incoming.data.prUrl !== undefined || incoming.data.prHeadSha !== undefined) {
+    const { prUrl, prHeadSha } = incoming.data;
+    if (typeof prUrl !== "string" || typeof prHeadSha !== "string"
+      || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]{0,8}$/.test(prUrl)
+      || !/^[0-9a-f]{40}$/.test(prHeadSha)) {
+      throw new Error("prUrl and prHeadSha must be a GitHub pull request URL and its 40-character head commit");
+    }
+    item.claim.pullRequest = { url: prUrl, headSha: prHeadSha, seenAt: incoming.at };
+  }
   item.claim.expiresAt = incoming.data.expiresAt;
   item.claim.renewedAt = incoming.at;
   item.claim.renewals = (item.claim.renewals ?? 0) + 1;

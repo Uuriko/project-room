@@ -5,7 +5,7 @@ export function thinWorkForContext(item) {
   const out=pick(item,'id title state revision mode createdAt updatedAt accountableMemberId verifierMemberId humanDecisionMakerId proposedById externalWriteGrantBy externalWriteGrantFor independentVerificationRequired ownerDecisionRequired supersededBy status stop_requested_at heartbeat_at worker_member_id started_at attempt_count spend_cents round_count tool_calls suspended_by');
   for(const [key,fields] of Object.entries({
     blocker:'reason',
-    claim:'holderId repository ref paths expiresAt status',
+    claim:'holderId repository ref paths expiresAt status pullRequest',
     receipt:'eventId evidenceVersion evidenceUrl producerId producerAttribution reportedById',
     verification:'eventId actorId verifierId result completionEventId evidenceVersion independenceConfirmed',
     decision:'eventId actorId decision completionEventId evidenceVersion',

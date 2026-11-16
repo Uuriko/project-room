@@ -209,7 +209,7 @@ export function autoLinkPullRequest(store, roomId, claimId, { url, source = "unk
 
 // --- webhook delivery journal (poll-fallback input) ----------------------
 
-function readConfig(store, key) {
+export function readConfig(store, key) {
   if (!store?.db || typeof store.db.prepare !== "function") return null;
   try {
     const row = store.db.prepare("SELECT config_json FROM work_claim_config WHERE room_id=?").get(key);
@@ -217,7 +217,7 @@ function readConfig(store, key) {
   } catch { return null; }
 }
 
-function writeConfig(store, key, value, nowMs) {
+export function writeConfig(store, key, value, nowMs) {
   if (!store?.db || typeof store.db.prepare !== "function") return;
   store.db.prepare(`INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)
     ON CONFLICT(room_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`)
@@ -310,7 +310,7 @@ export async function handlePrWebhookPayload(store, payload, { nowMs = Date.now(
 
 // --- poll fallback ---------------------------------------------------------
 
-function githubToken(env) {
+export function githubToken(env) {
   if (!env || typeof env !== "object") return null;
   for (const key of ["GITHUB_TOKEN", "GH_TOKEN"]) {
     const value = env[key];
@@ -319,7 +319,7 @@ function githubToken(env) {
   return null;
 }
 
-async function fetchOpenPulls(repo, { fetchImpl, token, nowMs, deadline }) {
+export async function fetchOpenPulls(repo, { fetchImpl, token, nowMs, deadline }) {
   const [owner, name] = repo.split("/");
   const endpoint = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}` +
     `/pulls?state=open&per_page=${DISCOVERY_PER_PAGE}&sort=updated&direction=desc`;

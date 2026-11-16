@@ -166,6 +166,12 @@ export class RoomClient {
   claimNote(claimId, note, requestId = randomUUID(), listenerToken = this.listenerToken) {
     return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}/update`, { body: { note, requestId }, listenerToken });
   }
+  // Extend the lease on a claim this member holds. A bare heartbeat is enough:
+  // the server's renewal needs no progress message, and refuses a lapsed,
+  // released or foreign claim with a 4xx the caller treats as "stop renewing".
+  renewClaim(claimId, listenerToken = this.listenerToken) {
+    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}/renew`, { body: {}, listenerToken });
+  }
   thread(messageId, {selected = false} = {}) {
     return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(messageId)}/thread${selected ? '?view=message' : ''}`).then(value => {
       if (selected && (value?.messageContextVersion !== 1 || value.roomId !== this.roomId || value.thread?.id !== messageId))

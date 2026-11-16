@@ -55,7 +55,7 @@ export function currentWorkRecord(item) {
   work.started_at = session.started_at;
   work.attempt_count = session.attempt_count;
   work.suspended_by = session.suspended_by;
-  work.claim = pick(item.claim, "holderId repository ref paths acquiredAt expiresAt status releasedAt");
+  work.claim = pick(item.claim, "holderId repository ref paths acquiredAt expiresAt status releasedAt pullRequest");
   work.receipt = pick(item.receipt, "reportedById producerId producerAttribution externalProducer summary evidenceUrl evidenceVersion signedEvidence checksClaimed nextAction eventId nativeText attemptSnapshot");
   work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId");
   work.decision = pick(item.decision, "actorId decision completionEventId evidenceVersion reason eventId");
