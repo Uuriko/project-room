@@ -264,7 +264,7 @@ test('legacy project state charges every Board lookup, including the claim looku
   const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'test-room', token: identity.secret });
   const bases = ['b1', 'b2', 'b3', 'b4', 'b5'];
   for (const id of bases) await client.workClaimCreate({ id, reviewPolicy: 'self_attested' });
-  // 20 waiting tasks x (1 claim lookup + 5 prerequisites) = 120 lookups if unbounded.
+  // 20 waiting tasks x (1 claim lookup + 5 prerequisites) = 120 lookups if unbounded and unshared.
   for (let i = 0; i < 20; i += 1) store.command(identity.secret, 'test-room', { id: crypto.randomUUID(), type: 'work.proposed',
     data: { workItemId: 'task-' + i, title: 'task ' + i, definitionOfDone: 'Done', accountableMemberId: identity.identityId, mode: 'read', dependsOn: bases } });
   const get = store.workClaims.get.bind(store.workClaims); let lookups = 0;
@@ -272,6 +272,7 @@ test('legacy project state charges every Board lookup, including the claim looku
   const state = readProjectState(store, identity.secret, 'test-room');
   store.workClaims.get = get;
   assert.ok(lookups > 0 && lookups <= PREREQUISITE_READS, `${lookups} Board lookups for one read`);
+  assert.equal(lookups, 20 + bases.length, 'one claim lookup per waiting task and one read per distinct shared prerequisite');
   const waiting = state.needsYou.map(entry => entry.waitingOn);
   assert.ok(waiting.length > 0 && waiting.every(value => value === 'unknown' || Array.isArray(value)), 'examined rows name prerequisites; the rest are unknown, never ready');
 });
