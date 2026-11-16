@@ -42,3 +42,24 @@ test('agent directory lists each local setup guide once', async () => {
     assert.equal(html.split(`href="${tool.docsPath}"`).length - 1, 1, tool.docsPath);
   }
 });
+
+test('self-host guide uses the shared copy controls without changing its destination',()=>{
+  const html=agentPages(undefined,{origin:'https://independent.example'}).get(PASTE_PAGE.htmlFile);
+  assert.match(html,/data-copy-prompt="agent-paste-prompt-1" hidden/);
+  assert.ok(html.includes(`<script>${AGENT_PASTE_COPY_SCRIPT}</script>`));
+  assert.match(html,/https:\/\/independent.example\/mcp/);
+});
+
+test('timeout/late completion, pagehide and multiple blocks retain truthful isolated feedback',async()=>{
+  let hide, show;const timers=[];const rows=[1,2].map(i=>({field:{value:'exact '+i,closest:()=>({open:false}),focus(){this.focused=true;},select(){this.selected=true;}},status:{textContent:''},button:{dataset:{copyPrompt:'p'+i},hidden:true,disabled:false,addEventListener(_e,fn){this.click=fn;}}}));
+  const document={querySelectorAll:()=>rows.map(r=>r.button),getElementById:id=>{const r=rows[Number(id[1])-1];return id.endsWith('-status')?r.status:r.field;}};
+  const pending=[];const navigator={clipboard:{writeText:text=>new Promise((resolve,reject)=>pending.push({text,resolve,reject}))}};
+  runInNewContext(AGENT_PASTE_COPY_SCRIPT,{document,navigator,addEventListener:(e,fn)=>{if(e==='pagehide')hide=fn;else show=fn;},setTimeout:fn=>{timers.push(fn);return timers.length;},clearTimeout(){},location:{search:'?room=project-room-lobby',origin:'https://independent.example'},URLSearchParams});
+  const first=rows[0].button.click();await rows[0].button.click();assert.equal(pending.length,1);
+  timers[0]();await first;assert.match(rows[0].status.textContent,/Copy the selected/);assert.equal(rows[0].field.selected,true);
+  pending[0].resolve();await Promise.resolve();assert.match(rows[0].status.textContent,/Copy the selected/);
+  const second=rows[1].button.click();pending[1].resolve();await second;assert.equal(pending[1].text,'exact 2');assert.match(rows[1].status.textContent,/^Copied/);assert.match(rows[0].status.textContent,/Copy the selected/);
+  const leaving=rows[1].button.click();hide();pending[2].reject(Error('denied'));await leaving;assert.equal(rows[1].field.focused,undefined);assert.equal(rows[1].status.textContent,'Copying…');
+  show();const restored=rows[1].button.click();pending[3].resolve();await restored;assert.match(rows[1].status.textContent,/^Copied/);
+  const stale=rows[1].button.click();hide();show();pending[4].resolve();await stale;assert.equal(rows[1].status.textContent,'Copying…');
+});

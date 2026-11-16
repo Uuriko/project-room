@@ -162,6 +162,10 @@ ${body}
 `;
 }
 
+function pastePrompt(text, label, index) {
+  return `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}</label><button type="button" class="copy-prompt" aria-label="Copy prompt: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}" data-copy-prompt="agent-paste-prompt-${index}" hidden>Copy prompt</button><span id="agent-paste-prompt-${index}-status" role="status" aria-live="polite"></span><details class="prompt-preview"><summary>View prompt</summary><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="4" spellcheck="false">${escape(text)}</textarea></details>`;
+}
+
 function instancePages(origin) {
   const workflow = `## Pick up the right work
 
@@ -184,7 +188,7 @@ Use this Room host: ${origin}. Keep your saved connection and the supplied Room 
 ## Connect once
 
 \`\`\`text
-Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. Show required host approval, then call room_check_access and confirm the intended Room, member and permissions. Read context and work addressed to me. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
+Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. If the saved connection is missing, show the host’s Connect or Allow approval and keep setup pending; do not silently enroll. Then call room_check_access and confirm the intended Room, member and permissions. Read context and work addressed to me. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
 \`\`\`
 
 ## Finish one small task
@@ -197,8 +201,8 @@ If blocked, save what is done, what is missing and one next action. A connection
 `;
   const referenceBody = '<details class="guide-section"><summary>Exact tool sequence for pickup, result and review</summary>' + renderMarkdown(workflow) + '</details>';
   const pages = new Map();
-  const pasteBody = renderMarkdown(introduction, { renderCode: (text, label, index) => `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent</label><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="8" spellcheck="false">${escape(text)}</textarea>` });
-  pages.set(PASTE_PAGE.htmlFile, page({ title: 'Connect your agent', description: 'Connect your existing agent to this Room host.', path: PASTE_PAGE.docsPath, body: pasteBody + referenceBody, steps: sections(introduction), origin }));
+  const pasteBody = renderMarkdown(introduction, { renderCode: pastePrompt });
+  pages.set(PASTE_PAGE.htmlFile, page({ title: 'Connect your agent', description: 'Connect your existing agent to this Room host.', path: PASTE_PAGE.docsPath, body: pasteBody + referenceBody, steps: sections(introduction), origin, script: AGENT_PASTE_COPY_SCRIPT }));
   const links = connectSnippets.map(tool => `- [${tool.label}](${origin}${tool.docsPath})`).join('\n');
   const index = introduction;
   pages.set('docs/agents/index.html', page({ title: 'One useful contribution', description: 'Connect once, pick up bounded work, save a result and get it reviewed.', path: '/docs/agents', body: renderMarkdown(index, { renderCode: (text, label) => '<details class="guide-section"><summary>View and select the agent prompt</summary>' + codeBlock(text, label) + '</details>' }) + referenceBody + '<details class="guide-section"><summary>Connection help and tool configuration</summary>' + renderMarkdown(`Read ${origin}/llms.txt for this host’s admission requirements. A private Room needs an invitation or owner approval. Native OAuth also needs a client configured by this host; if unavailable, report setup pending and the exact next action.\n\n` + links) + '</details>', steps: sections(index), origin }));
@@ -239,7 +243,7 @@ export function agentPages(dir = join(sourceRoot(), "docs", "agents"), { origin 
   if (/pri_[A-Za-z0-9_-]{8,}/.test(pasteMd)) throw new Error("paste page contains a secret");
   if (!indexMd.includes(`(${PASTE_PAGE.id}.md)`)) throw new Error("docs/agents/index.md does not link to the paste page");
   const pasteBody = renderMarkdown(pasteMd, { labelPrefix: "Paste block",
-    renderCode: (text, label, index) => `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}</label><button type="button" class="copy-prompt" aria-label="Copy prompt: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}" data-copy-prompt="agent-paste-prompt-${index}" hidden>Copy prompt</button><span id="agent-paste-prompt-${index}-status" role="status" aria-live="polite"></span><details class="prompt-preview"><summary>View prompt</summary><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="4" spellcheck="false">${escape(text)}</textarea></details>` });
+    renderCode: pastePrompt });
   const pasteSections = pasteBody.split(/(?=<h2>)/);
   const compactPasteBody = pasteSections.map((section, index) => index < 2 ? section : section.replace(/^<h2>(.*?)<\/h2>/, '<details class="guide-section"><summary>$1</summary>') + '</details>').join('');
   pages.set(PASTE_PAGE.htmlFile, page({
