@@ -15,6 +15,7 @@ import { Bonds } from "../server/bonds.mjs";
 
 const commands = "POST /api/rooms/{roomId}/commands";
 export const CORE_REST_TWINS = Object.freeze({
+  room_project_state: ["GET /api/rooms/{roomId}/state"],
   room_needs_me: ["GET /api/needs-me"],
   room_read_messages: ["GET /api/rooms/{roomId}/events"],
   room_post_message: [commands, { event: "message.posted" }],
