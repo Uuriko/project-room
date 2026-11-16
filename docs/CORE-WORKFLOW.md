@@ -116,6 +116,10 @@ permissions, instructions or represented work state returns the full current bri
 
 This reuses the existing fingerprinted brief. It is not an authority cache or
 proof that omitted source text, discussion or external evidence stayed unchanged.
+The fingerprint includes the selected read's prerequisite IDs, states and
+satisfaction observations: a prerequisite changing does not need to mutate the
+dependent task to refresh its brief. This remains an observation, not a cached
+permission to start; admission rechecks dependencies.
 Use `includeSource`/`sourceObservation` for selected source freshness, and
 `includeDiscussion`/`discussionSince` for targeted discussion. Follow remaining
 pages before retaining a discussion checkpoint. Result review still needs a fresh
