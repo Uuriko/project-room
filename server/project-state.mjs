@@ -12,10 +12,14 @@ import { nextWorkStep, terminalWork } from "../src/workflow.js";
 import { ownMember } from "../src/events.js";
 import { workRoleHolder } from "./work-context.mjs";
 import { isCurrentRoom } from "./current-room-repository.mjs";
+import { readWorkItem } from "./work-repository.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { parseReceipt } from "./receipts.mjs";
 import { readReceiptSignals } from "./receipt-signals.mjs";
 import { readResponseLatency, latencyLine } from "./response-latency.mjs";
+import { PREREQUISITE_GATED_STEPS, prerequisiteHold } from "../client/begin-work.mjs";
+import { nativePrerequisiteState, boardPrerequisiteState, observePrerequisites } from "./work-item-state.mjs";
+import { boardClaimId } from "./work-item-board.mjs";
 
 export const PROJECT_STATE_VERSION = 1;
 export const PROJECT_STATE_MAX_BYTES = 6144;
@@ -23,6 +27,11 @@ export const PROJECT_STATE_MAX_BYTES = 6144;
 export const RECEIPT_SCAN_EVENTS = 1500;
 export const WORK_PAGE = 8;
 export const WORK_MAX_PAGES = 16; // 128 items; beyond that `complete` is false
+// Prerequisite lookups per read: not-yet-started items examined, and work
+// records read for them. Past either bound a row reports unknown, never ready.
+export const PREREQUISITE_ITEMS = 24;
+export const PREREQUISITE_READS = 96;
+const PRE_START_STEPS = Object.freeze(["accept", ...PREREQUISITE_GATED_STEPS]);
 const CAPS = Object.freeze({ inProgress: 10, blocked: 6, needsYou: 6, needsHuman: 6, mergedNotDeployed: 8, receipts: 4, attention: 5 });
 
 const clip = (text, n) => {
@@ -39,7 +48,10 @@ export { parseReceipt };
 
 // Pure builder. `members` maps id → {displayName, kind}; `items` are work
 // items as the reducers hold them (privacy already applied by the reader).
-export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, live, items, itemsComplete, members, receipts, receiptWindow, attention, latency = null }) {
+// `prerequisites` maps work id → observations ({id,state,satisfied}[]) for
+// not-yet-started work. Omitted entirely (pure callers), rows are unchanged.
+// When supplied, an item without an entry is unknown, not ready.
+export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, live, items, itemsComplete, members, receipts, receiptWindow, attention, latency = null, prerequisites = undefined }) {
   const member = id => (id == null || !members ? null : ownMember(members, id));
   const name = id => (id == null ? null : clip(member(id)?.displayName, 24) ?? String(id).slice(0, 12));
   const nowMs = typeof now === "number" ? now : Date.parse(now);
@@ -56,16 +68,28 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
     const owner = name(item.claim?.status === "active" ? item.claim.holderId : item.accountableMemberId);
     const nextFor = step.memberId == null ? null : name(step.memberId);
     // Null and redundant fields are omitted: this document is read on every wake.
+    // A claim/start step is advice only while every prerequisite is known to be
+    // satisfied. Otherwise the row says what it waits on (ids only where the
+    // viewer may see the task) or that readiness is unknown. Accept stays open.
+    const hold = prerequisites && PRE_START_STEPS.includes(step.action)
+      ? (prerequisites.has(item.id) ? prerequisiteHold(prerequisites.get(item.id)) : prerequisiteHold(null)) : null;
+    const gated = Boolean(hold) && PREREQUISITE_GATED_STEPS.includes(step.action);
+    const waiting = !hold ? {} : !hold.known ? { waitingOn: "unknown" }
+      : item.title == null ? { waitingOn: hold.waitingOn.length + hold.more }
+      : { waitingOn: hold.waitingOn, ...(hold.more ? { waitingOnMore: hold.more } : {}) };
     const row = {
-      id: item.id, title: clip(item.title, 48) ?? "(private)", state: board, owner, next: step.action,
+      id: item.id, title: clip(item.title, 48) ?? "(private)", state: board, owner,
+      next: !gated ? step.action : hold.known ? "wait_prerequisites" : "check_prerequisites", ...waiting,
       ...(nextFor && nextFor !== owner ? { nextFor } : {}), ...(item.handoff?.open ? { handoff: "open" } : {}),
       quietMin: minutes(nowMs, item.updatedAt ?? item.createdAt)
     };
     row._t = Date.parse(item.updatedAt ?? item.createdAt) || 0; // sort key, removed before serialization
     if (board === "accepted" || board === "working") inProgress.push(row);
     if (board === "blocked") blocked.push({ ...row, blockedBy: clip(item.blocker?.reason, 60), ...(item.blocker?.nextAction ? { unblock: clip(item.blocker.nextAction, 40) } : {}) });
-    if (step.needsAttention && step.memberId === viewerId) needsYou.push(row);
-    if (step.needsAttention && step.memberId != null && member(step.memberId)?.kind === "human") needsHuman.push(row);
+    // Known waiting needs nobody yet; unknown readiness still needs a selected read.
+    const attention = step.needsAttention && !(gated && hold.known);
+    if (attention && step.memberId === viewerId) needsYou.push(row);
+    if (attention && step.memberId != null && member(step.memberId)?.kind === "human") needsHuman.push(row);
   }
   // Longest-quiet first (oldest update, then id: stable across reads) inside each list: stale work is what a reader acts on.
   const byQuiet = (a, b) => a._t - b._t || (a.id < b.id ? -1 : 1);
@@ -107,7 +131,7 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
     truncated: {}
   };
   const listed = new Set([...state.inProgress, ...state.blocked].map(row => row.id));
-  const pointer = ({ id, next, nextFor }) => ({ id, next, ...(nextFor ? { nextFor } : {}) });
+  const pointer = ({ id, next, nextFor, waitingOn }) => ({ id, next, ...(waitingOn !== undefined ? { waitingOn } : {}), ...(nextFor ? { nextFor } : {}) });
   state.needsYou = state.needsYou.map(row => (listed.has(row.id) ? pointer(row) : row));
   state.needsHuman = state.needsHuman.map(row => (listed.has(row.id) ? pointer(row) : row));
   const shed = { inProgress: inProgress.length - state.inProgress.length, blocked: blocked.length - state.blocked.length,
@@ -156,6 +180,30 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
         return !held || held.has(viewerId) || workRoleHolder(item, viewerId) ? item : { ...item, title: null, definitionOfDone: null };
       });
     }
+    // Prerequisite observations for not-yet-started work, by the same rule the
+    // selected read and claim/start admission use. Bounded: unexamined or
+    // unreadable items get no entry, which the builder reports as unknown.
+    const prerequisites = new Map(), native = isCurrentRoom(store.db, roomId);
+    let examined = 0, reads = 0;
+    // The viewer's own assignments are examined first so the bound cannot hide them.
+    for (const item of [...items].sort((a, b) => (b.accountableMemberId === viewerId) - (a.accountableMemberId === viewerId))) {
+      if (item.supersededBy || !["proposed", "accepted"].includes(item.state)) continue;
+      if (examined >= PREREQUISITE_ITEMS || reads >= PREREQUISITE_READS) break;
+      examined += 1;
+      try {
+        // Thin native summaries omit dependsOn; read the canonical record.
+        const full = native ? readWorkItem(store.db, roomId, item.id) : item;
+        if (native) reads += 1;
+        if (!full) continue;
+        const ids = native ? full.dependsOn ?? [] : null;
+        if (ids && (ids.length > 16 || reads + ids.length > PREREQUISITE_READS)) continue;
+        if (ids) reads += ids.length;
+        prerequisites.set(item.id, native
+          ? observePrerequisites(ids, id => readWorkItem(store.db, roomId, id), dep => nativePrerequisiteState(dep, now))
+          : observePrerequisites(store.workClaims.get(roomId, boardClaimId(item.id))?.dependsOn ?? full.dependsOn ?? [],
+            id => store.workClaims.get(roomId, id), boardPrerequisiteState));
+      } catch { /* unknown */ }
+    }
     const head = sequence || store.headSequence(roomId);
     // The viewer's history floor clamps the scan like every other read.
     const historyFloor = store.historyFloor(roomId, viewerId, head);
@@ -179,7 +227,7 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
     return buildProjectState({
       roomId, viewerId, ownerId, sequence: head, now, latency,
       live: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID },
-      items, itemsComplete: complete, members, receipts, receiptWindow: { fromSeq: floor + 1, throughSeq: head, source: receiptSource }, attention
+      items, itemsComplete: complete, members, receipts, prerequisites, receiptWindow: { fromSeq: floor + 1, throughSeq: head, source: receiptSource }, attention
     });
   });
 }
