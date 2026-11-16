@@ -26,7 +26,7 @@ export async function createWorkBrief(context) {
     instructions: structuredClone(context.context.charter ?? null),
     progress: { session: pick(work, 'status displayStatus stop_requested_at started_at attempt_count suspended_by'),
       blocker: pick(work.blocker, 'reason nextAction eventId'),
-      handoff: pick(work.handoff, 'open eventId doneSummary nextAction limitReason haltAll'),
+      handoff: pick(work.handoff, 'open eventId at actorId triageMemberId doneSummary nextAction limitReason evidenceUrl evidenceVersion haltAll'),
       next: pick(context.next, 'action label memberId addressedToViewer replacement'),
       budget: structuredClone(context.accessSummary.budget) },
     evidence: { receipt: pick(work.receipt, 'eventId reportedById producerId summary evidenceUrl evidenceVersion nextAction'),
