@@ -218,7 +218,15 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
     for (const item of workItems) {
       if (!item || typeof item !== "object" || typeof item.id !== "string") continue;
       const opp = helpWantedOpportunity(item, id, roomTitle, now);
-      if (opp) opportunities.push(opp);
+      if (opp) {
+        // A public discovery flag is not permission to disclose private work.
+        // Read current privacy independently of the cached public projection.
+        let parties;
+        try { parties = store.privateWorkParties(id, {workIds:[item.id]}); }
+        catch { continue; } // Unknown privacy cannot authorize publication.
+        if (!parties || parties.has(item.id)) continue;
+        opportunities.push(opp);
+      }
     }
   }
 

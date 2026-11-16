@@ -379,3 +379,24 @@ test("feed never serves a stale parsed projection, even when the row is rewritte
   assert.equal(second.opportunities.length, 1);
   assert.equal(second.opportunities[0].title, "Retitled by repair", "no stale cached projection");
 });
+
+test('public opportunities omit private work even after the public feed was cached', async t => {
+  const f = serve(t);
+  const { get } = await started(t, f);
+  f.store.roomDirectory.set(ROOM, 'owner', true);
+  propose(f.store, f.ownerKey, ROOM, 'private-feed', 'PRIVATE-FEED-TITLE');
+  propose(f.store, f.ownerKey, ROOM, 'public-feed', 'Public help');
+  for (const id of ['private-feed', 'public-feed']) openHelp(f.store, f.ownerKey, ROOM, id, new Date(f.now()+3600000).toISOString());
+  assert.match(await (await get('/api/opportunities.json')).text(), /PRIVATE-FEED-TITLE/);
+  const { linkWithProof } = await import('./helpers/link-with-proof.mjs');
+  const recipient = f.store.identities.create('Private recipient');
+  linkWithProof(f.store, f.ownerKey, ROOM, recipient, {displayName:'Private recipient',permissions:[]});
+  f.store.dmConsents.request(ROOM, 'owner', recipient.identityId, 'Private task');
+  f.store.dmConsents.decide(ROOM, recipient.identityId, 'owner', 'approve');
+  f.store.command(f.ownerKey, ROOM, {id:cmdId(),type:'message.posted',data:{messageId:'private-feed-question',workItemId:'private-feed',toMemberId:recipient.identityId,requestKind:'reply',body:'Private request'}});
+  const response = await get('/api/opportunities.json');
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  assert.doesNotMatch(text,/PRIVATE-FEED-TITLE|private-feed/);
+  assert.match(text,/Public help/);
+});

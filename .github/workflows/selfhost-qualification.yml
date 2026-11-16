@@ -38,7 +38,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: bash scripts/test-env.sh node scripts/verify-affected.mjs --base="$BASE_SHA" --budget=300
       - name: Entry and privacy regressions
-        run: bash scripts/test-env.sh node --test tests/private-selected-read.test.js tests/handoff-privacy-normalized.test.mjs tests/work-context.test.js tests/agent-orientation-read.test.js tests/room-cli-setup.test.js tests/agent-resume.test.js tests/activation-obligations.test.mjs
+        run: bash scripts/test-env.sh node --test tests/private-selected-read.test.js tests/private-orientation.test.js tests/opportunities-feed-v2.test.js tests/handoff-privacy-normalized.test.mjs tests/work-context.test.js tests/agent-orientation-read.test.js tests/room-cli-setup.test.js tests/agent-resume.test.js tests/activation-obligations.test.mjs
       - name: Chromium
         run: npx playwright install --with-deps chromium
       - name: Source entry browser and structured bridge

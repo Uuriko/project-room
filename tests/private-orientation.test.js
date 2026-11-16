@@ -6,6 +6,8 @@ import { createRoomServer } from '../server/http.mjs';
 import { readWorkItem } from '../server/work-repository.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { linkWithProof } from './helpers/link-with-proof.mjs';
+import { withheldWorkItem } from '../server/work-context.mjs';
+import { RoomAgentClient } from '../client/room-agent.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 
 // Legacy storage, the real store and the real HTTP route that serves agent
@@ -15,7 +17,7 @@ import { setTier } from '../server/autonomy-tiers.mjs';
 const SENTINEL = /PRIVATE-[A-Z]+-SENTINEL|acme\/private-repo|secret-branch|private-path/g;
 const found = text => [...new Set(text.match(SENTINEL) ?? [])];
 
-async function fixture(t, representation) {
+async function fixture(t, representation, evidenceMode = 'combined') {
   const store = new RoomStore(':memory:');
   store.initialize(initialRoom(), representation === 'legacy' ? {} : {representation});
   const owner = store.issueAccessKey('commons', 'owner');
@@ -39,11 +41,15 @@ async function fixture(t, representation) {
     send(pk, 'claim.acquired', { workItemId: id, expectedRevision: rev(), repository: secret ? 'acme/private-repo' : 'acme/open-repo', ref: secret ? 'secret-branch' : 'open-branch',
       paths: [secret ? 'private-path.js' : 'open.js'], expiresAt: new Date(Date.now() + 3600000).toISOString() });
     send(pk, 'work.started', { workItemId: id, expectedRevision: rev() });
+    if (evidenceMode === 'empty') return;
+    if (evidenceMode !== 'receipt') {
     send(pk, 'work.blocked', { workItemId: id, expectedRevision: rev(), reason: text('BLOCKER'), nextAction: text('UNBLOCK') });
+    if (evidenceMode === 'blocker') return;
     // A handoff that is later closed by restarting: it must not surface from retained history either.
     send(pk, 'work.handoff_recorded', { workItemId: id, expectedRevision: rev(), doneSummary: text('HANDOFF'), nextAction: text('HANDOFFNEXT'), limitReason: text('LIMIT'), toMemberId: triage.identityId });
     send(pk, 'work.blocker_resolved', { workItemId: id, expectedRevision: rev(), resolution: text('RESOLUTION') });
     send(pk, 'work.started', { workItemId: id, expectedRevision: rev() });
+    }
     const body = text('RESULT'), post = send(pk, 'message.posted', { messageId: id + '-result', workItemId: id, body });
     const done = send(pk, 'work.completed', { workItemId: id, expectedRevision: rev(), evidenceKind: 'room_text', evidenceMessageId: id + '-result', evidenceMessageEventId: post.event.id,
       evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: producer.identityId, summary: text('SUMMARY'), nextAction: text('RESULTNEXT'), checksClaimed: [text('CHECK')] });
@@ -56,7 +62,7 @@ async function fixture(t, representation) {
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const read = async (identity, view) => { const response = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons?view=${view}`, { headers: { Authorization: 'Bearer ' + identity.secret } });
     assert.equal(response.status, 200); return response.text(); };
-  return { store, producer, reviewer, observer, triage, read, item };
+  return { store, producer, reviewer, observer, triage, read, item, origin: `http://127.0.0.1:${server.address().port}` };
 }
 
 for (const representation of ['legacy', 'normalized-current-v1']) for (const view of ['orientation', 'work']) {
@@ -75,7 +81,7 @@ test(`${representation} ${view} view: private work is a minimal record for membe
     assert.equal(record.id, 'secret'); assert.equal(record.title, null); assert.equal(record.definitionOfDone, null);
     assert.equal(record.state, f.item('secret').state); assert.equal(record.accountableMemberId, f.producer.identityId); assert.equal(record.verifierMemberId, f.reviewer.identityId);
     assert.equal(record.claim.holderId, f.producer.identityId); assert.equal(Object.hasOwn(record.claim, 'repository'), false); assert.equal(Object.hasOwn(record.claim, 'paths'), false);
-    assert.deepEqual(Object.keys(record.receipt).sort(), ['eventId', 'evidenceVersion', 'producerAttribution', 'producerId', 'reportedById']);
+    assert.equal(record.receipt, null); assert.equal(record.blocker, null);
     assert.equal(Object.hasOwn(record.verification, 'summary'), false); assert.equal(record.verification.result, 'fail');
     // The closed handoff is retained on the record. Its text is gone; so is any retained history list a later revision adds.
     if (representation === 'legacy') {
@@ -99,3 +105,31 @@ test(`${representation} ${view} view: private work is a minimal record for membe
   assert.equal(JSON.stringify([f.item('secret'), f.item('open')]), stored, 'reads redact a copy; stored records are unchanged');
 });
 }
+
+for (const representation of ['legacy', 'normalized-current-v1']) for (const evidenceMode of ['empty','blocker','receipt','combined']) {
+ test(`${representation} ${evidenceMode}: SDK orientation accepts withheld private evidence and preserves authorized work`, async t => {
+  const f = await fixture(t, representation, evidenceMode);
+  for (const identity of [f.observer, f.triage, f.producer, f.reviewer]) {
+   const client = new RoomAgentClient({origin:f.origin,roomId:'commons',memberId:identity.identityId,token:identity.secret});
+   const result = await client.orient();
+   if ([f.observer,f.triage].includes(identity)) {
+    assert.deepEqual(found(JSON.stringify(result)), []);
+    assert.equal(result.work.find(work => work.id === 'open').title, 'open title');
+   } else {
+    assert.equal(result.work.find(work => work.id === 'secret').title, 'PRIVATE-TITLE-SENTINEL');
+    if (representation === 'legacy' && ['receipt','combined'].includes(evidenceMode)) assert.match(JSON.stringify(result), /PRIVATE-SUMMARY-SENTINEL/);
+   }
+  }
+ });
+}
+
+test('withheld record preserves absent/null evidence and removes help invitation scope', () => {
+ for (const item of [{id:'absent'}, {id:'empty',receipt:null,blocker:null,helpWanted:{scope:'PRIVATE-HELP-SENTINEL'}}]) {
+  const result=withheldWorkItem(item);
+  assert.equal(Object.hasOwn(result,'receipt'),Object.hasOwn(item,'receipt'));
+  assert.equal(Object.hasOwn(result,'blocker'),Object.hasOwn(item,'blocker'));
+  assert.equal(result.receipt,item.receipt);
+  assert.equal(result.blocker,item.blocker);
+  assert.equal(Object.hasOwn(result,'helpWanted'),false);
+ }
+});

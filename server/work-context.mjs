@@ -55,11 +55,11 @@ export function withheldWorkItem(item) {
   const { helpWanted: _helpScope, ...rest } = item; // a help invitation's scope text is participant-written
   return { ...rest, title: null, definitionOfDone: null, sourceMessageId: null, labels: [],
     ...(Object.hasOwn(item, "claim") ? { claim: keep(item.claim, "holderId status acquiredAt expiresAt releasedAt") } : {}),
-    ...(Object.hasOwn(item, "receipt") ? { receipt: keep(item.receipt, "reportedById producerId producerAttribution evidenceVersion eventId") } : {}),
+    ...(Object.hasOwn(item, "receipt") ? { receipt: null } : {}),
     ...(Object.hasOwn(item, "receiptHistory") ? { receiptHistory: [] } : {}),
     ...(Object.hasOwn(item, "verification") ? { verification: keep(item.verification, "verifierId result completionEventId evidenceVersion independenceConfirmed eventId") } : {}),
     ...(Object.hasOwn(item, "decision") ? { decision: keep(item.decision, "actorId decision completionEventId evidenceVersion eventId") } : {}),
-    ...(Object.hasOwn(item, "blocker") ? { blocker: keep(item.blocker, "eventId") } : {}),
+    ...(Object.hasOwn(item, "blocker") ? { blocker: null } : {}),
     ...(Object.hasOwn(item, "handoff") ? { handoff: keep(item.handoff, "open eventId at actorId triageMemberId haltAll") } : {}),
     ...(Object.hasOwn(item, "handoffHistory") ? { handoffHistory: [] } : {}) };
 }
