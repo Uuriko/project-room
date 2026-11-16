@@ -5,6 +5,11 @@ import {readCurrentNativeInbox} from './current-native-inbox.mjs';
 import {conversationCursorCodec} from './conversation-sync.mjs';
 import {withCurrentReadContext,readCurrentHead,readCurrentRecord,currentVisibleHorizon,chargeCurrentReadBudget} from './current-room-repository.mjs';
 import {ServiceError} from './service-error.mjs';
+import {enrichNeedsYouQueue,computeNextLine} from './next-line.mjs';
+// Computed `next:` verb per attention kind (closed vocabulary, next-line.mjs):
+// addressed work and replies wait on the holder's review; a direct ask waits
+// on the holder's decision.
+const NEEDS_ME_VERBS={work:'review',mention:'review',dm:'review',reply:'review',direct_ask:'decide'};
 const fail=()=>{throw new ServiceError(409,'stale_needs_me_cursor','Attention source or service changed. Restart needs-me without since.');};
 const clip=value=>String(value??'').replace(/\s+/g,' ').slice(0,140);
 const keys='kind roomId memberId credential head mode minimum after older workCursor conversationDone workDone'.split(' ');
@@ -80,5 +85,14 @@ function readPage(store,secret,roomId,{cursor,after,freshWindow=500,expectedMode
  if(complete&&!visibleThrough)visibleThrough=withCurrentReadContext(store.db,roomId,()=>currentVisibleHorizon(store,roomId,binding.memberId,binding.sequence));
  const nextCursor=complete?null:conversationCursorCodec(store).encode(state);
  if(nextCursor&&nextCursor.length>4096)throw new ServiceError(409,'current_room_context_unavailable','Attention continuation exceeds the existing cursor codec bound; inspect inbox and work separately.');
- return{items,complete,cursor:nextCursor,visibleThrough,coverage:{available:true,mode:'native_bounded',complete,conversation:{complete:conversationComplete,examined,direction:state.mode,range:state.mode==='recent'?{recentEventWindow:freshWindow}:{afterProvided:true}},standingWorkAndRequests:{complete:workComplete},omitted:['ambient bond and peer routing presentation','legacy board presentation'],globalAttentionComplete:false}};
+ // Queue rendering carries the holding actor, each item's `1 of N` position,
+ // and the one computed `next:` line (JSON twin + human line) for this page's
+ // items. Only a complete page may render the terminal form: over a partial
+ // page the items shown are blocking rows, so the computed line names the
+ // first of them rather than claiming `next: none` for unexamined ground.
+ const queue=enrichNeedsYouQueue(items,{holderId:binding.memberId,verbFor:item=>NEEDS_ME_VERBS[item.kind]??'review'});
+ // An empty but incomplete page has one blocking row — the unexamined
+ // remainder — so its computed line is a verify step, never `next: none`.
+ const pending=!complete&&items.length===0?computeNextLine([{id:null,status:'NOT-RUN',verb:'verify',owner:binding.memberId}],{holderId:binding.memberId}):null;
+ return{items:queue.items,nextLine:pending?pending.line:queue.nextLine,nextLineJson:pending?pending.json:queue.nextLineJson,complete,cursor:nextCursor,visibleThrough,coverage:{available:true,mode:'native_bounded',complete,conversation:{complete:conversationComplete,examined,direction:state.mode,range:state.mode==='recent'?{recentEventWindow:freshWindow}:{afterProvided:true}},standingWorkAndRequests:{complete:workComplete},omitted:['ambient bond and peer routing presentation','legacy board presentation'],globalAttentionComplete:false}};
 }
