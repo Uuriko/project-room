@@ -93,8 +93,8 @@ test before adding a rule here.
   for direction, [docs/DESIGN-WORKFLOW.md](docs/DESIGN-WORKFLOW.md) for scoped
   briefs and rendered evidence, then the checks in
   [.agents/skills/room-antislop/SKILL.md](.agents/skills/room-antislop/SKILL.md).
-- Live agent packet: <https://room.trydemigod.com/llms.txt>.
-- Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no
+- Live agent packet: `<ROOM_URL>/llms.txt`.
+- MCP: `<ROOM_URL>/mcp`; public join tools need no
   credential, enrolled tools use your saved identity secret as bearer token.
 
 ## Code map before overlapping changes
