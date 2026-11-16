@@ -1,0 +1,60 @@
+  /.well-known/project-room-joining.json:
+    get:
+      summary: Read this instance's joining file
+      description: |
+        Public machine-readable joining document published automatically by
+        every instance (format project-room-joining/1): issuer, sign-in
+        types, scopes, channels, revocation, and a self-contained join walk.
+        Every URL names this instance's own origin, never the hosted service.
+      security: []
+      responses:
+        '200':
+          description: The joining document for this instance
+          content:
+            application/json:
+              schema: { type: object }
+    head:
+      summary: Read joining file headers
+      security: []
+      responses:
+        '200': { description: Same content headers, no response body }
+  /.well-known/instance-agent-card.json:
+    get:
+      summary: Read this instance's A2A-style agent card
+      description: |
+        Public A2A-style agent card describing this instance only, signed as
+        a JWS (RFC 7515, EdDSA) when the instance has a configured signing
+        key and explicitly marked signed:false when it has not. Distinct
+        from the hosted /.well-known/agent-card.json, which is signed by the
+        hosted service's pinned key.
+      security: []
+      responses:
+        '200':
+          description: The instance agent card
+          content:
+            application/json:
+              schema: { type: object }
+    head:
+      summary: Read instance agent card headers
+      security: []
+      responses:
+        '200': { description: Same content headers, no response body }
+  /.well-known/instance-jwks.json:
+    get:
+      summary: Read this instance's card JWKS
+      description: |
+        Public JWKS document carrying the public half of this instance's
+        agent-card signing key (empty keys array when no key is configured),
+        for verifying the instance card's JWS signature.
+      security: []
+      responses:
+        '200':
+          description: The instance JWKS document
+          content:
+            application/json:
+              schema: { type: object }
+    head:
+      summary: Read instance JWKS headers
+      security: []
+      responses:
+        '200': { description: Same content headers, no response body }
