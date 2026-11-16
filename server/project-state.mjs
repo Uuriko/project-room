@@ -191,17 +191,18 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
       if (examined >= PREREQUISITE_ITEMS || reads >= PREREQUISITE_READS) break;
       examined += 1;
       try {
-        // Thin native summaries omit dependsOn; read the canonical record.
-        const full = native ? readWorkItem(store.db, roomId, item.id) : item;
-        if (native) reads += 1;
-        if (!full) continue;
-        const ids = native ? full.dependsOn ?? [] : null;
-        if (ids && (ids.length > 16 || reads + ids.length > PREREQUISITE_READS)) continue;
-        if (ids) reads += ids.length;
+        // Every lookup is charged before it runs, on both representations: the
+        // canonical record (thin native summaries omit dependsOn) or the Board
+        // card that owns a legacy list, then one read per prerequisite.
+        reads += 1;
+        const source = native ? readWorkItem(store.db, roomId, item.id) : store.workClaims.get(roomId, boardClaimId(item.id));
+        if (native && !source) continue;
+        const ids = source?.dependsOn ?? (native ? [] : item.dependsOn ?? []);
+        if (ids.length > 16 || reads + ids.length > PREREQUISITE_READS) continue;
+        reads += ids.length;
         prerequisites.set(item.id, native
           ? observePrerequisites(ids, id => readWorkItem(store.db, roomId, id), dep => nativePrerequisiteState(dep, now))
-          : observePrerequisites(store.workClaims.get(roomId, boardClaimId(item.id))?.dependsOn ?? full.dependsOn ?? [],
-            id => store.workClaims.get(roomId, id), boardPrerequisiteState));
+          : observePrerequisites(ids, id => store.workClaims.get(roomId, id), boardPrerequisiteState));
       } catch { /* unknown */ }
     }
     const head = sequence || store.headSequence(roomId);
