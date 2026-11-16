@@ -1,3 +1,4 @@
+import {activationObligations, currentActivationObligations} from './activation-obligations.mjs';
 import {readCurrentPinsWindow} from './current-pins.mjs';
 // Room activation pack (quill lane, RC-2026-09-18-040).
 //
@@ -10,7 +11,7 @@ import {readCurrentPinsWindow} from './current-pins.mjs';
 // Reads the room projection through the store passed in; unknown rooms
 // surface the store's own 404 (room_not_found).
 import { roomOrientation } from "../src/work-selectors.js";
-import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
+import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust, ownMember } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
 import { availableClaimsInRoom, memoizeBoardList } from "./available-work.mjs";
@@ -69,6 +70,7 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *       claimAction: { method: "POST", endpoint: string, params: object }
  *     }
  *   ],
+ *   obligations: {items: object[], complete: boolean}, // bounded viewer work, stable ID order; read suggestions only
  *   pinnedResources: [         // pinned messages, pin order
  *     {
  *       messageId: string,
@@ -163,6 +165,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     const pins=store.readTransaction(()=>readCurrentPinsWindow(store,roomSlug,viewerId));
     return withContentTrust({room:{slug:state.room.id,title:state.room.title,state:state.room.archivedAt?'archived':'active',kind:roomKind(state.room),owner:state.room.ownerId},
       members:Object.values(state.members).filter(member=>member.active!==false).map(memberOf),
+      obligations:currentActivationObligations(store,roomSlug,viewerId),
       openWork:Object.values(state.workItems).filter(item=>OPEN_WORK_STATES.has(item.state)).map(item=>workOf(item,new Date(store.now()).toISOString())),
       workWindow,workScope:'workWindow',participationRules:{...roomPolicy(state),trust:roomTrust(state).enabled},coordinationNorms:{...COORDINATION_NORMS},
       pinnedResources:pins.items.map(pinnedOf),pinWindow:{sourceWindow:pins.sourceWindow,page:pins.page},
@@ -187,6 +190,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
     .map(item => workOf(item, now));
   const floor = summaryHistoryFloor(store, roomSlug, viewerId, sequence); // QA4 Q4-SEC-1
+  const obligations = activationObligations(Object.values(state.workItems ?? {}), ownMember(state.members, viewerId), state.room.ownerId, store.now());
   const pack = withContentTrust({
     room: {
       slug: state.room.id,
@@ -198,6 +202,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     orientation: annotateOrientation(roomOrientation(state)),
     members,
     openWork,
+    obligations: {items: obligations.slice(0, 4), complete: obligations.length <= 4},
     openClaims: availableClaimsInRoom(store, roomSlug, { viewerId, boardList }),
     // QA4 Q4-SEC-1: only pins whose message this viewer may read.
     // (Supersedes the audit-fix F-1 pinVisibleToViewer filter: the shared
@@ -271,19 +276,29 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   const around = listed.slice(0, BRIEF_AROUND);
   const you = pack.members.find(member => member.id === viewerId) ?? null;
   const claims = (pack.openClaims ?? []).slice(0, BRIEF_ITEMS).map(claim => ({
-    id: claim.id, title: clip(claim.title, 100), untrusted: true, claimAction: claim.claimAction }));
+    id: claim.id, title: clip(claim.title, 100), untrusted: true,
+    nextRead: {tool: 'room_work_claim_thread', arguments: {claimId: claim.id}} }));
   const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
-    .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
+    .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true, nextRead: {tool: 'room_read_work', arguments: {workItemId: item.id}} }));
   const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
-  const firstClaim = claims[0]?.claimAction;
-  const next = firstClaim ? { why: "claim the top open task", ...firstClaim }
+  const charter = pack.orient?.instructions?.charter;
+  const own = pack.obligations?.items ?? [];
+  const yourWork = own.slice(0, BRIEF_ITEMS).map(item => ({...item, title: clip(item.title, 80)}));
+  const coverage = {complete: pack.obligations?.complete === true && own.length <= BRIEF_ITEMS,
+    order: 'id', nextRead: {tool: 'room_list_work', arguments: {focus: 'all'}},
+    guidance: 'ID order, not priority. Incomplete: list all work through every page, even empty pages. Reads grant no authority.'};
+  const first = yourWork[0];
+  const next = first ? {why: `read your ${first.reason} work`, method: 'GET', endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(first.id)}`}
+    : !coverage.complete ? {why: 'Addressed work coverage is incomplete; inspect remaining work before choosing pickup', method: 'GET', endpoint: `${roomPath}/work-list?focus=all`}
+    : claims[0] ? {why: 'inspect an available claim before choosing work', method: 'GET', endpoint: `${roomPath}/work-claims/${encodeURIComponent(claims[0].id)}/thread`}
     : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
-      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` };
+      : { why: "No pickup selected from this view; read work addressed to you and follow its continuation pages", method: "GET", endpoint: `${roomPath}/work-list?focus=needs_me` };
   const brief = {
     contentTrust: pack.contentTrust,
     view: "brief",
     room: { slug: pack.room.slug, title: clip(pack.room.title, 80), state: pack.room.state },
-    purpose: clip(pack.orientation?.purpose ?? "", 280),
+    purpose: clip(pack.orientation?.purpose ?? charter?.charter?.purpose ?? "", 280),
+    ...(charter ? {purposeSource: {authority: charter.authority, revision: charter.revision, eventId: charter.eventId}} : {}),
     you: you ? { memberId: you.id, handle: clip(you.handle, 40), permissions: you.permissions } : null,
     around,
     aroundMore: listed.length - around.length,
@@ -291,7 +306,9 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     // The window the around[] "recent" label stands for, stated in the
     // payload itself (REGISTER row 59).
     recentWindowMs: BRIEF_ACTIVE_MS,
-    pickUp: [...claims, ...unclaimed],
+    yourWork,
+    yourWorkCoverage: coverage,
+    pickUp: [...claims, ...unclaimed].filter(item => !own.some(work => work.id === item.id)),
     openWorkTotal: pack.workWindow ? null : pack.openWork.length,
     ...(pack.workWindow ? {workWindow: pack.workWindow, workScope: pack.workScope, omitted: pack.omitted} : {}),
     recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)
@@ -305,13 +322,14 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   // Over budget (long ids, multibyte text): shed detail in a fixed order.
   // Each step keeps the brief valid; `truncated` tells the reader to use `full`.
   const shed = [
+    () => { if (brief.yourWork.length) brief.pickUp = []; },
     () => { for (const member of brief.around) member.workingOn = []; },
     () => { brief.recentDecisions = []; },
     () => { while (brief.around.length > 3) { brief.around.pop(); brief.aroundMore += 1; } },
     () => { brief.purpose = clip(brief.purpose, 80); for (const item of brief.pickUp) item.title = clip(item.title, 40); },
     () => { brief.aroundMore += brief.around.length; brief.around = []; },
-    () => { brief.pickUp = brief.pickUp.slice(0, 1); },
-    () => { for (const item of brief.pickUp) delete item.claimAction; },
+    () => { if (brief.yourWork.length > 1) {brief.yourWork = brief.yourWork.slice(0, 1); brief.yourWorkCoverage.complete = false;} },
+    () => { brief.pickUp = brief.pickUp.slice(0, 1); for (const item of brief.pickUp) delete item.nextRead; },
     () => { delete brief.rules; brief.recentDecisions = []; },
   ];
   for (const step of shed) {
@@ -332,7 +350,9 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     aroundCount: brief.around.length + brief.aroundMore,
     quietMembers: brief.quietMembers,
     openWorkTotal: brief.openWorkTotal,
-    next: { method: "GET", endpoint: brief.full, why: "this room's brief is over budget; read the full pack" },
+    yourWork: brief.yourWork.slice(0, 1).map(item => ({...item, title: clip(item.title, 40)})),
+    yourWorkCoverage: {...brief.yourWorkCoverage, complete: false},
+    next: brief.next,
     full: brief.full,
     eventCursor: brief.eventCursor
   };
