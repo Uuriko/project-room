@@ -420,6 +420,17 @@ function applyProvenanceRepair(state, events) {
 }
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+// A private request makes its work private to that request's parties and to the
+// members the work itself names (the rule the room snapshot and project state
+// already apply). A selected read carries the claim scope, evidence, source and
+// discussion, so anyone else is refused rather than served a partly redacted
+// copy. An unreadable privacy record withholds. No new permission is involved.
+function assertSelectedWorkVisible(store, roomId, workItemId, item, viewerId) {
+  let parties;
+  try { parties = store.privateWorkParties(roomId, { workIds: [workItemId] })?.get(workItemId) ?? null; }
+  catch { parties = new Set(); }
+  if (parties && !parties.has(viewerId) && !workRoleHolder(item, viewerId)) fail(403, "work_private", "This work is private to its participants");
+}
 // F5: the bounded pilot caps in one place. The room write paths below enforce
 // them; server/usage-summary.mjs reports them with the remaining headroom.
 // G11 (2026-10-06): muse-room reached 82% of the 4 MB projection and was
@@ -6537,6 +6548,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if(current) {
         if(!Object.hasOwn(current.state.workItems,workItemId))fail(404,'work_not_found','Work item not found in this Room');
         const item=current.state.workItems[workItemId],target=item.supersededBy;
+        assertSelectedWorkVisible(this,roomId,workItemId,item,auth.member.id);
         const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now:this.now(),includeSource,includeOffers,sourceObservation,
           floor:this.historyFloor(roomId,auth.member.id,current.sequence),messageRecords:{get:id=>selectedMessageRecord(this,roomId,id,false)},
           replacementAvailable:validId(target)&&target!==workItemId&&Boolean(readWorkItem(this.db,roomId,target))});
@@ -6567,6 +6579,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         : { room: metadata, members, workItems, ...(replyRequests ? { replyRequests } : {}) };
       const room = { sequence: row.sequence, state }, now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
+      assertSelectedWorkVisible(this, roomId, workItemId, room.state.workItems[workItemId], auth.member.id);
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, sourceObservation, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
         floor: this.historyFloor(roomId, auth.member.id, room.sequence),
         replacementAvailable: (() => {
@@ -6587,6 +6600,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");
       const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
+      assertSelectedWorkVisible(this, roomId, workItemId, room.state.workItems[workItemId], auth.member.id);
       const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit, consistent, resumeToken });
       const anchorId = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.horizon)?.id;
       if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)
@@ -6613,6 +6627,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!row) fail(404, "room_not_found", "Room not found");
       const work = readWorkItem(this.db, roomId, workItemId);
       if (!work) fail(404, "work_not_found", "Work item not found in this Room");
+      assertSelectedWorkVisible(this, roomId, workItemId, work, auth.member.id);
       // The full selected receipt history is needed for withdrawn historical
       // text. Unrelated work and conversation bodies are not result dependencies.
       const state = { room: isCurrentRoom(this.db,roomId) ? readCurrentRecord(this.db,roomId,'metadata','room') : JSON.parse(row.metadata), workItems: { [workItemId]: work } };
