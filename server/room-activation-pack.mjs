@@ -290,7 +290,7 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     requestRead: {tool: 'room_list_work', arguments: {focus: 'needs_me'}},
     guidance: 'ID order, not priority. Follow BOTH reads through every page, even empty. Reads grant no authority.'};
   const first = yourWork[0];
-  const next = first ? {why: `read your ${first.reason} work`, method: 'GET', endpoint: first.kind === 'request' ? `${roomPath}/reply-context?requestMessageId=${encodeURIComponent(first.id)}` : `${roomPath}/work-context?workItemId=${encodeURIComponent(first.id)}`}
+  const next = first ? {why: first.kind === 'request' ? 'read your open reply request' : `read your ${first.reason} work`, method: 'GET', endpoint: first.kind === 'request' ? `${roomPath}/reply-context?requestMessageId=${encodeURIComponent(first.id)}` : `${roomPath}/work-context?workItemId=${encodeURIComponent(first.id)}`}
     : !coverage.complete ? {why: 'Addressed work coverage is incomplete; inspect remaining work before choosing pickup', method: 'GET', endpoint: `${roomPath}/work-list?focus=all`}
     : claims[0] ? {why: 'inspect an available claim before choosing work', method: 'GET', endpoint: `${roomPath}/work-claims/${encodeURIComponent(claims[0].id)}/thread`}
     : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }

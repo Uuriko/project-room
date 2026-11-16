@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {RoomStore} from '../server/store.mjs';
+import {event} from '../src/events.js';
 import {initialRoom} from '../server/bootstrap.mjs';
 import {readWorkItem} from '../server/work-repository.mjs';
 import {textVersion} from '../server/text-results.mjs';
@@ -54,6 +55,7 @@ test('current exact review, authorized decision and failed-review correction use
   const current = f.item('review').receipt;
   f.step('verification.recorded', 'review', {result: 'pass', completionEventId: current.eventId, evidenceVersion: current.evidenceVersion, summary: 'Exact version checked'}, 'reviewer');
   assert.equal(f.brief('owner').yourWork[0].reason, 'decide');
+  assert.equal(f.brief('owner').yourWork[0].nextRead.arguments.includeResult,true);
   assert.deepEqual(f.brief('reviewer').yourWork, []);
 });
 
@@ -136,4 +138,24 @@ test('prerequisite-bearing start is an observation check, not a readiness claim'
   const f=fixture(t);f.propose('prereq',{accountableMemberId:'owner'});f.propose('dependent',{dependsOn:['prereq']});
   f.step('work.accepted','dependent');f.forbidHydration();
   assert.equal(f.brief().yourWork[0].reason,'check_prerequisites');assert.equal(f.brief().yourWork[0].nextRead.tool,'room_read_work');
+});
+
+for (const current of [true,false]) test(`reactivated member cannot see old formal requests (${current?'native':'legacy'})`,t=>{
+  const events=initialRoom();let tick=Date.now()+10000;
+  const add=(type,data)=>events.push(event({roomId:'commons',actorId:'owner',type,data,at:new Date(tick++).toISOString()}));
+  add('member.added',{memberId:'reader',displayName:'Reader',kind:'agent',permissions:[]});
+  add('room.history_visibility_set',{historyVisibility:'since_join'});
+  for(let i=0;i<5;i++)add('message.posted',{messageId:'a-old-'+i,toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'HIDDEN BEFORE REACTIVATION'});
+  add('member.access_changed',{memberId:'reader',expectedMemberRevision:0,active:false,permissions:[]});
+  add('member.access_changed',{memberId:'reader',expectedMemberRevision:1,active:true,permissions:[]});
+  add('message.posted',{messageId:'z-new',toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Visible'});
+  const store=new RoomStore(':memory:');t.after(()=>store.close());store.initialize(events,current?{representation:'normalized-current-v1'}:{});
+  const key=store.issueAccessKey('commons','reader');
+  const b=briefActivationPack(buildActivationPack(store,'commons','reader'),[],store.now(),'reader');
+  assert.ok(!b.yourWork.some(x=>x.id.startsWith('a-old')));assert.doesNotMatch(JSON.stringify(b),/HIDDEN BEFORE REACTIVATION/);
+  if(current){assert.deepEqual(b.yourWork,[]);assert.equal(b.yourWorkCoverage.complete,false);
+    let args=b.yourWorkCoverage.requestRead.arguments,found=[];
+    do{const p=store.currentWorkListing(key,'commons',args);found.push(...p.replyRequests.map(x=>x.id));args=p.page.nextRead?.arguments;}while(args);
+    assert.deepEqual(found,['z-new']);
+  }else assert.equal(b.yourWork[0].id,'z-new');
 });

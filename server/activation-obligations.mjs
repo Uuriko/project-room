@@ -17,6 +17,8 @@ export function activationObligations(items, member, ownerId, now) {
   return items.flatMap(item => {
     const next = nextWorkStep(item, now, ownerId);
     if (next.memberId !== member.id || (!next.needsAttention && next.action !== 'in_progress')) return [];
+    // Thin native summaries omit dependencies. Selected reads resolve waiting vs ready;
+    // never infer executable start/claim readiness from this bounded projection.
     const required = REQUIRED_ACTION[next.action];
     const permitted = !required || workActions(item, member, now).some(([action]) => action === required);
     return [{id: item.id, title: item.title, reason: !permitted ? 'permission_required' : ['claim','start'].includes(next.action) ? 'check_prerequisites' : next.action,
