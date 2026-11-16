@@ -253,6 +253,7 @@ optional.push("server/inbox-collab-routes.mjs"); // Lane C: collab HTTP routes (
 optional.push("server/work-list-page.mjs"); // Shared hosted/stdio work pagination
 optional.push("server/content-trust.mjs"); // structured untrusted markers for member-authored text (leaf; imported by store, http surfaces, MCP)
 optional.push("server/room-activation-pack.mjs"); // quill lane RC-2026-09-18-040: room activation pack (imported by server/http.mjs)
+optional.push("server/activation-obligations.mjs"); // Bounded read-only obligation projection used by room activation.
 optional.push("server/orient.mjs"); // jill lane RC-2026-09-28: orient endpoint builder (imported by server/http.mjs; pure, imports ../src/* only)
 optional.push("server/available-work.mjs"); // E1 AvailableWork projection (imported by server/orient.mjs and server/room-activation-pack.mjs; pure read projection, imports ../src/events.js + server/work-claim-routes.mjs)
 optional.push("server/mcp-call-log.mjs"); // grok/mcp-call-log new modules
