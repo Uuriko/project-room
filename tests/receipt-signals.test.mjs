@@ -82,9 +82,9 @@ test("project state: typed receipts answer when the log holds a deploy anchor, a
   f.store.db.exec("DROP INDEX room_signal_log_receipts; DROP TABLE room_signal_log");
   const text = readProjectState(f.store, f.keys.owner, "commons");
   assert.equal(text.receiptWindow.source, "journal");
-  const core = s => ({ receipts: s.receipts, mergedNotDeployed: s.mergedNotDeployed, lastDeploy: s.live.lastDeploy, smoke: s.live.smoke });
+  const core = s => ({ receipts: s.receipts, delivery: s.delivery });
   assert.deepEqual(core(typed), core(text), "the typed read and the text fallback tell the same story");
-  assert.equal(typed.mergedNotDeployed.count, 1);
+  assert.equal(typed.delivery.mergesPostedAfterDeployReport.count, 1);
 });
 
 test("project state carries one latency line derived from the full latency read", t => {

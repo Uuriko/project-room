@@ -268,7 +268,6 @@ export function latencyLine(doc) {
     ...(w ? { worst: `${w.from} -> ${w.to} (${w.ctx}): ${w.dropped} dropped, ${w.waiting} waiting` } : {}),
     ...(doc.wake?.message?.ackP50Ms != null ? { wakeAckP50Ms: doc.wake.message.ackP50Ms } : {}),
     ...(doc.wake?.turns?.silent ? { silentTurns: doc.wake.turns.silent } : {}),
-    ...(doc.ship?.pending ? { unshipped: doc.ship.pending, oldestUnshippedMin: doc.ship.oldestPendingMin } : {}),
     see: "room_response_latency" };
 }
 
