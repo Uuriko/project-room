@@ -94,11 +94,12 @@ test('partial unavailable attention is explicit and current obligations survive'
 });
 
 test('final changed projection replaces stale obligations', async () => {
+  const prior = await resumeAgent({connection,fetchImpl:transport().fetchImpl});
   const f = transport(url => url.includes('since_version=') ? context({ context_version: 'c'.repeat(64), focusWork: [] }) : undefined);
   const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
   assert.deepEqual(result.obligations, []);
   assert.match(result.contextVersion,/^[a-f0-9]{64}$/);
-  assert.notEqual(result.contextVersion, version);
+  assert.notEqual(result.contextVersion, prior.contextVersion);
 });
 
 test('unchanged context keeps fresh cursors and directs reuse rather than inventing an empty queue', async () => {
@@ -540,4 +541,20 @@ test('resume version binds credential and treats old unscoped server hash as fre
 
 test('missing service origin cannot reuse a context token or send credentials',async()=>{
   let calls=0;await assert.rejects(resumeAgent({connection:{...connection,origin:undefined},sinceVersion:version,fetchImpl:()=>{calls++;}}));assert.equal(calls,0);
+});
+
+import {initialRoom} from '../server/bootstrap.mjs';
+import {event} from '../src/events.js';
+test('normalized HTTP resume also refreshes full work after replies-only output',async t=>{
+  const store=new RoomStore(':memory:'),worker=store.identities.create('Mira');
+  const events=initialRoom();events.push(event({roomId:'commons',actorId:'owner',type:'member.added',data:{memberId:'reader',displayName:'Mira',kind:'agent',permissions:['verify'],identityId:worker.identityId}}));
+  events.push(event({roomId:'commons',actorId:'owner',type:'work.proposed',data:{workItemId:'task',title:'Inspect',definitionOfDone:'Read',accountableMemberId:'reader',mode:'read'}}));
+  store.initialize(events,{representation:'normalized-current-v1'});
+  store.db.prepare('INSERT OR IGNORE INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('commons',worker.identityId,'reader',new Date().toISOString());
+  const server=createRoomServer({store});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));store.close();});
+  const config={origin:'http://127.0.0.1:'+server.address().port,roomId:'commons',memberId:'reader',token:worker.secret};
+  const replies=await resumeAgent({connection:config,focus:'replies'});
+  const full=await resumeAgent({connection:config,sinceVersion:replies.contextVersion});
+  assert.equal(full.connection.status,'credential_accepted');assert.ok(full.obligations.some(w=>w.id==='task'));assert.notEqual(full.contextVersion,replies.contextVersion);
 });
