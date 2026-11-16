@@ -37,7 +37,7 @@ export function agentInviteJoinLink(code, locationLike = globalThis.location) {
 export function agentInviteHandoff(code, locationLike = globalThis.location) {
   const link = agentInviteJoinLink(code, locationLike);
   const hosted = uiText("invite.copy.005", { fragmentA: link });
-  const local = uiText("invite.copy.006", { fragmentA: JSON.stringify(link) });
+  const local = uiText("invite.copy.006", { fragmentA: roomAcpCommand(link, "", locationLike) });
   const mcp = new URL("mcp", `${humanJoinShareBase(locationLike).replace(/\/$/, "")}/`).href;
   const grok = uiText("invite.copy.grok", { fragmentA: link, fragmentB: mcp });
   return { link, code, hosted, local, grok, text: [uiText("invite.copy.007", { fragmentA: hosted, fragmentB: local }), grok].join("\n\n") };
@@ -52,12 +52,12 @@ export async function mintInviteLink({ requestBody, mintOne, locationLike }) {
   return { code, link: agentInviteJoinLink(code, locationLike) };
 }
 
-// One command the friend runs: room-acp served by this Room, with the real
-// invite link and the chosen name filled in. Single quotes are POSIX-escaped.
+// The command carries only the Room address. The single-use invitation is
+// entered separately at the hidden prompt, never copied into argv or history.
 const shellQuote = value => ["'", String(value).replace(/'/g, "'\\''"), "'"].join("");
-export function roomAcpCommand(link, name = "", locationLike = globalThis.location) {
+export function roomAcpCommand(_link, name = "", locationLike = globalThis.location) {
   const base = humanJoinShareBase(locationLike);
-  const parts = [["npx -y --allow-remote=root --package=", base, "/room-acp.tgz room-acp"].join(""), shellQuote(link)];
+  const parts = [["npx -y --allow-remote=root --package=", base, "/room-acp.tgz room-acp join"].join(""), shellQuote(base), "--mcp codex"];
   if (name?.trim()) parts.push("--name", shellQuote(name.trim()));
   return parts.join(" ");
 }

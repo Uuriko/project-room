@@ -13,7 +13,7 @@ import { roomSetupPrompt, roomSetupPromptShort } from "../src/room-setup-prompt.
 import { experimentArm } from "./experiments.mjs";
 import { CONTENT_TRUST } from "./content-trust.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
-import { PUBLIC_PAGE_LASTMOD } from "./public-search.mjs";
+import { PUBLIC_PAGE_LASTMOD, addCspSources } from "./public-search.mjs";
 import { listRoomTemplates, getRoomTemplate } from "./templates.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";
@@ -47,7 +47,7 @@ const SETUP_COPY_SCRIPT = `(() => {
   });
 })();`;
 export { RECEIPTS_PAGE_CSP as PUBLIC_PAGE_CSP };
-export const PUBLIC_ROOM_SETUP_CSP = RECEIPTS_PAGE_CSP.replace('script-src ', `script-src 'sha256-${createHash('sha256').update(SETUP_COPY_SCRIPT).digest('base64')}' `);
+export const PUBLIC_ROOM_SETUP_CSP = addCspSources(RECEIPTS_PAGE_CSP, 'script-src', `'sha256-${createHash('sha256').update(SETUP_COPY_SCRIPT).digest('base64')}'`);
 
 const OG_IMAGE = `${ROOM_ORIGIN}/og/home.png`;
 

@@ -69,7 +69,26 @@ test('default catalog supports task pickup, correction, exact review and owner a
   assert.ok((await call(producer, 'room_list_work', { focus: 'needs_me' })).work.some(work => work.id === workItemId));
   const read = () => call(producer, 'room_read_work', { workItemId });
   assert.equal((await read()).next.action, 'accept');
-  const pickup = (await call(producer, 'room_read_work', { workItemId, brief: true })).continuation;
+  const initialBrief = await call(producer, 'room_read_work', { workItemId, brief: true });
+  const repeatedBrief = await call(producer, 'room_read_work', { workItemId, brief: true, knownBriefVersion: initialBrief.briefVersion });
+  assert.equal(repeatedBrief.briefUnchanged, true);
+  assert.equal(Object.hasOwn(repeatedBrief, 'brief'), false);
+  assert.deepEqual(repeatedBrief.continuation, initialBrief.continuation);
+  assert.ok(JSON.stringify(repeatedBrief).length < JSON.stringify(initialBrief).length * 0.5, 'unchanged reads omit repeated context');
+  console.log('known-brief-fixture', JSON.stringify({fullBytes:Buffer.byteLength(JSON.stringify(initialBrief)),repeatBytes:Buffer.byteLength(JSON.stringify(repeatedBrief)),measurement:'structured response bytes, synthetic fixture'}));
+  const otherViewer = await call(reviewer, 'room_read_work', { workItemId, brief: true, knownBriefVersion: initialBrief.briefVersion });
+  assert.equal(otherViewer.briefUnchanged, undefined, 'versions are bound to the current identity scope');
+  assert.equal(typeof otherViewer.brief, 'string');
+  for (const options of [{brief:false}, {includeResult:true}, {includeDiscussion:true}, {knownBriefVersion:'bad'}]) {
+    const refused = await invoke(producer, 'room_read_work', {workItemId, brief:true, knownBriefVersion:initialBrief.briefVersion, ...options});
+    assert.ok(refused.error || refused.result?.isError, 'incompatible known-brief input is refused');
+  }
+  command('charter-change', 'room.charter_updated', {expectedRevision:0, purpose:'One useful contribution', outputs:'An exact reviewed result', boundaries:'Keep current access checks', escalation:'Report blockers'});
+  const changedContext = await call(producer, 'room_read_work', {workItemId,brief:true,knownBriefVersion:initialBrief.briefVersion});
+  assert.equal(changedContext.revision, initialBrief.revision, 'room instructions can change without work revision changing');
+  assert.notEqual(changedContext.briefVersion, initialBrief.briefVersion);
+  assert.equal(typeof changedContext.brief, 'string');
+  const pickup = changedContext.continuation;
   assert.equal(pickup.tool, 'room_begin_work');
   assert.deepEqual(pickup.inputRequired, []);
   await call(producer, pickup.tool, pickup.arguments);
@@ -130,4 +149,9 @@ test('default catalog supports task pickup, correction, exact review and owner a
   const before = store.room('commons').sequence;
   assert.equal((await call(producer, 'room_submit_text_result', revised.input)).duplicate, true);
   assert.equal(store.room('commons').sequence, before, 'reconnect retry must not duplicate completion');
+  const finalBrief = await call(producer, 'room_read_work', {workItemId,brief:true});
+  const member = store.room('commons').state.members[producer.identityId];
+  command('revoke-after-completion','member.access_changed',{memberId:producer.identityId,expectedMemberRevision:member.revision,permissions:[],active:false});
+  const revokedRead = await invoke(producer,'room_read_work',{workItemId,brief:true,knownBriefVersion:finalBrief.briefVersion});
+  assert.ok(revokedRead.error || revokedRead.result?.isError, 'known content never bypasses fresh membership checks');
 });

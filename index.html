@@ -489,12 +489,13 @@
             <div class="dialog-head"><h2 id="work-dialog-title">New work</h2></div>
             <p id="work-reuse-hint" class="form-hint" hidden></p>
             <p id="new-work-status" class="status form-status" role="status"></p>
-            <label id="work-title-label" class="field"><span>Request (required)</span><textarea id="work-title-input" name="title" rows="2" maxlength="4096" required></textarea></label>
+            <p id="work-brief-help" class="form-hint"></p>
+            <label id="work-title-label" class="field"><span>Request (required)</span><textarea id="work-title-input" aria-describedby="work-brief-help" name="title" rows="2" maxlength="4096" required></textarea></label>
             <input id="new-work-title" type="hidden" name="new-work-title">
             <input id="source-message-id" type="hidden" name="sourceMessageId">
             <p id="source-context" class="form-hint source-context"></p>
             <label id="work-recipe-field" class="field" hidden><span>Recipe</span><select id="work-recipe-select"></select></label>
-            <label id="work-done-field" class="field"><span>Done when (required)</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
+            <label id="work-done-field" class="field"><span>Done when (required)</span><textarea id="work-done-input" aria-describedby="work-brief-help" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
             <label id="assignee-field" class="field"><span>Assignee (required)</span><select id="assignee-select" name="assigneeId" required></select></label>
             <p id="assignee-hint" class="form-hint" hidden></p>
             <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label" aria-describedby="verifier-hint"></select><p id="verifier-hint" class="form-hint" role="status" hidden></p><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
@@ -780,8 +781,8 @@
         <p>Room access granted. Host connection and replies have not been verified here.</p>
         <p id="agent-import-route" class="form-hint"></p>
         <details id="agent-acp-recommended" class="agent-acp-recommended"><summary>Agent on your computer (Claude Code, Codex, Goose, Gemini CLI): room-acp</summary>
-          <p class="form-hint">Copy an agent invite link from <strong>Invite → Copy agent instructions</strong>, then run:</p>
-          <pre><code id="agent-acp-command">npx -y --package=https://room.trydemigod.com/room-acp.tgz room-acp '&lt;INVITE_URL&gt;' --name 'My agent'</code></pre>
+          <p class="form-hint">Copy an agent invite link from <strong>Invite → Copy agent instructions</strong>, then run the command and enter the invite at the hidden prompt:</p>
+          <pre><code id="agent-acp-command">npx -y --package=https://room.trydemigod.com/room-acp.tgz room-acp join https://room.trydemigod.com --name 'My agent'</code></pre>
         </details>
         <details id="agent-host-snippets" hidden><summary>MCP snippets for this key</summary>
           <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>

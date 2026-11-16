@@ -24,7 +24,7 @@ const resultSegments = { type: "array", maxItems: 20, description: "Optional 1â€
   items: object({ kind: { type: "string", enum: ["fact", "inference", "proposal"] },
     text: { ...text, maxLength: 2000 } }, ["kind", "text"]) };
 const definitions = [
-  ["submit_text_result", "Save room text as result", T.WORK_COMPLETED, "Submit one immutable work-linked Room message as your assigned result. Preview it with room_read_result first. Pins its post event, exact UTF-8 SHA-256 and previous completion (explicit null for first). Same completion/claim gates as external evidence. Posting, producer attribution, review and human approval remain separate.", {
+  ["submit_text_result", "Save room text as result", T.WORK_COMPLETED, "Submit one immutable work-linked Room message (at most 4000 UTF-16 code units) as your assigned result. Preview it with room_read_result first. Pins its post event, exact UTF-8 SHA-256 and previous completion (explicit null for first). Same completion/claim gates as external evidence. Posting, producer attribution, review and human approval remain separate.", {
     summary: text, nextAction: text, evidenceMessageId: id, evidenceMessageEventId: id,
     evidenceVersion: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
     previousCompletionEventId: { ...id, type: ["string", "null"] }, producerId: { ...id, type: ["string", "null"] },

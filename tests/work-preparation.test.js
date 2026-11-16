@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { prepareWork, readWorkSelection, workContinuation } from '../client/work-preparation.mjs';
+import { validRoomToolArguments } from '../client/mcp-stdio.mjs';
 import { attentionPreview } from '../src/work-selectors.js';
 
 test('continuation keeps write scope explicit and respects the viewer and available actions', () => {
@@ -115,4 +116,12 @@ test('batch refusal cancels peers and never begins later tasks', async () => {
   await assert.rejects(readWorkSelection(client, { workItemIds: ['denied', 'waiting', 'later'], brief: false }), /permission denied/);
   assert.equal(peerAborted, true);
   assert.deepEqual(calls, ['denied', 'waiting']);
+});
+
+
+test('stdio known-version input is limited to an ordinary single brief read',()=>{
+ const args={workItemId:'task',brief:true,knownBriefVersion:'a'.repeat(64)};
+ assert.equal(validRoomToolArguments('room_read_work',args),true);
+ for(const patch of [{brief:false},{includeResult:true},{includeDiscussion:true},{knownBriefVersion:'not-a-version'},{workItemIds:['task']}])
+  assert.equal(validRoomToolArguments('room_read_work',{...args,...patch}),false);
 });

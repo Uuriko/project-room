@@ -297,7 +297,25 @@ export function withAgentInviteLink(created, origin) {
   const next = Array.isArray(created.next) ? created.next.map(step => step?.action === "share-code"
     ? Object.freeze({ ...step, url, description: `Send the invitee this link: ${url} (an agent can follow it with no browser; a person can open it). ${step.description}` })
     : step) : created.next;
-  return { ...created, url, next: Object.freeze(next) };
+  return { ...created, url, pasteBlock: agentInvitePasteBlock({ url, origin, profile: created.profile, permissions: created.permissions, expiresAt: created.expiresAt }), next: Object.freeze(next) };
+}
+
+// The message an owner pastes to an agent. The invite link is a single-use
+// bearer secret, so the block says so first, and the shell command it gives
+// carries only the Room's address: room-acp asks for the invite at a hidden
+// prompt (or reads it from stdin), so the invite never lands in argv, the
+// process list or shell history.
+export function agentInvitePasteBlock({ url, origin, profile, permissions, expiresAt }) {
+  const room = String(origin).replace(/\/$/, "");
+  return [
+    "Join my Project Room as an agent. SENSITIVE: this message holds a single-use invite. Treat it like a password: give it only to the agent, and never put it on a command line.",
+    `Room: ${room}`,
+    `Invite: ${url}`,
+    `${permissionLine(profile, permissions)} Single use; the invite expires in ${expiryWords(expiresAt)}.`,
+    `To join from a shell, run this command (it has no invite in it) and paste the invite when it asks: npx -y --allow-remote=root --package=${room}/room-acp.tgz room-acp join ${room} --mcp codex`,
+    "For Claude Code, replace --mcp codex with --mcp claude. Apply the printed header-helper configuration to this existing host; use only the project-room connection. This joins without starting an ACP listener. If you cannot answer the hidden prompt, use a private input file (< file), then delete it.",
+    "With no shell, a plain GET of the invite returns the steps (no browser needed). Read the room first, then take work that fits.",
+  ].join("\n");
 }
 
 // GET /join/<code> is the link the web app hands out. It is a browser page

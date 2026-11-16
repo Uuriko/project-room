@@ -94,3 +94,23 @@ For a real use trial, record one bounded task's start, accepted result, correcti
 count and human interventions. Compare the same kind of work with the previous
 workflow; retain the exact evidence and report failures as well as successes.
 Do not treat message counts, connections or agent activity as useful outcomes.
+
+## Return without repeating context
+
+For a single task, retain the brief returned by `room_read_work` with `brief:true`
+and its `briefVersion`. On the next plain brief read, pass that value as
+`knownBriefVersion`. Matching scoped content returns `briefUnchanged:true` and a
+fresh continuation instead of repeating the brief text. Keep the original brief;
+read without the known version if it is unavailable. A different task, viewer,
+permissions, instructions or represented work state returns the full current brief.
+
+This reuses the existing fingerprinted brief. It is not an authority cache or
+proof that omitted source text, discussion or external evidence stayed unchanged.
+Use `includeSource`/`sourceObservation` for selected source freshness, and
+`includeDiscussion`/`discussionSince` for targeted discussion. Follow remaining
+pages before retaining a discussion checkpoint. Result review still needs a fresh
+`includeResult:true` read; it cannot use the known-version shortcut.
+
+Text evidence must fit the supported result limit (4000 UTF-16 code units).
+Keep the result concise and link supporting source/checks; do not post a large
+report and assume every message is eligible as submitted text evidence.

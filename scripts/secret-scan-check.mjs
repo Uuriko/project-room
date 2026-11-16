@@ -304,7 +304,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 
 function runTreeScan() {
   const files = [];

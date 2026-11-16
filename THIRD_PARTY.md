@@ -40,3 +40,10 @@ For a new dependency or imported asset, include its origin, version, license and
 required notices in the same PR. Do not copy competitor code or assets without
 permission merely because they can be viewed online. Report attribution mistakes
 through a repository issue without republishing confidential material.
+
+- **Buzz client metrics:** `client/operation-metrics.mjs` adapts the percentile,
+  bounded-buffer and numeric request summary code from `block/buzz-app` revision
+  `3fca4520a53dc5618c908361e332b84ff45dba6a`,
+  `src/features/developer/client-metrics.ts` (Apache-2.0, Block, Inc.).
+  See `third_party/buzz-metrics/NOTICE` and `LICENSE`. Room records only fixed
+  operation labels and numbers; monitoring is disabled by default.

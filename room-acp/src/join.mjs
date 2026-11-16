@@ -39,6 +39,9 @@ export async function join({ link, displayName, agent = null, permissionApprover
       throw Error("The selected saved connection has no matching Room identity at this origin; this attempt did not redeem an invitation");
     const selection = selectionOf(selected);
     let pending = journal.read();
+    // Native MCP setup may omit a name. Choose a nonsecret distinct default
+    // once, then preserve it across retries of this same invitation.
+    displayName ??= pending?.displayName ?? `Coding agent ${randomUUID().slice(0, 8)}`;
     const legacy = pending !== null && !Object.hasOwn(pending, "targetRoomId");
     if (!pending) {
       pending = { version: 1, apiBase, displayName, requestId: randomUUID(), hostId: defaultHostId(), agent, permissionApproverId,

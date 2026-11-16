@@ -43,12 +43,18 @@ export function publicBuildLastmod(buildId = BUILD_ID) {
   return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== match[1] ? null : match[1];
 }
 export const PUBLIC_PAGE_LASTMOD = publicBuildLastmod();
-// Compare and docs/agents documents ship no first-party scripts. Cloudflare
-// injects its Web Analytics beacon at the edge, so script-src and
-// connect-src name the manual beacon host. publicPageCsp adds only the exact
-// auto-injected same-origin endpoint; default-src and every other directive
-// stay unchanged. /about is the one exception: aboutPageCsp below.
-export const PUBLIC_SEARCH_CSP = "default-src 'none'; script-src https://static.cloudflareinsights.com; style-src 'unsafe-inline'; connect-src https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// Compare and docs/agents documents ship no first-party scripts, so script-src
+// and connect-src start as 'none'; no third-party analytics host is named.
+// Pages that need one exact script or connection add it with addCspSources.
+// /about is the one exception: aboutPageCsp below.
+export const PUBLIC_SEARCH_CSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// Add sources to one directive of a policy. A directive that is exactly
+// 'none' becomes the new sources (so 'none' never sits beside real sources);
+// otherwise the sources are prepended to the existing list.
+export function addCspSources(policy, directive, ...sources) {
+  const added = sources.join(" ");
+  return policy.replace(new RegExp(`(^|; )${directive} ([^;]*)`), (_, lead, list) => `${lead}${directive} ${list.trim() === "'none'" ? added : `${added} ${list}`}`);
+}
 // The /about front door ships exactly one first-party script
 // (src/front-door.js), which freshens the hero's live counters from exactly
 // one feed (GET /api/public/front-door). Its policy names those two absolute
@@ -59,26 +65,23 @@ export const PUBLIC_SEARCH_CSP = "default-src 'none'; script-src https://static.
 export function aboutPageCsp(origin) {
   const url = new URL(origin);
   if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) throw new TypeError("Exact HTTP(S) public page origin required");
-  return publicPageCsp(origin, PUBLIC_SEARCH_CSP)
-    .replace("script-src ", () => `script-src ${url.origin}/src/front-door.js `)
-    .replace("connect-src ", () => `connect-src ${url.origin}/api/public/front-door `);
+  return addCspSources(addCspSources(publicPageCsp(origin, PUBLIC_SEARCH_CSP), "script-src", `${url.origin}/src/front-door.js`),
+    "connect-src", `${url.origin}/api/public/front-door`);
 }
 // The CSP a public search page is served under: the shared locked-down
 // policy, with /about's two path-pinned additions.
 export function publicSearchPageCsp(pathname, origin) {
   if (pathname === "/about") return aboutPageCsp(origin);
   const csp = publicPageCsp(origin, PUBLIC_SEARCH_CSP);
-  return pathname === "/docs/agents/paste" ? csp.replace("script-src ", `script-src 'sha256-${AGENT_PASTE_COPY_HASH}' `) : csp;
+  return pathname === "/docs/agents/paste" ? addCspSources(csp, "script-src", `'sha256-${AGENT_PASTE_COPY_HASH}'`) : csp;
 }
-// Use only a trusted, exact configured/validated served origin, never a
-// forwarded Host header. An absolute path source (without a trailing slash)
-// allows /cdn-cgi/rum and its query variants, not arbitrary same-origin APIs.
-// CSP does not enforce path constraints after redirects, so the endpoint must
-// remain a direct collector; host restrictions still apply to redirect targets.
+// The policy a public page is served under. It validates the served origin
+// (a trusted, exact configured origin, never a forwarded Host header) and adds
+// nothing to the policy: no analytics endpoint is allowed.
 export function publicPageCsp(origin, policy = PUBLIC_SEARCH_CSP) {
   const url = new URL(origin);
   if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) throw new TypeError("Exact HTTP(S) public page origin required");
-  return policy.replace(/\bconnect-src([^;]*)/, (_, sources) => `connect-src${sources} ${url.origin}/cdn-cgi/rum`);
+  return policy;
 }
 
 // Static browser 404. 404.html is the same document.

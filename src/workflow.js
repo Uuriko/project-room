@@ -151,8 +151,7 @@ export function nextWorkStep(item, now = Date.now(), ownerId = null) {
 }
 
 // PR20's presentation adapter delegates to the same next-step model as the API.
-export function workStatus(item, now = Date.now()) {
-  const next = nextWorkStep(item, now);
+export function workStatus(item, now = Date.now(), next = nextWorkStep(item, now)) {
   const labels = {
     superseded: "Replaced", triaged_handoff: "Handoff open", accept: "Awaiting acceptance", start: "Accepted", claim: "Scope needed",
     in_progress: "Working · reported", revise: "Blocked", unknown: "Needs reconciliation",
@@ -222,9 +221,8 @@ const NEXT_ACTION = Object.freeze({
 
 // One primary action from the current next step. Other actions stay available
 // behind More. Release and renew stay on the scope record, not in this row.
-export function presentedWorkActions(item, member, now = Date.now()) {
+export function presentedWorkActions(item, member, now = Date.now(), next = nextWorkStep(item, now)) {
   const available = workActions(item, member, now).filter(([action]) => !["release", "renew"].includes(action));
-  const next = nextWorkStep(item, now);
   const actionId = NEXT_ACTION[next.action] ?? null;
   const match = actionId ? available.find(([action]) => action === actionId) : null;
   if (!match) return { primary: null, more: available, nextAction: next.action, nextLabel: next.label };
@@ -236,8 +234,8 @@ export function presentedWorkActions(item, member, now = Date.now()) {
   };
 }
 
-export function renderWorkActions(item, member, { now = Date.now(), busy = false, esc = value => String(value ?? ""), workId = item?.id } = {}) {
-  const presented = presentedWorkActions(item, member, now);
+export function renderWorkActions(item, member, { now = Date.now(), busy = false, esc = value => String(value ?? ""), workId = item?.id, next } = {}) {
+  const presented = presentedWorkActions(item, member, now, next);
   const button = (action, label, prominence) => `<button type="button" class="button ${prominence}" data-action="${esc(action)}" data-work-id="${esc(workId)}" data-focus-key="work-action:${esc(workId)}:${esc(action)}"${busy ? " disabled" : ""}>${esc(label)}</button>`;
   // Render human result entry with the card itself: selection can mount a card
   // without another room-state sync. Keep authorization in workActions above.

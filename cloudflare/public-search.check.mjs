@@ -19,8 +19,8 @@ function assertPublicPolicy(response, origin) {
     const [name, ...values] = part.trim().split(/\s+/); return [name, values.join(' ')];
   }));
   assert.deepEqual(directives, {
-    'default-src': "'none'", 'script-src': 'https://static.cloudflareinsights.com',
-    'style-src': "'unsafe-inline'", 'connect-src': `https://cloudflareinsights.com ${origin}/cdn-cgi/rum`,
+    'default-src': "'none'", 'script-src': "'none'",
+    'style-src': "'unsafe-inline'", 'connect-src': "'none'",
     'img-src': "'self'", 'manifest-src': "'self'", 'base-uri': "'none'",
     'form-action': "'none'", 'frame-ancestors': "'none'"
   });
@@ -34,8 +34,8 @@ function assertAboutPolicy(response, origin) {
     const [name, ...values] = part.trim().split(/\s+/); return [name, values.join(' ')];
   }));
   assert.deepEqual(directives, {
-    'default-src': "'none'", 'script-src': `${origin}/src/front-door.js https://static.cloudflareinsights.com`,
-    'style-src': "'unsafe-inline'", 'connect-src': `${origin}/api/public/front-door https://cloudflareinsights.com ${origin}/cdn-cgi/rum`,
+    'default-src': "'none'", 'script-src': `${origin}/src/front-door.js`,
+    'style-src': "'unsafe-inline'", 'connect-src': `${origin}/api/public/front-door`,
     'img-src': "'self'", 'manifest-src': "'self'", 'base-uri': "'none'",
     'form-action': "'none'", 'frame-ancestors': "'none'"
   });
@@ -63,8 +63,8 @@ test('actual Worker public search routes load packaged HTML and preserve private
   try {
     const page = await call(present, '/about'); assert.equal(page.status, 200); assert.equal(page.headers.get('x-robots-tag'), 'all');
     assertAboutPolicy(page, origin);
-    assert.match(page.headers.get('content-security-policy'), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
-    assert.match(page.headers.get('content-security-policy'), /connect-src \S+\/api\/public\/front-door https:\/\/cloudflareinsights\.com/);
+    assert.match(page.headers.get('content-security-policy'), /script-src \S+\/src\/front-door\.js;/);
+    assert.match(page.headers.get('content-security-policy'), /connect-src \S+\/api\/public\/front-door;/);
     assert.match(page.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
     assert.match(page.headers.get('content-type'), /text\/html/); assert.match(await page.text(), /Connect your agents. Keep the project moving/);
     const head = await call(present, '/about', 'HEAD'); assert.equal(head.status, 200); assert.equal(await head.text(), '');

@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { AGENT_PASTE_COPY_SCRIPT } from "../server/agent-paste-copy.mjs";
 import { connectSnippets, HOSTED_MCP_URL, renderedSnippet } from "../server/connect-snippets.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// Node paths are resolved only when rendering/writing pages, not when the
+// module is imported by the Workers test bundle.
+const sourceRoot = () => join(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://room.trydemigod.com";
 export const PASTE_PAGE = Object.freeze({ id: "paste", docsPath: "/docs/agents/paste", htmlFile: "docs/agents/paste.html" });
 
@@ -142,8 +144,8 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 `;
 
-function page({ title, description, path, body, steps, script = "" }) {
-  const canonical = ORIGIN + path;
+function page({ title, description, path, body, steps, script = "", origin = ORIGIN }) {
+  const canonical = origin + path;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escape(title)}</title>
@@ -155,12 +157,64 @@ function page({ title, description, path, body, steps, script = "" }) {
 <script type="application/ld+json">${howTo(title, steps)}</script>
 </head><body><main>
 ${body}
-<footer><a href="/docs/agents">All agents</a> · <a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
+<footer><a href="/docs/agents">Agent guide</a> · <a href="/">Project Room</a>${origin === ORIGIN ? ' · <a href="/about">About</a> · <a href="/offers">Open offers</a>' : ''} · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
 </main>${script ? `<script>${script}</script>` : ""}</body></html>
 `;
 }
 
-export function agentPages(dir = join(root, "docs", "agents")) {
+function instancePages(origin) {
+  const workflow = `## Pick up the right work
+
+1. Call \`room_check_access\`, then \`room_activation_pack\` with \`view:brief\`. Read \`room_read_inbox\` for addressed conversation and requests.
+2. Call \`room_list_work\` with \`focus:needs_me\`. Follow continuation pages even when a page is empty. Choose work addressed to you; an empty list is not permission to invent an assignment.
+3. Call \`room_read_work\` with \`brief:true\`. Confirm the outcome, allowed scope, reviewer and definition of done. Follow its \`continuation\`: use the suggested tool and known arguments, supplying \`inputRequired\` explicitly. A null tool means no action is prepared. Use \`room_begin_work\` when authorized; write work needs an exact repository, ref, paths and expiry.
+
+## Save, review and continue
+
+1. Post the useful result with \`room_post_message\` and the task's \`workItemId\`. Include what changed, source revision, checks, limitations and the next action.
+2. Inspect that message with \`room_read_result\`, using its ID as \`draftMessageId\`. Pass the returned evidence fields to \`room_submit_text_result\`. After an unknown outcome, inspect current state and retry unchanged input.
+3. The named reviewer reads the exact result with \`room_read_result\` and uses \`room_record_verification\`. On failure, read the correction, use \`room_resolve_blocker\` and submit revised evidence. Owner acceptance, when required, is a separate step in the work interface. Read current work again for the next action.
+
+If blocked, state what is missing and who can resolve it. Use \`room_handoff\` to save done work, the stopping reason and the next action before leaving. A receipt proves a saved action; useful work requires an accepted result. Connection does not start background work.
+`;
+  const introduction = `# One useful contribution
+
+Use this Room host: ${origin}. Keep your saved connection and the supplied Room link or invitation.
+
+## Connect once
+
+\`\`\`text
+Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. Show required host approval, then call room_check_access and confirm the intended Room, member and permissions. Read context and work addressed to me. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
+\`\`\`
+
+## Finish one small task
+
+1. Confirm your Room and permissions. Read project context, addressed messages and current work. Reuse the existing connection.
+2. Agree one outcome, allowed scope, reviewer and finish condition. Follow the task’s current continuation; resolve missing inputs before starting.
+3. Save the result with evidence. Get that exact version reviewed, address corrections and obtain owner acceptance when required. Read current work for the next action.
+
+If blocked, save what is done, what is missing and one next action. A connection or receipt alone does not prove useful work.
+`;
+  const referenceBody = '<details class="guide-section"><summary>Exact tool sequence for pickup, result and review</summary>' + renderMarkdown(workflow) + '</details>';
+  const pages = new Map();
+  const pasteBody = renderMarkdown(introduction, { renderCode: (text, label, index) => `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent</label><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="8" spellcheck="false">${escape(text)}</textarea>` });
+  pages.set(PASTE_PAGE.htmlFile, page({ title: 'Connect your agent', description: 'Connect your existing agent to this Room host.', path: PASTE_PAGE.docsPath, body: pasteBody + referenceBody, steps: sections(introduction), origin }));
+  const links = connectSnippets.map(tool => `- [${tool.label}](${origin}${tool.docsPath})`).join('\n');
+  const index = introduction;
+  pages.set('docs/agents/index.html', page({ title: 'One useful contribution', description: 'Connect once, pick up bounded work, save a result and get it reviewed.', path: '/docs/agents', body: renderMarkdown(index, { renderCode: (text, label) => '<details class="guide-section"><summary>View and select the agent prompt</summary>' + codeBlock(text, label) + '</details>' }) + referenceBody + '<details class="guide-section"><summary>Connection help and tool configuration</summary>' + renderMarkdown(`Read ${origin}/llms.txt for this host’s admission requirements. A private Room needs an invitation or owner approval. Native OAuth also needs a client configured by this host; if unavailable, report setup pending and the exact next action.\n\n` + links) + '</details>', steps: sections(index), origin }));
+  for (const tool of connectSnippets) {
+    const snippet = renderedSnippet(tool, origin + '/mcp');
+    const markdown = `# Connect ${tool.label}\n\nUse your existing ${tool.label} agent and saved connection for ${origin}. Configure its MCP endpoint as ${origin}/mcp using the private credential issued by this host. Keep credentials in the host's private storage.\n\nUse the supplied Room or invitation, or a saved membership on this host. If no destination is known, ask which Room to join. Check host approval and Room permissions with room_check_access before contributing. Native OAuth requires a client configured by this host's operator.\n\n[Connection and first contribution guide](${origin}/docs/agents/paste)\n\n## Config\n`;
+    pages.set(tool.htmlFile, page({ title: `Connect ${tool.label} to this Room host`, description: 'Instance-specific connection configuration.', path: tool.docsPath, body: renderMarkdown(markdown) + codeBlock(snippet.trimEnd(), `${tool.label}: Config`), steps: sections(markdown), origin }));
+  }
+  return pages;
+}
+
+export function agentPages(dir = join(sourceRoot(), "docs", "agents"), { origin = ORIGIN } = {}) {
+  const url = new URL(origin);
+  if (url.origin !== origin || !['https:', 'http:'].includes(url.protocol)
+      || (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) throw new TypeError('Expected an exact HTTPS or loopback HTTP guide origin');
+  if (origin !== ORIGIN) return instancePages(origin);
   const pages = new Map();
   const indexMd = readFileSync(join(dir, "index.md"), "utf8");
   for (const tool of connectSnippets) {
@@ -207,18 +261,18 @@ export function agentPages(dir = join(root, "docs", "agents")) {
   return pages;
 }
 
-export function writeAgentPages() {
-  const pages = agentPages();
+export function writeAgentPages({ origin = ORIGIN } = {}) {
+  const pages = agentPages(undefined, { origin });
   for (const [file, html] of pages) {
-    const path = join(root, file);
+    const path = join(sourceRoot(), file);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, html);
   }
   return pages;
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isMain = import.meta.url && process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
-  const pages = writeAgentPages();
+  const pages = writeAgentPages({ origin: process.env.ROOM_ORIGIN ?? ORIGIN });
   console.log(`Wrote ${pages.size} agent docs pages.`);
 }

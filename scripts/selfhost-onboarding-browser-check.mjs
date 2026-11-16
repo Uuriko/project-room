@@ -77,7 +77,15 @@ test("self-host: empty database signup, chat, restart and fresh-browser login pr
   assert.match(roomId, /^personal-/);
   const message = "I can reproduce the invitation bug and share a fix.";
   await page.locator("#message-input").fill(message);
+  // A visible optimistic row is not a committed write. Wait for the real
+  // command receipt before navigation can abort the in-flight request.
+  const committed = page.waitForResponse(response => response.request().method() === "POST"
+    && new URL(response.url()).pathname === `/api/rooms/${roomId}/commands`
+    && response.request().postDataJSON()?.type === "message.posted");
   await page.locator("#message-input").press("Enter");
+  const receipt = await committed;
+  assert.equal(receipt.status(), 201);
+  assert.equal((await receipt.json()).event.data.body, message);
   const sent = page.locator("[data-message-record-id]").filter({ hasText: message });
   await sent.waitFor();
   assert.equal(await sent.count(), 1);
