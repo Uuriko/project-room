@@ -4,9 +4,10 @@ import ProjectRoomKit
 @MainActor final class Application: NSObject, NSApplicationDelegate {
     var room: RoomWindow?
     let initialURL: URL
-    init(url: URL) { initialURL = url }
+    let selfHostedOrigin: URL?
+    init(url: URL, selfHostedOrigin: URL?) { initialURL = url; self.selfHostedOrigin = selfHostedOrigin }
     func applicationDidFinishLaunching(_ notification: Notification) {
-        room = RoomWindow(url: initialURL)
+        room = RoomWindow(url: initialURL, selfHostedOrigin: selfHostedOrigin)
         let menu = NSMenu()
         let appItem = NSMenuItem(); menu.addItem(appItem)
         let appMenu = NSMenu(title: "Project Room"); appItem.submenu = appMenu
@@ -45,19 +46,35 @@ import ProjectRoomKit
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             // Authentication callbacks belong to ASWebAuthenticationSession.
-            // Public links use the canonical HTTPS Room URL and current auth.
-            if RoomLocation.allowed(url) { room?.open(url); room?.show() }
+            // Incoming links may navigate only within the already selected origin.
+            if let room, RoomLocation.sameOrigin(url, room.origin) { room.open(url); room.show() }
         }
     }
 }
 
 MainActor.assumeIsolated {
 let args = CommandLine.arguments
-let selected = args.firstIndex(of: "--url").flatMap { index in index + 1 < args.count ? URL(string: args[index + 1]) : nil } ?? URL(string: "https://room.trydemigod.com")!
-guard RoomLocation.allowed(selected) else { fputs("Only the first-party Room origin or a local development server is allowed.\n", stderr); exit(2) }
+func argument(_ name: String) -> String? {
+    let matches = args.indices.filter { args[$0] == name }
+    guard matches.count <= 1 else { fputs("Duplicate Room argument.\n", stderr); exit(2) }
+    guard let index = matches.first else { return nil }
+    guard index + 1 < args.count, !args[index + 1].hasPrefix("--") else {
+        fputs("Missing Room argument value.\n", stderr); exit(2)
+    }
+    return args[index + 1]
+}
+let originArgument = argument("--self-hosted-origin")
+let selfHostedOrigin = originArgument.flatMap { URL(string: $0) }
+if originArgument != nil && (selfHostedOrigin == nil || !RoomLocation.validSelfHostedOrigin(selfHostedOrigin!)) {
+    fputs("Self-hosted origin must be an HTTPS root origin without credentials, query, or fragment.\n", stderr); exit(2)
+}
+let destination = argument("--url") ?? originArgument ?? "https://room.trydemigod.com"
+guard let selected = URL(string: destination), RoomLocation.allowed(selected, selfHostedOrigin: selfHostedOrigin) else {
+    fputs("Destination must match the explicitly selected origin, or use the default hosted/local development policy.\n", stderr); exit(2)
+}
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
-let delegate = Application(url: selected)
+let delegate = Application(url: selected, selfHostedOrigin: selfHostedOrigin)
 app.delegate = delegate
 app.run()
 
