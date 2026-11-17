@@ -183,8 +183,8 @@ Evidence: `src/work-packet.js:46-70`; `src/work-reducers.js` (`completeWork`, `r
 ### E. Attention
 
 Actionable obligations are surfaced with their reasons and a concrete next call. Notifications are deduplicated, and unchanged context is not resent. Presence, runner activity, and message receipt are never treated as acknowledgement or completion; request states are derived and keep "needs input" and "stale" distinct from answered. This contract introduces no wake mechanism, queue, automatic reassignment, or polling loop.
-**Status: EXISTS AND VERIFIED.**
-Evidence: `server/current-needs-me.mjs` (messageId dedupe; item `next` calls); `server/work-context.mjs:124,150`; `server/request-states.mjs:8,40`; `tests/current-needs-me-attention.test.mjs` 4/4.
+**Status: EXISTS AND VERIFIED, with one defective case.** Deduplication holds for replies against mentions/DMs and for unchanged-context reads, but a targeted DM that also explicitly mentions its recipient is returned twice by the normalized attention reader — once as a mention, once as a DM (`server/current-native-inbox.mjs:160-163` adds it to both collections; `server/current-needs-me.mjs:38-40` deduplicates replies against mentions/DMs, not mentions against DMs). That case is EXISTS BUT DEFECTIVE; the rest of this section is verified as stated. (Correction recorded 2026-11-16: the overlap case was found by an independent review probe after the original marking; the original probe covered tagged DMs and reply overlap, not DM-plus-mention.)
+Evidence: `server/current-needs-me.mjs` (messageId dedupe; item `next` calls); `server/work-context.mjs:124,150`; `server/request-states.mjs:8,40`; `tests/current-needs-me-attention.test.mjs` 4/4; the DM-plus-mention duplication reproduced by a store-level probe against this section's base.
 
 ### F. External evidence
 
