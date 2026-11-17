@@ -41,10 +41,11 @@ function cursorBinding(auth, roomId, source, head) {
 function pageCursor(store, binding, cursor) {
   const codec = conversationCursorCodec(store);
   const previous = cursor ? codec.decode(cursor) : null;
-  if (cursor && (!previous || typeof previous.after !== "string"
+  if (cursor && (!previous || typeof previous.after !== "string" || !Number.isSafeInteger(previous.at)
     || Object.keys(binding).some(key => JSON.stringify(binding[key]) !== JSON.stringify(previous[key]))))
     return null;
-  return { after: previous?.after ?? "", encode: after => codec.encode({ ...binding, after }) };
+  const at = previous?.at ?? store.now();
+  return { after: previous?.after ?? "", at, encode: after => codec.encode({ ...binding, at, after }) };
 }
 
 function workRows(items, auth, room, roomId, now) {
@@ -72,7 +73,7 @@ function workPage(store, roomId, auth, room, cursor) {
     return {
       coverage: window.hasMore ? "partial" : "complete",
       evaluatedThrough: currentVisibleHorizon(store, roomId, auth.member.id, head.sequence),
-      items: workRows(visible, auth, room, roomId, store.now()),
+      items: workRows(visible, auth, room, roomId, position.at),
       nextRead: window.hasMore ? read(roomId, "work", position.encode(window.after)) : null
     };
   }, { maxRecords: 512 });
@@ -95,7 +96,7 @@ function legacyWorkPage(store, roomId, auth, room, cursor) {
   const more = rows.length > PAGE_SIZE;
   return {
     coverage: more ? "partial" : "complete",
-    items: workRows(visible, auth, room, roomId, store.now()),
+    items: workRows(visible, auth, room, roomId, position.at),
     nextRead: more ? read(roomId, "work", position.encode(ids.at(-1))) : null
   };
 }

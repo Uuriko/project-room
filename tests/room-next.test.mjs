@@ -13,6 +13,9 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
   test(`room next uses the same private-view boundary through MCP and CLI (${representation})`, async t => {
     const f = await privateWorkFixture(t, representation);
     const before = f.stored();
+    const room = f.store.room;
+    f.store.room = () => { throw new Error("room next hydrated the whole Room"); };
+    t.after(() => { f.store.room = room; });
     const owner = await f.mcp(f.producer, "room_next");
     assert.equal(owner.ok, true, owner.text);
     assert.equal(owner.value.viewerId, f.producer.id);
@@ -143,4 +146,38 @@ test("formal requests paginate independently with no work, and closed requests c
   assert.ok(!closed.value.responseActions?.length);
   const stale = await f.mcp(f.observer, reply.tool, { ...reply.arguments, body: "Read and answered." });
   assert.equal(stale.ok, false);
+});
+
+test("a selected successor does not disclose a private prerequisite's state", async t => {
+  const f = await privateWorkFixture(t, "normalized-current-v1");
+  f.send(f.owner, "work.proposed", {
+    workItemId: "successor", title: "Successor", definitionOfDone: "Save a result",
+    accountableMemberId: f.observer.id, mode: "read", dependsOn: ["secret"]
+  });
+  f.send(f.observer.key, "work.accepted", { workItemId: "successor", expectedRevision: f.rev("successor") });
+  const result = await f.mcp(f.observer, "room_read_work", { workItemId: "successor" });
+  assert.equal(result.ok, true, result.text);
+  assert.deepEqual(result.value.dependencies, [{ id: "secret", state: "unknown", satisfied: false }]);
+  assert.equal(result.value.next.action, "wait_prerequisites");
+  assert.deepEqual(privateMarkers(result.text), []);
+});
+
+test("compare first useful entry with the existing three reads", async t => {
+  const f = await privateWorkFixture(t, "normalized-current-v1");
+  const calls = await Promise.all([
+    f.mcp(f.producer, "room_activation_pack", { view: "brief" }),
+    f.mcp(f.producer, "room_list_work", { focus: "needs_me" }),
+    f.mcp(f.producer, "room_list_requests", { direction: "incoming", status: "open" })
+  ]);
+  assert.ok(calls.every(call => call.ok), calls.map(call => call.text).join("\n"));
+  const compact = await f.mcp(f.producer, "room_next");
+  assert.equal(compact.ok, true, compact.text);
+  assert.deepEqual(compact.value.work.items.map(row => row.id).sort(), calls[1].value.work.map(row => row.id).sort());
+  assert.deepEqual(compact.value.requests.items.map(row => row.id), calls[2].value.requests.map(row => row.id));
+  assert.equal(compact.value.work.coverage, calls[1].value.page.hasMore ? "partial" : "complete");
+  assert.equal(compact.value.requests.coverage, calls[2].value.page.hasMore ? "partial" : "complete");
+  t.diagnostic(JSON.stringify({
+    control: { calls: calls.length, wireBytes: calls.reduce((sum, row) => sum + Buffer.byteLength(row.text), 0) },
+    next: { calls: 1, wireBytes: Buffer.byteLength(compact.text) }
+  }));
 });

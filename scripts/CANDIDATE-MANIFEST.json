@@ -189,7 +189,7 @@
     "src/work-reducers.js": "sha256:ab5275949b4c3efbf2474390d46b4fdff1777e13c30675db23457a008abef65d",
     "src/work-selectors.js": "sha256:eeda5f25e3cbfd632c6b89387eadd96accbcc998a37fd7cf6cb2ef94889ec9c4",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
-    "src/workflow.js": "sha256:aec781f5613024ef1a49f3d0108b40aa848ecbb82e66c975f57e0200dccfbb55",
+    "src/workflow.js": "sha256:a9d9d38357c0414b6eae6d0830952006837549ae716ace0f616c111b74640b01",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
     "strings/en.js": "sha256:09905d58aefa8be3b47aba5ca337531c47ee3ea852dee7dd90a05ff5c9373af1",
     "strings/en.json": "sha256:83299cf1a4bd0efe32febae42056319e4578664f3f260162019950ec72b940c2"
