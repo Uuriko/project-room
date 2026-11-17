@@ -495,22 +495,34 @@ export function initializeCurrentRoom(store,state,events,{adoptExisting=null}={}
   });
 }
 // One command authenticates the same principal several times (token binding,
-// sponsor, identity link, then the command's own actor). Inside a single read
-// context and transaction, a repeated read of one member's authority returns
-// the same verified rows unless this connection has written since, so it is
-// answered from the first read. Four conditions, all required: a context that
-// asked for it (today only the command path; read paths keep their measured
-// costs and reservations), a caller-owned context budget, an open transaction
-// (other connections cannot change what this one sees), and an unchanged
-// SQLite mutation counter (this connection has not written). Any write, including a membership or permission change,
-// moves the counter and the next read is verified from storage again. Nothing
-// is kept past the context. Each caller gets its own copy.
+// sponsor, identity link, then the command's own actor). Until the command
+// first writes, a repeated read of one member's authority returns the same
+// verified rows, so it is answered from the first read.
+//
+// Reuse is allowed only while every one of these holds, and it ends for good
+// at the first that fails; it is never switched back on within a context:
+// - the context asked for it when it opened its budget (today only the
+//   command path; read paths keep their measured costs and reservations);
+// - a transaction is open, so no other connection can change what this one
+//   sees;
+// - this connection has not written since the context opened. SQLite's
+//   mutation counter is compared with its value at that moment. The counter
+//   moves on every write and never moves back, including when a savepoint
+//   rolls the write back. So a value read after a write must not be kept: it
+//   would still match the counter after a rollback had undone the write.
+//   Stopping at the first difference means every kept value was read, and is
+//   returned, with nothing written in between.
+// A context opened by store.transaction or store.command sits lexically inside
+// any savepoint that began before it, so such a savepoint cannot roll back
+// while the context is alive. Nothing is kept past the context. Each caller
+// gets its own copy.
+const mutationCount=db=>{const n=db.prepare('SELECT total_changes() AS n').get().n;return Number.isSafeInteger(n)&&n>=0?n:null;};
 function reusableMemberAuthority(db,b) {
-  if(!b?.reuseMemberAuthority||contextBudgets.get(db)!==b||!db.isTransaction)return null;
-  const changes=db.prepare('SELECT total_changes() AS n').get().n;
-  if(!Number.isSafeInteger(changes)||changes<0)return null;
-  if(b.memberAuthorityChanges!==changes){b.memberAuthorityChanges=changes;b.memberAuthority=new Map();}
-  return b.memberAuthority;
+  if(!b?.reuseMemberAuthority||contextBudgets.get(db)!==b)return null;
+  if(!db.isTransaction||b.memberAuthorityBaseline===null||mutationCount(db)!==b.memberAuthorityBaseline){
+    b.reuseMemberAuthority=false;b.memberAuthority=null;return null;
+  }
+  return b.memberAuthority??=new Map();
 }
 export function currentRoomAuthority(db,roomId,{memberId=null,activeOnly=false}={}) {
   const b=contextBudgets.get(db)??budget();
@@ -519,7 +531,7 @@ export function currentRoomAuthority(db,roomId,{memberId=null,activeOnly=false}=
   const head=readCurrentHead(db,roomId,b);if(!head)return null;
   if(memberId!==null){
     const authority=currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
-    // Re-check after the read: only a read that ran with no write underneath it is kept.
+    // Checked again after the read: a value is kept only if nothing was written while it was read.
     if(reuse&&reusableMemberAuthority(db,b)===reuse)reuse.set(reuseKey,structuredClone(authority));
     return authority;
   }
@@ -1372,7 +1384,7 @@ export function withCurrentReadContext(db,roomId,operation,{maxRecords=200,reuse
   if(![200,512,1024].includes(maxRecords))throw Error('Unsupported internal current read reservation');
   if(!isCurrentRoom(db,roomId))return operation();
   // Only the context that opens the budget may ask for authority reuse; an inner context inherits the outer one unchanged.
-  const previous=contextBudgets.get(db);if(!previous)contextBudgets.set(db,Object.assign(budget(maxRecords),reuseMemberAuthority===true?{reuseMemberAuthority:true}:{}));
+  const previous=contextBudgets.get(db);if(!previous)contextBudgets.set(db,Object.assign(budget(maxRecords),reuseMemberAuthority===true?{reuseMemberAuthority:true,memberAuthorityBaseline:mutationCount(db)}:{}));
   try{return operation(contextBudgets.get(db));}finally{if(!previous)contextBudgets.delete(db);}
 }
 export function readCurrentHistoryFloor(db,roomId,memberId) {

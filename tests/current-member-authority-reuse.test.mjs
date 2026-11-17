@@ -83,3 +83,74 @@ test('there is no reuse outside a transaction, without the opt-in, or across con
     assert.ok(b.records > 20, 'a new context starts by verifying from storage');
   }));
 });
+
+// Codex's review of 64f6bd11: SQLite's mutation counter does not move back on
+// rollback. If reuse were only "cleared and refilled" after a write, a read
+// inside a savepoint would be stored under the moved counter and still match
+// it after the savepoint rolled back. Reuse therefore ends for good at the
+// first write the context observes, counted from when the context opened.
+const access = (f, permissions, id) => f.store.command(f.ownerKey, 'commons', { id, type: 'member.access_changed',
+  data: { memberId: 'reviewer', expectedMemberRevision: f.read().members.reviewer.revision, active: true, permissions } });
+const rolledBack = (f, operation) => assert.throws(() => f.store.transaction(() => { operation(); throw new Error('roll this back'); }, { isolated: true }), /roll this back/);
+
+test('a permission change that rolls back never survives in a later read (grant, then revocation)', t => {
+  const f = fixture(t);
+  f.store.transaction(() => f.reusing(() => {
+    assert.deepEqual(f.read().members.reviewer.permissions, ['verify']);
+    rolledBack(f, () => {
+      access(f, ['verify', 'accept_work'], 'temporary-grant');
+      assert.deepEqual(f.read().members.reviewer.permissions, ['verify', 'accept_work'], 'inside the savepoint the grant is visible');
+      assert.deepEqual(f.read().members.reviewer.permissions, ['verify', 'accept_work']);
+    });
+    assert.deepEqual(f.read().members.reviewer.permissions, ['verify'], 'the rolled-back grant is gone');
+    assert.deepEqual(f.read().members.reviewer.permissions, ['verify']);
+  }, { maxRecords: 1024 }));
+  f.store.transaction(() => f.reusing(() => {
+    rolledBack(f, () => {
+      access(f, [], 'temporary-revocation');
+      assert.deepEqual(f.read().members.reviewer.permissions, []);
+    });
+    assert.deepEqual(f.read().members.reviewer.permissions, ['verify'], 'the rolled-back revocation is undone');
+  }, { maxRecords: 1024 }));
+  assert.deepEqual(f.read().members.reviewer.permissions, ['verify'], 'nothing was persisted');
+});
+
+test('the first read may happen inside the savepoint: a write before any read still ends reuse', t => {
+  const f = fixture(t);
+  f.store.transaction(() => f.reusing(() => {
+    rolledBack(f, () => {
+      access(f, ['verify', 'accept_work'], 'grant-before-first-read');
+      assert.deepEqual(f.read().members.reviewer.permissions, ['verify', 'accept_work']);
+    });
+    assert.deepEqual(f.read().members.reviewer.permissions, ['verify']);
+  }, { maxRecords: 1024 }));
+});
+
+test('nested savepoints: an inner rollback inside an outer rollback, then a committed change, are each read as stored', t => {
+  const f = fixture(t);
+  f.store.transaction(() => f.reusing(b => {
+    assert.deepEqual(f.read().members.reviewer.permissions, ['verify']);
+    rolledBack(f, () => {
+      access(f, ['verify', 'accept_work'], 'outer-grant');
+      rolledBack(f, () => {
+        access(f, ['verify', 'accept_work', 'complete_work'], 'inner-grant');
+        assert.deepEqual(f.read().members.reviewer.permissions, ['verify', 'accept_work', 'complete_work']);
+      });
+      assert.deepEqual(f.read().members.reviewer.permissions, ['verify', 'accept_work'], 'only the inner change rolled back');
+    });
+    assert.deepEqual(f.read().members.reviewer.permissions, ['verify']);
+    // A change that commits inside the same context is seen, and reuse stays off afterwards.
+    f.store.transaction(() => access(f, ['verify', 'complete_work'], 'kept-grant'), { isolated: true });
+    assert.deepEqual(f.read().members.reviewer.permissions, ['verify', 'complete_work']);
+    const before = b.records;
+    f.read();
+    assert.ok(b.records - before > 1, 'after any write the context verifies every read from storage');
+  }, { maxRecords: 1024 }));
+  // The next transaction starts clean and reads what was committed.
+  f.store.transaction(() => f.reusing(b => {
+    assert.deepEqual(f.read().members.reviewer.permissions, ['verify', 'complete_work']);
+    const afterFirst = b.records;
+    f.read();
+    assert.equal(b.records - afterFirst, 1, 'a fresh context with no write reuses again');
+  }));
+});
