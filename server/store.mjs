@@ -7108,7 +7108,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
       const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
         .map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
-      const brief = buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, H, startAfter, C, memberId: auth.member.id });
+      // Private work the reader is outside: every scanned row keeps its place,
+      // so the continuation below is unchanged, and loses its payload text.
+      const outsideWork = this.privateWorkEventOutside(roomId, auth.member.id, { workItems: room.state.workItems ?? {} });
+      const viewerRows = rows.map(row => outsideWork(row.event) ? { ...row, event: withheldWorkEvent(row.event) } : row);
+      const brief = buildReturnBrief({ sequence: room.sequence, workItems: this.privateWorkStateForViewer(roomId, room.state, auth.member.id).workItems, rows: viewerRows, H, startAfter, C, memberId: auth.member.id });
       const identityId = this.bonds.identityForMember(roomId, auth.member.id);
       const isOwner = auth.member.id === room.state.room.ownerId;
       // Derive continuation from scanned rows before removing private events:

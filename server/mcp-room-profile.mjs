@@ -40,7 +40,7 @@ import { handleWorkClaims } from "./work-claim-routes.mjs";
 import { handoffPacketEnabled, buildHandoffPacket, collectDecisions, DECISION_TYPES, decisionWindowStart } from "./handoff-packet.mjs";
 import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
-import { claimThread } from "./claim-thread.mjs";
+import { claimThreadForViewer } from "./claim-thread.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { validId, ownMember, publicPage, joinLink, isRoomArchived, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep, workActions } from "../src/workflow.js";
@@ -792,7 +792,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
     const viewerId = store.authenticate(secret, roomId).member.id;
     const item = store.workClaims.get(roomId, args.claimId);
     if (!item) throw new ServiceError(404, "work_claim_not_found", `No work claim "${args.claimId}" in this room`);
-    return claimThread(store, roomId, store.workClaimsForViewer(roomId, viewerId, [item])[0]);
+    return claimThreadForViewer(store, roomId, item, viewerId);
   }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET
