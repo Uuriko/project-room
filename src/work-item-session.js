@@ -254,6 +254,16 @@ export function sessionClaimConflict(item, actorId, nowMs = Date.now()) {
 export function presentedSessionStatus(item) {
   const session = sessionRecord(item);
   if (session.status === SESSION_STATUSES.QUEUED && item?.state === "completed") return SESSION_STATUSES.DONE;
+  // The native lifecycle commands move the work state without writing this
+  // ledger, so natively started work still reads queued here and the packet
+  // contradicts its own state. When the ledger shows no start was ever
+  // recorded, present the start the work state proves — processing, the
+  // status session.started itself writes — never active, which would claim
+  // a live heartbeat no native command records. Ledger facts (started_at,
+  // attempt_count, recordedStatus) are untouched: no session start exists
+  // to report, so none is invented.
+  if (session.status === SESSION_STATUSES.QUEUED && session.started_at === null && session.attempt_count === 0
+    && item?.state === "working") return SESSION_STATUSES.PROCESSING;
   return session.status;
 }
 
