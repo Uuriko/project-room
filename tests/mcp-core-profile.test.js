@@ -63,6 +63,14 @@ test("default tools/list is the short core profile and every listed name is lega
     roomId: "ada-den", title: "Ada den", purpose: "Core profile", kind: "personal", displayName: "Ada"
   });
 
+  const initialized = await rpc(origin, "initialize", { protocolVersion: "2025-11-25", capabilities: {},
+    clientInfo: { name: "agent-entry", version: "1" } }, ada.secret);
+  const instructions = (await initialized.json()).result.instructions;
+  assert.match(instructions, /room_list_work\(focus=needs_me\).*room_list_requests/);
+  assert.match(instructions, /room_read_work\(brief=true\).*continuation/);
+  assert.match(instructions, /room_read_request.*responseActions/);
+  assert.doesNotMatch(instructions, /public_work|room-acp|room_read_inbox/);
+
   const listed = await rpc(origin, "tools/list", undefined, ada.secret);
   const body = await listed.json();
   const names = namesOf(body);
