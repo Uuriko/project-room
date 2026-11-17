@@ -204,14 +204,19 @@ export function paintClaimChat(state, list) {
 }
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
+// The chip compares this Room server's own build with the latest main commit
+// GitHub reports for the repository the server is built from. It is not the
+// deployment state of the project being developed in this room, and it never
+// reads member-posted receipts. The label comes from the two full shas, never
+// from a server-sent count, and a held (stale) read can lag a fresh deploy or a
+// new main commit, so it stays "not compared".
+const LIVE_NOTE = "Compares this Room server's own build with the latest main commit on GitHub. It does not show whether your project is deployed anywhere.";
 function liveLabel(status) {
-  // The server sends behind = 0 when live and main match and null otherwise,
-  // never a count, so a known mismatch has to be read from the two shas. A
-  // held (stale) read can lag a fresh deploy, so it stays unknown.
-  if (status && status.behind === 0) return "Live matches main";
-  if (status && typeof status.behind === "number" && status.behind > 0) return "Live is behind main";
-  if (status && !status.stale && FULL_SHA.test(status.live ?? "") && FULL_SHA.test(status.main ?? "") && status.live !== status.main) return uiText("board.live.differs");
-  return "Deploy status unknown";
+  if (status && !status.stale && FULL_SHA.test(status.live ?? "") && FULL_SHA.test(status.main ?? "")) {
+    if (status.live === status.main) return uiText("board.live.matches");
+    return typeof status.behind === "number" && status.behind > 0 ? uiText("board.live.behind") : uiText("board.live.differs");
+  }
+  return uiText("board.live.unknown");
 }
 
 // room_read_board / room_acquire_claim / room_renew_claim / room_release_claim
@@ -974,7 +979,7 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   // A failed refresh keeps the stale board but must still say so, with retry.
   const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
   const loadingNote = loading ? uiText(all.length ? "board.loading.002" : "board.loading.001") : "";
-  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
+  return `${needsMe}${form}<div class="board-head"><p class="live-chip" title="${escapeHtml(LIVE_NOTE)}">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
 }
 
 function staleDonePage(claims, now) {

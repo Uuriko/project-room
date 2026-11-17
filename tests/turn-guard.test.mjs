@@ -1,4 +1,4 @@
-// turn.completed + advisory reply guard on wake ack, and the ship (merge -> prod smoke) context.
+// turn.completed + advisory reply guard on wake ack, and the reported-delivery counts in the latency read.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -6,7 +6,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { WAKE_STALE_PRUNE_MS } from "../server/agent-heartbeats.mjs";
 import { createTestClock } from "./helpers/test-clock.mjs";
 import { REPLY_GUARD_NOTE, REPLY_WINDOW_EVENTS } from "../server/turn-guard.mjs";
-import { buildShipContext, buildWakeContext, readResponseLatency, latencyLine } from "../server/response-latency.mjs";
+import { buildReportedDelivery, buildWakeContext, readResponseLatency, latencyLine } from "../server/response-latency.mjs";
 import { recordReceiptSignal } from "../server/receipt-signals.mjs";
 import { verifySignalChain } from "../server/signal-log.mjs";
 
@@ -74,7 +74,7 @@ test("never a false silent: non-message kinds, the cron door and an unreachable 
   assert.equal(turns().length, before, "the stale-prune door never records a turn");
 });
 
-test("ship context: merge to first good prod deploy after it, pending, oldest pending, last deploy", () => {
+test("reported delivery: counts member posts, pairs nothing, and says unknown when no good deploy post exists", () => {
   const T = Date.UTC(2026, 10, 12, 12, 0, 0), MIN = 60_000;
   const r = (seq, min, parsed) => ({ seq, at: new Date(T + min * MIN).toISOString(), actorId: "m", parsed });
   const receipts = [
@@ -84,13 +84,14 @@ test("ship context: merge to first good prod deploy after it, pending, oldest pe
     r(6, 30, { kind: "deploy", sha: "aaaaaaaa", smoke: "ok" }),
     r(5, 10, { kind: "merged", pr: 1, sha: "aaaaaaaa" })
   ];
-  const ship = buildShipContext(receipts, T + 160 * MIN);
-  assert.deepEqual(ship, { merged: 3, shipped: 1, pending: 2, oldestPendingMin: 120, mergeToProdP50Ms: 20 * MIN, mergeToProdP90Ms: 20 * MIN, lastDeploy: "failed" });
-  assert.equal(buildShipContext([], T), null);
-  assert.equal(buildShipContext([r(1, 1, { kind: "ci", pr: 1, sha: "aaaaaaaa", verdict: "passed" })], T), null);
+  assert.deepEqual(buildReportedDelivery(receipts, T + 160 * MIN), { evidence: "member-reported", verified: false, mergeReports: 3, deployReports: 2,
+    lastDeployReport: "failed", mergeReportsAfterGoodDeployReport: 2, oldestMergeReportAfterGoodDeployMin: 120 });
+  assert.equal(buildReportedDelivery([r(5, 10, { kind: "merged", pr: 1, sha: "aaaaaaaa" })], T).mergeReportsAfterGoodDeployReport, null);
+  assert.equal(buildReportedDelivery([], T), null);
+  assert.equal(buildReportedDelivery([r(1, 1, { kind: "ci", pr: 1, sha: "aaaaaaaa", verdict: "passed" })], T), null);
 });
 
-test("latency read carries ship from real receipts, and the whole document stays inside the byte cap", t => {
+test("latency read carries reported delivery from real receipts, and the whole document stays inside the byte cap", t => {
   const { f, clock } = setup(t);
   const at = () => new Date(clock.now()).toISOString();
   const post = (body, seq) => recordReceiptSignal(f.store.db, { roomId: "commons", at: at(), actorId: "producer", body, eventId: `e${seq}`, journalSeq: seq });
@@ -98,10 +99,11 @@ test("latency read carries ship from real receipts, and the whole document stays
   post("PROD DEPLOY aaaaaaaa · strict smoke success · live smoke success", 102); clock.advance(5 * 60_000);
   post("MERGED #2 bbbbbbbb · second", 103); clock.advance(5 * 60_000);
   const doc = readResponseLatency(f.store, f.keys.owner, "commons");
-  assert.equal(doc.ship.shipped, 1); assert.equal(doc.ship.pending, 1); assert.equal(doc.ship.mergeToProdP50Ms, 10 * 60_000);
-  assert.equal(doc.ship.oldestPendingMin, 5);
+  assert.equal(doc.ship, undefined, "no merge-to-prod pairing by posting order");
+  assert.deepEqual([doc.reportedDelivery.mergeReports, doc.reportedDelivery.deployReports, doc.reportedDelivery.mergeReportsAfterGoodDeployReport], [2, 1, 1]);
+  assert.equal(doc.reportedDelivery.oldestMergeReportAfterGoodDeployMin, 5);
   assert.equal(doc.wake, undefined, "receipts alone add no wake section");
   assert.ok(Buffer.byteLength(JSON.stringify(doc)) <= 6144);
-  assert.equal(latencyLine(doc).unshipped, 1);
+  assert.equal(latencyLine(doc).unshipped, undefined, "project state does not restate message-order merge→deploy pairing as fact; nor does the full latency read");
   assert.equal(buildWakeContext([{ type: "turn.completed", ts_ms: 1, detail: JSON.stringify({ rp: 1 }) }]).turns.completed, 1);
 });

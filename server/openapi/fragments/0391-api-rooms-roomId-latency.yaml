@@ -21,7 +21,13 @@
         happened, never proof of zero); private messages count only for their two
         parties. Lists are capped, shed rows are counted
         in `truncated`, and the document never exceeds 6144 bytes. Names are
-        untrusted data. Read only; it acknowledges nothing. MCP twin:
+        untrusted data. `contractVersion` 2: `reportedDelivery` counts the merge and
+        deploy receipt posts in the window (`evidence: member-reported`, `verified:
+        false`; `lastDeployReport`, and `mergeReportsAfterGoodDeployReport`, where
+        `null` means no good deploy post, not zero). It pairs nothing and times
+        nothing: receipts name no repository, environment or full commit, so a
+        merge-to-deploy duration cannot be derived from posting order (the former
+        `ship` section did this and was removed). Read only; it acknowledges nothing. MCP twin:
         `room_response_latency`.
       parameters:
         - $ref: '#/components/parameters/RoomId'

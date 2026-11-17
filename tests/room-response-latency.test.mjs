@@ -148,7 +148,7 @@ test("read: REST on a real room; private pairs stay private, and reading appends
   const before = f.store.room("commons").sequence;
   const origin = `http://127.0.0.1:${server.address().port}`;
   const asProducer = await (await fetch(`${origin}/api/rooms/commons/latency`, { headers: { Authorization: `Bearer ${f.keys.producer}` } })).json();
-  assert.equal(asProducer.contractVersion, 1);
+  assert.equal(asProducer.contractVersion, 2);
   assert.ok(Buffer.byteLength(JSON.stringify(asProducer)) <= LATENCY_MAX_BYTES);
   assert.equal(asProducer.totals.mention.answered, 1, "the reply stamp closed the public mention");
   assert.equal(asProducer.totals.dm.n, 1);

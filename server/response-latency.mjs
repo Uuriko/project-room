@@ -24,10 +24,10 @@
 // room_signal_log that feeds `wake` is the one close port: server/signal-log.mjs.)
 import { ownMember } from "../src/events.js";
 import { ACK_WINDOW_MS } from "./request-states.mjs";
-import { readReceiptSignals } from "./receipt-signals.mjs";
+import { readReceiptSignals, withoutRedactedPosts } from "./receipt-signals.mjs";
 import { isCurrentRoom, currentRoomOwnerAuthority, readCurrentRecord, withCurrentReadContext } from "./current-room-repository.mjs";
 
-export const LATENCY_VERSION = 1;
+export const LATENCY_VERSION = 2; // 2: `ship` (merge->prod pairing by posting order) replaced by `reportedDelivery`
 export const LATENCY_MAX_BYTES = 6144;
 // One call reads at most this many journal rows (plus one indexed probe per
 // message for mention rows). Daily Durable Object rows_read is the scarce
@@ -173,31 +173,30 @@ export function buildWakeContext(rows, { scan = LATENCY_WAKE_SCAN } = {}) {
   return { rows: rows.length, since: iso(rows.at(-1).ts_ms), complete: read < scan, ...(turns.completed ? { turns } : {}), ...out };
 }
 
-// Pure. receipts: readReceiptSignals output (newest first). Merge -> prod smoke:
-// a merge ships at the first good PROD DEPLOY posted after it. Reports shipped /
-// pending counts, the oldest pending age, merge-to-prod p50/p90 and how the latest
-// deploy ended. Counts only what the typed receipts hold (the window is honest).
-export function buildShipContext(receipts, nowMs) {
+// Pure. receipts: readReceiptSignals output (newest first). Receipts are member
+// posts: they name no repository, environment or full commit, so a merge post is
+// never paired with a later deploy post and no merge-to-prod duration, "shipped"
+// or "pending" verdict is derived (posting order is not delivery chronology).
+// What remains is counted as reports: how many merge and deploy posts the window
+// holds, the outcome the latest deploy/rollback post claimed, and how many merge
+// posts follow the latest good deploy post (null: no good deploy post, unknown).
+export function buildReportedDelivery(receipts, nowMs) {
   if (!receipts?.length) return null;
   const asc = [...receipts].sort((a, b) => a.seq - b.seq);
   const merges = asc.filter(r => r.parsed.kind === "merged");
-  const deploys = asc.filter(r => r.parsed.kind === "deploy");
+  const deploys = asc.filter(r => r.parsed.kind === "deploy" || r.parsed.kind === "rollback");
   if (!merges.length && !deploys.length) return null;
-  const okDeploys = deploys.filter(r => r.parsed.smoke === "ok");
-  const lat = [];
-  let pending = 0, oldest = null;
-  for (const m of merges) {
-    const d = okDeploys.find(x => x.seq > m.seq);
-    if (d) lat.push(Math.max(0, Date.parse(d.at) - Date.parse(m.at)));
-    else { pending += 1; const t = Date.parse(m.at); if (oldest === null || t < oldest) oldest = t; }
-  }
-  lat.sort((a, b) => a - b);
+  const lastOk = deploys.findLast(r => r.parsed.kind === "deploy" && r.parsed.smoke === "ok");
+  const after = lastOk ? merges.filter(r => r.seq > lastOk.seq) : null;
+  const oldest = after?.length ? Math.min(...after.map(r => Date.parse(r.at)).filter(Number.isFinite)) : null;
   const last = deploys.at(-1);
-  return { merged: merges.length, shipped: lat.length, pending, ...(oldest !== null ? { oldestPendingMin: Math.max(0, Math.round((nowMs - oldest) / MIN)) } : {}),
-    mergeToProdP50Ms: percentile(lat, 50), mergeToProdP90Ms: percentile(lat, 90), lastDeploy: last ? last.parsed.smoke : "none" };
+  return { evidence: "member-reported", verified: false, mergeReports: merges.length, deployReports: deploys.length,
+    lastDeployReport: !last ? "none" : last.parsed.kind === "rollback" ? "rollback" : last.parsed.smoke,
+    mergeReportsAfterGoodDeployReport: after ? after.length : null,
+    ...(Number.isFinite(oldest) ? { oldestMergeReportAfterGoodDeployMin: Math.max(0, Math.round((nowMs - oldest) / MIN)) } : {}) };
 }
 
-export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, through, window, events, mentions = [], members = {}, wake = null, ship = null }) {
+export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, through, window, events, mentions = [], members = {}, wake = null, reportedDelivery = null }) {
   const nowMs = typeof now === "number" ? now : Date.parse(now);
   const name = id => (id == null ? null : clip(ownMember(members, id)?.displayName, 24) ?? String(id).slice(0, 12));
   const items = collectLatencyItems({ events, mentions, ownerId, now: nowMs });
@@ -244,7 +243,7 @@ export function buildResponseLatency({ roomId, viewerId, ownerId = null, now, th
     dropped: droppedRows.slice(0, CAPS.dropped).map(shape),
     waiting: waitingRows.slice(0, CAPS.waiting).map(shape),
     ...(wake ? { wake } : {}),
-    ...(ship ? { ship } : {}),
+    ...(reportedDelivery ? { reportedDelivery } : {}),
     truncated: {}
   };
   const shed = { pairs: pairRows.length - state.pairs.length, dropped: droppedRows.length - state.dropped.length, waiting: waitingRows.length - state.waiting.length };
@@ -268,7 +267,6 @@ export function latencyLine(doc) {
     ...(w ? { worst: `${w.from} -> ${w.to} (${w.ctx}): ${w.dropped} dropped, ${w.waiting} waiting` } : {}),
     ...(doc.wake?.message?.ackP50Ms != null ? { wakeAckP50Ms: doc.wake.message.ackP50Ms } : {}),
     ...(doc.wake?.turns?.silent ? { silentTurns: doc.wake.turns.silent } : {}),
-    ...(doc.ship?.pending ? { unshipped: doc.ship.pending, oldestUnshippedMin: doc.ship.oldestPendingMin } : {}),
     see: "room_response_latency" };
 }
 
@@ -338,7 +336,7 @@ export function readResponseLatency(store, token, roomId, { expectedSessionBindi
     } catch { wakeRows = []; /* table is lazy: no wake signal has been logged yet */ }
     const value = buildResponseLatency({ roomId, viewerId, ownerId, now, through: head,
       window: { fromSeq: floor + 1, throughSeq: head, events: rows.length, complete: floor === 0 }, events, mentions, members,
-      wake: buildWakeContext(wakeRows), ship: buildShipContext(readReceiptSignals(store.db, roomId, { limit: 200 }), now) });
+      wake: buildWakeContext(wakeRows), reportedDelivery: buildReportedDelivery(withoutRedactedPosts(store.db, roomId, readReceiptSignals(store.db, roomId, { limit: 200 })), now) });
     memo.set(memoKey, { head, at: now, value });
     if (memo.size > 64) memo.delete(memo.keys().next().value);
     return value;

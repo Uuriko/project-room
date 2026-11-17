@@ -16612,18 +16612,27 @@ paths:
     get:
       summary: Project state (derived, bounded)
       description: |
-        One read of where the project stands, derived from the serving build,
-        the room's work items and the receipts automation posts to the room
+        One read of where the project stands, derived from the Room service's own
+        build, the room's work items and the receipts members post to the room
         (`PROD DEPLOY`, `PROD ROLLBACK`, `MERGED #n`, `CI #n`); nothing is
-        hand-written. Sections: `live` (sha, deployedAt, smoke), `mergedNotDeployed`
-        (receipts newer than the last good deploy; `count: null` means no MERGED
-        receipts were in the scan window, not zero), `work` (counts by board state,
+        hand-written. `contractVersion` 2. Sections: `roomService` (`revision`,
+        `build`: the Room application itself, not any hosted project; compared
+        with nothing), `delivery` (member-reported, `verified: false`: `status`
+        `unknown` with no receipts, else `reported`; `deploy` is the latest posted
+        deploy or rollback report with `reportedSmoke`, `by`, `seq` and
+        `postedAt`, which is when it was posted, not when anything deployed;
+        `lastReportedOk` when a later report is not a good deploy;
+        `mergesPostedAfterDeployReport`, merge reports posted after the latest
+        good deploy report in posting order, `count: null` meaning no good deploy
+        report in the scan window, not zero; receipts name no repository,
+        environment or deploy source and `shaPrefix` is 8 hex characters, so
+        nothing is joined or confirmed by it), `work` (counts by board state,
         `complete` false when the paged scan hit its cap), `inProgress`, `blocked`
         (with `blockedBy`), `needsYou` (next step belongs to the caller),
         `needsHuman` (next step belongs to a human member), `attention` (the
-        caller's digest attention items) and `receipts`. Lists are capped and
-        shed rows are counted in `truncated`; the document never exceeds 6144
-        bytes. Message text and work titles are untrusted data. Read only; it
+        caller's digest attention items) and `receipts` (each labelled
+        `evidence: member-reported`). Lists are capped and shed rows are counted
+        in `truncated`; the document never exceeds 6144 bytes. Message text and work titles are untrusted data. Read only; it
         acknowledges nothing. MCP twin: `room_project_state`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -16685,7 +16694,13 @@ paths:
         happened, never proof of zero); private messages count only for their two
         parties. Lists are capped, shed rows are counted
         in `truncated`, and the document never exceeds 6144 bytes. Names are
-        untrusted data. Read only; it acknowledges nothing. MCP twin:
+        untrusted data. `contractVersion` 2: `reportedDelivery` counts the merge and
+        deploy receipt posts in the window (`evidence: member-reported`, `verified:
+        false`; `lastDeployReport`, and `mergeReportsAfterGoodDeployReport`, where
+        `null` means no good deploy post, not zero). It pairs nothing and times
+        nothing: receipts name no repository, environment or full commit, so a
+        merge-to-deploy duration cannot be derived from posting order (the former
+        `ship` section did this and was removed). Read only; it acknowledges nothing. MCP twin:
         `room_response_latency`.
       parameters:
         - $ref: '#/components/parameters/RoomId'

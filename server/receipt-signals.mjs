@@ -65,3 +65,14 @@ export function readReceiptSignals(db, roomId, { floorSeq = 0, limit = 200 } = {
   }
   return out;
 }
+
+// A deleted post is redacted in the journal (its event body is rewritten with
+// data.redacted) but its typed row outlives it. Drop rows whose source post was
+// redacted so a deleted receipt is never read back as a delivery claim. `rows`
+// are readReceiptSignals output (seq is the journal sequence of the post).
+export function withoutRedactedPosts(db, roomId, rows) {
+  if (!rows?.length) return rows;
+  let redacted;
+  try { redacted = db.prepare("SELECT 1 FROM events WHERE room_id=? AND sequence=? AND json_extract(body,'$.data.redacted')=1"); } catch { return rows; }
+  return rows.filter(r => !redacted.get(roomId, r.seq));
+}

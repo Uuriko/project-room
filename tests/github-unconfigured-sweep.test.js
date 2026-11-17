@@ -80,7 +80,7 @@ test("GitHub App token without credentials is a named not_configured error, with
 });
 
 // A failed GitHub read hands back the CACHED main. That value can predate a
-// deploy, so it must be marked stale: the Board chip only says "Live differs
+// deploy, so it must be marked stale: the Board chip only says "Room server differs
 // from main" for a fresh read, and a rate-limited GitHub right after a deploy
 // used to produce a false mismatch.
 const SHA_OLD = "a".repeat(40), SHA_LIVE = "b".repeat(40);
@@ -90,7 +90,7 @@ const failedReads = {
   "thrown fetch": async () => { throw new TypeError("fetch failed"); },
   "5xx": async () => res(503)
 };
-const chipFor = status => /<p class="live-chip">([^<]*)<\/p>/.exec(boardHtml([], status, { id: "u1", manage: false, owner: false, write: true }, {}, Date.now(), { canWrite: true }))?.[1];
+const chipFor = status => /<p class="live-chip"[^>]*>([^<]*)<\/p>/.exec(boardHtml([], status, { id: "u1", manage: false, owner: false, write: true }, {}, Date.now(), { canWrite: true }))?.[1];
 
 for (const [name, fetchImpl] of Object.entries(failedReads)) {
   test(`deploy status after a failed GitHub read (${name}) is stale and the chip stays unknown`, async t => {
@@ -102,7 +102,7 @@ for (const [name, fetchImpl] of Object.entries(failedReads)) {
     const status = await readBoardDeployStatus(store, { fetchImpl, token: null, nowMs: 1_750_000_000_000, force: true });
     assert.equal(status.main, SHA_OLD, "the cached main is still reported");
     assert.equal(status.stale, true, "a fallback to the cache is stale");
-    assert.equal(chipFor({ ...status, live: SHA_LIVE }), "Deploy status unknown", "no false mismatch from a stale cache");
+    assert.equal(chipFor({ ...status, live: SHA_LIVE }), "Not compared with GitHub main", "no false mismatch from a stale cache");
   });
 }
 
@@ -113,7 +113,7 @@ test("a successful GitHub read is fresh and a real mismatch shows", async t => {
   const status = await readBoardDeployStatus(store, { fetchImpl: ok, token: null, nowMs: 1_750_000_000_000, force: true });
   assert.equal(status.stale, false);
   assert.equal(status.main, SHA_OLD);
-  assert.equal(chipFor({ ...status, live: SHA_LIVE }), "Live differs from main");
+  assert.equal(chipFor({ ...status, live: SHA_LIVE }), "Room server differs from GitHub main");
 });
 
 // Readers inside the 60 s window after a failed read share that read's result,
@@ -129,6 +129,6 @@ for (const name of ["403", "thrown fetch", "5xx"]) {
     const second = await readBoardDeployStatus(store, { fetchImpl: failedReads[name], token: null, nowMs: nowMs + 5_000 });
     assert.equal(second.main, SHA_OLD);
     assert.equal(second.stale, true, "the window reuses the failed read, so the cache is still stale");
-    assert.equal(chipFor({ ...second, live: SHA_LIVE }), "Deploy status unknown");
+    assert.equal(chipFor({ ...second, live: SHA_LIVE }), "Not compared with GitHub main");
   });
 }

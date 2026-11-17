@@ -410,20 +410,35 @@ test("a completed Board action moves focus to the finished card when its button 
 // (server/claim-pr-sync.mjs readRoomDeployStatus), never a positive count, so
 // the chip must read the two shas to tell "differs" from "can't tell".
 const SHA_A = "a".repeat(40), SHA_B = "b".repeat(40);
-const liveChip = status => /<p class="live-chip">([^<]*)<\/p>/.exec(boardHtml([], status, viewer, {}, NOW, { canWrite: true }))?.[1];
+const chipHtml = status => /<p class="live-chip"([^>]*)>([^<]*)<\/p>/.exec(boardHtml([], status, viewer, {}, NOW, { canWrite: true }));
+const liveChip = status => chipHtml(status)?.[2];
 
-test("deploy chip: matching shas read as matching", () => {
-  assert.equal(liveChip({ live: SHA_A, main: SHA_A, behind: 0, checkedAt: "2026-10-11T00:00:00Z" }), "Live matches main");
+test("deploy chip: matching shas say the Room server matches GitHub main, not that a project is deployed", () => {
+  assert.equal(liveChip({ live: SHA_A, main: SHA_A, behind: 0, checkedAt: "2026-10-11T00:00:00Z" }), "Room server matches GitHub main");
 });
 
 test("deploy chip: both shas known and different is its own state, not unknown", () => {
-  assert.equal(liveChip({ live: SHA_A, main: SHA_B, behind: null, checkedAt: "2026-10-11T00:00:00Z" }), "Live differs from main");
+  assert.equal(liveChip({ live: SHA_A, main: SHA_B, behind: null, checkedAt: "2026-10-11T00:00:00Z" }), "Room server differs from GitHub main");
 });
 
 test("deploy chip: a missing sha, no status, or a held (stale) read stays unknown", () => {
   for (const status of [null, {}, { live: SHA_A, main: null, behind: null }, { live: null, main: SHA_B, behind: null },
     { live: "unstamped", main: SHA_B, behind: null }, { live: SHA_A, main: SHA_B, behind: null, stale: true, heldUntil: "2026-10-11T01:00:00Z" }]) {
-    assert.equal(liveChip(status), "Deploy status unknown", JSON.stringify(status));
+    assert.equal(liveChip(status), "Not compared with GitHub main", JSON.stringify(status));
+  }
+});
+
+test("deploy chip: a stale read never reports a match, even when the cached compare said behind 0", () => {
+  // A held read can lag a fresh deploy or a new main commit; its cached behind:0 describes an older pair.
+  assert.equal(liveChip({ live: SHA_A, main: SHA_A, behind: 0, stale: true, heldUntil: "2026-10-11T01:00:00Z" }), "Not compared with GitHub main");
+  assert.equal(liveChip({ live: SHA_B, main: SHA_A, behind: 0, checkedAt: "2026-10-11T00:00:00Z" }), "Room server differs from GitHub main", "the label comes from the two shas, not a server-sent count");
+});
+
+test("deploy chip: the wording and tooltip say what is compared and that it is not a project deployment check", () => {
+  for (const status of [{ live: SHA_A, main: SHA_A, behind: 0 }, { live: SHA_A, main: SHA_B, behind: null }, null]) {
+    const [, attrs, text] = chipHtml(status);
+    assert.doesNotMatch(text, /^Live |Deploy status/, "no bare 'Live' that reads as the project's deployment");
+    assert.match(attrs, /title="[^"]*Room server(?:'|&#39;)s own build[^"]*latest main[^"]*not[^"]*project[^"]*"/);
   }
 });
 
