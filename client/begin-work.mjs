@@ -19,6 +19,12 @@ export function prerequisiteHold(dependencies) {
 }
 
 
+export function stepWithPrerequisiteHold(step, hold) {
+  if (!hold || !PREREQUISITE_GATED_STEPS.includes(step.action)) return step;
+  return { ...step, action: "wait_prerequisites", label: "Wait for prerequisites", needsAttention: false,
+    waitingOn: hold.waitingOn, ...(hold.more ? { waitingOnMore: hold.more } : {}) };
+}
+
 function canonicalBeginInput(input) {
   const scope = input || {};
   const paths = Array.isArray(scope.paths) ? scope.paths : [];

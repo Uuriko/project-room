@@ -6597,16 +6597,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if(!Object.hasOwn(current.state.workItems,workItemId))fail(404,'work_not_found','Work item not found in this Room');
         const item=current.state.workItems[workItemId],target=item.supersededBy;
         assertSelectedWorkVisible(this,roomId,workItemId,item,auth.member.id,current.privateParties);
-        const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now:this.now(),includeSource,includeOffers,sourceObservation,
+        const ids=item.dependsOn??[];
+        if(ids.length>16)fail(409,'current_room_context_unavailable','Selected dependency list exceeds bounded context');
+        const now=this.now(),dependencies=observePrerequisites(ids,id=>readWorkItem(this.db,roomId,id),dep=>nativePrerequisiteState(dep,now));
+        const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now,includeSource,includeOffers,sourceObservation,dependencies,
           floor:this.historyFloor(roomId,auth.member.id,current.sequence),messageRecords:{get:id=>selectedMessageRecord(this,roomId,id,false)},
           replacementAvailable:validId(target)&&target!==workItemId&&Boolean(readWorkItem(this.db,roomId,target))});
         // Native commands do not support the legacy help invitation/offer service.
         // Omit its versioned capability contract rather than fabricate false v1 data.
         delete value.helpContextVersion;
         delete value.help;
-        const ids=item.dependsOn??[];
-        if(ids.length>16)fail(409,'current_room_context_unavailable','Selected dependency list exceeds bounded context');
-        const now=this.now(),dependencies=observePrerequisites(ids,id=>readWorkItem(this.db,roomId,id),dep=>nativePrerequisiteState(dep,now));
         return {...value,dependencies,viewerId:auth.member.id,viewerAccountId:auth.account?.id??null,viewerAuthEpoch:auth.account?.authEpoch??null,
           viewerSessionBinding:auth.sessionBinding,viewerSessionRevision:auth.sessionRevision??null};
       }
@@ -6628,14 +6628,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = { sequence: row.sequence, state }, now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       assertSelectedWorkVisible(this, roomId, workItemId, room.state.workItems[workItemId], auth.member.id);
-      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, sourceObservation, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
+      const dependencies = observePrerequisites(this.workClaims.get(roomId, boardClaimId(workItemId))?.dependsOn ?? room.state.workItems[workItemId].dependsOn ?? [],
+        id => this.workClaims.get(roomId, id), boardPrerequisiteState);
+      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, sourceObservation, dependencies, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
         floor: this.historyFloor(roomId, auth.member.id, room.sequence),
         replacementAvailable: (() => {
           const target = room.state.workItems[workItemId].supersededBy;
           return validId(target) && target !== workItemId && Boolean(readWorkItem(this.db, roomId, target));
         })() }),
-        dependencies: observePrerequisites(this.workClaims.get(roomId, boardClaimId(workItemId))?.dependsOn ?? room.state.workItems[workItemId].dependsOn ?? [],
-          id => this.workClaims.get(roomId, id), boardPrerequisiteState),
+        dependencies,
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     // Selected work shares this reservation with OAuth, protected participants,

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { nextWorkStep, workActions, workCollaboration, workResume } from "../src/workflow.js";
+import { PREREQUISITE_GATED_STEPS, prerequisiteHold, stepWithPrerequisiteHold } from "../client/begin-work.mjs";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
 import { workOffersContext } from "../src/help-offers.js";
@@ -154,7 +155,7 @@ export function accessSummary({ item, linked, participantIds }) {
 
 // An authenticated selected read, not the deliberately narrower portable export.
 // All input comes from one committed Room projection and one service clock.
-export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null, replacementAvailable = null, sourceObservation = undefined }) {
+export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null, replacementAvailable = null, sourceObservation = undefined, dependencies = undefined }) {
   if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
   const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
   // Work assignment does not expand a targeted message's audience. Apply the
@@ -180,7 +181,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     if (source.freshness === "unchanged") { source.status = "not_modified"; source.message = null; }
     source.nextRead = observable ? { tool: "room_read_work", arguments: { workItemId, includeSource: true, sourceObservation: { ...source.observation } } } : null;
   }
-  const next = nextWorkStep(item, now, state.room.ownerId);
+  let next = nextWorkStep(item, now, state.room.ownerId);
   // One link, not recursive traversal or target-content delivery. Work is
   // room-visible; the subsequent selected read rechecks membership and source privacy.
   const replacementId = item.supersededBy;
@@ -189,6 +190,16 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     next.replacement = { status: available ? "available" : "unavailable", workItemId: replacementId,
       nextRead: available ? { tool: "room_read_work", arguments: { workItemId: replacementId } } : null };
   }
+  // A claim/start step is advice only while every prerequisite is known to be
+  // satisfied — the same rule server/project-state.mjs applies to its rows.
+  // When the caller observed the prerequisites and some are unmet, the step
+  // says what it waits on instead of offering the action admission refuses,
+  // and the gated actions leave suggestedActions. Callers that pass no
+  // observation keep the previous presentation: readiness is then unknown,
+  // never asserted either way.
+  const prerequisiteBlocked = Array.isArray(dependencies) && PREREQUISITE_GATED_STEPS.includes(next.action)
+    ? prerequisiteHold(dependencies) : null;
+  next = stepWithPrerequisiteHold(next, prerequisiteBlocked);
   const offers = includeOffers ? workOffersContext(state, workItemId, viewerId, new Date(now).toISOString()) : null;
   const participantIds = new Set([viewerId, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId,
     item.proposedById, item.claim?.holderId, item.receipt?.producerId, item.receipt?.reportedById, message?.authorId, state.room.ownerId].filter(Boolean));
@@ -199,7 +210,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
     replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor),
-    resume: workResume(work, now, state.room.ownerId),
+    resume: workResume(work, now, state.room.ownerId, next),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
     toolFocus: {
       focus: next.memberId === viewerId && ["verify", "decide", "triaged_handoff"].includes(next.action) ? "review" : "work",
@@ -207,7 +218,9 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
       automatic: false,
       guidance: "Optional discovery preference. Hosted MCP tools/list accepts params.focus; omit focus from both params and URL and set profile=full for the full catalog. This does not select a mode, change permissions or authorize execution."
     },
-    suggestedActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
+    suggestedActions: workActions(item, member, now)
+      .filter(([action]) => !prerequisiteBlocked || !PREREQUISITE_GATED_STEPS.includes(action))
+      .map(([action, label]) => ({ action, label })),
     collaboration: workCollaboration(item, member, participants),
     helpContextVersion: 1, help: workHelpContext(state, workItemId, viewerId, new Date(now).toISOString()),
     ...(includeOffers ? { offerContextVersion: 1, offers } : {}),

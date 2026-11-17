@@ -1,3 +1,4 @@
+import { workResume } from "../src/workflow.js";
 import { loadInstanceCardRuntime } from './instance-card-runtime.mjs';
 import { agentPages } from '../scripts/build-agent-docs.mjs';
 import { instanceDiscoveryBody, instanceCardSignatureState } from './node-discovery-origin.mjs';
@@ -4870,10 +4871,15 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           if (raw.length > 1024) reject(422, "invalid_source_observation", "Source observation is too large");
           try { sourceObservation = JSON.parse(raw); } catch { reject(422, "invalid_source_observation", "Invalid source observation"); }
         }
-        return json(res, 200, store.workContext(selected.token, roomId, params.get("workItemId"), {
+        const context = store.workContext(selected.token, roomId, params.get("workItemId"), {
           sourceObservation,
           includeSource: params.get("includeSource") === "true", includeOffers: offerContext === "1", expectedSessionBinding: fence
-        }));
+        });
+        // Older SDKs strictly validate the original resume shape. Their
+        // primary next step already carries the prerequisite observation.
+        if (req.headers["x-project-room-resume-context"] !== "1" && context.resume?.next.action === "wait_prerequisites")
+          context.resume = workResume(context.work, Date.parse(context.evaluatedAt), context.context.roomOwnerId);
+        return json(res, 200, context);
       }
       if (route === "work-result" && req.method === "GET") {
         const params = url.searchParams;
