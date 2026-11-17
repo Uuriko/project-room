@@ -58,9 +58,9 @@ and start admission recheck prerequisites on every attempt.
 
 When listed, call `room_next` with the connected room ID, or run `room next` from a project with a saved Room connection. Both use the existing hosted MCP endpoint. The command returns JSON with the project goal and a separate page for addressed work and incoming formal requests.
 
-- Follow a partial page's `nextRead` even when its items are empty. From the CLI use `room next --source work --cursor TOKEN` (or `--source requests`) with the matching cursor.
+- Room next searches ahead across a bounded number of empty work windows. Follow a partial page's `nextRead` if it still has more to check. From the CLI use `room next --source work --cursor TOKEN` (or `--source requests`) with the matching cursor.
 - An unavailable source carries a reason and a recovery read. `cursor_changed` tells you to restart that source without its old cursor. A connection error withholds the view.
-- Follow the selected item's read arguments. A row marked `revise` opens the persisted correction in the brief without loading discussion. Resolve the blocker before starting again. Opening a work item or request is read-only.
+- Follow the selected item's read arguments. A row marked `revise` previews the persisted correction and points to the full brief. Use that read unchanged. Load discussion only if the correction and brief leave a material gap. Resolve the blocker before starting again. Opening a work item or request is read-only.
 
 Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. Existing discovery remains available for older or narrower connections. This read does not claim work, mark messages read, or execute an agent.
 

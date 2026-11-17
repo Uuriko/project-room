@@ -3,13 +3,16 @@ import { conversationCursorCodec } from "./conversation-sync.mjs";
 import { addressedWorkWindow } from "./current-work-list.mjs";
 import {
   CurrentReadBudgetExceeded, currentVisibleHorizon, isCurrentRoom, readCurrentHead,
-  readCurrentRecord, readCurrentWorkPrivacy, withCurrentReadContext
+  readCurrentRecord, readCurrentWorkItem, readCurrentWorkPrivacy, withCurrentReadContext
 } from "./current-room-repository.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { readWorkItems } from "./work-repository.mjs";
 import { workRoleHolder } from "./work-context.mjs";
 
 const PAGE_SIZE = 4;
+const WORK_SEARCH_WINDOWS = 4;
+const CORRECTION_CHARS = 400;
+const CORRECTION_FIELD_BYTES = 650;
 const MAX_BYTES = 16 * 1024;
 const LEGACY_PROJECTION_BYTES = 256 * 1024;
 const CURSOR_ERRORS = new Set([
@@ -48,15 +51,47 @@ function pageCursor(store, binding, cursor) {
   return { after: previous?.after ?? "", at, encode: after => codec.encode({ ...binding, at, after }) };
 }
 
-function workRows(items, auth, room, roomId, now) {
+function correctionText(text) {
+  let bounded = text.slice(0, CORRECTION_CHARS);
+  while (Buffer.byteLength(JSON.stringify(bounded)) > CORRECTION_FIELD_BYTES)
+    bounded = bounded.slice(0, Math.floor(bounded.length / 2));
+  return bounded;
+}
+
+function correctionPreview(blocker) {
+  if (typeof blocker?.reason !== "string" || typeof blocker.nextAction !== "string") return {};
+  const reason = correctionText(blocker.reason), nextAction = correctionText(blocker.nextAction);
+  return { correction: { reason, nextAction,
+    truncated: reason !== blocker.reason || nextAction !== blocker.nextAction } };
+}
+
+function workRows(items, auth, room, roomId, now, blockerFor) {
   const byId = new Map(items.map(item => [item.id, item]));
-  return activationObligations(items, auth.member, room.ownerId, now).map(row => ({
-    id: row.id, title: row.title.slice(0, 160), revision: byId.get(row.id).revision,
-    reason: row.reason,
-    nextRead: { tool: row.nextRead.tool, arguments: {
-      roomId, brief: true, ...row.nextRead.arguments, ...(row.reason === "revise" ? { includeDiscussion: false } : {})
-    } }
-  }));
+  return activationObligations(items, auth.member, room.ownerId, now).map(row => {
+    const item = byId.get(row.id);
+    return {
+      id: row.id, title: row.title.slice(0, 160), revision: item.revision, reason: row.reason,
+      ...(row.reason === "revise" ? correctionPreview(blockerFor(item)) : {}),
+      nextRead: { tool: row.nextRead.tool, arguments: {
+        roomId, brief: true, ...row.nextRead.arguments, ...(row.reason === "revise" ? { includeDiscussion: false } : {})
+      } }
+    };
+  });
+}
+
+// Scan past empty source windows within the same observed head and budget.
+// Advance only across examined keys. A capped search still exposes its cursor.
+function scanWorkPage(roomId, position, loadWindow, rowsFor) {
+  let after = position.after, hasMore = false, items = [];
+  for (let n = 0; n < WORK_SEARCH_WINDOWS; n++) {
+    const window = loadWindow(after);
+    after = window.after;
+    hasMore = window.hasMore;
+    items = rowsFor(window.items);
+    if (items.length || !hasMore) break;
+  }
+  return { coverage: hasMore ? "partial" : "complete", items,
+    nextRead: hasMore ? read(roomId, "work", position.encode(after)) : null };
 }
 
 function workPage(store, roomId, auth, room, cursor) {
@@ -66,41 +101,32 @@ function workPage(store, roomId, auth, room, cursor) {
     const position = pageCursor(store, cursorBinding(auth, roomId, "work", head.head_sha256), cursor);
     if (!position) return unavailable(roomId, "work", "cursor_changed");
 
-    const window = addressedWorkWindow(store, roomId, auth.member.id, room.ownerId,
-      position.after, PAGE_SIZE, budget);
-    const visible = window.items.filter(item => {
-      const privacy = readCurrentWorkPrivacy(db, roomId, item.id, budget);
-      return !privacy.requests || Object.hasOwn(privacy.parties, auth.member.id) || workRoleHolder(item, auth.member.id);
-    });
-    return {
-      coverage: window.hasMore ? "partial" : "complete",
-      evaluatedThrough: currentVisibleHorizon(store, roomId, auth.member.id, head.sequence),
-      items: workRows(visible, auth, room, roomId, position.at),
-      nextRead: window.hasMore ? read(roomId, "work", position.encode(window.after)) : null
-    };
+    const page = scanWorkPage(roomId, position,
+      after => addressedWorkWindow(store, roomId, auth.member.id, room.ownerId, after, PAGE_SIZE, budget),
+      items => workRows(items.filter(item => {
+        const privacy = readCurrentWorkPrivacy(db, roomId, item.id, budget);
+        return !privacy.requests || Object.hasOwn(privacy.parties, auth.member.id) || workRoleHolder(item, auth.member.id);
+      }), auth, room, roomId, position.at, item => readCurrentWorkItem(db, roomId, item.id, budget).blocker));
+    return { ...page, evaluatedThrough: currentVisibleHorizon(store, roomId, auth.member.id, head.sequence) };
   }, { maxRecords: 512 });
 }
 
 function legacyWorkPage(store, roomId, auth, room, cursor) {
   const position = pageCursor(store, cursorBinding(auth, roomId, "work", room.sequence), cursor);
   if (!position) return unavailable(roomId, "work", "cursor_changed");
-  // Legacy work can be inline or referenced. Bound the containing projection
-  // before opening it in SQLite and hydrate only the selected keys.
-  const rows = store.db.prepare(`SELECT item.key FROM rooms, json_each(rooms.projection, '$.workItems') AS item
-    WHERE rooms.id=? AND item.key COLLATE BINARY>? ORDER BY item.key COLLATE BINARY LIMIT ?`)
-    .all(roomId, position.after, PAGE_SIZE + 1);
-  const ids = rows.slice(0, PAGE_SIZE).map(row => row.key);
-  const parties = store.privateWorkParties(roomId, { workIds: ids });
-  const visible = [...readWorkItems(store.db, roomId, ids).values()].filter(item => {
-    const allowed = parties.get(item.id);
-    return !allowed || allowed.has(auth.member.id) || workRoleHolder(item, auth.member.id);
-  });
-  const more = rows.length > PAGE_SIZE;
-  return {
-    coverage: more ? "partial" : "complete",
-    items: workRows(visible, auth, room, roomId, position.at),
-    nextRead: more ? read(roomId, "work", position.encode(ids.at(-1))) : null
-  };
+  // The caller bounds the containing projection before examining these keys.
+  const keys = store.db.prepare(`SELECT item.key FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+    WHERE rooms.id=? AND item.key COLLATE BINARY>? ORDER BY item.key COLLATE BINARY LIMIT ?`);
+  return scanWorkPage(roomId, position, after => {
+    const rows = keys.all(roomId, after, PAGE_SIZE + 1);
+    const ids = rows.slice(0, PAGE_SIZE).map(row => row.key);
+    const parties = store.privateWorkParties(roomId, { workIds: ids });
+    const items = [...readWorkItems(store.db, roomId, ids).values()].filter(item => {
+      const allowed = parties.get(item.id);
+      return !allowed || allowed.has(auth.member.id) || workRoleHolder(item, auth.member.id);
+    });
+    return { items, hasMore: rows.length > ids.length, after: ids.at(-1) ?? after };
+  }, items => workRows(items, auth, room, roomId, position.at, item => item.blocker));
 }
 
 function requestRows(requests, roomId) {
