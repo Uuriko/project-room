@@ -76,7 +76,7 @@ test('native: brief, continuation, begin and project state wait for an unfinishe
   // 1. Unfinished prerequisite: prose, structured hint, project state and admission agree.
   const waiting = await f.call('room_read_work', { workItemId: 'child', brief: true });
   assert.match(waiting.brief, /Do not claim or start/);
-  assert.equal(waiting.continuation.action, 'start');
+  assert.equal(waiting.continuation.action, 'wait_prerequisites');
   assert.equal(waiting.continuation.tool, null);
   assert.deepEqual(waiting.continuation.waitingOn, [{ id: 'base', state: 'unclaimed' }]);
   let state = await f.call('room_project_state');
