@@ -358,7 +358,6 @@ export function diffResultSummary(rows) {
 }
 
 // One current-state restart record; no dispatch or history scan.
-export function workResume(item, now = Date.now(), ownerId = null) {
-  const next = nextWorkStep(item, now, ownerId);
+export function workResume(item, now = Date.now(), ownerId = null, next = nextWorkStep(item, now, ownerId)) {
   return { ...workProgress(item, now), next: { action: next.action, label: next.label, memberId: next.memberId } };
 }

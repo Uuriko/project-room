@@ -5,31 +5,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { event } from '../src/events.js';
 import { textVersion } from '../server/text-results.mjs';
 
-// Resume/next consistency — a FAILING REGRESSION handed to the src/workflow.js
-// owner (ownership unresolved at filing; no production code is changed here).
-//
-// On the #6257 branch the selected read's authoritative step is fixed: for a
-// dependency-blocked item, packet.next presents "wait_prerequisites" with
-// waitingOn (server/work-context.mjs applies prerequisiteHold to the step it
-// composes, because store.workContext passes the observed dependencies in).
-// But the same packet's resume projection is composed separately —
-// workResume(work, ...) at server/work-context.mjs receives `work`, the
-// picked currentWorkRecord, whose field list carries no dependsOn — and
-// workResume (src/workflow.js) derives resume.next from nextWorkStep over
-// that dependency-blind record. Nothing applies the prerequisite hold there,
-// so resume.next still presents the "start" that packet.next refuses to
-// offer and admission would refuse with work_claim_dependencies_unmet.
-// One packet, two different next actions for the returning agent.
-//
-// No different semantics for resume.next is documented in code: workResume is
-// "one current-state restart record" whose next is the same nextWorkStep
-// output, and the #6257 presentation rule ("a claim/start step is advice only
-// while every prerequisite is known to be satisfied") is stated generally.
-// So this file asserts full agreement, not only the weaker no-gated-action
-// truth (which it also asserts, first, so the failure names the harm).
-//
-// Fixture pattern copied from tests/agent-continuity-successor.test.mjs: a
-// real normalized RoomStore driven only through store.command.
+// An accepted successor must wait on the predecessor’s exact review and acceptance.
 const TASK_RESULT = 'Exact saved result RESULT-TASK-SENTINEL';
 
 function fixture(t) {

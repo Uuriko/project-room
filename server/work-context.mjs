@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { nextWorkStep, workActions, workCollaboration, workResume } from "../src/workflow.js";
-import { PREREQUISITE_GATED_STEPS, prerequisiteHold } from "../client/begin-work.mjs";
+import { PREREQUISITE_GATED_STEPS, prerequisiteHold, stepWithPrerequisiteHold } from "../client/begin-work.mjs";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
 import { workOffersContext } from "../src/help-offers.js";
@@ -122,7 +122,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     if (source.freshness === "unchanged") { source.status = "not_modified"; source.message = null; }
     source.nextRead = observable ? { tool: "room_read_work", arguments: { workItemId, includeSource: true, sourceObservation: { ...source.observation } } } : null;
   }
-  const next = nextWorkStep(item, now, state.room.ownerId);
+  let next = nextWorkStep(item, now, state.room.ownerId);
   // One link, not recursive traversal or target-content delivery. Work is
   // room-visible; the subsequent selected read rechecks membership and source privacy.
   const replacementId = item.supersededBy;
@@ -140,13 +140,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   // never asserted either way.
   const prerequisiteBlocked = Array.isArray(dependencies) && PREREQUISITE_GATED_STEPS.includes(next.action)
     ? prerequisiteHold(dependencies) : null;
-  if (prerequisiteBlocked) {
-    next.action = "wait_prerequisites";
-    next.label = "Wait for prerequisites";
-    next.needsAttention = false;
-    next.waitingOn = prerequisiteBlocked.waitingOn;
-    if (prerequisiteBlocked.more) next.waitingOnMore = prerequisiteBlocked.more;
-  }
+  next = stepWithPrerequisiteHold(next, prerequisiteBlocked);
   const offers = includeOffers ? workOffersContext(state, workItemId, viewerId, new Date(now).toISOString()) : null;
   const participantIds = new Set([viewerId, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId,
     item.proposedById, item.claim?.holderId, item.receipt?.producerId, item.receipt?.reportedById, message?.authorId, state.room.ownerId].filter(Boolean));
@@ -157,7 +151,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
     replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor),
-    resume: workResume(work, now, state.room.ownerId),
+    resume: workResume(work, now, state.room.ownerId, next),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
     toolFocus: {
       focus: next.memberId === viewerId && ["verify", "decide", "triaged_handoff"].includes(next.action) ? "review" : "work",
