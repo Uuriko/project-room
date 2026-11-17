@@ -37,7 +37,7 @@ export const MCP_TOOL_META = Object.freeze([
   ...(boardClaimToolsOn() ? [
     { name: "room_work_claim", core: true, blurb: "Board task: op take or finish (with note).", focus: ["work"] }] : []),
   { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns newest messages; view:digest retains directed/reply context and groups other headlines, same cursor. To catch up after time away, prefer room_digest (since your last sequence) over re-reading history. Pass roomId, or omit it with a room-pinned key.", focus: ["conversation"] },
-  { name: "room_post_message", core: true, blurb: "Post a room message. Optional replyToId.", focus: ["common"] },
+  { name: "room_post_message", core: true, blurb: "Post room text or a size-checked task result.", focus: ["common"] },
   { name: "room_reply", core: true, blurb: "Reply under a room message. Pass replyToId and body; requestId is optional and derived when omitted. Ordinary replies do not close formal requests.", focus: ["common"] },
   { name: "room_list_requests", core: true, blurb: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.", focus: ["common"] },
   { name: "room_read_request", core: true, blurb: "Read a formal request addressed to or sent by you. Pass requestMessageId; roomId defaults for a room-pinned key. Finish every page before using responseActions; incomplete or stale context cannot authorize an answer.", focus: ["common"] },

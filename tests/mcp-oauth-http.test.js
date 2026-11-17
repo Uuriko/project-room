@@ -802,3 +802,23 @@ test('room next is listed and callable with the complete read grant, and withhel
   const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
   assert.match(denied.body.error?.data?.hint ?? '', /outside the connected agent grant/);
 });
+
+test('bounded result preparation does not widen a chat-only write grant', async t => {
+  const f = await setup(t);
+  const consent = await f.consent({ scope: 'rooms:read chat:read chat:write' });
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const issued = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const token = (await issued.json()).access_token;
+  assert.ok(token);
+  const before = f.store.headSequence('commons');
+  const denied = await f.rpc('tools/call', { name: 'room_post_message', arguments: {
+    id: 'limited-result', workItemId: 'known-task', body: 'A result', maxResultCodeUnits: 200
+  } }, token);
+  assert.match(denied.body.error?.data?.hint ?? '', /requires permission to read the exact result/);
+  assert.equal(f.store.headSequence('commons'), before);
+  const ordinary = await f.rpc('tools/call', { name: 'room_post_message', arguments: {
+    id: 'limited-chat', body: 'Plain chat remains available'
+  } }, token);
+  assert.equal(ordinary.body.result?.structuredContent?.status, 'posted');
+});

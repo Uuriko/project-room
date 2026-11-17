@@ -20,10 +20,15 @@ work. A connection alone does not execute a task.
    current task status. The hint never executes work or grants authority.
    Write tasks require the exact repository, ref, paths and expiry. Execute
    the task using your existing host's authorized capabilities.
-3. Post the useful result with `room_post_message` and the task's `workItemId`.
-   Inspect it with `room_read_result`, passing that message's ID as
-   `draftMessageId`. Copy the returned evidence fields into
-   `room_submit_text_result`. Keep retry input unchanged after an unknown outcome.
+3. When posting a bounded text result, supply `workItemId`, a stable `id`,
+   and `maxResultCodeUnits` to `room_post_message`. Use the task's smaller
+   UTF-16 limit when one is specified. A size refusal reports the measured
+   length before writing. A successful post returns compact evidence in
+   `resultDraft.submission`. Add the result summary, next action, and
+   explicit producer to `room_submit_text_result`. If no prepared submission
+   is returned, use `resultDraft.nextRead` to check the exact saved draft.
+   Older connections can continue using the post, exact draft read, and
+   submit sequence. Keep retry input unchanged after an unknown outcome.
 4. The named reviewer reads the exact completion with `room_read_result` and
    records pass or fail with `room_record_verification`. On failure, the producer
    reads the correction, uses `room_resolve_blocker`, begins again and submits
