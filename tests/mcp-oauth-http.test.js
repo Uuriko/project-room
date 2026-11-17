@@ -207,7 +207,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 33, 'audit every advertised native tool, including acquire/release/renew, bounded attention wait, own catch-up marker, catch-up digest, project state, response latency, cancelling your own ask, reporting ask progress and needs-me');
+  assert.equal(tools.length, 34, 'audit every advertised native tool, including exact-result verification, including acquire/release/renew, bounded attention wait, own catch-up marker, catch-up digest, project state, response latency, cancelling your own ask, reporting ask progress and needs-me');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -600,4 +600,38 @@ for (const normalized of [false, true]) test(`OAuth agents can call room_needs_m
   assert.ok(found.includes('owner-ask-nm'), `the owner's formal ask is found: ${found}`);
   const other = await f.rpc('tools/call', { name: 'room_needs_me', arguments: { roomId: 'someone-elses-room' } });
   assert.equal(other.body.result?.isError ?? Boolean(other.body.error), true, 'a different room is refused');
+});
+
+for (const normalized of [false, true]) test(`OAuth exact-result review preserves consent and reviewer gates (${normalized ? 'normalized' : 'legacy'})`, async t => {
+  const f = await setup(t, { normalized });
+  const workItemId = 'oauth-review-result';
+  const command = (id, type, data) => f.store.command(f.ownerKey, 'commons', { id, type, data });
+  command('review-propose', 'work.proposed', { workItemId, title: 'Review an exact result', definitionOfDone: 'Independent review of stored text',
+    accountableMemberId: 'owner', verifierMemberId: 'friend-dot', mode: 'read', independentVerificationRequired: true, ownerDecisionRequired: false });
+  command('review-accept', 'work.accepted', { workItemId, expectedRevision: 0 });
+  const body = 'An exact contribution for independent review';
+  const posted = command('review-post', 'message.posted', { messageId: 'review-result', workItemId, body });
+  const evidenceVersion = 'sha256:' + createHash('sha256').update(body).digest('hex');
+  const completed = command('review-complete', 'work.completed', { workItemId, expectedRevision: 1, evidenceKind: 'room_text',
+    evidenceMessageId: 'review-result', evidenceMessageEventId: posted.event.id, evidenceVersion, previousCompletionEventId: null,
+    producerId: 'owner', summary: 'Result ready', nextAction: 'Independent review' });
+  const tool = 'room_record_verification';
+  const args = { workItemId, expectedRevision: 2, completionEventId: completed.event.id, evidenceVersion, result: 'pass', summary: 'Inspected exact stored result', requestId: 'oauth-review' };
+  const readonlyConsent = await f.consent({ scope: 'rooms:read chat:read work:read' });
+  const code = new URL(readonlyConsent.headers.get('location')).searchParams.get('code');
+  const response = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const readTokens = await response.json();
+  const readCatalog = await f.rpc('tools/list', {}, readTokens.access_token);
+  assert.ok(!readCatalog.body.result.tools.some(item => item.name === tool));
+  const noConsent = await f.rpc('tools/call', { name: tool, arguments: args }, readTokens.access_token);
+  assert.ok(noConsent.body.error || noConsent.body.result?.isError, 'Room verify authority cannot bypass OAuth consent');
+  const catalog = await f.rpc('tools/list');
+  assert.ok(catalog.body.result.tools.some(item => item.name === tool), 'consented reviewer must discover verification');
+  const stale = await f.rpc('tools/call', { name: tool, arguments: { ...args, requestId: 'oauth-stale-review', evidenceVersion: 'sha256:' + '0'.repeat(64) } });
+  assert.ok(stale.body.error || stale.body.result?.isError, 'wrong result version cannot pass');
+  const accepted = await f.rpc('tools/call', { name: tool, arguments: args });
+  assert.equal(accepted.body.error, undefined, JSON.stringify(accepted.body));
+  assert.equal(accepted.body.result?.structuredContent.status, 'recorded', JSON.stringify(accepted.body));
+  const read = await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId, includeResult: true } });
+  assert.equal(read.body.result.structuredContent.next.action, 'complete');
 });
