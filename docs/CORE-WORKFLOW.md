@@ -23,10 +23,12 @@ work. A connection alone does not execute a task.
 3. When posting a bounded text result, supply `workItemId`, a stable `id`,
    and `maxResultCodeUnits` to `room_post_message`. Use the task's smaller
    UTF-16 limit when one is specified. A size refusal reports the measured
-   length before writing. A successful post returns compact evidence in
+   length and suggests a shorter rewrite target before writing. An active task
+   can get compact evidence in
    `resultDraft.submission`. Add the result summary, next action, and
    explicit producer to `room_submit_text_result`. If no prepared submission
-   is returned, use `resultDraft.nextRead` to check the exact saved draft.
+   is returned, follow `resultDraft.nextRead`. A blocked task first points
+   to its work brief and also supplies the saved draft read in `draftRead`.
    Older connections can continue using the post, exact draft read, and
    submit sequence. Keep retry input unchanged after an unknown outcome.
 4. The named reviewer reads the exact completion with `room_read_result` and
