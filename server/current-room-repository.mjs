@@ -494,9 +494,35 @@ export function initializeCurrentRoom(store,state,events,{adoptExisting=null}={}
     return roomId;
   });
 }
+// One command authenticates the same principal several times (token binding,
+// sponsor, identity link, then the command's own actor). Inside a single read
+// context and transaction, a repeated read of one member's authority returns
+// the same verified rows unless this connection has written since, so it is
+// answered from the first read. Four conditions, all required: a context that
+// asked for it (today only the command path; read paths keep their measured
+// costs and reservations), a caller-owned context budget, an open transaction
+// (other connections cannot change what this one sees), and an unchanged
+// SQLite mutation counter (this connection has not written). Any write, including a membership or permission change,
+// moves the counter and the next read is verified from storage again. Nothing
+// is kept past the context. Each caller gets its own copy.
+function reusableMemberAuthority(db,b) {
+  if(!b?.reuseMemberAuthority||contextBudgets.get(db)!==b||!db.isTransaction)return null;
+  const changes=db.prepare('SELECT total_changes() AS n').get().n;
+  if(!Number.isSafeInteger(changes)||changes<0)return null;
+  if(b.memberAuthorityChanges!==changes){b.memberAuthorityChanges=changes;b.memberAuthority=new Map();}
+  return b.memberAuthority;
+}
 export function currentRoomAuthority(db,roomId,{memberId=null,activeOnly=false}={}) {
-  const b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
-  if(memberId!==null)return currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
+  const b=contextBudgets.get(db)??budget();
+  const reuse=memberId!==null?reusableMemberAuthority(db,b):null,reuseKey=roomId+'\0'+memberId;
+  if(reuse?.has(reuseKey)){charge(b,256);return structuredClone(reuse.get(reuseKey));}
+  const head=readCurrentHead(db,roomId,b);if(!head)return null;
+  if(memberId!==null){
+    const authority=currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
+    // Re-check after the read: only a read that ran with no write underneath it is kept.
+    if(reuse&&reusableMemberAuthority(db,b)===reuse)reuse.set(reuseKey,structuredClone(authority));
+    return authority;
+  }
   return activeOnly?currentActiveAuthorityFromHead(db,roomId,head,b):currentAuthorityFromHead(db,roomId,head,b);
 }
 // Recovery needs a complete census, including inactive history, rather than
@@ -1342,10 +1368,11 @@ export function readCurrentRoomForAudit(store,roomId) {
   });
 }
 
-export function withCurrentReadContext(db,roomId,operation,{maxRecords=200}={}) {
+export function withCurrentReadContext(db,roomId,operation,{maxRecords=200,reuseMemberAuthority=false}={}) {
   if(![200,512,1024].includes(maxRecords))throw Error('Unsupported internal current read reservation');
   if(!isCurrentRoom(db,roomId))return operation();
-  const previous=contextBudgets.get(db);if(!previous)contextBudgets.set(db,budget(maxRecords));
+  // Only the context that opens the budget may ask for authority reuse; an inner context inherits the outer one unchanged.
+  const previous=contextBudgets.get(db);if(!previous)contextBudgets.set(db,Object.assign(budget(maxRecords),reuseMemberAuthority===true?{reuseMemberAuthority:true}:{}));
   try{return operation(contextBudgets.get(db));}finally{if(!previous)contextBudgets.delete(db);}
 }
 export function readCurrentHistoryFloor(db,roomId,memberId) {

@@ -7764,6 +7764,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Posts also include repeated protected OAuth authority and selected work.
       // Reserve a fixed record count for that complete command, without
       // changing byte, payload, history, or default read limits.
+      // A command authenticates one principal several times before it writes;
+      // those repeats reuse the first verified read until the first write.
+      reuseMemberAuthority: true,
       maxRecords: command.type === T.ROOM_PUBLIC_PAGE_SET && command.data.enabled === true || command.type === T.MEMBER_ADDED || command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === true
         || command.type === T.MESSAGE_POSTED && typeof command.data.body === "string"
         && command.data.body.includes("@") ? 1024 : command.type === T.CHANNEL_CREATED || command.type === T.MESSAGE_POSTED ? 512 : 200

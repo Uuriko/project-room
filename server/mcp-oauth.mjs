@@ -63,7 +63,25 @@ function canonicalOAuthBindingState(store, roomId, memberId, humanMemberId) {
 // This check must run on issuance AND each request: ownership and membership
 // may have changed since consent. The account check is intentionally repeated
 // here so a provider built without isAccountActive cannot bypass it.
+// One token resolution validates its binding twice: the provider's
+// isBindingActive gate inside verifyAccessToken, then the principal lookup
+// right after it. Both run synchronously, back to back, on the same stored
+// binding, with no write or await between them, so the second pass can only
+// repeat the first. resolveMcpOAuthPrincipal opens this memo for exactly that
+// span and drops it before returning; nothing outlives the call, so a later
+// request, a changed membership or a revoked grant is always validated afresh.
+let resolving = null;
+const bindingKey = (subject, binding) => JSON.stringify([subject, Object.entries(binding).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)]);
+function validatedOnce(store, subject, binding, validate) {
+  if (!resolving || resolving.store !== store || !binding || typeof binding !== 'object') return validate();
+  const key = bindingKey(subject, binding);
+  if (!resolving.results.has(key)) resolving.results.set(key, validate());
+  return resolving.results.get(key);
+}
 export function validateMcpOAuthBinding(store, userId, binding) {
+  return validatedOnce(store, userId, binding, () => validateMcpOAuthBindingNow(store, userId, binding));
+}
+function validateMcpOAuthBindingNow(store, userId, binding) {
   if (!binding || !userId) return null;
   const adopted=binding.principalType==='account-adopted-agent';
   const direct = binding.principalType === 'account-owned-agent';
@@ -124,12 +142,17 @@ export function validateMcpOAuthBinding(store, userId, binding) {
 export function resolveMcpOAuthPrincipal({ store, provider, token, resource, roomId, requiredScopes = [] }) {
   if (typeof token !== 'string' || !(/^(oat|iat)_/.test(token)) || !Array.isArray(requiredScopes)
     || requiredScopes.some(scope => !OAUTH_SCOPES.includes(scope))) return null;
-  const grant = provider.verifyAccessToken(token, { resource });
-  if (!grant?.binding || grant.binding.resource !== resource || grant.binding.roomId !== roomId
-    || requiredScopes.some(scope => !grant.scopes.includes(scope))) return null;
-  const principal = grant.binding.principalType === "invited-agent"
-    ? validateMcpInviteOAuthBinding(store, grant.userId, grant.binding)
-    : validateMcpOAuthBinding(store, grant.userId, grant.binding);
+  let grant, principal;
+  const outer = resolving;
+  resolving = { store, results: new Map() };
+  try {
+    grant = provider.verifyAccessToken(token, { resource });
+    if (!grant?.binding || grant.binding.resource !== resource || grant.binding.roomId !== roomId
+      || requiredScopes.some(scope => !grant.scopes.includes(scope))) return null;
+    principal = grant.binding.principalType === "invited-agent"
+      ? validateMcpInviteOAuthBinding(store, grant.userId, grant.binding)
+      : validateMcpOAuthBinding(store, grant.userId, grant.binding);
+  } finally { resolving = outer; }
   return principal ? Object.freeze({ ...principal, principalType: principal.principalType ?? "account-agent",
     familyId: grant.familyId, resource, clientId: grant.clientId,
     scopes: Object.freeze([...grant.scopes]) }) : null;
