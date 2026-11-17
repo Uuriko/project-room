@@ -89,6 +89,7 @@ const WORKITEMS_REFERENCE_SITES = [
   "server/return-brief.mjs",
   "server/room-activation-pack.mjs",
   "server/room-context.mjs",
+  "server/room-next.mjs",
   "server/snapshot-window.mjs",
   "server/spend-allowance.mjs",
   "server/store.mjs",
@@ -144,7 +145,8 @@ const NORMALIZED_WORKITEMS_ROLES = {
   "server/recovery-reply-rules.mjs": "shared-audit-rules",
   "server/recovery-work-help.mjs": "recovery",
   "server/replay-cutover.mjs": "migration",
-  "server/replay-projection-codec.mjs": "codec"
+  "server/replay-projection-codec.mjs": "codec",
+  "server/room-next.mjs": "reader"
 };
 
 function referenceSites() {
@@ -163,7 +165,7 @@ function referenceSites() {
   return found.sort();
 }
 
-test("step0 census: workItems reference-site inventory is pinned (86 files)", () => {
+test("step0 census: workItems reference-site inventory is pinned", () => {
   assert.deepEqual(referenceSites(), WORKITEMS_REFERENCE_SITES);
 });
 

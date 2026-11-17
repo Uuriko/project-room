@@ -12,6 +12,11 @@ import { privateMarkers, privateWorkFixture } from "./helpers/private-work-fixtu
 for (const representation of ["legacy", "normalized-current-v1"]) {
   test(`room next uses the same private-view boundary through MCP and CLI (${representation})`, async t => {
     const f = await privateWorkFixture(t, representation);
+    for (let n = 0; n < 4; n++) {
+      f.send(f.owner, "work.proposed", { workItemId: `a-decoy-${n}`, title: "Unrelated work",
+        definitionOfDone: "Out of scope", accountableMemberId: f.observer.id, verifierMemberId: f.producer.id,
+        independentVerificationRequired: true, mode: "read" });
+    }
     const before = f.stored();
     const room = f.store.room;
     f.store.room = () => { throw new Error("room next hydrated the whole Room"); };
@@ -20,11 +25,15 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(owner.ok, true, owner.text);
     assert.equal(owner.value.viewerId, f.producer.id);
     assert.ok(owner.value.goal);
-    assert.ok(owner.value.work.items.some(item => item.id === "secret"));
+    const correction = owner.value.work.items.find(item => item.id === "secret");
+    assert.equal(correction?.reason, "revise");
+    assert.equal(correction.correction.truncated, false);
+    assert.ok(privateMarkers(correction.correction.reason).length);
+    assert.equal(correction.nextRead.arguments.includeDiscussion, false);
     assert.deepEqual(owner.value.requests.items.map(item => item.id), ["private-ask"]);
     assert.ok(!owner.text.includes("zq-private-request-zq"));
 
-    const observer = await f.mcp(f.observer, "room_next");
+    const observer = await f.mcp(f.triage, "room_next");
     assert.equal(observer.ok, true, observer.text);
     assert.deepEqual(observer.value.work.items, []);
     assert.deepEqual(observer.value.requests.items, []);
@@ -59,8 +68,8 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
 
 test("an empty work page advances, keeps ongoing work, and invalidates stale authority", async t => {
   const f = await privateWorkFixture(t, "normalized-current-v1");
-  for (let i = 0; i < 4; i++) {
-    const id = `a-${i}`;
+  for (let i = 0; i < 16; i++) {
+    const id = `a-${String(i).padStart(2, "0")}`;
     f.send(f.owner, "work.proposed", {
       workItemId: id, title: id, definitionOfDone: "Save a result", accountableMemberId: f.observer.id,
       verifierMemberId: f.reviewer.id, independentVerificationRequired: true

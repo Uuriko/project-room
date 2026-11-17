@@ -34,7 +34,9 @@ const roomNextOutput = {
     charterRevision: { type: ["integer", "null"] }, contentTrust: { type: "string" },
     work: nextPage(schema({
       id: idField, title: { type: "string", maxLength: 160 }, revision: { type: "integer", minimum: 0 },
-      reason: { type: "string" }, nextRead
+      reason: { type: "string" }, nextRead,
+      correction: schema({ reason: { type: "string" }, nextAction: { type: "string" }, truncated: { type: "boolean" } },
+        ["reason", "nextAction", "truncated"])
     }, ["id", "title", "revision", "reason", "nextRead"])),
     requests: nextPage(schema({ id: idField, revision: { type: "integer", minimum: 0 }, nextRead },
       ["id", "revision", "nextRead"]))

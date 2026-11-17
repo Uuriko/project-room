@@ -411,6 +411,7 @@ The legacy field-fate and rework/divergence tests remain unchanged.
 | `server/current-search.mjs` | reader | Bounded authorized search matches selected canonical work bodies from protected summary windows; total remains unknown and continuations are viewer, credential and head bound. No work writer or board absorption. |
 | `server/current-work-capacity.mjs` | constraint | Derived canonical-work capacity index preserves legacy cap and dormancy rules; it is not a board claim writer. |
 | `server/current-work-list.mjs` | reader | Authorized paged native work discovery, selected result pointers and continuation; partial summaries are not a complete work map. |
+| `server/room-next.mjs` | reader | Bounded work discovery on legacy and normalized storage. An addressed row can carry a correction preview and a scoped read pointer. |
 | `server/current-work-privacy.mjs` | derived-policy | Derives private request parties and work-request links from canonical work and requests; no board mapping. |
 | `server/current-work-snapshot.mjs` | reader | Bounded work-view pages load selected canonical work records, with protected private-party redaction and explicit partial coverage; no lifecycle writes or complete-map claim. |
 | `server/recovery-census-continuation.mjs` | recovery | Independent protected work-reference/body/summary/capacity/privacy census and complete membership counts. |
