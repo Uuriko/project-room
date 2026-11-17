@@ -81,7 +81,42 @@ export function workReadRefusal(error) {
 
 // A hint derived from the same authorized read as the brief. Missing input is
 // explicit; this never executes a tool, invents scope, or supplies a verdict.
-export function workContinuation(context, { hosted = false } = {}) {
+// The operation that advances each addressed step, and the Room action
+// (workActions) that must be present for this member to perform it.
+const ADVANCING_STEP = Object.freeze({
+  accept: ["accept", "room_begin_work"], start: ["start", "room_begin_work"], claim: ["claim", "room_begin_work"],
+  revise: ["resolve", "room_resolve_blocker"], verify: ["verify", "room_record_verification"]
+});
+
+// Room side of the effective capability, from the same read. The hosted MCP
+// transport adds this connection's grant/catalog; other callers keep "unknown".
+function roomCapability(context, step) {
+  const { viewer, next } = context;
+  const entry = ADVANCING_STEP[next.action];
+  const waitingOn = step.waitingOn ?? next.waitingOn;
+  const base = { operation: next.action, tool: entry?.[1] ?? null, connection: "not_evaluated", blockedBy: null, recovery: null,
+    ...(waitingOn === undefined ? {} : { waitingOn }) };
+  const wait = { status: "waiting", blockedBy: "prerequisites", recovery: "Read this task again after its prerequisites finish; claim/start admission rechecks them." };
+  if (!next.addressedToViewer || next.replacement?.nextRead) return { ...base, tool: null, room: "not_addressed", status: "none" };
+  if (viewer.active === false) return { ...base, room: "inactive", status: "blocked", blockedBy: "room_authority", recovery: "This membership is inactive; ask the room owner to restore it." };
+  // A server-side prerequisite wait (#6257) stays a wait; Room authority for the later start is not evaluated here.
+  if (next.action === "wait_prerequisites") return { ...base, room: "not_evaluated", ...wait };
+  if (!entry) return { ...base, room: "no_agent_operation", status: "none" };
+  if (!new Set(context.suggestedActions.map(action => action.action)).has(entry[0])) return { ...base, room: "not_permitted", status: "blocked", blockedBy: "room_authority",
+    recovery: "Room permissions or the independence rule do not let this member take this step; ask the room owner to adjust permissions or reassign it. Do not attempt the operation." };
+  if (!step.tool) return waitingOn === "unknown"
+    ? { ...base, room: "permitted", status: "unknown", recovery: "Prerequisite state was not returned; read this task again before claiming or starting. Admission decides." }
+    : { ...base, room: "permitted", ...wait };
+  // Callable suggestion: the transport decides available/blocked for its connection.
+  return { ...base, room: "permitted", status: "unknown" };
+}
+
+export function workContinuation(context, options = {}) {
+  const step = continuationStep(context, options);
+  return { ...step, capability: roomCapability(context, step) };
+}
+
+function continuationStep(context, { hosted = false, brief = true } = {}) {
   const { work, viewer, next } = context;
   const value = { action: next.action, label: next.label, memberId: next.memberId,
     addressedToViewer: next.addressedToViewer, workRevision: work.revision,
@@ -116,7 +151,7 @@ export function workContinuation(context, { hosted = false } = {}) {
     return point("room_resolve_blocker", { expectedRevision: work.revision }, ["resolution"]);
   }
   if (next.action === "verify" && available.has("verify")) {
-    if (!context.review) return point("room_read_work", { brief: true, includeResult: true });
+    if (!context.review) return point("room_read_work", { ...(brief ? { brief: true } : {}), includeResult: true });
     return point("room_record_verification", { expectedRevision: work.revision,
       completionEventId: context.review.completionEventId,
       evidenceVersion: context.review.result.receipt.evidenceVersion }, ["result", "summary"]);
@@ -159,7 +194,9 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
       for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = context.roomId;
       if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = context.roomId;
     }
-    if (!(args.brief ?? batch)) return context;
+    // Full selected reads carry the same executable contract as brief reads.
+    if (!(args.brief ?? batch)) return context?.next && Array.isArray(context.suggestedActions)
+      ? { ...context, continuation: workContinuation(context, { hosted, brief: false }) } : context;
     const brief = await createWorkBrief(context);
     const identity = { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),

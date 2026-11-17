@@ -72,6 +72,7 @@ import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { ACTION_META_TOOL_NAMES, SEARCH_ACTIONS_TOOL, RUN_ACTION_TOOL, actionMetaToolDefs, isRunnableAction, searchActions, validRunActionArgs, validSearchActionsArgs } from "./mcp-action-search.mjs";
 import { CONTENT_TRUST, stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext, stampWorkListing, withContentTrust } from "./content-trust.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
+import { withConnectionCapability } from "./mcp-next-capability.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
 import { runRoomMap } from "./project-map-store.mjs";
 import { firstConnectTask } from "./first-connect-task.mjs";
@@ -522,6 +523,19 @@ function credentialRedactions(name, value) {
     mcpRedaction(value?.connection?.token, "structuredContent.connection.token"),
     mcpRedaction(value?.connection?.identitySecret, "structuredContent.connection.identitySecret"),
   ];
+}
+
+// Selected work reads: say whether THIS connection can run the suggested step.
+function selectedReadCapability(value, { store, secret, identity, oauthPrincipal }) {
+  const agent = resolveCatalogAgent(store, identity);
+  return withConnectionCapability(value, {
+    connection: oauthPrincipal ? { kind: "oauth", scopes: oauthPrincipal.scopes }
+      : { kind: typeof secret === "string" && secret.startsWith(API_KEY_PREFIX) ? "api_key" : "identity" },
+    exposed: tool => {
+      const def = HOSTED_TOOLS.find(entry => entry.name === tool);
+      return Boolean(def) && SUGGESTABLE_TOOLS.includes(tool) && !catalogCallDenial(agent, def);
+    }
+  });
 }
 
 function enforceMcpCallVisibility(store, identity, toolName) {
@@ -1258,7 +1272,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
         const outcome = await callHostedStdioTool(store, secret, name, args);
-        return { jsonrpc: "2.0", id: requestId, result: toolResult(boardIdHint(store, args, outcome), outcome.isError) };
+        const value = name === "room_read_work" && !outcome.isError
+          ? selectedReadCapability(outcome.value, { store, secret, identity, oauthPrincipal }) : boardIdHint(store, args, outcome);
+        return { jsonrpc: "2.0", id: requestId, result: toolResult(value, outcome.isError) };
       }
       if (INBOX_TOOLS.some(entry => entry.name === name)) {
         // Scoped API keys need the mcp:inbox scope: inbox tools reach the
