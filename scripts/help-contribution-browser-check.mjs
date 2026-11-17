@@ -175,6 +175,16 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   let alternateDraft = null;
   if (multiple) {
     const alternate = await open('alternate');
+    // The helper's private reply request now makes this private work. An
+    // ordinary DM is not an invitation to read it: assert refusal before the
+    // owner explicitly makes the alternate a private-request party.
+    assert.throws(() => f.store.workContext(f.keys.alternate, 'commons', workItemId),
+      error => error.status === 403 && error.code === 'work_private');
+    const denied = await alternate.call('room_read_work', { workItemId });
+    assert.equal(denied.result.isError, true);
+    f.store.command(f.keys.owner, 'commons', { id: 'request-alternative', type: T.MESSAGE_POSTED, data: {
+      messageId: 'request-alternative', workItemId, toMemberId: 'alternate', requestKind: 'reply',
+      body: 'Test alternate: contribute a second two-step guide here for comparison. I will inspect both and choose; do not take over the assignment or use external tools.' } });
     const alternateContext = await call(alternate, 'room_read_work', { workItemId }, true);
     assert.equal(alternateContext.work.revision, current.work.revision);
     const before = await call(alternate, 'room_read_work_discussion', { workItemId }, true);
