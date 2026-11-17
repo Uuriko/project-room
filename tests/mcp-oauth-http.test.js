@@ -207,7 +207,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 33, 'audit every advertised native tool, including acquire/release/renew, bounded attention wait, own catch-up marker, catch-up digest, project state, response latency, cancelling your own ask, reporting ask progress and needs-me');
+  assert.equal(tools.length, 35, 'audit every advertised native tool, including room next, exact-result verification, including acquire/release/renew, bounded attention wait, own catch-up marker, catch-up digest, project state, response latency, cancelling your own ask, reporting ask progress and needs-me');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -467,6 +467,14 @@ test('in-flight consent cannot issue a code after browser account-slot logout',a
 
 test('Claude defaults to existing-account consent while explicit invitation and public discovery remain available',async t=>{
  const f=await setup(t,{legacyOwned:true,client:CLAUDE});
+ const initialized = await f.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {},
+   clientInfo: { name: 'agent-entry', version: '1' } });
+ const instructions = initialized.body.result.instructions;
+  assert.match(instructions, /room_list_work\(focus=needs_me\).*room_list_requests/);
+  assert.match(instructions, /room_read_work\(brief=true\).*continuation/);
+  assert.match(instructions, /room_read_request.*responseActions/);
+  assert.doesNotMatch(instructions, /public_work|room-acp|room_read_inbox/);
+
  const args={client_id:CLAUDE.clientId,redirect_uri:CLAUDE.redirectUris[0],scope:'rooms:read chat:read',state:'claude',code_challenge:challenge,code_challenge_method:'S256',resource};
  const account=await fetch(f.base+'/oauth/authorize?'+new URLSearchParams(args));assert.equal(account.status,302);assert.match(account.headers.get('location'),/oauth=login/);
  const invitation=await fetch(f.base+'/oauth/authorize?'+new URLSearchParams({...args,connection:'invite'}));assert.equal(invitation.status,200);
@@ -600,4 +608,197 @@ for (const normalized of [false, true]) test(`OAuth agents can call room_needs_m
   assert.ok(found.includes('owner-ask-nm'), `the owner's formal ask is found: ${found}`);
   const other = await f.rpc('tools/call', { name: 'room_needs_me', arguments: { roomId: 'someone-elses-room' } });
   assert.equal(other.body.result?.isError ?? Boolean(other.body.error), true, 'a different room is refused');
+});
+
+for (const normalized of [false, true]) test(`OAuth exact-result review preserves consent and reviewer gates (${normalized ? 'normalized' : 'legacy'})`, async t => {
+  const f = await setup(t, { normalized });
+  const workItemId = 'oauth-review-result';
+  const command = (id, type, data) => f.store.command(f.ownerKey, 'commons', { id, type, data });
+  command('review-propose', 'work.proposed', { workItemId, title: 'Review an exact result', definitionOfDone: 'Independent review of stored text',
+    accountableMemberId: 'owner', verifierMemberId: 'friend-dot', mode: 'read', independentVerificationRequired: true, ownerDecisionRequired: false });
+  command('review-accept', 'work.accepted', { workItemId, expectedRevision: 0 });
+  const body = 'An exact contribution for independent review';
+  const posted = command('review-post', 'message.posted', { messageId: 'review-result', workItemId, body });
+  const evidenceVersion = 'sha256:' + createHash('sha256').update(body).digest('hex');
+  const completed = command('review-complete', 'work.completed', { workItemId, expectedRevision: 1, evidenceKind: 'room_text',
+    evidenceMessageId: 'review-result', evidenceMessageEventId: posted.event.id, evidenceVersion, previousCompletionEventId: null,
+    producerId: 'owner', summary: 'Result ready', nextAction: 'Independent review' });
+  const tool = 'room_record_verification';
+  const args = { workItemId, expectedRevision: 2, completionEventId: completed.event.id, evidenceVersion, result: 'pass', summary: 'Inspected exact stored result', requestId: 'oauth-review' };
+  const readonlyConsent = await f.consent({ scope: 'rooms:read chat:read work:read' });
+  const code = new URL(readonlyConsent.headers.get('location')).searchParams.get('code');
+  const response = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const readTokens = await response.json();
+  const readCatalog = await f.rpc('tools/list', {}, readTokens.access_token);
+  assert.ok(!readCatalog.body.result.tools.some(item => item.name === tool));
+  const noConsent = await f.rpc('tools/call', { name: tool, arguments: args }, readTokens.access_token);
+  assert.ok(noConsent.body.error || noConsent.body.result?.isError, 'Room verify authority cannot bypass OAuth consent');
+  const catalog = await f.rpc('tools/list');
+  assert.ok(catalog.body.result.tools.some(item => item.name === tool), 'consented reviewer must discover verification');
+  const stale = await f.rpc('tools/call', { name: tool, arguments: { ...args, requestId: 'oauth-stale-review', evidenceVersion: 'sha256:' + '0'.repeat(64) } });
+  assert.ok(stale.body.error || stale.body.result?.isError, 'wrong result version cannot pass');
+  const accepted = await f.rpc('tools/call', { name: tool, arguments: args });
+  assert.equal(accepted.body.error, undefined, JSON.stringify(accepted.body));
+  assert.equal(accepted.body.result?.structuredContent.status, 'recorded', JSON.stringify(accepted.body));
+  const read = await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId, includeResult: true } });
+  assert.equal(read.body.result.structuredContent.next.action, 'complete');
+});
+
+// The exact-result review above is one command. These two cover the rest of
+// what an OAuth-connected agent does around it, on both storage types: the
+// whole work:write lifecycle must fit the bounded command context, and consent,
+// role and exact-version gates must each refuse for their own reason.
+const reviewed = body => body.result?.structuredContent ?? null;
+const refusal = body => body.error?.data?.code ?? body.error?.code ?? reviewed(body)?.error?.code ?? reviewed(body)?.code ?? (body.result?.isError ? JSON.stringify(body.result).match(/"code":"([a-z_]+)"/)?.[1] ?? 'tool_error' : null);
+const textVersionOf = body => 'sha256:' + createHash('sha256').update(body).digest('hex');
+const memberOfRoom = (f, id) => f.store.roomAuthority('commons', { memberId: id }).members[id];
+const verifications = (f, workItemId) => f.store.db.prepare("SELECT count(*) n FROM events WHERE room_id='commons' AND json_extract(body,'$.type')='verification.recorded' AND json_extract(body,'$.data.workItemId')=?").get(workItemId).n;
+function ownerResult(f, workItemId, { verifierMemberId = 'friend-dot', suffix = '' } = {}) {
+  const command = (id, type, data) => f.store.command(f.ownerKey, 'commons', { id: `${workItemId}-${id}${suffix}`, type, data });
+  if (!suffix) {
+    command('propose', 'work.proposed', { workItemId, title: 'Result for review', definitionOfDone: 'Independent review of stored text', accountableMemberId: 'owner',
+      verifierMemberId, mode: 'read', independentVerificationRequired: true, ownerDecisionRequired: false });
+    command('accept', 'work.accepted', { workItemId, expectedRevision: 0 });
+  }
+  const body = `Stored result ${workItemId}${suffix}`, messageId = `${workItemId}-result${suffix}`;
+  const posted = command('post', 'message.posted', { messageId, workItemId, body });
+  const revision = f.store.workContext(f.ownerKey, 'commons', workItemId).work.revision;
+  const previous = f.store.workContext(f.ownerKey, 'commons', workItemId).work.receipt?.eventId ?? null;
+  const completed = command('complete', 'work.completed', { workItemId, expectedRevision: revision, evidenceKind: 'room_text', evidenceMessageId: messageId,
+    evidenceMessageEventId: posted.event.id, evidenceVersion: textVersionOf(body), previousCompletionEventId: previous, producerId: 'owner', summary: 'Result ready', nextAction: 'Independent review' });
+  return { workItemId, expectedRevision: revision + 1, completionEventId: completed.event.id, evidenceVersion: textVersionOf(body), result: 'pass', summary: 'Inspected exact stored result' };
+}
+
+for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits the bounded command context (${normalized ? 'normalized' : 'legacy'})`, async t => {
+  const f = await setup(t, { normalized });
+  const workItemId = 'oauth-lifecycle';
+  f.store.command(f.ownerKey, 'commons', { id: 'lifecycle-propose', type: 'work.proposed', data: { workItemId, title: 'Do the work over OAuth', definitionOfDone: 'A stored text result',
+    accountableMemberId: 'friend-dot', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false } });
+  const call = async (name, args) => {
+    const response = await f.rpc('tools/call', { name, arguments: { workItemId, ...args } });
+    assert.notEqual(refusal(response.body), 'current_room_context_unavailable', `${name} exceeded the bounded command context`);
+    assert.equal(response.body.error, undefined, `${name}: ${JSON.stringify(response.body).slice(0, 300)}`);
+    assert.notEqual(response.body.result?.isError, true, `${name}: ${JSON.stringify(response.body).slice(0, 300)}`);
+    return reviewed(response.body);
+  };
+  await call('room_accept_work', { expectedRevision: 0, requestId: 'life-accept' });
+  await call('room_start_work', { expectedRevision: 1, requestId: 'life-start' });
+  await call('room_block_work', { expectedRevision: 2, reason: 'Waiting on an input', nextAction: 'Owner supplies it', requestId: 'life-block' });
+  await call('room_resolve_blocker', { expectedRevision: 3, resolution: 'Input supplied', requestId: 'life-resolve' });
+  await call('room_start_work', { expectedRevision: 4, requestId: 'life-restart' });
+  const text = 'The finished text';
+  const posted = await call('room_post_message', { body: text, id: 'life-result' });
+  const submitted = await call('room_submit_text_result', { expectedRevision: 5, evidenceMessageId: posted.command.data.messageId, evidenceMessageEventId: posted.event.id,
+    evidenceVersion: textVersionOf(text), previousCompletionEventId: null, producerId: 'friend-dot', summary: 'Done', nextAction: 'None', requestId: 'life-submit' });
+  assert.ok(submitted, 'the result submission returns a structured receipt');
+  const read = reviewed((await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId, includeResult: true } })).body);
+  assert.equal(read.work.state, 'completed');
+  assert.ok(JSON.stringify(read).includes('The finished text'));
+});
+
+for (const normalized of [false, true]) test(`OAuth review refuses on consent, role and version, records once, and follows authority changes (${normalized ? 'normalized' : 'legacy'})`, async t => {
+  const f = await setup(t, { normalized });
+  const tool = 'room_record_verification';
+  const verify = (args, token) => f.rpc('tools/call', { name: tool, arguments: args }, token);
+  const refused = async (label, args, token) => {
+    const before = verifications(f, args.workItemId), response = await verify(args, token), code = refusal(response.body);
+    assert.ok(code, `${label} must be refused: ${JSON.stringify(response.body).slice(0, 300)}`);
+    assert.notEqual(code, 'current_room_context_unavailable', `${label} must be refused for its own reason, not the read budget`);
+    assert.equal(verifications(f, args.workItemId), before, `${label} recorded nothing`);
+    return code;
+  };
+  // 1. The producer cannot be made their own independent reviewer: the task cannot exist.
+  assert.throws(() => f.store.command(f.ownerKey, 'commons', { id: 'own-propose', type: 'work.proposed', data: { workItemId: 'own-result', title: 'Agent result',
+    definitionOfDone: 'A stored text result', accountableMemberId: 'friend-dot', verifierMemberId: 'friend-dot', mode: 'read', independentVerificationRequired: true, ownerDecisionRequired: false } }),
+    /different accountable member and verifier/);
+  // 2. A member with verify permission who is not the designated reviewer cannot approve.
+  f.store.command(f.ownerKey, 'commons', { id: 'add-other-reviewer', type: 'member.added', data: { memberId: 'other-reviewer', displayName: 'Other Reviewer', kind: 'agent', permissions: ['verify'] } });
+  const designated = ownerResult(f, 'designated-other', { verifierMemberId: 'other-reviewer' });
+  await refused('non-designated reviewer', { ...designated, requestId: 'not-designated' });
+  // 3. The designated reviewer: wrong version, then a completion event that does not exist.
+  const mine = ownerResult(f, 'for-friend');
+  await refused('wrong evidence version', { ...mine, evidenceVersion: 'sha256:' + 'a'.repeat(64), requestId: 'wrong-version' });
+  await refused('unknown completion event', { ...mine, completionEventId: randomUUID(), requestId: 'wrong-completion' });
+  // 4. Read-only consent with full Room authority still cannot verify.
+  const readonly = await f.consent({ scope: 'rooms:read chat:read work:read' });
+  const readTokens = await (await f.exchange({ grant_type: 'authorization_code', code: new URL(readonly.headers.get('location')).searchParams.get('code'), client_id: CLIENT.clientId,
+    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource })).json();
+  await refused('read-only consent', { ...mine, requestId: 'read-only' }, readTokens.access_token);
+  // 5. The exact result records once; the same request again adds nothing.
+  let validations = 0, authorityReads = 0;
+  const connections = f.store.agentConnections, validate = connections.authority.bind(connections), authority = f.store.roomAuthority.bind(f.store);
+  connections.authority = row => { validations += 1; return validate(row); };
+  f.store.roomAuthority = (...args) => { authorityReads += 1; return authority(...args); };
+  const first = await verify({ ...mine, requestId: 'the-review' });
+  connections.authority = validate; f.store.roomAuthority = authority;
+  // One tool call resolves the token several times (dispatch, then the command). Each
+  // resolution validates its binding once; before the repair each did it twice (9 here).
+  assert.ok(validations <= 5, `binding validated ${validations} times for one review`);
+  assert.ok(authorityReads <= (normalized ? 25 : 20), `member authority requested ${authorityReads} times for one review`);
+  assert.equal(reviewed(first.body)?.status, 'recorded', JSON.stringify(first.body).slice(0, 300));
+  assert.equal(verifications(f, 'for-friend'), 1);
+  const retry = await verify({ ...mine, requestId: 'the-review' });
+  assert.equal(refusal(retry.body), null, `an exact retry is not an error: ${JSON.stringify(retry.body).slice(0, 300)}`);
+  assert.equal(verifications(f, 'for-friend'), 1, 'an exact retry does not record a second verification');
+  // 6. A superseded result cannot be approved: fail it, replace it, then try the first completion again.
+  const replaced = ownerResult(f, 'replaced');
+  const failed = await verify({ ...replaced, result: 'fail', summary: 'Needs another pass', nextAction: 'Rework', requestId: 'fail-first' });
+  assert.equal(reviewed(failed.body)?.status, 'recorded', JSON.stringify(failed.body).slice(0, 300));
+  const afterFail = f.store.workContext(f.ownerKey, 'commons', 'replaced').work;
+  f.store.command(f.ownerKey, 'commons', { id: 'replaced-resolve', type: 'work.blocker_resolved', data: { workItemId: 'replaced', expectedRevision: afterFail.revision, resolution: 'Reworked' } });
+  f.store.command(f.ownerKey, 'commons', { id: 'replaced-restart', type: 'work.started', data: { workItemId: 'replaced', expectedRevision: afterFail.revision + 1 } });
+  const second = ownerResult(f, 'replaced', { suffix: '-2' });
+  // The first completion is now history. A review naming it is kept as a historical record
+  // and does not satisfy the gate on the current result: the task still waits for review.
+  const superseded = await verify({ ...replaced, expectedRevision: second.expectedRevision, requestId: 'superseded' });
+  assert.equal(reviewed(superseded.body)?.currentStateVerified, false, 'the receipt does not claim the current result was reviewed');
+  const stillWaiting = reviewed((await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId: 'replaced', includeResult: true } })).body);
+  assert.notEqual(stillWaiting.next.action, 'complete', 'a review of a superseded result does not complete the task');
+  assert.equal(stillWaiting.work.state, 'completed');
+  assert.notEqual(f.store.workContext(f.ownerKey, 'commons', 'replaced').work.verification?.completionEventId, replaced.completionEventId, 'the current gate does not point at the superseded completion');
+  const accepted = await verify({ ...second, expectedRevision: f.store.workContext(f.ownerKey, 'commons', 'replaced').work.revision, requestId: 'approve-second' });
+  assert.equal(reviewed(accepted.body)?.status, 'recorded', JSON.stringify(accepted.body).slice(0, 300));
+  // 7. A fresh read shows the durable outcome.
+  for (const workItemId of ['for-friend', 'replaced']) {
+    const read = reviewed((await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId, includeResult: true } })).body);
+    assert.equal(read.next.action, 'complete', workItemId);
+    assert.equal(read.work.verification?.result ?? read.review?.result ?? 'pass', 'pass');
+  }
+  // 8. Authority changes are respected. Removing the reviewer's Room verify permission ends
+  // what this grant can do: consent never supplies Room authority the member lacks, and giving
+  // the permission back does not revive the old grant. A new consent does.
+  const later = ownerResult(f, 'after-change');
+  const seat = memberOfRoom(f, 'friend-dot');
+  f.store.command(f.ownerKey, 'commons', { id: 'strip-verify', type: 'member.access_changed', data: { memberId: 'friend-dot', expectedMemberRevision: seat.revision, active: true,
+    permissions: seat.permissions.filter(permission => permission !== 'verify') } });
+  await refused('work:write consent without Room verify permission', { ...later, requestId: 'no-room-authority' });
+  f.store.command(f.ownerKey, 'commons', { id: 'restore-verify', type: 'member.access_changed', data: { memberId: 'friend-dot', expectedMemberRevision: seat.revision + 1, active: true, permissions: seat.permissions } });
+  await refused('the grant issued before the authority change', { ...later, requestId: 'old-grant' });
+});
+
+test('room next is listed and callable with the complete read grant, and withheld with a partial grant', async t => {
+  const f = await setup(t, { normalized: true });
+  const tool = 'room_next';
+  const list = await f.rpc('tools/list');
+  assert.ok(list.body.result.tools.some(entry => entry.name === tool));
+  const view = await f.rpc('tools/call', { name: tool, arguments: {} });
+  assert.equal(view.body.result?.isError, undefined, JSON.stringify(view.body));
+  assert.equal(view.body.result.structuredContent.viewerId, 'friend-dot');
+  assert.deepEqual(view.body.result.structuredContent.work.items, []);
+  assert.equal(view.body.result.structuredContent.requests.coverage, 'complete');
+  const otherRoom = await f.rpc('tools/call', { name: tool, arguments: { roomId: 'another-room' } });
+  assert.match(otherRoom.body.error?.data?.hint ?? '', /limited to its approved room/);
+
+  const consent = await f.consent({ scope: 'rooms:read chat:read' });
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const issued = await f.exchange({
+    grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0],
+    code_verifier: verifier, resource
+  });
+  const partial = (await issued.json()).access_token;
+  assert.ok(partial);
+  const narrowList = await f.rpc('tools/list', {}, partial);
+  assert.ok(!narrowList.body.result.tools.some(entry => entry.name === tool));
+  const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
+  assert.match(denied.body.error?.data?.hint ?? '', /outside the connected agent grant/);
 });

@@ -46,7 +46,7 @@ test('actual current request and response maintain privacy links atomically with
  assert.ok(!JSON.stringify(buildActivationPack(store,'commons','observer')).includes('ACTUAL-PRIVATE-TITLE'));
  assert.ok(JSON.stringify(buildOrient(store,'commons','producer')).includes('ACTUAL-PRIVATE-TITLE'));
  const before=store.db.prepare('SELECT * FROM operator_actions ORDER BY id').all();assert.equal(store.command(owner,'commons',command).duplicate,true);assert.deepEqual(store.db.prepare('SELECT * FROM operator_actions ORDER BY id').all(),before);
- const observer=store.issueAccessKey('commons','observer');assert.equal(store.workContext(observer,'commons','private').work.title,null);
+ const observer=store.issueAccessKey('commons','observer');assert.throws(()=>store.workContext(observer,'commons','private'),e=>e.status===403&&e.code==='work_private');
  const selected=store.workContext(producer,'commons','private');assert.equal(selected.work.id,'private');
  store.command(producer,'commons',{id:'answer-private',type:'message.posted',data:{messageId:'answer-private',toMemberId:'owner',replyToId:'ask-private',workItemId:'private',responseToRequestId:'ask-private',expectedRequestRevision:0,responseOutcome:'answered',contextEventId:asked.event.id,contextSequence:asked.sequence,body:'Saved private answer'}});
  assert.ok(!JSON.stringify(buildOrient(store,'commons','observer')).includes('ACTUAL-PRIVATE-TITLE'));

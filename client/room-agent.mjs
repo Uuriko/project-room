@@ -9,6 +9,7 @@ import { isDeepStrictEqual } from "node:util";
 import { searchWork, searchWorkMatches, completedResults, currentResult } from "../src/work-selectors.js";
 import { createHash, randomUUID } from "node:crypto";
 import { workPacket, resultDraft, verifyWorkResult, resumeMarkdown, validSourceObservation } from "../src/work-packet.js";
+import { prerequisiteHold, stepWithPrerequisiteHold } from "./begin-work.mjs";
 import { submitWorkAction } from "./work-actions.mjs";
 import { submitHelpAction } from "./help-actions.mjs";
 import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
@@ -446,7 +447,8 @@ export class RoomAgentClient {
       method: body === undefined ? "GET" : "POST", signal,
       headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(helpContext ? { "X-Project-Room-Help-Context": "1" } : {}),
-        ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}) },
+        ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
+        ...(/\/work-context\?/.test(path) ? { "X-Project-Room-Resume-Context": "1" } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
     let value;
@@ -840,9 +842,18 @@ export class RoomAgentClient {
         || dep.satisfied && dep.state !== "done")
       || new Set(result.dependencies.map(dep => dep.id)).size !== result.dependencies.length))
       throw new RoomClientError(200, "invalid_response", "Invalid work dependency observation");
-    if (Object.hasOwn(result, "resume") && !isDeepStrictEqual(result.resume,
-      workResume(result.work, Date.parse(result.evaluatedAt), result.context.roomOwnerId)))
-      throw new RoomClientError(200, "invalid_response", "Resume brief does not match selected work");
+    if (Object.hasOwn(result, "resume")) {
+      const now = Date.parse(result.evaluatedAt);
+      const { roomOwnerId } = result.context;
+      const step = nextWorkStep(result.work, now, roomOwnerId);
+      const hold = Array.isArray(result.dependencies) ? prerequisiteHold(result.dependencies) : null;
+      const expected = workResume(result.work, now, roomOwnerId, stepWithPrerequisiteHold(step, hold));
+      // Older servers compute resume without dependency observations.
+      const legacy = workResume(result.work, now, roomOwnerId, step);
+      if (!isDeepStrictEqual(result.resume, expected) && !isDeepStrictEqual(result.resume, legacy))
+        throw new RoomClientError(200, "invalid_response", "Resume brief does not match selected work");
+      result.resume = expected;
+    }
     if (result.context.charter !== undefined) result.context.charter = checkedCharter(result.context.charter, result.evaluatedThrough);
     if (Object.hasOwn(result, "collaboration")) {
       try {

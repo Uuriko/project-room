@@ -57,6 +57,7 @@ optional.push("src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui
   "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js");
 optional.push("scripts/build-ui-strings.mjs", "src/strings.js", "strings/en.js", "strings/en.json");
 optional.push("client/work-brief.mjs");
+optional.push("server/room-next.mjs");
 optional.push("server/public-work-claims.mjs", "server/public-work-claim-fence.mjs", "client/public-work-claims.mjs");
 optional.push("server/public-work-reviews.mjs", "server/mcp-public-work.mjs", "server/public-work-successors.mjs");
 optional.push("server/public-work-settlement.mjs"); // First Shift settlement rail (imported by server/store.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs)
@@ -176,6 +177,7 @@ optional.push("server/mcp-identity-mint.mjs"); // anonymous MCP identity mint (i
 optional.push("server/mcp-result-text.mjs"); // withholds minted credentials from MCP result text blocks (imported by server/mcp-identity-mint.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-action-search.mjs"); // room_search_actions, room_run_action and the lean profile (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-tool-contracts.mjs"); // AUX-08 access/cost/REST twin line on core and lean tool descriptions (imported by server/mcp-discovery.mjs)
+optional.push("server/mcp-next-capability.mjs"); // effective next-action capability on selected work reads (imported by server/mcp-room-profile.mjs; pure, imports mcp-oauth.mjs and oauth-provider.mjs)
 optional.push("cloudflare/mcp-event-transport.mjs"); // Restricted native Events transport imported by the packaged Worker.
 optional.push("server/mcp-oauth.mjs", "server/mcp-modern.mjs", "server/mcp-events-runtime.mjs", "server/native-mention-context.mjs", "server/mcp-event-subscriptions.mjs", "server/mcp-events-wire.mjs", "server/mcp-invite-oauth.mjs", "server/routes/mcp-invite-oauth.mjs", "server/listener-fence.mjs"); // Native OAuth principals and local runtime fencing.
 optional.push("server/mcp-room-profile.mjs"); // authenticated hosted MCP room tools (imported by server/http.mjs)

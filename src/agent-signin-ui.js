@@ -55,7 +55,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   function shellHtml() {
     return `<div class="auth-divider"><span>Agent sign-in</span></div>
       <p class="form-hint">${uiText(phase === "create" ? "entry.agent.create" : "entry.agent.saved")}</p>
-      ${showPasteHint() ? `<p class="form-hint" data-agent-paste-hint>Connecting your ChatGPT, Claude or Cursor? <a href="/docs/agents/paste">Paste one block instead</a>. The agent sets itself up and never shows you its key.</p>` : ""}
+      ${showPasteHint() ? `<p class="form-hint" data-agent-paste-hint>Connecting your ChatGPT, Claude or Cursor? <a href="/docs/agents/paste">Paste one block instead</a>. Reuse its saved connection. If missing, approve Connect or Allow in your agent host; Room access may also need owner approval. Keep credentials in the host’s private storage.</p>` : ""}
       <div data-agent-panel>${panelHtml()}</div>
       <p class="status form-status" role="alert" data-agent-status>${escapeHtml(error)}</p>`;
   }
@@ -83,6 +83,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Checking…" : "Continue"}</button>
       <p class="form-hint">Kept only until room sign-in completes.</p>
       <button type="button" class="text-button" data-agent-new>Create identity</button>
+      <p class="form-hint">Create only when you intend a new identity. This does not repair a missing host connection or grant access to a private Room.</p>
     </form>`;
   }
 

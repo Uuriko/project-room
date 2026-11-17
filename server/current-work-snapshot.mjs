@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {conversationCursorCodec} from './conversation-sync.mjs';
 import {withCurrentReadContext,readCurrentHead,readCurrentWorkItem} from './current-room-repository.mjs';
-import {currentWorkRecord} from './work-context.mjs';
+import {currentWorkRecord,withheldWorkItem} from './work-context.mjs';
 import {charterContext} from '../src/room-charter.js';
 import {ServiceError} from './service-error.mjs';
 const invalid=()=>{throw new ServiceError(409,'stale_work_snapshot_cursor','Work or access changed. Restart the work snapshot without cursor.');};
@@ -19,7 +19,7 @@ export function readCurrentWorkSnapshot(store,token,roomId,{expectedSessionBindi
     const scalar=store.db.prepare('SELECT length(CAST(body AS BLOB)) AS bytes FROM work_entities WHERE room_id=? AND work_id=?').get(roomId,id);
     if(Object.keys(workItems).length&&b.bytes+(scalar?.bytes??0)+16384>256*1024)break;
     const item=readCurrentWorkItem(store.db,roomId,id),withheld=parties.has(id)&&summary.title===null;
-    workItems[id]=currentWorkRecord(withheld?{...item,title:null,definitionOfDone:null}:item);examinedAfter=id;
+    workItems[id]=currentWorkRecord(withheld?{...withheldWorkItem(item),handoff:null}:item);examinedAfter=id;
    }
    const more=Object.keys(workItems).length<Object.keys(overview.state.workItems).length||overview.workWindow.nextAfter!==null;
    const nextCursor=more?codec.encode({...binding,after:examinedAfter}):null;

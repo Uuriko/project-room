@@ -184,6 +184,8 @@ export function workPacket(state, workItemId, { includeSource = false, includePr
     const progress = workProgress(work, Date.parse(exportedAt));
     // Keep external export narrower than the authenticated read.
     progress.supersededBy = progress.supersededBy ? "replacement" : null;
+    if (progress.handoff) progress.handoff = Object.fromEntries(["open", "doneSummary", "nextAction", "limitReason", "haltAll"]
+      .filter(key => Object.hasOwn(progress.handoff, key)).map(key => [key, progress.handoff[key]]));
     packet.progress = progress;
   }
   if (JSON.stringify(packet).length > 16000) invalid("This task is too large to copy. Leave out progress or the source message, or shorten the task.");
@@ -238,7 +240,7 @@ export function workProgress(item, now = Date.now()) {
     continuity: workContinuity(item, now),
     reportedProgress: item.handoff?.open ? item.handoff.doneSummary : item.receipt?.summary ?? item.handoff?.doneSummary ?? null,
     blocker: pick(item.blocker, ["reason", "nextAction"]),
-    handoff: pick(item.handoff, ["open", "doneSummary", "nextAction", "limitReason", "haltAll"]),
+    handoff: pick(item.handoff, ["open", "eventId", "at", "actorId", "triageMemberId", "doneSummary", "nextAction", "limitReason", "evidenceUrl", "evidenceVersion", "haltAll"]),
     result: item.receipt ? { summary: item.receipt.summary, checksClaimed: item.receipt.checksClaimed ?? null,
       nextAction: item.receipt.nextAction, evidenceVersion: item.receipt.evidenceVersion,
       verification: matchesReceipt(item.verification, item.receipt) ? pick(item.verification, ["result", "summary"]) : null,
@@ -261,6 +263,7 @@ export function resumeMarkdown(resume) {
   if (resume.handoff) lines.push(resume.handoff.open ? "Handoff: awaiting owner triage" : "Previous handoff (closed)",
     "Completed at handoff: " + resume.handoff.doneSummary, (resume.handoff.open ? "Suggested continuation: " : "Historical handoff suggestion: ") + resume.handoff.nextAction,
     "Reason for handoff: " + resume.handoff.limitReason);
+  if (resume.handoff?.at) lines.push("Handoff recorded at: " + resume.handoff.at);
   if (resume.handoff?.haltAll) lines.push("A stop was requested in this handoff. Confirm current authorization before resuming; this record does not confirm external processes stopped.");
   if (resume.blocker) lines.push("Blocker: " + resume.blocker.reason, "Needed next: " + resume.blocker.nextAction);
   if (resume.result) {

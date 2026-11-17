@@ -51,7 +51,7 @@ async function nativeFixture(t) {
     completionEventId: completion.event.id, evidenceVersion: item(id).receipt.evidenceVersion, summary: 'Checked exact result' });
   const start = id => send(producerKey, 'work.started', { workItemId: id, expectedRevision: item(id).revision });
   const row = (state, id) => [...state.needsYou, ...state.inProgress].find(entry => entry.id === id);
-  return { store, owner, producer, producerKey, send, call, item, propose, submit, pass, start, row };
+  return { store, owner, producer, producerKey, origin, send, call, item, propose, submit, pass, start, row };
 }
 
 test('native: brief, continuation, begin and project state wait for an unfinished prerequisite and release on the exact gate', async t => {
@@ -76,9 +76,25 @@ test('native: brief, continuation, begin and project state wait for an unfinishe
   // 1. Unfinished prerequisite: prose, structured hint, project state and admission agree.
   const waiting = await f.call('room_read_work', { workItemId: 'child', brief: true });
   assert.match(waiting.brief, /Do not claim or start/);
-  assert.equal(waiting.continuation.action, 'start');
+  assert.equal(waiting.continuation.action, 'wait_prerequisites');
   assert.equal(waiting.continuation.tool, null);
   assert.deepEqual(waiting.continuation.waitingOn, [{ id: 'base', state: 'unclaimed' }]);
+  const token = f.producer.secret;
+  const path = f.origin + '/api/rooms/commons/work-context?workItemId=child';
+  const headers = { Authorization: 'Bearer ' + token };
+  const legacy = await (await fetch(path, { headers })).json();
+  assert.equal(legacy.next.action, 'wait_prerequisites');
+  assert.equal(legacy.resume.next.action, 'start');
+  const current = await (await fetch(path, { headers: { ...headers, 'X-Project-Room-Resume-Context': '1' } })).json();
+  assert.equal(current.resume.next.action, 'wait_prerequisites');
+  const client = new RoomAgentClient({ origin: f.origin, roomId: 'commons', token });
+  assert.deepEqual((await client.workContext('child')).resume.next, current.resume.next);
+  const olderServer = new RoomAgentClient({ origin: f.origin, roomId: 'commons', token, fetchImpl(url, options) {
+    const legacyHeaders = new Headers(options.headers);
+    legacyHeaders.delete('X-Project-Room-Resume-Context');
+    return fetch(url, { ...options, headers: legacyHeaders });
+  } });
+  assert.deepEqual((await olderServer.workContext('child')).resume.next, current.resume.next);
   let state = await f.call('room_project_state');
   assert.equal(state.needsYou.some(entry => entry.id === 'child'), false);
   assert.equal(f.row(state, 'child').next, 'wait_prerequisites');

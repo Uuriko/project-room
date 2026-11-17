@@ -36,7 +36,10 @@ export class CanonicalMigrationProbe extends DurableObject{
     await this.ctx.storage.put('observer-key',observer);
     const request={id:'new-private-request',type:'message.posted',data:{messageId:'new-private-request',workItemId:'new-private',toMemberId:'producer',requestKind:'reply',body:'New private question'}};const asked=s.command(owner,'commons',request),auditBefore=db.prepare('SELECT count(*) n FROM operator_actions').get().n,retry=s.command(owner,'commons',request);if(!retry.duplicate||db.prepare('SELECT count(*) n FROM operator_actions').get().n!==auditBefore)throw Error('privacy retry mutated audit');
     s.command(producer,'commons',{id:'new-private-answer',type:'message.posted',data:{messageId:'new-private-answer',workItemId:'new-private',toMemberId:'owner',replyToId:'new-private-request',responseToRequestId:'new-private-request',expectedRequestRevision:0,responseOutcome:'answered',contextEventId:asked.event.id,contextSequence:asked.sequence,body:'Exact private answer'}});
-    result={owner:readComposedRoomContext(s,owner,'commons'),producer:readComposedRoomContext(s,producer,'commons'),observer:readComposedRoomContext(s,observer,'commons'),observerBegin:buildActivationPack(s,'commons','observer'),observerSelected:s.workContext(observer,'commons','new-private')};auditRecovery(s);
+    let observerSelected;
+    try{s.workContext(observer,'commons','new-private');throw Error('Private selected work was visible to the observer');}
+    catch(error){if(error.status!==403||error.code!=='work_private')throw error;observerSelected={status:error.status,code:error.code};}
+    result={owner:readComposedRoomContext(s,owner,'commons'),producer:readComposedRoomContext(s,producer,'commons'),observer:readComposedRoomContext(s,observer,'commons'),observerBegin:buildActivationPack(s,'commons','observer'),observerSelected};auditRecovery(s);
    }
    else if(u.pathname==='/private-read') {s.room=()=>{throw Error('private context full-room hydration');};result=readComposedRoomContext(s,await this.ctx.storage.get('observer-key'),'commons');}
    else if(u.pathname==='/workflow') {

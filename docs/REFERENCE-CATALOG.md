@@ -112,6 +112,7 @@ Earlier implementation and release plans retain their original evidence:
 [focused collaboration](FOCUSED-COLLABORATION-PLAN-20261019.md),
 [entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md),
 [controller simplification](COLLABORATION-COMPONENTS-PLAN-20261019.md),
-[release acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), and
-[cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
+[release acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md),
+[cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md), and
+[agent interface review trial](AGENT-INTERFACE-TRIAL-20261116.md).
 Dated plans preserve intent and evidence; current scope and current work records determine what to do next.

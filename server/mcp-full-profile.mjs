@@ -415,6 +415,14 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     } catch (error) {
       const value = workReadRefusal(error);
       if (value) return { value, isError: true };
+      if (rest.includeDiscussion && error instanceof ServiceError && error.code === "current_room_context_required") {
+        const { includeDiscussion, discussionSince, ...selection } = rest;
+        return { isError: true, value: {
+          status: 409, code: "work_discussion_unavailable",
+          message: "Discussion cannot be included in this selected Room read. The work brief includes the current correction.",
+          nextRead: { tool: "room_read_work", arguments: { roomId, ...selection, brief: true } }
+        } };
+      }
       throw error;
     }
   }

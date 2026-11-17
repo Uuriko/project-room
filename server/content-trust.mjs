@@ -23,6 +23,7 @@ export const MEMBER_TEXT_TOOLS = new Set([
   "room_list_peer_dms",
   "room_list_events",
   "room_activation_pack",
+  "room_next",
   "get_room_context",
   "room_read_bootstrap",
   "room_get_file",

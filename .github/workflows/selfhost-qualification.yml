@@ -1,0 +1,56 @@
+name: selfhost-qualification
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    if: contains(github.event.pull_request.labels.*.name, 'selfhost-qualification')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - name: Exact source
+        run: git rev-parse HEAD
+      - name: Lint
+        run: npm run lint
+      - name: Contracts and generated inputs
+        run: |
+          node scripts/candidate-manifest.mjs --check
+          node scripts/openapi-gen.mjs --check
+          node scripts/build-ui-strings.mjs --check
+          node scripts/check-workflow-pins.mjs
+          node scripts/secret-scan-check.mjs
+      - name: Affected unit tests
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash scripts/test-env.sh node scripts/verify-affected.mjs --base="$BASE_SHA" --budget=300
+      - name: Entry and privacy regressions
+        run: bash scripts/test-env.sh node --test tests/private-selected-read.test.js tests/private-orientation.test.js tests/opportunities-feed-v2.test.js tests/handoff-privacy-normalized.test.mjs tests/work-context.test.js tests/agent-orientation-read.test.js tests/room-cli-setup.test.js tests/agent-resume.test.js tests/activation-obligations.test.mjs
+      - name: Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Source entry browser and structured bridge
+        env:
+          ENTRY_RESUME_MODULE: ${{ github.workspace }}/client/agent-resume.mjs
+        run: node --test scripts/agent-entry-browser-check.mjs
+      - name: Exact package and packaged entry bridge
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ENTRY_RUNTIME_DIR: ${{ runner.temp }}/selfhost-package
+          ENTRY_RESUME_MODULE: ${{ github.workspace }}/client/agent-resume.mjs
+        run: |
+          node scripts/runtime-package.mjs create "$PWD" "$HEAD_SHA" "$ENTRY_RUNTIME_DIR" --build-id ci-selfhost
+          node scripts/runtime-package.mjs verify "$ENTRY_RUNTIME_DIR" "$HEAD_SHA"
+          node --test scripts/agent-entry-browser-check.mjs

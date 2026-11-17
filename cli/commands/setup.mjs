@@ -96,7 +96,7 @@ export function planTool(tool, { project, home, url, platform, claude, env = {} 
     const conventions = join(project, ".project-room", "CONVENTIONS.md");
     files.push({ path: conf, contents: planMarked(readOrNull(conf), "read:\n  - .project-room/CONVENTIONS.md\n") });
     files.push({ path: conventions, contents: planMarked(readOrNull(conventions), AIDER_CONVENTIONS) });
-    next = "Aider reads .project-room/CONVENTIONS.md. Aider has no MCP client, so this setup does not register a server. A process wrapper (room wrap -- aider) is not part of this command.";
+    next = "Aider reads .project-room/CONVENTIONS.md. This setup does not provide a Room MCP client or register a server. A process wrapper (room wrap -- aider) is not part of this command.";
   } else if (tool === "gemini") {
     const dir = process.env.GEMINI_CLI_HOME || join(home, ".gemini");
     const path = join(dir, "settings.json");

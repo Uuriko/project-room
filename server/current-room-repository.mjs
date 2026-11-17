@@ -9,7 +9,7 @@ import {emptyWorkPrivacy,validateWorkPrivacy,applyWorkPrivacyRequest,deriveWorkP
 import {CURRENT_LEGACY_WORK_INDEXES,CURRENT_LEGACY_WORK_GUARDS,assertLegacyWorkReconciled} from './current-legacy-work-gate.mjs';
 import {currentWorkCapacity,assertCurrentWorkCapacity,CURRENT_WORK_CAPACITY_INDEXES} from './current-work-capacity.mjs';
 import {CURRENT_WRITER_FORMAT} from './current-room-format.mjs';
-import {workRoleHolder} from './work-context.mjs';
+import {workRoleHolder,withheldWorkItem} from './work-context.mjs';
 import {currentWorkSummary} from './current-work-summary.mjs';
 import {archiveRetains,recoverArchiveMarker} from './current-room-archive.mjs';
 import {messageRowForWrite} from './messages-store.mjs';
@@ -494,9 +494,47 @@ export function initializeCurrentRoom(store,state,events,{adoptExisting=null}={}
     return roomId;
   });
 }
+// One command authenticates the same principal several times (token binding,
+// sponsor, identity link, then the command's own actor). Until the command
+// first writes, a repeated read of one member's authority returns the same
+// verified rows, so it is answered from the first read.
+//
+// Reuse is allowed only while every one of these holds, and it ends for good
+// at the first that fails; it is never switched back on within a context:
+// - the context asked for it when it opened its budget (today only the
+//   command path; read paths keep their measured costs and reservations);
+// - a transaction is open, so no other connection can change what this one
+//   sees;
+// - this connection has not written since the context opened. SQLite's
+//   mutation counter is compared with its value at that moment. The counter
+//   moves on every write and never moves back, including when a savepoint
+//   rolls the write back. So a value read after a write must not be kept: it
+//   would still match the counter after a rollback had undone the write.
+//   Stopping at the first difference means every kept value was read, and is
+//   returned, with nothing written in between.
+// A context opened by store.transaction or store.command sits lexically inside
+// any savepoint that began before it, so such a savepoint cannot roll back
+// while the context is alive. Nothing is kept past the context. Each caller
+// gets its own copy.
+const mutationCount=db=>{const n=db.prepare('SELECT total_changes() AS n').get().n;return Number.isSafeInteger(n)&&n>=0?n:null;};
+function reusableMemberAuthority(db,b) {
+  if(!b?.reuseMemberAuthority||contextBudgets.get(db)!==b)return null;
+  if(!db.isTransaction||b.memberAuthorityBaseline===null||mutationCount(db)!==b.memberAuthorityBaseline){
+    b.reuseMemberAuthority=false;b.memberAuthority=null;return null;
+  }
+  return b.memberAuthority??=new Map();
+}
 export function currentRoomAuthority(db,roomId,{memberId=null,activeOnly=false}={}) {
-  const b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
-  if(memberId!==null)return currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
+  const b=contextBudgets.get(db)??budget();
+  const reuse=memberId!==null?reusableMemberAuthority(db,b):null,reuseKey=roomId+'\0'+memberId;
+  if(reuse?.has(reuseKey)){charge(b,256);return structuredClone(reuse.get(reuseKey));}
+  const head=readCurrentHead(db,roomId,b);if(!head)return null;
+  if(memberId!==null){
+    const authority=currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
+    // Checked again after the read: a value is kept only if nothing was written while it was read.
+    if(reuse&&reusableMemberAuthority(db,b)===reuse)reuse.set(reuseKey,structuredClone(authority));
+    return authority;
+  }
   return activeOnly?currentActiveAuthorityFromHead(db,roomId,head,b):currentAuthorityFromHead(db,roomId,head,b);
 }
 // Recovery needs a complete census, including inactive history, rather than
@@ -1342,10 +1380,11 @@ export function readCurrentRoomForAudit(store,roomId) {
   });
 }
 
-export function withCurrentReadContext(db,roomId,operation,{maxRecords=200}={}) {
+export function withCurrentReadContext(db,roomId,operation,{maxRecords=200,reuseMemberAuthority=false}={}) {
   if(![200,512,1024].includes(maxRecords))throw Error('Unsupported internal current read reservation');
   if(!isCurrentRoom(db,roomId))return operation();
-  const previous=contextBudgets.get(db);if(!previous)contextBudgets.set(db,budget(maxRecords));
+  // Only the context that opens the budget may ask for authority reuse; an inner context inherits the outer one unchanged.
+  const previous=contextBudgets.get(db);if(!previous)contextBudgets.set(db,Object.assign(budget(maxRecords),reuseMemberAuthority===true?{reuseMemberAuthority:true,memberAuthorityBaseline:mutationCount(db)}:{}));
   try{return operation(contextBudgets.get(db));}finally{if(!previous)contextBudgets.delete(db);}
 }
 export function readCurrentHistoryFloor(db,roomId,memberId) {
@@ -1493,7 +1532,8 @@ export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{inclu
   const prefix=workRequestPrefix(workId),requests=db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='workRequest' AND present=1 AND record_key>=? AND record_key<? ORDER BY record_key LIMIT 9").all(roomId,prefix,prefix+'\uffff');
   charge(b,requests.length*256,requests.length);if(requests.length!==privacy.requests)corrupt('selected request index count differs');
   for(const {record_key:key} of requests){const link=readCurrentRecord(db,roomId,'workRequest',key,b);if(!link||link.workItemId!==workId||workRequestKey(workId,link.requestId)!==key)corrupt('selected request index binding differs');const request=readCurrentRecord(db,roomId,'replyRequests',link.requestId,b);if(request?.workItemId!==workId)corrupt('selected private request missing');Object.defineProperty(replyRequests,link.requestId,{value:request,enumerable:true});}
-  return {sequence:head.sequence,state:{room,members,workItems:{[workId]:privateWorkForViewer(db,roomId,workId,item,viewerId,b)},replyRequests}};
+  // privateParties: the parties this read already observed (null when the work has no private request), so the caller's refusal check needs no second privacy read.
+  return {sequence:head.sequence,state:{room,members,workItems:{[workId]:privateWorkForViewer(db,roomId,workId,item,viewerId,b)},replyRequests},privateParties:privacy.requests?new Set(Object.keys(privacy.parties)):null};
 }
 
 export {currentWorkSummary} from './current-work-summary.mjs';
@@ -1588,6 +1628,17 @@ export function readCurrentWorkSummaryForViewer(db,roomId,id,viewerId,b=contextB
   if(reuse?.roomId===roomId&&reuse.viewerId===viewerId&&reuse.values.size<8)reuse.values.set(id,structuredClone(result));
   return result;
 }
+// Whether this viewer is outside the private work an event names. A summary
+// this transaction already read for the viewer answers for free; otherwise the
+// privacy record alone settles public work and request parties, and only a
+// non-party on private work needs the summary for the named-role check.
+export function currentWorkWithheldFromViewer(db,roomId,id,viewerId,b=contextBudgets.get(db)??budget()){
+  const reuse=workSummaryReuseScopes.get(db);
+  if(reuse?.roomId===roomId&&reuse.viewerId===viewerId&&reuse.values.has(id))return reuse.values.get(id).title===null;
+  const privacy=readCurrentWorkPrivacy(db,roomId,id,b);
+  if(!privacy.requests||Object.hasOwn(privacy.parties,viewerId))return false;
+  return readCurrentWorkSummaryForViewer(db,roomId,id,viewerId,b).title===null;
+}
 
 // Bound source examination before parsing event bodies. Long excluded tails
 // refuse instead of scanning history or inventing a visible cursor.
@@ -1681,7 +1732,16 @@ export function readCurrentWorkPrivacy(db,roomId,workId,b=contextBudgets.get(db)
 function privateWorkForViewer(db,roomId,workId,item,viewerId,b) {
   const privacy=readCurrentWorkPrivacy(db,roomId,workId,b);
   if(!privacy.requests||Object.hasOwn(privacy.parties,viewerId)||workRoleHolder(item,viewerId))return item;
-  return {...item,title:null,definitionOfDone:null};
+  // The handoff is member-authored content of this private work, in the same
+  // class as its title and definition of done: a viewer who is neither a
+  // private-request party nor a work-role holder receives neither its text
+  // nor its references (evidence URL/version, author, triage addressee).
+  // Being named as the handoff's triage addressee does not by itself
+  // authorize a member; access follows the same party / work-role rule.
+  const result=withheldWorkItem(item);
+  if(Object.hasOwn(item,'handoff'))result.handoff=null;
+  if(Object.hasOwn(item,'handoffHistory'))result.handoffHistory=null;
+  return result;
 }
 export function readCurrentPrivateWorkParties(store,roomId,workIds) {
   if(!Array.isArray(workIds)||workIds.length>8||workIds.some(id=>typeof id!=='string'))refuse('Use bounded addressed work IDs for current private-work context');

@@ -15,7 +15,7 @@ import { isGuestAgentMemberId } from "../guest-agent-links.mjs";
 import { buildWorkClaimPage, handleWorkClaims } from "../work-claim-routes.mjs";
 import { withProjectMapOverlap } from "../project-map-store.mjs";
 import { readBoard } from "../board-read.mjs";
-import { claimThread } from "../claim-thread.mjs";
+import { claimThreadForViewer } from "../claim-thread.mjs";
 import { withContentTrust } from "../content-trust.mjs";
 
 function requireRoomScope(ctx, auth, writing = false) {
@@ -57,16 +57,16 @@ export async function getBoardRead(ctx) {
 }
 
 export async function getRetentionDashboard(ctx) {
-  const { roomId } = authenticateRead(ctx);
+  const { roomId, auth } = authenticateRead(ctx);
   const now = typeof ctx.store.now === "function" ? ctx.store.now() : Date.now();
-  return ctx.json(ctx.res, 200, retentionReport(ctx.store.workClaims.list(roomId), { now }));
+  return ctx.json(ctx.res, 200, retentionReport(ctx.store.workClaimsForViewer(roomId, auth.member.id), { now }));
 }
 
 export async function getWorkClaimsRead(ctx) {
   const { roomId, auth } = authenticateRead(ctx);
   const now = typeof ctx.store.now === "function" ? ctx.store.now() : Date.now();
-  return ctx.json(ctx.res, 200, withProjectMapOverlap(ctx.store, roomId, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
-    auth.member.id, ctx.url.searchParams, now)));
+  return ctx.json(ctx.res, 200, withProjectMapOverlap(ctx.store, roomId, buildWorkClaimPage(ctx.store.workClaimsForViewer(roomId, auth.member.id), roomId,
+    auth.member.id, ctx.url.searchParams, now), auth.member.id));
 }
 
 export async function provenanceRoute(ctx) {
@@ -114,14 +114,14 @@ export async function approvalRoute(ctx) {
 // claim reads its thread. Entries are board events and the claim's own
 // history only, never chat, so private replies and DMs cannot leak.
 export async function threadRoute(ctx) {
-  const { roomId } = authenticateRead(ctx);
+  const { roomId, auth } = authenticateRead(ctx);
   const claimId = ctx.params.claimId;
   if (typeof claimId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(claimId)) {
     ctx.reject(422, "invalid_claim_input", "Expected claimId matching [A-Za-z0-9_-]{1,128}.");
   }
   const item = ctx.store.workClaims.get(roomId, claimId);
   if (!item) ctx.reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
-  return ctx.json(ctx.res, 200, withContentTrust(claimThread(ctx.store, roomId, item)));
+  return ctx.json(ctx.res, 200, withContentTrust(claimThreadForViewer(ctx.store, roomId, item, auth.member.id)));
 }
 
 const claimParameters = Object.freeze({ type: "object", required: ["roomId", "claimId"],

@@ -33,14 +33,17 @@ test('adopted OAuth reads saved verified work through actual hosted single, batc
  const denied=await f.call('room_read_work',{workItemId:'task',brief:true});assert.ok(denied.status===401||denied.body.result?.isError);assert.equal(f.store.headSequence('commons'),head);
 });
 
+// The OAuth selected read costs 156 records since the token binding is validated once per
+// resolution (170 before). The outer context is pre-charged 60 so the inherited 200 cap,
+// not the read's own 512 reservation, is still what refuses it.
 test('selected work reserves records only, retaining an inherited stricter context',t=>{
  const s=new RoomStore(':memory:');t.after(()=>s.close());const saved=seedOAuthWorkRead(s);
  s.room=()=>{throw Error('whole-room hydration');};
  const auth={store:s,provider:providerFor(s),token:saved.token,resource,roomId:'commons'};
  let small,large;
- assert.throws(()=>s.readTransaction(()=>withCurrentReadContext(s.db,'commons',b=>{small=b;chargeCurrentReadBudget(b,0,40);return runMcpOAuthRequest(auth,()=>s.workContext(saved.token,'commons','task'));})),e=>e.code==='current_room_context_unavailable');
- s.readTransaction(()=>withCurrentReadContext(s.db,'commons',b=>{large=b;chargeCurrentReadBudget(b,0,40);assert.equal(runMcpOAuthRequest(auth,()=>s.workContext(saved.token,'commons','task')).work.revision,4);},{maxRecords:512}));
- assert.equal(small.records,202);assert.ok(large.records>200&&large.records<=512);assert.ok(large.bytes<=256*1024);
+ assert.throws(()=>s.readTransaction(()=>withCurrentReadContext(s.db,'commons',b=>{small=b;chargeCurrentReadBudget(b,0,60);return runMcpOAuthRequest(auth,()=>s.workContext(saved.token,'commons','task'));})),e=>e.code==='current_room_context_unavailable');
+ s.readTransaction(()=>withCurrentReadContext(s.db,'commons',b=>{large=b;chargeCurrentReadBudget(b,0,60);assert.equal(runMcpOAuthRequest(auth,()=>s.workContext(saved.token,'commons','task')).work.revision,4);},{maxRecords:512}));
+ assert.equal(small.records,201);assert.ok(large.records>200&&large.records<=512);assert.ok(large.bytes<=256*1024);
  t.diagnostic(JSON.stringify({failed:{records:small.records,bytes:small.bytes},accepted:{records:large.records,bytes:large.bytes}}));
 });
 

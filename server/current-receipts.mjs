@@ -24,9 +24,10 @@ import { WORK_STATES } from "../src/events.js";
 import { terminalWork } from "../src/workflow.js";
 import { boardClaimId } from "./work-item-board.mjs";
 import {
-  chargeCurrentReadBudget, isCurrentRoom, readCurrentRecord, readCurrentWorkItem,
+  chargeCurrentReadBudget, isCurrentRoom, readCurrentRecord, readCurrentWorkItem, readCurrentWorkPrivacy,
   remainingCurrentReadBytes, withCurrentReadContext,
 } from "./current-room-repository.mjs";
+import { outsidePrivateWork, withheldBoardRow } from "./work-context.mjs";
 
 // One window of work keys per read context (B7 cure). A single context
 // charges ~43.6 KiB of schema/head admission before the first record,
@@ -90,6 +91,16 @@ const claimShapeOf = (db, roomId, item) => {
   });
 };
 
+// Apply the same party/task-role boundary as selected work before receipt
+// summaries are searched or returned. Missing viewer identity cannot disclose
+// private work. The privacy record is charged to the current read window.
+const claimForViewer = viewerId => (db, roomId, item, budget) => {
+  const privacy = readCurrentWorkPrivacy(db, roomId, item.id, budget);
+  const parties = privacy.requests ? new Set(Object.keys(privacy.parties)) : null;
+  const claim = claimShapeOf(db, roomId, item);
+  return outsidePrivateWork(parties, item, viewerId) ? withheldBoardRow(claim) : claim;
+};
+
 // The room state receiptWithPublicLink needs for its opt-in check, in
 // the { room } shape publicReceipts reads. store.room() refuses
 // current rooms outright (409 current_room_context_required — full
@@ -150,7 +161,7 @@ function enumerateTerminal(store, roomId, project) {
         if (!isTerminalCompletion(thin)) continue;
         const item = readCurrentWorkItem(db, roomId, id, budget);
         if (!isTerminalCompletion(item)) continue;
-        found.push(project(db, roomId, item));
+        found.push(project(db, roomId, item, budget));
       }
       return { found, fetched: rows.length, examined, examinedAfter };
     }, { maxRecords: 1024 });
@@ -162,8 +173,8 @@ function enumerateTerminal(store, roomId, project) {
   return claims;
 }
 
-export function currentReceiptClaims(store, roomId) {
-  return enumerateTerminal(store, roomId, claimShapeOf);
+export function currentReceiptClaims(store, roomId, viewerId = null) {
+  return enumerateTerminal(store, roomId, claimForViewer(viewerId));
 }
 
 // The room's terminal work items themselves (not the claim projection),
@@ -225,7 +236,7 @@ const workItemIdForClaimId = claimId => {
 // Only ids whose work item cannot be derived from the claim id (the
 // irreversible "_h" boardClaimId fallback) fall back to the windowed
 // enumeration above, which is itself budget-bounded per window.
-export function currentReceiptClaim(store, roomId, workClaimId) {
+export function currentReceiptClaim(store, roomId, workClaimId, viewerId = null) {
   const db = store?.db;
   if (!db || !isCurrentRoom(db, roomId)) return null;
   const claimId = typeof workClaimId === "string" && workClaimId.startsWith("rc_")
@@ -238,10 +249,10 @@ export function currentReceiptClaim(store, roomId, workClaimId) {
       if (!isTerminalCompletion(thin)) return undefined;
       const item = readCurrentWorkItem(db, roomId, candidate, budget);
       if (!isTerminalCompletion(item)) return undefined;
-      const mapped = claimShapeOf(db, roomId, item);
+      const mapped = claimForViewer(viewerId)(db, roomId, item, budget);
       return mapped.id === claimId ? mapped : undefined;
     }, { maxRecords: 1024 });
     return addressed;
   }
-  return currentReceiptClaims(store, roomId)?.find(claim => claim.id === claimId);
+  return currentReceiptClaims(store, roomId, viewerId)?.find(claim => claim.id === claimId);
 }

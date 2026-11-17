@@ -19,7 +19,7 @@ const READ_TOOLS = [
   "room_needs_me", "room_read_messages", "room_read_request", "room_request_history",
   "room_read_inbox", "room_read_work", "room_read_work_discussion", "room_read_board",
   "room_read_result", "room_list_work", "room_list_peer_dms", "room_list_events",
-  "room_activation_pack", "get_room_context", "room_get_file", "inbox_get_attachment", "room_list_access_requests",
+  "room_activation_pack", "room_next", "get_room_context", "room_get_file", "inbox_get_attachment", "room_list_access_requests",
   "public_work_recommend", "public_work_read_task", "public_work_my_review"
 ];
 
@@ -169,10 +169,11 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   // cannot silently consume this allowance; the core budget stays unchanged.
   const releaseTools = new Set(["room_assistant_context", "room_assistant_action", "room_work_claim_provenance",
     "room_work_claim_thread", "room_claim", "room_handoff", "room_read_bootstrap",
-    "room_merge_members"]);
+    "room_merge_members", "room_next"]);
   for (const name of releaseTools) {
     assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);
-    if (!["room_claim", "room_handoff"].includes(name)) assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`); // Claim and handoff are part of the default work loop.
+    const inDefaultWorkLoop = ["room_claim", "room_handoff", "room_next"].includes(name);
+    assert.equal(coreTools.some(tool => tool.name === name), inDefaultWorkLoop, `${name} default catalog presence`);
   }
   const existingTools = fullTools.filter(tool => !releaseTools.has(tool.name));
   // #5814 adds exactly one reviewed wait tool outside core. Ratchet the full

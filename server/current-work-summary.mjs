@@ -9,7 +9,7 @@ export function thinWorkForContext(item) {
     receipt:'eventId evidenceVersion evidenceUrl producerId producerAttribution reportedById',
     verification:'eventId actorId verifierId result completionEventId evidenceVersion independenceConfirmed',
     decision:'eventId actorId decision completionEventId evidenceVersion',
-    handoff:'open eventId at actorId triageMemberId nextAction limitReason haltAll evidenceUrl evidenceVersion'
+    handoff:'open eventId at actorId triageMemberId doneSummary nextAction limitReason haltAll evidenceUrl evidenceVersion'
   }))if(Object.hasOwn(item,key))out[key]=pick(item[key],fields);
   if(out.claim){const expiresAtMs=Date.parse(out.claim.expiresAt);out.claim.expiresAtMs=Number.isFinite(expiresAtMs)?expiresAtMs:null;}
   return out;

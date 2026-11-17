@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { nextWorkStep, workActions, workCollaboration, workResume } from "../src/workflow.js";
+import { PREREQUISITE_GATED_STEPS, prerequisiteHold, stepWithPrerequisiteHold } from "../client/begin-work.mjs";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
 import { workOffersContext } from "../src/help-offers.js";
@@ -39,7 +40,66 @@ function openWorkReplies(state, workItemId, viewerId, floor) {
 const pick = (value, fields) => value == null ? null
   : Object.fromEntries(fields.split(" ").filter(key => Object.hasOwn(value, key)).map(key => [key, structuredClone(value[key])]));
 
-// Shared current record; no prior receipts/checks, conversation text or event log.
+// The record a member outside private work receives where a collection read
+// lists every item: a minimal copy, never the stored object. It is built from
+// an allowlist, so a field added to work items later is withheld until someone
+// decides it is safe. Kept: identity, state, the members the task names, and
+// what the shared next-step derivation needs. Dropped: everything a
+// participant wrote or reserved (title, definition, source pointer, labels,
+// claim scope, result text and checks, evidence links, review and decision
+// prose, blocker text, handoff text, and every retained history entry).
+// Receipts, checks, decisions and blockers are null: their evidence versions
+// may be arbitrary private strings, and partial records fail SDK validation.
+// The caller decides who is outside, with the existing rule (private request parties plus
+// workRoleHolder); this grants nothing and stores nothing.
+const WITHHELD_ITEM_KEYS = "id revision state mode proposedById accountableMemberId verifierMemberId humanDecisionMakerId externalWriteGrantBy externalWriteGrantFor independentVerificationRequired ownerDecisionRequired supersededBy dependsOn createdAt updatedAt round_count tool_calls suspended_by";
+const WITHHELD_HISTORY_KEYS = ["receiptHistory", "verificationHistory", "decisionHistory", "handoffHistory"];
+export function withheldWorkItem(item) {
+  const keep = (value, keys) => value == null ? value : pick(value, keys);
+  const part = (key, keys) => Object.hasOwn(item, key) ? { [key]: keep(item[key], keys) } : {};
+  return { ...pick(item, WITHHELD_ITEM_KEYS), title: null, definitionOfDone: null,
+    ...(Object.hasOwn(item, "sourceMessageId") ? { sourceMessageId: null } : {}), ...(Object.hasOwn(item, "labels") ? { labels: [] } : {}),
+    ...part("claim", "holderId status acquiredAt expiresAt releasedAt"),
+    ...(Object.hasOwn(item, "receipt") ? { receipt: null } : {}),
+    ...(Object.hasOwn(item, "verification") ? { verification: null } : {}),
+    ...(Object.hasOwn(item, "decision") ? { decision: null } : {}),
+    ...(Object.hasOwn(item, "blocker") ? { blocker: null } : {}),
+    ...part("handoff", "open eventId at actorId triageMemberId haltAll"),
+    ...Object.fromEntries(WITHHELD_HISTORY_KEYS.filter(key => Object.hasOwn(item, key)).map(key => [key, []])) };
+}
+
+// The same boundary for one event about private work, for a viewer outside
+// it. The event stays in its place (id, type, actor, time, sequence), so
+// cursors and counts are unchanged; its payload keeps only identifiers and
+// enumerated values. Messages are a separate contract: a message posted to
+// the room is public, and a direct message is filtered before this point.
+const WITHHELD_EVENT_KEYS = "workItemId expectedRevision accountableMemberId verifierMemberId humanDecisionMakerId mode independentVerificationRequired ownerDecisionRequired result decision completionEventId previousCompletionEventId producerId toMemberId expiresAt haltAll evidenceKind evidenceMessageId evidenceMessageEventId dependsOn workClaim action claimState ownerId leaseExpiresAt";
+export const privateWorkEvent = event => typeof event?.type === "string" && !event.type.startsWith("message.")
+  && typeof (event.data?.workItemId ?? (event.type.startsWith("work_claim.") ? event.data?.workClaim : undefined)) === "string";
+export const privateWorkEventId = event => event.data.workItemId ?? event.data.workClaim;
+export function withheldWorkEvent(event) {
+  if (!privateWorkEvent(event)) return event;
+  const data = pick(event.data, WITHHELD_EVENT_KEYS);
+  for (const key of ["title", "definitionOfDone"]) if (Object.hasOwn(event.data, key)) data[key] = null;
+  return { ...event, data: { ...data, withheld: true } };
+}
+// Legacy storage mirrors each work item onto a Board row and reports the
+// mirror in work_claim.* events. Both carry the task's title, paths, notes
+// and review text, so the same boundary applies to them.
+const WITHHELD_BOARD_KEYS = "id state owner claimedAt leaseStartAt leaseExpiresAt deliveryMode reviewPolicy reviewedBy dependsOn parentClaimId updatedAt supersededBy workItemId squadId kind revision deliveryGeneration claimRound";
+const BOARD_MAP_KEYS = new Set(["fileBlocks", "readingAcks", "requestOutcomes"]);
+export function withheldBoardRow(row) {
+  const kept = pick(row, WITHHELD_BOARD_KEYS);
+  for (const [key, value] of Object.entries(row)) {
+    if (Object.hasOwn(kept, key)) continue;
+    kept[key] = Array.isArray(value) ? [] : BOARD_MAP_KEYS.has(key) ? {} : typeof value === "number" || typeof value === "boolean" ? value : null;
+  }
+  return kept;
+}
+// The one statement of who is outside private work: not a party to a private
+// request linked to it and not a member the task names in a role.
+export const outsidePrivateWork = (parties, item, viewerId) => Boolean(parties) && !parties.has(viewerId) && !workRoleHolder(item, viewerId);
+
 export function currentWorkRecord(item) {
   const work = pick(item, "id title definitionOfDone revision state mode sourceMessageId proposedById externalWriteGrantBy externalWriteGrantFor accountableMemberId verifierMemberId humanDecisionMakerId independentVerificationRequired ownerDecisionRequired supersededBy createdAt updatedAt");
   const session = sessionRecord(item);
@@ -95,7 +155,7 @@ export function accessSummary({ item, linked, participantIds }) {
 
 // An authenticated selected read, not the deliberately narrower portable export.
 // All input comes from one committed Room projection and one service clock.
-export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null, replacementAvailable = null, sourceObservation = undefined }) {
+export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null, replacementAvailable = null, sourceObservation = undefined, dependencies = undefined }) {
   if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
   const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
   // Work assignment does not expand a targeted message's audience. Apply the
@@ -121,7 +181,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     if (source.freshness === "unchanged") { source.status = "not_modified"; source.message = null; }
     source.nextRead = observable ? { tool: "room_read_work", arguments: { workItemId, includeSource: true, sourceObservation: { ...source.observation } } } : null;
   }
-  const next = nextWorkStep(item, now, state.room.ownerId);
+  let next = nextWorkStep(item, now, state.room.ownerId);
   // One link, not recursive traversal or target-content delivery. Work is
   // room-visible; the subsequent selected read rechecks membership and source privacy.
   const replacementId = item.supersededBy;
@@ -130,6 +190,16 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     next.replacement = { status: available ? "available" : "unavailable", workItemId: replacementId,
       nextRead: available ? { tool: "room_read_work", arguments: { workItemId: replacementId } } : null };
   }
+  // A claim/start step is advice only while every prerequisite is known to be
+  // satisfied — the same rule server/project-state.mjs applies to its rows.
+  // When the caller observed the prerequisites and some are unmet, the step
+  // says what it waits on instead of offering the action admission refuses,
+  // and the gated actions leave suggestedActions. Callers that pass no
+  // observation keep the previous presentation: readiness is then unknown,
+  // never asserted either way.
+  const prerequisiteBlocked = Array.isArray(dependencies) && PREREQUISITE_GATED_STEPS.includes(next.action)
+    ? prerequisiteHold(dependencies) : null;
+  next = stepWithPrerequisiteHold(next, prerequisiteBlocked);
   const offers = includeOffers ? workOffersContext(state, workItemId, viewerId, new Date(now).toISOString()) : null;
   const participantIds = new Set([viewerId, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId,
     item.proposedById, item.claim?.holderId, item.receipt?.producerId, item.receipt?.reportedById, message?.authorId, state.room.ownerId].filter(Boolean));
@@ -140,7 +210,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
     replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor),
-    resume: workResume(work, now, state.room.ownerId),
+    resume: workResume(work, now, state.room.ownerId, next),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
     toolFocus: {
       focus: next.memberId === viewerId && ["verify", "decide", "triaged_handoff"].includes(next.action) ? "review" : "work",
@@ -148,7 +218,9 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
       automatic: false,
       guidance: "Optional discovery preference. Hosted MCP tools/list accepts params.focus; omit focus from both params and URL and set profile=full for the full catalog. This does not select a mode, change permissions or authorize execution."
     },
-    suggestedActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
+    suggestedActions: workActions(item, member, now)
+      .filter(([action]) => !prerequisiteBlocked || !PREREQUISITE_GATED_STEPS.includes(action))
+      .map(([action, label]) => ({ action, label })),
     collaboration: workCollaboration(item, member, participants),
     helpContextVersion: 1, help: workHelpContext(state, workItemId, viewerId, new Date(now).toISOString()),
     ...(includeOffers ? { offerContextVersion: 1, offers } : {}),
