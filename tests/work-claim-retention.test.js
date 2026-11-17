@@ -308,6 +308,10 @@ const tableCtx = ({ memberId = "newbie", members, registry, authKind = "session"
         now: () => T0,
         roomAuthority: () => ({ members }),
         workClaims: registry,
+        workClaimsForViewer: (roomId, viewerId) => {
+          captured.viewer = { roomId, viewerId };
+          return registry.list(roomId);
+        },
       },
       roomCredentials: () => ({ mode: "room", bearer: authKind === "api-key" }),
       expectedBinding: () => ({}),
@@ -329,6 +333,7 @@ test("route table: GET /api/rooms/{roomId}/work-claims/retention serves the dash
   assert.equal(handled, true);
   assert.equal(ctx.route.handler, getRetentionDashboard);
   assert.equal(captured.status, 200);
+  assert.deepEqual(captured.viewer, { roomId: "room1", viewerId: "newbie" });
   assert.equal(captured.value.sla.breached, 1);
   assert.equal(captured.value.sla.queue[0].memberId, "newbie");
   assert.equal(captured.value.zeroReply.unacked, 1);
