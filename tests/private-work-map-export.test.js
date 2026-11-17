@@ -117,7 +117,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.deepEqual([after.item, after.open, after.board], [was.item, was.open, was.board], "work and Board rows are untouched");
   });
 
-  test(`${representation}: export for an owner outside a private task (reported, policy not asserted)`, async t => {
+  test(`${representation}: export withholds private work from an owner outside the task`, async t => {
     const f = await privateWorkFixture(t, representation);
     // A private task the owner neither proposed nor was asked about.
     const mark = name => `zq-private-ownerless${name}-zq`;
@@ -138,10 +138,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       assert.equal(response.status, 200);
       assert.ok(!text.includes(mark("ask")), "a direct message between other members is not exported");
       assert.ok(text.includes(PUBLIC.TITLE));
-      // Not asserted: docs/DATA-BOUNDARIES.md calls the export "the full
-      // history", while the live reads above withhold this task from the same
-      // owner. The two stores currently differ; see the diagnostic.
-      t.diagnostic(`${representation} ${format} export, owner outside the task, private work fields present: ${JSON.stringify(theirs(text))}`);
+      assert.deepEqual(theirs(text), [], "ownership does not grant private-task access");
     }
   });
 }

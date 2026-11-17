@@ -9,7 +9,7 @@ export function readBoard(store, token, roomId, fence = null, query = new URLSea
   const snapshot = store.snapshot(token, roomId, fence, "work");
   const now = typeof store.now === "function" ? store.now() : Date.now();
   const { claims, ...claimsPage } = withProjectMapOverlap(store, roomId,
-    buildWorkClaimPage(store.workClaimsForViewer(roomId, snapshot.viewerId), roomId, snapshot.viewerId, query, now));
+    buildWorkClaimPage(store.workClaimsForViewer(roomId, snapshot.viewerId), roomId, snapshot.viewerId, query, now), snapshot.viewerId);
   return stampBoard({ ...projectBoard(snapshot.state, now), roomId: snapshot.roomId,
     ...Object.fromEntries(["viewerId", "viewerAccountId", "viewerAuthEpoch", "viewerSessionBinding", "viewerSessionRevision"]
       .map(key => [key, snapshot[key]])),

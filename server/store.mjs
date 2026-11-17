@@ -6153,7 +6153,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }));
   }
   *exportEvents(token, roomId, expectedSessionBinding = null) {
-    this.authenticate(token, roomId, expectedSessionBinding);
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
     if (isCurrentRoom(this.db,roomId)) {
       let after=0;
       for (;;) {
@@ -6167,13 +6167,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       return;
     }
+    const outside = this.privateWorkEventOutside(roomId, auth.member.id);
     const sequence = this.roomAuthority(roomId).sequence;
     const stmt = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 1000");
     let after = 0;
     for (;;) {
       const rows = stmt.all(roomId, after);
       if (!rows.length) break;
-      for (const r of rows) yield { sequence: r.sequence, event: JSON.parse(r.body) };
+      for (const r of rows) {
+        const event = JSON.parse(r.body);
+        yield { sequence: r.sequence, event: outside(event) ? withheldWorkEvent(event) : event };
+      }
       after = rows.at(-1).sequence;
       if (after >= sequence) break;
     }

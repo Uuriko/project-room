@@ -201,11 +201,14 @@ export function runRoomMap(store, secret, args) {
   return readProjectMap(store, args.roomId, args);
 }
 
-function loadContext(store, roomId) {
+function loadContext(store, roomId, viewerId = null) {
   try { store.db.prepare("SELECT 1 FROM project_maps LIMIT 1").get(); }
   catch { return { claims: [], pulls: [], graphs: new Map() }; }
   let claims = [];
-  try { claims = store.workClaims?.list?.(roomId) ?? []; } catch { claims = []; }
+  try {
+    claims = store.workClaims?.list?.(roomId) ?? [];
+    claims = store.workClaimsForViewer?.(roomId, viewerId, claims) ?? claims;
+  } catch { claims = []; }
   let pulls = [];
   try {
     pulls = store.db.prepare("SELECT repo, number, title, state, files_json FROM project_map_pulls WHERE room_id=? AND state='open'").all(roomId)
@@ -269,7 +272,10 @@ function postNotice(store, roomId, subject, overlap) {
 export function publishProjectMapOverlap(store, roomId, subject) {
   if (!subject || !projectMapEnabled(featureEnv(store))) return null;
   try {
-    const overlap = overlapAgainst(loadContext(store, roomId), subject);
+    // Notices are public: neither the subject nor its peers may depend on
+    // the triggering member's private-task access.
+    const publicSubject = store.workClaimsForViewer?.(roomId, null, [subject])?.[0] ?? subject;
+    const overlap = overlapAgainst(loadContext(store, roomId), publicSubject);
     if (!overlap) return null;
     if (LIVE.has(subject.state) || subject.kind === "pull") {
       try { postNotice(store, roomId, subject, overlap); }
@@ -287,10 +293,10 @@ export function noteProjectMapOverlap(store, roomId, item) {
   return publishProjectMapOverlap(store, roomId, item);
 }
 
-export function withProjectMapOverlap(store, roomId, value) {
+export function withProjectMapOverlap(store, roomId, value, viewerId = null) {
   if (!value || !projectMapEnabled(featureEnv(store))) return value;
   try {
-    const ctx = loadContext(store, roomId);
+    const ctx = loadContext(store, roomId, viewerId);
     const decorate = item => {
       if (!item || HIDDEN.has(item.state)) return item;
       const overlap = overlapAgainst(ctx, item);

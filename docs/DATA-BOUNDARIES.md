@@ -91,9 +91,12 @@ display preference, not authority (`docs/MODERATION.md`).
   without application-level encryption. No encryption routine exists in
   `server/`, `src/`, `cloudflare/` or `deploy/`; the only mention is the open
   backup-encryption gate in `docs/SERVICE.md` "Limits, recovery, and honest release gates".
-- Room exports are unencrypted point-in-time JSONL copies of the full history,
-  including deleted and edited-away content; whoever downloads one owns its
-  handling (`archive/docs/history/EXPORT-RETENTION-DELETION.md`).
+- Room exports are owner-only, unencrypted JSONL or HTML downloads of the
+  history visible to that owner. Private messages between other members are
+  omitted; private work outside the owner's task roles and request parties is
+  withheld, and message redactions apply. Ownership does not grant private-task
+  access. These downloads are not complete backups or guaranteed restore inputs;
+  whoever downloads one owns its handling.
 - Node-fallback backups stay on the same disk, unencrypted; encrypted
   off-host copies are a documented precondition for calling them disaster
   recovery (`archive/docs/history/INVITE-ONLY-DEPLOYMENT.md` "Backup and restore",

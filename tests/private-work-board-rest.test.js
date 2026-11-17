@@ -1,4 +1,4 @@
-// REPRODUCTION, fails on 4b3d1ab2. Legacy storage. Two table routes in
+// Regression reproduced on 4b3d1ab2. Legacy storage. Two table routes in
 // server/routes/work-claims.mjs read Board rows without the viewer boundary:
 //   GET /api/rooms/{roomId}/work-claims-read            (getWorkClaimsRead)
 //   GET /api/rooms/{roomId}/work-claims/{claimId}/thread (threadRoute)
