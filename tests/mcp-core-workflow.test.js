@@ -171,7 +171,29 @@ test(`${representation}: default catalog supports task pickup, correction, exact
   await call(producer, resumed.continuation.tool, { ...resumed.continuation.arguments,
     resolution: 'Add reconnect and duplicate-result checks' });
   await call(producer, 'room_begin_work', { workItemId });
-  const revised = await submit('revised-draft', 'Reconnect the existing agent, select one bounded task, and verify its exact saved result appears once.');
+  const revisedBody = 'Reconnect the existing agent and verify its exact saved result appears once. 🧭';
+  const post = { workItemId, id: 'revised-draft', body: revisedBody, maxResultCodeUnits: revisedBody.length };
+  const headBeforePost = store.headSequence('commons');
+  const refused = await invoke(producer, 'room_post_message', { ...post, maxResultCodeUnits: revisedBody.length - 1 });
+  assert.equal(refused.result.isError, true);
+  assert.equal(refused.result.structuredContent.code, 'result_draft_invalid');
+  assert.deepEqual(refused.result.structuredContent.detail, {
+    maxCodeUnits: revisedBody.length - 1, codeUnits: revisedBody.length, exceededBy: 1
+  });
+  assert.equal(store.headSequence('commons'), headBeforePost, 'over-budget text must never post');
+  const posted = await call(producer, 'room_post_message', post);
+  assert.equal(posted.resultDraft.codeUnits, revisedBody.length);
+  assert.ok(!JSON.stringify(posted).includes(revisedBody), 'compact draft receipt does not echo body');
+  assert.equal(posted.resultDraft.submission.previousCompletionEventId, first.exact.result.receipt.eventId);
+  const duplicate = await call(producer, 'room_post_message', post);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.resultDraft.submission, undefined, 'replay cannot prepare a fresh submission');
+  assert.deepEqual(duplicate.resultDraft.nextRead, posted.resultDraft.nextRead);
+  const input = { ...posted.resultDraft.submission, requestId: 'revised-draft-submit',
+    summary: 'Contribution brief reviewed', nextAction: 'Review exact result', producerId: producer.identityId };
+  await call(producer, 'room_submit_text_result', input);
+  const revised = { input, exact: await call(reviewer, 'room_read_result', { workItemId }) };
+  assert.equal(revised.exact.result.text.body, revisedBody);
   await verify(first.exact, 'pass', 'Old evidence cannot approve the revised result');
   assert.equal((await read()).work.verification, null);
   await attention(reviewer, ['verify']);

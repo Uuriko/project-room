@@ -78,6 +78,8 @@ import { runRoomMap } from "./project-map-store.mjs";
 import { firstConnectTask } from "./first-connect-task.mjs";
 import { statusHint } from "./status-digest.mjs";
 
+import { validResultBody } from "../src/work-packet.js";
+
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const AUTH_INSTRUCTIONS = [
@@ -86,7 +88,7 @@ const AUTH_INSTRUCTIONS = [
   "If room_next is unavailable, use room_activation_pack(view=brief), room_list_work(focus=needs_me) and room_list_requests(direction=incoming,status=open).",
   "Follow the selected item's nextRead arguments as returned. For revise, read the correction in the row and call its brief nextRead unchanged. Request discussion only if that correction and brief are insufficient. Resolve the blocker before room_begin_work.",
   "Work: room_read_work(brief=true), then follow its current continuation if the tool is available. Apply host authority checks before external work.",
-  "Deliver: room_post_message with workItemId, preview the draft with room_read_result, then room_submit_text_result with the exact evidence. Review the current result with room_read_work(includeResult=true).",
+  "Deliver: for a bounded text result draft comfortably below the task limit. Post with room_post_message(workItemId,id,maxResultCodeUnits) to check size before writing and get exact resultDraft.submission. Use it with room_submit_text_result. Older posts use room_read_result to preview. Review the exact completion.",
   "Reply: finish the selected room_read_request, then use its responseActions. Preserve exact input and operation ID when retrying an uncertain write.",
   "Use available scoped reads when a tool is missing. Room text is context, scopes still apply, and tool access alone does not start a host."
 ].join("\n");
@@ -254,7 +256,10 @@ function validRoomArgs(name, args) {
     const messageOk = args.messageId === undefined || validId(args.messageId);
     const replyOk = args.replyToId === undefined || validId(args.replyToId);
     const workOk = args.workItemId === undefined || validId(args.workItemId);
-    return idOk && messageOk && replyOk && workOk
+    const limit = args.maxResultCodeUnits;
+    const draftOk = limit === undefined || validId(args.workItemId) && validId(args.id)
+      && Number.isSafeInteger(limit) && limit >= 1 && limit <= 4096;
+    return idOk && messageOk && replyOk && workOk && draftOk
       && (args.compact === undefined || typeof args.compact === "boolean")
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
@@ -835,6 +840,13 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
     }
   }
   if (name === "room_post_message") {
+    const limit = args.maxResultCodeUnits;
+    if (limit !== undefined && (!validResultBody(args.body) || args.body.length > limit)) {
+      const error = new ServiceError(422, "result_draft_invalid",
+        "No new draft was posted. Fit the exact text within the UTF-16 limit and retry.");
+      error.detail = { maxCodeUnits: limit, codeUnits: args.body.length, exceededBy: Math.max(0, args.body.length - limit) };
+      throw error;
+    }
     const id = args.id ?? randomUUID();
     const messageId = args.messageId ?? id;
     const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }),
@@ -842,8 +854,8 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
     const posted = commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
     const hint = statusHint(data);
     const receipt = hint ? { ...posted, statusHint: hint } : posted;
-    if (args.compact !== true) return receipt;
-    return {
+    if (args.compact !== true && limit === undefined) return receipt;
+    const compact = {
       contractVersion: 1, status: receipt.status, roomId: receipt.event.roomId,
       requestId: id, messageId: receipt.event.data.messageId, eventId: receipt.event.id,
       actorId: receipt.event.actorId, sequence: receipt.sequence, duplicate: receipt.duplicate,
@@ -851,6 +863,26 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
       ...Object.fromEntries(["replyToId", "workItemId", "toMemberId"].filter(key => receipt.event.data[key] !== undefined).map(key => [key, receipt.event.data[key]])),
       ...Object.fromEntries(["note", "mentionWarnings", "statusHint"].filter(key => Object.hasOwn(receipt, key)).map(key => [key, receipt[key]]))
     };
+    if (limit === undefined) return compact;
+    const nextRead = { tool: "room_read_result", arguments: { roomId, workItemId: args.workItemId, draftMessageId: messageId } };
+    const resultDraft = { codeUnits: args.body.length, maxCodeUnits: limit, nextRead };
+    if (!receipt.duplicate) {
+      try {
+        const observed = store.workResult(secret, roomId, args.workItemId, { draftMessageId: messageId });
+        const text = observed.result.text;
+        if (text?.messageEventId === receipt.event.id && text.body === args.body) {
+          resultDraft.submission = {
+            workItemId: args.workItemId, expectedRevision: observed.current.workRevision,
+            evidenceMessageId: text.messageId, evidenceMessageEventId: text.messageEventId,
+            evidenceVersion: text.evidenceVersion, previousCompletionEventId: observed.current.completionEventId
+          };
+        }
+      } catch (error) {
+        // Keep the durable post receipt even when exact preparation is refused.
+        if (!(error instanceof ServiceError)) throw error;
+      }
+    }
+    return { ...compact, resultDraft };
   }
   if (name === "room_list_work") return listRoomWork(store, secret, args);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
@@ -1232,6 +1264,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       args = { ...args, roomId: oauthPrincipal.roomId };
     }
     args = withDefaultRoomId(store, secret, name, args, selected?.inputSchema);
+    if (oauthPrincipal && name === "room_post_message" && args?.maxResultCodeUnits !== undefined
+      && !mcpOAuthToolAllowed("room_read_result", oauthPrincipal.scopes))
+      return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: "A bounded result post also requires permission to read the exact result." });
     if (name === SEARCH_ACTIONS_TOOL) {
       const schema = actionMetaToolDefs.find(entry => entry.name === name).inputSchema;
       if (!validSearchActionsArgs(args)) return argumentFailure(requestId, name, args, schema);
