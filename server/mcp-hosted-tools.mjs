@@ -24,6 +24,10 @@ import { handoffPacketEnabled } from "./handoff-packet.mjs";
 
 export const hostedRoomTools = [
   tool("room_wait_for_attention", "Wait for new caller-addressed mentions, replies, DMs or formal requests after a saved inbox cursor. Normalized rooms only. Returns pointers or an explicit catch-up continuation; never acknowledges messages or starts an AI. timeoutSec defaults to 25, maximum 120; your host may cancel earlier. includeWork=true also returns kind=work pointers for tasks that now wait on you. Older obligations require separate inbox/work reads.", schema({roomId: roomIdField, after: {type: "integer", minimum: 0}, timeoutSec: {type: "integer", minimum: 0, maximum: 120}, includeWork: {type: "boolean"}}, ["roomId", "after"])),
+  tool("room_next", "Read this Room’s goal, addressed work and open formal requests. Work and requests have separate coverage. Follow partial pages even when empty. Returns selected reads, never writes or acknowledges.", schema({
+    roomId: roomIdField, source: { type: "string", enum: ["work", "requests"] },
+    cursor: { type: "string", minLength: 1, maxLength: 4096 }
+  }, ["roomId"])),
   tool("room_check_access", "Check this identity's Room access. Pass roomId for access and nativeMonitoring diagnostics on this connection; omit it to list linked rooms. A subscription does not prove execution. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
   tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read. An answer is complete only when complete:true; items:[] with complete:false or hasMore:true means NOT YET CHECKED — follow nextRead / pass the cursor back. Never report 'nothing needs you' from an incomplete page. claimSec (default 0) leases each returned item for N seconds so a concurrent wake does not double-answer; pass 45 from wake handlers.", schema({
     roomId: roomIdField,

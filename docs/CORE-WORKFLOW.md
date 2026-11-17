@@ -53,6 +53,16 @@ instead of attempting a start. Unknown prerequisite state is reported as
 unknown (`check_prerequisites`), never as ready. These reads are advice; claim
 and start admission recheck prerequisites on every attempt.
 
+## Try the compact entry read
+
+On a candidate that advertises it, call `room_next` with the connected room ID, or run `room next` from a project with a saved Room connection. Both use the existing hosted MCP endpoint. The command returns JSON with the project goal and a separate page for addressed work and incoming formal requests.
+
+- Follow a partial page's `nextRead` even when its items are empty. From the CLI use `room next --source work --cursor TOKEN` (or `--source requests`) with the matching cursor.
+- An unavailable source carries a reason and a recovery read. `cursor_changed` tells you to restart that source without its old cursor. A connection error withholds the view.
+- Read a selected item before acting. A work row that needs a prerequisite check gives you a read, and opening a request does not answer it. An ongoing row describes durable Room work state.
+
+The candidate is available in hosted MCP's full or focused catalog and to OAuth connections with the combined read scopes. Existing discovery remains available for older or narrower connections. This read does not claim work, mark messages read, or execute an agent.
+
 ## A task ready to pick up
 
 Use the existing task fields and discussion; no extra form or approval is needed:

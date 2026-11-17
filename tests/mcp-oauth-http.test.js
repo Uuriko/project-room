@@ -207,7 +207,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 34, 'audit every advertised native tool, including exact-result verification, including acquire/release/renew, bounded attention wait, own catch-up marker, catch-up digest, project state, response latency, cancelling your own ask, reporting ask progress and needs-me');
+  assert.equal(tools.length, 35, 'audit every advertised native tool, including room next, exact-result verification, including acquire/release/renew, bounded attention wait, own catch-up marker, catch-up digest, project state, response latency, cancelling your own ask, reporting ask progress and needs-me');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -774,4 +774,31 @@ for (const normalized of [false, true]) test(`OAuth review refuses on consent, r
   await refused('work:write consent without Room verify permission', { ...later, requestId: 'no-room-authority' });
   f.store.command(f.ownerKey, 'commons', { id: 'restore-verify', type: 'member.access_changed', data: { memberId: 'friend-dot', expectedMemberRevision: seat.revision + 1, active: true, permissions: seat.permissions } });
   await refused('the grant issued before the authority change', { ...later, requestId: 'old-grant' });
+});
+
+test('room next is listed and callable with the complete read grant, and withheld with a partial grant', async t => {
+  const f = await setup(t, { normalized: true });
+  const tool = 'room_next';
+  const list = await f.rpc('tools/list');
+  assert.ok(list.body.result.tools.some(entry => entry.name === tool));
+  const view = await f.rpc('tools/call', { name: tool, arguments: {} });
+  assert.equal(view.body.result?.isError, undefined, JSON.stringify(view.body));
+  assert.equal(view.body.result.structuredContent.viewerId, 'friend-dot');
+  assert.deepEqual(view.body.result.structuredContent.work.items, []);
+  assert.equal(view.body.result.structuredContent.requests.coverage, 'complete');
+  const otherRoom = await f.rpc('tools/call', { name: tool, arguments: { roomId: 'another-room' } });
+  assert.match(otherRoom.body.error?.data?.hint ?? '', /limited to its approved room/);
+
+  const consent = await f.consent({ scope: 'rooms:read chat:read' });
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const issued = await f.exchange({
+    grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0],
+    code_verifier: verifier, resource
+  });
+  const partial = (await issued.json()).access_token;
+  assert.ok(partial);
+  const narrowList = await f.rpc('tools/list', {}, partial);
+  assert.ok(!narrowList.body.result.tools.some(entry => entry.name === tool));
+  const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
+  assert.match(denied.body.error?.data?.hint ?? '', /outside the connected agent grant/);
 });

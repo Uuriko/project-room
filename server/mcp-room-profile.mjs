@@ -1,3 +1,4 @@
+import { readRoomNext, validRoomNextSelection } from "./room-next.mjs";
 import { withInviteShare } from "./invite-share.mjs";
 import { readProjectState } from "./project-state.mjs";
 import { readResponseLatency } from "./response-latency.mjs";
@@ -188,6 +189,7 @@ function validRoomArgs(name, args) {
   if (name === 'room_wait_for_attention') return Number.isSafeInteger(args.after) && args.after >= 0 && (args.timeoutSec === undefined || Number.isInteger(args.timeoutSec) && args.timeoutSec >= 0 && args.timeoutSec <= 120) && (args.includeWork === undefined || typeof args.includeWork === 'boolean');
   if (name === "room_digest") return (args.since === undefined || Number.isSafeInteger(args.since) && args.since >= 0)
     && (args.cursor === undefined || typeof args.cursor === "string" && args.cursor.length >= 1 && args.cursor.length <= 12288);
+  if (name === "room_next") return validRoomNextSelection(args);
   if (name === "room_check_access" || name === "room_activation_pack" || name === "room_project_state" || name === "room_response_latency") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
@@ -603,6 +605,7 @@ async function boardClaimCall(store, secret, name, args) {
 }
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal) {
+  if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args));
   if (BOARD_CLAIM_TOOLS.includes(name)) return boardClaimCall(store, secret, name, args);
   if (name === 'room_wait_for_attention') return waitForAttention(store, secret, args.roomId, {...args, signal});
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId, oauthIdentity: /^(oat|iat)_/.test(secret ?? "") ? identity : null, claimSec: args.claimSec ?? 0 });
