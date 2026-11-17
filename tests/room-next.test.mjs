@@ -146,6 +146,17 @@ test("formal requests paginate independently with no work, and closed requests c
   assert.ok(!closed.value.responseActions?.length);
   const stale = await f.mcp(f.observer, reply.tool, { ...reply.arguments, body: "Read and answered." });
   assert.equal(stale.ok, false);
+
+  const { member } = f.store.authenticate(f.observer.key, "commons");
+  f.send(f.owner, "member.access_changed", {
+    memberId: member.id, expectedMemberRevision: member.revision, permissions: ["accept_work"], active: true
+  });
+  const changed = await f.mcp(f.observer, "room_next", first.value.requests.nextRead.arguments);
+  assert.equal(changed.ok, true, changed.text);
+  assert.equal(changed.value.requests.reason, "cursor_changed");
+  assert.deepEqual(changed.value.requests.items, []);
+  const restarted = await f.mcp(f.observer, "room_next", changed.value.requests.nextRead.arguments);
+  assert.ok(restarted.value.requests.items.length, "the same credential can still make a fresh scoped read");
 });
 
 test("a selected successor does not disclose a private prerequisite's state", async t => {

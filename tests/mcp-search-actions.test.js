@@ -48,7 +48,9 @@ const size = tools => JSON.stringify(tools).length;
 test("lean is opt-in: default core completes work and full stays available, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
   assert.equal(core.length, 25, "default core is the 21 conversation+task tools plus 4 join readers for callers not yet in a room (#5468)");
-  assert.equal(full.length, 129, "full includes the caller-addressed room_wait_for_attention tool, the reviewed room_mark_caught_up (#5842), room_digest, room_project_state and room_response_latency");
+  assert.equal(full.length, 130, "full includes the opt-in room_next tool");
+  assert.ok(full.some(tool => tool.name === "room_next"));
+  assert.ok(!core.some(tool => tool.name === "room_next"));
   assert.ok(full.some(tool => tool.name === "room_wait_for_attention"));
   assert.equal(new Set(full.map(tool => tool.name)).size, full.length, "full names remain unique");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");

@@ -15,6 +15,32 @@ const tool = (name, description, inputSchema, readOnlyHint = true) => ({
 });
 const idField = { type: "string", minLength: 1, maxLength: 128 };
 const roomIdField = { ...idField, description: "Room id this identity is linked to." };
+const nextRead = schema({
+  tool: { type: "string", enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request"] },
+  arguments: { type: "object" }
+}, ["tool", "arguments"]);
+const nextPage = items => schema({
+  coverage: { type: "string", enum: ["complete", "partial", "unavailable"] },
+  evaluatedThrough: { type: "integer", minimum: 0 },
+  evaluationScope: { type: "string" },
+  reason: { type: "string" },
+  items: { type: "array", items, maxItems: 4 },
+  nextRead: { anyOf: [nextRead, { type: "null" }] }
+}, ["coverage", "items", "nextRead"]);
+const roomNextOutput = {
+  ...schema({
+    contractVersion: { type: "integer", const: 1 },
+    roomId: idField, viewerId: idField, goal: { type: "string", maxLength: 800 },
+    charterRevision: { type: ["integer", "null"] }, contentTrust: { type: "string" },
+    work: nextPage(schema({
+      id: idField, title: { type: "string", maxLength: 160 }, revision: { type: "integer", minimum: 0 },
+      reason: { type: "string" }, nextRead
+    }, ["id", "title", "revision", "reason", "nextRead"])),
+    requests: nextPage(schema({ id: idField, revision: { type: "integer", minimum: 0 }, nextRead },
+      ["id", "revision", "nextRead"]))
+  }, ["contractVersion", "roomId", "viewerId", "goal", "charterRevision", "contentTrust"]),
+  anyOf: [{ required: ["work"] }, { required: ["requests"] }]
+};
 const commandIdField = { ...idField, description: "Client command id. Stable across retries." };
 const bondIdField = { ...idField, description: "Bond id from bond_propose or bond_list." };
 const scopesField = { type: "array", items: { type: "string", enum: [...BOND_SCOPES] }, minItems: 1, maxItems: BOND_SCOPES.length };
@@ -24,10 +50,10 @@ import { handoffPacketEnabled } from "./handoff-packet.mjs";
 
 export const hostedRoomTools = [
   tool("room_wait_for_attention", "Wait for new caller-addressed mentions, replies, DMs or formal requests after a saved inbox cursor. Normalized rooms only. Returns pointers or an explicit catch-up continuation; never acknowledges messages or starts an AI. timeoutSec defaults to 25, maximum 120; your host may cancel earlier. includeWork=true also returns kind=work pointers for tasks that now wait on you. Older obligations require separate inbox/work reads.", schema({roomId: roomIdField, after: {type: "integer", minimum: 0}, timeoutSec: {type: "integer", minimum: 0, maximum: 120}, includeWork: {type: "boolean"}}, ["roomId", "after"])),
-  tool("room_next", "Read this Room’s goal, addressed work and open formal requests. Work and requests have separate coverage. Follow partial pages even when empty. Returns selected reads, never writes or acknowledges.", schema({
+  { ...tool("room_next", "Read this Room’s goal, addressed work and open formal requests. Work and requests have separate coverage. Follow partial pages even when empty. Returns selected reads, never writes or acknowledges.", schema({
     roomId: roomIdField, source: { type: "string", enum: ["work", "requests"] },
     cursor: { type: "string", minLength: 1, maxLength: 4096 }
-  }, ["roomId"])),
+  }, ["roomId"])), outputSchema: roomNextOutput },
   tool("room_check_access", "Check this identity's Room access. Pass roomId for access and nativeMonitoring diagnostics on this connection; omit it to list linked rooms. A subscription does not prove execution. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
   tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read. An answer is complete only when complete:true; items:[] with complete:false or hasMore:true means NOT YET CHECKED — follow nextRead / pass the cursor back. Never report 'nothing needs you' from an incomplete page. claimSec (default 0) leases each returned item for N seconds so a concurrent wake does not double-answer; pass 45 from wake handlers.", schema({
     roomId: roomIdField,

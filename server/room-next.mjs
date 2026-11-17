@@ -125,9 +125,13 @@ function legacyRequestPage(store, secret, roomId, auth, room, cursor) {
 }
 
 function requestPage(store, secret, roomId, auth, cursor) {
+  // Keep the canonical request reader's current-per-page semantics while
+  // fencing permission changes the native request cursor does not bind.
+  const position = pageCursor(store, cursorBinding(auth, roomId, "requests", null), cursor);
+  if (!position) return unavailable(roomId, "requests", "cursor_changed");
   const page = store.replyRequests.list(secret, roomId, {
     direction: "incoming", status: "open", limit: PAGE_SIZE,
-    expectedSessionBinding: auth.sessionBinding, ...(cursor ? { cursor } : {})
+    expectedSessionBinding: auth.sessionBinding, ...(position.after ? { cursor: position.after } : {})
   });
   if (page.viewerId !== auth.member.id || page.roomId !== roomId)
     throw new ServiceError(403, "no_access", "Room request viewer changed");
@@ -136,7 +140,7 @@ function requestPage(store, secret, roomId, auth, cursor) {
     evaluatedThrough: page.evaluatedThrough,
     evaluationScope: page.evaluationScope,
     items: requestRows(page.requests, roomId),
-    nextRead: page.page.nextCursor ? read(roomId, "requests", page.page.nextCursor) : null
+    nextRead: page.page.nextCursor ? read(roomId, "requests", position.encode(page.page.nextCursor)) : null
   };
 }
 
@@ -152,7 +156,7 @@ function boundedPage(roomId, source, getPage) {
 
 export function readRoomNext(store, secret, roomId, { source, cursor } = {}) {
   if (!validRoomNextSelection({ source, cursor }))
-    throw new ServiceError(422, "invalid_room_next_selection", "Choose a source and its returned cursor");
+    throw new ServiceError(422, "invalid_arguments", "Choose a source and its returned cursor");
   return store.readTransaction(() => {
     const auth = store.authenticate(secret, roomId);
     const packet = { contractVersion: 1, roomId, viewerId: auth.member.id };
@@ -179,7 +183,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor } = {}) {
         ? requestPage(store, secret, roomId, auth, cursor) : legacyRequestPage(store, secret, roomId, auth, room, cursor));
     }
     if (Buffer.byteLength(JSON.stringify(packet)) > MAX_BYTES)
-      throw new ServiceError(413, "room_next_too_large", "Read one source at a time");
+      throw new ServiceError(409, "current_room_context_unavailable", "Read one source at a time");
     return packet;
   });
 }

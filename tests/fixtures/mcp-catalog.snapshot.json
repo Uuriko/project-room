@@ -1134,6 +1134,16 @@
         "title": "Needs Me"
       }
     },
+    "room_next": {
+      "inputSchema": "fc50aaa360379f80",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Next"
+      }
+    },
     "room_offer_help": {
       "inputSchema": "acae95d1a4b0d2fe",
       "annotations": {
@@ -1866,6 +1876,16 @@
         "title": "Needs Me"
       }
     },
+    "room_next": {
+      "inputSchema": "fc50aaa360379f80",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Next"
+      }
+    },
     "room_post_draft": {
       "inputSchema": "d61f6ac8fbe3056e",
       "annotations": {
@@ -2258,6 +2278,16 @@
         "title": "Needs Me"
       }
     },
+    "room_next": {
+      "inputSchema": "fc50aaa360379f80",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Next"
+      }
+    },
     "room_post_message": {
       "inputSchema": "e44f2474de64f98d",
       "annotations": {
@@ -2530,6 +2560,16 @@
         "title": "Needs Me"
       }
     },
+    "room_next": {
+      "inputSchema": "fc50aaa360379f80",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Next"
+      }
+    },
     "room_post_message": {
       "inputSchema": "e44f2474de64f98d",
       "annotations": {
@@ -2790,6 +2830,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Needs Me"
+      }
+    },
+    "room_next": {
+      "inputSchema": "fc50aaa360379f80",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Next"
       }
     },
     "room_post_message": {
