@@ -15,7 +15,7 @@ import { isGuestAgentMemberId } from "../guest-agent-links.mjs";
 import { buildWorkClaimPage, handleWorkClaims } from "../work-claim-routes.mjs";
 import { withProjectMapOverlap } from "../project-map-store.mjs";
 import { readBoard } from "../board-read.mjs";
-import { claimThread } from "../claim-thread.mjs";
+import { claimThreadForViewer } from "../claim-thread.mjs";
 import { withContentTrust } from "../content-trust.mjs";
 
 function requireRoomScope(ctx, auth, writing = false) {
@@ -121,7 +121,7 @@ export async function threadRoute(ctx) {
   }
   const item = ctx.store.workClaims.get(roomId, claimId);
   if (!item) ctx.reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
-  return ctx.json(ctx.res, 200, withContentTrust(claimThread(ctx.store, roomId, ctx.store.workClaimsForViewer(roomId, auth.member.id, [item])[0])));
+  return ctx.json(ctx.res, 200, withContentTrust(claimThreadForViewer(ctx.store, roomId, item, auth.member.id)));
 }
 
 const claimParameters = Object.freeze({ type: "object", required: ["roomId", "claimId"],

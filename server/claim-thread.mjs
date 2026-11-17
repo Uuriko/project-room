@@ -32,7 +32,7 @@ export function claimThreadKind(action, data = {}) {
   return "claim";
 }
 
-function eventEntry(row) {
+function eventEntry(row, withheld = false) {
   let event;
   try { event = JSON.parse(row.body); } catch { return null; }
   const data = event?.data ?? {};
@@ -45,6 +45,14 @@ function eventEntry(row) {
     kind: claimThreadKind(data.action, data),
     action: data.action,
     claimState: data.claimState ?? null,
+    // Private work read from outside: the step stays in the timeline, its
+    // stored detail (reason, CI state, verdict, pull request) does not.
+    ...(withheld ? {} : eventDetail(data)),
+  };
+}
+
+function eventDetail(data) {
+  return {
     ...(data.reason ? { reason: data.reason } : {}),
     ...(data.ciState ? { ciState: data.ciState } : {}),
     ...(data.verdict ? { verdict: data.verdict } : {}),
@@ -75,7 +83,16 @@ export function mergeClaimThread(eventEntries, historyEntries) {
   return out;
 }
 
-export function claimThread(store, roomId, item, { limit = CLAIM_THREAD_LIMIT } = {}) {
+// The thread as one member may read it. The Board row passes through the
+// viewer boundary, and when that boundary withheld it the entries built from
+// stored events are reduced too: those events are read raw, so filtering the
+// row alone would still hand over what they recorded.
+export function claimThreadForViewer(store, roomId, item, viewerId, options = {}) {
+  const seen = store.workClaimsForViewer?.(roomId, viewerId, [item])?.[0] ?? item;
+  return claimThread(store, roomId, seen, { ...options, withheld: seen !== item });
+}
+
+export function claimThread(store, roomId, item, { limit = CLAIM_THREAD_LIMIT, withheld = false } = {}) {
   let rows = [];
   if (store?.db && typeof store.db.prepare === "function") {
     rows = store.db.prepare(
@@ -83,7 +100,7 @@ export function claimThread(store, roomId, item, { limit = CLAIM_THREAD_LIMIT } 
       .all(roomId, item.id, limit + 1);
   }
   const truncated = rows.length > limit;
-  const events = rows.slice(0, limit).reverse().map(eventEntry).filter(Boolean);
+  const events = rows.slice(0, limit).reverse().map(row => eventEntry(row, withheld)).filter(Boolean);
   const history = (item.history ?? []).filter(entry => HISTORY_ONLY.has(entry?.action)).map(historyEntry);
   const pulls = (Array.isArray(item.pullRequests) && item.pullRequests.length ? item.pullRequests : item.pullRequest ? [item.pullRequest] : [])
     .map(pull => ({ url: pull.url ?? null, outcome: pull.outcome ?? null }));

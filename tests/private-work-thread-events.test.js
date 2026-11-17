@@ -1,10 +1,9 @@
-// REPRODUCTION, fails on e08e4d37. Legacy storage. The claim thread filters
-// the Board row for the viewer, but builds its entries from raw
-// work_claim.updated events (server/claim-thread.mjs). A merged or closed
-// pull request on private work is recorded in such an event with its URL, so
-// an outsider reads the private repository and pull number from the thread.
-// The event is written with the server's own emitter, the one the pull
-// request sync uses; the reads are real HTTP and MCP calls.
+// Legacy storage. The claim thread builds its entries from stored
+// work_claim.updated events, which are read raw. A merged or closed pull
+// request on private work is recorded there with its URL, so filtering the
+// Board row alone would still show an outsider the private repository and pull
+// number. The event is written with the server's own emitter, the one the
+// pull request sync uses; the reads are real HTTP and MCP calls.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
