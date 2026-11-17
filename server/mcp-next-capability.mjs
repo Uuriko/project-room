@@ -45,15 +45,17 @@ export function connectionCapability(continuation, { connection, exposed, allowe
   const isExposed = exposed(tool);
   const grant = isExposed ? grantFor(tool, connection, allowed) : { grant: "unknown" };
   const out = { ...base, connection: { kind: connection.kind, exposed: isExposed, ...grant } };
-  if (base.status === "blocked") return { ...continuation, capability: out }; // Room side already decided
+  // Room-side outcomes are final: a blocked step, a prerequisite wait or an
+  // unknown prerequisite observation never becomes callable here.
+  if (base.status === "blocked" || base.status === "waiting" || typeof continuation.tool !== "string") return { ...continuation, capability: out };
   const blocked = (blockedBy, recovery, extra = {}) => ({ ...continuation, capability: { ...out, status: "blocked", blockedBy, recovery, ...extra } });
   if (!isExposed) return blocked("catalog", `This member's tier withholds ${tool} on this server; ask the room owner to review the tier. Do not retry the call.`);
   if (grant.grant === "missing_scope") return blocked("oauth_scope",
     `Reconnect this same agent through its host OAuth consent and approve ${grant.missingScopes.join(" ")}; keep the existing identity. ${tool} is refused on this connection until then.`);
   if (grant.grant === "not_offered") {
-    const stage = tool === "room_begin_work" ? BEGIN_STAGES[base.operation] : null;
-    if (stage && allowed(stage.tool, connection.scopes) && exposed(stage.tool)) {
-      const args = continuation.arguments ?? {};
+    const stage = tool === "room_begin_work" && continuation.tool === "room_begin_work" ? BEGIN_STAGES[base.operation] : null;
+    const args = continuation.arguments ?? {};
+    if (stage && typeof args.workItemId === "string" && allowed(stage.tool, connection.scopes) && exposed(stage.tool)) {
       const alternative = { tool: stage.tool, arguments: { ...(args.roomId ? { roomId: args.roomId } : {}), workItemId: args.workItemId, expectedRevision: continuation.workRevision }, inputRequired: stage.inputRequired };
       return { ...continuation, capability: { ...out, status: "available", via: "alternative", alternative, blockedBy: null,
         recovery: `${tool} is not offered to OAuth connections; use alternative (one stage per call) and read the task again after it.` } };
@@ -62,7 +64,8 @@ export function connectionCapability(continuation, { connection, exposed, allowe
   }
   if (grant.grant === "unknown") return { ...continuation, capability: { ...out, status: "unknown", blockedBy: null,
     recovery: "This API key's scopes are checked when the call is made; a refusal names the missing scope." } };
-  return { ...continuation, capability: { ...out, status: base.status === "waiting" ? "waiting" : "available", blockedBy: base.blockedBy ?? null } };
+  // Listed and permitted for this connection; admission still checks revision, version, role and prerequisites.
+  return { ...continuation, capability: { ...out, status: "available", blockedBy: null } };
 }
 
 // Annotate every selected-read continuation in a room_read_work value in place-safe copy.
