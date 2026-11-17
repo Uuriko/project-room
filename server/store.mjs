@@ -6175,8 +6175,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const rows = stmt.all(roomId, after);
       if (!rows.length) break;
       for (const r of rows) {
-        const event = JSON.parse(r.body);
-        yield { sequence: r.sequence, event: outside(event) ? withheldWorkEvent(event) : event };
+        const exportedEvent = JSON.parse(r.body);
+        yield { sequence: r.sequence, event: outside(exportedEvent) ? withheldWorkEvent(exportedEvent) : exportedEvent };
       }
       after = rows.at(-1).sequence;
       if (after >= sequence) break;
