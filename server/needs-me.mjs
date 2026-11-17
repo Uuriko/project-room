@@ -1061,6 +1061,41 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
+// Asks this member SENT that now need the asker, not the recipient. Linear
+// shows an unresponsive agent session and stops there; here the asker is told,
+// in the same read that lists what others need from it. A standing list, like
+// myWork: recomputed on every read from the open-ask index, never part of the
+// cursor, so nothing is delivered-once or lost. Reasons: `unresponsive` (no
+// acknowledgement inside the ack window), `stale`, `needs_input` (the
+// recipient asked the asker something) and `error`.
+const SENT_ASK_ROOMS = 3, SENT_ASK_LIMIT = 8;
+function sentAsksNeedingAsker(store, secret, links, scopedRoom) {
+  const out = [];
+  for (const link of links.filter(link => !scopedRoom || link.roomId === scopedRoom).slice(0, SENT_ASK_ROOMS)) {
+    if (out.length >= SENT_ASK_LIMIT) break;
+    try {
+      const listed = store.replyRequests.list(secret, link.roomId, { direction: "outgoing", status: "open", states: true,
+        ...(isCurrentRoom(store.db, link.roomId) ? { limit: SENT_ASK_LIMIT } : {}) });
+      for (const request of listed.requests) {
+        const life = request.lifecycle;
+        const reason = !life ? null : ["needs_input", "error", "stale"].includes(life.state) ? life.state : life.unresponsive ? "unresponsive" : null;
+        if (!reason || request.requesterId !== link.memberId) continue;
+        const target = { roomId: link.roomId, requestMessageId: request.id };
+        out.push({ roomId: link.roomId, id: request.id, recipientId: request.recipientId, reason, since: life.since ?? request.createdAt,
+          ...(request.progress?.note ? { note: clip(request.progress.note) } : {}),
+          summary: clip(reason === "needs_input" ? `${request.recipientId} needs input from you on this ask`
+            : reason === "error" ? `${request.recipientId} reported an error on this ask`
+            : reason === "stale" ? `No activity on your ask to ${request.recipientId}`
+            : `${request.recipientId} has not acknowledged your ask`),
+          next: { tool: "room_read_request", arguments: target },
+          cancel: { tool: "room_cancel_request", arguments: { ...target, expectedRequestRevision: request.revision }, requiredInput: ["reason"] } });
+        if (out.length >= SENT_ASK_LIMIT) break;
+      }
+    } catch { /* a room this read cannot list is skipped; never fail the inbox */ }
+  }
+  return out;
+}
+
 export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null, freshWindow = NEEDS_ME_FRESH_WINDOW, oauthIdentity = null, claimSec = undefined } = {}) {
   let identity = null;
   let allowedRooms = null;
@@ -1307,6 +1342,7 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
   // disposition. Only explicit reply_request.progressed records ACK/work.
   // In particular, a lost response must leave an undispositioned ask open.
   const claimMeta = claim.leaseSec > 0 ? { claims: { leased: claim.leased, suppressed: claim.suppressed, leaseSec: claim.leaseSec } } : {};
-  return stampNeedsMe({ identityId: identity.identityId, ...claimMeta, items: claimedItems, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, complete: !hasMore, status: hasMore ? 'incomplete' : 'complete', ...(hasMore ? { nextRead: { tool: 'room_needs_me', arguments: { ...(scopedRoom ? { roomId: scopedRoom } : {}), since: cursor } }, guidance: "INCOMPLETE: this is a partial page, not an empty answer. Pass the returned cursor back unchanged as since until complete:true before concluding nothing needs you." } : {}), ...(nativeCoverage.length?{contractVersion:2,nativeCoverage}:{}),
+  const sentAsks = sentAsksNeedingAsker(store, secret, links, scopedRoom);
+  return stampNeedsMe({ identityId: identity.identityId, ...claimMeta, items: claimedItems, ...(sentAsks.length ? { sentAsks } : {}), ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, complete: !hasMore, status: hasMore ? 'incomplete' : 'complete', ...(hasMore ? { nextRead: { tool: 'room_needs_me', arguments: { ...(scopedRoom ? { roomId: scopedRoom } : {}), since: cursor } }, guidance: "INCOMPLETE: this is a partial page, not an empty answer. Pass the returned cursor back unchanged as since until complete:true before concluding nothing needs you." } : {}), ...(nativeCoverage.length?{contractVersion:2,nativeCoverage}:{}),
     scan: { scannedRows: scan.scannedRows, scannedBytes: scan.scannedBytes, exhausted: scan.exhausted, replies: scan.replies, mentions: scan.mentions, rowBudgets: { replies: REPLY_SCAN_ROW_BUDGET, mentions: MENTION_SCAN_ROW_BUDGET }, byteBudgets: { replies: REPLY_SCAN_BYTE_BUDGET, mentions: MENTION_SCAN_BYTE_BUDGET }, ...(scan.exhausted ? { continuation: "pass the returned cursor back unchanged; the scan resumes at the first unscanned sequence" } : {}) } });
 }
