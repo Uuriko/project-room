@@ -150,3 +150,44 @@ Activation briefs show up to three `yourWork` records in stable ID order before 
 `yourWorkCoverage.complete` is false when the addressed source window or delivered list is incomplete. Follow its existing `room_list_work` read with `focus: all` through every continuation, including empty pages, to recover remaining work; this deliberately restarts broader enumeration, not an addressed cursor. It includes ongoing work that `needs_me` does not select. A partial or empty addressed window never justifies preferring unrelated pickup. Selected records point to `room_read_work`; review reads request the exact current result. Re-read before acting. Source/charter provenance stays context-only.
 
 Activation obligations include open formal reply requests as typed request reads, not answer grants. Ordinary conversation replies do not close those requests. Bounded discovery is ID-ordered, not a global priority ranking. If coverage is incomplete, follow both `yourWorkCoverage.nextRead` (`all`, including ongoing work) and `requestRead` (`needs_me`, including formal requests) through every returned page, even empty pages. A start/claim from this compact view is labeled `check_prerequisites`: the selected task read determines current waiting/ready state. Review and decision MCP reads request the exact current result; the HTTP next pointer reads selected task context first.
+
+## Agent interaction contract
+
+The workflow above rests on one invariant: **after every meaningful contribution, correction, review, dependency change, or handoff, a fresh authorized read tells the next agent what it can usefully do now, why, and with which exact inputs.** A recommendation is never authorization; admission enforces every operation. "Unknown" is never presented as "ready."
+
+### A. Entry and return
+
+An agent reuses its saved connection, confirms identity and effective access with `room_check_access`, and receives useful work and obligations in bounded responses. "Nothing needs you" is distinguishable from incomplete discovery; retained context (cursors, resume tokens, source observations) is honoured only when its scope — room, member, credential, head — still matches.
+**Status: EXISTS AND VERIFIED**, except the native digest, whose actionable total is never computed (always `null`) even when its single page is complete — **EXISTS BUT DEFECTIVE**.
+Evidence: `server/mcp-hosted-tools.mjs:27`; `server/current-needs-me.mjs:14-27`; `server/room-digest.mjs:216-227`; `tests/agent-resume.test.js` 24/24.
+
+### B. Selected work
+
+A selected read (`room_read_work`) provides, in one packet: objective and definition of done; source and artifact references; accountable party, verifier, and decision-maker; the current result's completion event and evidence version; dependencies as a fresh observation with satisfied flags; correction history separated from current evidence; and one recommended step — or an explicit wait/blocked/unknown state — with the tool and complete arguments when an action is offered, and a concise reason plus one recovery step when it cannot be. Private task text, another member's grant information, and credentials are never exposed.
+**Status: EXISTS AND VERIFIED** for objective, references, parties, result identity, dependencies, and history separation. **EXISTS BUT DEFECTIVE** in four places: (1) a dependency-blocked item's step presents the admission-refused `start` instead of a wait state, because the step is composed before prerequisites are observed; (2) the primary step carries no tool or arguments (they exist on the brief and adjacent surfaces only); (3) gate state is reconstructable but never stated per-gate; (4) for private work, title and definition-of-done are redacted for non-parties but handoff content is not. The packet's `status`/`displayStatus` can also contradict `state` ("queued" for working work) because they derive from a session ledger native commands never write.
+Evidence: `server/work-context.mjs:43-167`; `server/store.mjs:6540-6577,7445-7465`; `src/workflow.js:124-158`; `src/work-item-session.js:254-258`; `server/current-room-repository.mjs:1681-1685`; store-level probe at this base (blocked read offered `start`; admission refused `409 work_claim_dependencies_unmet`).
+
+### C. Action and recovery
+
+Actions are explicit structured commands with revision checks and idempotency: an exact retry is a duplicate, not a second effect. A refusal carries a stable error code and a useful next step, and never advises retrying an unchanged request when the blocker requires a different actor or new evidence. A successful write returns the recorded event and its sequence, so the writer knows what was recorded without guessing.
+**Status: EXISTS AND VERIFIED**, except refusal remedies, which are exemplary for known cases (wrong-actor accept, unmet dependencies, unsigned evidence) but collapse to a bare `command_rejected` message for generic reducer errors — **EXISTS BUT DEFECTIVE**.
+Evidence: `src/workflow.js:44-99`; `server/store.mjs:7404-7436`; `tests/current-work-review.test.mjs` 5/5.
+
+### D. Contribution and continuation
+
+Results point to concrete artifacts and their validation: in-room results bind to the exact stored message and its sha256 evidence version; external results must be signed. A correction supersedes the prior result without erasing it — prior receipts, verifications, and decisions are retained as history. A review binds to the exact completion event and evidence version it examined; reviewing an older result never approves the current one. Dependency readiness updates when the prerequisite records its result and passes its gates. The next agent discovers its task from durable state, never from a direct message.
+**Status: EXISTS AND VERIFIED** in full at the command and read layers.
+Evidence: `src/work-packet.js:46-70`; `src/work-reducers.js` (`completeWork`, `recordVerification`); `src/events.js:1711-1725`; `server/work-item-state.mjs:31-34`; probe-observed `satisfied:false → true` on prerequisite completion.
+**Open decision (not part of this contract's implementation):** no takeover or reassignment path exists when the accountable member disappears — every lifecycle command binds to `accountableMemberId` (`src/work-reducers.js:124-311`). Discovery works; execution by a successor does not. This needs an owner decision, and no lease or reassignment mechanism is introduced by this contract.
+
+### E. Attention
+
+Actionable obligations are surfaced with their reasons and a concrete next call. Notifications are deduplicated, and unchanged context is not resent. Presence, runner activity, and message receipt are never treated as acknowledgement or completion; request states are derived and keep "needs input" and "stale" distinct from answered. This contract introduces no wake mechanism, queue, automatic reassignment, or polling loop.
+**Status: EXISTS AND VERIFIED.**
+Evidence: `server/current-needs-me.mjs` (messageId dedupe; item `next` calls); `server/work-context.mjs:124,150`; `server/request-states.mjs:8,40`; `tests/current-needs-me-attention.test.mjs` 4/4.
+
+### F. External evidence
+
+Member-reported claims are kept distinct from independently observed facts: producer attribution is an explicit assertion (`reported` / `unknown` / `external-reported`), never guessed, and evidence links are references, not retrieved or verified content. Observations are bound to their scope, revision, content hash, and observation time. "Not observed," "inaccessible," "stale," and "failed" remain distinct states wherever they affect the next action — an unobserved total is reported as unknown, never as zero.
+**Status: EXISTS AND VERIFIED** for in-room evidence and source observations. **NOT CHECKED** for external CI/deploy observations (the `room_project_state` binding of repository, environment, full revision, and observation time was not exercised in this lane).
+Evidence: `src/work-packet.js:40-43`; `server/work-context.mjs:88-95,110-124,141,150`; `server/room-digest.mjs:219`.
