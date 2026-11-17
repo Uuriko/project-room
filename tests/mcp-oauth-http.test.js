@@ -467,6 +467,14 @@ test('in-flight consent cannot issue a code after browser account-slot logout',a
 
 test('Claude defaults to existing-account consent while explicit invitation and public discovery remain available',async t=>{
  const f=await setup(t,{legacyOwned:true,client:CLAUDE});
+ const initialized = await f.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {},
+   clientInfo: { name: 'agent-entry', version: '1' } });
+ const instructions = initialized.body.result.instructions;
+  assert.match(instructions, /room_list_work\(focus=needs_me\).*room_list_requests/);
+  assert.match(instructions, /room_read_work\(brief=true\).*continuation/);
+  assert.match(instructions, /room_read_request.*responseActions/);
+  assert.doesNotMatch(instructions, /public_work|room-acp|room_read_inbox/);
+
  const args={client_id:CLAUDE.clientId,redirect_uri:CLAUDE.redirectUris[0],scope:'rooms:read chat:read',state:'claude',code_challenge:challenge,code_challenge_method:'S256',resource};
  const account=await fetch(f.base+'/oauth/authorize?'+new URLSearchParams(args));assert.equal(account.status,302);assert.match(account.headers.get('location'),/oauth=login/);
  const invitation=await fetch(f.base+'/oauth/authorize?'+new URLSearchParams({...args,connection:'invite'}));assert.equal(invitation.status,200);
