@@ -148,7 +148,23 @@ test(`${representation}: default catalog supports task pickup, correction, exact
   await attention(producer, ['revise']);
   await attention(reviewer, []);
   await stop(); store = new RoomStore(database); await start();
-  const resumed = await call(producer, 'room_read_work', { workItemId, brief: true });
+  const next = await call(producer, 'room_next');
+  const correction = next.work.items.find(row => row.id === workItemId);
+  assert.equal(correction?.reason, 'revise');
+  assert.deepEqual(correction.nextRead, {
+    tool: 'room_read_work', arguments: { roomId: 'commons', workItemId, brief: true, includeDiscussion: false }
+  });
+  if (representation === 'normalized-current-v1') {
+    const discussion = await invoke(producer, 'room_read_work', { workItemId, brief: true, includeDiscussion: true });
+    assert.equal(discussion.result?.isError, true);
+    const refusal = discussion.result.structuredContent;
+    assert.equal(refusal.code, 'work_discussion_unavailable');
+    assert.deepEqual(refusal.nextRead.arguments, { roomId: 'commons', workItemId, brief: true });
+    const fallback = await call(producer, refusal.nextRead.tool, refusal.nextRead.arguments);
+    assert.match(fallback.brief, /Missing the required reconnect check/);
+  }
+  const resumed = await call(producer, correction.nextRead.tool, correction.nextRead.arguments);
+  assert.equal(resumed.revision, correction.revision);
   assert.match(resumed.brief, /Missing the required reconnect check/);
   assert.equal(resumed.continuation.tool, 'room_resolve_blocker');
   assert.deepEqual(resumed.continuation.inputRequired, ['resolution']);

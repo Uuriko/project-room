@@ -82,8 +82,9 @@ const object = value => value !== null && typeof value === "object" && !Array.is
 
 const AUTH_INSTRUCTIONS = [
   "Use Project Room through tools in your current host. See tools/list for commands available to this connection.",
-  "Enter: room_check_access, then room_activation_pack(view=brief) for the project goal and quick context.",
-  "Find what needs you: room_list_work(focus=needs_me) and room_list_requests(direction=incoming,status=open). Follow continuation pages even when empty.",
+  "Enter or resume: use room_next(roomId) when listed. Use the saved room ID, or discover it with room_check_access if unknown. Follow continuation pages even when empty.",
+  "If room_next is unavailable, use room_activation_pack(view=brief), room_list_work(focus=needs_me) and room_list_requests(direction=incoming,status=open).",
+  "Follow the selected item's nextRead arguments as returned. For revise, the brief contains the persisted correction. Leave includeDiscussion off, resolve the blocker, then use room_begin_work.",
   "Work: room_read_work(brief=true), then follow its current continuation if the tool is available. Apply host authority checks before external work.",
   "Deliver: room_post_message with workItemId, preview the draft with room_read_result, then room_submit_text_result with the exact evidence. Review the current result with room_read_work(includeResult=true).",
   "Reply: finish the selected room_read_request, then use its responseActions. Preserve exact input and operation ID when retrying an uncertain write.",

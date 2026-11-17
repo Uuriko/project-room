@@ -222,6 +222,16 @@
         "title": "Needs Me"
       }
     },
+    "room_next": {
+      "inputSchema": "fc50aaa360379f80",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Next"
+      }
+    },
     "room_post_message": {
       "inputSchema": "e44f2474de64f98d",
       "annotations": {
@@ -3264,6 +3274,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Needs Me"
+      }
+    },
+    "room_next": {
+      "inputSchema": "fc50aaa360379f80",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Next"
       }
     },
     "room_post_message": {

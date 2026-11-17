@@ -53,7 +53,9 @@ function workRows(items, auth, room, roomId, now) {
   return activationObligations(items, auth.member, room.ownerId, now).map(row => ({
     id: row.id, title: row.title.slice(0, 160), revision: byId.get(row.id).revision,
     reason: row.reason,
-    nextRead: { tool: row.nextRead.tool, arguments: { roomId, brief: true, ...row.nextRead.arguments } }
+    nextRead: { tool: row.nextRead.tool, arguments: {
+      roomId, brief: true, ...row.nextRead.arguments, ...(row.reason === "revise" ? { includeDiscussion: false } : {})
+    } }
   }));
 }
 

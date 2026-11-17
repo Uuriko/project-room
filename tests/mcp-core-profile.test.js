@@ -66,7 +66,8 @@ test("default tools/list is the short core profile and every listed name is lega
   const initialized = await rpc(origin, "initialize", { protocolVersion: "2025-11-25", capabilities: {},
     clientInfo: { name: "agent-entry", version: "1" } }, ada.secret);
   const instructions = (await initialized.json()).result.instructions;
-  assert.match(instructions, /room_list_work\(focus=needs_me\).*room_list_requests/);
+  assert.match(instructions, /Enter or resume: use room_next\(roomId\) when listed/);
+  assert.match(instructions, /If room_next is unavailable.*room_list_work\(focus=needs_me\).*room_list_requests/);
   assert.match(instructions, /room_read_work\(brief=true\).*continuation/);
   assert.match(instructions, /room_read_request.*responseActions/);
   assert.doesNotMatch(instructions, /public_work|room-acp|room_read_inbox/);
@@ -77,6 +78,8 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.equal(body.result.profile, "core");
   // A joined member does not get the four join helpers in its default list.
   assert.deepEqual(names, [...CORE_MCP_TOOLS]);
+  assert.equal(names[0], "room_next");
+  assert.ok(body.result.tools[0].outputSchema, "default discovery keeps the next-read contract");
   assert.equal(JOIN_TOOLS.some(tool => names.includes(tool)), false);
   // Core covers conversation and the task loop: create, files,
   // land queue, wake and bond tools move to focus/full profiles.
@@ -99,9 +102,8 @@ test("default tools/list is the short core profile and every listed name is lega
   console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
   // Core includes the complete task/correction/review loop. Keep a bounded
   // catalog instead of requiring the 129-tool full profile to finish a task.
-  // The existing project-state read is now discoverable too: 21 tools rather
-  // than 20. Allow one more KiB while retaining the relative full-catalog cap.
-  assert.ok(coreBytes < 31 * 1024, `core tools/list is ${coreBytes} bytes`);
+  // Room next includes its structured output contract in the default list.
+  assert.ok(coreBytes < 34 * 1024, `core tools/list is ${coreBytes} bytes`);
 
   const aliased = await rpc(origin, "tools/list", { aliases: 1, profile: "full" }, ada.secret);
   const aliasBody = await aliased.json();
