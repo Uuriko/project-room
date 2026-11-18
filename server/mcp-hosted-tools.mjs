@@ -211,7 +211,7 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     status: { type: "string", enum: ["pending", "approved", "denied", "expired", "cancelled"], description: "Filter. Defaults to pending." }
   }, ["roomId"])),
-  tool("room_decide_access_request", "Approve or deny one access request. Same write as POST /api/rooms/:roomId/access-requests/:requestId/decide. The room owner or a membership-administration delegate can decide. decision is approve or deny. permissions optionally narrows what an approval grants. note is optional. The read-only autonomy tier refuses this call.", schema({
+  tool("room_decide_access_request", "Approve or deny one access request. Same write as POST /api/rooms/:roomId/access-requests/:requestId/decide. The room owner or a membership administrator can decide. A Room admin can grant admin permissions they hold. decision is approve or deny. permissions specifies what an approval grants. note is optional. The read-only autonomy tier refuses this call.", schema({
     roomId: roomIdField,
     requestId: { ...idField, maxLength: 64, description: "requestId from room_list_access_requests." },
     decision: { type: "string", enum: ["approve", "deny"] },

@@ -8,6 +8,10 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { operatorNormalization } from "../server/operator-normalization.mjs";
+import { auditRecovery } from "../server/recovery.mjs";
+import { PERMISSIONS } from "../src/events.js";
 
 function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-admin-"));
@@ -119,6 +123,73 @@ test("owner lists and decides access requests over MCP", async t => {
   assert.ok(approved.value.requests.some(request => request.requestId === requestId), "request is approved");
   const nowPending = await call(origin, "room_list_access_requests", { roomId: room.roomId }, owner.secret);
   assert.equal(nowPending.value.requests.length, 0);
+});
+
+test("a Commons admin can grant admin access on normalized SQLite over MCP", async t => {
+  const { origin, store } = await serve(t);
+  const roomId = "commons";
+  store.initialize(initialRoom(roomId));
+  const owner = store.issueAccessKey(roomId, "owner");
+  const requesterIdentity = (displayName, permissions) => {
+    const identity = store.identities.create(displayName);
+    const requestId = displayName.toLowerCase().replaceAll(" ", "-");
+    return { ...identity, requestId, displayName, permissions };
+  };
+  const file = async requester => {
+    const response = await fetch(`${origin}/api/access-requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${requester.secret}` },
+      body: JSON.stringify({ roomId, requestId: requester.requestId, identityId: requester.identityId,
+        displayName: requester.displayName, requestedPermissions: [] })
+    });
+    assert.ok(response.ok, `filing access request returned ${response.status}`);
+  };
+  const decide = (admin, requester) => call(origin, "room_decide_access_request", {
+    roomId, requestId: requester.requestId, decision: "approve", permissions: requester.permissions
+  }, admin);
+  const invite = store.invites.create(owner, roomId, { ownerEquivalent: true });
+  const admin = requesterIdentity("Current Admin", PERMISSIONS);
+  store.invites.redeem(invite.code, { identitySecret: admin.secret, displayName: admin.displayName });
+  const plan = operatorNormalization(store, { roomId, discardLegacyAssignments: true });
+  operatorNormalization(store, { roomId, discardLegacyAssignments: true, planHash: plan.planHash,
+    requestId: "adopt-admin-fixture", reason: "Use the Commons serving writer" }, true);
+
+  const peer = requesterIdentity("Requested Admin", PERMISSIONS);
+  await file(peer);
+  const granted = await decide(admin.secret, peer);
+  assert.equal(granted.value?.status, "approved", JSON.stringify(granted.body));
+  assert.equal(granted.value.decidedBy, admin.identityId);
+  assert.equal(granted.value.memberId, peer.identityId);
+  assert.deepEqual(granted.value.grantedPermissions, PERMISSIONS);
+  assert.equal(store.roomAuthority(roomId, { memberId: peer.identityId }).members[peer.identityId].delegatedAdmin, true);
+  const { ownerId, members } = store.roomAuthority(roomId);
+  assert.equal(ownerId, "owner");
+  assert.throws(() => store.command(admin.secret, roomId, { id: "attempt-owner-demotion",
+    type: "member.access_changed", data: { memberId: ownerId, active: true,
+      permissions: ["manage_members"], expectedMemberRevision: members[ownerId].revision } }),
+  /Only the Room owner may change owner authority/);
+
+  const scoped = requesterIdentity("Scoped Admin", ["manage_members"]);
+  await file(scoped);
+  assert.equal((await decide(peer.secret, scoped)).value?.status, "approved");
+  const second = requesterIdentity("Second Request", PERMISSIONS);
+  await file(second);
+  const denied = await decide(scoped.secret, second);
+  assert.match(JSON.stringify(denied.body), /Cannot grant permissions not held/);
+  const pending = await call(origin, "room_list_access_requests", { roomId }, admin.secret);
+  assert.ok(pending.value.requests.some(request => request.requestId === second.requestId));
+
+  const peerMember = store.roomAuthority(roomId, { memberId: peer.identityId }).members[peer.identityId];
+  store.command(owner, roomId, { id: "demote-fixture-admin", type: "member.access_changed",
+    data: { memberId: peer.identityId, active: true, permissions: [], expectedMemberRevision: peerMember.revision } });
+  const afterDemotion = await decide(peer.secret, second);
+  assert.match(JSON.stringify(afterDemotion.body), /Membership administration grant required/);
+
+  const demoted = store.roomAuthority(roomId, { memberId: peer.identityId }).members[peer.identityId];
+  store.command(admin.secret, roomId, { id: "restore-fixture-admin", type: "member.access_changed",
+    data: { memberId: peer.identityId, active: true, permissions: PERMISSIONS, expectedMemberRevision: demoted.revision } });
+  assert.equal((await decide(peer.secret, second)).value?.status, "approved");
+  assert.doesNotThrow(() => auditRecovery(store));
 });
 
 test("minted invite code stays out of the MCP text block and still redeems from structuredContent", async t => {

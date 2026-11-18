@@ -1,7 +1,7 @@
 import { uiText } from './strings.js';
 import { prepareClaimOverlap, matchClaimOverlap } from './claim-overlap.js';
 import { currentRecordClaimOverlaps, inheritCurrentRecordContext } from './current-record-context.js';
-import { canAdministerRoom, canInviteCoOwners, museDevelopmentAccess } from './room-administration.js';
+import { canAdministerRoom, canInviteCoOwners } from './room-administration.js';
 import { createWorkReducers } from "./work-reducers.js";
 import { createMessageReducers, isRedactedBody } from "./message-reducers.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
@@ -1140,12 +1140,9 @@ function addMember(state, incoming) {
     }
   }
   if (!["human", "agent"].includes(incoming.data.kind)) throw new Error("Member kind must be human or agent");
-  // #643 owner-delegated administration: a non-owner agent may hold
-  // AGENT_ADMIN_PERMISSIONS only when the grant event's actor is the room
-  // owner. The grant is explicit, auditable (actorId on the event), and
-  // marked on the event + projection via delegatedAdmin below.
-  const isOwnerGrant = !isBootstrapOwner && canInviteCoOwners(state, incoming.actorId);
-  validatePermissions(incoming.data.permissions, incoming.data.kind, isBootstrapOwner, isOwnerGrant);
+  // Record grants to agents with the actual administrator as the event actor.
+  const isAdminGrant = !isBootstrapOwner && canGrantAgentAdministration(state, incoming);
+  validatePermissions(incoming.data.permissions, incoming.data.kind, isBootstrapOwner, isAdminGrant);
   if (!isBootstrapOwner && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
     requireScopedMemberAdministration(state, incoming.actorId, memberId, null, incoming.data.permissions);
   } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
@@ -1207,18 +1204,16 @@ function addMember(state, incoming) {
     ...(incoming.data.historyGuest === true ? { historyGuest: true } : {}),
     accountableHumanId: incoming.data.accountableHumanId || (incoming.data.kind === "human" ? memberId : state.room.ownerId),
     permissions: [...incoming.data.permissions],
-    // #643: explicit delegation marker. Set only when the owner granted
-    // admin bits to a non-owner agent — cheaper to query than deriving the
-    // grant class from the log, and inspectable (access-review surfaces it).
+    // The existing membership marker makes an admin grant inspectable.
     // Omitted otherwise so older projections replay byte-identically.
-    ...(isOwnerGrant && incoming.data.kind === "agent" && incoming.data.permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p)) ? { delegatedAdmin: true } : {}),
+    ...(isAdminGrant && incoming.data.kind === "agent" && incoming.data.permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p)) ? { delegatedAdmin: true } : {}),
     availability: incoming.data.availability || "unknown",
     active: true,
     revision: 0
   };
   // The member.added event itself carries the marker, so the grant class is
   // visible on the immutable log, not just the projection.
-  if (isOwnerGrant && incoming.data.kind === "agent" && incoming.data.permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
+  if (isAdminGrant && incoming.data.kind === "agent" && incoming.data.permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
     incoming.data.delegatedAdmin = true;
   }
 }
@@ -1255,15 +1250,11 @@ function joinMemberViaInvitation(state, incoming) {
   };
 }
 
-function validatePermissions(permissions, kind, isOwner = false, isOwnerGrant = false) {
+function validatePermissions(permissions, kind, isOwner = false, isAdminGrant = false) {
   if (!Array.isArray(permissions) || permissions.some(p => !PERMISSIONS.includes(p)) || new Set(permissions).size !== permissions.length) throw new Error("Invalid permissions");
-  // Human administration cannot be delegated to an agent — except to the
-  // room owner itself, or by the room owner's explicit grant (#643):
-  // ownership implies full authority, so a bootstrap or appointed agent
-  // owner holds the whole set like a human owner does, and the owner may
-  // delegate administration to a non-owner agent. isOwnerGrant is threaded
-  // by addMember/changeMemberAccess from the grant event's actorId.
-  if (!isOwner && !isOwnerGrant && kind === "agent" && permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) throw new Error("Human administration cannot be delegated to an agent");
+  // Administrative permissions on an agent require an authorized grantor.
+  // A bootstrap owner receives its permissions directly.
+  if (!isOwner && !isAdminGrant && kind === "agent" && permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) throw new Error("Human administration cannot be delegated to an agent");
 }
 
 function changeMemberAccess(state, incoming) {
@@ -1277,10 +1268,8 @@ function changeMemberAccess(state, incoming) {
   const member = Object.hasOwn(state.members, incoming.data.memberId) && state.members[incoming.data.memberId];
   if (!member) throw new Error("Unknown member");
   if (member.revision !== incoming.data.expectedMemberRevision) throw new Error("Stale member revision");
-  // #643: thread the owner-grant context like addMember does — the owner may
-  // grant (or strip) administration on a non-owner agent.
-  const isOwnerGrant = canInviteCoOwners(state, incoming.actorId);
-  validatePermissions(incoming.data.permissions, member.kind, false, isOwnerGrant);
+  const isAdminGrant = canGrantAgentAdministration(state, incoming);
+  validatePermissions(incoming.data.permissions, member.kind, false, isAdminGrant);
   // A self-leave with unchanged permissions grants and removes no authority,
   // so the scoped-administration rule does not apply to it. Without this,
   // an invite_member-only human could not leave (account deletion: 422).
@@ -1293,11 +1282,8 @@ function changeMemberAccess(state, incoming) {
   member.active = incoming.data.active;
   member.permissions = [...incoming.data.permissions];
   member.revision += 1;
-  // #643: the delegation marker follows the bits. An owner grant of admin
-  // bits to a non-owner agent sets it (on the projection and the
-  // member.access_changed event); any other outcome clears it, so a
-  // stripped or demoted agent never keeps the marker.
-  if (isOwnerGrant && member.kind === "agent" && member.id !== state.room.ownerId
+  // The marker follows grants of admin bits and clears on demotion.
+  if (isAdminGrant && member.kind === "agent" && member.id !== state.room.ownerId
     && incoming.data.permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
     member.delegatedAdmin = true;
     incoming.data.delegatedAdmin = true;
@@ -1375,16 +1361,16 @@ export function isMutedBy(state, viewerId, authorId) {
   return viewerId != null && authorId != null && mutedMemberIds(state, viewerId).includes(authorId);
 }
 
+function canGrantAgentAdministration(state, { actorId, data }) {
+  return canInviteCoOwners(state, actorId)
+    || (data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION && canAdministerRoom(state, actorId));
+}
+
 function requireScopedMemberAdministration(state, actorId, targetId, currentTarget, nextPermissions) {
   if (actorId === state.room.ownerId) return;
   if (targetId === state.room.ownerId) throw new Error("Only the Room owner may change owner authority");
   const actor = requireMember(state, actorId);
-  // Delegated agents may grant existing humans permissions they hold.
-  // Delegating administrative authority onward to agents remains owner-controlled.
-  // The subset check below also prevents granting or removing unheld authority.
-  if (actor.delegatedAdmin && !museDevelopmentAccess(state) && currentTarget?.kind !== "human" && nextPermissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
-    throw new Error("Delegated administrators cannot re-delegate");
-  }
+  // All non-owner grants and removals are confined to authority the actor holds.
   const affected = new Set([...(currentTarget?.permissions ?? []), ...nextPermissions]);
   // invite_member-only issuers may grant the standing agent-safe set
   // (chat/contribute/review/collaborate) without holding those bits themselves.
