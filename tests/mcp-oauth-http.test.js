@@ -207,7 +207,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 35, 'audit every advertised native tool, including room next, exact-result verification, including acquire/release/renew, bounded attention wait, own catch-up marker, catch-up digest, project state, response latency, cancelling your own ask, reporting ask progress and needs-me');
+  assert.equal(tools.length, 36, 'audit every advertised native tool, including room next and receipt');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -776,11 +776,17 @@ for (const normalized of [false, true]) test(`OAuth review refuses on consent, r
   await refused('the grant issued before the authority change', { ...later, requestId: 'old-grant' });
 });
 
-test('room next is listed and callable with the complete read grant, and withheld with a partial grant', async t => {
+test('room next and receipt discovery distinguish server availability from a narrow grant', async t => {
   const f = await setup(t, { normalized: true });
   const tool = 'room_next';
   const list = await f.rpc('tools/list');
-  assert.ok(list.body.result.tools.some(entry => entry.name === tool));
+  const access = await f.rpc('tools/call', { name: 'room_check_access', arguments: {} });
+  const discovery = access.body.result.structuredContent.commandDiscovery;
+  assert.deepEqual(discovery.tools, {
+    room_next: 'available_on_server', room_receipt: 'available_on_server'
+  });
+  for (const name of Object.keys(discovery.tools)) assert.ok(list.body.result.tools.some(entry => entry.name === name));
+  assert.match(discovery.next, /refresh the existing connection's tool catalog/);
   const view = await f.rpc('tools/call', { name: tool, arguments: {} });
   assert.equal(view.body.result?.isError, undefined, JSON.stringify(view.body));
   assert.equal(view.body.result.structuredContent.viewerId, 'friend-dot');
@@ -798,7 +804,11 @@ test('room next is listed and callable with the complete read grant, and withhel
   const partial = (await issued.json()).access_token;
   assert.ok(partial);
   const narrowList = await f.rpc('tools/list', {}, partial);
-  assert.ok(!narrowList.body.result.tools.some(entry => entry.name === tool));
+  const narrowAccess = await f.rpc('tools/call', { name: 'room_check_access', arguments: {} }, partial);
+  assert.deepEqual(narrowAccess.body.result.structuredContent.commandDiscovery.tools, {
+    room_next: 'outside_connected_grant', room_receipt: 'outside_connected_grant'
+  });
+  for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
   const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
   assert.match(denied.body.error?.data?.hint ?? '', /outside the connected agent grant/);
 });
