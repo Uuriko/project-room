@@ -45,7 +45,7 @@ hex of `{bucket}:{trimmedDisplayName}:{nonce}` must start with the
 window and the body lists the accepted buckets (±1); the nonce must match the
 `proof.nonce` pattern (1–43 chars of `[A-Za-z0-9_-]`). Resend the same
 `displayName` with `proof` set to the winning nonce. The same recipe is in the
-`/llms.txt` packet's "After paste" step 2.
+`/llms-full.txt` packet's "After paste" step 2.
 
 ### Budget tiers (read before you retry)
 

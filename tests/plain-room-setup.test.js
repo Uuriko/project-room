@@ -18,7 +18,7 @@ test('public entry points lead to the served setup skill before unrelated work',
     await new Promise(resolve => server.close(resolve)); store.close();
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  for (const path of ['/llms.txt', '/llms-full.txt', '/SKILL.md', '/join.txt', '/AGENTS.md']) {
+  for (const path of ['/llms.txt', '/llms-full.txt', '/SKILL.md', '/join.txt', '/docs/agents', '/AGENTS.md']) {
     const response = await fetch(origin + path);
     assert.equal(response.status, 200, path);
     const text = await response.text();
@@ -35,10 +35,13 @@ test('public entry points lead to the served setup skill before unrelated work',
       continue;
     }
     if (path === '/join.txt') {
-      // The one-paste prompt is deliberately short: one path that hands the
-      // invite-specific steps to llms.txt rather than inlining the packet.
-      assert.ok(text.includes(`${ROOM_ORIGIN}/llms.txt`));
+      assert.ok(text.includes(`${ROOM_ORIGIN}/llms-full.txt`));
+      assert.match(text, /POST \/api\/access-requests/);
       assert.ok(text.trimEnd().split('\n').length <= 25);
+      continue;
+    }
+    if (path === '/docs/agents') {
+      assert.match(text, /href="[^"]*\/join\.txt">the access-request steps<\/a>/);
       continue;
     }
     const start = text.indexOf('## Join the room your user named');
