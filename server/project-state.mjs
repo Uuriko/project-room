@@ -184,6 +184,7 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
     // selected read and claim/start admission use. Bounded: unexamined or
     // unreadable items get no entry, which the builder reports as unknown.
     const prerequisites = new Map(), native = isCurrentRoom(store.db, roomId);
+    const observed = new Map();
     let examined = 0, reads = 0;
     // The viewer's own assignments are examined first so the bound cannot hide them.
     for (const item of [...items].sort((a, b) => (b.accountableMemberId === viewerId) - (a.accountableMemberId === viewerId))) {
@@ -198,11 +199,15 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
         const source = native ? readWorkItem(store.db, roomId, item.id) : store.workClaims.get(roomId, boardClaimId(item.id));
         if (native && !source) continue;
         const ids = source?.dependsOn ?? (native ? [] : item.dependsOn ?? []);
-        if (ids.length > 16 || reads + ids.length > PREREQUISITE_READS) continue;
-        reads += ids.length;
-        prerequisites.set(item.id, native
-          ? observePrerequisites(ids, id => readWorkItem(store.db, roomId, id), dep => nativePrerequisiteState(dep, now))
-          : observePrerequisites(ids, id => store.workClaims.get(roomId, id), boardPrerequisiteState));
+        // Many waiting tasks usually share a few prerequisites. Each distinct
+        // prerequisite is read and charged once per project-state read; this
+        // read runs in one transaction, so a repeated observation is the same fact.
+        const fresh = ids.filter(id => !observed.has(id));
+        if (ids.length > 16 || reads + fresh.length > PREREQUISITE_READS) continue;
+        reads += fresh.length;
+        for (const id of fresh) observed.set(id, native ? nativePrerequisiteState(readWorkItem(store.db, roomId, id), now)
+          : boardPrerequisiteState(store.workClaims.get(roomId, id)));
+        prerequisites.set(item.id, observePrerequisites(ids, id => observed.get(id), state => state));
       } catch { /* unknown */ }
     }
     const head = sequence || store.headSequence(roomId);
