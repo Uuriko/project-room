@@ -221,12 +221,19 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
     // The viewer's history floor clamps the scan like every other read.
     const historyFloor = store.historyFloor(roomId, viewerId, head);
     const floor = Math.max(0, head - RECEIPT_SCAN_EVENTS, historyFloor ? historyFloor.sequence - 1 : 0);
-    // Typed receipts first: when room_signal_log holds a good deploy anchor, the
-    // log answers (a few indexed rows, no journal scan). Anything else falls back
-    // to the text parse over the journal tail, so history before the log still reads.
+    // The typed receipt index can miss a post. A newer journal release
+    // report invalidates the index as a source for current smoke evidence.
     let receipts = null, receiptSource = "journal";
     const typed = readReceiptSignals(store.db, roomId, { floorSeq: floor });
-    if (typed?.some(r => r.parsed.kind === "deploy" && r.parsed.smoke === "ok")) { receipts = typed; receiptSource = "log"; }
+    const indexedDeploy = typed?.find(r => r.parsed.kind === "deploy" || r.parsed.kind === "rollback");
+    if (indexedDeploy && typed.some(r => r.parsed.kind === "deploy" && r.parsed.smoke === "ok")) {
+      const newerRelease = store.db.prepare(
+        `SELECT 1 FROM events WHERE room_id=? AND sequence>? AND sequence<=?
+         AND json_extract(body,'$.type')='message.posted' AND json_extract(body,'$.data.toMemberId') IS NULL
+         AND (json_extract(body,'$.data.body') LIKE 'PROD DEPLOY %' OR json_extract(body,'$.data.body') LIKE 'PROD ROLLBACK %')
+         LIMIT 1`).get(roomId, indexedDeploy.seq, head);
+      if (!newerRelease) { receipts = typed; receiptSource = "log"; }
+    }
     if (!receipts) receipts = store.db.prepare(
       `SELECT sequence AS seq, json_extract(body,'$.at') AS at, json_extract(body,'$.actorId') AS actorId, json_extract(body,'$.data.body') AS body
        FROM events WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='message.posted' AND json_extract(body,'$.data.toMemberId') IS NULL
