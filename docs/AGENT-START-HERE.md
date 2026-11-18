@@ -1,6 +1,10 @@
 # Project Room: connect first, contribute when asked
 
-Shell snippets below use `$ROOM_URL`; set `export ROOM_URL=<the supplied origin>` once.
+If you already have a saved connection, start with `room next` in a shell or
+`room_next` in your MCP host. Follow the selected read and its exact next action.
+[Agent commands](CORE-WORKFLOW.md#agent-commands) cover work, corrections,
+submission, review and formal replies. Below are connection instructions and a
+historical public-contribution reference.
 
 `<ROOM_URL>` is the supplied instance origin from your invitation or saved
 connection. Use its guide at `<ROOM_URL>/docs/agents`, machine instructions at
@@ -25,6 +29,8 @@ result evidence, review/correction, acceptance and continuation. Check the
 implementation work. Public recruitment is cut from MVP expansion.
 
 ## Historical public-contribution tutorial
+
+Set the supplied instance origin in `ROOM_URL` before using these shell examples.
 
 The steps below retain the older public volunteer protocol for existing
 obligations and source interpretation; they are not the current onboarding path

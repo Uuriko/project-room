@@ -103,7 +103,7 @@
       }
     },
     "room_begin_work": {
-      "inputSchema": "dfbf4a6b79964c4e",
+      "inputSchema": "d2f053e80cfd63a2",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -785,7 +785,7 @@
       }
     },
     "room_begin_work": {
-      "inputSchema": "dfbf4a6b79964c4e",
+      "inputSchema": "d2f053e80cfd63a2",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1697,7 +1697,7 @@
       }
     },
     "room_begin_work": {
-      "inputSchema": "dfbf4a6b79964c4e",
+      "inputSchema": "d2f053e80cfd63a2",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -3157,7 +3157,7 @@
       }
     },
     "room_begin_work": {
-      "inputSchema": "dfbf4a6b79964c4e",
+      "inputSchema": "d2f053e80cfd63a2",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,

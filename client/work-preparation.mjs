@@ -139,7 +139,7 @@ function continuationStep(context, { hosted = false, brief = true } = {}) {
     if (hold && PREREQUISITE_GATED_STEPS.includes(next.action)) return { ...value, ...waiting,
       guidance: hold.known ? "Prerequisites are not satisfied; do not claim or start yet. Read this task again after they finish. Claim/start admission rechecks them."
         : "Prerequisite state was not returned; readiness is unknown. Read this task again before claiming or starting." };
-    const begin = point("room_begin_work", {}, work.mode === "write" && ["accept", "claim"].includes(next.action)
+    const begin = point("room_begin_work", { expectedRevision: work.revision }, work.mode === "write" && ["accept", "claim"].includes(next.action)
       ? ["repository", "ref", "paths", "expiresAt"] : []);
     // Begin stops after the accept only when it can see an unfinished
     // prerequisite. With no observation it goes on to claim/start and admission decides.

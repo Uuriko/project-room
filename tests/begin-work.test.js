@@ -100,3 +100,17 @@ test("room_begin_work is a hosted tool and rejects a guessed extra field", async
   assert.equal(validRoomToolArguments("room_begin_work", { workItemId: "together-begin-20260925", repository: "Uuriko/project-room" }), true);
   assert.equal(validRoomToolArguments("room_begin_work", { workItemId: "together-begin-20260925", token: "nope" }), false);
 });
+
+test("selected Begin stops if another writer moves the revision between stages", async () => {
+  const work = { id: "work", state: "proposed", mode: "read", revision: 2, accountableMemberId: member.id };
+  const writes = [];
+  const result = await beginSelectedWork({
+    connected: true, expectedRevision: 2, scope: { workItemId: work.id },
+    read: async () => ({ work: { ...work, ...(writes.length ? { revision: 4, state: "accepted" } : {}) }, viewer: member }),
+    execute: async stage => { writes.push(stage); return { status: "recorded", eventId: "accept-event" }; }
+  });
+  assert.deepEqual(writes.map(stage => stage.action), ["room_accept_work"]);
+  assert.equal(result.stopped, "stale_revision");
+  assert.equal(result.confirmed[0].eventId, "accept-event");
+  assert.equal(result.resume.workItemId, "work");
+});
