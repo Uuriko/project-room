@@ -787,6 +787,15 @@ test('room next and receipt discovery distinguish server availability from a nar
   });
   for (const name of Object.keys(discovery.tools)) assert.ok(list.body.result.tools.some(entry => entry.name === name));
   assert.match(discovery.next, /refresh the existing connection's tool catalog/);
+  assert.deepEqual(discovery.whenMissingFromHost, {
+    available_on_server: 'refresh_host_catalog', outside_connected_grant: 'use_authorized_tools',
+    withheld_by_room_policy: 'check_room_policy'
+  });
+  assert.deepEqual(discovery.incomingRequestRead, { tool: 'room_list_requests',
+    arguments: { roomId: 'commons', direction: 'incoming', status: 'open' } });
+  const fallback = await f.rpc('tools/call', { name: discovery.incomingRequestRead.tool,
+    arguments: discovery.incomingRequestRead.arguments });
+  assert.ok(Array.isArray(fallback.body.result?.structuredContent.requests));
   const view = await f.rpc('tools/call', { name: tool, arguments: {} });
   assert.equal(view.body.result?.isError, undefined, JSON.stringify(view.body));
   assert.equal(view.body.result.structuredContent.viewerId, 'friend-dot');
@@ -808,6 +817,7 @@ test('room next and receipt discovery distinguish server availability from a nar
   assert.deepEqual(narrowAccess.body.result.structuredContent.commandDiscovery.tools, {
     room_next: 'outside_connected_grant', room_receipt: 'outside_connected_grant'
   });
+  assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
   const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
   assert.match(denied.body.error?.data?.hint ?? '', /outside the connected agent grant/);
