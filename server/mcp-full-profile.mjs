@@ -320,6 +320,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     const value = await beginSelectedWork({
       connected: true,
       scope: { workItemId: rest.workItemId, repository: rest.repository, ref: rest.ref, paths: rest.paths, expiresAt: rest.expiresAt },
+      expectedRevision: rest.expectedRevision,
       invocation: rest.invocationRequestId ? { requestId: rest.invocationRequestId } : null,
       read: () => store.workContext(secret, roomId, rest.workItemId, {}),
       receipts: (requestId, item) => findBeginReceipt(after => store.eventsAfter(secret, roomId, after, 100), requestId, item),

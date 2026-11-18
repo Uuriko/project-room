@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -13,11 +13,12 @@ import { createRoomServer } from "../server/http.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
-test("Room commands cover pickup, correction, review, requests and exact submission recovery", async t => {
+for (const representation of ["legacy", "normalized-current-v1"]) {
+test(`${representation} commands cover pickup, correction, review, requests and submission recovery`, async t => {
   const home = mkdtempSync(join(realpathSync(tmpdir()), "room-submit-"));
   const env = { HOME: home, PROJECT_ROOM_KEYCHAIN: "0" };
   const store = new RoomStore(join(home, "fixture.sqlite"));
-  store.initialize(initialRoom(), { representation: "normalized-current-v1" });
+  store.initialize(initialRoom(), representation === "legacy" ? {} : { representation });
   const owner = store.issueAccessKey("commons", "owner");
   const producer = store.identities.create("Producer");
   linkWithProof(store, owner, "commons", producer, {
@@ -59,10 +60,15 @@ test("Room commands cover pickup, correction, review, requests and exact submiss
     assert.notEqual(data.result?.isError, true, JSON.stringify(data));
     return data.result.structuredContent;
   };
-  const cli = async (argv, input, cwd = home) => {
+  const save = (file, packet) => {
+    const path = join(home, file);
+    writeFileSync(path, JSON.stringify(packet), { mode: 0o600 });
+    return path;
+  };
+  const cli = async (argv, input, cwd = home, fetchImpl = fetch) => {
     const lines = [];
     const code = await main(argv, {
-      cwd, env, stdin: Readable.from(input === undefined ? [] : [JSON.stringify(input)]),
+      cwd, env, fetchImpl, stdin: Readable.from(input === undefined ? [] : [JSON.stringify(input)]),
       out: value => lines.push(JSON.parse(value))
     });
     assert.equal(lines.length, 1);
@@ -78,8 +84,13 @@ test("Room commands cover pickup, correction, review, requests and exact submiss
     const selected = await cli(["work", workItemId]);
     assert.equal(selected.code, 0, JSON.stringify(selected));
     const step = selected.value.continuation;
-    assert.deepEqual(step.command, ["room", "act", "begin"]);
-    assert.equal((await cli(step.command.slice(1), step.arguments)).value.working, true);
+    assert.deepEqual(step.command, ["room", "begin", "--from"]);
+    const begin = await cli([...step.command.slice(1), "-"], selected.value);
+    assert.equal(begin.value.working, true, JSON.stringify(begin));
+    const beforeRetry = store.headSequence("commons");
+    const staleBegin = await cli([...step.command.slice(1), "-"], selected.value);
+    assert.equal(staleBegin.value.stopped, "stale_revision");
+    assert.equal(store.headSequence("commons"), beforeRetry);
     const read = await cli(["work", workItemId]);
     return { body: "The exact contribution.", summary: "Checked the evidence", nextAction: "Read the contribution",
       producerId: producer.identityId, expectedRevision: read.value.revision };
@@ -140,35 +151,65 @@ test("Room commands cover pickup, correction, review, requests and exact submiss
   assert.deepEqual(stale.calls, ["room_post_message", "room_read_result"]);
 
   const reviewed = await prepare("needs-review", true);
-  const finished = await run("needs-review", reviewed);
+  const { expectedRevision, ...result } = reviewed;
+  const inProgress = await cli(["work", "needs-review"]);
+  assert.equal(inProgress.value.revision, expectedRevision);
+  const workFile = save("work.json", inProgress.value);
+  const beforeSize = store.headSequence("commons");
+  assert.equal((await cli(["submit", "--from", workFile], { ...result, maxCodeUnits: 5 })).value.code, "result_too_large");
+  assert.equal(store.headSequence("commons"), beforeSize);
+  const finished = await cli(["submit", "--from", workFile], result);
   assert.equal(finished.code, 0, JSON.stringify(finished));
   const selectedReview = await cli(["work", "needs-review"], undefined, reviewerProject);
   const fetchResult = selectedReview.value.continuation.command;
   assert.deepEqual(fetchResult, ["room", "work", "needs-review", "--result"]);
   const evidence = await cli(fetchResult.slice(1), undefined, reviewerProject);
   assert.equal(evidence.value.review.result.text.body, reviewed.body);
-  const check = evidence.value.continuation;
-  assert.deepEqual(check.command, ["room", "act", "review"]);
-  const wrongBasis = { ...check.arguments, expectedRevision: check.arguments.expectedRevision - 1,
-    requestId: "stale-review", result: "pass", summary: "Stale evidence should be refused" };
-  assert.equal((await cli(check.command.slice(1), wrongBasis, reviewerProject)).code, 1);
-  const correction = await cli(check.command.slice(1), { ...check.arguments,
-    requestId: "record-correction", result: "fail", summary: "Include the reconnect instructions" }, reviewerProject);
+  assert.deepEqual(evidence.value.continuation.command, ["room", "review", "--from"]);
+  const reviewFile = save("review.json", evidence.value);
+  const review = ["review", "--from", reviewFile, "--fail", "--summary", "Include the reconnect instructions"];
+  const beforeBadBasis = store.headSequence("commons");
+  const unexpectedFetch = () => assert.fail("Invalid packet should not reach HTTP");
+  assert.equal((await cli(review, undefined, home, unexpectedFetch)).value.code, "invalid_action_basis");
+  const changedPacket = structuredClone(evidence.value);
+  changedPacket.cliBasis.actions.review.expectedRevision--;
+  const changedFile = save("changed.json", changedPacket);
+  assert.equal((await cli(["review", "--from", changedFile, "--pass", "--summary", "Changed basis"],
+    undefined, reviewerProject, unexpectedFetch)).value.code, "invalid_action_basis");
+  assert.equal((await cli(["review", "--from", reviewFile, "--summary", "No decision"],
+    undefined, reviewerProject, unexpectedFetch)).value.code, "invalid_action_input");
+  assert.equal(store.headSequence("commons"), beforeBadBasis);
+  const lostReview = await cli(review, undefined, reviewerProject, async (url, init) => {
+    const response = await fetch(url, init);
+    await response.arrayBuffer();
+    throw new Error("lost review reply");
+  });
+  assert.equal(lostReview.value.status, "unknown");
+  const afterReview = store.headSequence("commons");
+  const reviewEvents = store.eventsAfter(owner, "commons", beforeBadBasis, 20).events.map(row => row.event ?? row);
+  assert.equal(reviewEvents.filter(row => row.type === "verification.recorded").length, 1);
+  const correction = await cli(review, undefined, reviewerProject);
   assert.equal(correction.code, 0, JSON.stringify(correction));
+  assert.equal(correction.value.duplicate, true);
+  assert.equal(correction.value.eventId, reviewEvents.find(row => row.type === "verification.recorded").id);
+  assert.equal(store.headSequence("commons"), afterReview);
+  assert.equal((await cli(["review", "--from", reviewFile, "--pass", "--summary", "Stale verdict"],
+    undefined, reviewerProject)).code, 1);
+  assert.equal(store.headSequence("commons"), afterReview);
+
   const current = await cli(["work", "needs-review"]);
-  const resolve = current.value.continuation;
-  assert.deepEqual(resolve.command, ["room", "act", "resolve"]);
-  assert.equal((await cli(resolve.command.slice(1), { ...resolve.arguments,
-    requestId: "resolve-correction", resolution: "Added the reconnect instructions" })).code, 0);
-  const restart = (await cli(["work", "needs-review"])).value.continuation;
-  assert.equal((await cli(restart.command.slice(1), restart.arguments)).value.working, true);
-  const corrected = { ...reviewed, body: "The exact contribution with the reconnect instructions.",
-    expectedRevision: (await cli(["work", "needs-review"])).value.revision };
-  const replacement = await cli(["submit", "needs-review", "--operation", "replacement"], corrected);
+  assert.deepEqual(current.value.continuation.command, ["room", "resolve", "--from"]);
+  const resolve = await cli(["resolve", "--from", "-", "--resolution", "Added the reconnect instructions"], current.value);
+  assert.equal(resolve.code, 0, JSON.stringify(resolve));
+  const restart = await cli(["work", "needs-review"]);
+  assert.equal((await cli(["begin", "--from", "-"], restart.value)).value.working, true);
+  const work = await cli(["work", "needs-review"]);
+  const replacement = await cli(["submit", "--from", save("replacement.json", work.value)],
+    { ...result, body: "The exact contribution with the reconnect instructions." });
   assert.equal(replacement.code, 0, JSON.stringify(replacement));
-  const followup = (await cli(["work", "needs-review", "--result"], undefined, reviewerProject)).value.continuation;
-  const accepted = await cli(followup.command.slice(1), { ...followup.arguments,
-    requestId: "pass-replacement", result: "pass", summary: "The replacement includes reconnect instructions" }, reviewerProject);
+  const followup = await cli(["work", "needs-review", "--result"], undefined, reviewerProject);
+  const accepted = await cli(["review", "--from", "-", "--pass", "--summary", "Includes reconnect instructions"],
+    followup.value, reviewerProject);
   assert.equal(accepted.code, 0, JSON.stringify(accepted));
 
   const requested = await rpc("room_request_reply", { toMemberId: producer.identityId,
@@ -176,9 +217,15 @@ test("Room commands cover pickup, correction, review, requests and exact submiss
   const request = await cli(["request", requested.requestMessageId]);
   assert.equal(request.code, 0, JSON.stringify(request));
   assert.equal(Object.hasOwn(request.value, "responseHttpActions"), false);
-  const reply = request.value.responseActions[0];
-  assert.deepEqual(reply.command, ["room", "act", "respond"]);
-  const answered = await cli(reply.command.slice(1), { ...reply.arguments,
-    requestId: "fixture-answer", body: "The original operation receipt was recovered." });
+  assert.deepEqual(request.value.responseActions[0].command, ["room", "respond", "--from"]);
+  const answerFile = join(home, "answer.txt");
+  writeFileSync(answerFile, "The original operation receipt was recovered.", { mode: 0o600 });
+  const respond = ["respond", "--from", "-", "--answer", "--body-file", answerFile];
+  const partial = structuredClone(request.value);
+  partial.page.hasMore = true;
+  assert.equal((await cli(respond, partial, home, unexpectedFetch)).value.code, "invalid_action_basis");
+  const answered = await cli(respond, request.value);
   assert.equal(answered.code, 0, JSON.stringify(answered));
+  assert.doesNotMatch(JSON.stringify([accepted, answered]), new RegExp(producer.secret));
 });
+}

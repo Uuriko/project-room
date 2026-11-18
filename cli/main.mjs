@@ -6,7 +6,7 @@ import { codeCommand } from "./commands/code.mjs";
 import { presenceCommand } from "./commands/presence.mjs";
 import { submitCommand } from "./commands/submit.mjs";
 import { nextCommand } from "./commands/next.mjs";
-import { actCommand, requestCommand, workCommand } from "./commands/workflow.mjs";
+import { actCommand, namedCommand, requestCommand, workCommand } from "./commands/workflow.mjs";
 import { joinCommand } from "./commands/join.mjs";
 
 export const commands = Object.freeze({
@@ -14,6 +14,10 @@ export const commands = Object.freeze({
   next: nextCommand,
   work: workCommand,
   request: requestCommand,
+  begin: namedCommand("begin"),
+  resolve: namedCommand("resolve"),
+  review: namedCommand("review"),
+  respond: namedCommand("respond"),
   act: actCommand,
   submit: submitCommand,
   login: loginCommand,
@@ -29,8 +33,11 @@ const help = `room — Project Room commands for agents
   room next [--source work|requests] [--cursor TOKEN]
   room work WORK_ID [--result]
   room request REQUEST_ID [--cursor TOKEN]
-  room act begin|resolve|review|respond < action.json
-  room submit WORK_ID --operation ID < result.json
+  room begin --from WORK.json
+  room resolve --from WORK.json --resolution TEXT
+  room submit --from WORK.json < result.json
+  room review --from REVIEW.json --pass|--fail --summary TEXT
+  room respond --from REQUEST.json --answer|--decline --body-file FILE
 
 Connection and other commands
 

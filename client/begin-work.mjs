@@ -123,8 +123,9 @@ const idOk = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]*
 export function validBeginArguments(args) {
   if (!args || typeof args !== "object" || Array.isArray(args)) return false;
   const keys = Object.keys(args);
-  if (!keys.includes("workItemId") || keys.some(key => !["workItemId", "repository", "ref", "paths", "expiresAt", "invocationRequestId"].includes(key))) return false;
+  if (!keys.includes("workItemId") || keys.some(key => !["workItemId", "repository", "ref", "paths", "expiresAt", "invocationRequestId", "expectedRevision"].includes(key))) return false;
   if (!idOk(args.workItemId)) return false;
+  if (args.expectedRevision !== undefined && (!Number.isSafeInteger(args.expectedRevision) || args.expectedRevision < 0 || args.expectedRevision >= Number.MAX_SAFE_INTEGER)) return false;
   if (args.invocationRequestId !== undefined && !idOk(args.invocationRequestId)) return false;
   if (args.repository !== undefined && (typeof args.repository !== "string" || !args.repository.trim() || args.repository.length > 4096)) return false;
   if (args.ref !== undefined && (typeof args.ref !== "string" || !args.ref.trim() || args.ref.length > 4096)) return false;
@@ -170,11 +171,11 @@ export function operationKey(memberId, requestId) {
 
 function beginReceipt(event, requestId, item) {
   if (!event || !item || !requestId) return null;
-  if (!["work.accepted", "claim.acquired"].includes(event.type) || event.data?.workItemId !== item.id) return null;
+  if (!["work.accepted", "claim.acquired", "work.started"].includes(event.type) || event.data?.workItemId !== item.id) return null;
   if (event.actorId !== item.accountableMemberId) return null;
   if (event.idempotencyKey !== operationKey(item.accountableMemberId, requestId)) return null;
   return {
-    action: event.type === "work.accepted" ? "room_accept_work" : "room_acquire_claim",
+    action: { "work.accepted": "room_accept_work", "claim.acquired": "room_acquire_claim", "work.started": "room_start_work" }[event.type],
     requestId, eventId: event.id, type: event.type,
     ...(event.type === "claim.acquired" ? { scope: {
       repository: event.data.repository, ref: event.data.ref, paths: event.data.paths, expiresAt: event.data.expiresAt
@@ -219,13 +220,17 @@ function preservedResume(pending, stage) {
 // exact claim or its recorded operation receipt already landed. A later revision
 // is not proof of that accept. A response that never returned the stage id
 // cannot be recovered unless the caller already held that id.
-export async function beginSelectedWork({ connected, read, execute, scope = null, now = Date.now(), invocation = null, receipts = null } = {}) {
+export async function beginSelectedWork({ connected, read, execute, scope = null, now = Date.now(), invocation = null, receipts = null, expectedRevision } = {}) {
   if (connected !== true) {
     return { working: false, roomState: null, confirmed: [], stopped: "disconnected", invented: false };
   }
   const confirmed = [];
   const seen = new Set();
   let pending = invocation?.requestId ? invocation : null;
+  let requiredRevision = expectedRevision;
+  const refresh = { tool: "room_read_work", workItemId: scope?.workItemId ?? null };
+  const stale = context => stoppedResult(context, { confirmed, stopped: "stale_revision", resume: refresh,
+    next: context.next?.action ?? null });
   for (let step = 0; step < 4; step += 1) {
     let context;
     try {
@@ -238,7 +243,25 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
       return stoppedResult(context, { confirmed, stopped: "unknown",
         resume: pending ?? { tool: "room_read_work", workItemId: scope?.workItemId ?? null } });
     }
+    if (requiredRevision !== undefined && (context.work.revision < requiredRevision
+        || !pending && context.work.revision !== requiredRevision)) return stale(context);
     const plan = planBegin(context.work, context.viewer, { scope, now });
+    if (requiredRevision !== undefined && pending && !plan.stage) {
+      try {
+        const found = receipts ? await receipts(pending.requestId, context.work) : null;
+        if (plan.reason === "ready" && found?.type === "work.started"
+            && found.requestId === pending.requestId && found.workItemId === context.work.id
+            && found.actorId === context.viewer.id && Number.isSafeInteger(found.expectedRevision)
+            && found.expectedRevision >= requiredRevision
+            && found.expectedRevision + 1 === context.work.revision) {
+          confirmed.push({ action: found.action, requestId: found.requestId, eventId: found.eventId });
+          return readResult(context, plan, confirmed);
+        }
+      } catch {
+        return stoppedResult(context, { confirmed, stopped: "unknown", resume: preservedResume(pending) });
+      }
+      return stale(context);
+    }
     if (!plan.stage) return readResult(context, plan, confirmed);
     if (pending && plan.stage.requestId !== pending.requestId) {
       let claim = claimLanded(context.work, scope, pending);
@@ -248,6 +271,8 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
           const found = receipts ? await receipts(pending.requestId, context.work) : null;
           const matches = found && found.requestId === pending.requestId
             && found.workItemId === context.work.id && found.actorId === context.work.accountableMemberId;
+          if (requiredRevision !== undefined && matches && (found.expectedRevision < requiredRevision
+              || !Number.isSafeInteger(found.expectedRevision) || found.expectedRevision + 1 !== context.work.revision)) return stale(context);
           accept = matches && found.type === "work.accepted" ? found : null;
           claim = Boolean(matches && found.type === "claim.acquired"
             && activeClaim(context.work, now) && context.work.claim.holderId === found.actorId
@@ -268,6 +293,7 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
       }
       pending = null;
     }
+    if (pending && requiredRevision !== undefined && plan.stage.expectedRevision < requiredRevision) return stale(context);
     // Known unfinished prerequisites: stop before a claim/start that admission
     // would refuse. Accept still runs; an absent observation is left to admission.
     const hold = plan.stage.action !== "room_accept_work" && Array.isArray(context.dependencies)
@@ -294,6 +320,7 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
       return stoppedResult(context, { confirmed, stopped: "refused", refusal: result.code || result.status, resume: plan.stage });
     }
     confirmed.push({ action: plan.stage.action, requestId: plan.stage.requestId, eventId: result.eventId ?? null });
+    if (requiredRevision !== undefined) requiredRevision = plan.stage.expectedRevision + 1;
     pending = null;
   }
   return { working: false, roomState: null, confirmed, stopped: "unknown", invented: false };

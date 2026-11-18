@@ -4,35 +4,29 @@ import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
 import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { openPrivateJournal, privateDirectory } from "../../client/setup-journal.mjs";
+import { readInput, hasRevision, readSelectedBasis, operationFingerprint } from "../selected-basis.mjs";
 import { validId } from "../../src/events.js";
 
-const HELP = `room submit WORK_ID --operation ID < result.json
+const HELP = `room submit --from WORK.json [--operation ID] < result.json
+Compatibility: room submit WORK_ID --operation ID < result.json
 JSON fields are body, summary, nextAction, producerId (member ID or null),
-expectedRevision (from the selected work read), and optional maxCodeUnits.
+and optional maxCodeUnits. The compatibility form also requires expectedRevision.
 Use the same ID and JSON after an uncertain result. A receipt records submission.`;
 
 const hash = value => createHash("sha256").update(value, "utf8").digest("hex");
 const nonblank = text => typeof text === "string" && text.trim().length > 0 && text.isWellFormed();
 const validText = text => nonblank(text) && text.length <= 4096;
 
-async function readIntent(stdin) {
-  if (stdin.isTTY) throw new Error("Pipe the result JSON from a file.");
-  const chunks = [];
-  let bytes = 0;
-  for await (const chunk of stdin) {
-    const buffer = Buffer.from(chunk);
-    bytes += buffer.length;
-    if (bytes > 96 * 1024) throw new Error("Result JSON is too large.");
-    chunks.push(buffer);
-  }
-  const input = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)));
-  const fields = ["body", "summary", "nextAction", "producerId", "expectedRevision", "maxCodeUnits"];
+async function readIntent(stdin, selectedRevision) {
+  const input = JSON.parse(await readInput(stdin, 96 * 1024));
+  const fields = ["body", "summary", "nextAction", "producerId", "maxCodeUnits", ...(selectedRevision === undefined ? ["expectedRevision"] : [])];
   if (!input || typeof input !== "object" || Array.isArray(input)
       || Object.keys(input).some(key => !fields.includes(key))) throw new Error("Invalid result JSON.");
-  const { body, summary, nextAction, producerId, expectedRevision, maxCodeUnits = 4096 } = input;
+  const { body, summary, nextAction, producerId, maxCodeUnits = 4096 } = input;
+  const expectedRevision = selectedRevision ?? input.expectedRevision;
   if (!nonblank(body) || !validText(summary) || !validText(nextAction)
       || !(producerId === null || validId(producerId))
-      || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= Number.MAX_SAFE_INTEGER
+      || !hasRevision(expectedRevision)
       || !Number.isInteger(maxCodeUnits) || maxCodeUnits < 1 || maxCodeUnits > 4096)
     throw new Error("Invalid result fields.");
   return { body, summary, nextAction, producerId, expectedRevision, maxCodeUnits };
@@ -75,23 +69,40 @@ function matchesEvidence(basis, operation) {
 export async function submitCommand(argv, { cwd = process.cwd(), env = process.env,
   stdin = process.stdin, fetchImpl = fetch, out = console.log } = {}) {
   if (argv.length === 1 && argv[0] === "--help") { out(HELP); return 0; }
-  const [workItemId, flag, operationId] = argv;
-  if (argv.length !== 3 || flag !== "--operation" || !validId(workItemId) || !validId(operationId))
+  const selected = argv[0] === "--from";
+  let [workItemId, flag, operationId] = argv;
+  if (selected) {
+    operationId = argv[3];
+    if (!argv[1] || argv[1] === "-" || !(argv.length === 2
+        || argv.length === 4 && argv[2] === "--operation" && validId(operationId))) throw new Error(HELP);
+    workItemId = undefined;
+  } else if (argv.length !== 3 || flag !== "--operation" || !validId(workItemId) || !validId(operationId)) {
     throw new Error(HELP);
-
+  }
   const report = (status, stage, extra = {}) => {
     out(JSON.stringify({ contractVersion: 1, status, stage, workItemId, operationId, ...extra }));
     return status === "recorded" ? 0 : 1;
   };
+  let connection;
+  try { connection = loadConnection({ project: cwd, env }); }
+  catch { return report("refused", "input", { code: "saved_connection_required" }); }
+  const { config, configDirectory, name } = connection;
+  let basisInput;
+  if (selected) {
+    try { basisInput = await readSelectedBasis(argv[1], "submit", config, { cwd, stdin }); }
+    catch { return report("refused", "input", { code: "invalid_action_basis" }); }
+    workItemId = basisInput.workItemId;
+  }
   let intent;
-  try { intent = await readIntent(stdin); }
+  try { intent = await readIntent(stdin, basisInput?.expectedRevision); }
   catch { return report("refused", "input", { code: "invalid_result_json" }); }
+  if (operationId === undefined)
+    operationId = `selected-${operationFingerprint([config.origin, config.roomId, config.memberId, workItemId, intent])}`;
   const { body, summary, nextAction, producerId, expectedRevision, maxCodeUnits } = intent;
   if (body.length > maxCodeUnits)
     return report("refused", "input", { code: "result_too_large", maxCodeUnits,
       codeUnits: body.length, targetCodeUnits: Math.max(1, Math.floor(maxCodeUnits * 0.8)) });
 
-  const { config, configDirectory, name } = loadConnection({ project: cwd, env });
   const { roomId, memberId } = config;
   const base = hash(JSON.stringify([roomId, memberId, operationId]));
   const requestId = `submit-${base}`;

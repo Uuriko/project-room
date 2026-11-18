@@ -82,34 +82,43 @@ Use the saved connection directly. The CLI returns JSON for each operation.
 | Open a task or correction | `room work WORK_ID` |
 | Inspect the exact result for review | `room work WORK_ID --result` |
 | Read a formal request | `room request REQUEST_ID [--cursor TOKEN]` |
-| Begin work, resolve a correction, record review, or answer | `room act begin\|resolve\|review\|respond < action.json` |
-| Submit exact evidence | `room submit WORK_ID --operation ID < result.json` |
+| Begin the selected assignment | `room begin --from work.json` |
+| Record a resolution | `room resolve --from work.json --resolution TEXT` |
+| Submit exact evidence | `room submit --from work.json < result.json` |
+| Record an explicit verdict | `room review --from review.json --pass --summary TEXT` (or `--fail`) |
+| Respond to a formal request | `room respond --from request.json --answer --body-file FILE` (or `--decline`) |
 
-Follow the selected read's command when provided. For `room act`, use the
-selected continuation or response template's `arguments` as the JSON input and
-supply its required inputs. Use a stable `requestId` for resolve, review and
-respond. Reuse the same input after an unknown write. If Begin returns a
-pending stage, use its returned operation ID and original scope when retrying.
-If no stage ID returned, read the current work before attempting another write.
-Connector hosts use the same typed MCP operations and selected arguments.
+Save the selected read as JSON and inspect it before acting. The command carries
+the fixed arguments and current version from that read. Supply write scope when
+Begin requires it. If Begin returns an unknown stage with a request ID, pass
+that ID as `--resume` with the original basis and scope. If no stage ID returned,
+read current work to determine what changed. For other unknown writes, retry
+the same command with the same saved read and input. Connector hosts use the
+same typed MCP operations and selected arguments.
+
+```sh
+room work WORK_ID --result > review.json
+# Inspect review.json and pick a verdict.
+room review --from review.json --fail --summary "Include the reconnect check."
+```
 
 ## Submit a text result from the shell
 
-From the project with your saved connection, run
-`room submit WORK_ID --operation ID < result.json`. Choose a stable ID for this
-submission and supply the revision from the selected work read:
+After beginning the work, save its current read with `room work WORK_ID > work.json`.
+Run `room submit --from work.json < result.json` with these fields:
 
 ```json
-{"body":"The result text","summary":"What the evidence shows","nextAction":"Review the exact result","producerId":null,"expectedRevision":2}
+{"body":"The result text","summary":"What the evidence shows","nextAction":"Review the exact result","producerId":null}
 ```
 
-Set `producerId` to the known member ID, or leave it explicitly null if unknown.
-Add `maxCodeUnits` when the task specifies a smaller UTF-16 limit. Keep the
-original JSON and operation ID after an `unknown` response and retry with the
-same saved connection on the same host. The command retains the completion
-arguments in private local state. If it reports a changed or blocked basis after
-posting, use the supplied work read to decide what to do with the saved draft.
+Set `producerId` to the known member ID, or use null if it is unknown.
+Add `maxCodeUnits` when the task specifies a smaller UTF-16 limit. The command
+retains the completion arguments in private local state. If it reports a changed
+or blocked basis after posting, inspect the fresh work read and saved draft.
 The receipt points to the exact completion for review.
+
+The explicit `room act` adapter and `room submit WORK_ID --operation ID`
+form remain available. The latter takes `expectedRevision` in the JSON input.
 
 ## A task ready to pick up
 

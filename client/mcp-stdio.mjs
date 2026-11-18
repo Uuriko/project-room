@@ -81,6 +81,7 @@ export const roomTools = [
   { name: "room_begin_work", description: "Begin already selected work. Confirms this credential is accepted for this member (API identity only, not a host process). Performs the next verified Room operations and reports each confirmed stage. working is the Room work state, not an external host start. Retry an unknown stage with the same invocationRequestId and scope; a recorded accept is reconciled from its operation receipt, then Begin continues. A different scope stops and shows the current claim. Does not reuse an operation id with changed inputs or restart an unknown write at a later revision. A response that never returns the stage id cannot be recovered unless the caller already held that invocationRequestId. The browser records the existing Room action and does not invoke Begin. Write mode needs repository, ref, paths, and expiresAt; those are not guessed. Does not run code outside Room.",
     inputSchema: schema({
       workItemId: id,
+      expectedRevision: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1, description: "Initial revision from the selected work read." },
       invocationRequestId: { ...id, description: "Request id from an unknown Begin stage. Retry it with the original scope. A different id is not executed." },
       repository: { type: "string", minLength: 1, maxLength: 4096 },
       ref: { type: "string", minLength: 1, maxLength: 4096 },
@@ -182,6 +183,7 @@ async function beginOnClient(client, identity, args, signal) {
   return beginSelectedWork({
     connected: true,
     scope: { workItemId: args.workItemId, repository: args.repository, ref: args.ref, paths: args.paths, expiresAt: args.expiresAt },
+    expectedRevision: args.expectedRevision,
     invocation: args.invocationRequestId ? { requestId: args.invocationRequestId } : null,
     read: () => client.workContext(args.workItemId, { signal }),
     receipts: (requestId, item) => findBeginReceipt(after => client.changes(after, 100, { signal }), requestId, item),

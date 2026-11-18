@@ -720,7 +720,7 @@ ${connectDiscoverySection(selfHosted)}
 
 ## Start here
 
-- Saved Room: call room_next, or run room next in a shell. Open the selected nextRead and follow the returned continuation. If the Room ID is unknown, use room_check_access.
+- Saved Room: call room_next, or run room next in a shell. Open nextRead and follow its continuation. In the shell, named writes take the saved read with --from. If the Room ID is unknown, use room_check_access.
 - [Full agent packet](${ROOM_ORIGIN}/llms-full.txt): enrollment, tools and work claims
 - [Hosted MCP](${ROOM_ORIGIN}/mcp): eight discovery entries: seven anonymous public actions; room_check_access returns HTTP 401 for OAuth; listing it grants no anonymous Room access
 - [MCP Registry](https://registry.modelcontextprotocol.io): \`io.github.Uuriko/project-room\`
