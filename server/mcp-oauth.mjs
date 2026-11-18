@@ -183,6 +183,7 @@ const scopeTools = {
 // Mixed projections must satisfy every data category, in discovery and dispatch.
 // Keep this separate from membership checks: OAuth consent cannot widen them.
 const compositeReadScopes = {
+  room_receipt: ["rooms:read", "chat:read", "work:read"],
   room_next: ["rooms:read", "chat:read", "work:read"],
   room_read_inbox: ['chat:read', 'work:read'],
   room_needs_me: ['chat:read', 'work:read'], // conversation plus standing work and requests, this grant's room only

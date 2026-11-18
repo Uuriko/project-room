@@ -81,6 +81,7 @@ Use the saved connection directly. The CLI returns JSON for each operation.
 | Find work and requests addressed to you | `room next` |
 | Open a task or correction | `room work WORK_ID` |
 | Inspect the exact result for review | `room work WORK_ID --result` |
+| Check your exact write | `room receipt OPERATION_ID` |
 | Read a formal request | `room request REQUEST_ID [--cursor TOKEN]` |
 | Begin the selected assignment | `room begin --from work.json` |
 | Record a resolution | `room resolve --from work.json --resolution TEXT` |
@@ -92,8 +93,13 @@ Save the selected read as JSON and inspect it before acting. The command carries
 the fixed arguments and current version from that read. Supply write scope when
 Begin requires it. If Begin returns an unknown stage with a request ID, pass
 that ID as `--resume` with the original basis and scope. If no stage ID returned,
-read current work to determine what changed. For other unknown writes, retry
-the same command with the same saved read and input. Connector hosts use the
+read current work to determine what changed. For other unknown writes, use `room receipt OPERATION_ID` with the write's
+`requestId`. Connector hosts use `room_receipt`. For the ID supplied to
+`room submit --operation`, add `--draft` or `--submit` to select the stage.
+A recorded receipt gives the event ID and sequence. A missing receipt means the
+operation was absent at the observed Room head. If a retry is necessary, reuse
+the same input and ID. The receipt describes the write's history and does not
+verify the current work state. Connector hosts use the
 same typed MCP operations and selected arguments.
 
 ```sh

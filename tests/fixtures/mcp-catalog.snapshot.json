@@ -292,6 +292,16 @@
         "title": "Read Work"
       }
     },
+    "room_receipt": {
+      "inputSchema": "711821b41f4a6e8b",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Receipt"
+      }
+    },
     "room_record_verification": {
       "inputSchema": "1e2a38ead28d7003",
       "annotations": {
@@ -1304,6 +1314,16 @@
         "title": "Read Work Discussion"
       }
     },
+    "room_receipt": {
+      "inputSchema": "711821b41f4a6e8b",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Receipt"
+      }
+    },
     "room_record_completion": {
       "inputSchema": "2afcf4d21cf9b8c5",
       "annotations": {
@@ -1996,6 +2016,16 @@
         "title": "Read Work Discussion"
       }
     },
+    "room_receipt": {
+      "inputSchema": "711821b41f4a6e8b",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Receipt"
+      }
+    },
     "room_record_completion": {
       "inputSchema": "2afcf4d21cf9b8c5",
       "annotations": {
@@ -2358,6 +2388,16 @@
         "title": "Read Request"
       }
     },
+    "room_receipt": {
+      "inputSchema": "711821b41f4a6e8b",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Receipt"
+      }
+    },
     "room_reply": {
       "inputSchema": "0aba86b71e8d815b",
       "annotations": {
@@ -2650,6 +2690,16 @@
         "title": "Read Work Discussion"
       }
     },
+    "room_receipt": {
+      "inputSchema": "711821b41f4a6e8b",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Receipt"
+      }
+    },
     "room_record_verification": {
       "inputSchema": "1e2a38ead28d7003",
       "annotations": {
@@ -2890,6 +2940,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Read Request"
+      }
+    },
+    "room_receipt": {
+      "inputSchema": "711821b41f4a6e8b",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Receipt"
       }
     },
     "room_reply": {
@@ -3344,6 +3404,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Read Work"
+      }
+    },
+    "room_receipt": {
+      "inputSchema": "711821b41f4a6e8b",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Receipt"
       }
     },
     "room_record_verification": {

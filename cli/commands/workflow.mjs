@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { join } from "node:path";
 import { openPrivateJournal, privateDirectory } from "../../client/setup-journal.mjs";
 import { workflowTools as actions, isRecord, hasRevision, selectedBasis, readSelectedBasis,
-  fileInput, readInput, operationFingerprint } from "../selected-basis.mjs";
+  fileInput, readInput, operationFingerprint, submissionOperationKey } from "../selected-basis.mjs";
 import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
 import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
@@ -71,6 +71,9 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
   const { config, name } = connection;
   if (args.roomId !== undefined && args.roomId !== config.roomId)
     return report({ status: "refused", code: "room_selection_mismatch" }, 1);
+  const receiptHint = id => validId(id) ? { requestId: id, receiptCommand: ["room", "receipt", id],
+    receiptRead: { tool: "room_receipt", arguments: { roomId: config.roomId, operationId: id } } } : {};
+  const recovery = receiptHint(args.requestId ?? args.invocationRequestId);
   const next = action === "respond"
     ? { tool: "room_read_request", arguments: { roomId: config.roomId, requestMessageId: args.responseToRequestId } }
     : { tool: "room_read_work", arguments: { roomId: config.roomId, workItemId: args.workItemId, brief: true } };
@@ -79,13 +82,15 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
   catch { return report({ status: "refused", code: "saved_connection_required" }, 1); }
   try {
     const reply = await exchange(tool, args, config, secret, fetchImpl);
-    if (reply.refused) return report({ status: "refused", code: reply.refused, ...(selectedConnection ? { contractVersion: 1, nextRead: next } : {}) }, 1);
+    if (reply.refused) return report({ status: "refused", code: reply.refused, ...(selectedConnection && write ? { contractVersion: 1, nextRead: next } : {}) }, 1);
     const value = reply.value;
     const serialized = value && JSON.stringify(value);
     if (serialized && (serialized.includes(secret) || serialized.includes(config.token)))
       throw new Error("Unexpected credential content");
     if (reply.unknown) return report({ status: "unknown", ...(value ? { begin: value } : {}),
-      ...(selectedConnection ? { contractVersion: 1, nextRead: next, ...(args.requestId ? { requestId: args.requestId } : {}) } : {}) }, 1);
+      ...(write ? { contractVersion: 1, ...recovery,
+        ...(action === "begin" ? receiptHint(value?.resume?.requestId) : {}),
+        ...(selectedConnection ? { nextRead: next } : {}) } : {}) }, 1);
     if (!validate(value, config)) throw new Error("Unmatched Room result");
     if (tool === "room_read_work" || tool === "room_read_request") {
       const basis = selectedBasis(value, config);
@@ -118,10 +123,31 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
     return report({ value }, action === "begin" && !value.working ? 1 : 0);
   } catch {
     return report(write ? { status: "unknown", code: action === "begin" ? "read_current_work" : "retry_exact_action",
-      ...(selectedConnection ? { contractVersion: 1, nextRead: next,
-        ...(args.requestId ? { requestId: args.requestId } : {}) } : {}) }
+      contractVersion: 1, ...recovery, ...(selectedConnection ? { nextRead: next } : {}) }
       : { status: "unavailable", code: "room_read_unavailable" }, 1);
   }
+}
+
+const receiptHelp = "room receipt OPERATION_ID [--draft|--submit]\nLook up your original write without replaying it. For a room submit operation ID, select its draft or completion.";
+
+export async function receiptCommand(argv, io = {}) {
+  const out = io.out ?? console.log;
+  if (argv.length === 1 && argv[0] === "--help") { out(receiptHelp); return 0; }
+  const [id, stage] = argv;
+  if (!validId(id) || argv.length > 2 || (stage !== undefined && !["--draft", "--submit"].includes(stage)))
+    throw new Error(receiptHelp);
+  let connection;
+  try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env }); }
+  catch { out(JSON.stringify({ status: "refused", code: "saved_connection_required" })); return 1; }
+  const { roomId, memberId } = connection.config;
+  const operationId = stage ? `${stage.slice(2)}-${submissionOperationKey(roomId, memberId, id)}` : id;
+  return runWorkflow("room_receipt", { operationId }, value =>
+    value.contractVersion === 1 && value.roomId === roomId && value.viewerId === memberId
+    && value.operationId === operationId && hasRevision(value.checkedThrough) && value.currentStateVerified === false
+    && (value.status === "recorded"
+      ? validId(value.eventId) && typeof value.eventType === "string" && value.eventType.length > 0
+        && hasRevision(value.sequence) && value.sequence > 0 && value.sequence <= value.checkedThrough
+      : value.status === "not_recorded" && value.eventId === undefined && value.sequence === undefined), io, undefined, connection);
 }
 
 export async function workCommand(argv, io = {}) {

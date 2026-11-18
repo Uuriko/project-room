@@ -34,7 +34,7 @@ const JOIN_READERS = ["room_join_packet", "room_join_kits", "room_join_prompt", 
 
 // Independent enumeration of the complete default conversation/task loop.
 const CORE_WORKFLOW = [
-  "room_next", "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
+  "room_next", "room_receipt", "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
   "room_list_requests", "room_read_request", "room_respond_to_request",
   "dm_posted", "room_check_access", "room_join",
   "room_list_work", "room_activation_pack", "room_read_result", "room_read_work", "room_project_state",

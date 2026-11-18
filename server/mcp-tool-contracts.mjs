@@ -22,6 +22,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_wait_for_attention: {access: `read, ${MEMBER}; same scopes as room_read_inbox`, cost: "read only, at most four bounded inbox probes and one pending wait, starts no AI", rest: "none; use GET /api/rooms/{roomId}/agent-inbox for immediate reads"},
   room_work_claim_thread: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims/{claimId}/thread" },
   room_digest: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/digest" },
+  room_receipt: { access: `read, ${MEMBER}; caller’s own operations`, cost: READ, rest: "none; use hosted MCP for exact operation receipt lookup" },
   room_next: { access: `read, ${MEMBER}`, cost: READ, rest: "none; call room_next through hosted MCP" },
   room_activation_pack: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/activation-pack" },
   room_read_result: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-result" },

@@ -15,10 +15,11 @@ const tool = (name, description, inputSchema, readOnlyHint = true) => ({
 });
 const idField = { type: "string", minLength: 1, maxLength: 128 };
 const roomIdField = { ...idField, description: "Room id this identity is linked to." };
-const nextRead = schema({
+const nextReadSchema = schema({
   tool: { type: "string", enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request"] },
   arguments: { type: "object" }
 }, ["tool", "arguments"]);
+const nextRead = { $ref: "#/$defs/nextRead" };
 const nextPage = items => schema({
   coverage: { type: "string", enum: ["complete", "partial", "unavailable"] },
   evaluatedThrough: { type: "integer", minimum: 0 },
@@ -28,6 +29,7 @@ const nextPage = items => schema({
   nextRead: { anyOf: [nextRead, { type: "null" }] }
 }, ["coverage", "items", "nextRead"]);
 const roomNextOutput = {
+  $defs: { nextRead: nextReadSchema },
   ...schema({
     contractVersion: { type: "integer", const: 1 },
     roomId: idField, viewerId: idField, goal: { type: "string", maxLength: 800 },
@@ -56,6 +58,9 @@ export const hostedRoomTools = [
     roomId: roomIdField, source: { type: "string", enum: ["work", "requests"] },
     cursor: { type: "string", minLength: 1, maxLength: 4096 }
   }, ["roomId"])), outputSchema: roomNextOutput },
+  tool("room_receipt", "Check your exact Room operation ID. Returns committed event metadata only. Not recorded means absent at the observed head. Read only.", schema({
+    roomId: idField, operationId: idField
+  }, ["roomId", "operationId"])),
   tool("room_check_access", "Check this identity's Room access. Pass roomId for access and nativeMonitoring diagnostics on this connection; omit it to list linked rooms. A subscription does not prove execution. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
   tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read. An answer is complete only when complete:true; items:[] with complete:false or hasMore:true means NOT YET CHECKED — follow nextRead / pass the cursor back. Never report 'nothing needs you' from an incomplete page. claimSec (default 0) leases each returned item for N seconds so a concurrent wake does not double-answer; pass 45 from wake handlers.", schema({
     roomId: roomIdField,
