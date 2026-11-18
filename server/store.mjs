@@ -7656,7 +7656,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MESSAGE_POSTED) {
         recordReceiptSignal(this.db, { roomId, at: incoming.at, actorId: auth.member.id, body: command.data.body,
           eventId: incoming.id, journalSeq: sequence, toMemberId: command.data.toMemberId });
-        this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
+        this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id, requestMode === "open" ? command.data.messageId : undefined);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
         this.humanPush.notifyPosted({
           roomId, state, senderMemberId: auth.member.id,
@@ -7936,7 +7936,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
-  maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
+  maybeWakeOnMention(roomId, state, senderMemberId, data, eventId, requestId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
     // Decision #25: trial seats receive mention wakes in their room. Guest
@@ -7967,7 +7967,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
-      this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, eventId, actorId: senderMemberId, kind });
+      this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, requestId, eventId, actorId: senderMemberId, kind });
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
