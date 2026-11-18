@@ -25,25 +25,29 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
   const { config, name } = loadConnection({ project: cwd, env });
   try {
     const secret = await loadSecret(name, config.token, env);
-    const response = await fetchImpl(mcpUrl(config.origin), {
-      method: "POST", redirect: "error", signal: AbortSignal.timeout(10000),
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: bearerHeader(secret) },
-      body: JSON.stringify({
-        jsonrpc: "2.0", id: "room-next", method: "tools/call",
-        params: { name: "room_next", arguments: { roomId: config.roomId, ...selection } }
-      })
-    });
-    if (!response.ok) {
-      err(`Room read failed (HTTP ${response.status}).`);
-      return 1;
-    }
-    const rpc = await boundedJson(response);
-    const value = rpc.result?.structuredContent;
-    if (rpc.id !== "room-next" || rpc.error || rpc.result?.isError
-      || value?.contractVersion !== 1 || value.roomId !== config.roomId || value.viewerId !== config.memberId) {
-      err("Room did not return a matching next view. Check connection access and server support.");
-      return 1;
-    }
+    const call = async (name, args) => {
+      const response = await fetchImpl(mcpUrl(config.origin), {
+        method: "POST", redirect: "error", signal: AbortSignal.timeout(10000),
+        headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: bearerHeader(secret) },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: "room-next", method: "tools/call",
+          params: { name, arguments: { roomId: config.roomId, ...args } }
+        })
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`Room read failed (HTTP ${response.status}).`);
+      }
+      const rpc = await boundedJson(response);
+      const value = rpc.result?.structuredContent;
+      const matches = name === "room_activation_pack"
+        ? value?.view === "brief" && value.room?.slug === config.roomId && value.you?.memberId === config.memberId
+        : value?.contractVersion === 1 && value.roomId === config.roomId && value.viewerId === config.memberId;
+      if (rpc.id !== "room-next" || rpc.error || rpc.result?.isError || !matches)
+        throw new Error("Room did not return a matching next view. Check connection access and server support.");
+      return value;
+    };
+    const value = await call("room_next", selection);
     if (["work", "requests"].some(source => {
       const page = value[source];
       if (selection.source && selection.source !== source) return page !== undefined;
@@ -52,6 +56,40 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
     })) {
       err("Room returned an invalid next view.");
       return 1;
+    }
+    const workFallback = value.work?.nextRead;
+    if (!selection.cursor && value.work?.coverage === "unavailable"
+        && value.work.reason === "legacy_projection_budget"
+        && workFallback?.tool === "room_activation_pack" && workFallback.arguments?.roomId === config.roomId
+        && workFallback.arguments.view === "brief") {
+      try {
+        const pack = await call("room_activation_pack", { view: "brief" });
+        if (Array.isArray(pack.pickUp)) {
+          value.work.preview = pack.pickUp.filter(row => validId(row?.id)
+            && row.nextRead?.tool === "room_read_work" && row.nextRead.arguments?.workItemId === row.id)
+            .map(row => ({ id: row.id, title: row.title, state: row.state, untrusted: true,
+              command: ["room", "work", row.id] }));
+        }
+      } catch { /* Keep the unavailable status and next read if the preview fails. */ }
+    }
+    const fallback = value.requests?.nextRead;
+    if (!selection.cursor && value.requests?.coverage === "unavailable"
+        && value.requests.reason === "legacy_projection_budget"
+        && fallback?.tool === "room_list_requests" && fallback.arguments?.roomId === config.roomId
+        && fallback.arguments.direction === "incoming" && fallback.arguments.status === "open") {
+      try {
+        const list = await call("room_list_requests", { direction: "incoming", status: "open" });
+        if (list.selection?.direction === "incoming" && list.selection.status === "open"
+            && Number.isSafeInteger(list.evaluatedThrough) && list.evaluatedThrough >= 0
+            && !Object.hasOwn(list, "page") && Array.isArray(list.requests)
+            && list.requests.every(row => validId(row.id) && row.status === "open" && row.revision === 0
+              && row.recipientId === config.memberId)) {
+          value.requests = { coverage: "complete", evaluatedThrough: list.evaluatedThrough,
+            items: list.requests.map(row => ({ id: row.id, revision: row.revision,
+              nextRead: { tool: "room_read_request", arguments: { roomId: config.roomId, requestMessageId: row.id } } })),
+            nextRead: null };
+        }
+      } catch { /* Retain the server's unavailable status and recovery pointer. */ }
     }
     for (const source of ["work", "requests"]) {
       const read = value[source]?.nextRead;
@@ -76,7 +114,7 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
       if (row.nextRead?.tool === "room_read_request" && validId(args?.requestMessageId)
           && (args.roomId === undefined || args.roomId === config.roomId)
           && Object.keys(args).every(key => ["roomId", "requestMessageId"].includes(key))) {
-        row.nextRead.command = ["room", "request", args.requestMessageId];
+        row.nextRead.command = ["room", "read", args.requestMessageId];
       }
     }
     const output = JSON.stringify(value);

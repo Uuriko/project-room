@@ -58,6 +58,39 @@ async function exchange(tool, args, config, secret, fetchImpl) {
   return { value };
 }
 
+function matchesOperationReceipt(value, { roomId, memberId }, id) {
+  return value?.contractVersion === 1 && value.roomId === roomId && value.viewerId === memberId
+    && value.operationId === id && hasRevision(value.checkedThrough) && value.currentStateVerified === false
+    && (value.status === "recorded"
+      ? validId(value.eventId) && typeof value.eventType === "string" && value.eventType.length > 0
+        && hasRevision(value.sequence) && value.sequence > 0 && value.sequence <= value.checkedThrough
+      : value.status === "not_recorded" && value.eventId === undefined && value.sequence === undefined);
+}
+
+function selectedRequest(value, { roomId, memberId }, id) {
+  return value?.roomId === roomId && value.viewerId === memberId && value.request?.id === id;
+}
+
+async function reconcileAnswer(call, args, config) {
+  const { value: receipt } = await call("room_receipt", { operationId: args.requestId });
+  if (!matchesOperationReceipt(receipt, config, args.requestId) || receipt.status !== "recorded"
+      || receipt.eventType !== "message.posted") return null;
+  const { value: read } = await call("room_read_request", { requestMessageId: args.responseToRequestId, view: "compact" });
+  if (!selectedRequest(read, config, args.responseToRequestId)) return null;
+  const request = read.request;
+  if (request.terminalEventId !== receipt.eventId || request.status !== args.responseOutcome
+      || request.recipientId !== config.memberId || request.requesterId !== args.toMemberId
+      || request.workItemId !== args.workItemId || request.contextEventId !== args.contextEventId
+      || request.responseContextSequence !== args.contextSequence
+      || request.revision !== args.expectedRequestRevision + 1 || !validId(request.responseMessageId)) return null;
+  const entry = read.page?.items?.find(row => row.eventId === receipt.eventId && row.sequence === receipt.sequence);
+  if (entry?.actorId !== config.memberId || entry.kind !== args.responseOutcome || entry.message?.body !== args.body) return null;
+  return { contractVersion: 1, status: "recorded", requestId: args.requestId,
+    requestMessageId: args.responseToRequestId, eventId: receipt.eventId,
+    messageId: request.responseMessageId, sequence: receipt.sequence, recoveredFromReceipt: true,
+    currentStateVerified: false, workStateChanged: false };
+}
+
 async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = process.env,
   fetchImpl = fetch, out = console.log } = {}, action, selectedConnection) {
   const write = action !== undefined;
@@ -80,13 +113,40 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
   let secret;
   try { secret = await loadSecret(name, config.token, env); }
   catch { return report({ status: "refused", code: "saved_connection_required" }, 1); }
-  try {
-    const reply = await exchange(tool, args, config, secret, fetchImpl);
-    if (reply.refused) return report({ status: "refused", code: reply.refused, ...(selectedConnection && write ? { contractVersion: 1, nextRead: next } : {}) }, 1);
-    const value = reply.value;
-    const serialized = value && JSON.stringify(value);
+  const call = async (name, input) => {
+    const reply = await exchange(name, input, config, secret, fetchImpl);
+    const serialized = reply.value && JSON.stringify(reply.value);
     if (serialized && (serialized.includes(secret) || serialized.includes(config.token)))
       throw new Error("Unexpected credential content");
+    return reply;
+  };
+  const readAnswerRecovery = async () => {
+    if (action !== "respond" || !selectedConnection) return null;
+    try { return await reconcileAnswer(call, args, config); }
+    catch { return null; }
+  };
+  try {
+    const reply = await call(tool, args);
+    if (reply.refused) {
+      const recovery = selectedConnection && write ? { contractVersion: 1, nextRead: next } : {};
+      if (action === "respond" && selectedConnection && reply.refused === "stale_revision") {
+        try {
+          const { value: current } = await call("room_read_request", { ...next.arguments, view: "compact" });
+          if (selectedRequest(current, config, args.responseToRequestId)) {
+            const basis = selectedBasis(current, config);
+            if (basis) current.cliBasis = basis;
+            delete current.responseHttpActions;
+            recovery.currentRead = current;
+          }
+        } catch { /* The explicit next read remains available. */ }
+      }
+      return report({ status: "refused", code: reply.refused, ...recovery }, 1);
+    }
+    const value = reply.value;
+    if (reply.unknown) {
+      const recovered = await readAnswerRecovery();
+      if (recovered) return report({ value: recovered }, 0);
+    }
     if (reply.unknown) return report({ status: "unknown", ...(value ? { begin: value } : {}),
       ...(write ? { contractVersion: 1, ...recovery,
         ...(action === "begin" ? receiptHint(value?.resume?.requestId) : {}),
@@ -118,7 +178,11 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
           ["room", "request", read.arguments.requestMessageId, "--compact"]);
       }
       for (const response of value.responseActions ?? []) {
-        if (response.tool === actions.respond && value.cliBasis?.actions.respond) response.command = ["room", "respond", "--from"];
+        if (response.tool === actions.respond && value.cliBasis?.actions.respond) {
+          response.command = ["room", "respond", "--from"];
+          if (response.arguments.responseOutcome === "answered")
+            value.answerCommand = ["room", "answer", args.requestMessageId, "--from"];
+        }
       }
     }
     if (selectedConnection && action === "begin") {
@@ -128,6 +192,8 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
     }
     return report({ value }, action === "begin" && !value.working ? 1 : 0);
   } catch {
+    const recovered = await readAnswerRecovery();
+    if (recovered) return report({ value: recovered }, 0);
     return report(write ? { status: "unknown", code: action === "begin" ? "read_current_work" : "retry_exact_action",
       contractVersion: 1, ...recovery, ...(selectedConnection ? { nextRead: next } : {}) }
       : { status: "unavailable", code: "room_read_unavailable" }, 1);
@@ -147,13 +213,8 @@ export async function receiptCommand(argv, io = {}) {
   catch { out(JSON.stringify({ status: "refused", code: "saved_connection_required" })); return 1; }
   const { roomId, memberId } = connection.config;
   const operationId = stage ? `${stage.slice(2)}-${submissionOperationKey(roomId, memberId, id)}` : id;
-  return runWorkflow("room_receipt", { operationId }, value =>
-    value.contractVersion === 1 && value.roomId === roomId && value.viewerId === memberId
-    && value.operationId === operationId && hasRevision(value.checkedThrough) && value.currentStateVerified === false
-    && (value.status === "recorded"
-      ? validId(value.eventId) && typeof value.eventType === "string" && value.eventType.length > 0
-        && hasRevision(value.sequence) && value.sequence > 0 && value.sequence <= value.checkedThrough
-      : value.status === "not_recorded" && value.eventId === undefined && value.sequence === undefined), io, undefined, connection);
+  return runWorkflow("room_receipt", { operationId },
+    value => matchesOperationReceipt(value, connection.config, operationId), io, undefined, connection);
 }
 
 export async function workCommand(argv, io = {}) {
@@ -173,6 +234,14 @@ export async function workCommand(argv, io = {}) {
     && (!includeResult || value.review?.workRevision === value.revision), io);
 }
 
+export function readCommand(argv, io = {}) {
+  if (argv.length === 1 && argv[0] === "--help") {
+    (io.out ?? console.log)("room read REQUEST_ID [--cursor TOKEN]\nRead this request with prior exchanges deferred. Follow the next page before answering.");
+    return 0;
+  }
+  return requestCommand([...argv, "--compact"], io);
+}
+
 export async function requestCommand(argv, io = {}) {
   if (argv.length === 1 && argv[0] === "--help") { (io.out ?? console.log)(requestHelp); return 0; }
   const { positionals, values } = parseArgs({ args: argv, allowPositionals: true,
@@ -182,8 +251,7 @@ export async function requestCommand(argv, io = {}) {
       || values.cursor !== undefined && !validCursor(values.cursor)) throw new Error(requestHelp);
   return runWorkflow("room_read_request", { requestMessageId, ...(values.cursor ? { cursor: values.cursor } : {}),
     ...(values.compact ? { view: "compact" } : {}) },
-    (value, { roomId, memberId }) => value.roomId === roomId && value.viewerId === memberId
-      && value.request?.id === requestMessageId, io);
+    (value, config) => selectedRequest(value, config, requestMessageId), io);
 }
 
 export async function actCommand(argv, io = {}) {
@@ -253,28 +321,34 @@ async function suppliedInput(action, flags, io) {
   return input;
 }
 
-export function namedCommand(action) {
+export const answerCommand = namedCommand("respond", true);
+
+export function namedCommand(action, answer = false) {
   return async (argv, io = {}) => {
     const out = io.out ?? console.log;
     if (argv.length === 1 && argv[0] === "--help") {
-      out(namedHelp[action] + (action === "begin" ? "" : " [--operation ID]"));
+      out((answer ? "room answer REQUEST_ID --from FILE --body-file FILE" : namedHelp[action])
+        + (action === "begin" ? "" : " [--operation ID]"));
       return 0;
     }
     const refuse = code => { out(JSON.stringify({ contractVersion: 1, status: "refused", code })); return 1; };
     let flags, connection, fixed, input;
     try {
-      const { values, tokens } = parseArgs({ args: argv, tokens: true, options: { from: string,
+      const { values, tokens, positionals } = parseArgs({ args: argv, tokens: true, allowPositionals: answer, options: { from: string,
         ...(action === "begin" ? {} : { operation: string }), ...namedOptions[action] } });
       const names = tokens.filter(token => token.kind === "option" && token.name !== "path").map(token => token.name);
       if (!values.from || new Set(names).size !== names.length
           || values.operation !== undefined && !validId(values.operation)) return refuse("invalid_action_input");
-      flags = values;
+      if (answer && (positionals.length !== 1 || !validId(positionals[0]) || values.answer || values.decline))
+        return refuse("invalid_action_input");
+      flags = answer ? { ...values, answer: true, requestMessageId: positionals[0] } : values;
     } catch { return refuse("invalid_action_input"); }
     try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env }); }
     catch { return refuse("saved_connection_required"); }
     const { config, configDirectory } = connection;
     try { fixed = await readSelectedBasis(flags.from, action, config, io); }
     catch { return refuse("invalid_action_basis"); }
+    if (answer && fixed.responseToRequestId !== flags.requestMessageId) return refuse("request_selection_mismatch");
     try { input = await suppliedInput(action, flags, io); }
     catch { return refuse("invalid_action_input"); }
     const args = { ...fixed, ...input };
