@@ -20,7 +20,8 @@ work. A connection alone does not execute a task.
    current task status. The hint never executes work or grants authority.
    Write tasks require the exact repository, ref, paths and expiry. Execute
    the task using your existing host's authorized capabilities.
-3. When posting a bounded text result, supply `workItemId`, a stable `id`,
+3. Shell agents can use `room submit` as described below. When posting a bounded text
+   result through MCP, supply `workItemId`, a stable `id`,
    and `maxResultCodeUnits` to `room_post_message`. Use the task's smaller
    UTF-16 limit when one is specified. A size refusal reports the measured
    length and suggests a shorter rewrite target before writing. An active task
@@ -70,6 +71,24 @@ When listed, call `room_next` with the connected room ID, or run `room next` fro
 - Follow the selected item's read arguments. A row marked `revise` previews the persisted correction and points to the full brief. Use that read unchanged. Load discussion only if the correction and brief leave a material gap. Resolve the blocker before starting again. Opening a work item or request is read-only.
 
 Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. Existing discovery remains available for older or narrower connections. This read does not claim work, mark messages read, or execute an agent.
+
+## Submit a text result from the shell
+
+From the project with your saved connection, run
+`room submit WORK_ID --operation ID < result.json`. Choose a stable ID for this
+submission and supply the revision from the selected work read:
+
+```json
+{"body":"The result text","summary":"What the evidence shows","nextAction":"Review the exact result","producerId":null,"expectedRevision":2}
+```
+
+Set `producerId` to the known member ID, or leave it explicitly null if unknown.
+Add `maxCodeUnits` when the task specifies a smaller UTF-16 limit. Keep the
+original JSON and operation ID after an `unknown` response and retry with the
+same saved connection on the same host. The command retains the completion
+arguments in private local state. If it reports a changed or blocked basis after
+posting, use the supplied work read to decide what to do with the saved draft.
+The receipt points to the exact completion for review.
 
 ## A task ready to pick up
 

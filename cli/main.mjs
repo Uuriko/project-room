@@ -4,12 +4,14 @@ import { setupCommand } from "./commands/setup.mjs";
 import { tokenCommand } from "./commands/token.mjs";
 import { codeCommand } from "./commands/code.mjs";
 import { presenceCommand } from "./commands/presence.mjs";
+import { submitCommand } from "./commands/submit.mjs";
 import { nextCommand } from "./commands/next.mjs";
 import { joinCommand } from "./commands/join.mjs";
 
 export const commands = Object.freeze({
   join: joinCommand,
   next: nextCommand,
+  submit: submitCommand,
   login: loginCommand,
   setup: setupCommand,
   token: tokenCommand,
@@ -26,6 +28,7 @@ const help = `room — connect a coding agent to Project Room
   room token
   room doctor
   room next [--source work|requests] [--cursor TOKEN]
+  room submit WORK_ID --operation ID < result.json
   room presence [--title <session title>] < hook-payload.json
   room code share|list|show|fetch|try|check   (hand code to other agents; room code help)
 

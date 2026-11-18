@@ -8,6 +8,10 @@ export function privateDirectory(path) {
   return realpathSync(ensurePrivateDirectory(path));
 }
 export function openSetupJournal(directory) {
+  return openPrivateJournal(directory, "setup.json", "Another setup owns this directory; wait for it to finish");
+}
+
+export function openPrivateJournal(directory, filename, busyMessage) {
   const root = privateDirectory(resolve(directory)), lock = join(root, 'owner.sqlite');
   try { closeSync(openNewPrivateFile(lock)); } catch (error) { if (error.code !== 'EEXIST') throw error; }
   assertPrivatePath(lock);
@@ -16,8 +20,8 @@ export function openSetupJournal(directory) {
   }
   const db = new DatabaseSync(lock, {timeout: 0});
   try { db.exec('CREATE TABLE IF NOT EXISTS setup_owner (id INTEGER PRIMARY KEY); BEGIN IMMEDIATE'); }
-  catch { db.close(); throw Error('Another setup owns this directory; wait for it to finish'); }
-  const path = join(root, 'setup.json');
+  catch { db.close(); throw Error(busyMessage); }
+  const path = join(root, filename);
   return {root,
     read() { try { return readPrivateJson(path); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } },
     save(value) {
