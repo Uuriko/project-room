@@ -12,9 +12,9 @@ test('continuation keeps write scope explicit and respects the viewer and availa
   const before = structuredClone(context);
   const local = workContinuation(context);
   assert.equal(local.tool, 'room_begin_work');
-  assert.deepEqual(local.arguments, { workItemId: 'task' });
+  assert.deepEqual(local.arguments, { workItemId: 'task', expectedRevision: 7 });
   assert.deepEqual(local.inputRequired, ['repository', 'ref', 'paths', 'expiresAt']);
-  assert.deepEqual(workContinuation(context, { hosted: true }).arguments, { roomId: 'commons', workItemId: 'task' });
+  assert.deepEqual(workContinuation(context, { hosted: true }).arguments, { roomId: 'commons', workItemId: 'task', expectedRevision: 7 });
   assert.deepEqual(context, before, 'hint cannot mutate work or fill a guessed scope');
   for (const change of [{ viewer: { active: false } }, { suggestedActions: [] },
     { next: { ...context.next, memberId: 'someone-else', addressedToViewer: false } }]) {

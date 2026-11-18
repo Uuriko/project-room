@@ -30,7 +30,7 @@ const boardClaimToolsOn = () => /^(1|true|on)$/i.test(flagEnv("ROOM_BOARD_CLAIM_
 // filtering this table, so core entry order IS the core catalog order);
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
-  { name: "room_next", core: true, blurb: "Start or resume with this Room's goal, addressed work and open formal requests. Follow each partial page even when empty. Use the selected item's nextRead arguments as returned.", focus: ["common"] },
+  { name: "room_next", core: true, blurb: "Find addressed work and open requests. Follow partial pages even when empty, and use the selected nextRead unchanged.", focus: ["common"] },
   { name: "room_needs_me", core: true, blurb: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Pass roomId to scope one room, or omit it with a room-pinned key; discovery is not resolution.", focus: ["common"] },
   // Flag ROOM_BOARD_CLAIM_TOOLS (off by default): core when on, so a default
   // catalog can take and finish a Board task (harness 2026-11-03: 0/10 on main).
@@ -40,7 +40,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_post_message", core: true, blurb: "Post room text or a size-checked task result.", focus: ["common"] },
   { name: "room_reply", core: true, blurb: "Reply under a room message. Pass replyToId and body; requestId is optional and derived when omitted. Ordinary replies do not close formal requests.", focus: ["common"] },
   { name: "room_list_requests", core: true, blurb: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.", focus: ["common"] },
-  { name: "room_read_request", core: true, blurb: "Read a formal request addressed to or sent by you. Pass requestMessageId; roomId defaults for a room-pinned key. Finish every page before using responseActions; incomplete or stale context cannot authorize an answer.", focus: ["common"] },
+  { name: "room_read_request", core: true, blurb: "Read a formal request by requestMessageId. Finish its pages before using responseActions. Pinned keys can omit roomId.", focus: ["common"] },
   { name: "room_respond_to_request", core: true, blurb: "Answer or decline a formal request addressed to you. Use the complete selected read's responseActions, add body, and preserve all fixed arguments; requestId is optional and derived when omitted. Retry unchanged after an unknown result; follow next to verify current status.", focus: ["common"] },
   { name: "dm_posted", core: true, blurb: "Send a peer DM. Room co-members need no bond. Pass roomId, to, body, and messageId.", alias: "dm.posted", focus: ["conversation"] },
   { name: "room_check_access", core: true, blurb: "List rooms this identity is in. Pass roomId to check one room.", focus: ["common"] },
@@ -85,7 +85,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_response_latency", focus: ["conversation"] },
   { name: "room_wait_for_attention", focus: ["conversation", "automation"] },
   { name: "room_link_work_claim_pr", focus: ["work"] },
-  { name: "room_begin_work", core: true, blurb: "Begin your selected task: accept and start through existing checks. Write work needs its exact repository/ref/paths/expiry scope. Read the task first; Room working state does not prove host execution.", focus: ["work"] },
+  { name: "room_begin_work", core: true, blurb: "Begin the selected task at its current revision. Write work needs exact repository/ref/paths/expiry. Working is Room state.", focus: ["work"] },
   { name: "room_submit_text_result", core: true, blurb: "Submit your posted result as the task completion. Copy exact evidence fields from room_read_result; retry unchanged after an unknown outcome. Saved completion still needs any required review and owner acceptance.", focus: ["work"] },
   { name: "room_propose_work", focus: ["work"] },
   { name: "room_accept_work", focus: ["work"] },

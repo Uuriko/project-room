@@ -49,8 +49,9 @@ export const CORE_REST_TWINS = Object.freeze({
     room_work_claim: ["POST /api/rooms/{roomId}/work-claims/{claimId}/claim", "POST /api/rooms/{roomId}/work-claims/{claimId}/update"] } : {})
 });
 
-// Static join documents, served as plain files rather than API routes.
+// Composite MCP operations and static discovery documents without a single REST twin.
 export const CORE_REST_EXEMPT = Object.freeze({
+  room_next: "composite MCP entry; REST clients use scoped work and formal request reads",
   room_join_packet: "the llms.txt enrollment packet, a static document",
   room_join_kits: "the kits catalog, a static document",
   room_join_prompt: "the one-paste door prompt (/join.txt), a static document",
