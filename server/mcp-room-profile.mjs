@@ -922,7 +922,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   }
   if (name === "room_create_agent_invite") {
     const request = {};
-    for (const key of ["profile", "permissions", "ownerEquivalent", "expiresInMinutes", "displayName"]) {
+    for (const key of ["profile", "permissions", "ownerEquivalent", "expiresInMinutes", "displayName", "starterWork"]) {
       if (args[key] !== undefined) request[key] = args[key];
     }
     return withInviteShare(store.invites.create(secret, roomId, request));

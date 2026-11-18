@@ -224,7 +224,8 @@ export const hostedRoomTools = [
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 } },
     ownerEquivalent: { type: "boolean", description: "Room owner, or a co-owner in opted-in Muse Room. Grants every delegable permission without transferring ownership." },
     expiresInMinutes: { type: "integer", minimum: 1, maximum: 43200 },
-    displayName: { type: "string", minLength: 1, maxLength: 80 }
+    displayName: { type: "string", minLength: 1, maxLength: 80 },
+    starterWork: { type: "object", additionalProperties: false, required: ["title", "definitionOfDone"], description: "Optional first task. On redeem the new member gets this work item (read mode, accountable to itself, label starter). Needs a profile with steer and accept_work, such as contribute.", properties: { title: { type: "string", minLength: 1, maxLength: 120 }, definitionOfDone: { type: "string", minLength: 1, maxLength: 500 } } }
   }, ["roomId"]), false),
   tool("room_list_agent_invites", "List agent invite codes for a room. Same read as GET /api/rooms/:roomId/agent-invites. Needs the manage_members grant. Rows carry the inviteId handle, never the raw code.", schema({ roomId: roomIdField }, ["roomId"])),
   tool("room_revoke_agent_invite", "Revoke one unused agent invite code. Same write as DELETE /api/rooms/:roomId/agent-invites. Needs the manage_members grant. Redeemed and already revoked codes return invite_unavailable.", schema({
