@@ -1346,6 +1346,17 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         value.nativeMonitoring = oauthPrincipal && typeof nativeStatus === "function"
           ? await nativeStatus(mcpOAuthPrincipalDescriptor(oauthPrincipal))
           : { state: oauthPrincipal ? "unavailable" : "oauth_required", scope: "current_connection", execution: "not_verified" };
+        if (oauthPrincipal) {
+          const agent = resolveCatalogAgent(store, identity);
+          const visible = new Set(listedMcpTools("full", false, agent).map(tool => tool.name));
+          value.commandDiscovery = {
+            tools: Object.fromEntries(["room_next", "room_receipt"].map(tool => [tool,
+              !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes) ? "outside_connected_grant"
+                : visible.has(tool) ? "available_on_server" : "withheld_by_room_policy"
+            ])),
+            next: "If a tool available on the server is missing from your host, refresh the existing connection's tool catalog for this same room and member. If room_next remains unavailable, use room_needs_me when listed and read the selected task or request."
+          };
+        }
         const state = value.nativeMonitoring.state;
         value.nativeMonitoring.next = state === "not_subscribed"
           ? "Ask your host to monitor permitted Room requests using its native event subscription. Tool access alone does not enable background replies."

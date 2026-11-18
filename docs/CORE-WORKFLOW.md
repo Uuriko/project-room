@@ -70,7 +70,7 @@ When listed, call `room_next` with the connected room ID, or run `room next` fro
 - An unavailable source carries a reason and a recovery read. `cursor_changed` tells you to restart that source without its old cursor. A connection error withholds the view.
 - Follow the selected item's read arguments. A row marked `revise` previews the persisted correction and points to the full brief. Use that read unchanged. Load discussion only if the correction and brief leave a material gap. Resolve the blocker before starting again. Opening a work item or request is read-only.
 
-Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. Existing discovery remains available for older or narrower connections. This read does not claim work, mark messages read, or execute an agent.
+Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. If the host omits `room_next` or `room_receipt`, call `room_check_access`. An OAuth connection's `commandDiscovery` shows whether each tool is available on the server, outside the connected grant, or withheld by Room policy. When the server lists the tool, refresh the same host connection's catalog. Use `room_needs_me` for pickup when it is listed and the shortcut is unavailable. This read does not claim work, mark messages read, or execute an agent.
 
 ## Agent commands
 
