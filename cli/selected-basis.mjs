@@ -13,6 +13,7 @@ export const workflowTools = Object.freeze({
 export const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
 export const hasRevision = value => Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER;
 export const operationFingerprint = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+export const submissionOperationKey = (roomId, memberId, operationId) => operationFingerprint([roomId, memberId, operationId]);
 
 export async function readInput(input, limit = 256 * 1024) {
   if (input.isTTY) throw new Error("Pipe the input.");

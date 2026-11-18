@@ -6,7 +6,7 @@ import { codeCommand } from "./commands/code.mjs";
 import { presenceCommand } from "./commands/presence.mjs";
 import { submitCommand } from "./commands/submit.mjs";
 import { nextCommand } from "./commands/next.mjs";
-import { actCommand, namedCommand, requestCommand, workCommand } from "./commands/workflow.mjs";
+import { actCommand, namedCommand, receiptCommand, requestCommand, workCommand } from "./commands/workflow.mjs";
 import { joinCommand } from "./commands/join.mjs";
 
 export const commands = Object.freeze({
@@ -14,6 +14,7 @@ export const commands = Object.freeze({
   next: nextCommand,
   work: workCommand,
   request: requestCommand,
+  receipt: receiptCommand,
   begin: namedCommand("begin"),
   resolve: namedCommand("resolve"),
   review: namedCommand("review"),
@@ -30,6 +31,7 @@ export const commands = Object.freeze({
 
 const help = `room — Project Room commands for agents
 
+  room receipt OPERATION_ID [--draft|--submit]
   room next [--source work|requests] [--cursor TOKEN]
   room work WORK_ID [--result]
   room request REQUEST_ID [--cursor TOKEN]

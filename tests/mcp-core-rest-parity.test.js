@@ -51,6 +51,7 @@ export const CORE_REST_TWINS = Object.freeze({
 
 // Composite MCP operations and static discovery documents without a single REST twin.
 export const CORE_REST_EXEMPT = Object.freeze({
+  room_receipt: "exact actor-scoped receipt read available through hosted MCP and the Room CLI",
   room_next: "composite MCP entry; REST clients use scoped work and formal request reads",
   room_join_packet: "the llms.txt enrollment packet, a static document",
   room_join_kits: "the kits catalog, a static document",

@@ -126,20 +126,44 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   assert.equal(observed.result.text.body, normal.body);
 
   const draft = await prepare("lost-draft");
-  assert.equal((await run("lost-draft", draft, "room_post_message")).output.status, "unknown");
+  const draftUnknown = (await run("lost-draft", draft, "room_post_message")).output;
+  assert.equal(draftUnknown.status, "unknown");
+  assert.deepEqual(draftUnknown.receiptCommand, ["room", "receipt", "lost-draft", "--draft"]);
+  const draftHead = store.headSequence("commons");
+  const draftReceipt = await cli(draftUnknown.receiptCommand.slice(1));
+  assert.equal(draftReceipt.value.status, "recorded");
+  assert.equal(draftReceipt.value.eventType, "message.posted");
+  assert.equal((await cli(["receipt", "lost-draft", "--submit"])).value.status, "not_recorded");
+  assert.equal(store.headSequence("commons"), draftHead);
   const recoveredDraft = await run("lost-draft", draft);
   assert.equal(recoveredDraft.code, 0, JSON.stringify(recoveredDraft));
   assert.deepEqual(recoveredDraft.calls, ["room_post_message", "room_read_result", "room_submit_text_result"]);
 
   const completion = await prepare("lost-completion");
-  assert.equal((await run("lost-completion", completion, "room_submit_text_result")).output.status, "unknown");
+  const completionUnknown = (await run("lost-completion", completion, "room_submit_text_result")).output;
+  assert.equal(completionUnknown.status, "unknown");
+  assert.deepEqual(completionUnknown.receiptCommand, ["room", "receipt", "lost-completion", "--submit"]);
   const recordedThrough = store.headSequence("commons");
+  const completionReceipt = await cli(completionUnknown.receiptCommand.slice(1));
+  assert.equal(completionReceipt.code, 0);
+  assert.equal(completionReceipt.value.status, "recorded");
+  assert.equal(completionReceipt.value.eventType, "work.completed");
+  assert.ok(completionReceipt.value.sequence <= recordedThrough);
+  assert.equal(completionReceipt.value.checkedThrough, recordedThrough);
+  assert.equal(completionReceipt.value.currentStateVerified, false);
+  assert.doesNotMatch(JSON.stringify(completionReceipt), /The exact contribution|fingerprint|body/);
+  const otherActor = await cli(["receipt", completionReceipt.value.operationId], undefined, reviewerProject);
+  assert.equal(otherActor.value.status, "not_recorded");
+  assert.equal(otherActor.value.checkedThrough, recordedThrough);
+  assert.equal(Object.hasOwn(otherActor.value, "eventId"), false);
+  assert.equal(store.headSequence("commons"), recordedThrough, "lookup adds no event");
   assert.equal((await run("lost-completion", { ...completion, summary: "Changed intent" })).output.code,
     "operation_input_changed");
   const recoveredCompletion = await run("lost-completion", completion);
   assert.equal(recoveredCompletion.code, 0, JSON.stringify(recoveredCompletion));
   assert.deepEqual(recoveredCompletion.calls, ["room_submit_text_result"]);
   assert.equal(recoveredCompletion.output.duplicate, true);
+  assert.equal(recoveredCompletion.output.completionEventId, completionReceipt.value.eventId);
   assert.equal(store.headSequence("commons"), recordedThrough);
 
   const changed = await prepare("changed-after-draft");
@@ -185,6 +209,10 @@ test(`${representation} commands cover pickup, correction, review, requests and 
     throw new Error("lost review reply");
   });
   assert.equal(lostReview.value.status, "unknown");
+  assert.deepEqual(lostReview.value.receiptCommand, ["room", "receipt", lostReview.value.requestId]);
+  const typedReceipt = await rpc("room_receipt", lostReview.value.receiptRead.arguments, reviewer);
+  assert.equal(typedReceipt.status, "recorded");
+  assert.equal(typedReceipt.eventType, "verification.recorded");
   const afterReview = store.headSequence("commons");
   const reviewEvents = store.eventsAfter(owner, "commons", beforeBadBasis, 20).events.map(row => row.event ?? row);
   assert.equal(reviewEvents.filter(row => row.type === "verification.recorded").length, 1);
@@ -192,6 +220,7 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   assert.equal(correction.code, 0, JSON.stringify(correction));
   assert.equal(correction.value.duplicate, true);
   assert.equal(correction.value.eventId, reviewEvents.find(row => row.type === "verification.recorded").id);
+  assert.equal(typedReceipt.eventId, correction.value.eventId);
   assert.equal(store.headSequence("commons"), afterReview);
   assert.equal((await cli(["review", "--from", reviewFile, "--pass", "--summary", "Stale verdict"],
     undefined, reviewerProject)).code, 1);

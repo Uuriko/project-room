@@ -3914,6 +3914,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // probe's change check, three orders of magnitude cheaper than a page read.
   assertRestoreAdmitted() { return assertRestoreAdmitted(this.db); }
   restoreStatus() { verifyRestoreControl(this.db); return {pending:restorePending(this.db)}; }
+  operationReceipt(token, roomId, operationId) {
+    if (!validId(operationId)) throw new TypeError("Invalid operation ID");
+    return this.readTransaction(() => {
+      const { member } = this.authenticate(token, roomId);
+      const checkedThrough = this.headSequence(roomId);
+      const row = this.db.prepare(`
+        SELECT c.sequence, e.id, json_extract(e.body, '$.type') AS eventType
+        FROM commands c LEFT JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence
+        WHERE c.room_id=? AND c.actor_id=? AND c.id=?
+      `).get(roomId, member.id, operationId);
+      if (row && (!validId(row.id) || typeof row.eventType !== "string" || row.sequence > checkedThrough))
+        throw new Error("Operation receipt is unavailable");
+      return { contractVersion: 1, roomId, viewerId: member.id, operationId, checkedThrough,
+        status: row ? "recorded" : "not_recorded", currentStateVerified: false,
+        ...(row ? { eventId: row.id, eventType: row.eventType, sequence: row.sequence } : {}) };
+    });
+  }
   headSequence(roomId) {
     if(!this._restoreOpening)assertRestoreAdmitted(this.db);
     const row = this.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);

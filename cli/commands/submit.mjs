@@ -4,7 +4,7 @@ import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
 import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { openPrivateJournal, privateDirectory } from "../../client/setup-journal.mjs";
-import { readInput, hasRevision, readSelectedBasis, operationFingerprint } from "../selected-basis.mjs";
+import { readInput, hasRevision, readSelectedBasis, operationFingerprint, submissionOperationKey } from "../selected-basis.mjs";
 import { validId } from "../../src/events.js";
 
 const HELP = `room submit --from WORK.json [--operation ID] < result.json
@@ -104,7 +104,7 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
       codeUnits: body.length, targetCodeUnits: Math.max(1, Math.floor(maxCodeUnits * 0.8)) });
 
   const { roomId, memberId } = config;
-  const base = hash(JSON.stringify([roomId, memberId, operationId]));
+  const base = submissionOperationKey(roomId, memberId, operationId);
   const requestId = `submit-${base}`;
   const draftId = `draft-${base}`;
   const fingerprint = hash(JSON.stringify([workItemId, intent]));
@@ -174,7 +174,11 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
       next: { tool: "room_read_result", arguments: { roomId, workItemId, completionEventId: receipt.eventId } } });
   } catch {
     return report(stage === "local" ? "refused" : "unknown", stage, {
-      code: stage === "local" ? "local_operation_unavailable" : "retry_same_operation" });
+      code: stage === "local" ? "local_operation_unavailable" : "retry_same_operation",
+      ...(stage === "local" ? {} : {
+        receiptCommand: ["room", "receipt", operationId, stage === "submit" ? "--submit" : "--draft"],
+        receiptRead: { tool: "room_receipt", arguments: { roomId, operationId: stage === "submit" ? requestId : draftId } }
+      }) });
   } finally {
     journal?.close();
   }
