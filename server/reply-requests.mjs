@@ -52,6 +52,32 @@ function decode(token, kind, binding) {
 
 // Every read is authenticated and anchored in the same storage transaction. The
 // local notice acknowledgement, history checkpoint and human read cursor are separate.
+export function compactReplySelection(selected) {
+  const requestMessageId = selected.request.id;
+  // Preserve all selected-read and history visibility checks before projecting
+  // the payload. A conversation cursor follows the same window in either view.
+  const preparation = selected.preparation;
+  const omitted = Math.max(0, preparation.previousExchanges.length - 1);
+  const nextRead = selected.nextRead && {
+    ...selected.nextRead, arguments: { ...selected.nextRead.arguments, view: "compact" }
+  };
+  return { ...selected,
+    ...(nextRead ? { nextRead, page: { ...selected.page, nextRead } } : {}),
+    preparation: { ...preparation,
+      previousExchanges: preparation.previousExchanges.slice(-1),
+      previousExchangesOmitted: omitted,
+      ...(omitted ? {
+        olderExchangeReads: preparation.previousExchanges.slice(0, -1).map(exchange => ({
+          tool: "room_read_request", arguments: { requestMessageId: exchange.requestMessageId, view: "compact" }
+        })),
+        previousExchangesNextRead: {
+          tool: "room_read_request", arguments: { requestMessageId, view: "full" }
+        }
+      } : {})
+    }
+  };
+}
+
 export class ReplyRequests {
   constructor(store) { this.store = store; }
   read(token, roomId, expectedSessionBinding, fn, { requestsOnly = false } = {}) {
@@ -101,7 +127,11 @@ export class ReplyRequests {
   }
   selected(token, roomId, requestMessageId, options = {}) {
     if (!validId(requestMessageId)) fail("invalid_reply_selection", "Choose one request");
-    return this.page(token, roomId, { ...options, requestMessageId, direction: null });
+    if (options.view !== undefined && !["compact", "full"].includes(options.view))
+      fail("invalid_reply_selection", "Choose a compact or full request read");
+    const selected = this.page(token, roomId, { ...options, requestMessageId, direction: null });
+    if (options.view !== "compact") return selected;
+    return compactReplySelection(selected);
   }
   history(token, roomId, options = {}) {
     return this.page(token, roomId, { ...options, direction: options.direction ?? "incoming", requestMessageId: null });

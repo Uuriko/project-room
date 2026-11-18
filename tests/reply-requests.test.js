@@ -16,9 +16,9 @@ import { validateReplyRead } from "../client/reply-actions.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
-function fixture(t, extra = []) {
+function fixture(t, extra = [], options = {}) {
   const store = new RoomStore(":memory:"); t.after(() => store.close());
-  store.initialize([...initialRoom(), ...extra]);
+  store.initialize([...initialRoom(), ...extra], options);
   const keys = { owner: store.issueAccessKey("commons", "owner") };
   const send = (actor, command) => store.command(keys[actor], "commons", command);
   const post = (actor, data, id = crypto.randomUUID()) => send(actor, { id, type: "message.posted", data });
@@ -429,6 +429,50 @@ test("follow-up preparation carries bounded completed exchanges for the same pai
   assert.deepEqual(read("agent", next).preparation.previousExchanges.map(exchange => exchange.requestMessageId), [id, follow.command.data.messageId]);
   assert.equal(f.state().replyRequests[id].status, "answered");
   auditRecovery(f.store);
+});
+
+for (const normalized of [false, true]) test(`compact request pages preserve current answer binding (${normalized ? "normalized" : "legacy"})`, async t => {
+  const f = fixture(t, [], normalized ? { representation: "normalized-current-v1" } : {});
+  const first = f.open("guest", { body: "Earlier decision with context" });
+  f.send("agent", f.answer(first, first.receipt, { messageId: "compact-first-answer" }));
+  const second = f.open("guest", { replyToId: "compact-first-answer" });
+  f.send("agent", f.answer(second, second.receipt, { messageId: "compact-second-answer" }));
+  const third = f.open("guest", { replyToId: "compact-second-answer", body: "Use option A" });
+  const id = third.command.data.messageId;
+  const read = options => f.store.replyRequests.selected(f.keys.agent, "commons", id, options);
+  const stale = read({ view: "compact" }).current.answerBasis;
+  const correction = f.post("guest", { messageId: "compact-correction", body: "Correction: use option B", replyToId: id });
+  assert.throws(() => f.send("agent", f.answer(third, third.receipt, stale)));
+  const full = read({ view: "full" });
+  const compact = read({ view: "compact" });
+  validateReplyRead(compact, { name: "room_read_request", roomId: "commons", args: { requestMessageId: id, view: "compact" } });
+  assert.deepEqual(compact.page, full.page);
+  assert.deepEqual(compact.current, full.current);
+  assert.equal(compact.current.contextEventId, correction.event.id);
+  assert.deepEqual(compact.responseActions, full.responseActions);
+  assert.deepEqual(compact.preparation.previousExchanges, full.preparation.previousExchanges.slice(-1));
+  assert.equal(compact.preparation.previousExchangesOmitted, 1);
+  const older = compact.preparation.olderExchangeReads;
+  assert.deepEqual(older, [{ tool: "room_read_request",
+    arguments: { requestMessageId: first.command.data.messageId, view: "compact" } }]);
+  const oldest = f.store.replyRequests.selected(f.keys.agent, "commons", older[0].arguments.requestMessageId, older[0].arguments);
+  assert.equal(oldest.page.items[0].message.body, "Earlier decision with context");
+  assert.deepEqual(compact.preparation.previousExchangesNextRead.arguments, { requestMessageId: id, view: "full" });
+  assert.ok(Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(full)));
+  const page = read({ view: "compact", limit: 1 });
+  assert.equal(page.current.answerBasis, null);
+  const args = { view: "compact", limit: 1, cursor: page.page.nextCursor, requestMessageId: id };
+  if (page.nextRead) assert.deepEqual(page.nextRead.arguments, args);
+  const rest = read(args);
+  validateReplyRead(rest, { name: "room_read_request", roomId: "commons", args });
+  assert.equal(rest.page.items.at(-1).message.body, "Correction: use option B");
+  assert.deepEqual(rest.responseActions, full.responseActions);
+  assert.throws(() => f.store.replyRequests.selected(f.keys.reviewer, "commons", id, { view: "compact" }), { code: "reply_request_not_found" });
+  const answer = f.answer(third, correction);
+  const recorded = f.send("agent", answer);
+  const repeated = f.send("agent", answer);
+  assert.equal(repeated.duplicate, true);
+  assert.equal(recorded.event.id, repeated.event.id);
 });
 
 test("follow-up refuses withdrawn context and oversized history instead of silently omitting it", t => {

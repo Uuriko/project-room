@@ -10,7 +10,7 @@ import { validId } from "../../src/events.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
 const workHelp = "room work WORK_ID [--result | --since BRIEF_VERSION]\nRead the compact task brief. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.";
-const requestHelp = "room request REQUEST_ID [--cursor TOKEN]\nRead the selected request and follow its next page before responding.";
+const requestHelp = "room request REQUEST_ID [--compact] [--cursor TOKEN]\nRead the selected request and follow its next page before responding.";
 const validCursor = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(value);
 
 async function readArguments(stdin) {
@@ -110,7 +110,13 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
     if (tool === "room_read_request") {
       delete value.responseHttpActions;
       const cursor = value.nextRead?.arguments?.cursor ?? value.page?.nextCursor;
-      if (validCursor(cursor)) value.nextCommand = ["room", "request", args.requestMessageId, "--cursor", cursor];
+      const compactFlag = args.view === "compact" ? ["--compact"] : [];
+      if (validCursor(cursor)) value.nextCommand = ["room", "request", args.requestMessageId, ...compactFlag, "--cursor", cursor];
+      if (value.preparation?.previousExchangesNextRead && Array.isArray(value.preparation.olderExchangeReads)) {
+        value.previousExchangesCommand = ["room", "request", args.requestMessageId];
+        value.olderExchangeCommands = value.preparation.olderExchangeReads.map(read =>
+          ["room", "request", read.arguments.requestMessageId, "--compact"]);
+      }
       for (const response of value.responseActions ?? []) {
         if (response.tool === actions.respond && value.cliBasis?.actions.respond) response.command = ["room", "respond", "--from"];
       }
@@ -169,10 +175,13 @@ export async function workCommand(argv, io = {}) {
 
 export async function requestCommand(argv, io = {}) {
   if (argv.length === 1 && argv[0] === "--help") { (io.out ?? console.log)(requestHelp); return 0; }
-  const [requestMessageId, flag, cursor] = argv;
-  if (!validId(requestMessageId) || !(argv.length === 1 || argv.length === 3 && flag === "--cursor" && validCursor(cursor)))
-    throw new Error(requestHelp);
-  return runWorkflow("room_read_request", { requestMessageId, ...(cursor ? { cursor } : {}) },
+  const { positionals, values } = parseArgs({ args: argv, allowPositionals: true,
+    options: { compact: { type: "boolean" }, cursor: { type: "string" } } });
+  const [requestMessageId] = positionals;
+  if (positionals.length !== 1 || !validId(requestMessageId)
+      || values.cursor !== undefined && !validCursor(values.cursor)) throw new Error(requestHelp);
+  return runWorkflow("room_read_request", { requestMessageId, ...(values.cursor ? { cursor: values.cursor } : {}),
+    ...(values.compact ? { view: "compact" } : {}) },
     (value, { roomId, memberId }) => value.roomId === roomId && value.viewerId === memberId
       && value.request?.id === requestMessageId, io);
 }

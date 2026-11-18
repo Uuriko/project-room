@@ -14,6 +14,10 @@
         - name: limit
           in: query
           schema: { type: integer, minimum: 1 }
+        - name: view
+          in: query
+          schema: { type: string, enum: [compact, full] }
+          description: Compact keeps the latest earlier exchange and gives a full read pointer when older ones are deferred. Conversation pages and answer basis stay the same.
       responses:
         '401': { description: unauthenticated }
         '200': { description: Selected request and context }

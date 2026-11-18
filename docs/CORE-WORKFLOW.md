@@ -83,12 +83,20 @@ Use the saved connection directly. The CLI returns JSON for each operation.
 | Refresh a retained task brief | `room work WORK_ID --since BRIEF_VERSION` |
 | Inspect the exact result for review | `room work WORK_ID --result` |
 | Check your exact write | `room receipt OPERATION_ID` |
-| Read a formal request | `room request REQUEST_ID [--cursor TOKEN]` |
+| Read a formal request | `room request REQUEST_ID [--compact] [--cursor TOKEN]` |
 | Begin the selected assignment | `room begin --from work.json` |
 | Record a resolution | `room resolve --from work.json --resolution TEXT` |
 | Submit exact evidence | `room submit --from work.json < result.json` |
 | Record an explicit verdict | `room review --from review.json --pass --summary TEXT` (or `--fail`) |
 | Respond to a formal request | `room respond --from request.json --answer --body-file FILE` (or `--decline`) |
+
+Use `room request REQUEST_ID --compact` or `room_read_request` with
+`view: "compact"` for the current conversation and the latest previous
+exchange. Follow the conversation pages. When older exchanges are omitted,
+`preparation.olderExchangeReads` lists exact earlier requests from oldest
+to newest. Open the relevant exchange directly when the ask refers to an
+older decision. `preparation.previousExchangesNextRead` opens full
+preparation for the same request when several exchanges are needed.
 
 Keep the full brief if you plan to refresh it with `--since`. Use its
 `briefVersion` for the same connection and task. A `briefUnchanged` response

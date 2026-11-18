@@ -4832,7 +4832,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       }
       if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
         const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status", "cursor", "limit", "states"]
-          : route === "reply-context" ? ["requestMessageId", "cursor", "limit"] : ["direction", "cursor", "checkpoint", "limit"];
+          : route === "reply-context" ? ["requestMessageId", "cursor", "limit", "view"] : ["direction", "cursor", "checkpoint", "limit"];
         if ([...params.keys()].some(key => ![...names, "auth"].includes(key) || params.getAll(key).length !== 1)
           || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))
           || params.has("states") && params.get("states") !== "1") reject(422, "invalid_reply_selection", "Invalid request selection");
