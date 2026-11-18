@@ -9,7 +9,7 @@ import { boundedJson } from "../room-response.mjs";
 import { validId } from "../../src/events.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
-const workHelp = "room work WORK_ID [--result]\nRead the compact task brief. Add --result to inspect exact evidence for review.";
+const workHelp = "room work WORK_ID [--result | --since BRIEF_VERSION]\nRead the compact task brief. Add --result for exact review evidence or --since to refresh a retained brief.";
 const requestHelp = "room request REQUEST_ID [--cursor TOKEN]\nRead the selected request and follow its next page before responding.";
 const validCursor = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(value);
 
@@ -152,12 +152,18 @@ export async function receiptCommand(argv, io = {}) {
 
 export async function workCommand(argv, io = {}) {
   if (argv.length === 1 && argv[0] === "--help") { (io.out ?? console.log)(workHelp); return 0; }
-  const [workItemId, flag] = argv;
-  if (!validId(workItemId) || argv.length > 2 || flag !== undefined && flag !== "--result") throw new Error(workHelp);
+  const [workItemId, flag, since] = argv;
   const includeResult = flag === "--result";
-  return runWorkflow("room_read_work", { workItemId, brief: true, includeResult }, (value, { roomId }) =>
+  const conditional = flag === "--since" && /^[a-f0-9]{64}$/.test(since ?? "");
+  if (!validId(workItemId) || !(argv.length === 1 || argv.length === 2 && includeResult || argv.length === 3 && conditional))
+    throw new Error(workHelp);
+  return runWorkflow("room_read_work", { workItemId, brief: true, includeResult,
+    ...(conditional ? { knownBriefVersion: since } : {}) }, (value, { roomId }) =>
     value.roomId === roomId && value.workItemId === workItemId && hasRevision(value.revision)
-    && typeof value.brief === "string" && isRecord(value.continuation)
+    && isRecord(value.continuation)
+    && (value.briefUnchanged === true
+      ? conditional && value.briefVersion === since && value.brief === undefined
+      : typeof value.brief === "string")
     && (!includeResult || value.review?.workRevision === value.revision), io);
 }
 
