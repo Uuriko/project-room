@@ -842,9 +842,12 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   if (name === "room_post_message") {
     const limit = args.maxResultCodeUnits;
     if (limit !== undefined && (!validResultBody(args.body) || args.body.length > limit)) {
-      const error = new ServiceError(422, "result_draft_invalid",
-        "No new draft was posted. Fit the exact text within the UTF-16 limit and retry.");
-      error.detail = { maxCodeUnits: limit, codeUnits: args.body.length, exceededBy: Math.max(0, args.body.length - limit) };
+      const exceededBy = Math.max(0, args.body.length - limit);
+      const error = new ServiceError(422, "result_draft_invalid", exceededBy
+        ? "No new draft was posted. Rewrite to the suggested target with room to spare. Keep the required checks and cut repeated wording."
+        : "No new draft was posted. Supply well-formed result text.");
+      error.detail = { maxCodeUnits: limit, codeUnits: args.body.length, exceededBy,
+        ...(exceededBy ? { targetCodeUnits: Math.max(1, Math.floor(limit * 0.8)) } : {}) };
       throw error;
     }
     const id = args.id ?? randomUUID();
@@ -870,7 +873,10 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
       try {
         const observed = store.workResult(secret, roomId, args.workItemId, { draftMessageId: messageId });
         const text = observed.result.text;
-        if (text?.messageEventId === receipt.event.id && text.body === args.body) {
+        if (observed.current.next.action !== "in_progress" || observed.current.next.memberId !== receipt.event.actorId) {
+          resultDraft.draftRead = nextRead;
+          resultDraft.nextRead = { tool: "room_read_work", arguments: { roomId, workItemId: args.workItemId, brief: true } };
+        } else if (text?.messageEventId === receipt.event.id && text.body === args.body) {
           resultDraft.submission = {
             workItemId: args.workItemId, expectedRevision: observed.current.workRevision,
             evidenceMessageId: text.messageId, evidenceMessageEventId: text.messageEventId,

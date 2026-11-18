@@ -168,6 +168,11 @@ test(`${representation}: default catalog supports task pickup, correction, exact
   assert.match(resumed.brief, /Missing the required reconnect check/);
   assert.equal(resumed.continuation.tool, 'room_resolve_blocker');
   assert.deepEqual(resumed.continuation.inputRequired, ['resolution']);
+  const earlyDraft = await call(producer, 'room_post_message', { id: 'saved-before-resolve', workItemId,
+    body: 'Draft for later use.', maxResultCodeUnits: 80 });
+  assert.equal(earlyDraft.resultDraft.submission, undefined, 'a saved draft must not offer a blocked completion');
+  assert.equal(earlyDraft.resultDraft.nextRead.tool, 'room_read_work');
+  assert.equal(earlyDraft.resultDraft.draftRead.tool, 'room_read_result');
   await call(producer, resumed.continuation.tool, { ...resumed.continuation.arguments,
     resolution: 'Add reconnect and duplicate-result checks' });
   await call(producer, 'room_begin_work', { workItemId });
@@ -178,7 +183,8 @@ test(`${representation}: default catalog supports task pickup, correction, exact
   assert.equal(refused.result.isError, true);
   assert.equal(refused.result.structuredContent.code, 'result_draft_invalid');
   assert.deepEqual(refused.result.structuredContent.detail, {
-    maxCodeUnits: revisedBody.length - 1, codeUnits: revisedBody.length, exceededBy: 1
+    maxCodeUnits: revisedBody.length - 1, codeUnits: revisedBody.length, exceededBy: 1,
+    targetCodeUnits: Math.floor((revisedBody.length - 1) * 0.8)
   });
   assert.equal(store.headSequence('commons'), headBeforePost, 'over-budget text must never post');
   const posted = await call(producer, 'room_post_message', post);
