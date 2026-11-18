@@ -13,8 +13,9 @@ import { createRoomServer } from '../server/http.mjs';
 import { createMcpInviteOAuth } from '../server/mcp-invite-oauth.mjs';
 const version = '2026-07-28', origin = 'https://room.example', resource = origin + '/mcp';
 const client = { clientId: 'events-test', name: 'Events test', redirectUris: ['https://client.example/callback'] };
-async function fixture(t, { callbackError } = {}) {
-  const store = new RoomStore(':memory:'); store.initialize(initialRoom());
+async function fixture(t, { callbackError, normalized = false } = {}) {
+  const store = new RoomStore(':memory:');
+  store.initialize(initialRoom(), normalized ? { representation: 'normalized-current-v1' } : {});
   const owner = store.issueAccessKey('commons', 'owner');
   const invite = store.invites.create(owner, 'commons', { profile: 'member' });
   const native = createMcpInviteOAuth({ store, clients: [client], resource });
@@ -66,8 +67,8 @@ test('authenticated modern Events subscribe -> atomic permitted wake -> signed c
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
   assert.equal((await f.rpc('events/list')).status, 401);
 });
-test('reconnecting recovers saved requests by reading, not by replaying callbacks', async t => {
-  const f = await fixture(t);
+for (const normalized of [false, true]) test(`native request wake carries the exact read pointer and reconnect recovers earlier requests (${normalized ? 'normalized' : 'legacy'})`, async t => {
+  const f = await fixture(t, { normalized });
   const call = async (name, args = {}) => {
     const response = await f.rpc('tools/call', { name, arguments: args });
     assert.notEqual(response.result?.isError, true, JSON.stringify(response));
@@ -100,7 +101,14 @@ test('reconnecting recovers saved requests by reading, not by replaying callback
   ask('after-subscription');
   await f.server.drainMcpEvents();
   assert.equal(f.deliveries.length, 1);
-  assert.equal(JSON.parse(f.deliveries[0].body).data.messageId, 'after-subscription');
+  const pointer = JSON.parse(f.deliveries[0].body).data;
+  assert.deepEqual(pointer, { roomId: 'commons', memberId: f.grant.member_id,
+    messageId: 'after-subscription', requestId: 'after-subscription' });
+  const fromWake = await call('room_read_request', { requestMessageId: pointer.requestId });
+  assert.equal(fromWake.request.id, 'after-subscription');
+  assert.equal(fromWake.request.status, 'open');
+  assert.equal(fromWake.page.hasMore, false);
+  assert.ok(fromWake.current.answerBasis);
   assert.equal((await call('room_read_request', { requestMessageId: 'before-subscription' })).request.status, 'open',
     'reading and callback delivery do not answer a request');
 });

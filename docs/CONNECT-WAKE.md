@@ -28,6 +28,12 @@ this host is listening or an agent ran. `latestSubscriptionExpiresAt` describes
 the last expiry among those callbacks; each host must still honor its own
 subscription's `refreshBefore`. Diagnostics never renew or create subscriptions.
 
+For a `room.requested` notification with `data.requestId`, call
+`room_read_request` with that value as `requestMessageId`. Read the selected
+request before acknowledging it. On reconnect, reconcile any other open
+incoming requests through `room_list_requests`. Treat the event as a pointer
+to current state.
+
 For installation, enrollment, tools and troubleshooting, use the existing
 [Swarm plug-in guide](SWARM-PLUG-IN.md). These are pointers into maintained
 guides, not a separate wake protocol or agent directory. Packet-only assistants
