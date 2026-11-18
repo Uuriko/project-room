@@ -59,7 +59,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(code, 0, errors.join("\n"));
     const cli = JSON.parse(output[0]);
     // Opaque continuations intentionally differ on fresh issuance.
-    for (const [source, command] of [["work", "work"], ["requests", "request"]]) {
+    for (const [source, command] of [["work", "work"], ["requests", "read"]]) {
       assert.deepEqual(cli[source].items.map(row => {
         const { command: actual, ...nextRead } = row.nextRead;
         assert.deepEqual(actual, ["room", command, row.id]);
@@ -67,6 +67,28 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       }), owner.value[source].items);
     }
     assert.equal(cli.requests.coverage, owner.value.requests.coverage);
+    if (representation === "legacy") {
+      const inputs = [];
+      output.length = 0;
+      const fallbackCode = await main(["next", "--source", "requests"], {
+        cwd: directory, env, out: value => output.push(value), err: value => errors.push(value),
+        fetchImpl: async (url, init) => {
+          const { id, params } = JSON.parse(init.body);
+          inputs.push(params.name);
+          if (params.name !== "room_next") return fetch(url, init);
+          return Response.json({ jsonrpc: "2.0", id, result: { structuredContent: {
+            contractVersion: 1, roomId: "commons", viewerId: f.producer.id,
+            requests: { coverage: "unavailable", reason: "legacy_projection_budget", items: [],
+              nextRead: { tool: "room_list_requests", arguments: { roomId: "commons", direction: "incoming", status: "open" } } }
+          } } });
+        }
+      });
+      assert.equal(fallbackCode, 0, errors.join("\n"));
+      const pickedUp = JSON.parse(output[0]).requests;
+      assert.equal(pickedUp.coverage, "complete");
+      assert.deepEqual(pickedUp.items.map(row => row.nextRead.command), [["room", "read", "private-ask"]]);
+      assert.deepEqual(inputs, ["room_next", "room_list_requests"]);
+    }
     assert.equal(f.stored(), before, "neither adapter writes or acknowledges");
   });
 }
