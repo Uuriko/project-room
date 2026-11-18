@@ -51,16 +51,17 @@ test("GET /download returns honest platform status and the runtime latest link",
   assert.equal(await head.text(), "");
 });
 
-test("setup skill and the short agent index state that there is no public Mac app", () => {
+test("setup skill names Mac app availability and the agent index links directly to the Node runtime", () => {
   const skill = readFileSync(new URL("../skills/project-room-setup/SKILL.md", import.meta.url), "utf8");
   const plugin = readFileSync(new URL("../plugins/project-room/skills/project-room-setup/SKILL.md", import.meta.url), "utf8");
-  for (const text of [skill, plugin, llmsTxt()]) {
+  for (const text of [skill, plugin]) {
     assert.equal(text.includes("official current download"), false);
     assert.ok(text.includes(MAC));
   }
   const packet = llmsTxt();
   assert.ok(Buffer.byteLength(packet) < 5120, `llms.txt is ${Buffer.byteLength(packet)} bytes`);
   assert.ok(packet.includes(RUNTIME_RELEASE_URL));
+  assert.ok(!packet.includes(MAC), "agent discovery should lead with the command runtime");
   assert.equal(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version, PACKAGE_VERSION);
 });
 
