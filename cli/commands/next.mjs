@@ -1,6 +1,7 @@
 import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
 import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
+import { validId } from "../../src/events.js";
 
 const HELP = "room next [--source work|requests] [--cursor TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow each partial source's nextRead.";
 
@@ -51,6 +52,32 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
     })) {
       err("Room returned an invalid next view.");
       return 1;
+    }
+    for (const source of ["work", "requests"]) {
+      const read = value[source]?.nextRead;
+      const args = read?.arguments;
+      if (read?.tool === "room_next" && args?.source === source && args.roomId === config.roomId
+          && Object.keys(args).every(key => ["roomId", "source", "cursor"].includes(key))
+          && (args.cursor === undefined || /^[A-Za-z0-9_-]{1,4096}$/.test(args.cursor))) {
+        read.command = ["room", "next", "--source", source, ...(args.cursor ? ["--cursor", args.cursor] : [])];
+      }
+    }
+    for (const row of value.work?.items ?? []) {
+      const args = row.nextRead?.arguments;
+      if (row.nextRead?.tool === "room_read_work" && validId(args?.workItemId)
+          && (args.roomId === undefined || args.roomId === config.roomId)
+          && args.brief === true && args.includeDiscussion !== true
+          && Object.keys(args).every(key => ["roomId", "workItemId", "brief", "includeDiscussion", "includeResult"].includes(key))) {
+        row.nextRead.command = ["room", "work", args.workItemId, ...(args.includeResult === true ? ["--result"] : [])];
+      }
+    }
+    for (const row of value.requests?.items ?? []) {
+      const args = row.nextRead?.arguments;
+      if (row.nextRead?.tool === "room_read_request" && validId(args?.requestMessageId)
+          && (args.roomId === undefined || args.roomId === config.roomId)
+          && Object.keys(args).every(key => ["roomId", "requestMessageId"].includes(key))) {
+        row.nextRead.command = ["room", "request", args.requestMessageId];
+      }
     }
     const output = JSON.stringify(value);
     if (output.includes(secret) || output.includes(config.token)) {

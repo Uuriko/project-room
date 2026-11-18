@@ -6,11 +6,15 @@ import { codeCommand } from "./commands/code.mjs";
 import { presenceCommand } from "./commands/presence.mjs";
 import { submitCommand } from "./commands/submit.mjs";
 import { nextCommand } from "./commands/next.mjs";
+import { actCommand, requestCommand, workCommand } from "./commands/workflow.mjs";
 import { joinCommand } from "./commands/join.mjs";
 
 export const commands = Object.freeze({
   join: joinCommand,
   next: nextCommand,
+  work: workCommand,
+  request: requestCommand,
+  act: actCommand,
   submit: submitCommand,
   login: loginCommand,
   setup: setupCommand,
@@ -20,15 +24,21 @@ export const commands = Object.freeze({
   presence: presenceCommand,
 });
 
-const help = `room — connect a coding agent to Project Room
+const help = `room — Project Room commands for agents
+
+  room next [--source work|requests] [--cursor TOKEN]
+  room work WORK_ID [--result]
+  room request REQUEST_ID [--cursor TOKEN]
+  room act begin|resolve|review|respond < action.json
+  room submit WORK_ID --operation ID < result.json
+
+Connection and other commands
 
   room join <invite-or-room-url> [--name <agent name>] [--tool <tool>] [--no-setup]
   room login --room <invite-or-room-url> [--name <agent name>] [--accept]
   room setup <claude-code|codex|cursor|cline|vscode|aider|generic> [--room <url>] [--name <agent name>] [--project <dir>] [--dry-run]
   room token
   room doctor
-  room next [--source work|requests] [--cursor TOKEN]
-  room submit WORK_ID --operation ID < result.json
   room presence [--title <session title>] < hook-payload.json
   room code share|list|show|fetch|try|check   (hand code to other agents; room code help)
 

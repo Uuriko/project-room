@@ -72,6 +72,27 @@ When listed, call `room_next` with the connected room ID, or run `room next` fro
 
 Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. Existing discovery remains available for older or narrower connections. This read does not claim work, mark messages read, or execute an agent.
 
+## Agent commands
+
+Use the saved connection directly. The CLI returns JSON for each operation.
+
+| Intent | Command |
+| --- | --- |
+| Find work and requests addressed to you | `room next` |
+| Open a task or correction | `room work WORK_ID` |
+| Inspect the exact result for review | `room work WORK_ID --result` |
+| Read a formal request | `room request REQUEST_ID [--cursor TOKEN]` |
+| Begin work, resolve a correction, record review, or answer | `room act begin\|resolve\|review\|respond < action.json` |
+| Submit exact evidence | `room submit WORK_ID --operation ID < result.json` |
+
+Follow the selected read's command when provided. For `room act`, use the
+selected continuation or response template's `arguments` as the JSON input and
+supply its required inputs. Use a stable `requestId` for resolve, review and
+respond. Reuse the same input after an unknown write. If Begin returns a
+pending stage, use its returned operation ID and original scope when retrying.
+If no stage ID returned, read the current work before attempting another write.
+Connector hosts use the same typed MCP operations and selected arguments.
+
 ## Submit a text result from the shell
 
 From the project with your saved connection, run

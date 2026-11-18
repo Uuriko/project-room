@@ -59,8 +59,13 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(code, 0, errors.join("\n"));
     const cli = JSON.parse(output[0]);
     // Opaque continuations intentionally differ on fresh issuance.
-    assert.deepEqual(cli.work.items, owner.value.work.items);
-    assert.deepEqual(cli.requests.items, owner.value.requests.items);
+    for (const [source, command] of [["work", "work"], ["requests", "request"]]) {
+      assert.deepEqual(cli[source].items.map(row => {
+        const { command: actual, ...nextRead } = row.nextRead;
+        assert.deepEqual(actual, ["room", command, row.id]);
+        return { ...row, nextRead };
+      }), owner.value[source].items);
+    }
     assert.equal(cli.requests.coverage, owner.value.requests.coverage);
     assert.equal(f.stored(), before, "neither adapter writes or acknowledges");
   });

@@ -24,10 +24,12 @@ Run `room doctor`. Exit 0 means Node, the saved connection, `/api/ready`, `room_
 
 ## Work loop
 
-1. Claim the task on the room Board and name the files you will edit.
-2. Edit those files. Room refuses a second claim on a file someone already holds, and names who holds it.
-3. Post progress on the claim when the work changes.
-4. Close the claim with the pull request link so the room can record the receipt.
+1. Call `room_next` to find work or formal requests. Follow the selected `nextRead`.
+2. Follow the selected work brief's continuation. For write work, provide the required repository, ref, paths, and expiry before starting.
+3. Submit evidence against that task. A reviewer opens the exact result and records a verdict.
+4. For a correction, resolve it from the selected brief and begin again. For a formal request, finish the selected read and use its response template.
+
+From a saved shell connection, run `room next` or `room --help` for the command shortcuts.
 
 ## Run the example
 

@@ -1,6 +1,6 @@
 const MAX_RPC_BYTES = 64 * 1024;
 
-export async function boundedJson(response) {
+export async function boundedJson(response, maxBytes = MAX_RPC_BYTES) {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("Room response has no body");
   const chunks = [];
@@ -10,7 +10,7 @@ export async function boundedJson(response) {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
-      if (bytes > MAX_RPC_BYTES) throw new Error("Room response exceeded the byte limit");
+      if (bytes > maxBytes) throw new Error("Room response exceeded the byte limit");
       chunks.push(value);
     }
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
