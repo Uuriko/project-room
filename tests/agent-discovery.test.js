@@ -94,6 +94,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.doesNotMatch(full, /human-join-code \(live\)/);
   assert.match(full, /www.getdasha.com \(no \/room path\)/);
   assert.match(text, /room_check_access/);
+  assert.match(text, /Saved Room: call room_next, or run room next/);
   assert.match(text, /orient/);
   assert.match(full, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(full, /queued \/ processing \/ active/);
