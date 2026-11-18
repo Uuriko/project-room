@@ -83,6 +83,20 @@ test(`${representation} commands cover pickup, correction, review, requests and 
     } });
     const selected = await cli(["work", workItemId]);
     assert.equal(selected.code, 0, JSON.stringify(selected));
+    if (workItemId === "normal") {
+      const prior = selected.value;
+      const refreshed = (await cli(["work", workItemId, "--since", prior.briefVersion])).value;
+      assert.equal(refreshed.briefUnchanged, true);
+      assert.equal(refreshed.briefVersion, prior.briefVersion);
+      assert.equal(refreshed.brief, undefined);
+      assert.deepEqual(refreshed.continuation, prior.continuation);
+      assert.deepEqual(refreshed.cliBasis, prior.cliBasis);
+      assert.ok(Buffer.byteLength(JSON.stringify(refreshed)) < Buffer.byteLength(JSON.stringify(prior)));
+      const mismatched = await cli(["work", workItemId, "--since", prior.briefVersion], undefined, home,
+        async (_url, init) => Response.json({ jsonrpc: "2.0", id: JSON.parse(init.body).id,
+          result: { structuredContent: { ...refreshed, briefVersion: "0".repeat(64) } } }));
+      assert.deepEqual(mismatched, { code: 1, value: { status: "unavailable", code: "room_read_unavailable" } });
+    }
     const step = selected.value.continuation;
     assert.deepEqual(step.command, ["room", "begin", "--from"]);
     const begin = await cli([...step.command.slice(1), "-"], selected.value);
@@ -91,7 +105,15 @@ test(`${representation} commands cover pickup, correction, review, requests and 
     const staleBegin = await cli([...step.command.slice(1), "-"], selected.value);
     assert.equal(staleBegin.value.stopped, "stale_revision");
     assert.equal(store.headSequence("commons"), beforeRetry);
-    const read = await cli(["work", workItemId]);
+    const read = await cli(workItemId === "normal"
+      ? ["work", workItemId, "--since", selected.value.briefVersion] : ["work", workItemId]);
+    if (workItemId === "normal") {
+      assert.equal(read.code, 0);
+      assert.equal(typeof read.value.brief, "string");
+      assert.notEqual(read.value.briefVersion, selected.value.briefVersion);
+      assert.ok(read.value.revision > selected.value.revision);
+      assert.equal(read.value.cliBasis.actions.submit.expectedRevision, read.value.revision);
+    }
     return { body: "The exact contribution.", summary: "Checked the evidence", nextAction: "Read the contribution",
       producerId: producer.identityId, expectedRevision: read.value.revision };
   };

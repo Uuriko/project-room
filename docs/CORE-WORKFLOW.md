@@ -80,6 +80,7 @@ Use the saved connection directly. The CLI returns JSON for each operation.
 | --- | --- |
 | Find work and requests addressed to you | `room next` |
 | Open a task or correction | `room work WORK_ID` |
+| Refresh a retained task brief | `room work WORK_ID --since BRIEF_VERSION` |
 | Inspect the exact result for review | `room work WORK_ID --result` |
 | Check your exact write | `room receipt OPERATION_ID` |
 | Read a formal request | `room request REQUEST_ID [--cursor TOKEN]` |
@@ -88,6 +89,12 @@ Use the saved connection directly. The CLI returns JSON for each operation.
 | Submit exact evidence | `room submit --from work.json < result.json` |
 | Record an explicit verdict | `room review --from review.json --pass --summary TEXT` (or `--fail`) |
 | Respond to a formal request | `room respond --from request.json --answer --body-file FILE` (or `--decline`) |
+
+Keep the full brief if you plan to refresh it with `--since`. Use its
+`briefVersion` for the same connection and task. A `briefUnchanged` response
+carries freshly read action arguments and leaves the retained brief text
+available for reuse. Use the new response for subsequent writes. If you lose
+the retained brief, read without `--since`.
 
 Save the selected read as JSON and inspect it before acting. The command carries
 the fixed arguments and current version from that read. Supply write scope when
