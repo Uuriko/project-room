@@ -13,8 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
-for (const representation of ["legacy", "normalized-current-v1"]) {
-test(`${representation} commands cover pickup, correction, review, requests and submission recovery`, async t => {
+async function fixture(t, representation) {
   const home = mkdtempSync(join(realpathSync(tmpdir()), "room-submit-"));
   const env = { HOME: home, PROJECT_ROOM_KEYCHAIN: "0" };
   const store = new RoomStore(join(home, "fixture.sqlite"));
@@ -74,6 +73,12 @@ test(`${representation} commands cover pickup, correction, review, requests and 
     assert.equal(lines.length, 1);
     return { code, value: lines[0] };
   };
+  return { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
+}
+
+for (const representation of ["legacy", "normalized-current-v1"]) {
+test(`${representation} commands cover pickup, correction, review, requests and submission recovery`, async t => {
+  const { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli } = await fixture(t, representation);
   const prepare = async (workItemId, review = false) => {
     store.command(owner, "commons", { id: "propose-" + workItemId, type: "work.proposed", data: {
       workItemId, title: "Review the evidence", definitionOfDone: "Test the exact pickup",
@@ -278,5 +283,62 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   const answered = await cli(respond, request.value);
   assert.equal(answered.code, 0, JSON.stringify(answered));
   assert.doesNotMatch(JSON.stringify([accepted, answered]), new RegExp(producer.secret));
+
+});
+
+test(`${representation} answers use the saved request, stop at a correction and recover a lost response`, async t => {
+  const { home, store, producer, reviewer, rpc, cli } = await fixture(t, representation);
+  const requested = await rpc("room_request_reply", { toMemberId: producer.identityId,
+    requestId: "fixture-first", body: "What did reconnect show?" }, reviewer);
+  const request = await cli(["read", requested.requestMessageId]);
+  const answerFile = join(home, "answer.txt");
+  writeFileSync(answerFile, "The original operation receipt was recovered.", { mode: 0o600 });
+  const answered = await cli(["answer", requested.requestMessageId, "--from", "-", "--body-file", answerFile], request.value);
+  assert.equal(answered.code, 0, JSON.stringify(answered));
+  const unexpectedFetch = () => assert.fail("Invalid packet should not reach HTTP");
+
+  const follow = await rpc("room_request_reply", { requestId: "fixture-follow",
+    toMemberId: producer.identityId, replyToId: answered.value.messageId,
+    body: "Use the receipt, then report the reconnect check." }, reviewer);
+  const followRead = await cli(["read", follow.requestMessageId]);
+  assert.deepEqual(followRead.value.answerCommand, ["room", "answer", follow.requestMessageId, "--from"]);
+  assert.equal(followRead.value.preparation.previousExchanges[0].requestMessageId, requested.requestMessageId);
+  const progress = await rpc("room_progress_request", { requestMessageId: follow.requestMessageId,
+    expectedRequestRevision: followRead.value.request.revision, progress: "acknowledged" });
+  assert.equal(progress.appliedRequestRevision, followRead.value.request.revision);
+
+  const answer = ["answer", follow.requestMessageId, "--from", "-", "--body-file", answerFile];
+  assert.equal((await cli(answer, request.value, home, unexpectedFetch)).value.code, "request_selection_mismatch");
+  await rpc("room_reply", { replyToId: follow.requestMessageId, toMemberId: producer.identityId,
+    body: "Correction: confirm the original operation was recovered." }, reviewer);
+  const beforeStale = store.headSequence("commons");
+  const staleAnswer = await cli(answer, followRead.value);
+  assert.equal(staleAnswer.value.status, "refused", JSON.stringify(staleAnswer));
+  assert.equal(staleAnswer.value.code, "stale_revision");
+  assert.equal(staleAnswer.value.currentRead?.request.id, follow.requestMessageId);
+  assert.equal(staleAnswer.value.currentRead?.page.items.at(-1).message.body,
+    "Correction: confirm the original operation was recovered.");
+  assert.equal(store.headSequence("commons"), beforeStale);
+
+  const operations = [];
+  const recovered = await cli(answer, staleAnswer.value.currentRead, home, async (url, init) => {
+    const name = JSON.parse(init.body).params.name;
+    operations.push(name);
+    const response = await fetch(url, init);
+    if (name === "room_respond_to_request") {
+      await response.arrayBuffer();
+      throw new Error("Lost the response after SQLite committed");
+    }
+    return response;
+  });
+  assert.equal(recovered.code, 0, JSON.stringify(recovered));
+  assert.equal(recovered.value.recoveredFromReceipt, true);
+  assert.equal(recovered.value.requestMessageId, follow.requestMessageId);
+  assert.deepEqual(operations, ["room_respond_to_request", "room_receipt", "room_read_request"]);
+  assert.equal(store.headSequence("commons"), beforeStale + 1);
+  const complete = await rpc("room_read_request", { requestMessageId: follow.requestMessageId });
+  assert.equal(complete.request.terminalEventId, recovered.value.eventId);
+  assert.equal(complete.request.status, "answered");
+
 });
 }
