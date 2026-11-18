@@ -84,7 +84,7 @@ test("project state: typed receipts answer when the log holds a deploy anchor, a
   assert.equal(text.receiptWindow.source, "journal");
   const core = s => ({ receipts: s.receipts, mergedNotDeployed: s.mergedNotDeployed, lastDeploy: s.live.lastDeploy, smoke: s.live.smoke });
   assert.deepEqual(core(typed), core(text), "the typed read and the text fallback tell the same story");
-  assert.equal(typed.mergedNotDeployed.count, 1);
+  assert.equal(typed.mergedNotDeployed.count, null, "typed receipts cannot prove the unstamped serving build");
 });
 
 test("project state carries one latency line derived from the full latency read", t => {

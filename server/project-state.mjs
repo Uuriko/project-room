@@ -100,25 +100,37 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
   const deploys = rows.filter(r => r.parsed.kind === "deploy" || r.parsed.kind === "rollback").sort((a, b) => b.seq - a.seq);
   const lastOkDeploy = deploys.find(r => r.parsed.smoke === "ok" && r.parsed.kind === "deploy") ?? null;
   const merges = rows.filter(r => r.parsed.kind === "merged").sort((a, b) => a.seq - b.seq);
-  // Main is linear and merges are posted in order, so a deploy of sha X covers
-  // every merge up to the MERGED receipt for X; with no matching receipt the
-  // deploy receipt's own position is the watermark.
-  const tip = lastOkDeploy ? merges.find(r => r.parsed.sha === lastOkDeploy.parsed.sha) : null;
-  const watermark = tip?.seq ?? lastOkDeploy?.seq ?? 0;
-  const pending = merges.filter(r => r.seq > watermark);
-  const liveSha = /^[0-9a-f]{40}$/.test(live?.sourceRevision ?? "") ? live.sourceRevision.slice(0, 8) : null;
-  const deployMatchesLive = lastOkDeploy && liveSha && lastOkDeploy.parsed.sha === liveSha;
+  const sourceRevision = /^[0-9a-f]{40}$/.test(live?.sourceRevision ?? "") ? live.sourceRevision : null;
+  const liveSha = sourceRevision?.slice(0, 8) ?? null;
+  const last = deploys[0] ?? null;
+  const lastDeploy = last ? { kind: last.parsed.kind, sha: last.parsed.sha ?? null, smoke: last.parsed.smoke,
+    at: iso(Date.parse(last.at)), seq: last.seq } : null;
+  const matchesLive = lastDeploy?.sha != null && lastDeploy.sha === liveSha;
+  const deployMatchesLive = matchesLive && last === lastOkDeploy;
+  // A prefix without a unique visible merge anchor cannot establish which
+  // merges a deploy included. Count only receipts after a usable anchor.
+  const anchors = deployMatchesLive ? merges.filter(r => r.seq < last.seq && r.parsed.sha === liveSha) : [];
+  const anchor = anchors.length === 1 ? anchors[0] : null;
+  const pending = anchor ? merges.filter(r => r.seq > anchor.seq) : [];
+  const smokeStatus = !lastDeploy ? "missing"
+    : !lastDeploy.sha || !liveSha ? "unbound"
+    : !matchesLive ? "different-revision"
+    : lastDeploy.smoke === "ok" ? "reported-passed"
+    : lastDeploy.smoke === "failed" ? "reported-failed" : "reported-unknown";
   const state = {
     contractVersion: PROJECT_STATE_VERSION, roomId, viewerId, through: sequence, evaluatedAt: iso(nowMs), untrusted: true,
     live: {
       sha: liveSha, build: Number.isFinite(Date.parse(live?.buildId)) ? live.buildId : null,
-      deployedAt: deployMatchesLive ? iso(Date.parse(lastOkDeploy.at)) : (Number.isFinite(Date.parse(live?.buildId)) ? iso(Date.parse(live.buildId)) : null),
-      smoke: deployMatchesLive ? "ok" : lastOkDeploy ? "receipt-sha-differs" : "no-receipt",
-      lastDeploy: deploys[0] ? { kind: deploys[0].parsed.kind, sha: deploys[0].parsed.sha ?? null, smoke: deploys[0].parsed.smoke, at: iso(Date.parse(deploys[0].at)), seq: deploys[0].seq } : null
+      deployedAt: deployMatchesLive ? lastDeploy.at : null,
+      smoke: deployMatchesLive ? "ok" : lastOkDeploy && !matchesLive ? "receipt-sha-differs" : "no-receipt",
+      lastDeploy,
+      serving: { source: "runtime-version", sourceRevision, buildId: clip(live?.buildId, 128) },
+      smokeEvidence: { status: smokeStatus, binding: matchesLive ? "revision-prefix" : null,
+        ...(lastDeploy ? { sequence: lastDeploy.seq } : {}) }
     },
-    mergedNotDeployed: lastOkDeploy
+    mergedNotDeployed: anchor
       ? { count: pending.length, items: pending.slice(-CAPS.mergedNotDeployed).reverse().map(r => ({ pr: r.parsed.pr, sha: r.parsed.sha, title: r.parsed.title, at: iso(Date.parse(r.at)) })) }
-      : { count: null, note: "no good PROD DEPLOY receipt in the scan window, so what is undeployed is unknown, not zero", mergesSeen: merges.length },
+      : { count: null, note: "no current passing deploy and unique matching merge receipt in this window", mergesSeen: merges.length },
     work: { counts, scanned: items.length, complete: Boolean(itemsComplete) },
     inProgress: inProgress.slice(0, CAPS.inProgress).map(strip),
     blocked: blocked.slice(0, CAPS.blocked).map(strip),

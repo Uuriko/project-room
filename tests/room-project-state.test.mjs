@@ -51,6 +51,27 @@ test("builder: merged-not-deployed is the merges after the last good deploy; unk
   const unknown = buildProjectState({ ...base, receipts: [] });
   assert.equal(unknown.mergedNotDeployed.count, null);
   assert.equal(unknown.live.smoke, "no-receipt");
+  assert.equal(unknown.live.deployedAt, null, "build time alone does not establish deploy time");
+  assert.deepEqual(unknown.live.smokeEvidence, { status: "missing", binding: null });
+  const nodeInstall = buildProjectState({ ...base, receipts: [], live: { ...base.live, buildId: "selfhost-234527c7" } });
+  assert.deepEqual(nodeInstall.live.serving, { source: "runtime-version", sourceRevision: base.live.sourceRevision,
+    buildId: "selfhost-234527c7" });
+  assert.deepEqual(s.live.smokeEvidence, { status: "reported-passed", binding: "revision-prefix", sequence: 30 });
+  const laterFailure = { seq: 60, at: at(6), actorId: "owner", body: "PROD DEPLOY 234527c7 · smoke failure" };
+  const failed = buildProjectState({ ...base, receipts: [...receipts, laterFailure] });
+  assert.deepEqual(failed.live.smokeEvidence, { status: "reported-failed", binding: "revision-prefix", sequence: 60 });
+  assert.equal(failed.live.deployedAt, null);
+  assert.equal(failed.mergedNotDeployed.count, null);
+  const laterRollback = { ...laterFailure, body: "PROD ROLLBACK · smoke ok" };
+  const rollback = buildProjectState({ ...base, receipts: [...receipts, laterRollback] });
+  assert.deepEqual(rollback.live.smokeEvidence, { status: "unbound", binding: null, sequence: 60 });
+  assert.equal(rollback.live.deployedAt, null);
+  const missingAnchor = buildProjectState({ ...base, receipts: receipts.filter(row => row.seq !== 20) });
+  assert.equal(missingAnchor.mergedNotDeployed.count, null);
+  const ambiguousAnchor = buildProjectState({ ...base, receipts: [...receipts,
+    { seq: 25, at: at(2), actorId: "owner", body: "MERGED #8 234527c7 · same prefix" }] });
+  assert.equal(ambiguousAnchor.mergedNotDeployed.count, null);
+
   const rolled = buildProjectState({ ...base, live: { sourceRevision: "f".repeat(40), buildId: null }, receipts });
   assert.equal(rolled.live.smoke, "receipt-sha-differs", "a live sha the last receipt does not name is flagged, not trusted");
 });
@@ -153,7 +174,7 @@ test("MCP twin on a normalized agent room: same document, bounded, unknown argum
   const listedRow = state.needsYou.find(row => state.inProgress.some(other => other.id === row.id));
   assert.ok(!listedRow || !("title" in listedRow), "a row already listed in full under inProgress is a pointer in needsYou");
   assert.equal(state.live.lastDeploy.sha, "234527c7");
-  assert.equal(state.mergedNotDeployed.count, 1);
+  assert.equal(state.mergedNotDeployed.count, null);
   assert.ok(Buffer.byteLength(JSON.stringify(state)) <= PROJECT_STATE_MAX_BYTES + 256);
   const rest = await fetch(`${origin}/api/rooms/ps/state`, { headers: { authorization: `Bearer ${bob.secret}` } });
   const twin = await rest.json();
