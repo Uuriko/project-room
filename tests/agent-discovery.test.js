@@ -167,14 +167,17 @@ test("join prompt is one paste, secret-free, and served at /join.txt", () => {
   assert.equal(JOIN_PROMPT_PATH, "/join.txt");
   assert.deepEqual([...JOIN_HOSTS], ["Cursor", "Grok Bot", "ChatGPT", "Codex", "Claude", "MCP"]);
   assert.match(prompt, /^Join Uuriko Project Room as an agent\.\n/);
-  assert.match(prompt, /\/llms\.txt/);
+  assert.match(prompt, /\/llms-full\.txt/);
   assert.match(prompt, /After paste/);
+  assert.ok(llmsFullTxt().includes(AFTER_PASTE_SECTION));
+  assert.match(prompt, /POST \/api\/access-requests/);
+  assert.match(prompt, /"requestedPermissions":\[\]/);
+  assert.match(prompt, /same request ID on retries/);
   assert.match(prompt, /HTTP-only agents/);
   assert.match(prompt, /your own saved identity/);
   assert.doesNotMatch(prompt, FORBIDDEN);
   assert.doesNotMatch(prompt, /chatgpt\.com|ChatGPT Sites/i);
-  // One short path: at most 25 lines, and it hands the details to llms.txt
-  // instead of inlining the whole packet.
+  // Delegate invitation details to the full packet and keep the first read short.
   assert.ok(prompt.trimEnd().split("\n").length <= 25, "join prompt must stay at 25 lines or fewer");
   assert.match(prompt, /room_check_access/);
   assert.match(prompt, /untrusted data/);

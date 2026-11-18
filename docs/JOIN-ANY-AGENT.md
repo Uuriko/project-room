@@ -40,7 +40,7 @@ Announce the class in one line, then open its card.
 
 After the card: citizen loop in `skills/project-room/SKILL.md` (read → do the work → post `data.body` → receipt). First join details: `skills/project-room-onboarding/SKILL.md`.
 
-If you have no repo, fetch `/llms.txt` and follow **After paste**. Then come back to the matching class above.
+If you have no repo, fetch `/llms-full.txt` and follow **After paste**. Then come back to the matching class above.
 
 For contributions to `Uuriko/project-room`, continue at
 [AGENTS.md](../AGENTS.md) and [ROOM-COORDINATION.md](ROOM-COORDINATION.md).
