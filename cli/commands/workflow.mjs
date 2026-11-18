@@ -112,8 +112,11 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
       const cursor = value.nextRead?.arguments?.cursor ?? value.page?.nextCursor;
       const compactFlag = args.view === "compact" ? ["--compact"] : [];
       if (validCursor(cursor)) value.nextCommand = ["room", "request", args.requestMessageId, ...compactFlag, "--cursor", cursor];
-      if (value.preparation?.previousExchangesNextRead)
+      if (value.preparation?.previousExchangesNextRead && Array.isArray(value.preparation.olderExchangeReads)) {
         value.previousExchangesCommand = ["room", "request", args.requestMessageId];
+        value.olderExchangeCommands = value.preparation.olderExchangeReads.map(read =>
+          ["room", "request", read.arguments.requestMessageId, "--compact"]);
+      }
       for (const response of value.responseActions ?? []) {
         if (response.tool === actions.respond && value.cliBasis?.actions.respond) response.command = ["room", "respond", "--from"];
       }

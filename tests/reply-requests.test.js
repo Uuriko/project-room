@@ -452,6 +452,11 @@ for (const normalized of [false, true]) test(`compact request pages preserve cur
   assert.deepEqual(compact.responseActions, full.responseActions);
   assert.deepEqual(compact.preparation.previousExchanges, full.preparation.previousExchanges.slice(-1));
   assert.equal(compact.preparation.previousExchangesOmitted, 1);
+  const older = compact.preparation.olderExchangeReads;
+  assert.deepEqual(older, [{ tool: "room_read_request",
+    arguments: { requestMessageId: first.command.data.messageId, view: "compact" } }]);
+  const oldest = f.store.replyRequests.selected(f.keys.agent, "commons", older[0].arguments.requestMessageId, older[0].arguments);
+  assert.equal(oldest.page.items[0].message.body, "Earlier decision with context");
   assert.deepEqual(compact.preparation.previousExchangesNextRead.arguments, { requestMessageId: id, view: "full" });
   assert.ok(Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(full)));
   const page = read({ view: "compact", limit: 1 });

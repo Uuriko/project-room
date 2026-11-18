@@ -66,9 +66,14 @@ export function compactReplySelection(selected) {
     preparation: { ...preparation,
       previousExchanges: preparation.previousExchanges.slice(-1),
       previousExchangesOmitted: omitted,
-      ...(omitted ? { previousExchangesNextRead: {
-        tool: "room_read_request", arguments: { requestMessageId, view: "full" }
-      } } : {})
+      ...(omitted ? {
+        olderExchangeReads: preparation.previousExchanges.slice(0, -1).map(exchange => ({
+          tool: "room_read_request", arguments: { requestMessageId: exchange.requestMessageId, view: "compact" }
+        })),
+        previousExchangesNextRead: {
+          tool: "room_read_request", arguments: { requestMessageId, view: "full" }
+        }
+      } : {})
     }
   };
 }

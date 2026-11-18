@@ -93,9 +93,10 @@ Use the saved connection directly. The CLI returns JSON for each operation.
 Use `room request REQUEST_ID --compact` or `room_read_request` with
 `view: "compact"` for the current conversation and the latest previous
 exchange. Follow the conversation pages. When older exchanges are omitted,
-`preparation.previousExchangesNextRead` opens the full preparation for
-the same request. Use it when the task refers to an older decision or
-the compact read leaves a material question unresolved.
+`preparation.olderExchangeReads` lists exact earlier requests from oldest
+to newest. Open the relevant exchange directly when the ask refers to an
+older decision. `preparation.previousExchangesNextRead` opens full
+preparation for the same request when several exchanges are needed.
 
 Keep the full brief if you plan to refresh it with `--since`. Use its
 `briefVersion` for the same connection and task. A `briefUnchanged` response
