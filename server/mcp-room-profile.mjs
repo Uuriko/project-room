@@ -1349,12 +1349,22 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         if (oauthPrincipal) {
           const agent = resolveCatalogAgent(store, identity);
           const visible = new Set(listedMcpTools("full", false, agent).map(tool => tool.name));
+          const allowed = tool => visible.has(tool) && mcpOAuthToolAllowed(tool, oauthPrincipal.scopes);
           value.commandDiscovery = {
             tools: Object.fromEntries(["room_next", "room_receipt"].map(tool => [tool,
               !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes) ? "outside_connected_grant"
                 : visible.has(tool) ? "available_on_server" : "withheld_by_room_policy"
             ])),
-            next: "If a tool available on the server is missing from your host, refresh the existing connection's tool catalog for this same room and member. If room_next remains unavailable, use room_needs_me when listed and read the selected task or request."
+            whenMissingFromHost: {
+              available_on_server: "refresh_host_catalog",
+              outside_connected_grant: "use_authorized_tools",
+              withheld_by_room_policy: "check_room_policy"
+            },
+            ...(allowed("room_list_requests") && allowed("room_read_request") ? {
+              incomingRequestRead: { tool: "room_list_requests", arguments: { roomId: value.roomId,
+                direction: "incoming", status: "open" } }
+            } : {}),
+            next: "If a tool available on the server is missing from your host, refresh the existing connection's tool catalog for this same room and member. For formal requests, follow incomingRequestRead when listed; for broader pickup, use room_needs_me when listed."
           };
         }
         const state = value.nativeMonitoring.state;

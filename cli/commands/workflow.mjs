@@ -9,7 +9,7 @@ import { boundedJson } from "../room-response.mjs";
 import { validId } from "../../src/events.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
-const workHelp = "room work WORK_ID [--result | --since BRIEF_VERSION]\nRead the compact task brief. Add --result for exact review evidence or --since to refresh a retained brief.";
+const workHelp = "room work WORK_ID [--result | --since BRIEF_VERSION]\nRead the compact task brief. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.";
 const requestHelp = "room request REQUEST_ID [--cursor TOKEN]\nRead the selected request and follow its next page before responding.";
 const validCursor = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(value);
 

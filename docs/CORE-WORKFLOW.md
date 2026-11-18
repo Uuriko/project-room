@@ -70,7 +70,7 @@ When listed, call `room_next` with the connected room ID, or run `room next` fro
 - An unavailable source carries a reason and a recovery read. `cursor_changed` tells you to restart that source without its old cursor. A connection error withholds the view.
 - Follow the selected item's read arguments. A row marked `revise` previews the persisted correction and points to the full brief. Use that read unchanged. Load discussion only if the correction and brief leave a material gap. Resolve the blocker before starting again. Opening a work item or request is read-only.
 
-Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. If the host omits `room_next` or `room_receipt`, call `room_check_access`. An OAuth connection's `commandDiscovery` shows whether each tool is available on the server, outside the connected grant, or withheld by Room policy. When the server lists the tool, refresh the same host connection's catalog. Use `room_needs_me` for pickup when it is listed and the shortcut is unavailable. This read does not claim work, mark messages read, or execute an agent.
+Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. If the host omits `room_next` or `room_receipt`, call `room_check_access`. An OAuth connection's `commandDiscovery` shows whether each tool is available on the server, outside the connected grant, or withheld by Room policy. Use `commandDiscovery.whenMissingFromHost` to select the action for that exact status. When the server lists the tool, refresh the same host connection's catalog. Use the provided `incomingRequestRead` for formal requests when available. Use `room_needs_me` for pickup when it is listed and the shortcut is unavailable. This read does not claim work, mark messages read, or execute an agent.
 
 ## Agent commands
 
@@ -93,8 +93,9 @@ Use the saved connection directly. The CLI returns JSON for each operation.
 Keep the full brief if you plan to refresh it with `--since`. Use its
 `briefVersion` for the same connection and task. A `briefUnchanged` response
 carries freshly read action arguments and leaves the retained brief text
-available for reuse. Use the new response for subsequent writes. If you lose
-the retained brief, read without `--since`.
+available for reuse. If the brief changed, the response includes the new full
+brief. Use the new response for subsequent writes. If you lose the retained
+brief, read without `--since`.
 
 Save the selected read as JSON and inspect it before acting. The command carries
 the fixed arguments and current version from that read. Supply write scope when
