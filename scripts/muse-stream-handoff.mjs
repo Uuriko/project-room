@@ -45,7 +45,7 @@ async function inspect(client, policy, after, signal) {
   do {
     const page = await client.replyRequests({ direction: "incoming", status: "open", ...(cursor ? { cursor } : {}), signal });
     through ??= page.evaluatedThrough;
-    for (const candidate of page.requests.filter(request => matches(request, policy))) {
+    for (const candidate of page.requests.filter(request => matches(request, policy) && !request.progress)) {
       const context = await client.replyContext(candidate.id, { view: "compact", signal });
       const found = pointer(context, candidate, policy, after);
       if (found && (!next || found.openingSequence < next.openingSequence)) next = found;
