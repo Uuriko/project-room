@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { createReadStream, realpathSync, lstatSync, readlinkSync } from "node:fs";
+import { existsSync, createReadStream, realpathSync, lstatSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
@@ -131,7 +131,7 @@ async function main() {
   emit({ phase: "finished", evidence, operationId: id, recorded: Boolean(recorded), sequence: recorded ? receipt.sequence : null });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+if (process.argv[1] && existsSync(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   process.once("SIGTERM", () => { stop(); process.exit(143); });
   process.once("SIGINT", () => { stop(); process.exit(130); });
   main().catch(error => {
