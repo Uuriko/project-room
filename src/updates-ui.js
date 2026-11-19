@@ -446,8 +446,6 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   entry.addEventListener("click", () => open(filter));
   function openConversation() {
     cancelPending(); hidePage();
-    if (!location.hash || location.hash === "#pr-view/rooms")
-      window.history.replaceState(window.history.state, "", "#pr-view/conversation");
     host?.querySelector("#conversation-title")?.focus();
   }
   dialog.querySelector("#updates-close").addEventListener("click", openConversation);
