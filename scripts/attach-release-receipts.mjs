@@ -84,6 +84,14 @@ export async function attachReleaseReceipts({ binding, inputs, readResult, post 
   return { candidateRevision, completionEventId, report: published, evidence };
 }
 
+export function confirmedReceipt(saved, id) {
+  if (saved.messageId !== id || !Number.isSafeInteger(saved.sequence) || saved.sequence <= 0
+      || saved.status !== (saved.duplicate === true ? "duplicate" : "posted")) {
+    throw new Error("Unexpected receipt. Replay the same files.");
+  }
+  return { messageId: saved.messageId, sequence: saved.sequence, duplicate: saved.duplicate === true };
+}
+
 async function main() {
   const { values } = parseArgs({ options: Object.fromEntries(
     ["binding", "build", "browser", "deploy"].map(name => [name, { type: "string" }])) });
@@ -109,11 +117,7 @@ async function main() {
   }
   const output = await attachReleaseReceipts({ binding, inputs,
     readResult: args => call("room_read_result", args),
-    post: async args => {
-      const saved = await call("room_post_message", args);
-      if (saved.status !== "posted" || saved.messageId !== args.id) throw new Error("Unexpected receipt. Replay the same files.");
-      return { messageId: saved.messageId, sequence: saved.sequence, duplicate: saved.duplicate };
-    } });
+    post: async args => confirmedReceipt(await call("room_post_message", args), args.id) });
   console.log(JSON.stringify(output));
 }
 
