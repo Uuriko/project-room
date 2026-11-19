@@ -5,13 +5,37 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { summarizeCheckpoint, checkpointMarkdown } from "../scripts/release-checkpoint.mjs";
+import { summarizeCheckpoint, checkpointMarkdown, qualifyPr } from "../scripts/release-checkpoint.mjs";
 
 // Contract owner: a checkpoint must not turn changed revisions, absent checks,
 // public HTTP success, or missing evidence into release readiness. Existing
 // release-evidence tests cover TAP/digests; these cover PR/version observations.
 const HEAD = "a".repeat(40), BASE = "b".repeat(40), OTHER = "c".repeat(40);
 const AT = "2026-09-26T01:00:00.000Z";
+
+test("PR qualification distinguishes skipped steps, missing attribution, and newer attempts", async () => {
+  const pr = { headRefOid: HEAD, baseRefOid: BASE, baseRefName: "main" };
+  const job = { name: "unit", id: 7, head_sha: HEAD, run_id: 2, run_attempt: 1, status: "completed", conclusion: "success",
+    steps: [{ name: "Run suite", status: "completed", conclusion: "success" }] };
+  const run = { path: ".github/workflows/test.yml", id: 2, head_sha: HEAD, run_number: 3, run_attempt: 1, status: "completed",
+    pull_requests: [{ number: 25, head: { sha: HEAD } }] };
+  const selections = [{ workflow: "test.yml", job: "unit", step: "Run suite" }];
+  async function evaluate({ first = run, final = first, steps = job.steps, last = pr } = {}) {
+    let lists = 0, views = 0;
+    return qualifyPr({ repository: "sample/room", prNumber: 25, selections }, async args => {
+      if (args[0] === "pr") return { value: views++ ? last : pr };
+      if (args[1].includes("/jobs?")) return { value: { total_count: 1, jobs: [{ ...job, steps }] } };
+      return { value: { total_count: 1, workflow_runs: [lists++ ? final : first] } };
+    });
+  }
+  assert.equal((await evaluate()).status, "passed");
+  assert.equal((await evaluate({ steps: [{ ...job.steps[0], conclusion: "skipped" }] })).status, "not_run");
+  const unbound = await evaluate({ first: { ...run, pull_requests: [] } });
+  assert.equal(unbound.status, "ambiguous");
+  assert.equal(unbound.checks[0].observedHeadStatus, "passed");
+  assert.equal((await evaluate({ final: { ...run, run_attempt: 2 } })).status, "stale");
+  assert.equal((await evaluate({ last: { ...pr, headRefOid: OTHER } })).status, "stale");
+});
 const snapshot = value => ({ checkedAt: AT, value });
 const passed = { __typename: "CheckRun", name: "unit", workflowName: "test", status: "COMPLETED", conclusion: "SUCCESS", completedAt: AT };
 function observations() {
