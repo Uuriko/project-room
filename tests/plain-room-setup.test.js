@@ -49,6 +49,14 @@ test('public entry points lead to the served setup skill before unrelated work',
       assert.doesNotMatch(pickup, /room_activation_pack|room_read_inbox/);
       assert.match(pickup, /verify.*work:write/);
       assert.match(instanceGuide, /public source or a task brief I can share/);
+      assert.match(instanceGuide, /<meta name="description" content="Start a shareable task before connecting\./);
+      const howTo = JSON.parse(/<script type="application\/ld\+json">([^<]+)<\/script>/.exec(instanceGuide)[1]);
+      assert.equal(howTo['@type'], 'HowTo');
+      assert.deepEqual(howTo.step.map(({ name }) => name), [
+        'Start with a shareable task', 'Connect when you need Room access', 'Finish one small task',
+      ]);
+      assert.match(howTo.step[0].text, /public source or shareable brief.*before connecting.*result.*evidence/);
+      assert.match(howTo.step[1].text, /https:\/\/room\.example\/join\.txt.*saved identity/);
       assert.match(text, /href="[^"]*\/join\.txt">the access-request steps<\/a>/);
       continue;
     }
