@@ -151,7 +151,12 @@ Set `producerId` to the known member ID, or use null if it is unknown.
 Add `maxCodeUnits` when the task specifies a smaller UTF-16 limit. The command
 retains the completion arguments in private local state. If it reports a changed
 or blocked basis after posting, inspect the fresh work read and saved draft.
-The receipt points to the exact completion for review.
+The receipt points to the exact completion for review. The Work Thread link
+opens the same work record across corrections. If a new result addresses a
+failed review of the preceding result, the exact result read includes that
+finding and a link to the earlier evidence when the viewer can read it. Use the
+review action bound to the new completion. For an uncertain verdict write,
+look up its original operation ID before retrying.
 
 The explicit `room act` adapter and `room submit WORK_ID --operation ID`
 form remain available. The latter takes `expectedRevision` in the JSON input.

@@ -2,7 +2,7 @@ import { messageRepository } from "./message-repository.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer, validateResultSegments } from "../src/work-packet.js";
-import { nextWorkStep, workActions } from "../src/workflow.js";
+import { nextWorkStep, workActions, workThreadHref } from "../src/workflow.js";
 import { messageInHistory } from "./history-visibility.mjs";
 import { WORK_REVISION_TYPES } from "../src/events.js";
 
@@ -98,6 +98,28 @@ function textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecor
   return messageInHistory(message, floor);
 }
 
+// A correction is grounded in the failed verdict on the immediately preceding
+// result. Historical-only checks never drove a correction. Reuse the selected
+// result's audience rules for the old text before exposing a review of it.
+function precedingCorrection(db, state, work, receipt, viewerId, floor, messageRecords) {
+  const previous = work.receiptHistory.at(-1);
+  if (!previous || !receipt || receipt.eventId !== work.receipt?.eventId) return null;
+  if (receipt.nativeText && receipt.nativeText.previousCompletionEventId !== previous.eventId) return null;
+  const finding = work.verificationHistory.findLast(entry =>
+    !entry.historical && entry.completionEventId === previous.eventId && entry.evidenceVersion === previous.evidenceVersion);
+  if (finding?.result !== "fail") return null;
+  if (previous.nativeText) {
+    const { messageId } = previous.nativeText;
+    const oldMessage = (messageRecords ?? messageRepository({ db }, state.room.id, state)).get(messageId);
+    if (oldMessage?.deletedAt || !textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecords)) return null;
+  }
+  return {
+    verificationEventId: finding.eventId, verifierId: finding.verifierId,
+    completionEventId: previous.eventId, summary: finding.summary, untrusted: true,
+    nextRead: { tool: "room_read_result", arguments: { roomId: state.room.id, workItemId: work.id, completionEventId: previous.eventId } }
+  };
+}
+
 export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null }) {
   const work = state.workItems[workItemId];
   let result;
@@ -124,7 +146,10 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
           evidenceVersion: result.receipt.evidenceVersion }, inputRequired: ["result", "summary"] },
         guidance: "Check each criterion against evidence for this exact completion. Producer claims and external references require independent verification. Summarize what passed, failed, was skipped, or could not be verified. The Room rechecks authority and revision when recording the verdict." }
     : null;
+  const correction = result.text?.body === null ? null
+    : precedingCorrection(db, state, work, result.receipt, viewerId, floor, messageRecords);
   return { contractVersion: 1, roomId: state.room.id, workItemId,
+    workThread: { workItemId, href: workThreadHref(workItemId), ...(correction ? { correction } : {}) },
     selection: { completionEventId, draftMessageId }, result,
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,

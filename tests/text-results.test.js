@@ -129,6 +129,51 @@ test('one selected result read gives only the designated reviewer a current exac
   assert.throws(() => f.send(T.VERIFICATION_RECORDED, verdict, 'reviewer'), /Stale Work Item revision/);
 });
 
+test("a corrected thread keeps the earlier finding and one retry-safe current verdict", async t => {
+  const f = await setup(t);
+  const original = f.mutate(T.WORK_COMPLETED, f.input(f.post("Old PR evidence")));
+  const reviewer = new RoomAgentClient({ ...f.config, memberId: "reviewer", token: f.keys.reviewer });
+  const basisOf = read => {
+    const { roomId, ...basis } = read.review.action.arguments;
+    return basis;
+  };
+  const oldBasis = basisOf(await reviewer.workResult(f.workItemId));
+  const finding = f.send(T.VERIFICATION_RECORDED,
+    { ...oldBasis, result: "fail", summary: "The old SHA is wrong." }, "reviewer");
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Corrected the SHA" });
+  const corrected = f.mutate(T.WORK_COMPLETED, f.input(f.post("Corrected PR evidence")));
+  const packet = await reviewer.workResult(f.workItemId, { completionEventId: corrected.event.id });
+  assert.equal(packet.workThread.workItemId, f.workItemId);
+  assert.equal(packet.workThread.correction.summary, "The old SHA is wrong.");
+  assert.equal(packet.workThread.correction.verificationEventId, finding.event.id);
+  assert.equal(packet.workThread.correction.nextRead.arguments.completionEventId, original.event.id);
+  const historical = await reviewer.workResult(f.workItemId, { completionEventId: original.event.id });
+  assert.equal(historical.workThread.href, packet.workThread.href);
+  assert.equal(historical.workThread.correction, undefined);
+  assert.equal(historical.review, undefined);
+  const verdict = { ...basisOf(packet), result: "pass", summary: "Checked the corrected SHA." };
+  assert.throws(() => f.send(T.VERIFICATION_RECORDED, { ...oldBasis, result: "pass", summary: "Stale" }, "reviewer"), /Stale Work Item revision/);
+  const operationId = "corrected-verdict";
+  const write = async () => {
+    const response = await fetch(f.origin + "/api/rooms/commons/commands", {
+      method: "POST", headers: { authorization: "Bearer " + f.keys.reviewer, "content-type": "application/json" },
+      body: JSON.stringify({ id: operationId, type: T.VERIFICATION_RECORDED, data: verdict })
+    });
+    assert.ok(response.ok);
+    return response;
+  };
+  // Once the HTTP response starts, its transaction has committed. Discard
+  // the response body and recover from the operation ID alone.
+  await (await write()).body.cancel();
+  const recovered = f.store.operationReceipt(f.keys.reviewer, "commons", operationId);
+  assert.equal(recovered.eventId, f.item().verification.eventId);
+  const retry = await (await write()).json();
+  assert.equal(retry.duplicate, true);
+  assert.equal(retry.event.id, f.item().verification.eventId);
+  assert.equal(f.item().verificationHistory.some(row => row.completionEventId === corrected.event.id), false);
+  assert.equal((await reviewer.workResult(f.workItemId)).review, undefined);
+});
+
 test("native text preserves exact stored UTF-8 and old post/proposal provenance across restart", async t => {
   const f = await setup(t), body = "\uFEFF  Café e\u0301 🪷\r\n\tsecond line  \n";
   const posted = f.post(body, { packetId: "original-packet", basisRevision: 1 }, "guest");
