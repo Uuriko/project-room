@@ -13,7 +13,7 @@ const binding = { origin: "http://room", roomId: "commons", memberId: "producer"
   requestId: "host-question", attemptId: "attempt-one", roomCreatedEventId: "room-created", openingEventId: "question-opened" };
 const input = { requestId: binding.requestId, request: { id: "question" }, messages: [], preparation: {} };
 const turn = (status = "inProgress") => ({ id: "turn-one", status, items: status === "completed" ? [{ type: "agentMessage", id: "answer-one", text: "Reviewed result" }] : [] });
-function transport({ complete = true, loseSteer = false, early = false } = {}) {
+function transport({ complete = true, loseSteer = false, loseStart = false, early = false } = {}) {
   const calls = [], listeners = new Set(); let state = "inProgress";
   const event = (method, params) => listeners.forEach(fn => fn({ method, params }));
   const finish = () => { state = "completed"; event("turn/completed", { threadId: "thread-one", turn: turn(state) }); };
@@ -28,6 +28,10 @@ function transport({ complete = true, loseSteer = false, early = false } = {}) {
           assert.deepEqual(Object.keys(params).sort(), ["input", "threadId"]);
           assert.equal(params.threadId, "thread-one");
           assert.deepEqual(Object.keys(params.input[0]).sort(), ["text", "text_elements", "type"]);
+          if (loseStart) {
+            finish(); // A notification alone cannot attribute this attempt.
+            throw new Error("Disconnected before turn start was confirmed");
+          }
           if (complete) { if (early) finish(); else setTimeout(finish, 5); }
           return { turn: turn() };
         case "turn/steer":
@@ -53,12 +57,32 @@ function setup(t, options = {}) {
   return { db, rpc, host, events, authorized };
 }
 test("exact thread/turn events complete despite notification preceding start response", async t => {
-  const { host, rpc } = setup(t, { early: true });
+  const { host, rpc, db, events } = setup(t, { early: true });
   assert.deepEqual(await host(input, { binding }), { body: "Reviewed result" });
   await assert.rejects(host(input, { binding }), /already exists/);
   assert.deepEqual(await host.reconcile(binding), { status: "completed", body: "Reviewed result" });
   assert.equal(rpc.calls.filter(x => x.method === "turn/start").length, 1);
+  const receipt = await host.turnReceipt(binding);
+  assert.deepEqual(receipt, { status: "received", roomId: binding.roomId, memberId: binding.memberId,
+    requestMessageId: binding.requestMessageId, triggeringEventId: binding.openingEventId, attemptId: binding.attemptId,
+    threadId: "thread-one", turnId: "turn-one", sessionMode: "fresh", receivedAt: receipt.receivedAt,
+    source: "codex_turn_start_response" });
+  assert.ok(Number.isFinite(Date.parse(receipt.receivedAt)));
+  assert.deepEqual(events, [{ type: "runtime_turn_received", ...receipt }]);
+  assert.deepEqual(await host.turnReceipt({ ...binding, openingEventId: "another-opening" }), { status: "unavailable" });
+  const reopened = createCodexRuntimeHost({ db, rpc, scope: binding, cwd: "/tmp/project",
+    policy: { approvalPolicy: "never", sandbox: "read-only" }, authorize: async () => {} });
+  assert.deepEqual(await reopened.turnReceipt(binding), receipt);
 });
+test("lost start response leaves exact receipt unknown even with an early completion", async t => {
+  const { host, rpc, events } = setup(t, { loseStart: true });
+  await assert.rejects(host(input, { binding }), /Disconnected before turn start/);
+  assert.deepEqual(await host.turnReceipt(binding), { status: "unavailable" });
+  assert.deepEqual(events, []);
+  await assert.rejects(host(input, { binding }), /already exists/);
+  assert.equal(rpc.calls.filter(call => call.method === "turn/start").length, 1);
+});
+
 test("runtime records the exact input digest and brief version before execution without retaining prompt text", async t => {
   const { host, rpc, db } = setup(t);
   const workBrief = { version: 'a'.repeat(64) };
@@ -87,7 +111,7 @@ test("lost steering response is uncertain and never automatically sent twice", a
   assert.deepEqual(await host.steer(binding, "contribution", "Keep it simple"), { status: "uncertain" });
   await assert.rejects(host.steer(binding, "contribution", "Different"), /reused/);
   assert.equal(rpc.calls.filter(x => x.method === "turn/steer").length, 1);
-  assert.equal(events.length, 1); assert.equal(events[0].delta, "Hi");
+  assert.deepEqual(events.filter(event => event.type === "answer_delta").map(event => event.delta), ["Hi"]);
   rpc.finish(); await executing;
 });
 test("interrupt acknowledgement remains stopping until terminal observation", async t => {

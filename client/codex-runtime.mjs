@@ -54,7 +54,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     throw new Error("Runtime needs a pinned Room identity");
   db.exec(`CREATE TABLE IF NOT EXISTS codex_runtime_attempts (
     id TEXT PRIMARY KEY, binding TEXT NOT NULL, thread_id TEXT, turn_id TEXT,
-    state TEXT NOT NULL, result TEXT);
+    state TEXT NOT NULL, result TEXT, admitted_at INTEGER);
     CREATE TABLE IF NOT EXISTS codex_runtime_inputs (
     attempt_id TEXT NOT NULL, input_id TEXT NOT NULL, text TEXT NOT NULL,
     state TEXT NOT NULL, PRIMARY KEY(attempt_id,input_id));
@@ -64,6 +64,8 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     CREATE TABLE IF NOT EXISTS codex_runtime_contexts (
     attempt_id TEXT PRIMARY KEY, input_digest TEXT NOT NULL, input_bytes INTEGER NOT NULL,
     work_brief_version TEXT);`);
+  if (!db.prepare("PRAGMA table_info(codex_runtime_attempts)").all().some(column => column.name === "admitted_at"))
+    db.exec("ALTER TABLE codex_runtime_attempts ADD COLUMN admitted_at INTEGER");
   if (!db.prepare("PRAGMA table_info(codex_runtime_outputs)").all().some(column => column.name === "phase"))
     db.exec("ALTER TABLE codex_runtime_outputs ADD COLUMN phase TEXT");
   db.exec(`CREATE TABLE IF NOT EXISTS codex_runtime_tool_blocks (
@@ -98,7 +100,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     db.prepare("INSERT INTO codex_runtime_outputs VALUES(?,?,?,?) ON CONFLICT(attempt_id,item_id) DO UPDATE SET text=excluded.text,phase=excluded.phase")
       .run(id, item.id, item.text, item.phase ?? null);
   };
-  const recordTurn = (id, turn) => {
+  const recordTurn = (id, turn, admittedAt = null) => {
     if (!turn || typeof turn.id !== "string" || ![...terminal, "inProgress"].includes(turn.status))
       throw new Error("Invalid runtime turn");
     const saved = get(id);
@@ -108,8 +110,8 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     const final = outputs.some(item => item.phase === "final_answer")
       ? outputs.filter(item => item.phase === "final_answer") : outputs.filter(item => item.phase === null);
     const result = turn.status === "completed" ? final.map(item => item.text).join("\n") : null;
-    db.prepare("UPDATE codex_runtime_attempts SET turn_id=?,state=?,result=? WHERE id=?")
-      .run(turn.id, saved.state === "stopping" && turn.status === "inProgress" ? "stopping" : turn.status, result, id);
+    db.prepare("UPDATE codex_runtime_attempts SET turn_id=?,state=?,result=?,admitted_at=coalesce(admitted_at,?) WHERE id=?")
+      .run(turn.id, saved.state === "stopping" && turn.status === "inProgress" ? "stopping" : turn.status, result, admittedAt, id);
     return { status: get(id).state, ...(result === null ? {} : { body: result, ...attention(id) }) };
   };
   const reconcile = async binding => {
@@ -145,6 +147,17 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
       workBriefVersion: saved.work_brief_version, authorityGranted: false }
       : { status: "unavailable", authorityGranted: false };
   };
+  // Adapted from Buzz's exact triggering-event attribution. Only an explicit
+  // request opening event binds this receipt. Room activity and turn recovery
+  // never substitute for a positive turn/start response.
+  // https://github.com/block/buzz-app/blob/cfbe4464fe329d64f73f6a0911f62aa80e0fcabf/src/features/agents/request-work.ts
+  const receiptFor = (binding, saved) => binding.kind !== "shared-assistant" && Number.isSafeInteger(saved?.admitted_at)
+    ? { status: "received", roomId: binding.roomId, memberId: binding.memberId,
+        requestMessageId: binding.requestMessageId, triggeringEventId: binding.openingEventId, attemptId: binding.attemptId,
+        threadId: saved.thread_id, turnId: saved.turn_id, sessionMode: "fresh",
+        receivedAt: new Date(saved.admitted_at).toISOString(), source: "codex_turn_start_response" }
+    : { status: "unavailable" };
+  const turnReceipt = async binding => receiptFor(binding, get(await checked(binding, "read")));
   const steer = async (binding, inputId, text) => {
     const id = await checked(binding, "steer"), saved = get(id);
     if (!saved?.turn_id || saved.state !== "inProgress") throw new Error("Runtime turn is not accepting input");
@@ -235,7 +248,11 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
       await checked(binding, "start");
       input.signal?.throwIfAborted();
       const value = await rpc.request("turn/start", { threadId: started.thread.id, input: textInput(prompt) });
-      recordTurn(id, value?.turn);
+      recordTurn(id, value?.turn, binding.kind !== "shared-assistant" ? Date.now() : null);
+      const receipt = receiptFor(binding, get(id));
+      if (receipt.status === "received") {
+        try { emit({ type: "runtime_turn_received", ...receipt }); } catch { /* The durable receipt remains readable. */ }
+      }
       for (const event of early) receive(event);
       if (terminal.has(value.turn.status)) receive({ method: "turn/completed", params: { threadId: started.thread.id, turn: value.turn } });
       if (input.signal?.aborted) abort();
@@ -247,7 +264,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
       await interruption; unsubscribe();
     }
   };
-  return Object.assign(execute, { steer, interrupt, reconcile, contextObservation });
+  return Object.assign(execute, { steer, interrupt, reconcile, contextObservation, turnReceipt });
 }
 
 // Connected entry point for runRequestOnce/runRequestQueue. Rechecks the Room
