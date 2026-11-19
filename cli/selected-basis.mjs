@@ -72,9 +72,25 @@ function requestActions(value, config) {
   return { respond };
 }
 
+function exactReviewAction(value, config) {
+  const { workItemId, result, current, review } = value;
+  const action = review?.action, fixed = action?.arguments;
+  const receipt = result?.receipt;
+  if (!validId(workItemId) || current?.next?.memberId !== config.memberId || current.next.action !== "verify"
+      || !hasRevision(current.workRevision) || !validId(receipt?.eventId)
+      || value.selection?.completionEventId !== receipt.eventId || current.completionEventId !== receipt.eventId
+      || typeof receipt.evidenceVersion !== "string" || !receipt.evidenceVersion.trim()
+      || action?.tool !== workflowTools.review || fixed?.roomId !== config.roomId || fixed.workItemId !== workItemId
+      || fixed.expectedRevision !== current.workRevision || fixed.completionEventId !== receipt.eventId
+      || fixed.evidenceVersion !== receipt.evidenceVersion) return {};
+  return { review: { roomId: config.roomId, workItemId, expectedRevision: current.workRevision,
+    completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion } };
+}
+
 export function selectedBasis(value, config) {
   if (value?.roomId !== config.roomId) return null;
-  const actions = value.request ? requestActions(value, config) : workActions(value, config);
+  const actions = value.request ? requestActions(value, config)
+    : value.selection ? exactReviewAction(value, config) : workActions(value, config);
   return Object.keys(actions).length ? { version: 1, origin: config.origin, memberId: config.memberId, actions } : null;
 }
 

@@ -14,7 +14,8 @@ const WORK_SEARCH_WINDOWS = 4;
 const CORRECTION_CHARS = 400;
 const CORRECTION_FIELD_BYTES = 650;
 const MAX_BYTES = 16 * 1024;
-const LEGACY_PROJECTION_BYTES = 256 * 1024;
+const LEGACY_WORK_BYTES = 256 * 1024;
+const LEGACY_REQUEST_BYTES = 1024 * 1024;
 const CURSOR_ERRORS = new Set([
   "invalid_reply_cursor", "reply_cursor_identity_changed", "stale_reply_cursor"
 ]);
@@ -72,11 +73,11 @@ function workRows(items, auth, room, roomId, now, blockerFor) {
     return {
       id: row.id, title: row.title.slice(0, 160), revision: item.revision, reason: row.reason,
       ...(row.reason === "revise" ? correctionPreview(blockerFor(item)) : {}),
-      ...(row.reason === "verify" && item.receipt?.eventId ? { nextResultRead: { tool: "room_read_result",
-        arguments: { roomId, workItemId: item.id, completionEventId: item.receipt.eventId } } } : {}),
-      nextRead: { tool: row.nextRead.tool, arguments: {
-        roomId, brief: true, ...row.nextRead.arguments, ...(row.reason === "revise" ? { includeDiscussion: false } : {})
-      } }
+      nextRead: row.reason === "verify" && item.receipt?.eventId
+        ? { tool: "room_read_result", arguments: { roomId, workItemId: item.id, completionEventId: item.receipt.eventId } }
+        : { tool: row.nextRead.tool, arguments: {
+          roomId, brief: true, ...row.nextRead.arguments, ...(row.reason === "revise" ? { includeDiscussion: false } : {})
+        } }
     };
   });
 }
@@ -116,26 +117,30 @@ function workPage(store, roomId, auth, room, cursor) {
 function legacyWorkPage(store, roomId, auth, room, cursor) {
   const position = pageCursor(store, cursorBinding(auth, roomId, "work", room.sequence), cursor);
   if (!position) return unavailable(roomId, "work", "cursor_changed");
-  // The caller bounds the containing projection before examining these keys.
+  // Load one bounded key window, and advance only over the keys examined.
+  const windowLimit = PAGE_SIZE * WORK_SEARCH_WINDOWS;
   const keys = store.db.prepare(`SELECT item.key FROM rooms, json_each(rooms.projection, '$.workItems') AS item
     WHERE rooms.id=? AND item.key COLLATE BINARY>? ORDER BY item.key COLLATE BINARY LIMIT ?`);
-  return scanWorkPage(roomId, position, after => {
-    const rows = keys.all(roomId, after, PAGE_SIZE + 1);
-    const ids = rows.slice(0, PAGE_SIZE).map(row => row.key);
-    const parties = store.privateWorkParties(roomId, { workIds: ids });
-    const items = [...readWorkItems(store.db, roomId, ids).values()].filter(item => {
-      const allowed = parties.get(item.id);
-      return !allowed || allowed.has(auth.member.id) || workRoleHolder(item, auth.member.id);
-    });
-    return { items, hasMore: rows.length > ids.length, after: ids.at(-1) ?? after };
-  }, items => workRows(items, auth, room, roomId, position.at, item => item.blocker));
+  const rows = keys.all(roomId, position.after, windowLimit + 1);
+  const ids = rows.slice(0, windowLimit).map(row => row.key);
+  const parties = store.privateWorkParties(roomId, { workIds: ids });
+  const visible = [...readWorkItems(store.db, roomId, ids).values()].filter(item => {
+    const allowed = parties.get(item.id);
+    return !allowed || allowed.has(auth.member.id) || workRoleHolder(item, auth.member.id);
+  });
+  const matches = workRows(visible, auth, room, roomId, position.at, item => item.blocker);
+  const items = matches.slice(0, PAGE_SIZE);
+  const hasMore = matches.length > items.length || rows.length > ids.length;
+  const after = matches.length > items.length ? items.at(-1).id : ids.at(-1);
+  return { coverage: hasMore ? "partial" : "complete", items,
+    nextRead: hasMore ? read(roomId, "work", position.encode(after)) : null };
 }
 
 function requestRows(requests, roomId) {
   return requests.map(row => ({
     id: row.id, revision: row.revision, savedAt: row.createdAt,
     ...(row.progress ? { latestRecipientProgress: { state: row.progress.state, at: row.progress.at } } : {}),
-    nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: row.id } }
+    nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: row.id, view: "compact" } }
   }));
 }
 
@@ -195,24 +200,28 @@ export function readRoomNext(store, secret, roomId, { source, cursor } = {}) {
     const current = isCurrentRoom(store.db, roomId);
     const room = current
       ? withCurrentReadContext(store.db, roomId, budget => readCurrentRecord(store.db, roomId, "metadata", "room", budget))
-      : store.db.prepare(`SELECT sequence, length(CAST(projection AS BLOB)) AS bytes,
+      : store.db.prepare(`SELECT sequence,
+          length(CAST(json_extract(projection,'$.workItems') AS BLOB)) AS workBytes,
+          length(CAST(json_extract(projection,'$.replyRequests') AS BLOB)) AS requestBytes,
           json_extract(projection,'$.room.ownerId') AS ownerId, json_extract(projection,'$.room.purpose') AS purpose,
           json_extract(projection,'$.room.charter') AS charter FROM rooms WHERE id=?`).get(roomId);
     const charter = current ? room.charter : JSON.parse(room.charter ?? "null");
     packet.goal = String(charter?.purpose ?? room.purpose ?? "").slice(0, 800);
     packet.charterRevision = charter?.revision ?? null;
 
-    if (!current && room.bytes > LEGACY_PROJECTION_BYTES) {
-      if (includeWork) packet.work = unavailable(roomId, "work", "legacy_projection_budget",
-        { tool: "room_activation_pack", arguments: { roomId, view: "brief" } });
-      if (includeRequests) packet.requests = unavailable(roomId, "requests", "legacy_projection_budget",
-        { tool: "room_list_requests", arguments: { roomId, direction: "incoming", status: "open" } });
-    } else {
-      if (includeWork) packet.work = boundedPage(roomId, "work", () => current
+    // Archived discussion and unrelated projections never enter these readers.
+    // Work visibility still depends on the private-request slice.
+    const requestsOverBudget = !current && room.requestBytes > LEGACY_REQUEST_BYTES;
+    if (includeWork) packet.work = !current && (room.workBytes > LEGACY_WORK_BYTES || requestsOverBudget)
+      ? unavailable(roomId, "work", "legacy_projection_budget",
+        { tool: "room_activation_pack", arguments: { roomId, view: "brief" } })
+      : boundedPage(roomId, "work", () => current
         ? workPage(store, roomId, auth, room, cursor) : legacyWorkPage(store, roomId, auth, room, cursor));
-      if (includeRequests) packet.requests = boundedPage(roomId, "requests", () => current
+    if (includeRequests) packet.requests = requestsOverBudget
+      ? unavailable(roomId, "requests", "legacy_projection_budget",
+        { tool: "room_list_requests", arguments: { roomId, direction: "incoming", status: "open" } })
+      : boundedPage(roomId, "requests", () => current
         ? requestPage(store, secret, roomId, auth, cursor) : legacyRequestPage(store, secret, roomId, auth, room, cursor));
-    }
     if (Buffer.byteLength(JSON.stringify(packet)) > MAX_BYTES)
       throw new ServiceError(409, "current_room_context_unavailable", "Read one source at a time");
     return packet;

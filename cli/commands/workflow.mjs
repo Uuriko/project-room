@@ -152,13 +152,15 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
         ...(action === "begin" ? receiptHint(value?.resume?.requestId) : {}),
         ...(selectedConnection ? { nextRead: next } : {}) } : {}) }, 1);
     if (!validate(value, config)) throw new Error("Unmatched Room result");
-    if (tool === "room_read_work" || tool === "room_read_request") {
+    if (["room_read_work", "room_read_request", "room_read_result"].includes(tool)) {
       const basis = selectedBasis(value, config);
       if (basis) {
         value.cliBasis = basis;
         if (basis.actions.submit) value.submitCommand = ["room", "submit", "--from"];
       }
     }
+    if (tool === "room_read_result" && value.cliBasis?.actions.review)
+      value.review.action.command = ["room", "review", "--from"];
     if (tool === "room_read_work") {
       const step = value.continuation;
       const shortcut = Object.keys(actions).find(name => actions[name] === step.tool);
@@ -232,6 +234,18 @@ export async function workCommand(argv, io = {}) {
       ? conditional && value.briefVersion === since && value.brief === undefined
       : typeof value.brief === "string")
     && (!includeResult || value.review?.workRevision === value.revision), io);
+}
+
+export async function resultCommand(argv, io = {}) {
+  const help = "room result WORK_ID --completion EVENT_ID\nRead the exact completion selected by room next.";
+  if (argv.length === 1 && argv[0] === "--help") { (io.out ?? console.log)(help); return 0; }
+  const [workItemId, flag, completionEventId] = argv;
+  if (argv.length !== 3 || flag !== "--completion" || !validId(workItemId) || !validId(completionEventId))
+    throw new Error(help);
+  return runWorkflow("room_read_result", { workItemId, completionEventId }, (value, { roomId }) =>
+    value.roomId === roomId && value.workItemId === workItemId
+    && value.selection?.completionEventId === completionEventId && value.result?.receipt?.eventId === completionEventId,
+  io);
 }
 
 export function readCommand(argv, io = {}) {

@@ -32,8 +32,9 @@ work. A connection alone does not execute a task.
    to its work brief and also supplies the saved draft read in `draftRead`.
    Older connections can continue using the post, exact draft read, and
    submit sequence. Keep retry input unchanged after an unknown outcome.
-4. The named reviewer reads the exact completion with `room_read_result` and
-   records pass or fail with `room_record_verification`. On failure, the producer
+4. The named reviewer follows the exact completion pointer in Room Next and
+   sends the selected result’s `review.action` with a verdict and summary.
+   CLI agents save the output of `room result` for `room review --from`. On failure, the producer
    reads the correction, uses `room_resolve_blocker`, begins again and submits
    revised evidence. A review of old evidence cannot approve the replacement.
 5. When the task requires owner acceptance, its current work read identifies
@@ -81,7 +82,7 @@ Use the saved connection directly. The CLI returns JSON for each operation.
 | Find work and requests addressed to you | `room next` |
 | Open a task or correction | `room work WORK_ID` |
 | Refresh a retained task brief | `room work WORK_ID --since BRIEF_VERSION` |
-| Inspect the exact result for review | `room work WORK_ID --result` |
+| Inspect the completion selected for review | `room result WORK_ID --completion EVENT_ID` |
 | Check your exact write | `room receipt OPERATION_ID` |
 | Read a formal request | `room read REQUEST_ID [--cursor TOKEN]` |
 | Begin the selected assignment | `room begin --from work.json` |

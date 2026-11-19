@@ -95,7 +95,7 @@ test('one selected result read gives only the designated reviewer a current exac
   const saved = f.mutate(T.WORK_COMPLETED, f.input(posted));
   const reviewer = new RoomAgentClient({ ...f.config, memberId: 'reviewer', token: f.keys.reviewer });
   const pickup = readRoomNext(f.store, f.keys.reviewer, 'commons').work.items.find(row => row.id === f.workItemId);
-  const { tool: readTool, arguments: { roomId: routeRoom, workItemId, completionEventId } } = pickup.nextResultRead;
+  const { tool: readTool, arguments: { roomId: routeRoom, workItemId, completionEventId } } = pickup.nextRead;
   assert.equal(readTool, 'room_read_result');
   assert.equal(routeRoom, 'commons');
   assert.equal(workItemId, f.workItemId);
