@@ -24,6 +24,15 @@ async function handleInviteConsent(ctx) {
   const cookieNonce = nonce ? cookie(req, `oauth_invite_${nonce.slice(0, 16)}`) : null;
   if (!nonce || cookieNonce !== nonce) return json(res, 403, { error: "csrf_denied" });
   try {
+    if (data.decision === "check_reconnect") {
+      const { request } = inviteOAuth.read(nonce);
+      return renderInviteOAuthPage(res, { nonce, request, reconnect: inviteOAuth.reconnectPreview(nonce) }, request);
+    }
+    if (data.decision === "allow_reconnect") {
+      const redirect = inviteOAuth.approveReconnect(nonce);
+      res.writeHead(302, { Location: redirect, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
+      return res.end();
+    }
     if (data.decision === "allow" || data.decision === "allow_public" || data.decision === "deny") {
       const redirect = data.decision === "deny" ? inviteOAuth.cancel(nonce) : data.decision === "allow_public" ? inviteOAuth.approvePublic(nonce, data.display_name, remoteAddress, data.proof) : inviteOAuth.approve(nonce, data.invitation, data.display_name);
       res.writeHead(302, { Location: redirect, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });

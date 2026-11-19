@@ -30,7 +30,7 @@ async function setup(t, { client = CLIENT, clients = [client] } = {}) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const start = () => fetch(base + '/oauth/authorize?' + new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0], scope: 'rooms:read chat:read chat:write work:read work:write', state: 'native-state', code_challenge: challenge, code_challenge_method: 'S256', resource, connection: 'invite' }));
+  const start = (scope = 'rooms:read chat:read chat:write work:read work:write') => fetch(base + '/oauth/authorize?' + new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0], scope, state: 'native-state', code_challenge: challenge, code_challenge_method: 'S256', resource, connection: 'invite' }));
   const initial = await start(); assert.equal(initial.status, 200);
   const html = await initial.text(); assert.match(html, /No Project Room signup/);
   const nonce = html.match(/name="nonce" value="([^"]+)"/)[1];
@@ -43,6 +43,41 @@ async function setup(t, { client = CLIENT, clients = [client] } = {}) {
   };
   return { store, owner, base, invitation, accountsBefore, start, submit, exchange, rpc };
 }
+test('owner pairs a fresh OAuth request to the same invited seat without changing earlier grants', async t => {
+  const f = await setup(t);
+  const initial = await f.submit('allow');
+  const first = await f.exchange({ grant_type: 'authorization_code', code: new URL(initial.headers.get('location')).searchParams.get('code') });
+  const firstToken = (await first.json()).access_token;
+  const seat = (await f.rpc(firstToken)).body.result.structuredContent.memberId;
+  const reconnect = await f.start('rooms:read work:read work:write');
+  const html = await reconnect.text(), cookie = reconnect.headers.get('set-cookie').split(';')[0];
+  const pairingId = html.match(/<output>([a-f0-9]{64})<\/output>/)[1];
+  const nonce = html.match(/name="nonce" value="([^"]+)"/)[1];
+  const submit = (decision, selectedCookie = cookie) => fetch(f.base + '/oauth/invite', {
+    method: 'POST', headers: { Cookie: selectedCookie, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ nonce, decision }) });
+  const input = { pairingId, roomId: 'commons', memberId: seat, clientId: CLIENT.clientId, scopes: ['rooms:read','work:read','work:write'] };
+  const pair = (token, payload) => fetch(f.base + '/api/mcp/oauth/reconnect', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  assert.equal((await submit('allow_reconnect')).status, 400);
+  assert.equal((await pair(firstToken, input)).status, 401);
+  assert.equal((await pair(f.owner, { ...input, scopes: ['rooms:read'] })).status, 409);
+  assert.equal((await pair(f.owner, input)).status, 200);
+  assert.match(await (await submit('check_reconnect')).text(), /Friend native agent/);
+  assert.equal((await submit('allow_reconnect', '')).status, 403);
+  const response = await submit('allow_reconnect');
+  assert.equal(response.status, 302);
+  const nextCode = new URL(response.headers.get('location')).searchParams.get('code');
+  assert.ok(nextCode);
+  const next = await f.exchange({ grant_type: 'authorization_code', code: nextCode });
+  assert.equal(next.status, 200);
+  const nextToken = (await next.json()).access_token;
+  assert.equal((await f.rpc(nextToken)).body.result.structuredContent.memberId, seat);
+  assert.equal((await f.rpc(firstToken)).status, 200);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n, 1);
+  assert.equal((await f.exchange({ grant_type: 'authorization_code', code: nextCode })).status, 400);
+});
+
 test('invitation native OAuth needs no account, survives lost consent response without duplicate seats, and acts as the agent', async t => {
   const f = await setup(t);
   const metadata = await (await fetch(f.base + '/.well-known/oauth-authorization-server')).json();
