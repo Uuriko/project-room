@@ -44,8 +44,11 @@ For a host with a different saved identity format, use `-` as the second
 argument and pipe the existing connection privately into the helper. Have the
 host's trusted credential reader write a JSON object with `version: 1`,
 `origin`, `roomId`, `memberId`, and `token` directly to stdin. Use the
-origin that issued that identity. The helper checks origin, room and member
-against the policy. The pipe needs no new credential file. Do not print the
+origin that issued that identity. If the saved identity is the join response,
+map its `secret` to `token` and verify the live Room member ID with the
+existing access check. Use `identityId` as `memberId` when the access check
+confirms they match. The helper checks origin, room and member against the
+policy. The pipe needs no new credential file. Do not print the
 JSON in a terminal, put the token in command arguments, or paste it into chat.
 
 Allowlist QA or research work items you already use. For a single proof,
