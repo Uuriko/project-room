@@ -3,10 +3,12 @@ import ProjectRoomKit
 
 @MainActor final class Application: NSObject, NSApplicationDelegate {
     var room: RoomWindow?
+    private lazy var affectedTests = LocalAffectedTests()
     let initialURL: URL
-    init(url: URL) { initialURL = url }
+    let affectedOnly: Bool
+    init(url: URL, affectedOnly: Bool) { initialURL = url; self.affectedOnly = affectedOnly }
     func applicationDidFinishLaunching(_ notification: Notification) {
-        room = RoomWindow(url: initialURL)
+        if !affectedOnly { room = RoomWindow(url: initialURL) }
         let menu = NSMenu()
         let appItem = NSMenuItem(); menu.addItem(appItem)
         let appMenu = NSMenu(title: "Project Room"); appItem.submenu = appMenu
@@ -30,10 +32,13 @@ import ProjectRoomKit
         auth.target = room
         let mac = view.addItem(withTitle: "My Mac…", action: #selector(RoomWindow.showMyMac), keyEquivalent: ",")
         mac.target = room
+        let tests = view.addItem(withTitle: "Affected tests…", action: #selector(showAffectedTests), keyEquivalent: "")
+        tests.target = self
         NSApp.mainMenu = menu
-        room?.show()
+        if affectedOnly { affectedTests.show() } else { room?.show() }
     }
-    func applicationWillTerminate(_ notification: Notification) { room?.stopLocalTools() }
+    func applicationWillTerminate(_ notification: Notification) { affectedTests.stop(); room?.stopLocalTools() }
+    @objc func showAffectedTests() { affectedTests.show() }
     @objc func showAbout() {
         let revision = Bundle.main.object(forInfoDictionaryKey: "ProjectRoomSourceRevision") as? String
         let dirty = Bundle.main.object(forInfoDictionaryKey: "ProjectRoomSourceDirty") as? Bool ?? false
@@ -41,7 +46,10 @@ import ProjectRoomKit
         NSApp.orderFrontStandardAboutPanel(options: [.version: source])
     }
     @objc func openRoom() { room?.show() }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { room?.show(); return true }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if affectedOnly { affectedTests.show() } else { room?.show() }
+        return true
+    }
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             // Authentication callbacks belong to ASWebAuthenticationSession.
@@ -57,7 +65,7 @@ let selected = args.firstIndex(of: "--url").flatMap { index in index + 1 < args.
 guard RoomLocation.allowed(selected) else { fputs("Only the first-party Room origin or a local development server is allowed.\n", stderr); exit(2) }
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
-let delegate = Application(url: selected)
+let delegate = Application(url: selected, affectedOnly: args.contains("--affected-tests"))
 app.delegate = delegate
 app.run()
 

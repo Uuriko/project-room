@@ -26,6 +26,16 @@ This creates a synthetic account and room, exercises the actual HTML-export hand
 
 ## Native local tools
 
+**View → Affected tests** runs the selected Project Room Git worktree's
+existing `scripts/verify-affected.mjs`. Choose the saved Room connection, work
+item and Git baseline. The app posts the local result to that work item with the
+head, baseline and worktree fingerprint. File contents and raw logs stay on the
+Mac. The reported scope includes selected tests and any selection omissions.
+If the checkout changes during the run, the evidence is marked stale. This is
+local test evidence and does not change the status of the Room work item.
+Use `open -n 'build/Project Room.app' --args --affected-tests` to open only this
+tool without starting the Room browser or the local agent receiver.
+
 The Mac app now owns a native local tool broker. Open **My Mac** in the toolbar or
 View menu (⌘,). Its initial state is paused. **Enable local tools** grants broad
 file/process authority to local agents for this app session; **Pause all local tools**
