@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { attachReleaseReceipts } from "../scripts/attach-release-receipts.mjs";
+import { attachReleaseReceipts, confirmedReceipt } from "../scripts/attach-release-receipts.mjs";
 
 test("publishes candidate-bound stage receipts and recovers a lost write by replay", async () => {
   const candidateRevision = "a".repeat(40), evidenceVersion = "sha256:" + "b".repeat(64);
@@ -29,7 +29,7 @@ test("publishes candidate-bound stage receipts and recovers a lost write by repl
         loseReport = false;
         throw new Error("lost response");
       }
-      return { messageId: args.id, duplicate: Boolean(found) };
+      return confirmedReceipt({ status: found ? "duplicate" : "posted", messageId: args.id, sequence: 123, duplicate: Boolean(found) }, args.id);
     }
   };
   await assert.rejects(attachReleaseReceipts({ ...options, inputs: { build, browser: raw({ sourceRevision: "f".repeat(40) }) } }), /mismatched browser/);
