@@ -45,4 +45,17 @@ test("publishes candidate-bound stage receipts and recovers a lost write by repl
   assert.equal(report.evidenceVersion, evidenceVersion);
   assert.deepEqual(Object.values(report.checks).map(check => check.status), ["passed", "passed", "passed"]);
   assert.ok([...messages.values()].every(message => message.replyToId === "result-1" && !message.body.includes("/private/operator/path")));
+  const failedInputs = {
+    build: raw({ sourceCommit: candidateRevision, verified: false, failurePhase: "verify" }),
+    browser: raw({ ...JSON.parse(browser), passed: 1, skipped: 1 }),
+    deploy: raw({ ...JSON.parse(deploy), databasePreserved: false })
+  };
+  const failed = await attachReleaseReceipts({ ...options, inputs: failedInputs,
+    readResult: async () => {
+      const result = options.readResult();
+      result.result.text.body = JSON.stringify({ sourceRevision: candidateRevision });
+      return result;
+    } });
+  const failures = JSON.parse(messages.get(failed.report.messageId).body.split("\n")[1]);
+  assert.deepEqual(Object.values(failures.checks).map(check => check.status), ["failed", "failed", "failed"]);
 });

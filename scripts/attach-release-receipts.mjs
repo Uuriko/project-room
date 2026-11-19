@@ -17,6 +17,11 @@ function stageEvidence(stage, value, candidate) {
     return { status: "passed", summary: `Runtime package verified, ${files} files.`,
       proof: { sourceCommit, sourceTree, manifestSha256, files, verified } };
   }
+  if (stage === "build" && value?.sourceCommit === candidate && value.verified === false
+      && ["package", "verify", "instance-card", "staged-legacy", "staged-normalized"].includes(value.failurePhase)) {
+    const { sourceCommit, verified, failurePhase } = value;
+    return { status: "failed", summary: `Build stopped during ${failurePhase}.`, proof: { sourceCommit, verified, failurePhase } };
+  }
   if (stage === "browser" && value?.sourceRevision === candidate && value.clean === true
       && [value.tests, value.passed, value.failed, value.skipped, value.elapsedMs].every(integer)
       && value.tests > 0 && value.tests === value.passed + value.failed + value.skipped
@@ -38,6 +43,14 @@ function stageEvidence(stage, value, candidate) {
       return { status: "passed", summary: "Candidate observed ready at its exact live revision. Database history and instance pin preserved.",
         proof: { newRevision, oldRevision, phase, ready, sourceRevision, databasePreserved, pinPreserved,
           signedCardVerifiedBeforeShutdown, rooms: value.after.rooms, eventsBefore: value.before.events, eventsAfter: value.after.events } };
+    }
+    if (phase === "complete" && [ready, databasePreserved, pinPreserved, signedCardVerifiedBeforeShutdown].every(flag => typeof flag === "boolean")
+        && revision.test(sourceRevision) && integer(value.before?.rooms) && integer(value.before?.events)
+        && integer(value.after?.rooms) && integer(value.after?.events)) {
+      return { status: "failed", summary: "Post-deploy verification did not confirm all release invariants.",
+        proof: { newRevision, oldRevision, phase, ready, sourceRevision, databasePreserved, pinPreserved,
+          signedCardVerifiedBeforeShutdown, roomsBefore: value.before.rooms, roomsAfter: value.after.rooms,
+          eventsBefore: value.before.events, eventsAfter: value.after.events } };
     }
     if (["preflight", "backup", "switch", "verify"].includes(phase) && typeof value.failure === "string") {
       return { status: "failed", summary: `Deployment stopped during ${phase}.`,
@@ -67,10 +80,10 @@ export async function attachReleaseReceipts({ binding, inputs, readResult, post 
 
   const selected = await readResult({ workItemId, completionEventId });
   const { receipt, text } = selected.result ?? {};
-  const candidates = new Set([...((text?.body ?? "").matchAll(/^Candidate revision: ([a-f0-9]{40})\r?$/gm))].map(match => match[1]));
+  const candidates = new Set([...((text?.body ?? "").matchAll(/(?:^Candidate revision: |"sourceRevision"\s*:\s*")([a-f0-9]{40})(?:"|\r?$)/gm))].map(match => match[1]));
   if (selected.workItemId !== workItemId || receipt?.eventId !== completionEventId
       || !digest.test(receipt.evidenceVersion) || !text?.messageId || candidates.size !== 1 || !candidates.has(candidateRevision)) {
-    throw new Error("The selected completion does not name this exact candidate on its own line.");
+    throw new Error("The selected completion does not name this exact candidate.");
   }
   const send = (id, body) => post({ id, compact: true, workItemId, replyToId: text.messageId, body });
   const evidence = [];
