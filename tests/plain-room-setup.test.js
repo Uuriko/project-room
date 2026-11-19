@@ -48,6 +48,7 @@ test('public entry points lead to the served setup skill before unrelated work',
       assert.match(pickup, /data\.nextRead.*room_next/);
       assert.doesNotMatch(pickup, /room_activation_pack|room_read_inbox/);
       assert.match(pickup, /verify.*work:write/);
+      assert.match(instanceGuide, /public source or a task brief I can share/);
       assert.match(text, /href="[^"]*\/join\.txt">the access-request steps<\/a>/);
       continue;
     }
