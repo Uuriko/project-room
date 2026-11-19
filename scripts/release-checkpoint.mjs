@@ -161,6 +161,90 @@ async function ghRead(args) {
 
 const ghSnapshot = (repository, prNumber, fields) => ghRead(["pr", "view", String(prNumber), "--repo", repository, "--json", fields]);
 const mainSnapshot = repository => ghRead(["api", `repos/${repository}/git/ref/heads/main`]);
+
+function qualifyCheck(selection, run, jobs, head) {
+  const report = { ...selection, status: "ambiguous", reason: "job_evidence_unavailable",
+    runId: run?.id ?? null, attempt: run?.run_attempt ?? null };
+  if (!run) return { ...report, status: "not_run", reason: "no_pr_run_for_head" };
+  const found = jobs?.filter(job => job.name === selection.job);
+  if (!found) return report;
+  if (!found.length) return run.status === "completed"
+    ? { ...report, reason: "job_missing_from_completed_run" }
+    : { ...report, status: "pending", reason: "job_not_reported_yet" };
+  if (found.length !== 1) return { ...report, reason: "job_name_ambiguous" };
+  const job = found[0];
+  if (sha(job.head_sha) !== head || job.run_attempt !== run.run_attempt || job.run_id !== run.id)
+    return { ...report, reason: "job_binding_mismatch" };
+  const row = { ...report, jobId: job.id, url: evidenceUrl(job.html_url), conclusion: job.conclusion ?? null };
+  const outcome = (status, reason) => ({ ...row, status, reason });
+  if (["queued", "in_progress", "waiting", "requested", "pending"].includes(job.status)) return outcome("pending", job.status);
+  if (job.status !== "completed") return outcome("ambiguous", "unknown_job_status");
+  if (["skipped", "neutral"].includes(job.conclusion)) return outcome("not_run", job.conclusion);
+  if (job.conclusion === "cancelled") return outcome("not_run", "cancelled");
+  if (["failure", "timed_out", "action_required", "startup_failure"].includes(job.conclusion)) return outcome("failed", job.conclusion);
+  if (job.conclusion !== "success") return outcome("ambiguous", "unknown_job_conclusion");
+  if (!selection.step) return outcome("passed", "job_succeeded");
+  const steps = (job.steps ?? []).filter(step => step.name === selection.step);
+  if (steps.length !== 1) return outcome("ambiguous", "step_evidence_missing_or_ambiguous");
+  if (steps[0].conclusion === "skipped") return outcome("not_run", "step_skipped");
+  if (steps[0].status === "completed" && steps[0].conclusion === "success") return outcome("passed", "step_succeeded");
+  return outcome("ambiguous", "step_did_not_confirm_job_success");
+}
+
+export async function qualifyPr({ repository, prNumber, expectedRevision, selections }, read = ghRead) {
+  if (!selections?.length) throw new Error("qualification_requires_job_selection");
+  const snapshot = () => read(["pr", "view", String(prNumber), "--repo", repository, "--json", "headRefOid,baseRefOid,baseRefName"]);
+  const before = await snapshot();
+  const head = sha(before.value?.headRefOid), base = sha(before.value?.baseRefOid);
+  const report = (status, reason, checks = []) => ({ repository, prNumber, head, base,
+    checkedAt: new Date().toISOString(), status, reason, checks });
+  if (!head || !base || before.error) return report("ambiguous", "pr_snapshot_unavailable");
+  if (expectedRevision && expectedRevision !== head) return report("stale", "expected_head_changed");
+  const prefix = `repos/${repository}/actions/runs`;
+  const readRuns = async () => {
+    const list = await read(["api", `${prefix}?head_sha=${head}&event=pull_request&per_page=100`]);
+    const runs = list.value?.workflow_runs;
+    return !list.error && Array.isArray(runs) && runs.length === list.value.total_count ? runs : null;
+  };
+  const runs = await readRuns();
+  if (!runs) return report("ambiguous", "run_listing_incomplete");
+  const workflows = [...new Set(selections.map(row => row.workflow))];
+  const snapshotRuns = (items, workflow) => items.filter(run => run.path === `.github/workflows/${workflow}` && sha(run.head_sha) === head);
+  const compareRuns = (a, b) => b.run_number - a.run_number || b.id - a.id;
+  const linked = run => run?.pull_requests?.some(pr => pr.number === prNumber && sha(pr.head?.sha) === head) ?? false;
+  const relevant = (items, workflow) => snapshotRuns(items, workflow)
+    .filter(run => !run.pull_requests?.length || run.pull_requests.some(pr => pr.number === prNumber))
+    .sort(compareRuns)[0];
+  const evidence = await Promise.all(workflows.map(async workflow => {
+    const run = relevant(runs, workflow);
+    const rows = selections.filter(row => row.workflow === workflow);
+    if (!run) return rows.map(row => qualifyCheck(row, null, null, head));
+    const attemptPath = `${prefix}/${run.id}/attempts/${run.run_attempt}`;
+    const readJobs = await read(["api", `${attemptPath}/jobs?per_page=100`]);
+    const jobs = readJobs.value?.jobs;
+    return rows.map(row => {
+      const observed = qualifyCheck(row, run, !readJobs.error && Array.isArray(jobs) && jobs.length === readJobs.value.total_count ? jobs : null, head);
+      // Keep useful job observations even when GitHub omits the triggering PR.
+      // A shared commit can be used by multiple PRs with different bases.
+      return linked(run) ? observed : { ...observed, status: "ambiguous",
+        reason: "run_pr_binding_missing", observedHeadStatus: observed.status, observedHeadReason: observed.reason };
+    });
+  }));
+  const [after, finalRuns] = await Promise.all([snapshot(), readRuns()]);
+  if (!after.value || after.error) return report("ambiguous", "pr_recheck_unavailable");
+  if (head !== sha(after.value.headRefOid) || base !== sha(after.value.baseRefOid) || before.value.baseRefName !== after.value.baseRefName)
+    return report("stale", "pr_changed_during_read");
+  if (!finalRuns) return report("ambiguous", "run_recheck_unavailable");
+  if (workflows.some(workflow => {
+    const first = relevant(runs, workflow), last = relevant(finalRuns, workflow);
+    return first?.id !== last?.id || first?.run_attempt !== last?.run_attempt
+      || linked(first) !== linked(last);
+  })) return report("stale", "run_changed_during_read");
+  const checks = evidence.flat();
+  const status = ["failed", "not_run", "ambiguous", "pending"].find(value => checks.some(check => check.status === value)) ?? "passed";
+  return report(status, status === "passed" ? "selected_checks_passed" : "selected_checks_incomplete", checks);
+}
+
 async function compareSnapshot(repository, base, head) {
   return { ...await ghRead(["api", `repos/${repository}/compare/${base}...${head}?per_page=1`]), base, head };
 }
@@ -296,22 +380,34 @@ export async function verifyCheckpoint(args, dependencies = {}) {
 }
 
 function options(argv) {
-  const result = { repository: "Uuriko/project-room", origins: [], format: "json", mode: "observe" };
+  const result = { repository: "Uuriko/project-room", origins: [], selections: [], format: "json", mode: "observe" };
   const names = { "--mode": "mode", "--prior-report": "priorReport", "--pr": "prNumber", "--repo": "repository", "--expected-revision": "expectedRevision", "--origin": "origin", "--output": "output", "--format": "format" };
   const seen = new Set();
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i], key = names[flag], value = argv[++i];
+    if (flag === "--job") {
+      const [, workflow, job, step] = /^(\w[\w.-]*\.ya?ml):([^:]+)(?::(.+))?$/.exec(value ?? "") ?? [];
+      if (!workflow || !job.trim()) throw new Error("invalid_job_selection");
+      result.selections.push({ workflow, job, ...(step ? { step } : {}) });
+      continue;
+    }
     if (!key || !value || value.startsWith("--") || (seen.has(flag) && flag !== "--origin")) throw new Error("invalid_arguments");
     seen.add(flag);
     if (key === "origin") result.origins.push(value);
     else result[key] = value;
   }
-  if (!["observe", "verify"].includes(result.mode)) throw new Error("invalid_mode");
+  if (!["observe", "verify", "qualify"].includes(result.mode)) throw new Error("invalid_mode");
   if (result.mode === "verify" && (!sha(result.expectedRevision) || !result.output)) throw new Error("verification_requires_revision_and_output");
-  if (result.mode === "observe" && (!/^[1-9]\d*$/.test(result.prNumber ?? "") || !Number.isSafeInteger(Number(result.prNumber)))) throw new Error("invalid_pr");
+  if (result.mode !== "verify" && (!/^[1-9]\d*$/.test(result.prNumber ?? "") || !Number.isSafeInteger(Number(result.prNumber)))) throw new Error("invalid_pr");
   result.prNumber = Number(result.prNumber);
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(result.repository)) throw new Error("invalid_repository");
   if (result.expectedRevision !== undefined && !sha(result.expectedRevision)) throw new Error("expected_revision_must_be_full_sha");
+  if (result.mode === "qualify") {
+    if (!result.selections.length || result.selections.length > 16 || result.output || result.origins.length || result.format !== "json") throw new Error("invalid_qualification_options");
+    result.expectedRevision = sha(result.expectedRevision);
+    return result;
+  }
+  if (result.selections.length) throw new Error("unexpected_job_selection");
   if (!["json", "markdown"].includes(result.format)) throw new Error("invalid_format");
   if (!result.origins.length) result.origins = DEFAULT_ORIGINS;
   if (result.origins.length > 8) throw new Error("too_many_origins");
@@ -327,9 +423,16 @@ function options(argv) {
 const HELP = "Usage: node scripts/release-checkpoint.mjs --pr NUMBER [--repo OWNER/REPO] [--expected-revision FULL_SHA] [--origin HTTPS_ORIGIN[/PREFIX]] [--format json|markdown] [--output DIRECTORY]\nVerification: --mode verify --expected-revision FULL_SHA --output DIRECTORY [--prior-report FAILED_SMOKE_JSON], from a clean target checkout; the tooling checkout must also be clean. No upload or publication. Read-only public observations. --origin repeats (max 8); defaults to canonical Room and getdasha/room. --output writes release-checkpoint.json and release-checkpoint.md. No output option writes only stdout. In verify mode exit 0 means this attempt verified; in observe mode exit 0 means collection complete, not ready to merge/deploy; exit 1 means incomplete observation; exit 2 means invalid arguments or output failure.";
 
 async function main(argv) {
-  if (argv.length === 1 && argv[0] === "--help") { console.log(HELP); return; }
+  const help = `${HELP}\nPR checks only: --mode qualify --pr NUMBER [--repo OWNER/REPO] [--expected-revision FULL_SHA] --job 'workflow.yml:job[:step]' (repeatable). Reports selected checks on the current PR head; exit 0 when they passed, 1 otherwise. No branch rules, deployment probes, or writes.`;
+  if (argv.length === 1 && argv[0] === "--help") { console.log(help); return; }
   let args;
-  try { args = options(argv); } catch { console.error(HELP); process.exitCode = 2; return; }
+  try { args = options(argv); } catch { console.error(help); process.exitCode = 2; return; }
+  if (args.mode === "qualify") {
+    const report = await qualifyPr(args);
+    process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    if (report.status !== "passed") process.exitCode = 1;
+    return;
+  }
   if (args.mode === "verify") {
     const report = await verifyCheckpoint(args);
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
