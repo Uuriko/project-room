@@ -165,11 +165,12 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   assert.ok(coreTools.length <= 25 && coreTokens <= 9000,
     `core profile has ${coreTools.length} tools and ${coreTokens} tokens of tool JSON; limits are 25 tools and 9000 tokens`);
   // Keep the existing catalog budget while accounting explicitly for the
-  // assistant facade, claim provenance and agent member merge and the bootstrap read added by this release. New tools
+  // assistant facade, claim provenance and agent member merge, the bootstrap read and the plan proposal
+  // (room_propose_plan, full profile only) added by this release. New tools
   // cannot silently consume this allowance; the core budget stays unchanged.
   const releaseTools = new Set(["room_assistant_context", "room_assistant_action", "room_work_claim_provenance",
     "room_work_claim_thread", "room_claim", "room_handoff", "room_read_bootstrap",
-    "room_merge_members", "room_next"]);
+    "room_merge_members", "room_next", "room_propose_plan"]);
   for (const name of releaseTools) {
     assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);
     const inDefaultWorkLoop = ["room_claim", "room_handoff", "room_next"].includes(name);

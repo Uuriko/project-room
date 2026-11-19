@@ -10,6 +10,7 @@ import { confirmsWorkReturn } from "../src/workflow.js";
 import { connectionDiagnostic } from "./agent-connection.mjs";
 import { validWorkSearchQuery, validProjectMapArguments } from "./room-agent.mjs";
 import { workTools, isWorkTool, validWorkArguments, submitWorkAction, workActionRefusal, normalizeHandoffArguments } from "./work-actions.mjs";
+import { PLAN_TOOL, planTool, submitPlan, validPlanArguments } from "./work-plan.mjs";
 import { currentAttention } from "./attention-inbox.mjs";
 import { WatchError } from "./watch-journal.mjs";
 import { replyTools, isReplyTool, replyRoute, validReplyArguments, submitReplyAction, replyRefusal } from "./reply-actions.mjs";
@@ -90,6 +91,7 @@ export const roomTools = [
     }, ["workItemId"]),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
   ...workTools,
+  planTool,
   ...helpTools,
   ...replyTools
 ];
@@ -117,6 +119,7 @@ function validArguments(tool, args) {
   if (isHelpTool(tool.name)) return validHelpArguments(tool.name, args);
   if (isReplyTool(tool.name)) return validReplyArguments(tool.name, args);
   if (isWorkTool(tool.name)) return validWorkArguments(tool.name, args);
+  if (tool.name === PLAN_TOOL) return validPlanArguments(args);
   if (!object(args) || Object.keys(args).some(key => !Object.hasOwn(tool.inputSchema.properties, key))
     || tool.inputSchema.required.some(key => !Object.hasOwn(args, key))) return false;
   if (tool.name === "room_map") return validProjectMapArguments(args);
@@ -202,6 +205,8 @@ async function callTool(client, identity, name, args, signal) {
   if (isHelpTool(name)) return submitHelpAction(client, identity, name, args, { signal });
   if (isReplyTool(name)) return replyRoute(name) ? client.replyRead(name, args, { signal }) : submitReplyAction(client, identity, name, args, { signal });
   if (isWorkTool(name)) return submitWorkAction(client, identity, name, args, { signal });
+  if (name === PLAN_TOOL) return submitPlan(args, step => submitWorkAction(client, identity, step.name, step.args, { signal }),
+    { refusal: (cause, step) => workActionRefusal(cause, step.args) });
   if (name === "room_list_outside_agents") return client.outsideAgents({ signal });
   if (name === "room_introduce_outside_agent") return client.recordOutsideAgent(args, { signal });
   if (name === "room_begin_work") return beginOnClient(client, identity, args, signal);

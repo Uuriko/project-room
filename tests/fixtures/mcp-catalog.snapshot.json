@@ -1214,6 +1214,16 @@
         "title": "Project State"
       }
     },
+    "room_propose_plan": {
+      "inputSchema": "fb79930b92f8f96c",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Propose a plan of work"
+      }
+    },
     "room_propose_work": {
       "inputSchema": "b21245e92696cb37",
       "annotations": {
@@ -1954,6 +1964,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Project State"
+      }
+    },
+    "room_propose_plan": {
+      "inputSchema": "fb79930b92f8f96c",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Propose a plan of work"
       }
     },
     "room_propose_work": {

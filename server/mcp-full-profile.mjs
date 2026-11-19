@@ -35,7 +35,8 @@ import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.m
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
-import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction, withWorkDeprecation, workUsesExpectedRevision } from "../client/work-actions.mjs";
+import { PLAN_TOOL, submitPlan } from "../client/work-plan.mjs";
+import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction, withWorkDeprecation, workActionRefusal, workUsesExpectedRevision } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction, helpUsesExpectedRevision } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
 import { markIfOther, stampAssistantResult, withContentTrust } from "./content-trust.mjs";
@@ -204,7 +205,7 @@ const HOSTED_STDIO_WRITE_TOOLS = new Set([
   "room_assistant_action",
   "room_introduce_outside_agent",
   "room_begin_work", "room_link_work_claim_pr", "room_set_member_claim_cap",
-  "room_post_draft", "room_close_work_claim",
+  "room_post_draft", "room_close_work_claim", PLAN_TOOL,
 ]);
 const HOSTED_STDIO_READ_BOUNTY_TOOLS = new Set([
   "bounty_list", "bounty_read_balances", "bounty_read_history",
@@ -390,6 +391,15 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       throw new ServiceError(422, "invalid_claim_input", "Set maxMemberOpenClaims, maxOpenClaims, or both.");
     }
     return { value: { roomId, ...store.workClaims.configure(roomId, patch) }, isError: false };
+  }
+  if (name === PLAN_TOOL) {
+    // Each step is one ordinary work.proposed command through store.command,
+    // so the steer gate and idempotency apply per item exactly as for room_propose_work.
+    const value = await submitPlan(rest, step => {
+      const command = buildWorkCommand(step.name, step.args, identity);
+      return recorded(store, secret, roomId, identity, command, receipt => recordedWorkAction(step.name, command, receipt)).value;
+    }, { refusal: (cause, step) => workActionRefusal(cause, step.args) });
+    return { value, isError: value.status !== "recorded" };
   }
   if (isWorkTool(name)) {
     const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, workUsesExpectedRevision, identity, buildWorkCommand(name, rest, identity));
