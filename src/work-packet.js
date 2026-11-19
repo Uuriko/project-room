@@ -134,6 +134,16 @@ export async function verifyWorkResult(value, { roomId, workItemId, completionEv
         && native.withdrawnAt === text.withdrawnAt && native.withdrawnBy === text.withdrawnBy);
     }
   }
+  if (value.review !== undefined) {
+    const { criteria, action } = value.review ?? {};
+    const basis = action?.arguments;
+    check(typeof criteria === "string" && criteria.trim() && action?.tool === "room_record_verification"
+      && action.inputRequired?.length === 2 && action.inputRequired[0] === "result" && action.inputRequired[1] === "summary"
+      && current.next.action === "verify" && current.next.memberId === value.viewerId
+      && result.receipt?.eventId === current.completionEventId && result.text?.body !== null
+      && basis?.roomId === roomId && basis.workItemId === workItemId && basis.expectedRevision === current.workRevision
+      && basis.completionEventId === result.receipt.eventId && basis.evidenceVersion === result.receipt.evidenceVersion);
+  }
   return value;
 }
 

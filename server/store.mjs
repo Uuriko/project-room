@@ -6719,7 +6719,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       } };
       let value;
       try { value = selectedWorkResult({ db: this.db, state, workItemId, sequence: row.sequence, now: this.now(), completionEventId, draftMessageId,
-        viewerId: auth.member.id, floor: this.historyFloor(roomId, auth.member.id, row.sequence), messageRecords }); }
+        viewerId: auth.member.id, reviewer: auth.member, floor: this.historyFloor(roomId, auth.member.id, row.sequence), messageRecords }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
       return stampWorkResult({ ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
