@@ -1871,6 +1871,15 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           return invitePage({ ...started, accountUrl: account.pathname + account.search, invitationChoice:url.searchParams.get("connection")==="invite", publicLobby:inviteOAuth.publicLobbyAvailable() }, started.request);
         } catch (error) { return json(res, 400, { error: "invalid_request", error_description: error.message }); }
       }
+      if (url.pathname === "/api/mcp/oauth/reconnect" && req.method === "POST") {
+        if (!inviteOAuth) return json(res, 404, { error: "native_connection_unavailable" });
+        rate(`oauth-owner-reconnect:${remoteAddress}`, 12);
+        const token = bearer(req);
+        if (!token) return json(res, 401, { error: "room_owner_credential_required" });
+        res.setHeader("Cache-Control", "no-store");
+        return json(res, 200, inviteOAuth.authorizeReconnect(token, await body(req)));
+      }
+
       // GET /oauth/authorize — validate the request and show the consent screen.
       // The user must be logged in (account session cookie); otherwise redirect
       // to the login page with a return URL.

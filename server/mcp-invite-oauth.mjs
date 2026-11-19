@@ -6,7 +6,7 @@ import { createOAuthProvider } from './oauth-provider.mjs';
 import { AccessRequests } from './access-requests.mjs';
 import { ServiceError } from './service-error.mjs';
 import { PUBLIC_LOBBY_ROOM_ID, currentPublicMetadata } from './current-public-face.mjs';
-import { publicPage, joinLink, isRoomArchived } from '../src/events.js';
+import { publicPage, joinLink, isRoomArchived, validId } from '../src/events.js';
 import { isUnpublished } from './legal-store.mjs';
 // The server supplies a short-lived challenge; work is done in the consenting
 // browser, so the normal anonymous mint proof and quotas remain meaningful.
@@ -83,6 +83,58 @@ export function createMcpInviteOAuth({ store, clients, resource, issuer = new UR
     if (!pending || pending.expires_at <= store.now()) throw new Error('Connection confirmation expired. Restart plugin connection. ' + MCP_INVITE_RECOVERY);
     return { pending, request: JSON.parse(pending.request_json) };
   };
+  const existingBinding = grant => ({ principalType: 'invited-agent', invitationGrantId: grant.id, resource,
+    roomId: grant.room_id, identityId: grant.identity_id, memberId: grant.member_id, identityEpoch: grant.identity_epoch });
+  const selectExisting = (roomId, memberId) => {
+    const candidates = db.prepare(`SELECT * FROM oauth_invite_grants WHERE room_id=? AND member_id=?
+      AND revoked_at IS NULL AND expires_at>? ORDER BY created_at DESC,id LIMIT 10`).all(roomId, memberId, store.now());
+    return candidates.find(grant => grant.sponsor_member_id === store.roomOwnerId(roomId)
+      && validateMcpInviteOAuthBinding(store, grant.id, existingBinding(grant)));
+  };
+  const authorizeReconnect = (token, { pairingId, roomId, memberId, clientId, scopes }) => store.transaction(() => {
+    if (!/^[a-f0-9]{64}$/.test(pairingId ?? '') || !validId(roomId) || !validId(memberId)
+      || typeof clientId !== 'string' || !Array.isArray(scopes)) throw new ServiceError(422, 'invalid_reconnect', 'Choose the precise existing seat and pending connector request');
+    const auth = store.authenticate(token, roomId, null, { allowAccountSession: false });
+    if (auth.member.kind !== 'human' || auth.member.id !== store.roomOwnerId(roomId))
+      throw new ServiceError(403, 'reconnect_requires_owner', 'Use the existing Room owner credential');
+    const pending = db.prepare('SELECT * FROM oauth_invite_pending WHERE nonce_hash=?').get(pairingId);
+    if (!pending || pending.expires_at <= store.now() || pending.grant_id !== null)
+      throw new ServiceError(409, 'reconnect_unavailable', 'Restart the connector to obtain a pending pairing');
+    const request = JSON.parse(pending.request_json);
+    if (request.clientId !== clientId || JSON.stringify([...request.scopes].sort()) !== JSON.stringify([...new Set(scopes)].sort()))
+      throw new ServiceError(409, 'reconnect_scope_mismatch', 'The selected client or scopes changed');
+    const grant = selectExisting(roomId, memberId);
+    if (!grant) throw new ServiceError(409, 'reconnect_seat_unavailable', 'No active owner-sponsored invitation grant for this seat');
+    if (request.reconnectGrantId && request.reconnectGrantId !== grant.id)
+      throw new ServiceError(409, 'reconnect_already_paired', 'This pending connector is paired to a different seat');
+    request.reconnectGrantId = grant.id;
+    db.prepare('UPDATE oauth_invite_pending SET request_json=? WHERE nonce_hash=?').run(JSON.stringify(request), pairingId);
+    return { status: 'paired', roomId, memberId, clientId, scopes: request.scopes, expiresAt: pending.expires_at };
+  });
+  const reconnectPreview = nonce => {
+    const { request } = read(nonce);
+    if (!request.reconnectGrantId) return null;
+    const grant = db.prepare('SELECT * FROM oauth_invite_grants WHERE id=?').get(request.reconnectGrantId);
+    if (!grant || !validateMcpInviteOAuthBinding(store, grant.id, existingBinding(grant))
+        || grant.sponsor_member_id !== store.roomOwnerId(grant.room_id)) throw new Error('The existing seat can no longer reconnect');
+    const { member } = store.identities.resolveIdentityLink(grant.identity_id, grant.room_id);
+    return { grant, request, displayName: member.displayName };
+  };
+  const approveReconnect = nonce => store.transaction(() => {
+    const { pending } = read(nonce);
+    const selected = reconnectPreview(nonce);
+    if (!selected || pending.grant_id !== null && pending.grant_id !== selected.grant.id) throw new Error('Pair this connector with your existing seat first');
+    const { grant, request } = selected;
+    const approvalHash = hash('reconnect:'+grant.id);
+    if (pending.grant_id !== null && pending.approval_hash !== approvalHash) throw new Error('Another connection was already confirmed');
+    db.prepare('UPDATE oauth_invite_pending SET grant_id=?,approval_hash=? WHERE nonce_hash=?').run(grant.id, approvalHash, hash(nonce));
+    const { code } = provider.issueCode({ ...request, userId: grant.id, binding: existingBinding(grant), codeIdempotencyKey: nonce });
+    const redirect = new URL(request.redirectUri);
+    redirect.searchParams.set('code', code);
+    redirect.searchParams.set('iss', issuer);
+    if (request.state) redirect.searchParams.set('state', request.state);
+    return redirect.href;
+  });
   const codeFrom = text => {
     if (typeof text !== 'string' || text.length > 2048) throw new Error('Paste a Member agent invitation link or RM code');
     const found = text.trim().match(/(?:^|[\/#=?&])(?:RM-[0-9A-Z]{16})(?=$|[\s&#/?])/i);
@@ -99,6 +151,7 @@ export function createMcpInviteOAuth({ store, clients, resource, issuer = new UR
   };
   const approve = (nonce, input, displayName) => store.transaction(() => {
     const { pending, request } = read(nonce);
+    if (request.reconnectGrantId) throw new Error('This pending connection is already paired to an existing seat');
     if (typeof displayName !== 'string' || !displayName.trim() || displayName.trim().length > 80) throw new Error('Choose an agent name');
     const approvalHash = hash(JSON.stringify([codeFrom(input).toUpperCase(), displayName.trim()]));
     let grant;
@@ -134,6 +187,7 @@ export function createMcpInviteOAuth({ store, clients, resource, issuer = new UR
   };
   const approvePublic = (nonce, displayName, address, proof) => store.transaction(() => {
     const { pending, request } = read(nonce);
+    if (request.reconnectGrantId) throw new Error('This pending connection is already paired to an existing seat');
     const name = typeof displayName === 'string' ? displayName.trim() : '';
     if (!name || name.length > 80) throw new Error('Choose an agent name');
     const approvalHash = hash(JSON.stringify([PUBLIC_LOBBY_GRANT, name]));
@@ -173,17 +227,20 @@ export function createMcpInviteOAuth({ store, clients, resource, issuer = new UR
     if (request.state) redirect.searchParams.set('state', request.state);
     return redirect.href;
   });
-  return { provider, begin, read, preview, approve, approvePublic, publicLobbyAvailable, cancel };
+  return { provider, begin, read, preview, approve, approvePublic, publicLobbyAvailable, cancel, authorizeReconnect, reconnectPreview, approveReconnect };
 }
-export function inviteOAuthPage({ nonce, request, invitation = null, code = '', accountUrl, invitationChoice = false, publicLobby = false, proofChallenge = null, displayName = '' }) {
+export function inviteOAuthPage({ nonce, request, invitation = null, code = '', accountUrl, invitationChoice = false, publicLobby = false, proofChallenge = null, displayName = '', reconnect = null }) {
   const hidden = `<input type="hidden" name="nonce" value="${escape(nonce)}">`;
   const consent = invitation
     ? `<p>Room: <strong>${escape(invitation.roomTitle)}</strong></p><p>Invitation sponsor: ${escape(invitation.inviterDisplayName || 'Room member')}</p><p>Room access: ${escape(invitation.profile)}. Requested scopes: ${escape(request.scopes.join(', '))}.</p><p>The sponsor grants access inside this Room. Your ChatGPT tool permissions stay under your control. No Room human account is created or claimed. This Room connection lasts up to 30 days and can be revoked.</p><input type="hidden" name="invitation" value="${escape(code)}"><label>Agent name <input name="display_name" maxlength="80" value="My agent" required></label><button name="decision" value="allow">Connect this agent</button>`
     : '<label>Agent invitation link or RM code <input name="invitation" maxlength="2048" autocomplete="off" required></label><button name="decision" value="preview">Review invitation</button>';
   const account = accountUrl ? `<section aria-labelledby="reconnect-title"><h2 id="reconnect-title">Already connected before?</h2><p>Use your Room account to choose an existing agent and room.</p><a class="${publicLobby && !invitation && !proofChallenge ? 'secondary' : 'primary'}" data-account-reconnect href="${escape(accountUrl)}">Reconnect existing agent</a></section>` : '';
+  const pair = invitation || proofChallenge ? '' : reconnect
+    ? `<section><h2>Confirm existing seat</h2><p>Room: <strong>${escape(reconnect.grant.room_id)}</strong></p><p>Agent: <strong>${escape(reconnect.displayName)}</strong></p><p>Requested scopes: ${escape(request.scopes.join(', '))}.</p><form method="post" action="/oauth/invite">${hidden}<button name="decision" value="allow_reconnect">Connect existing seat</button></form></section>`
+    : `<details><summary>Pair with Room owner approval</summary><p>Pair this connection to an existing owner-sponsored seat. Give the Room operator this pairing ID, then check approval here.</p><output>${hash(nonce)}</output><form method="post" action="/oauth/invite">${hidden}<button name="decision" value="check_reconnect">Check pairing</button></form></details>`;
   const publicForm = publicLobby && !invitation ? proofChallenge
     ? `<section><h2>Verifying your connection</h2><p id="proof-status" role="status">Verifying this connection…</p><form id="public-proof" method="post" action="/oauth/invite" data-prefix="${escape(proofChallenge.prefix)}" data-challenge="${escape(proofChallenge.challenge)}">${hidden}<input type="hidden" name="display_name" value="${escape(displayName)}"><input type="hidden" name="decision" value="allow_public"><input type="hidden" name="proof"><noscript>JavaScript is required for verification. Please use an invitation instead.</noscript></form><button id="proof-retry" type="button" hidden>Retry verification</button><script>${PUBLIC_LOBBY_PROOF_SCRIPT}</script></section>`
     : `<section><h2>Join the public lobby</h2><p>Connect your agent as a guest in the public lobby. This creates a new agent seat with read and chat access. Lobby messages are public. No Room account or invitation is required. Already connected? Reuse your saved host connection.</p><form method="post" action="/oauth/invite">${hidden}<label>Agent name <input name="display_name" maxlength="80" value="Agent ${escape(nonce.slice(0, 6))}" required></label><button class="primary" name="decision" value="allow_public">Connect to the lobby</button></form></section>` : '';
   const form = `<form id="invite-connection" method="post" action="/oauth/invite">${hidden}${consent}</form>`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect to Project Room</title><style>body{font-family:system-ui,sans-serif;max-width:30rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a;line-height:1.5}h1{font-size:1.5rem}h2{font-size:1.1rem}section,details{margin:1.5rem 0}summary{cursor:pointer;font-weight:600}label{display:block;margin:1rem 0}input{display:block;box-sizing:border-box;width:100%;padding:.7rem;font:inherit}button,.primary,.secondary{display:inline-block;padding:.7rem 1rem;margin:.5rem .3rem .5rem 0;border:1px solid #bbb;border-radius:.5rem;font:inherit}.secondary{text-decoration:none;color:inherit}button{background:white;cursor:pointer}.primary{background:#065dcc;color:white;border-color:#065dcc;text-decoration:none}a:focus-visible,button:focus-visible,summary:focus-visible,input:focus-visible{outline:3px solid #1468ce;outline-offset:3px}</style></head><body><main><h1>${invitation?'Confirm new agent connection':'Connect to Project Room'}</h1><p>Continue only if you just started this connection in your agent.</p>${publicForm}${account}${invitation?`<p>This invitation creates a new agent seat. It does not reconnect a previous seat.</p>${form}`:`<details${invitationChoice||!accountUrl?' open':''}><summary>Join with an invitation</summary><p>No Project Room signup is required. Confirming creates a new agent seat. ${accountUrl?'Use your Room account above for an account-linked seat.':'Reuse your saved host connection for an existing seat.'}</p>${form}</details>`}<button form="invite-connection" name="decision" value="deny" formnovalidate>Cancel connection</button><p>You can cancel before confirming without using the invitation.</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect to Project Room</title><style>body{font-family:system-ui,sans-serif;max-width:30rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a;line-height:1.5}h1{font-size:1.5rem}h2{font-size:1.1rem}section,details{margin:1.5rem 0}summary{cursor:pointer;font-weight:600}label{display:block;margin:1rem 0}input{display:block;box-sizing:border-box;width:100%;padding:.7rem;font:inherit}button,.primary,.secondary{display:inline-block;padding:.7rem 1rem;margin:.5rem .3rem .5rem 0;border:1px solid #bbb;border-radius:.5rem;font:inherit}.secondary{text-decoration:none;color:inherit}button{background:white;cursor:pointer}.primary{background:#065dcc;color:white;border-color:#065dcc;text-decoration:none}a:focus-visible,button:focus-visible,summary:focus-visible,input:focus-visible{outline:3px solid #1468ce;outline-offset:3px}</style></head><body><main><h1>${invitation?'Confirm new agent connection':'Connect to Project Room'}</h1><p>Continue only if you just started this connection in your agent.</p>${publicForm}${account}${pair}${invitation?`<p>This invitation creates a new agent seat. It does not reconnect a previous seat.</p>${form}`:`<details${invitationChoice||!accountUrl?' open':''}><summary>Join with an invitation</summary><p>No Project Room signup is required. Confirming creates a new agent seat. ${accountUrl?'Use your Room account above for an account-linked seat.':'Reuse your saved host connection for an existing seat.'}</p>${form}</details>`}<button form="invite-connection" name="decision" value="deny" formnovalidate>Cancel connection</button><p>You can cancel before confirming without using the invitation.</p></main></body></html>`;
 }
