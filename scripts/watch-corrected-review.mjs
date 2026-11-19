@@ -58,7 +58,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
       onWaiting: after => console.error(JSON.stringify({ status: "waiting", after })) });
     console.log(JSON.stringify(result));
   } catch (error) {
-    console.error(JSON.stringify({ status: "stopped", code: error.code ?? error.name }));
+    console.error(JSON.stringify({ status: "stopped", code: typeof error.code === "string" ? error.code : error.name }));
     process.exitCode = 1;
   }
 }

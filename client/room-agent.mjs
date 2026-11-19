@@ -419,9 +419,9 @@ export class RoomAgentClient {
   // Every service request shares one fetch posture: redirects are errors (a
   // redirect could carry the bearer elsewhere), no ambient credentials, and a
   // 15s deadline that a caller-supplied signal narrows but never removes.
-  #fetchRaw(path, { method = "GET", headers = {}, body, signal } = {}) {
+  #fetchRaw(path, { method = "GET", headers = {}, body, signal, timeoutMs = 15000 } = {}) {
     return this.#fetch(`${this.#origin}${edgeDoorApiPath(this.#origin, path)}`, {
-      method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
       headers: { Authorization: `Bearer ${this.#token}`, ...headers },
       ...(body === undefined ? {} : { body })
     });
@@ -561,7 +561,7 @@ export class RoomAgentClient {
     try {
       await this.checkConnection({ signal: stop });
       const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/stream?after=${after}`,
-        { signal: stop, headers: { Accept: "text/event-stream" } });
+        { signal: stop, timeoutMs: timeoutMs + 1000, headers: { Accept: "text/event-stream" } });
       if (!response.ok) throw this.#requestError(response, null, "Room stream unavailable");
       if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body)
         throw new RoomClientError(200, "invalid_response", "Room returned an invalid event stream");

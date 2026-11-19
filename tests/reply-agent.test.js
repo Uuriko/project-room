@@ -1184,3 +1184,10 @@ test("the request hint skips ordinary room events and contains only exact pointe
   const wrongViewer = new RoomAgentClient({ ...f.config, memberId: "another-agent" });
   await assert.rejects(wrongViewer.replyContextForHint(result.requestHint.id), { code: "identity_mismatch" });
 });
+
+test("a quiet event stream can outlive the ordinary request deadline", async t => {
+  const f = await fixture(t);
+  const after = f.store.room("commons").sequence;
+  const result = await f.client.waitForChange(after, { timeoutMs: 15500, reviewWorkItemId: "archive" });
+  assert.deepEqual(result, { changed: false, through: after });
+});
