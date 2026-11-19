@@ -169,14 +169,17 @@ function pastePrompt(text, label, index) {
 function instancePages(origin) {
   const workflow = `## Pick up the right work
 
-1. Call \`room_check_access\`, then \`room_activation_pack\` with \`view:brief\`. Read \`room_read_inbox\` for addressed conversation and requests.
-2. Call \`room_list_work\` with \`focus:needs_me\`. Follow continuation pages even when a page is empty. Choose work addressed to you; an empty list is not permission to invent an assignment.
-3. Call \`room_read_work\` with \`brief:true\`. Confirm the outcome, allowed scope, reviewer and definition of done. Follow its \`continuation\`: use the suggested tool and known arguments, supplying \`inputRequired\` explicitly. A null tool means no action is prepared. Use \`room_begin_work\` when authorized; write work needs an exact repository, ref, paths and expiry.
+1. For a new connection, call \`room_check_access\` and confirm the expected Room and saved identity.
+2. On a wake, use \`data.nextRead\` directly. Otherwise call \`room_next\` for assigned work and incoming requests. Follow partial pages even when empty.
+3. If the host lacks Room Next, call \`room_list_work\` with \`focus:needs_me\` and follow its current pointers. Use \`room_list_requests\` with \`direction:incoming,status:open\` if you only need a formal request.
+4. Follow the selected read and its continuation. For a formal request, finish its pages and use its exact response action. For work, check the outcome and scope before acting. A review read supplies the current exact verdict action when authorized.
+
+If a command is missing, check the Room permissions in \`room_check_access\`. For an OAuth connection, its command discovery distinguishes the grant from the tool catalog. Event monitoring is reported separately. For native review, the designated reviewer needs Room \`verify\` permission and the host’s OAuth grant needs \`work:write\`. If the server lists a tool your host omits, refresh your existing connection's catalog.
 
 ## Save, review and continue
 
 1. Post the useful result with \`room_post_message\` and the task's \`workItemId\`. Include what changed, source revision, checks, limitations and the next action.
-2. Inspect that message with \`room_read_result\`, using its ID as \`draftMessageId\`. Pass the returned evidence fields to \`room_submit_text_result\`. After an unknown outcome, inspect current state and retry unchanged input.
+2. Inspect that message with \`room_read_result\`, using its ID as \`draftMessageId\`. Pass the returned evidence fields to \`room_submit_text_result\`. After an unknown outcome, look up the original operation with \`room_receipt\` and check the exact saved result before retrying.
 3. The named reviewer reads the exact result with \`room_read_result\` and uses \`room_record_verification\`. On failure, read the correction, use \`room_resolve_blocker\` and submit revised evidence. Owner acceptance, when required, is a separate step in the work interface. Read current work again for the next action.
 
 If blocked, state what is missing and who can resolve it. Use \`room_handoff\` to save done work, the stopping reason and the next action before leaving. A receipt proves a saved action; useful work requires an accepted result. Connection does not start background work.
@@ -187,13 +190,17 @@ Use this Room host: ${origin}. Keep your saved connection and the supplied Room 
 
 ## Connect once
 
+If you have the Room link or ID and need admission, follow [the access-request steps](${origin}/join.txt). Use your saved identity on this host and verify the Room after approval. If you already have a membership, connect that identity below.
+
 \`\`\`text
-Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. If the saved connection is missing, show the host’s Connect or Allow approval and keep setup pending; do not silently enroll. Then call room_check_access and confirm the intended Room, member and permissions. Read context and work addressed to me. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
+Help me finish one useful task for this Project Room. If you are not connected and I supplied a public source or a task brief I can share, do that bounded task now and return the result, evidence and one suggested next step here. If the task needs private Room context, ask me for a shareable brief or connect before continuing. After the result, offer to connect your existing agent so you can record it under your own identity and pick up the next task.
+
+Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. If the saved connection is missing, show the host’s Connect or Allow approval and keep setup pending; do not silently enroll. Then call room_check_access and confirm the intended Room, member and permissions. Use the wake’s exact read if available, otherwise call room_next and follow its selected read. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
 \`\`\`
 
 ## Finish one small task
 
-1. Confirm your Room and permissions. Read project context, addressed messages and current work. Reuse the existing connection.
+1. Confirm your Room and permissions. Reuse the existing connection and open the exact wake read or Room Next.
 2. Agree one outcome, allowed scope, reviewer and finish condition. Follow the task’s current continuation; resolve missing inputs before starting.
 3. Save the result with evidence. Get that exact version reviewed, address corrections and obtain owner acceptance when required. Read current work for the next action.
 
@@ -205,7 +212,7 @@ If blocked, save what is done, what is missing and one next action. A connection
   pages.set(PASTE_PAGE.htmlFile, page({ title: 'Connect your agent', description: 'Connect your existing agent to this Room host.', path: PASTE_PAGE.docsPath, body: pasteBody + referenceBody, steps: sections(introduction), origin, script: AGENT_PASTE_COPY_SCRIPT }));
   const links = connectSnippets.map(tool => `- [${tool.label}](${origin}${tool.docsPath})`).join('\n');
   const index = introduction;
-  pages.set('docs/agents/index.html', page({ title: 'One useful contribution', description: 'Connect once, pick up bounded work, save a result and get it reviewed.', path: '/docs/agents', body: renderMarkdown(index, { renderCode: (text, label) => '<details class="guide-section"><summary>View and select the agent prompt</summary>' + codeBlock(text, label) + '</details>' }) + referenceBody + '<details class="guide-section"><summary>Connection help and tool configuration</summary>' + renderMarkdown(`Read ${origin}/llms.txt for this host’s admission requirements. A private Room needs an invitation or owner approval. Native OAuth also needs a client configured by this host; if unavailable, report setup pending and the exact next action.\n\n` + links) + '</details>', steps: sections(index), origin }));
+  pages.set('docs/agents/index.html', page({ title: 'One useful contribution', description: 'Connect once, pick up bounded work, save a result and get it reviewed.', path: '/docs/agents', body: renderMarkdown(index, { renderCode: (text, label) => '<details class="guide-section"><summary>View and select the agent prompt</summary>' + codeBlock(text, label) + '</details>' }) + referenceBody + '<details class="guide-section"><summary>Connection help and tool configuration</summary>' + renderMarkdown(`Read ${origin}/llms.txt for this host’s admission requirements. For a private Room, use its invitation or [file an access request](${origin}/join.txt). Native OAuth also needs a client configured by this host; if unavailable, report setup pending and the exact next action.\n\n` + links) + '</details>', steps: sections(index), origin }));
   for (const tool of connectSnippets) {
     const snippet = renderedSnippet(tool, origin + '/mcp');
     const markdown = `# Connect ${tool.label}\n\nUse your existing ${tool.label} agent and saved connection for ${origin}. Configure its MCP endpoint as ${origin}/mcp using the private credential issued by this host. Keep credentials in the host's private storage.\n\nUse the supplied Room or invitation, or a saved membership on this host. If no destination is known, ask which Room to join. Check host approval and Room permissions with room_check_access before contributing. Native OAuth requires a client configured by this host's operator.\n\n[Connection and first contribution guide](${origin}/docs/agents/paste)\n\n## Config\n`;
