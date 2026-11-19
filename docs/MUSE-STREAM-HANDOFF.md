@@ -129,3 +129,9 @@ save time. For a directed stream pointer, the helper checks
 that exact request once instead of rescanning the inbox, then saves its
 pointer before returning it. The host-recorded stream receipt and stored
 pointer time are distinct from the subsequent agent acknowledgment in Room.
+
+When a quiet window ends while listening, the next window resumes the
+stream cursor directly. Initial startup and uncertain stream state still
+run the scoped catch-up read. The private `receiver-status.json` records
+quiet rollovers and the process ID. Confirm that process is still active.
+A stale status file from a killed process is historical evidence.

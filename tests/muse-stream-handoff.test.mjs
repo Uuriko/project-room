@@ -98,7 +98,7 @@ test("a stream pointer selects the exact authenticated request without listing a
       assert.equal(after, 14); assert.equal(options.requestHints, true);
       return { changed: true, sequence: 15, requestHint: { ...ready, observedAt: "2026-11-18T21:00:00Z" } };
     },
-    replyContext(id) { assert.equal(id, ready.id); return context(ready, 15); }
+    replyContextForHint(id) { assert.equal(id, ready.id); return context(ready, 15); }
   };
   const result = await holdMuseHandoff({ client, policy, checkpoint: { after: 10, inFlight: null },
     signal: new AbortController().signal, save(state) { saved = state; } });
@@ -124,4 +124,27 @@ test("a stay-armed process rolls a quiet window into one handoff", async () => {
   assert.equal(result.quietWindows, 1);
   assert.ok(result.lastQuietAt);
   assert.equal(result.requestMessageId, "real-work");
+});
+
+test("a quiet rollover resumes a checked stream without an inbox read", async () => {
+  const windows = [], rollover = [], ready = request("after-rollover");
+  let lists = 0, hops = 0, saved = { after: 10, inFlight: null };
+  const client = {
+    replyRequests() { assert.equal(++lists, 1); return { evaluatedThrough: 14, requests: [] }; },
+    waitForChange(after, { signal }) {
+      assert.equal(after, 14);
+      if (++hops === 1) { windows[0].abort(); signal.throwIfAborted(); }
+      return { changed: true, sequence: 15, requestHint: ready };
+    },
+    replyContextForHint() { return context(ready, 15); }
+  };
+  const result = await runMuseHandoff({ mode: "--stay-armed", windowMs: 1000, stop: new AbortController().signal,
+    makeWindow() { const next = new AbortController(); windows.push(next); return next.signal; },
+    onRollover(facts) { rollover.push(facts); },
+    run(signal, progress) { return holdMuseHandoff({ client, policy, checkpoint: saved, save(value) { saved = value; }, signal, ...progress }); }
+  });
+  assert.equal(rollover.length, 1);
+  assert.equal(result.quietWindows, 1);
+  assert.equal(result.source, "stream_pointer");
+  assert.equal(lists, 1);
 });

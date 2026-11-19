@@ -55,7 +55,7 @@ async function inspect(client, policy, after, signal) {
   return { next, through };
 }
 
-export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true }) {
+export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, setWaiting = () => {} }) {
   let state = checkpoint;
   const remember = (after, inFlight = null) => { state = { after, inFlight }; save(state); };
   // A process may stop after saving the pointer and before delivering stdout.
@@ -74,17 +74,21 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
     }
     remember(state.after);
   }
+  let catchUp = !resumeStream || Boolean(checkpoint.inFlight);
   for (;;) {
     signal.throwIfAborted();
-    const { next, through } = await inspect(client, policy, state.after, signal);
-    if (next) {
-      remember(next.openingSequence, next);
-      return { status: "handoff", replay: false, after: state.after, source: "catch_up", ...next };
-    }
-    if (integer(through) && through > state.after) {
-      remember(through);
+    if (catchUp) {
+      setWaiting(false);
+      const { next, through } = await inspect(client, policy, state.after, signal);
+      if (next) {
+        remember(next.openingSequence, next);
+        return { status: "handoff", replay: false, after: state.after, source: "catch_up", ...next };
+      }
+      if (integer(through) && through > state.after) remember(through);
     }
     if (!wait) return { status: "no_work", after: state.after };
+    catchUp = true;
+    setWaiting(true);
     for (;;) {
       signal.throwIfAborted();
       let change;
@@ -97,7 +101,8 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
       const hint = change.requestHint;
       if (!hint) break; // Older, incomplete or lagging streams use the scoped catch-up read.
       if (matches({ ...hint, status: "open" }, policy)) {
-        const context = await client.replyContext(hint.id, { view: "compact", signal });
+        setWaiting(false);
+        const context = await client.replyContextForHint(hint.id, { signal });
         const exact = pointer(context, hint, policy, state.after);
         if (!exact || exact.openingSequence !== change.sequence) break;
         remember(exact.openingSequence, exact);
@@ -127,24 +132,29 @@ function loadCheckpoint(file, policy) {
     save: state => atomicPrivateJson(file, { version: 1, binding, ...state }) };
 }
 
-export async function runMuseHandoff({ mode, windowMs, stop, run, makeWindow = AbortSignal.timeout }) {
+export async function runMuseHandoff({ mode, windowMs, stop, run, onRollover = () => {}, makeWindow = AbortSignal.timeout }) {
   const startedAt = new Date().toISOString();
-  let quietWindows = 0, lastQuietAt = null;
+  let quietWindows = 0, lastQuietAt = null, resumeStream = false;
+  const facts = () => ({ startedAt, quietWindows, lastQuietAt });
   for (;;) {
     const window = makeWindow(windowMs), signal = AbortSignal.any([stop, window]);
     for (;;) {
+      let waiting = false;
       try {
-        const result = await run(signal);
-        return { ...result, startedAt, quietWindows, lastQuietAt };
+        const result = await run(signal, { resumeStream, setWaiting(value) { waiting = value; } });
+        return { ...result, ...facts() };
       } catch (error) {
-        if (stop.aborted) return { status: "stopped", startedAt, quietWindows, lastQuietAt };
+        if (stop.aborted) return { status: "stopped", ...facts() };
         if (window.aborted) {
           quietWindows++;
           lastQuietAt = new Date().toISOString();
-          if (mode !== "--stay-armed") return { status: "quiet_expired", startedAt, quietWindows, lastQuietAt };
+          if (mode !== "--stay-armed") return { status: "quiet_expired", ...facts() };
+          resumeStream = waiting;
+          onRollover(facts());
           break; // Keep the same process and lock. No host completion wakes a model here.
         }
         if (!(error instanceof TypeError) && error.name !== "TimeoutError" && ![429, 500, 502, 503, 504].includes(error.status)) throw error;
+        resumeStream = false;
         await pause(1000, undefined, { signal }).catch(() => {});
       }
     }
@@ -165,8 +175,12 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   process.once("SIGINT", interrupt); process.once("SIGTERM", interrupt);
   try {
     const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
+    const statusFile = join(directory, "receiver-status.json");
     const result = await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
-      run: signal => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), signal, wait: mode !== "--once" }) });
+      onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
+      run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
+        signal, wait: mode !== "--once" }) });
+    if (mode === "--stay-armed") atomicPrivateJson(statusFile, { pid: process.pid, ...result });
     console.log(JSON.stringify(result));
   } finally { process.removeListener("SIGINT", interrupt); process.removeListener("SIGTERM", interrupt); owner.close(); }
 }

@@ -1174,4 +1174,13 @@ test("the request hint skips ordinary room events and contains only exact pointe
   assert.deepEqual(result.requestHint, { id: q.command.data.messageId, openingEventId: q.receipt.event.id,
     requesterId: "owner", recipientId: "producer", workItemId: null, observedAt: result.requestHint.observedAt });
   assert.ok(Number.isFinite(Date.parse(result.requestHint.observedAt)));
+  const requests = [];
+  const client = new RoomAgentClient({ ...f.config, fetchImpl(url, options) {
+    requests.push(new URL(url).pathname); return fetch(url, options);
+  } });
+  const exact = await client.replyContextForHint(result.requestHint.id);
+  assert.equal(exact.request.openingEventId, result.requestHint.openingEventId);
+  assert.deepEqual(requests, ["/api/rooms/commons/reply-context"]);
+  const wrongViewer = new RoomAgentClient({ ...f.config, memberId: "another-agent" });
+  await assert.rejects(wrongViewer.replyContextForHint(result.requestHint.id), { code: "identity_mismatch" });
 });

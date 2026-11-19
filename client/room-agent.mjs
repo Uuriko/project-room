@@ -773,6 +773,18 @@ export class RoomAgentClient {
     if (Object.hasOwn(args, "requestMessageId")) throw new Error("Choose the request once");
     return this.replyRead("room_read_request", { ...args, requestMessageId }, { signal });
   }
+  // A directed stream hint already follows a connection check. The service
+  // authorizes the selected read and the packet must name this exact viewer.
+  // Keep this path read-only and reject any context with a different principal.
+  async replyContextForHint(requestMessageId, { signal } = {}) {
+    const name = "room_read_request", args = { requestMessageId, view: "compact" };
+    if (!this.#memberId || !validReplyArguments(name, args)) throw new Error("Choose an exact request and configured agent");
+    const path = `/api/rooms/${encodeURIComponent(this.#roomId)}${replyRoute(name)}?${new URLSearchParams(args)}`;
+    const packet = validateReplyRead(await this.#fetchPath(path, undefined, signal), { name, args, roomId: this.#roomId });
+    if (packet.viewerId !== this.#memberId || packet.request.recipientId !== this.#memberId)
+      throw new RoomClientError(200, "identity_mismatch", "Request context does not belong to this receiver");
+    return packet;
+  }
   replyHistory(options = {}) { const { signal, ...args } = options; return this.replyRead("room_request_history", args, { signal }); }
   replyAction(name, args, options = {}) {
     return submitReplyAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
