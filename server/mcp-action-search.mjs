@@ -59,6 +59,8 @@ export const LEAN_MCP_TOOLS = Object.freeze([
   "room_post_message",
   "room_read_request",
   "room_respond_to_request",
+  "room_request_reply",
+  "room_progress_request",
   "room_check_access",
   "room_list_work",
   "room_claim",
