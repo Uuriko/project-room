@@ -103,8 +103,8 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_claim", core: true, blurb: uiText("mcp.core.room_claim"), focus: ["work"] },
   { name: "room_handoff", core: true, blurb: "Hand your task back: what is done, next action, why. Does not complete or reassign. haltAll stops your mutations.", focus: ["work"] },
   { name: "room_request_history", focus: ["conversation"] },
-  { name: "room_request_reply", core: true, blurb: "Ask one member for a tracked reply; this wakes them. Plain mentions are untracked.", focus: ["common"] },
+  { name: "room_request_reply", core: true, blurb: "Ask one member for a tracked reply (formal request). Plain mentions are untracked.", focus: ["common"] },
   { name: "room_cancel_request", focus: ["common", "conversation"] },
-  { name: "room_progress_request", core: true, blurb: "Ack a request to you on landing, before model work; then accepted, working or needs_input.", focus: ["common", "conversation"] },
+  { name: "room_progress_request", core: true, blurb: "After the exact read, ack a request to you before model work; then accepted, working or needs_input.", focus: ["common", "conversation"] },
   { name: "room_map", focus: ["work"] }
 ]);
