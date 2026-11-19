@@ -198,3 +198,36 @@ test("late previous-result read cannot repopulate a different review after cance
   assert.equal(await page.locator("#action-text-body").textContent(), "Only version of this result");
   assert.equal(f.item().verification, null, "reading and cancellation record no review");
 });
+
+test("the verdict links exact candidate release checks without claiming missing stages passed", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const candidateRevision = "a".repeat(40);
+  f.mutate(T.WORK_BLOCKED, { reason: "Select exact release", nextAction: "Resubmit" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Candidate pinned" });
+  f.mutate(T.WORK_STARTED, {});
+  const completed = f.complete(`Result B\nCandidate revision: ${candidateRevision}`);
+  const receipt = f.item().receipt;
+  f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: "revision-journey",
+    expectedRevision: f.item().revision, completionEventId: completed.event.id, evidenceVersion: receipt.evidenceVersion,
+    result: "pass", summary: "Archive scope only" });
+  const report = { completionEventId: completed.event.id, evidenceVersion: receipt.evidenceVersion, candidateRevision,
+    checks: { build: { candidateRevision, status: "passed", summary: "Signed archive verified", evidenceDigest: "sha256:" + "1".repeat(64) } } };
+  const note = f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
+    messageId: "release-checks-evidence", body: "room-release-checks/1\n" + JSON.stringify(report) });
+  const page = await f.login("owner");
+  await openResult(page);
+  const link = page.getByRole("link", { name: "Release checks", exact: true });
+  await link.waitFor();
+  await link.press("Enter");
+  assert.match(await page.locator("#result-release-candidate").textContent(), new RegExp(candidateRevision));
+  assert.match(await page.locator("#result-release-stages").innerText(), /Build · Passed/);
+  assert.match(await page.locator("#result-release-stages").innerText(), /Browser · Pending/);
+  assert.match(await page.locator("#result-release-stages").innerText(), /Deploy · Pending/);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.equal(await page.locator("#result-release-title").evaluate(node => document.activeElement === node), true);
+  const source = page.getByRole("link", { name: "Open recorded evidence" });
+  assert.equal(await source.getAttribute("href"), "#pr-record/message/" + note.event.data.messageId);
+  await source.click();
+  await page.locator("#result-dialog").waitFor({ state: "hidden" });
+  assert.match(page.url(), /#pr-record\/message\/release-checks-evidence$/);
+});
