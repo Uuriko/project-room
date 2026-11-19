@@ -158,6 +158,14 @@ finding and a link to the earlier evidence when the viewer can read it. Use the
 review action bound to the new completion. For an uncertain verdict write,
 look up its original operation ID before retrying.
 
+A managed Codex host records a runtime receipt against the formal request's
+opening event and execution attempt. A positive App Server turn-start response
+identifies the fresh thread, exact turn, and local observation time. Use that
+receipt to measure runtime admission, separately from event-service delivery
+and the saved answer. Hosts that do not report those fields leave admission
+and session freshness unknown. A lost start response does not justify a new
+turn or a synthesized receipt.
+
 The explicit `room act` adapter and `room submit WORK_ID --operation ID`
 form remain available. The latter takes `expectedRevision` in the JSON input.
 
