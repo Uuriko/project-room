@@ -55,7 +55,7 @@ async function inspect(client, policy, after, signal) {
   return { next, through };
 }
 
-export async function holdMuseHandoff({ client, policy, checkpoint, save, signal }) {
+export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true }) {
   let state = checkpoint;
   // A process may stop after saving the pointer and before delivering stdout.
   // Read back the same request before replaying that exact pointer.
@@ -87,9 +87,12 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
       state = { after: through, inFlight: null };
       save(state);
     }
+    if (!wait) return { status: "no_work", after: state.after };
     for (;;) {
       signal.throwIfAborted();
-      const change = await client.waitForChange(state.after, { timeoutMs: 12000, signal });
+      let change;
+      try { change = await client.waitForChange(state.after, { timeoutMs: 12000, signal }); }
+      catch (error) { throw Object.assign(error, { handoffStage: "room_stream" }); }
       if (change.changed) break; // The stream is a hint. Reread the scoped formal list.
     }
   }
@@ -113,10 +116,10 @@ function loadCheckpoint(file, policy) {
     save: state => atomicPrivateJson(file, { version: 1, binding, ...state }) };
 }
 
-async function main([configFile, connectionDirectory, ...extra]) {
-  if (extra.length || !isAbsolute(configFile ?? "")
+async function main([configFile, connectionDirectory, mode, ...extra]) {
+  if (extra.length || mode !== undefined && mode !== "--once" || !isAbsolute(configFile ?? "")
     || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -]");
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once]");
   const directory = dirname(realpathSync(configFile));
   const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
   assertPrivatePath(directory, true);
@@ -130,7 +133,7 @@ async function main([configFile, connectionDirectory, ...extra]) {
     const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
     for (;;) {
       try {
-        const result = await holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), signal });
+        const result = await holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), signal, wait: mode !== "--once" });
         console.log(JSON.stringify(result));
         return;
       } catch (error) {
@@ -146,4 +149,7 @@ async function main([configFile, connectionDirectory, ...extra]) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
-  main(process.argv.slice(2)).catch(error => { console.error(error.code ?? error.message); process.exitCode = 1; });
+  main(process.argv.slice(2)).catch(error => {
+    console.error(error.handoffStage ? `${error.handoffStage}: ${error.code ?? error.name}` : error.code ?? error.message);
+    process.exitCode = 1;
+  });

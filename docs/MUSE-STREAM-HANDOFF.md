@@ -84,6 +84,12 @@ the bracketed paths locally. Keep credentials in the existing secure storage.
    qualifying work. Let the user or current agent decide when to re-arm.
    There is no scheduled poll or automatic turn on each empty wake.
 
+If the host has a working stream listener of its own, let that listener
+invoke the helper with `--once` after a matching event. The helper verifies
+the open scope and returns `handoff` or `no_work` without opening another
+stream. Use the same private state across invocations. This also gives a
+one-call diagnostic when the host's stream implementation is incompatible.
+
 ## Verify and recover
 
 Use a real QA or research request. Measure Room save to host handoff, seen

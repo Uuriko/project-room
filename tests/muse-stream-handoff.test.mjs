@@ -76,3 +76,15 @@ test("empty wait never starts work and clock expiry respects the stop signal", a
     signal: controller.signal, save() {} }), { name: "AbortError" });
   assert.equal(waited, 2);
 });
+
+test("an existing host listener can scan and return without opening a second event stream", async () => {
+  const client = {
+    replyRequests() { return { evaluatedThrough: 12, requests: [] }; },
+    waitForChange() { assert.fail("one-shot selection must open no stream"); }
+  };
+  let saved;
+  const result = await holdMuseHandoff({ client, policy, checkpoint: { after: 10, inFlight: null },
+    signal: new AbortController().signal, wait: false, save(state) { saved = state; } });
+  assert.deepEqual(result, { status: "no_work", after: 12 });
+  assert.deepEqual(saved, { after: 12, inFlight: null });
+});
