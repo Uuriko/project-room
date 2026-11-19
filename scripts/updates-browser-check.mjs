@@ -499,6 +499,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.locator("#updates-close").click();
   await clickChrome(page, "#signout-button");
   await loginAccount("navigation-account-b", "Reader B");
+  if (await page.locator("#updates-dialog").isVisible()) await page.locator("#updates-close").click();
   await page.locator("#message-input").fill("Replacement account draft");
   await showExpectedUpdates("Private update for Reader B");
   const accountDestination = page.url();
@@ -1564,7 +1565,7 @@ test("Updates refresh live without stealing focus and filter permission decision
   const first=page.getByRole('button',{name:'Open @owner live-first',exact:true});await first.waitFor();await first.focus();
   post('live-second');
   await page.getByRole('button',{name:'Open @owner live-second',exact:true}).waitFor();
-  assert.equal(await first.evaluate(n=>n===document.activeElement),true);
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Open @owner live-first');
   await page.setViewportSize({width:390,height:844});
   store.command(owner,'commons',command(T.MEMBER_ADDED,{memberId:'applicant',displayName:'Applicant',kind:'human',permissions:[]}));
   const applicant=store.issueAccessKey('commons','applicant');

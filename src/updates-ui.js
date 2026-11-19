@@ -247,8 +247,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     }
     paintOperations(); paintPaging();
   }
-  async function loadNative({append=false,budget=1,notice=""}={}){
-    const owned=currentContext();if(!owned||append&&(loading||!hasMore||!cursor))return false;const mine=++ticket,current=()=>mine===ticket&&owns(owned);loading=true;paintOperations();paintPaging();status.textContent='Loading attention…';
+  async function loadNative({append=false,budget=1,notice="",background=false}={}){
+    const owned=currentContext();if(!owned||append&&(loading||!hasMore||!cursor))return false;const mine=++ticket,current=()=>mine===ticket&&owns(owned);loading=true;if(!background)paintOperations();paintPaging();status.textContent='Loading attention…';
     try{const merged=new Map((append?items:[]).map(item=>[item.id,item])),seen=append?new Set(visitedCursors):new Set();let after=append?cursor:null,more=false,pages=append?loadedPages:0;
       for(let step=0;step<(append?1:Math.max(1,budget));step++){
         const page=await client.roomRead('/needs-me'+(after?'?cursor='+encodeURIComponent(after):''));if(!page||!current())return false;
@@ -259,8 +259,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       items=[...merged.values()];cursor=after;hasMore=more;loadedPages=pages;visitedCursors=seen;incomplete=true;filter='needs';actionable=items.length;badgeMore=hasMore;badgeIncomplete=false;loading=false;paintBadge();paint();status.textContent=notice;return true;
     }catch(error){if(!current())return false;if(error?.code==='stale_needs_me_cursor'&&(append||budget>1))return loadNative({notice:'Attention changed. Showing a fresh window; continue from here.'});status.textContent=error?.message||'Could not load attention. Retry when connected.';return false;}finally{if(current()){loading=false;paintOperations();paintPaging();}}
   }
-  async function load(next = filter, { append = false, budget = next === filter ? Math.max(1, loadedPages) : 1, notice = "" } = {}) {
-    if(nativeAttention())return loadNative({append,budget,notice});
+  async function load(next = filter, { append = false, budget = next === filter ? Math.max(1, loadedPages) : 1, notice = "", background = false } = {}) {
+    if(nativeAttention())return loadNative({append,budget,notice,background});
     if(client.sectionAvailability?.('updates')?.available===false&&!nativeAttention()){status.textContent=uiText("currentRoom.updatesUnavailable");badge.textContent='';loadMore.hidden=true;return;}
     const owned = currentContext();
     if (!owned || (append && (loading || !hasMore || !cursor))) return false;
@@ -269,7 +269,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     const pageBudget = Number.isSafeInteger(budget) && budget > 0 ? budget : 1;
     const startCursor = append ? cursor : null;
     const priorItems = append ? items : [];
-    loading = true; paintOperations(); paintPaging(); status.textContent = "Loading updates…";
+    loading = true; if (!background) paintOperations(); paintPaging(); status.textContent = "Loading updates…";
     const partialSources = page => Object.values(page?.incompleteSources ?? {}).some(Boolean);
     const readWindow = async () => {
       const merged = new Map(priorItems.map(item => [item.id, item]));
@@ -499,7 +499,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       const moving = event => { if (event.target !== before && event.target !== document.body) moved = true; };
       document.addEventListener("focusin", moving);
       try {
-        await load(filter);
+        await load(filter, { background: true });
         if (!owns(value) || mine !== interaction || !isOpen() || moved) return;
         dialog.scrollTop = scroll;
         if (saved) {

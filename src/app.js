@@ -2439,9 +2439,9 @@ function visibleConversationMessages() {
     : !message.toMemberId && (currentThreadId || messageChannelId(message) === activeChannelId));
 }
 function openDirectMessage(memberId) {
+  if (!Object.hasOwn(state?.members ?? {}, memberId) || state.members[memberId].active === false || state.members[memberId].identityRevoked || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   updatesUi?.close();
   if (document.querySelector(".result-focused:not([hidden])")) closeResult(false);
-  if (!Object.hasOwn(state?.members ?? {}, memberId) || state.members[memberId].active === false || state.members[memberId].identityRevoked || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
   requestEpoch++; requestReading = false; requestMode = null; assistantDraft = null;
   leaveWorkSelection();
@@ -3914,7 +3914,7 @@ function revealLocationHash() {
       else pendHashReveal(id);
       return;
     }
-    if (current[1] === "work" && id !== null && (partialWorkSnapshot || state.workItems[id]?.receipt?.nativeText)) {
+    if (current[1] === "work" && id !== null && (partialWorkSnapshot || state.workItems[id]?.receipt)) {
       showWorkDestination("work", id, "thread");
     } else if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
     return;
