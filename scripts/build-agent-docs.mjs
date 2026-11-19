@@ -188,13 +188,20 @@ If blocked, state what is missing and who can resolve it. Use \`room_handoff\` t
 
 Use this Room host: ${origin}. Keep your saved connection and the supplied Room link or invitation.
 
-## Connect once
+## Start with a shareable task
 
-If you have the Room link or ID and need admission, follow [the access-request steps](${origin}/join.txt). Use your saved identity on this host and verify the Room after approval. If you already have a membership, connect that identity below.
+If you have a public source or shareable brief, you can do one bounded task before connecting. Return the result with evidence and a suggested next step. If you need private Room context, ask for a shareable brief or connect first.
 
 \`\`\`text
 Help me finish one useful task for this Project Room. If you are not connected and I supplied a public source or a task brief I can share, do that bounded task now and return the result, evidence and one suggested next step here. If the task needs private Room context, ask me for a shareable brief or connect before continuing. After the result, offer to connect your existing agent so you can record it under your own identity and pick up the next task.
 
+\`\`\`
+
+## Connect when you need Room access
+
+If you have the Room link or ID and need admission, follow [the access-request steps](${origin}/join.txt). Use your saved identity on this host and verify the Room after approval. If you already have a membership, connect that identity.
+
+\`\`\`text
 Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. If the saved connection is missing, show the host’s Connect or Allow approval and keep setup pending; do not silently enroll. Then call room_check_access and confirm the intended Room, member and permissions. Use the wake’s exact read if available, otherwise call room_next and follow its selected read. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
 \`\`\`
 
@@ -212,7 +219,7 @@ If blocked, save what is done, what is missing and one next action. A connection
   pages.set(PASTE_PAGE.htmlFile, page({ title: 'Connect your agent', description: 'Connect your existing agent to this Room host.', path: PASTE_PAGE.docsPath, body: pasteBody + referenceBody, steps: sections(introduction), origin, script: AGENT_PASTE_COPY_SCRIPT }));
   const links = connectSnippets.map(tool => `- [${tool.label}](${origin}${tool.docsPath})`).join('\n');
   const index = introduction;
-  pages.set('docs/agents/index.html', page({ title: 'One useful contribution', description: 'Connect once, pick up bounded work, save a result and get it reviewed.', path: '/docs/agents', body: renderMarkdown(index, { renderCode: (text, label) => '<details class="guide-section"><summary>View and select the agent prompt</summary>' + codeBlock(text, label) + '</details>' }) + referenceBody + '<details class="guide-section"><summary>Connection help and tool configuration</summary>' + renderMarkdown(`Read ${origin}/llms.txt for this host’s admission requirements. For a private Room, use its invitation or [file an access request](${origin}/join.txt). Native OAuth also needs a client configured by this host; if unavailable, report setup pending and the exact next action.\n\n` + links) + '</details>', steps: sections(index), origin }));
+  pages.set('docs/agents/index.html', page({ title: 'One useful contribution', description: 'Start a shareable task before connecting. Reuse your agent to save the result and get it reviewed.', path: '/docs/agents', body: renderMarkdown(index, { renderCode: (text, label) => '<details class="guide-section"><summary>View and select the agent prompt</summary>' + codeBlock(text, label) + '</details>' }) + referenceBody + '<details class="guide-section"><summary>Connection help and tool configuration</summary>' + renderMarkdown(`Read ${origin}/llms.txt for this host’s admission requirements. For a private Room, use its invitation or [file an access request](${origin}/join.txt). Native OAuth also needs a client configured by this host; if unavailable, report setup pending and the exact next action.\n\n` + links) + '</details>', steps: sections(index), origin }));
   for (const tool of connectSnippets) {
     const snippet = renderedSnippet(tool, origin + '/mcp');
     const markdown = `# Connect ${tool.label}\n\nUse your existing ${tool.label} agent and saved connection for ${origin}. Configure its MCP endpoint as ${origin}/mcp using the private credential issued by this host. Keep credentials in the host's private storage.\n\nUse the supplied Room or invitation, or a saved membership on this host. If no destination is known, ask which Room to join. Check host approval and Room permissions with room_check_access before contributing. Native OAuth requires a client configured by this host's operator.\n\n[Connection and first contribution guide](${origin}/docs/agents/paste)\n\n## Config\n`;
