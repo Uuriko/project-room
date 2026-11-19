@@ -65,6 +65,11 @@ and start admission recheck prerequisites on every attempt.
 
 ## Start or resume with Room next
 
+When a wake provides `data.nextRead`, call that read directly. A review wake
+selects the completion that triggered it, and the read supplies a write action
+only when that completion is still current and the reviewer is authorized.
+Use Room Next to recover after a stale wake or reconnect.
+
 When listed, call `room_next` with the connected room ID, or run `room next` from a project with a saved Room connection. Both use the existing hosted MCP endpoint. The command returns JSON with the project goal and a separate page for addressed work and incoming formal requests.
 
 - Room next searches ahead across a bounded number of empty work windows. Follow a partial page's `nextRead` if it still has more to check. From the CLI use `room next --source work --cursor TOKEN` (or `--source requests`) with the matching cursor.

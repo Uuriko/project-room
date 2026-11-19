@@ -8,6 +8,7 @@ import { sessionRecord } from "../src/work-item-session.js";
 import { heldUntil } from "./attention.mjs";
 import { mutedEvent } from "./moderation.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { selectedWorkRead } from "./work-context.mjs";
 import { recordWakeEvent } from "./wake-metrics.mjs";
 
 export const workWakeSchema = `
@@ -82,7 +83,9 @@ export class WorkWakes {
         event: "suppressed_policy", kind: "work", subjectId: memberId });
       return;
     }
-    this.store.enqueueNativeMcpEvent?.({ roomId, memberId, eventId: incoming.id, actorId: incoming.actorId, kind: "work", workItemId: id, workRevision: item.revision });
+    const nextRead = selectedWorkRead(roomId, next);
+    this.store.enqueueNativeMcpEvent?.({ roomId, memberId, eventId: incoming.id, actorId: incoming.actorId,
+      kind: "work", workItemId: id, workRevision: item.revision, nextRead });
     const agentId = this.store.identities.identityIdForMember(roomId, memberId);
     if (!agentId || !this.optedIn(agentId, roomId)) {
       recordWakeEvent(this.db, { at, roomId, store: "work",
@@ -91,7 +94,7 @@ export class WorkWakes {
     }
     const pointer = { kind: "work", roomId, workItemId: id, workRevision: item.revision,
       action: next.action, completionEventId: next.completionEventId, evidenceVersion: next.evidenceVersion,
-      eventId: incoming.id, nextRead: { tool: "room_read_work", arguments: { roomId, workItemId: id } } };
+      eventId: incoming.id, nextRead };
     const inserted = this.db.prepare(`INSERT OR IGNORE INTO agent_work_wakes
       VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL)`)
       .run(`ww_${randomUUID()}`, agentId, roomId, memberId, id, item.revision, incoming.id, incoming.actorId, JSON.stringify(pointer), at);
