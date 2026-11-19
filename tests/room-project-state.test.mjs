@@ -235,6 +235,7 @@ test("Mac capability discovery is caller-scoped, bounded to a receiver session, 
   assert.equal((await publish(body)).status, 200);
   assert.deepEqual(discover(f.keys.owner), []);
   const [card] = discover(f.keys.reviewer);
+  assert.equal(card.kind, "desktop_affected_tests");
   assert.equal(card.head, body.head);
   assert.equal(card.base, body.base);
   assert.equal(Date.parse(card.expiresAt) - Date.parse(card.observedAt), 20_000);
