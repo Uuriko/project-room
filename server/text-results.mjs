@@ -141,6 +141,8 @@ function selectedReleaseChecks(db, state, work, result, viewerId, floor, message
     ORDER BY sequence DESC LIMIT 20`).all(state.room.id, work.id, text.messageId, JSON.stringify([...reporters]), text.postSequence,
       RELEASE_CHECKS_PREFIX.length, RELEASE_CHECKS_PREFIX);
   const messages = messageRecords ?? messageRepository({ db }, state.room.id, state);
+  const checks = new Map();
+  let latest = null;
   for (const row of rows) {
     const posted = JSON.parse(row.body);
     const messageId = posted.data.messageId || row.id;
@@ -151,30 +153,35 @@ function selectedReleaseChecks(db, state, work, result, viewerId, floor, message
     try { report = JSON.parse(message.body.slice(RELEASE_CHECKS_PREFIX.length)); } catch { continue; }
     if (report?.completionEventId !== receipt.eventId || report.evidenceVersion !== receipt.evidenceVersion
       || report.candidateRevision !== candidateRevision) continue;
-    const checks = [];
-    for (const stage of RELEASE_STAGES) {
-      const check = report.checks?.[stage];
-      if (check === undefined) { checks.push({ stage, status: "pending" }); continue; }
-      if (!["passed", "failed"].includes(check?.status) || check.candidateRevision !== candidateRevision
+    const entries = RELEASE_STAGES.filter(stage => report.checks?.[stage] !== undefined);
+    if (entries.some(stage => {
+      const check = report.checks[stage];
+      return !["passed", "failed"].includes(check?.status) || check.candidateRevision !== candidateRevision
         || typeof check.summary !== "string" || !check.summary.trim() || check.summary.length > 600
-        || !/^sha256:[a-f0-9]{64}$/.test(check.evidenceDigest ?? "")) break;
+        || !/^sha256:[a-f0-9]{64}$/.test(check.evidenceDigest ?? "");
+    })) continue;
+    latest ??= { messageId, recordedAt: message.createdAt, reportedById: message.authorId };
+    // An omitted stage does not supersede an earlier report for that stage.
+    for (const stage of entries) {
+      if (checks.has(stage)) continue;
+      const check = report.checks[stage];
       const evidenceId = check.evidenceMessageId;
       const evidence = typeof evidenceId === "string" && evidenceId.length <= 128 ? messages.get(evidenceId) : null;
       const binding = `room-release-receipt/1 ${stage} ${receipt.eventId} ${candidateRevision} ${check.evidenceDigest}\n`;
       if (!evidence || evidence.deletedAt || evidence.editedAt || evidence.authorId !== message.authorId
         || evidence.workItemId !== work.id || evidence.replyToId !== text.messageId || !evidence.body?.startsWith(binding)
         || !textVisibleToViewer(db, state, evidenceId, viewerId, floor, messages)) {
-        checks.push({ stage, status: "pending" });
+        checks.set(stage, { stage, status: "pending" });
         continue;
       }
-      checks.push({ stage, status: check.status, summary: check.summary, evidenceDigest: check.evidenceDigest,
-        evidenceMessageId: evidenceId, href: `#pr-record/message/${encodeURIComponent(evidenceId)}` });
+      checks.set(stage, { stage, status: check.status, summary: check.summary, evidenceDigest: check.evidenceDigest,
+        reportMessageId: messageId, evidenceMessageId: evidenceId, href: `#pr-record/message/${encodeURIComponent(evidenceId)}` });
     }
-    if (checks.length === RELEASE_STAGES.length) return { candidateRevision, checks, messageId,
-      completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion,
-      recordedAt: message.createdAt, reportedById: message.authorId, untrusted: true };
+    if (checks.size === RELEASE_STAGES.length) break;
   }
-  return null;
+  return latest ? { ...latest, candidateRevision,
+    checks: RELEASE_STAGES.map(stage => checks.get(stage) ?? { stage, status: "pending" }),
+    completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion, untrusted: true } : null;
 }
 
 export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null }) {

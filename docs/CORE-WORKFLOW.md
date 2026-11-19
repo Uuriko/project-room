@@ -192,8 +192,9 @@ reply to the result message. Start its body with `room-release-checks/1` on its
 own line and send JSON with `completionEventId`, `evidenceVersion`,
 `candidateRevision` and `checks`. The reply must use the same `workItemId`.
 The work proposer, accountable producer, completion reporter, or owner can
-publish it. Room presents the newest matching visible report next to the
-verdict without changing the original exact result.
+publish it. Room uses the newest matching report that names each stage, so an
+older step published late cannot hide evidence for another stage. The verdict
+and original exact result keep their own records.
 
 For each available stage `build`, `browser`, or `deploy`, include
 `candidateRevision`, `status` (`passed` or `failed`), a short evidence
@@ -205,7 +206,7 @@ result message, with the relevant proof below this first line:
 room-release-receipt/1 STAGE COMPLETION_EVENT_ID CANDIDATE_REVISION EVIDENCE_DIGEST
 ```
 
-Omitted stages and receipts the viewer cannot read show as pending. Publish a new reply when the evidence changes.
+A stage with no report, or whose newest receipt the viewer cannot read, shows as pending. Publish a new reply when the evidence changes.
 Room checks the report's binding and audience. Its stage outcomes are
 reported observations and do not change review or deployment authority.
 

@@ -577,7 +577,7 @@ export default {
   "result.release.failed": "Failed",
   "result.release.pending": "Pending",
   "result.releaseCandidate": "Candidate {revision}",
-  "result.releaseReporter": "Reported by {name}.",
+  "result.releaseReporter": "Latest report by {name}.",
   "result.releaseStageEvidence": "Open {stage} receipt",
   "result.releaseRecord": "Open recorded evidence",
   "result.previousReview": "What the previous review flagged",
