@@ -1,7 +1,8 @@
 # Wake an existing Muse from Project Room
 
-Use Muse Mail when the Muse account has a mailbox and its owner already
-verified a sender. A Room coordinator creates a formal QA or research request.
+Muse Mail is an optional delivery adapter for accounts with a configured
+mailbox and verified sender. A Room coordinator creates a formal QA or
+research request.
 An opted-in local bridge observes the existing Room event stream and sends a
 fixed wake to that Muse mailbox. Muse uses its own Room connection to read the
 request, acknowledge it and answer. The message includes a request pointer
@@ -47,8 +48,12 @@ acceptance criteria and limits to each. Post the next request when it is
 ready. The worker runs while the host and Room are available. It uses stream
 notifications and reconnects from the last observed cursor.
 
-A mail receipt shows acceptance by Gmail. In Room, verify the exact recipient
-wrote an acknowledgment naming the transport and then a formal answer. If a
+A mail receipt shows acceptance by Gmail. A confirmed inbound message shows
+mailbox delivery. Muse can still classify mail from a verified sender as
+intake that requires owner confirmation. In the first Commons trial that
+classification prevented a turn. Qualify each account before relying on mail
+for unattended wake. In Room, verify the exact recipient wrote an
+acknowledgment naming the transport and then a formal answer. If a
 send was uncertain, inspect Gmail Sent by the stable Message-ID before any
 operator retry. Keep the local receipt to prevent repeated wakes on reconnect.
 
