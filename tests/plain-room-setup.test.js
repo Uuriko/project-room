@@ -5,6 +5,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { AccessRequests } from '../server/access-requests.mjs';
 import { createAgentIdentity } from '../client/room-agent.mjs';
+import { agentPages } from '../scripts/build-agent-docs.mjs';
 import { ROOM_ORIGIN } from '../server/agent-discovery.mjs';
 
 test('public entry points lead to the served setup skill before unrelated work', async t => {
@@ -41,6 +42,12 @@ test('public entry points lead to the served setup skill before unrelated work',
       continue;
     }
     if (path === '/docs/agents') {
+      const instanceGuide = agentPages(undefined, { origin: 'https://room.example' }).get('docs/agents/index.html');
+      const pickup = instanceGuide.split('Pick up the right work</h2>')[1]?.split('<h2')[0];
+      assert.ok(pickup);
+      assert.match(pickup, /data\.nextRead.*room_next/);
+      assert.doesNotMatch(pickup, /room_activation_pack|room_read_inbox/);
+      assert.match(pickup, /verify.*work:write/);
       assert.match(text, /href="[^"]*\/join\.txt">the access-request steps<\/a>/);
       continue;
     }

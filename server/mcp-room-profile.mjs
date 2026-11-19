@@ -84,8 +84,8 @@ const object = value => value !== null && typeof value === "object" && !Array.is
 
 const AUTH_INSTRUCTIONS = [
   "Use Project Room through tools in your current host. See tools/list for commands available to this connection.",
-  "Enter or resume: use room_next(roomId) when listed. Use the saved room ID, or discover it with room_check_access if unknown. Follow continuation pages even when empty.",
-  "If room_next is unavailable, use room_activation_pack(view=brief), room_list_work(focus=needs_me) and room_list_requests(direction=incoming,status=open).",
+  "On a wake, follow data.nextRead directly. Otherwise use room_next(roomId) when listed. Use the saved room ID, or discover it with room_check_access if unknown. Follow continuation pages even when empty.",
+  "If room_next is unavailable, use room_list_work(focus=needs_me), or room_list_requests(direction=incoming,status=open) for formal requests only.",
   "Follow the selected item's nextRead arguments as returned. For revise, read the correction in the row and call its brief nextRead unchanged. Request discussion only if that correction and brief are insufficient. Resolve the blocker before room_begin_work.",
   "Work: room_read_work(brief=true), then follow its current continuation if the tool is available. Apply host authority checks before external work.",
   "Deliver: for a bounded text result draft comfortably below the task limit. Post with room_post_message(workItemId,id,maxResultCodeUnits) to check size before writing and get exact resultDraft.submission. Use it with room_submit_text_result. Older posts use room_read_result to preview. Review the exact completion.",
@@ -1351,8 +1351,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           const visible = new Set(listedMcpTools("full", false, agent).map(tool => tool.name));
           const allowed = tool => visible.has(tool) && mcpOAuthToolAllowed(tool, oauthPrincipal.scopes);
           value.commandDiscovery = {
-            tools: Object.fromEntries(["room_next", "room_receipt"].map(tool => [tool,
-              !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes) ? "outside_connected_grant"
+            tools: Object.fromEntries(["room_next", "room_receipt", "room_record_verification"].map(tool => [tool,
+              tool === "room_record_verification" && !value.permissions?.includes("verify") ? "withheld_by_room_policy"
+                : !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes) ? "outside_connected_grant"
                 : visible.has(tool) ? "available_on_server" : "withheld_by_room_policy"
             ])),
             whenMissingFromHost: {
@@ -1364,7 +1365,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
               incomingRequestRead: { tool: "room_list_requests", arguments: { roomId: value.roomId,
                 direction: "incoming", status: "open" } }
             } : {}),
-            next: "If a tool available on the server is missing from your host, refresh the existing connection's tool catalog for this same room and member. For formal requests, follow incomingRequestRead when listed; for broader pickup, use room_needs_me when listed."
+            requiredOAuthScope: { room_record_verification: "work:write" },
+            next: "If a tool available on the server is missing from your host, refresh the existing connection's tool catalog for this same room and member. For assigned review, check both the Room verify permission and work:write consent. For pickup use room_next, or incomingRequestRead for formal requests."
           };
         }
         const state = value.nativeMonitoring.state;

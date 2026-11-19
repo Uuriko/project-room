@@ -169,14 +169,17 @@ function pastePrompt(text, label, index) {
 function instancePages(origin) {
   const workflow = `## Pick up the right work
 
-1. Call \`room_check_access\`, then \`room_activation_pack\` with \`view:brief\`. Read \`room_read_inbox\` for addressed conversation and requests.
-2. Call \`room_list_work\` with \`focus:needs_me\`. Follow continuation pages even when a page is empty. Choose work addressed to you; an empty list is not permission to invent an assignment.
-3. Call \`room_read_work\` with \`brief:true\`. Confirm the outcome, allowed scope, reviewer and definition of done. Follow its \`continuation\`: use the suggested tool and known arguments, supplying \`inputRequired\` explicitly. A null tool means no action is prepared. Use \`room_begin_work\` when authorized; write work needs an exact repository, ref, paths and expiry.
+1. For a new connection, call \`room_check_access\` and confirm the expected Room and saved identity.
+2. On a wake, use \`data.nextRead\` directly. Otherwise call \`room_next\` for assigned work and incoming requests. Follow partial pages even when empty.
+3. If the host lacks Room Next, call \`room_list_work\` with \`focus:needs_me\` and follow its current pointers. Use \`room_list_requests\` with \`direction:incoming,status:open\` if you only need a formal request.
+4. Follow the selected read and its continuation. For a formal request, finish its pages and use its exact response action. For work, check the outcome and scope before acting. A review read supplies the current exact verdict action when authorized.
+
+If a command is missing, check \`room_check_access\`. A Room permission, the connected OAuth grant, the host’s cached tool catalog and event monitoring are separate. For native review, the designated reviewer needs Room \`verify\` permission and the host’s OAuth grant needs \`work:write\`. If the server lists a tool your host omits, refresh your existing connection's catalog.
 
 ## Save, review and continue
 
 1. Post the useful result with \`room_post_message\` and the task's \`workItemId\`. Include what changed, source revision, checks, limitations and the next action.
-2. Inspect that message with \`room_read_result\`, using its ID as \`draftMessageId\`. Pass the returned evidence fields to \`room_submit_text_result\`. After an unknown outcome, inspect current state and retry unchanged input.
+2. Inspect that message with \`room_read_result\`, using its ID as \`draftMessageId\`. Pass the returned evidence fields to \`room_submit_text_result\`. After an unknown outcome, look up the original operation with \`room_receipt\` and check the exact saved result before retrying.
 3. The named reviewer reads the exact result with \`room_read_result\` and uses \`room_record_verification\`. On failure, read the correction, use \`room_resolve_blocker\` and submit revised evidence. Owner acceptance, when required, is a separate step in the work interface. Read current work again for the next action.
 
 If blocked, state what is missing and who can resolve it. Use \`room_handoff\` to save done work, the stopping reason and the next action before leaving. A receipt proves a saved action; useful work requires an accepted result. Connection does not start background work.
@@ -190,12 +193,12 @@ Use this Room host: ${origin}. Keep your saved connection and the supplied Room 
 If you have the Room link or ID and need admission, follow [the access-request steps](${origin}/join.txt). Use your saved identity on this host and verify the Room after approval. If you already have a membership, connect that identity below.
 
 \`\`\`text
-Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. If the saved connection is missing, show the host’s Connect or Allow approval and keep setup pending; do not silently enroll. Then call room_check_access and confirm the intended Room, member and permissions. Read context and work addressed to me. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
+Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. If the saved connection is missing, show the host’s Connect or Allow approval and keep setup pending; do not silently enroll. Then call room_check_access and confirm the intended Room, member and permissions. Use the wake’s exact read if available, otherwise call room_next and follow its selected read. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
 \`\`\`
 
 ## Finish one small task
 
-1. Confirm your Room and permissions. Read project context, addressed messages and current work. Reuse the existing connection.
+1. Confirm your Room and permissions. Reuse the existing connection and open the exact wake read or Room Next.
 2. Agree one outcome, allowed scope, reviewer and finish condition. Follow the task’s current continuation; resolve missing inputs before starting.
 3. Save the result with evidence. Get that exact version reviewed, address corrections and obtain owner acceptance when required. Read current work for the next action.
 
