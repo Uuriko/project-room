@@ -10,7 +10,7 @@ import { confirmsWorkReturn } from "../src/workflow.js";
 import { connectionDiagnostic } from "./agent-connection.mjs";
 import { validWorkSearchQuery, validProjectMapArguments } from "./room-agent.mjs";
 import { workTools, isWorkTool, validWorkArguments, submitWorkAction, workActionRefusal, normalizeHandoffArguments } from "./work-actions.mjs";
-import { PLAN_TOOL, planTool, submitPlan, validPlanArguments } from "./work-plan.mjs";
+import { PLAN_TOOL, planRead, planTool, submitPlan, validPlanArguments } from "./work-plan.mjs";
 import { currentAttention } from "./attention-inbox.mjs";
 import { WatchError } from "./watch-journal.mjs";
 import { replyTools, isReplyTool, replyRoute, validReplyArguments, submitReplyAction, replyRefusal } from "./reply-actions.mjs";
@@ -206,7 +206,8 @@ async function callTool(client, identity, name, args, signal) {
   if (isReplyTool(name)) return replyRoute(name) ? client.replyRead(name, args, { signal }) : submitReplyAction(client, identity, name, args, { signal });
   if (isWorkTool(name)) return submitWorkAction(client, identity, name, args, { signal });
   if (name === PLAN_TOOL) return submitPlan(args, step => submitWorkAction(client, identity, step.name, step.args, { signal }),
-    { refusal: (cause, step) => workActionRefusal(cause, step.args) });
+    { read: planRead(id => client.workContext(id, { signal })), memberId: identity.memberId,
+      refusal: (cause, step) => workActionRefusal(cause, step.args) });
   if (name === "room_list_outside_agents") return client.outsideAgents({ signal });
   if (name === "room_introduce_outside_agent") return client.recordOutsideAgent(args, { signal });
   if (name === "room_begin_work") return beginOnClient(client, identity, args, signal);

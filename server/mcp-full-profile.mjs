@@ -35,7 +35,7 @@ import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.m
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
-import { PLAN_TOOL, submitPlan } from "../client/work-plan.mjs";
+import { PLAN_TOOL, planRead, submitPlan } from "../client/work-plan.mjs";
 import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction, withWorkDeprecation, workActionRefusal, workUsesExpectedRevision } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction, helpUsesExpectedRevision } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
@@ -398,8 +398,11 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     const value = await submitPlan(rest, step => {
       const command = buildWorkCommand(step.name, step.args, identity);
       return recorded(store, secret, roomId, identity, command, receipt => recordedWorkAction(step.name, command, receipt)).value;
-    }, { refusal: (cause, step) => workActionRefusal(cause, step.args) });
-    return { value, isError: value.status !== "recorded" };
+    }, { read: planRead(id => store.workContext(secret, roomId, id, {})), memberId: identity.memberId,
+      refusal: (cause, step) => workActionRefusal(cause, step.args) });
+    // Every hosted room tool takes roomId: restore it on each next step.
+    const next = value.next.map(step => ({ ...step, arguments: { roomId, ...step.arguments } }));
+    return { value: { ...value, next }, isError: value.status !== "recorded" };
   }
   if (isWorkTool(name)) {
     const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, workUsesExpectedRevision, identity, buildWorkCommand(name, rest, identity));
