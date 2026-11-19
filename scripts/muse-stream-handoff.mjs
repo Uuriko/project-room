@@ -12,6 +12,7 @@ import { validId } from "../src/events.js";
 
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const ids = value => Array.isArray(value) && value.length <= 20 && new Set(value).size === value.length && value.every(validId);
+const receiverReceiptNote = "Receiving runtime read and verified this exact request; model acceptance is separate.";
 const fields = ["version", "origin", "roomId", "memberId", "requesters", "workItems", "requests", "bootstrapAfter", "windowSeconds"];
 
 export function museHandoffPolicy(policy, connection) {
@@ -43,11 +44,13 @@ export function museSeenAction(handoff, roomId) {
   } };
 }
 
-function pointer(context, candidate, policy, after) {
+function pointer(context, candidate, policy, after, receiverAck = false) {
   const current = context.request;
+  const alreadySeen = current?.acknowledgedAt || current?.progressState;
+  const receiverSeen = receiverAck && current?.progressState === "acknowledged" && current.progressNote === receiverReceiptNote;
   if (context.roomId !== policy.roomId || context.viewerId !== policy.memberId || !validId(context.roomCreatedEventId)
     || !matches(current, policy) || current.id !== candidate.id || current.openingEventId !== candidate.openingEventId
-    || current.acknowledgedAt || current.progressState || !integer(current.revision)) return null;
+    || alreadySeen && !receiverSeen || !integer(current.revision)) return null;
   const opened = context.page.items.find(item => item.kind === "opened" && item.eventId === current.openingEventId);
   if (!opened || !integer(opened.sequence) || opened.sequence <= after) return null;
   return { requestMessageId: current.id, requesterId: current.requesterId, recipientId: current.recipientId,
@@ -70,9 +73,19 @@ async function inspect(client, policy, after, signal) {
   return { next, through };
 }
 
-export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, setWaiting = () => {} }) {
+export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, setWaiting = () => {} }) {
   let state = checkpoint;
   const remember = (after, inFlight = null) => { state = { after, inFlight }; save(state); };
+  const offer = async handoff => {
+    if (!receiverAck) return handoff;
+    const ackStartedAt = new Date().toISOString();
+    const action = museSeenAction(handoff, policy.roomId);
+    const { roomId, ...source } = action.arguments;
+    const receipt = await client.replyAction(action.tool, { ...source, note: receiverReceiptNote }, { signal });
+    if (receipt.status !== "recorded") throw Object.assign(Error("Unconfirmed receiver acknowledgment"), { status: 503 });
+    return { ...handoff, receiverAcknowledgment: { sequence: receipt.sequence, duplicate: receipt.duplicate,
+      startedAt: ackStartedAt, confirmedAt: new Date().toISOString() } };
+  };
   // A process may stop after saving the pointer and before delivering stdout.
   // Read back the same request before replaying that exact pointer.
   if (state.inFlight) {
@@ -80,12 +93,12 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
     const current = await client.replyContext(saved.requestMessageId, { view: "compact", signal });
     if (current.roomCreatedEventId !== saved.roomCreatedEventId || current.request.openingEventId !== saved.openingEventId)
       throw Error("muse_handoff_identity_changed");
-    const recovered = pointer(current, { id: saved.requestMessageId, openingEventId: saved.openingEventId }, policy, saved.openingSequence - 1);
+    const recovered = pointer(current, { id: saved.requestMessageId, openingEventId: saved.openingEventId }, policy, saved.openingSequence - 1, receiverAck);
     if (recovered) {
       if (recovered.requestRevision !== saved.requestRevision) {
         remember(state.after, recovered);
       }
-      return { status: "handoff", replay: true, after: state.after, ...recovered };
+      return offer({ status: "handoff", replay: true, after: state.after, ...recovered });
     }
     remember(state.after);
   }
@@ -97,7 +110,7 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
       const { next, through } = await inspect(client, policy, state.after, signal);
       if (next) {
         remember(next.openingSequence, next);
-        return { status: "handoff", replay: false, after: state.after, source: "catch_up", ...next };
+        return offer({ status: "handoff", replay: false, after: state.after, source: "catch_up", ...next });
       }
       if (integer(through) && through > state.after) remember(through);
     }
@@ -121,8 +134,8 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
         const exact = pointer(context, hint, policy, state.after);
         if (!exact || exact.openingSequence !== change.sequence) break;
         remember(exact.openingSequence, exact);
-        return { status: "handoff", replay: false, after: state.after, source: "stream_pointer",
-          streamObservedAt: hint.observedAt, pointerSavedAt: new Date().toISOString(), ...exact };
+        return offer({ status: "handoff", replay: false, after: state.after, source: "stream_pointer",
+          streamObservedAt: hint.observedAt, pointerSavedAt: new Date().toISOString(), ...exact });
       }
       remember(change.sequence);
     }
@@ -231,9 +244,10 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
 }
 
 async function main([configFile, connectionDirectory, mode, ...extra]) {
-  if (extra.length || mode !== undefined && !["--once", "--stay-armed", "--recover"].includes(mode) || !isAbsolute(configFile ?? "")
+  const receiverAck = extra.length === 1 && extra[0] === "--receiver-ack" && mode === "--stay-armed";
+  if (extra.length && !receiverAck || mode !== undefined && !["--once", "--stay-armed", "--recover"].includes(mode) || !isAbsolute(configFile ?? "")
     || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed | --recover]");
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack] | --recover]");
   const directory = dirname(realpathSync(configFile));
   const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
   assertPrivatePath(directory, true);
@@ -250,12 +264,12 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
       : await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
         onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
         run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
-          signal, wait: mode !== "--once" }) });
+          signal, receiverAck, wait: mode !== "--once" }) });
     if (mode === "--stay-armed") {
       if (result.status === "handoff") result.offeredAt = new Date().toISOString();
       atomicPrivateJson(statusFile, { pid: process.pid, ...result });
     }
-    if (result.status === "handoff") result.seenAction = museSeenAction(result, policy.roomId);
+    if (result.status === "handoff" && !result.receiverAcknowledgment) result.seenAction = museSeenAction(result, policy.roomId);
     console.log(JSON.stringify(result));
   } catch (error) {
     if (!stop.signal.aborted) throw error;
