@@ -7,6 +7,8 @@ import {withCurrentReadContext,withCurrentRoomWriter} from '../server/current-ro
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {mcpEventSubscriptionsSchema} from '../server/mcp-event-subscriptions.mjs';
+import {nativeOutboxEventId} from '../server/mcp-outbox-event-id.mjs';
 
 function fixture(t,extend=()=>{}){
  const store=new RoomStore(':memory:');t.after(()=>store.close());const events=initialRoom();
@@ -303,16 +305,15 @@ test('the SDK asks for ask states and falls back once against a service that pre
 });
 
 
-function retainOutbox(store,{requestId='question',memberId='reader',roomId='commons',state='delivered',eventId='wake-evidence-1'}={}){
- store.db.exec(`CREATE TABLE IF NOT EXISTS mcp_event_outbox (
-  subscription_id TEXT NOT NULL, event_id TEXT NOT NULL, document TEXT NOT NULL,
-  state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
-  next_at INTEGER NOT NULL, lease TEXT, lease_until INTEGER,
-  PRIMARY KEY(subscription_id,event_id))`);
- const document=JSON.stringify({eventId,name:'room.requested',timestamp:new Date().toISOString(),
+let outboxRows=0;
+function retainOutbox(store,{requestId='question',memberId='reader',roomId='commons',state='delivered',source='question',keyRoomId='commons',keyMemberId='reader',eventId}={}){
+ // Real schema, including the mcp_event_outbox_event index the readout uses.
+ store.db.exec(mcpEventSubscriptionsSchema);
+ const key=eventId??nativeOutboxEventId(keyRoomId,keyMemberId,source);
+ const document=JSON.stringify({eventId:key,name:'room.requested',timestamp:new Date().toISOString(),
   data:{roomId,memberId,requestId,messageId:requestId},cursor:null});
  store.db.prepare('INSERT INTO mcp_event_outbox(subscription_id,event_id,document,state,attempts,next_at) VALUES(?,?,?,?,0,?)')
-  .run('outbox-row',eventId,document,state,Date.now());
+  .run('outbox-row-'+(++outboxRows),key,document,state,Date.now());
 }
 
 test('selected read reports a positively recorded webhook callback without leaking outbox internals',t=>{
@@ -324,7 +325,7 @@ test('selected read reports a positively recorded webhook callback without leaki
  const listed=store.replyRequests.list(keys.reader,'commons');
  assert.equal(Object.hasOwn(listed.requests[0],'wakeDelivery'),false);
  const packed=JSON.stringify(read);
- assert.equal(/https?:|whsec_|subscription_id|outbox-row/i.test(packed),false);
+ assert.equal(/https?:|whsec_|subscription_id|outbox-row|mcp_[0-9a-f]{16}/i.test(packed),false);
  validateReplyRead(read,{name:'room_read_request',args:{requestMessageId:'question'},roomId:'commons'});
  const owner=store.replyRequests.selected(keys.owner,'commons','question');
  assert.deepEqual(owner.current.wakeDelivery,{webhook:'delivered',hostEligibility:'unknown'});
@@ -335,10 +336,14 @@ test('selected read keeps webhook and host eligibility unknown without retained 
  const bare=store.replyRequests.selected(keys.reader,'commons','question');
  assert.deepEqual(bare.current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
  // Dead or cross-room/recipient/request rows are not positive evidence for this ask.
- retainOutbox(store,{state:'dead',eventId:'dead-row'});
- retainOutbox(store,{state:'delivered',eventId:'other-room',roomId:'other'});
- retainOutbox(store,{state:'delivered',eventId:'other-member',memberId:'other'});
- retainOutbox(store,{state:'delivered',eventId:'other-request',requestId:'someone-else'});
+ retainOutbox(store,{state:'dead'});
+ // Rows under this request's exact key whose document names another room,
+ // recipient or request are still not evidence (collision guard).
+ retainOutbox(store,{state:'delivered',roomId:'other'});
+ retainOutbox(store,{state:'delivered',memberId:'other'});
+ retainOutbox(store,{state:'delivered',keyMemberId:'other'});
+ retainOutbox(store,{state:'delivered',requestId:'someone-else'});
+ retainOutbox(store,{state:'delivered',source:'someone-else'});
  const read=store.replyRequests.selected(keys.reader,'commons','question');
  assert.deepEqual(read.current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
  assert.equal(Object.hasOwn(read.request,'acknowledgedAt'),false,'agent ack stays off the readout and is not invented');
@@ -355,4 +360,19 @@ test('non-participants are refused a selected read and never receive a wake read
  assert.equal(Object.hasOwn(thrown,'current'),false);
  assert.equal(Object.hasOwn(thrown,'wakeDelivery'),false);
  assert.equal(JSON.stringify(thrown).includes('delivered'),false);
+});
+
+test('selected readout finds the exact native wake key from the opening event through the event_id index, never by scanning documents',t=>{
+ const {store,keys}=fixture(t);
+ const first=store.replyRequests.selected(keys.reader,'commons','question');
+ const opening=first.request.openingEventId;assert.ok(opening);
+ // A matching document under a non-derived key is invisible: no document scan.
+ retainOutbox(store,{state:'delivered',eventId:'wake-evidence-unkeyed'});
+ assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
+ // The key the runtime emits for a formal request (room, recipient, opening event).
+ retainOutbox(store,{state:'pending',source:opening});
+ assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'queued',hostEligibility:'unknown'});
+ const plan=store.db.prepare("EXPLAIN QUERY PLAN SELECT state FROM mcp_event_outbox WHERE event_id IN (?,?) LIMIT 64").all('a','b').map(r=>r.detail).join(' ');
+ assert.match(plan,/USING (COVERING )?INDEX mcp_event_outbox_event/);
+ assert.doesNotMatch(plan,/^SCAN mcp_event_outbox$/m);
 });
