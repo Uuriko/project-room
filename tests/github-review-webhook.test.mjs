@@ -36,6 +36,9 @@ test("exact webhook review uses one native request across redelivery, and stale 
   assert.deepEqual(await dispatchGithubReview(store, binding, delivery(oldHead), options), [{ number: 6319, status: "stale_head" }]);
   assert.deepEqual(await dispatchGithubReview(store, binding, delivery(head), options), [{ number: 6319, status: "required_check_failed" }]);
   assert.equal(store.headSequence("commons"), start);
+  const irrelevantCheck = { event: "check_run", action: "completed", payload: { repository: { full_name: repo },
+    check_run: { app: { slug: "github-actions" }, name: "unrelated", head_sha: head, pull_requests: [{ number: 6319 }] } } };
+  assert.deepEqual(await dispatchGithubReview(store, binding, irrelevantCheck, options), []);
   current = snapshot(head);
   const first = await dispatchGithubReview(store, binding, delivery(head), options);
   assert.deepEqual(first, [{ number: 6319, status: "posted" }]);
