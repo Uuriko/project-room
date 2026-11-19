@@ -169,3 +169,22 @@ test('stages derive from the record and the client validates them strictly', () 
   assert.equal(validReplyArguments('room_progress_request', args), true);
   assert.equal(buildReplyCommand({roomId: 'commons', memberId: 'helper'}, 'room_progress_request', args).data.progress, 'accepted');
 });
+
+for (const representation of [null, 'normalized-current-v1']) test(`stale asks offer one scoped next read (${representation ?? 'legacy'})`, t => {
+  t.mock.timers.enable({apis: ['Date']});
+  const {s, keys, cmd} = fixture(t, representation);
+  const args = {direction: 'both', status: 'open'};
+  const read = (who, states = true) => validateReplyRead(s.replyRequests.list(keys[who], 'commons', {...args, states}),
+    {name: 'room_list_requests', args, roomId: 'commons'});
+  assert.equal(read('asker').overdueActions, undefined);
+  t.mock.timers.tick(31 * 60_000);
+  const [requester] = read('asker').overdueActions;
+  const [recipient] = read('helper').overdueActions;
+  assert.match(requester.guidance, /delivery.*cancel.*reassign/);
+  assert.match(recipient.guidance, /Answer.*decline/);
+  assert.deepEqual(recipient.nextRead, {tool: 'room_read_request', arguments: {requestMessageId: 'ask', view: 'compact'}});
+  assert.equal(read('other').overdueActions, undefined);
+  assert.equal(read('asker', false).overdueActions, undefined);
+  cmd('asker', 'cancel-ask', 'reply_request.cancelled', {requestMessageId: 'ask', expectedRequestRevision: 0, reason: 'Superseded'});
+  assert.equal(read('helper').overdueActions, undefined);
+});
