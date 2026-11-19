@@ -1,3 +1,4 @@
+import { MAC_CHECK_KINDS, validMacChecks } from "../src/mac-checks.js";
 import { ownMember, validId } from "../src/events.js";
 
 export const MAC_CAPABILITY_TTL_MS = 20_000;
@@ -9,12 +10,13 @@ const iso = value => new Date(value).toISOString();
 
 export function reportMacCapability(store, roomId, memberId, input) {
   const fields = input?.state === "ready"
-    ? ["sessionId", "state", "workItemId", "head", "base", "requesters"]
+    ? ["sessionId", "state", "workItemId", "head", "base", "requesters", ...(Object.hasOwn(input, "checks") ? ["checks"] : [])]
     : ["sessionId", "state"];
   if (!input || Array.isArray(input) || Object.keys(input).length !== fields.length
     || !fields.every(field => Object.hasOwn(input, field)) || !session(input.sessionId)
     || !["ready", "unavailable", "stopped"].includes(input.state)
     || input.state === "ready" && (!validId(input.workItemId) || !sha(input.head) || !sha(input.base)
+      || Object.hasOwn(input, "checks") && !validMacChecks(input.checks)
       || !Array.isArray(input.requesters) || input.requesters.length < 1 || input.requesters.length > 20
       || !input.requesters.every(validId) || new Set(input.requesters).size !== input.requesters.length)) {
     return { error: "invalid_mac_capability", status: 422 };
@@ -30,7 +32,7 @@ export function reportMacCapability(store, roomId, memberId, input) {
     return { error: "mac_capability_session_changed", status: 409 };
   }
   if (input.state === "ready" && prior?.sessionId === input.sessionId
-    && ["workItemId", "head", "base", "requesters"].some(key => JSON.stringify(prior[key]) !== JSON.stringify(input[key]))) {
+    && ["workItemId", "head", "base", "requesters", "checks"].some(key => JSON.stringify(prior[key]) !== JSON.stringify(input[key]))) {
     return { error: "mac_capability_binding_changed", status: 409 };
   }
   if (input.state !== "ready" && prior?.sessionId !== input.sessionId) return { state: input.state };
@@ -51,9 +53,11 @@ export function readMacCapabilities(store, { roomId, viewerId, members, items, n
       || !lease.requesters.includes(viewerId) || !visibleWork.has(lease.workItemId)) return false;
     const member = ownMember(members, lease.memberId);
     return member?.kind === "agent" && member.active === true;
-  }).slice(0, 3).map(({ sessionId, memberId, workItemId, head, base, observedAt, expiresAt }) => ({
-    kind: "desktop_affected_tests", state: "ready", source: "runner_report", capabilityId: sessionId,
-    head, base, observedAt: iso(observedAt), expiresAt: iso(expiresAt),
-    request: { tool: "room_request_reply", arguments: { roomId, toMemberId: memberId, workItemId, body: `mac affected ${head}` } }
-  }));
+  }).flatMap(({ sessionId, memberId, workItemId, head, base, observedAt, expiresAt, checks = ["affected"] }) =>
+    checks.map(check => ({
+      kind: MAC_CHECK_KINDS[check], state: "ready", source: "runner_report",
+      capabilityId: check === "affected" ? sessionId : `${sessionId}-${check}`,
+      head, base, observedAt: iso(observedAt), expiresAt: iso(expiresAt),
+      request: { tool: "room_request_reply", arguments: { roomId, toMemberId: memberId, workItemId, body: `mac ${check} ${head}` } }
+    }))).slice(0, 3);
 }

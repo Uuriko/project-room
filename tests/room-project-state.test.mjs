@@ -243,6 +243,9 @@ test("Mac capability discovery is caller-scoped, bounded to a receiver session, 
     arguments: { roomId: "commons", toMemberId: "producer", workItemId, body: `mac affected ${body.head}` } });
   assert.equal("requesters" in card, false);
   const replacement = { ...body, sessionId: "fedcba98-cafe-4123-8910-012345678901" };
+  assert.equal((await publish({ ...replacement, checks: ["build", "build"] })).status, 422);
+  assert.equal((await publish({ ...replacement, checks: ["shell"] })).status, 422);
+  assert.equal((await publish({ ...body, checks: ["build"] })).status, 409);
   assert.equal((await publish(replacement)).status, 409);
   assert.equal((await publish({ ...body, head: "c".repeat(40) })).status, 409);
   assert.equal((await publish({ sessionId: body.sessionId, state: "unavailable" })).status, 200);
@@ -250,7 +253,13 @@ test("Mac capability discovery is caller-scoped, bounded to a receiver session, 
   assert.equal((await publish(body)).status, 200);
   clock += 20_000;
   assert.deepEqual(discover(f.keys.reviewer), [], "no scheduler or stop required to expire a dead receiver");
-  assert.equal((await publish(replacement)).status, 200);
+  const extended = { ...replacement, checks: ["affected", "build", "native-smoke"] };
+  assert.equal((await publish(extended)).status, 200);
+  const discovered = discover(f.keys.reviewer);
+  assert.deepEqual(discovered.map(({kind}) => kind), ["desktop_affected_tests", "desktop_local_build", "desktop_native_smoke"]);
+  assert.equal(new Set(discovered.map(item => item.capabilityId)).size, 3);
+  assert.deepEqual(discovered.map(item => item.request.arguments.body), extended.checks.map(check => `mac ${check} ${body.head}`));
+  assert.deepEqual(discover(f.keys.owner), []);
   assert.equal((await publish({ sessionId: body.sessionId, state: "stopped" })).status, 409);
   assert.equal((await publish({ sessionId: replacement.sessionId, state: "stopped" })).status, 200);
   assert.deepEqual(discover(f.keys.reviewer), []);

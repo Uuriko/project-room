@@ -232,3 +232,16 @@ when Room is reachable. An empty list means Room has no current eligible
 observation. Discovery is a runner report, and the receiver checks the exact
 checkout again before executing. Private paths and other requester IDs stay
 on the Mac. The feature adds no scheduled task.
+
+The private receiver policy can include `"checks": ["affected", "build", "native-smoke"]`.
+Omitting this field keeps the affected-test approval. The app shows the
+chosen checks alongside the head and baseline before starting. Each action
+requires the complete discovered command and pinned SHA in its original request.
+
+- `mac build` builds the release `ProjectRoom` Swift executable in private
+  scratch space and returns the exact source and executable digest.
+- `mac native-smoke` builds and runs the checkout's real AppKit/WebKit
+  acceptance executable in the logged-in Mac session. It renders an isolated
+  loopback page, then closes and reopens the native window and checks that its
+  draft survives. The response names both checks. It does not install the app
+  or touch live account data. Bundle signing and provider login are separate.

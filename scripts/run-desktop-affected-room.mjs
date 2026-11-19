@@ -8,6 +8,8 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { openRequestJournal, runRequestQueue } from "../client/request-runner.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
 import { assertPrivatePath, openPrivateRead, readPrivateJson } from "../room-acp/src/private-files.mjs";
+import { MAC_CHECK_KINDS, validMacChecks } from "../src/mac-checks.js";
+import { desktopNativeChecks } from "./desktop-native-checks.mjs";
 import { validId } from "../src/events.js";
 import { collectAffectedEvidence, inspectAffectedCheckout } from "./desktop-affected.mjs";
 
@@ -16,7 +18,9 @@ const fields = ["version", "origin", "roomId", "memberId", "worktree", "workItem
 const refusals = new Set(["worktree_mismatch", "checkout_not_pinned_clean_head", "baseline_not_ancestor"]);
 
 export function affectedRequestHost(policy) {
-  if (!policy || Object.keys(policy).length !== fields.length || !fields.every(key => Object.hasOwn(policy, key))
+  const checks = policy?.checks ?? ["affected"];
+  if (!policy || Object.keys(policy).length !== fields.length + Number(Object.hasOwn(policy, "checks")) || !fields.every(key => Object.hasOwn(policy, key))
+    || Object.hasOwn(policy, "checks") && !validMacChecks(policy.checks)
     || policy.version !== 1 || typeof policy.origin !== "string" || !policy.origin || !validId(policy.roomId) || !validId(policy.memberId) || !validId(policy.workItemId)
     || !sha(policy.head) || !sha(policy.base) || typeof policy.worktree !== "string" || !isAbsolute(policy.worktree)
     || !Array.isArray(policy.requesters) || !policy.requesters.length || policy.requesters.length > 20
@@ -25,25 +29,30 @@ export function affectedRequestHost(policy) {
   const worktree = realpathSync(policy.worktree);
   const allowRequest = request => request.recipientId === policy.memberId && policy.requesters.includes(request.requesterId);
   const selectRequest = request => request.workItemId === policy.workItemId;
-  const body = `mac affected ${policy.head}`;
+  const commands = new Map(checks.map(check => [`mac ${check} ${policy.head}`, check]));
+  const checkout = { worktree, base: policy.base, expectedHead: policy.head };
+  const native = desktopNativeChecks(checkout);
   const execute = async ({ request, messages, preparation, signal }) => {
     const opened = messages.find(item => item.kind === "opened" && item.eventId === request.openingEventId);
+    const check = commands.get(opened?.message?.body);
+    const kind = MAC_CHECK_KINDS[check] ?? MAC_CHECK_KINDS.affected;
     if (!allowRequest(request) || !selectRequest(request) || request.contextEventId !== request.openingEventId
-      || opened?.message?.authorId !== request.requesterId || opened.message?.body !== body
+      || opened?.message?.authorId !== request.requesterId || !check
       || preparation.work?.id !== policy.workItemId || !Number.isSafeInteger(preparation.work.revision)) {
-      return { body: JSON.stringify({ kind: "desktop_affected_tests", status: "refused", reason: "expected_exact_opening_command" }) };
+      return { body: JSON.stringify({ kind, status: "refused", reason: "expected_exact_opening_command" }) };
     }
     try {
-      const result = await collectAffectedEvidence({ worktree, base: policy.base, expectedHead: policy.head,
-        workRevision: preparation.work.revision, signal });
+      const workRevision = preparation.work.revision;
+      const result = check === "affected" ? await collectAffectedEvidence({ ...checkout, workRevision, signal })
+        : await native.run(check, workRevision, signal);
       return { body: JSON.stringify(result) };
     } catch (error) {
       signal.throwIfAborted();
-      return { body: JSON.stringify({ kind: "desktop_affected_tests", status: "refused",
+      return { body: JSON.stringify({ kind, status: "refused",
         reason: refusals.has(error.message) ? error.message : "local_check_unavailable" }) };
     }
   };
-  return { allowRequest, selectRequest, execute };
+  return { allowRequest, selectRequest, execute, checks, checkout, native };
 }
 
 async function main([path, connectionDirectory, ...extra]) {
@@ -80,10 +89,12 @@ async function main([path, connectionDirectory, ...extra]) {
   const report = (state, fields = {}) => client.reportMacCapability({ sessionId, state, ...fields },
     { signal: AbortSignal.timeout(2500) }).catch(() => null);
   const checkout = { worktree: realpathSync(policy.worktree), base: policy.base, expectedHead: policy.head };
-  const capability = { workItemId: policy.workItemId, head: policy.head, base: policy.base, requesters: policy.requesters };
+  const capability = { workItemId: policy.workItemId, head: policy.head, base: policy.base, requesters: policy.requesters,
+    ...(policy.checks ? { checks: host.checks } : {}) };
   let nextReport = 0, reportedReady = false;
   let db;
   try {
+    await host.native.verifySupport(host.checks, controller.signal);
     const journal = join(directory, "requests.sqlite");
     for (const suffix of ["", "-journal", "-wal", "-shm"]) {
       try { assertPrivatePath(journal + suffix); } catch (error) { if (error.code !== "ENOENT") throw error; }
@@ -111,6 +122,7 @@ async function main([path, connectionDirectory, ...extra]) {
   } finally {
     if (approvalDigest) await report("stopped");
     db?.close(); owner.close();
+    await host.native.close();
     process.removeListener("SIGTERM", stop);
     process.removeListener("SIGINT", stop);
   }
