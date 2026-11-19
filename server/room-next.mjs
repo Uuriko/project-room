@@ -131,7 +131,8 @@ function legacyWorkPage(store, roomId, auth, room, cursor) {
 
 function requestRows(requests, roomId) {
   return requests.map(row => ({
-    id: row.id, revision: row.revision,
+    id: row.id, revision: row.revision, savedAt: row.createdAt,
+    ...(row.progress ? { latestRecipientProgress: { state: row.progress.state, at: row.progress.at } } : {}),
     nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: row.id } }
   }));
 }
@@ -140,7 +141,7 @@ function legacyRequestPage(store, secret, roomId, auth, room, cursor) {
   const position = pageCursor(store, cursorBinding(auth, roomId, "requests", room.sequence), cursor);
   if (!position) return unavailable(roomId, "requests", "cursor_changed");
   const page = store.replyRequests.list(secret, roomId, {
-    direction: "incoming", status: "open", expectedSessionBinding: auth.sessionBinding
+    direction: "incoming", status: "open", states: true, expectedSessionBinding: auth.sessionBinding
   });
   const rows = page.requests.filter(row => row.id > position.after).sort((a, b) => a.id < b.id ? -1 : 1);
   const selected = rows.slice(0, PAGE_SIZE);
@@ -158,7 +159,7 @@ function requestPage(store, secret, roomId, auth, cursor) {
   const position = pageCursor(store, cursorBinding(auth, roomId, "requests", null), cursor);
   if (!position) return unavailable(roomId, "requests", "cursor_changed");
   const page = store.replyRequests.list(secret, roomId, {
-    direction: "incoming", status: "open", limit: PAGE_SIZE,
+    direction: "incoming", status: "open", states: true, limit: PAGE_SIZE,
     expectedSessionBinding: auth.sessionBinding, ...(position.after ? { cursor: position.after } : {})
   });
   if (page.viewerId !== auth.member.id || page.roomId !== roomId)
