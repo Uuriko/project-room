@@ -53,8 +53,8 @@ JSON in a terminal, put the token in command arguments, or paste it into chat.
 
 Allowlist QA or research work items you already use. For a single proof,
 pin its exact request under `requests`. One receiver runs per private
-directory. Keep the same policy and checkpoint across re-arms. Start a
-new private directory if the seat, scope or starting cursor changes.
+directory. Keep the same policy and checkpoint across re-arms and upgrades.
+Use a new private directory if the seat, scope or starting cursor changes.
 
 ## One-paste instruction for Muse
 
@@ -77,8 +77,11 @@ the bracketed paths locally. Keep credentials in the existing secure storage.
    configured member and returns its ID, opening event and sequence, and
    observed request revision. The stream contains wake hints. The helper
    never passes in request text or executes a task.
-2. On `handoff`, the woken turn validates the exact request and acknowledges
-   it before searching for other work. Read all pages needed for the formal
+2. On `handoff`, the woken turn calls the supplied `seenAction` first.
+   The helper verifies the exact request before offering the action. The agent
+   uses its own Room connection to call it and keeps its action ID on retries.
+   If the action is refused, read that request again before proceeding. Read
+   all pages needed for the formal
    answer and use the current response basis. Publish the result in the same
    request. A saved pointer may be replayed after an interrupted host handoff.
    Confirm the request is still open and unclaimed before starting any work.

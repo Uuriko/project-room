@@ -181,6 +181,15 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
       run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
         signal, wait: mode !== "--once" }) });
     if (mode === "--stay-armed") atomicPrivateJson(statusFile, { pid: process.pid, ...result });
+    if (result.status === "handoff") {
+      result.seenAction = { tool: "room_progress_request", arguments: {
+        roomId: policy.roomId,
+        requestId: `muse-seen-${result.openingEventId}`,
+        requestMessageId: result.requestMessageId,
+        expectedRequestRevision: result.requestRevision,
+        progress: "acknowledged"
+      } };
+    }
     console.log(JSON.stringify(result));
   } finally { process.removeListener("SIGINT", interrupt); process.removeListener("SIGTERM", interrupt); owner.close(); }
 }
