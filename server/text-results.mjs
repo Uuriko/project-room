@@ -2,7 +2,7 @@ import { messageRepository } from "./message-repository.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer, validateResultSegments } from "../src/work-packet.js";
-import { nextWorkStep } from "../src/workflow.js";
+import { nextWorkStep, workActions } from "../src/workflow.js";
 import { messageInHistory } from "./history-visibility.mjs";
 import { WORK_REVISION_TYPES } from "../src/events.js";
 
@@ -98,7 +98,7 @@ function textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecor
   return messageInHistory(message, floor);
 }
 
-export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, floor = null, messageRecords = null }) {
+export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null }) {
   const work = state.workItems[workItemId];
   let result;
   const deny = () => { throw new Error("Result text is hidden from this viewer"); };
@@ -115,10 +115,20 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
       check(result.text.evidenceVersion === receipt.evidenceVersion);
     }
   }
+  const next = nextWorkStep(work, now);
+  const review = result.receipt && result.receipt.eventId === work.receipt.eventId && next.action === "verify"
+    && result.text?.body !== null && workActions(work, reviewer, now).some(([action]) => action === "verify")
+    ? { criteria: work.definitionOfDone,
+        action: { tool: "room_record_verification", arguments: { roomId: state.room.id, workItemId,
+          expectedRevision: work.revision, completionEventId: result.receipt.eventId,
+          evidenceVersion: result.receipt.evidenceVersion }, inputRequired: ["result", "summary"] },
+        guidance: "Check each criterion against evidence for this exact completion. Producer claims and external references require independent verification. Summarize what passed, failed, was skipped, or could not be verified. The Room rechecks authority and revision when recording the verdict." }
+    : null;
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     selection: { completionEventId, draftMessageId }, result,
+    ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
-      completionEventId: work.receipt?.eventId ?? null, next: nextWorkStep(work, now) },
+      completionEventId: work.receipt?.eventId ?? null, next },
     scope: { membership: "room", selectedWorkOnly: true, externalExecution: false, contentAuthority: "untrusted-data" } };
 }
 
