@@ -119,8 +119,13 @@ explicitly to end the receiver. If the host terminates the process, start
 one new receiver on the same private checkpoint or use the chat fallback.
 
 The handoff reports the process start, completed quiet window count and
-last quiet-window end time. Verify rollover by sending a real request
-after that window ends. For a directed stream pointer, the helper checks
+last quiet-window end time. Before sending a rollover test, record the host's
+background task ID and start time. Verify that the same task is still running
+after the first window. The helper prints its result only when it exits.
+An ended task is inactive. If the host cannot report its state, readiness is
+unknown. After the test, check the same process start, at least one completed
+quiet window, and a last quiet timestamp earlier than the request's Room
+save time. For a directed stream pointer, the helper checks
 that exact request once instead of rescanning the inbox, then saves its
 pointer before returning it. The host-recorded stream receipt and stored
 pointer time are distinct from the subsequent agent acknowledgment in Room.
