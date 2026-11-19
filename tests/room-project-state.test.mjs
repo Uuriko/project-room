@@ -253,11 +253,11 @@ test("Mac capability discovery is caller-scoped, bounded to a receiver session, 
   assert.equal((await publish(body)).status, 200);
   clock += 20_000;
   assert.deepEqual(discover(f.keys.reviewer), [], "no scheduler or stop required to expire a dead receiver");
-  const extended = { ...replacement, checks: ["affected", "build", "native-smoke"] };
+  const extended = { ...replacement, checks: ["affected", "build", "native-smoke", "draft-recovery"] };
   assert.equal((await publish(extended)).status, 200);
   const discovered = discover(f.keys.reviewer);
-  assert.deepEqual(discovered.map(({kind}) => kind), ["desktop_affected_tests", "desktop_local_build", "desktop_native_smoke"]);
-  assert.equal(new Set(discovered.map(item => item.capabilityId)).size, 3);
+  assert.deepEqual(discovered.map(({kind}) => kind), ["desktop_affected_tests", "desktop_local_build", "desktop_native_smoke", "desktop_draft_recovery"]);
+  assert.equal(new Set(discovered.map(item => item.capabilityId)).size, 4);
   assert.deepEqual(discovered.map(item => item.request.arguments.body), extended.checks.map(check => `mac ${check} ${body.head}`));
   assert.deepEqual(discover(f.keys.owner), []);
   assert.equal((await publish({ sessionId: body.sessionId, state: "stopped" })).status, 409);

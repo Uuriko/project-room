@@ -67,6 +67,20 @@ async function smoke(application, scratch, options) {
   }
 }
 
+async function draftRecovery(application, cwd, signal) {
+  const fixture = join(cwd, "scripts/mac-draft-recovery-fixture.mjs");
+  const result = await nativeProcess(process.execPath, [fixture, application], { cwd, signal, timeout: 95_000 });
+  const line = result.tail.split("\n").find(line => line.startsWith("ROOM_DRAFT_FIXTURE "));
+  const report = line ? JSON.parse(line.slice("ROOM_DRAFT_FIXTURE ".length)) : null;
+  const checks = Object.fromEntries(["roomADraftStored", "roomARestoredOnReload", "roomAExcludedFromB",
+    "roomBRestoredOnFreshNavigation", "roomBExcludedFromA"].map(key => [key, report?.checks?.[key] === true]));
+  const sameSyntheticAccountAndBrowserStore = report?.sameSyntheticAccountAndBrowserStore === true;
+  return { status: result.exitCode === 0 && sameSyntheticAccountAndBrowserStore &&
+      Object.values(checks).every(Boolean) ? "passed" : "failed",
+    checks, sameSyntheticAccountAndBrowserStore, exitCode: result.exitCode,
+    ...(result.timedOut ? { reason: "draft_recovery_timeout" } : {}) };
+}
+
 export function desktopNativeChecks(checkout) {
   let scratch;
   return {
@@ -75,7 +89,9 @@ export function desktopNativeChecks(checkout) {
       if (process.platform !== "darwin") throw Error("mac_native_checks_unavailable");
       const directory = join(checkout.worktree, "desktop/macos");
       await access(join(directory, "Package.swift"));
-      if (checks.includes("native-smoke")) await access(join(directory, "Sources/RoomAcceptance/main.swift"));
+      if (checks.includes("native-smoke") || checks.includes("draft-recovery"))
+        await access(join(directory, "Sources/RoomAcceptance/main.swift"));
+      if (checks.includes("draft-recovery")) await access(join(checkout.worktree, "scripts/mac-draft-recovery-fixture.mjs"));
       const version = await nativeProcess(swift, ["--version"], { cwd: directory, signal, timeout: 10_000 });
       if (version.exitCode !== 0) throw Error("mac_swift_unavailable");
     },
@@ -96,8 +112,9 @@ export function desktopNativeChecks(checkout) {
         if (bin.exitCode === 0 && isAbsolute(location) && location.startsWith(join(scratch, "swift") + "/")) {
           const artifact = join(location, target);
           const artifactSha256 = await digest(artifact);
-          outcome = check === "build" ? { status: "passed", stage: "build", exitCode: 0, artifactSha256 }
-            : { ...await smoke(artifact, scratch, options), stage: "smoke", artifactSha256 };
+          if (check === "build") outcome = { status: "passed", stage: "build", exitCode: 0, artifactSha256 };
+          else if (check === "draft-recovery") outcome = { ...await draftRecovery(artifact, cwd, signal), stage: "draft-recovery", artifactSha256 };
+          else outcome = { ...await smoke(artifact, scratch, options), stage: "smoke", artifactSha256 };
         } else outcome = { status: "failed", stage: "build", reason: "build_artifact_unconfirmed", exitCode: bin.exitCode };
       }
       try {

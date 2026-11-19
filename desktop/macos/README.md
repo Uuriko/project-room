@@ -245,3 +245,11 @@ requires the complete discovered command and pinned SHA in its original request.
   loopback page, then closes and reopens the native window and checks that its
   draft survives. The response names both checks. It does not install the app
   or touch live account data. Bundle signing and provider login are separate.
+
+- `mac draft-recovery` runs the real page from the pinned checkout in
+  disposable loopback rooms. The same synthetic account and WebKit data store
+  are used for every navigation. It verifies drafts after fresh documents in
+  both rooms and checks that neither draft enters the other room. This tests
+  reload recovery within each room and the existing clearing behavior when
+  entering a different scope. It sends no drafts and uses no live account.
+  Enable the `draft-recovery` check explicitly in the private receiver policy.

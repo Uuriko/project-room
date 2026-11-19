@@ -2,7 +2,8 @@
 export const MAC_CHECK_KINDS = Object.freeze({
   affected: "desktop_affected_tests",
   build: "desktop_local_build",
-  "native-smoke": "desktop_native_smoke"
+  "native-smoke": "desktop_native_smoke",
+  "draft-recovery": "desktop_draft_recovery"
 });
 
 export function validMacChecks(checks) {
