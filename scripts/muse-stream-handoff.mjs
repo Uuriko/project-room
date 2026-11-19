@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { lstatSync, realpathSync } from "node:fs";
+import { on } from "node:events";
+import { lstatSync, realpathSync, watch } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -14,10 +15,13 @@ const ids = value => Array.isArray(value) && value.length <= 20 && new Set(value
 const fields = ["version", "origin", "roomId", "memberId", "requesters", "workItems", "requests", "bootstrapAfter", "windowSeconds"];
 
 export function museHandoffPolicy(policy, connection) {
-  if (!policy || Object.keys(policy).length !== fields.length || !fields.every(field => Object.hasOwn(policy, field))
+  if (!policy || !Object.keys(policy).every(field => fields.includes(field) || field === "allowStandaloneRequests")
+    || !fields.every(field => Object.hasOwn(policy, field))
+    || Object.hasOwn(policy, "allowStandaloneRequests") && typeof policy.allowStandaloneRequests !== "boolean"
     || policy.version !== 1 || ["origin", "roomId", "memberId"].some(field => policy[field] !== connection[field])
     || !ids(policy.requesters) || !policy.requesters.length || policy.requesters.includes(policy.memberId)
-    || !ids(policy.workItems) || !ids(policy.requests) || !policy.workItems.length && !policy.requests.length
+    || !ids(policy.workItems) || !ids(policy.requests)
+    || !policy.workItems.length && !policy.requests.length && !policy.allowStandaloneRequests
     || !integer(policy.bootstrapAfter) || !integer(policy.windowSeconds) || policy.windowSeconds < 1 || policy.windowSeconds > 600)
     throw Error("invalid_muse_handoff_policy");
   return policy;
@@ -25,7 +29,18 @@ export function museHandoffPolicy(policy, connection) {
 
 function matches(request, policy) {
   return request?.status === "open" && request.recipientId === policy.memberId && policy.requesters.includes(request.requesterId)
-    && (policy.requests.includes(request.id) || policy.workItems.includes(request.workItemId));
+    && (policy.requests.includes(request.id) || policy.workItems.includes(request.workItemId)
+      || policy.allowStandaloneRequests === true && request.workItemId === null);
+}
+
+export function museSeenAction(handoff, roomId) {
+  return { tool: "room_progress_request", arguments: {
+    roomId,
+    requestId: `muse-seen-${handoff.openingEventId}`,
+    requestMessageId: handoff.requestMessageId,
+    expectedRequestRevision: handoff.requestRevision,
+    progress: "acknowledged"
+  } };
 }
 
 function pointer(context, candidate, policy, after) {
@@ -116,6 +131,9 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
 
 function loadCheckpoint(file, policy) {
   const binding = [policy.origin, policy.roomId, policy.memberId, policy.requesters, policy.workItems, policy.requests, policy.bootstrapAfter];
+  // Existing configurations retain their saved cursor. Enabling a new
+  // class of requests requires an explicit starting cursor in a new scope.
+  if (policy.allowStandaloneRequests === true) binding.push("standalone");
   let value;
   try { lstatSync(file); value = readPrivateJson(file, 8192); }
   catch (error) {
@@ -161,36 +179,86 @@ export async function runMuseHandoff({ mode, windowMs, stop, run, onRollover = (
   }
 }
 
+// The host registers this process separately so it survives delivery of the
+// primary helper's stdout. It has no Room stream and no recurring timer.
+export async function recoverMuseHandoff({ client, policy, signal, offers, currentOffer, record,
+  graceMs = 6500, now = Date.now, delay = pause }) {
+  for await (const offer of offers) {
+    if (!offer) continue;
+    await delay(Math.max(0, Date.parse(offer.offeredAt) + graceMs - now()), undefined, { signal });
+    const pending = currentOffer();
+    if (!pending || pending.openingEventId !== offer.openingEventId) continue;
+    const context = await client.replyContextForHint(pending.requestMessageId, { signal });
+    if (context.roomCreatedEventId !== pending.roomCreatedEventId) throw Error("muse_handoff_identity_changed");
+    const exact = pointer(context, { id: pending.requestMessageId, openingEventId: pending.openingEventId },
+      policy, pending.openingSequence - 1);
+    if (!exact || exact.openingSequence !== pending.openingSequence) continue;
+    record(exact);
+    return { status: "handoff", source: "interrupted_delivery", replay: true,
+      after: exact.openingSequence, originalOfferedAt: pending.offeredAt, ...exact };
+  }
+}
+
+function readOptionalPrivate(file) {
+  try { return readPrivateJson(file, 8192); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+}
+
+async function runRecovery({ client, directory, file, policy, statusFile, signal }) {
+  const receiptFile = join(directory, "recovery-receipt.json");
+  const currentOffer = () => {
+    const status = readOptionalPrivate(statusFile);
+    if (status?.status !== "handoff" || !Number.isFinite(Date.parse(status.offeredAt))) return null;
+    const pending = loadCheckpoint(file, policy).checkpoint.inFlight;
+    if (!pending || pending.openingEventId !== status.openingEventId
+      || pending.requestMessageId !== status.requestMessageId || pending.openingSequence !== status.openingSequence
+      || readOptionalPrivate(receiptFile)?.openingEventId === pending.openingEventId) return null;
+    return { ...pending, offeredAt: status.offeredAt };
+  };
+  const watcher = watch(directory);
+  const changes = on(watcher, "change", { signal });
+  try {
+    const offers = (async function* () {
+      yield currentOffer();
+      for await (const [, name] of changes) {
+        if (name === null || name === "receiver-status.json") yield currentOffer();
+      }
+    })();
+    atomicPrivateJson(join(directory, "recovery-status.json"), { pid: process.pid, armedAt: new Date().toISOString() });
+    return await recoverMuseHandoff({ client, policy, signal, offers, currentOffer,
+      record: exact => atomicPrivateJson(receiptFile, { openingEventId: exact.openingEventId, retriedAt: new Date().toISOString() }) });
+  } finally { await changes.return(); watcher.close(); }
+}
+
 async function main([configFile, connectionDirectory, mode, ...extra]) {
-  if (extra.length || mode !== undefined && !["--once", "--stay-armed"].includes(mode) || !isAbsolute(configFile ?? "")
+  if (extra.length || mode !== undefined && !["--once", "--stay-armed", "--recover"].includes(mode) || !isAbsolute(configFile ?? "")
     || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed]");
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed | --recover]");
   const directory = dirname(realpathSync(configFile));
   const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
   assertPrivatePath(directory, true);
   const policy = museHandoffPolicy(readPrivateJson(configFile, 8192), connection);
-  const owner = new WatchJournal(join(directory, "watch"));
+  const owner = new WatchJournal(join(directory, mode === "--recover" ? "recovery-watch" : "watch"));
   const stop = new AbortController();
   const interrupt = () => stop.abort();
   process.once("SIGINT", interrupt); process.once("SIGTERM", interrupt);
   try {
     const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
     const statusFile = join(directory, "receiver-status.json");
-    const result = await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
-      onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
-      run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
-        signal, wait: mode !== "--once" }) });
-    if (mode === "--stay-armed") atomicPrivateJson(statusFile, { pid: process.pid, ...result });
-    if (result.status === "handoff") {
-      result.seenAction = { tool: "room_progress_request", arguments: {
-        roomId: policy.roomId,
-        requestId: `muse-seen-${result.openingEventId}`,
-        requestMessageId: result.requestMessageId,
-        expectedRequestRevision: result.requestRevision,
-        progress: "acknowledged"
-      } };
+    const result = mode === "--recover"
+      ? await runRecovery({ client, directory, file, policy, statusFile, signal: stop.signal })
+      : await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
+        onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
+        run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
+          signal, wait: mode !== "--once" }) });
+    if (mode === "--stay-armed") {
+      if (result.status === "handoff") result.offeredAt = new Date().toISOString();
+      atomicPrivateJson(statusFile, { pid: process.pid, ...result });
     }
+    if (result.status === "handoff") result.seenAction = museSeenAction(result, policy.roomId);
     console.log(JSON.stringify(result));
+  } catch (error) {
+    if (!stop.signal.aborted) throw error;
   } finally { process.removeListener("SIGINT", interrupt); process.removeListener("SIGTERM", interrupt); owner.close(); }
 }
 

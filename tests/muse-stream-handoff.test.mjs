@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { holdMuseHandoff, museHandoffPolicy, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
+import { holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
 
 const connection = { origin: "https://room.example.org", roomId: "build", memberId: "muse" };
 const policy = museHandoffPolicy({ ...connection, version: 1, requesters: ["codex"], workItems: ["ready"],
@@ -108,6 +108,52 @@ test("a stream pointer selects the exact authenticated request without listing a
   assert.doesNotMatch(JSON.stringify(result), /private QA/);
 });
 
+test("standalone asks require explicit opt-in and still honor requester, recipient and linked-work scopes", async () => {
+  const direct = request("standalone", { workItemId: null });
+  const rules = { ...policy, workItems: [], requests: [] };
+  assert.throws(() => museHandoffPolicy(rules, connection), /invalid_muse_handoff_policy/);
+  assert.throws(() => museHandoffPolicy({ ...rules, allowStandaloneRequests: "true" }, connection), /invalid_muse_handoff_policy/);
+  const optedIn = museHandoffPolicy({ ...rules, allowStandaloneRequests: true }, connection);
+  const reads = [];
+  const client = {
+    replyRequests() {
+      return { evaluatedThrough: 21, requests: [
+        request("wrong-sender", { requesterId: "unapproved", workItemId: null }),
+        request("wrong-recipient", { recipientId: "other", workItemId: null }),
+        request("out-of-scope-work", { workItemId: "private" }),
+        request("missing-work-field", { workItemId: undefined }),
+        direct,
+      ] };
+    },
+    replyContext(id) { reads.push(id); return context(direct, 21); },
+  };
+  const run = selected => holdMuseHandoff({ client, policy: selected, checkpoint: { after: 10, inFlight: null },
+    signal: new AbortController().signal, save() {}, wait: false });
+  assert.equal((await run(policy)).status, "no_work");
+  assert.deepEqual(reads, []);
+  assert.equal((await run(optedIn)).requestMessageId, direct.id);
+  assert.deepEqual(reads, [direct.id]);
+});
+
+test("an opted-in standalone stream wake reads only its exact request and saves before handoff", async () => {
+  const direct = request("direct-standalone", { workItemId: null });
+  const optedIn = museHandoffPolicy({ ...policy, allowStandaloneRequests: true }, connection);
+  let lists = 0, exactReads = 0, saved;
+  const client = {
+    replyRequests() { lists++; return { evaluatedThrough: 14, requests: [] }; },
+    waitForChange() { return { changed: true, sequence: 15, requestHint: direct }; },
+    replyContextForHint(id) { exactReads++; assert.equal(id, direct.id); return context(direct, 15); },
+  };
+  const result = await holdMuseHandoff({ client, policy: optedIn, checkpoint: { after: 10, inFlight: null },
+    signal: new AbortController().signal, save(state) { saved = state; } });
+  assert.equal(result.source, "stream_pointer");
+  assert.equal(result.requestMessageId, direct.id);
+  assert.equal(saved.inFlight.openingEventId, direct.openingEventId);
+  assert.equal(lists, 1);
+  assert.equal(exactReads, 1);
+  assert.doesNotMatch(JSON.stringify(result), /private QA/);
+});
+
 test("a stay-armed process rolls a quiet window into one handoff", async () => {
   const stop = new AbortController(), windows = [];
   let rounds = 0;
@@ -147,4 +193,77 @@ test("a quiet rollover resumes a checked stream without an inbox read", async ()
   assert.equal(result.quietWindows, 1);
   assert.equal(result.source, "stream_pointer");
   assert.equal(lists, 1);
+});
+
+test("interrupted delivery waits once, then rechecks and replays only the exact unseen opening", async () => {
+  const pending = { requestMessageId: "ready", openingEventId: "open-ready", openingSequence: 15,
+    roomCreatedEventId: "room-birth", offeredAt: "2026-11-18T21:00:00Z" };
+  const seen = { ...pending, requestMessageId: "already-seen", openingEventId: "open-already-seen", openingSequence: 14 };
+  const replaced = { ...pending, openingSequence: 13, openingEventId: "open-replaced" };
+  let current;
+  const reads = [], waits = [], records = [];
+  const offers = (async function* () {
+    yield null;
+    current = replaced;
+    yield replaced;
+    current = seen;
+    yield seen;
+    current = pending;
+    yield pending;
+  })();
+  const result = await recoverMuseHandoff({ policy, offers, signal: new AbortController().signal,
+    currentOffer: () => current, now: () => Date.parse(pending.offeredAt) + 1000,
+    delay: async ms => { waits.push(ms); if (current === replaced) current = null; },
+    client: { replyContextForHint(id) {
+      reads.push(id);
+      if (id === seen.requestMessageId) return context(request(id, { progressState: "acknowledged" }), 14);
+      return context(request(id, { revision: 2 }), 15);
+    } },
+    record: item => records.push(item.openingEventId)
+  });
+  assert.deepEqual(waits, [5500, 5500, 5500]);
+  assert.deepEqual(reads, ["already-seen", "ready"]);
+  assert.deepEqual(records, ["open-ready"]);
+  assert.equal(result.replay, true);
+  assert.equal(result.source, "interrupted_delivery");
+  assert.equal(result.requestMessageId, "ready");
+  assert.equal(result.openingSequence, 15);
+  assert.equal(result.requestRevision, 2);
+});
+
+test("interrupted delivery never reopens settled work or replays a different room", async () => {
+  const offer = { requestMessageId: "ready", openingEventId: "open-ready", openingSequence: 15,
+    roomCreatedEventId: "room-birth", offeredAt: "2026-11-18T21:00:00Z" };
+  const args = { policy, signal: new AbortController().signal, offers: [offer], currentOffer: () => offer,
+    delay: async () => {}, record: () => assert.fail("must not publish a replay") };
+  const answered = context(request("ready", { status: "answered" }), 15);
+  assert.equal(await recoverMuseHandoff({ ...args, client: { replyContextForHint: () => answered } }), undefined);
+  const other = { ...context(request("ready"), 15), roomCreatedEventId: "another-birth" };
+  await assert.rejects(recoverMuseHandoff({ ...args, client: { replyContextForHint: () => other } }),
+    /muse_handoff_identity_changed/);
+});
+
+test("a standalone request survives a new receiver invocation with the original acknowledgment operation", async () => {
+  const standalone = request("open-after-restart", { workItemId: null });
+  const optedIn = museHandoffPolicy({ ...policy, allowStandaloneRequests: true }, connection);
+  let current = standalone, saved;
+  const firstClient = {
+    replyRequests: () => ({ evaluatedThrough: 15, requests: [standalone] }),
+    replyContext: () => context(standalone, 15),
+  };
+  const primary = await holdMuseHandoff({ client: firstClient, policy: optedIn, checkpoint: { after: 10, inFlight: null },
+    signal: new AbortController().signal, save: state => { saved = state; }, wait: false });
+  const offer = { ...saved.inFlight, offeredAt: "2026-11-18T21:00:00Z" };
+  const replay = () => recoverMuseHandoff({ policy: optedIn, offers: [offer], currentOffer: () => offer,
+    client: { replyContextForHint: () => context(current, 15) },
+    signal: new AbortController().signal, record() {}, delay: async () => {} });
+  current = { ...standalone, revision: 2 };
+  const recovered = await replay();
+  const originalAction = museSeenAction(primary, connection.roomId);
+  const replayAction = museSeenAction(recovered, connection.roomId);
+  assert.equal(recovered.openingEventId, primary.openingEventId);
+  assert.equal(replayAction.arguments.requestId, originalAction.arguments.requestId);
+  assert.equal(replayAction.arguments.expectedRequestRevision, 2);
+  current = { ...current, progressState: "acknowledged" };
+  assert.equal(await replay(), undefined);
 });

@@ -56,6 +56,15 @@ pin its exact request under `requests`. One receiver runs per private
 directory. Keep the same policy and checkpoint across re-arms and upgrades.
 Use a new private directory if the seat, scope or starting cursor changes.
 
+A standalone formal request has no work item. To accept these from the
+configured requesters, add `"allowStandaloneRequests": true`. It still
+requires an addressed formal request in the bound Room from a listed
+requester. Requests attached to a work item still need an approved work item
+or an explicit request ID. Omission and `false` preserve the existing scope
+and checkpoint. To enable the new scope, use a fresh private directory and
+choose the starting cursor deliberately. Use a cursor before a known open
+request if you want to pick it up after a missed wake.
+
 ## One-paste instruction for Muse
 
 Paste into the same Muse conversation after configuring the helper. Replace
@@ -137,3 +146,30 @@ stream cursor directly. Initial startup and uncertain stream state still
 run the scoped catch-up read. The private `receiver-status.json` records
 quiet rollovers and the process ID. Confirm that process is still active.
 A stale status file from a killed process is historical evidence.
+
+## Recover a displaced Muse turn
+
+On a host that can register two independent background completions in one
+conversation, start `--recover` in that conversation before `--stay-armed`.
+Use the same private policy directory and connection for both. Confirm that
+both processes are alive. The recovery process watches the primary's local
+handoff record. After an exact offer, it allows 6.5 seconds for the agent's
+acknowledgment, then reads that exact request once. It stays quiet if the
+request was acknowledged or settled. It re-delivers an open, unseen pointer
+at most once, using the same prepared acknowledgment operation. Re-arm a
+recovery process after a replay. The normal handoff does not wait for recovery.
+
+Use the same first tool call for either delivery. Only a receiving turn with
+a newly recorded acknowledgment should start the work. If acknowledgment is
+a duplicate because another turn already received it, read current state and
+leave that turn's work alone. If the call's own response is lost, look up its
+original operation before taking action. Read the latest exact answer basis
+before submitting. The Room's revision and terminal checks protect the
+answer if two deliveries overlap.
+
+The recovery waits on a local file event with a one-time deadline for that
+offer. It uses no scheduled task and starts no second Room subscription.
+The host must keep the second registration alive and deliver its completion
+to the same conversation. If both host tasks end, or a receiving turn is
+interrupted after acknowledging, a fresh turn needs to pick up the saved
+request through the existing Room workflow.
