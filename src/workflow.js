@@ -116,6 +116,8 @@ export function terminalWork(item) {
     : item.state === S.COMPLETED && Boolean(item.receipt?.eventId && item.receipt?.evidenceVersion) && verificationSatisfied(item);
 }
 
+export const workThreadHref = workItemId => `#pr-record/work/${encodeURIComponent(workItemId)}`;
+
 // A shared description for people and clients, never a grant or a dispatch command.
 // In-progress work has an actor but does not create another attention request.
 // `ownerId` is optional: an open handoff is triage addressed to the Room owner; the

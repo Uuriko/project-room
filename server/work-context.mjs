@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { nextWorkStep, workActions, workCollaboration, workResume } from "../src/workflow.js";
+import { nextWorkStep, workActions, workCollaboration, workResume, workThreadHref } from "../src/workflow.js";
 import { PREREQUISITE_GATED_STEPS, prerequisiteHold, stepWithPrerequisiteHold } from "../client/begin-work.mjs";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
@@ -209,6 +209,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   const value = {
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
+    workThread: { workItemId, href: workThreadHref(workItemId) },
     replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor),
     resume: workResume(work, now, state.room.ownerId, next),
     next: { ...next, addressedToViewer: next.memberId === viewerId },

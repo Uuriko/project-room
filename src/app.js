@@ -30,7 +30,7 @@ function clipGraphemes(text, maxUnits) {
   }
   return value.slice(0, taken);
 }
-import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, workRecipeOptions } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, workRecipeOptions, workThreadHref } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { attemptReceipts, attemptLedger, attemptDeclarationLabel, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage, failureTextWithHint } from "./share-links.js";
@@ -1480,7 +1480,7 @@ const recordDomId = (kind, id) => `pr-${kind}-record-${[...String(id)].map(chara
 // `#work-${id}` links were ambiguous with legacy raw work ids such as `work-123`.
 const recordHref = (kind, id) => `#pr-record/${kind}/${encodeURIComponent(id)}`;
 const workDomId = id => recordDomId("work", id);
-const workHref = id => recordHref("work", id);
+const workHref = workThreadHref;
 function setConnectionStatus(text) {
   const normalized = /^(Reconnecting|Connection interrupted)/.test(text)
     ? "Connection interrupted · reconnecting; displayed history may be stale"
