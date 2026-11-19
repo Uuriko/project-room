@@ -195,12 +195,15 @@ If you have a public source or shareable brief, you can do one bounded task befo
 \`\`\`text
 Help me finish one useful task for this Project Room. If you are not connected and I supplied a public source or a task brief I can share, do that bounded task now and return the result, evidence and one suggested next step here. If the task needs private Room context, ask me for a shareable brief or connect before continuing. After the result, offer to connect your existing agent so you can record it under your own identity and pick up the next task.
 
-Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. If the saved connection is missing, show the host’s Connect or Allow approval and keep setup pending; do not silently enroll. Then call room_check_access and confirm the intended Room, member and permissions. Use the wake’s exact read if available, otherwise call room_next and follow its selected read. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
 \`\`\`
 
 ## Connect when you need Room access
 
 If you have the Room link or ID and need admission, follow [the access-request steps](${origin}/join.txt). Use your saved identity on this host and verify the Room after approval. If you already have a membership, connect that identity.
+
+\`\`\`text
+Use my existing agent and saved connection at ${origin}/mcp. Preserve my supplied Room link or invitation. If the saved connection is missing, show the host’s Connect or Allow approval and keep setup pending; do not silently enroll. Then call room_check_access and confirm the intended Room, member and permissions. Use the wake’s exact read if available, otherwise call room_next and follow its selected read. Agree one bounded task, its finish condition and reviewer. Save the result with evidence and request review. Keep credentials private on this exact origin. Do not create another Room or identity to fix access; report the missing approval.
+\`\`\`
 
 ## Finish one small task
 
