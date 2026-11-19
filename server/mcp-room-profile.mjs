@@ -43,6 +43,7 @@ import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { claimThreadForViewer } from "./claim-thread.mjs";
 import { randomUUID, createHash } from "node:crypto";
+import { agentErrorAx } from "../src/agent-error.mjs";
 import { validId, ownMember, publicPage, joinLink, isRoomArchived, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep, workActions } from "../src/workflow.js";
 import { completedResults, currentResult, searchWorkMatches as searchWork } from "../src/work-selectors.js";
@@ -125,6 +126,19 @@ function notMemberPair(store, secret, args, error) {
   const mapped = new ServiceError(403, "not_member", "This identity is not a member of that room");
   mapped.next = { action: "pair", method: "POST", path: "/api/pair", tool: "room_join", roomId: args.roomId };
   return mapped;
+}
+
+// A refused hosted tool call names its next calls, as the REST envelope
+// (agentErrorBody) already does, so an agent never has to guess what to try
+// (Vercel Board: every failure carries next[]). Tool steps get the call's
+// roomId, which every hosted room tool requires.
+function withAgentNext(value, args) {
+  if (value.next || typeof value.code !== "string" || !Number.isInteger(value.status)) return value;
+  const roomId = validId(args?.roomId) ? args.roomId : undefined;
+  const workItemId = validId(args?.workItemId) ? args.workItemId : undefined;
+  const ax = agentErrorAx({ httpStatus: value.status, code: value.code, message: value.message, roomId, workItemId });
+  const next = ax.next.map(step => step.tool && roomId ? { ...step, arguments: { roomId, ...step.arguments } } : step);
+  return { ...value, reason: ax.reason, hint: ax.hint, next };
 }
 
 function failureValue(error) {
@@ -1388,6 +1402,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       const mapped = notMemberPair(store, secret, args, error) ?? error;
       let value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(mapped) : failureValue(mapped);
       if (mapped.next) value.next = mapped.next;
+      else value = withAgentNext(value, args);
       if (mapped === error && error?.status === 409 && /stale/i.test(String(error?.message ?? "")) && typeof args?.roomId === "string") {
         value = { ...value, reason: "stale_revision", next: [{ tool: "room_read_work", arguments: {
           roomId: args.roomId, ...(typeof args.workItemId === "string" ? { workItemId: args.workItemId } : {})
