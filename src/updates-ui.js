@@ -20,7 +20,7 @@ export function queryFor(filter) {
   return "state=actionable";
 }
 
-export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessage, actorLabel = () => "" }) {
+export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessage, onOpenPage, actorLabel = () => "" }) {
   const topbar = host?.querySelector(".topbar-actions") ?? document.querySelector(".topbar-actions");
   const entry = document.createElement("button");
   entry.id = "topbar-updates";
@@ -410,6 +410,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   }
   function open(next = "needs", focus = true) {
     if (!currentContext()) return;
+    onOpenPage?.();
     if(nativeAttention())next="needs";
     cancelPending();
     if (!isOpen()) showPage();
@@ -446,7 +447,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   function openConversation() {
     cancelPending(); hidePage();
     if (!location.hash || location.hash === "#pr-view/rooms")
-      history.replaceState(history.state, "", "#pr-view/conversation");
+      window.history.replaceState(window.history.state, "", "#pr-view/conversation");
     host?.querySelector("#conversation-title")?.focus();
   }
   dialog.querySelector("#updates-close").addEventListener("click", openConversation);
