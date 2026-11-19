@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { holdMuseHandoff, museHandoffPolicy, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
+import { holdMuseHandoff, museHandoffPolicy, recoverMuseHandoff, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
 
 const connection = { origin: "https://room.example.org", roomId: "build", memberId: "muse" };
 const policy = museHandoffPolicy({ ...connection, version: 1, requesters: ["codex"], workItems: ["ready"],
@@ -147,4 +147,52 @@ test("a quiet rollover resumes a checked stream without an inbox read", async ()
   assert.equal(result.quietWindows, 1);
   assert.equal(result.source, "stream_pointer");
   assert.equal(lists, 1);
+});
+
+test("interrupted delivery waits once, then rechecks and replays only the exact unseen opening", async () => {
+  const pending = { requestMessageId: "ready", openingEventId: "open-ready", openingSequence: 15,
+    roomCreatedEventId: "room-birth", offeredAt: "2026-11-18T21:00:00Z" };
+  const seen = { ...pending, requestMessageId: "already-seen", openingEventId: "open-already-seen", openingSequence: 14 };
+  const replaced = { ...pending, openingSequence: 13, openingEventId: "open-replaced" };
+  let current;
+  const reads = [], waits = [], records = [];
+  const offers = (async function* () {
+    yield null;
+    current = replaced;
+    yield replaced;
+    current = seen;
+    yield seen;
+    current = pending;
+    yield pending;
+  })();
+  const result = await recoverMuseHandoff({ policy, offers, signal: new AbortController().signal,
+    currentOffer: () => current, now: () => Date.parse(pending.offeredAt) + 1000,
+    delay: async ms => { waits.push(ms); if (current === replaced) current = null; },
+    client: { replyContextForHint(id) {
+      reads.push(id);
+      if (id === seen.requestMessageId) return context(request(id, { progressState: "acknowledged" }), 14);
+      return context(request(id, { revision: 2 }), 15);
+    } },
+    record: item => records.push(item.openingEventId)
+  });
+  assert.deepEqual(waits, [5500, 5500, 5500]);
+  assert.deepEqual(reads, ["already-seen", "ready"]);
+  assert.deepEqual(records, ["open-ready"]);
+  assert.equal(result.replay, true);
+  assert.equal(result.source, "interrupted_delivery");
+  assert.equal(result.requestMessageId, "ready");
+  assert.equal(result.openingSequence, 15);
+  assert.equal(result.requestRevision, 2);
+});
+
+test("interrupted delivery never reopens settled work or replays a different room", async () => {
+  const offer = { requestMessageId: "ready", openingEventId: "open-ready", openingSequence: 15,
+    roomCreatedEventId: "room-birth", offeredAt: "2026-11-18T21:00:00Z" };
+  const args = { policy, signal: new AbortController().signal, offers: [offer], currentOffer: () => offer,
+    delay: async () => {}, record: () => assert.fail("must not publish a replay") };
+  const answered = context(request("ready", { status: "answered" }), 15);
+  assert.equal(await recoverMuseHandoff({ ...args, client: { replyContextForHint: () => answered } }), undefined);
+  const other = { ...context(request("ready"), 15), roomCreatedEventId: "another-birth" };
+  await assert.rejects(recoverMuseHandoff({ ...args, client: { replyContextForHint: () => other } }),
+    /muse_handoff_identity_changed/);
 });
