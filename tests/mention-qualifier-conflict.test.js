@@ -61,6 +61,12 @@ test("parenthesized mentions identify exactly one room label or member ID", () =
   assert.deepEqual(resolve("@(unknown @Dot)"), []);
   assert.deepEqual(resolve("@(broken\n@Dot"), ["ai_dot"]);
   assert.deepEqual(resolve("@(Dot) and @Dot"), ["ai_dot"]);
+  assert.deepEqual(resolve("@Build-Worker"), ["ai_codex"], "bare tags retain generated aliases");
+  assert.deepEqual(resolve("@(Build-Worker)"), []);
+  assert.equal(warn("@(Build-Worker)")[0].reason, "not_member");
+  const withLiteral = { ...members, literal: { displayName: "Build-Worker", kind: "agent" } };
+  assert.deepEqual(resolveMentionTargetsInText(withLiteral, names, "@(Build-Worker)", "ai_grok"), ["literal"]);
+  assert.deepEqual(mentionTargetWarnings(withLiteral, names, "@(Build-Worker)", "ai_grok"), []);
 });
 
 test("nested parenthesized labels resolve and duplicate labels warn without waking either seat", () => {
