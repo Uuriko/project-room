@@ -11,6 +11,7 @@ const FILTERS = [
 ];
 const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
 export const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
+const messageDestination = item => item.kind === "request" ? item.sourceRef?.requestId : item.sourceRef?.messageId;
 const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions" };
 
 export function queryFor(filter) {
@@ -19,13 +20,12 @@ export function queryFor(filter) {
   return "state=actionable";
 }
 
-export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessage }) {
+export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessage, actorLabel = () => "" }) {
   const topbar = host?.querySelector(".topbar-actions") ?? document.querySelector(".topbar-actions");
   const entry = document.createElement("button");
   entry.id = "topbar-updates";
   entry.className = "topbar-button";
   entry.type = "button";
-  entry.setAttribute("aria-haspopup", "dialog");
   entry.setAttribute("aria-controls", "updates-dialog");
   const badge = document.createElement("span");
   badge.id = "updates-count";
@@ -33,10 +33,14 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   entry.append("Updates ", badge);
   topbar?.prepend(entry);
 
-  const dialog = document.createElement("dialog");
+  const dialog = document.createElement("section");
+  dialog.hidden = true;
+  const isOpen = () => !dialog.hidden;
+  const showPage = () => { dialog.hidden = false; entry.setAttribute("aria-current", "page"); };
+  const hidePage = () => { dialog.hidden = true; entry.removeAttribute("aria-current"); };
   dialog.id = "updates-dialog";
   dialog.setAttribute("aria-labelledby", "updates-title");
-  dialog.innerHTML = `<div class="dialog-head"><h2 id="updates-title">Updates</h2><button id="updates-close" class="button ghost" type="button">Close</button></div><div class="updates-filters" role="tablist" aria-label="Update filters"></div><ol class="updates-list"></ol><div id="updates-summary-status" role="status" aria-live="polite" aria-atomic="true"><span id="updates-page-announcement" class="sr-only"></span><p id="updates-summary" class="form-hint"></p><p id="updates-partial" class="form-hint"></p></div><button id="updates-load-more" class="button secondary" type="button" hidden>Load more</button><p id="updates-status" class="form-hint" role="status"></p>`;
+  dialog.innerHTML = `<div class="dialog-head"><h2 id="updates-title">Updates</h2><button id="updates-close" class="button ghost" type="button">Conversation</button></div><div class="updates-filters" role="tablist" aria-label="Update filters"></div><ol class="updates-list"></ol><div id="updates-summary-status" role="status" aria-live="polite" aria-atomic="true"><span id="updates-page-announcement" class="sr-only"></span><p id="updates-summary" class="form-hint"></p><p id="updates-partial" class="form-hint"></p></div><button id="updates-load-more" class="button secondary" type="button" hidden>Load more</button><p id="updates-status" class="form-hint" role="status"></p>`;
   (host ?? document.body).append(dialog);
   const history = document.querySelector("#topbar-catchup");
   const attention = document.querySelector("#needs-attention");
@@ -84,7 +88,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     ticket++; interaction++; owner = null; items = []; actionable = 0; filter = "needs"; operations.clear();
     cursor = null; hasMore = false; loadedPages = 0; incomplete = false; visitedCursors = new Set();
     badgeMore = false; badgeIncomplete = false; loading = false;
-    if (dialog.open) dialog.close();
+    if (isOpen()) hidePage();
     syncDecisionRows();
     list.replaceChildren(); status.textContent = ""; summary.textContent = ""; partial.textContent = "";
     paintBadge(); paintPaging();
@@ -101,9 +105,9 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   async function restore(saved) {
     if (!currentContext()) return false;
     const mine = ++interaction, owned = owner;
-    if (!dialog.open) dialog.showModal();
+    if (!isOpen()) showPage();
     const restored = await load(saved.filter, { budget: Math.max(1, saved.pageBudget || 1) });
-    if (!restored || mine !== interaction || !owns(owned) || !dialog.open) return false;
+    if (!restored || mine !== interaction || !owns(owned) || !isOpen()) return false;
     dialog.scrollTop = saved.scrollTop; list.scrollTop = saved.listScrollTop;
     const row = [...list.children].find(node => node.dataset.updateId === saved.itemId);
     const target = row?.querySelector(`[data-update-action="${saved.action}"]`)
@@ -207,6 +211,16 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       const title = document.createElement("strong");
       title.textContent = item.title || item.kind;
       copy.append(title);
+      const actor = item.actor ? actorLabel(item.actor) : "";
+      const updated = Date.parse(item.updatedAt);
+      if (actor || Number.isFinite(updated)) {
+        const meta = document.createElement("p");
+        meta.className = "updates-meta";
+        meta.textContent = [actor, Number.isFinite(updated) ? new Date(updated).toLocaleString(undefined, {
+          month: "short", day: "numeric", hour: "numeric", minute: "2-digit"
+        }) : ""].filter(Boolean).join(" · ");
+        copy.append(meta);
+      }
       if (item.kind === "review_requested") {
         const cue = document.createElement("p");
         cue.className = "form-hint";
@@ -219,7 +233,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         if(nativeAttention()&&name!=='open')continue;
         // Owner decisions are below this list; do not offer an Open action
         // unless this row has a supported work or conversation destination.
-        if (name === "open" && !item.sourceRef?.workItemId && !item.sourceRef?.messageId && operations.get(item.id)?.action !== "open") continue;
+        if (name === "open" && !item.sourceRef?.workItemId && !messageDestination(item) && operations.get(item.id)?.action !== "open") continue;
         const button = document.createElement("button");
         button.type = "button";
         button.className = name === "open" ? "button secondary" : "button ghost";
@@ -314,7 +328,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   async function mark(item, action) {
     if(nativeAttention()){
       if(action!=='open')return;const origin=capture(item.id,action),opened=item.sourceRef?.workItemId&&onOpenWork?onOpenWork(item.sourceRef.workItemId,origin):item.sourceRef?.messageId&&onOpenMessage?onOpenMessage(item.sourceRef.messageId,origin):false;
-      if(opened===false){status.textContent='That source is no longer available in this room.';return;}cancelPending();dialog.close();return;
+      if(opened===false){status.textContent='That source is no longer available in this room.';return;}cancelPending();hidePage();return;
     }
     const owned = currentContext();
     if (!owned) return;
@@ -336,7 +350,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     const mine = ++interaction, flight = ++operation.flight;
     const origin = capture(item.id, action);
     const path = action === "open" ? "read" : action;
-    const current = () => mine === interaction && owns(owned) && dialog.open;
+    const current = () => mine === interaction && owns(owned) && isOpen();
     operation.busy = true; paintOperations(); status.textContent = "";
     let result;
     try {
@@ -356,7 +370,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     } finally {
       if (owns(owned) && operations.get(item.id) === operation && operation.flight === flight) {
         operation.busy = false;
-        if (dialog.open) paintOperations();
+        if (isOpen()) paintOperations();
       }
     }
     if (!result || !current()) return;
@@ -379,12 +393,12 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       return;
     }
     if (action === "open") {
-      const workItemId = operation.item.sourceRef?.workItemId;
-      const messageId = operation.item.sourceRef?.messageId;
+      const messageId = messageDestination(operation.item);
+      const workItemId = operation.item.kind === "request" ? null : operation.item.sourceRef?.workItemId;
       const opened = workItemId && onOpenWork ? onOpenWork(workItemId, origin)
         : messageId && onOpenMessage ? onOpenMessage(messageId, origin) : null;
       if (opened === false) { paintOperations(); status.textContent = "That source is no longer available in this room."; return; }
-      dialog.close();
+      hidePage();
       if (opened !== true && messageId) {
         const row = document.querySelector(`[data-message-record-id="${CSS.escape(messageId)}"]`);
         row?.scrollIntoView({ block: "nearest" });
@@ -394,13 +408,13 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     }
     await load();
   }
-  function open(next = "needs") {
+  function open(next = "needs", focus = true) {
     if (!currentContext()) return;
     if(nativeAttention())next="needs";
     cancelPending();
-    if (!dialog.open) dialog.showModal();
+    if (!isOpen()) showPage();
     const tab = tabs.querySelector(`[data-update-filter="${next}"]`);
-    if(nativeAttention())dialog.querySelector('#updates-title').focus();else tab?.focus();
+    if (focus) (nativeAttention() ? dialog.querySelector("#updates-title") : tab)?.focus();
     void load(next);
   }
   loadMore.addEventListener("click", async event => {
@@ -415,7 +429,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     document.addEventListener("pointerdown", movedPointer);
     try {
       const loaded = await load(filter, hasMore && cursor ? { append: true } : { budget: 1 });
-      if (!retainFocus || mine !== interaction || !owns(owned) || !dialog.open) return;
+      if (!retainFocus || mine !== interaction || !owns(owned) || !isOpen()) return;
       // Disabling the pending control can drop keyboard focus. On failure,
       // return to the same enabled retry control without moving into old rows.
       const added = new Set(loaded ? items.filter(item => !previous.has(item.id)).map(item => item.id) : []);
@@ -429,8 +443,16 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     }
   });
   entry.addEventListener("click", () => open(filter));
-  dialog.querySelector("#updates-close").addEventListener("click", () => { cancelPending(); dialog.close(); });
-  dialog.addEventListener("cancel", cancelPending);
+  function openConversation() {
+    cancelPending(); hidePage();
+    if (!location.hash || location.hash === "#pr-view/rooms")
+      history.replaceState(history.state, "", "#pr-view/conversation");
+    host?.querySelector("#conversation-title")?.focus();
+  }
+  dialog.querySelector("#updates-close").addEventListener("click", openConversation);
+  dialog.addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); openConversation(); }
+  });
   tabs.addEventListener("click", event => {
     const button = event.target.closest("[data-update-filter]");
     if (button) { cancelPending(); void load(button.dataset.updateFilter); }
@@ -454,7 +476,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     if (!item) return;
     const owned = context();
     void mark(item, button.dataset.updateAction).catch(error => {
-      if (owns(owned) && dialog.open) status.textContent = error?.message || "Could not confirm that action. Retry it to check the same update.";
+      if (owns(owned) && isOpen()) status.textContent = error?.message || "Could not confirm that action. Retry it to check the same update.";
     });
   });
   // Coalesce room events without replacing a pending action or stealing focus.
@@ -479,7 +501,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       document.addEventListener("focusin", moving);
       try {
         await load(filter);
-        if (!owns(value) || mine !== interaction || !dialog.open || moved) return;
+        if (!owns(value) || mine !== interaction || !isOpen() || moved) return;
         dialog.scrollTop = scroll;
         if (saved) {
           const replacement = [...list.children].find(node => node.dataset.updateId === saved.itemId);
@@ -501,5 +523,5 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     if (nativeAttention() && owns(owner)) { paintBadge(); paint(); }
   }).observe(attention, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "data-access-request-id"] });
   paintBadge();
-  return { open, restore, reset, sync, cancelPending, close() { cancelPending(); if (dialog.open) dialog.close(); }, openAction(id) { if(nativeAttention()&&['catch-up','activity'].includes(id))return false;const next = PALETTE[id]; if (!next) return false; open(next); return true; } };
+  return { open, restore, reset, sync, cancelPending, close() { cancelPending(); if (isOpen()) hidePage(); }, openAction(id) { if(nativeAttention()&&['catch-up','activity'].includes(id))return false;const next = PALETTE[id]; if (!next) return false; open(next); return true; } };
 }
