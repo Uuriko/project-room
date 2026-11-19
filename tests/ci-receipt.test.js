@@ -1,21 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { receiptId, verdictOf, receiptBody, runCiReceipt } from "../scripts/ci-receipt.mjs";
+import { loadManifest } from "../scripts/ci-verdict.mjs";
 
 const repo = "Uuriko/project-room", SHA = "f5e8e226aa".padEnd(40, "0");
+const manifest = loadManifest();
 const run = (over = {}) => ({ id: 77, name: "test", event: "pull_request", conclusion: "success", head_sha: SHA,
   html_url: `https://github.com/${repo}/actions/runs/77`, ...over });
-const passing = [{ name: "changes", conclusion: "success" }, { name: "unit", conclusion: "success" }, { name: "lint", conclusion: "success" },
-  { name: "coverage", conclusion: "skipped" }, { name: "ci-verdict", conclusion: "success" }];
+const passing = manifest.jobs.map(job => ({ name: job.job_id, conclusion: "success" }));
+const GATING = manifest.jobs.filter(job => job.required || job.substantive).length;
 
 test("verdict: pass, fail, and the runs that say nothing", () => {
-  assert.deepEqual(verdictOf(run(), passing), { verdict: "PASSED", failed: [], ran: 3, total: 4 });
-  const bad = verdictOf(run({ conclusion: "failure" }), [...passing.slice(0, 2), { name: "browser-shards (2)", conclusion: "failure" }, { name: "unit ", conclusion: "cancelled" }]);
-  assert.equal(bad.verdict, "FAILED"); assert.deepEqual(bad.failed, ["browser-shards (2)"]);
-  assert.equal(verdictOf(run({ conclusion: "cancelled" }), passing), null, "a superseded run is not a verdict");
-  assert.equal(verdictOf(run({ event: "push" }), passing), null);
-  assert.equal(verdictOf(run(), [{ name: "changes", conclusion: "success" }, { name: "unit", conclusion: "skipped" }, { name: "ci-verdict", conclusion: "success" }]), null,
+  assert.deepEqual(verdictOf(run(), passing, manifest), { verdict: "PASSED", failed: [], ran: GATING, total: GATING });
+  const bad = verdictOf(run({ conclusion: "failure" }),
+    passing.map(job => job.name === "browser-shards" ? { name: "browser shard 2/6", conclusion: "failure" }
+      : job.name === "unit" ? { name: "unit", conclusion: "cancelled" } : job), manifest);
+  assert.equal(bad.verdict, "FAILED"); assert.deepEqual(bad.failed, ["unit", "browser-shards"]);
+  assert.equal(verdictOf(run({ conclusion: "cancelled" }), passing, manifest), null, "a superseded run is not a verdict");
+  assert.equal(verdictOf(run({ event: "push" }), passing, manifest), null);
+  assert.equal(verdictOf(run(), [{ name: "changes", conclusion: "success" }, { name: "unit", conclusion: "skipped" }, { name: "ci-verdict", conclusion: "success" }], manifest), null,
     "NOTHING RAN (no ready-to-land label) is not a test result");
+});
+
+test("verdict: a skipped substantive job is NOT-RUN and fails the verdict (no skipped-as-OK)", () => {
+  // The pre-manifest receipt counted skipped as OK and called this run
+  // PASSED. Coverage is required and substantive in the manifest, so the
+  // same run now grades FAILED with coverage named.
+  const jobs = passing.map(job => job.name === "coverage" ? { ...job, conclusion: "skipped" } : job);
+  const result = verdictOf(run(), jobs, manifest);
+  assert.equal(result.verdict, "FAILED");
+  assert.deepEqual(result.failed, ["coverage"]);
+  assert.equal(result.ran, GATING - 1);
+  assert.equal(result.total, GATING);
 });
 
 test("body is compact and never carries pull request text; id is stable per head and verdict", () => {
@@ -39,6 +55,7 @@ function fakeFetch({ pulls, jobs = passing, roomStatus = [201], seen = [] } = {}
     throw new Error(`unexpected ${u}`);
   }, { seen });
 }
+
 const env = { GITHUB_TOKEN: "gh-token-value", ROOM_RECEIPT_TOKEN: "room-secret-value" };
 const open = (over = {}) => ({ number: 6162, state: "open", head: { sha: SHA }, body: "", ...over });
 
@@ -49,7 +66,7 @@ test("posts one receipt to the room, attached to the Room-Work item, with no sec
   const post = f.seen.find(c => c.url.includes("/commands"));
   const sent = JSON.parse(post.init.body);
   assert.equal(sent.type, "message.posted"); assert.equal(sent.data.workItemId, "wk-digest");
-  assert.equal(sent.id, sent.data.messageId); assert.match(sent.data.body, /^CI #6162 f5e8e226 PASSED 3\/4 jobs · https:\/\/github\.com\//);
+  assert.equal(sent.id, sent.data.messageId); assert.match(sent.data.body, new RegExp(`^CI #6162 f5e8e226 PASSED ${GATING}\\/${GATING} jobs · https:\\/\\/github\\.com\\/`));
   assert.ok(!sent.data.body.includes("secret"), "pull request text is not copied");
   assert.ok(!JSON.stringify(sent).includes(env.ROOM_RECEIPT_TOKEN) && !out.body.includes("token"));
   assert.equal(post.init.headers.authorization, `Bearer ${env.ROOM_RECEIPT_TOKEN}`);
