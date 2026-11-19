@@ -1147,3 +1147,20 @@ test("implicit private replies confirm over HTTP without changing retry input or
   const unavailable = { command: async () => receipt, messageThread: async () => { throw new Error("parent unavailable"); } };
   assert.equal((await submitReplyAction(unavailable, f.identity, "room_reply", args)).status, "unconfirmed");
 });
+
+test("an acknowledged request remains readable with its exact answer basis", async t => {
+  const f = await fixture(t), q = f.open(), id = q.command.data.messageId;
+  await f.client.replyAction("room_progress_request", {
+    requestId: "receipt-first-test", requestMessageId: id, expectedRequestRevision: 0,
+    progress: "acknowledged", note: "Host has seen the request."
+  });
+  const list = await f.client.replyRequests({ direction: "incoming", status: "open" });
+  assert.equal(list.requests.find(request => request.id === id).progress.state, "acknowledged");
+  const reply = await f.client.replyContext(id);
+  assert.equal(reply.request.progressState, "acknowledged");
+  assert.equal(reply.current.answerBasis.expectedRequestRevision, 0);
+  assert.equal(reply.current.answerBasis.contextEventId, q.receipt.event.id);
+  const malformed = structuredClone(reply); delete malformed.request.progressEventId;
+  assert.throws(() => validateReplyRead(malformed, { name: "room_read_request", args: { requestMessageId: id }, roomId: "commons" }),
+    { code: "invalid_response" });
+});
