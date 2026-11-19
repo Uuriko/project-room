@@ -174,6 +174,41 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   assert.equal((await reviewer.workResult(f.workItemId)).review, undefined);
 });
 
+test("release evidence binds the exact result, candidate and visible report without changing the verdict", async t => {
+  const f = await setup(t), candidateRevision = "a".repeat(40), other = "b".repeat(40);
+  const draft = f.post(`Candidate revision: ${candidateRevision}\nArchive qualification`);
+  const data = f.input(draft);
+  const result = f.mutate(T.WORK_COMPLETED, data);
+  const completionEventId = result.event.id, evidenceVersion = data.evidenceVersion;
+  const read = () => f.client.workResult(f.workItemId, { completionEventId });
+  const record = (report, actor, extra) => f.post("room-release-checks/1\n" + JSON.stringify(report),
+    { replyToId: draft.event.data.messageId, ...extra }, actor);
+  const evidenceDigest = "sha256:" + "1".repeat(64);
+  const evidence = f.post(`room-release-receipt/1 build ${completionEventId} ${candidateRevision} ${evidenceDigest}\nArchive manifest verified`,
+    { replyToId: draft.event.data.messageId });
+  const passed = { candidateRevision, status: "passed", summary: "Archive verified", evidenceDigest,
+    evidenceMessageId: evidence.event.data.messageId };
+  const basis = { completionEventId, evidenceVersion, candidateRevision };
+  const verdict = f.mutate(T.VERIFICATION_RECORDED, { result: "pass", completionEventId, evidenceVersion, summary: "Scoped PASS" }, "reviewer");
+  record({ ...basis, candidateRevision: other, checks: { build: { ...passed, candidateRevision: other } } });
+  record({ ...basis, checks: { build: { ...passed, candidateRevision: other } } });
+  record({ ...basis, checks: { build: passed } }, "guest");
+  assert.equal((await read()).workThread.releaseChecks, undefined);
+  record({ ...basis, checks: { build: { ...passed, evidenceMessageId: "missing" } } });
+  assert.equal((await read()).workThread.releaseChecks.checks[0].status, "pending");
+  record({ ...basis, checks: { browser: passed } });
+  assert.equal((await read()).workThread.releaseChecks.checks[1].status, "pending");
+  const visible = record({ ...basis, checks: { build: passed } });
+  assert.deepEqual((await read()).workThread.releaseChecks.checks.map(x => [x.stage, x.status]), [
+    ["build", "passed"], ["browser", "pending"], ["deploy", "pending"]
+  ]);
+  assert.equal((await read()).workThread.releaseChecks.messageId, visible.event.data.messageId);
+  assert.equal((await read()).workThread.releaseChecks.checks[0].evidenceMessageId, evidence.event.data.messageId);
+  record({ ...basis, completionEventId: "wrong-completion", checks: { build: passed } });
+  assert.equal((await read()).workThread.releaseChecks.messageId, visible.event.data.messageId);
+  assert.equal(f.item().verification.eventId, verdict.event.id);
+});
+
 test("native text preserves exact stored UTF-8 and old post/proposal provenance across restart", async t => {
   const f = await setup(t), body = "\uFEFF  Café e\u0301 🪷\r\n\tsecond line  \n";
   const posted = f.post(body, { packetId: "original-packet", basisRevision: 1 }, "guest");

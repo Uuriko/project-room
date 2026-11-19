@@ -120,6 +120,63 @@ function precedingCorrection(db, state, work, receipt, viewerId, floor, messageR
   };
 }
 
+const RELEASE_CHECKS_PREFIX = "room-release-checks/1\n";
+const RELEASE_STAGES = ["build", "browser", "deploy"];
+
+// Release proof can arrive after review. A linked Room message preserves
+// the original exact result and verdict and can be read through their scope.
+function selectedReleaseChecks(db, state, work, result, viewerId, floor, messageRecords) {
+  if (result.kind !== "room_text" || !result.text.body) return null;
+  const candidates = new Set([...result.text.body.matchAll(/(?:^Candidate revision: |"sourceRevision"\s*:\s*")([a-f0-9]{40})(?:"|\r?$)/gm)].map(match => match[1]));
+  if (candidates.size !== 1) return null;
+  const [candidateRevision] = candidates;
+  const { receipt, text } = result;
+  const reporters = new Set([state.room.ownerId, work.proposedById, work.accountableMemberId, receipt.reportedById].filter(Boolean));
+  // Existing work/event index bounds lookup to this one task and result.
+  const rows = db.prepare(`SELECT id,body FROM events
+    WHERE room_id=? AND json_extract(body,'$.data.workItemId')=?
+      AND json_extract(body,'$.type')='message.posted' AND json_extract(body,'$.data.replyToId')=?
+      AND json_extract(body,'$.actorId') IN (SELECT value FROM json_each(?))
+      AND sequence>? AND substr(json_extract(body,'$.data.body'),1,?)=?
+    ORDER BY sequence DESC LIMIT 20`).all(state.room.id, work.id, text.messageId, JSON.stringify([...reporters]), text.postSequence,
+      RELEASE_CHECKS_PREFIX.length, RELEASE_CHECKS_PREFIX);
+  const messages = messageRecords ?? messageRepository({ db }, state.room.id, state);
+  for (const row of rows) {
+    const posted = JSON.parse(row.body);
+    const messageId = posted.data.messageId || row.id;
+    const message = messages.get(messageId);
+    if (!message || message.deletedAt || message.editedAt || message.body !== posted.data.body
+      || !textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecords)) continue;
+    let report;
+    try { report = JSON.parse(message.body.slice(RELEASE_CHECKS_PREFIX.length)); } catch { continue; }
+    if (report?.completionEventId !== receipt.eventId || report.evidenceVersion !== receipt.evidenceVersion
+      || report.candidateRevision !== candidateRevision) continue;
+    const checks = [];
+    for (const stage of RELEASE_STAGES) {
+      const check = report.checks?.[stage];
+      if (check === undefined) { checks.push({ stage, status: "pending" }); continue; }
+      if (!["passed", "failed"].includes(check?.status) || check.candidateRevision !== candidateRevision
+        || typeof check.summary !== "string" || !check.summary.trim() || check.summary.length > 600
+        || !/^sha256:[a-f0-9]{64}$/.test(check.evidenceDigest ?? "")) break;
+      const evidenceId = check.evidenceMessageId;
+      const evidence = typeof evidenceId === "string" && evidenceId.length <= 128 ? messages.get(evidenceId) : null;
+      const binding = `room-release-receipt/1 ${stage} ${receipt.eventId} ${candidateRevision} ${check.evidenceDigest}\n`;
+      if (!evidence || evidence.deletedAt || evidence.editedAt || evidence.authorId !== message.authorId
+        || evidence.workItemId !== work.id || evidence.replyToId !== text.messageId || !evidence.body?.startsWith(binding)
+        || !textVisibleToViewer(db, state, evidenceId, viewerId, floor, messages)) {
+        checks.push({ stage, status: "pending" });
+        continue;
+      }
+      checks.push({ stage, status: check.status, summary: check.summary, evidenceDigest: check.evidenceDigest,
+        evidenceMessageId: evidenceId, href: `#pr-record/message/${encodeURIComponent(evidenceId)}` });
+    }
+    if (checks.length === RELEASE_STAGES.length) return { candidateRevision, checks, messageId,
+      completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion,
+      recordedAt: message.createdAt, reportedById: message.authorId, untrusted: true };
+  }
+  return null;
+}
+
 export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null }) {
   const work = state.workItems[workItemId];
   let result;
@@ -148,8 +205,9 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
     : null;
   const correction = result.text?.body === null ? null
     : precedingCorrection(db, state, work, result.receipt, viewerId, floor, messageRecords);
+  const releaseChecks = selectedReleaseChecks(db, state, work, result, viewerId, floor, messageRecords);
   return { contractVersion: 1, roomId: state.room.id, workItemId,
-    workThread: { workItemId, href: workThreadHref(workItemId), ...(correction ? { correction } : {}) },
+    workThread: { workItemId, href: workThreadHref(workItemId), ...(correction ? { correction } : {}), ...(releaseChecks ? { releaseChecks } : {}) },
     selection: { completionEventId, draftMessageId }, result,
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,

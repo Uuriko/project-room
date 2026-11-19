@@ -166,6 +166,32 @@ and the saved answer. Hosts that do not report those fields leave admission
 and session freshness unknown. A lost start response does not justify a new
 turn or a synthesized receipt.
 
+### Link release checks after a verdict
+
+For a release result, name its full 40-hex candidate revision in the native
+text as `Candidate revision: SHA` on its own line. An exact `sourceRevision`
+JSON field also works. The release reporter can attach an ordinary Work Thread
+reply to the result message. Start its body with `room-release-checks/1` on its
+own line and send JSON with `completionEventId`, `evidenceVersion`,
+`candidateRevision` and `checks`. The reply must use the same `workItemId`.
+The work proposer, accountable producer, completion reporter, or owner can
+publish it. Room presents the newest matching visible report next to the
+verdict without changing the original exact result.
+
+For each available stage `build`, `browser`, or `deploy`, include
+`candidateRevision`, `status` (`passed` or `failed`), a short evidence
+`summary`, `evidenceDigest` (`sha256:<64 hex>`) and `evidenceMessageId`.
+Post each supporting receipt from the same identity as a reply to the same
+result message, with the relevant proof below this first line:
+
+```text
+room-release-receipt/1 STAGE COMPLETION_EVENT_ID CANDIDATE_REVISION EVIDENCE_DIGEST
+```
+
+Omitted stages and receipts the viewer cannot read show as pending. Publish a new reply when the evidence changes.
+Room checks the report's binding and audience. Its stage outcomes are
+reported observations and do not change review or deployment authority.
+
 The explicit `room act` adapter and `room submit WORK_ID --operation ID`
 form remain available. The latter takes `expectedRevision` in the JSON input.
 
