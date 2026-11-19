@@ -40,8 +40,10 @@ const roomNextOutput = {
       correction: schema({ reason: { type: "string" }, nextAction: { type: "string" }, truncated: { type: "boolean" } },
         ["reason", "nextAction", "truncated"])
     }, ["id", "title", "revision", "reason", "nextRead"])),
-    requests: nextPage(schema({ id: idField, revision: { type: "integer", minimum: 0 }, nextRead },
-      ["id", "revision", "nextRead"]))
+    requests: nextPage(schema({ id: idField, revision: { type: "integer", minimum: 0 }, nextRead,
+      savedAt: { type: "string", description: "When the Room recorded the request." },
+      latestRecipientProgress: schema({ state: { type: "string" }, at: { type: ["string", "null"] } }, ["state", "at"])
+    }, ["id", "revision", "nextRead"]))
   }, ["contractVersion", "roomId", "viewerId", "goal", "charterRevision", "contentTrust"]),
   anyOf: [{ required: ["work"] }, { required: ["requests"] }]
 };
