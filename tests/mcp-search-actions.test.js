@@ -48,7 +48,7 @@ const size = tools => JSON.stringify(tools).length;
 test("lean is opt-in: default core completes work and full stays available, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
   assert.equal(core.length, 26, "default core is 22 conversation and task tools plus four join readers");
-  assert.equal(full.length, 130, "full includes room_next");
+  assert.equal(full.length, 131, "full includes room_next and room_propose_plan");
   assert.ok(full.some(tool => tool.name === "room_next"));
   assert.equal(core[0].name, "room_next");
   assert.ok(full.some(tool => tool.name === "room_wait_for_attention"));
