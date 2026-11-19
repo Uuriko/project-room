@@ -3,7 +3,7 @@ import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { readAgentConnection } from "../client/agent-connection.mjs";
+import { readAgentConnection, readConnectionInput } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
 import { assertPrivatePath, atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
@@ -114,9 +114,11 @@ function loadCheckpoint(file, policy) {
 }
 
 async function main([configFile, connectionDirectory, ...extra]) {
-  if (extra.length || ![configFile, connectionDirectory].every(path => path && isAbsolute(path)))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json /private/room-connection");
-  const directory = dirname(realpathSync(configFile)), connection = readAgentConnection(connectionDirectory);
+  if (extra.length || !isAbsolute(configFile ?? "")
+    || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -]");
+  const directory = dirname(realpathSync(configFile));
+  const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
   assertPrivatePath(directory, true);
   const policy = museHandoffPolicy(readPrivateJson(configFile, 8192), connection);
   const owner = new WatchJournal(join(directory, "watch"));
