@@ -9,7 +9,7 @@ import { currentResult } from "./work-selectors.js";
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, memberLabel, workRecord, focusRecord,
-  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, storage = null, recoveryScope = () => null }) {
+  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null, pointerSelection = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
@@ -90,12 +90,17 @@ export function installResultReader({ client, getState, getSession, sameSession,
   }
   function mountResultReader() {
     if (!resultView) return;
-    const docked = wide.matches;
+    const focused = resultView.focused === true;
+    const docked = !focused && wide.matches;
+    resultReader.classList.toggle("result-focused", focused);
+    const checks = resultElement("result-release-checks");
+    if (focused) resultElement("result-work-context").before(checks);
+    else resultElement("result-work-action").before(checks);
     resultReader.classList.toggle("result-docked", docked);
-    resultReader.classList.toggle("result-mobile", !docked);
+    resultReader.classList.toggle("result-mobile", !docked && !focused);
     resize.hidden = !docked;
     applyWidth();
-    const host = shell;
+    const host = focused ? shell.querySelector(".room-main") : shell;
     if (host && resultReader.parentElement !== host) {
       const focused = resultReader.contains(document.activeElement) ? document.activeElement : null;
       host.append(resultReader);
@@ -146,14 +151,16 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const link = document.createElement("a");
     link.href = href;
     link.textContent = label;
-    link.addEventListener("click", () => closeResult(false));
+    if (resultView?.focused) { link.target = "_blank"; link.rel = "noopener"; }
+    else link.addEventListener("click", () => closeResult(false));
     return link;
   }
   function showReleaseChecks(report) {
     if (!releaseLink || !releasePanel) return;
-    releaseLink.hidden = !report;
-    releaseLink.setAttribute("aria-expanded", "false");
-    releasePanel.hidden = true;
+    const focused = resultView?.focused === true;
+    releaseLink.hidden = !report || focused;
+    releaseLink.setAttribute("aria-expanded", String(Boolean(focused && report)));
+    releasePanel.hidden = !report || !focused;
     const list = resultElement("result-release-stages");
     list.replaceChildren();
     if (!report) return;
@@ -161,11 +168,19 @@ export function installResultReader({ client, getState, getSession, sameSession,
     for (const check of report.checks) {
       const row = document.createElement("li"), title = document.createElement("strong");
       title.textContent = uiText("result.releaseStage", { stage: uiText(`result.release.${check.stage}`), status: uiText(`result.release.${check.status}`) });
-      row.append(title);
-      if (check.summary) { const summary = document.createElement("p"); summary.textContent = check.summary; row.append(summary); }
-      if (check.evidenceDigest) { const digest = document.createElement("code"); digest.textContent = check.evidenceDigest; row.append(digest); }
+      row.dataset.status = check.status;
+      let evidence = row;
+      if (focused && (check.summary || check.evidenceDigest || check.href)) {
+        evidence = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.append(title);
+        evidence.append(summary);
+        row.append(evidence);
+      } else row.append(title);
+      if (check.summary) { const summary = document.createElement("p"); summary.textContent = check.summary; evidence.append(summary); }
+      if (check.evidenceDigest) { const digest = document.createElement("code"); digest.textContent = check.evidenceDigest; evidence.append(digest); }
       if (check.href) {
-        row.append(" ", releaseEvidenceLink(check.href, uiText("result.releaseStageEvidence", { stage: uiText(`result.release.${check.stage}`) })));
+        evidence.append(" ", releaseEvidenceLink(check.href, uiText("result.releaseStageEvidence", { stage: uiText(`result.release.${check.stage}`) })));
       }
       list.append(row);
     }
@@ -177,6 +192,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     mountResultReader();
     const view = resultView;
     if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
+    resultElement("close-result").hidden = view.focused === true;
     resultElement("close-result").textContent = wide.matches ? "×" : uiText("result.backConversation");
     resultElement("close-result").setAttribute("aria-label", uiText(wide.matches ? "result.closePreview" : "result.backConversation"));
     if (!clipboard.busy && resultElement("result-use-status").textContent === uiText("clipboard.pending")) resultElement("result-use-status").textContent = "";
@@ -208,10 +224,18 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const context = resultElement("result-work-context");
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
     if (context) context.hidden = !current;
+    const verdict = resultElement("result-verdict");
+    const finding = current && matchesReceipt(item.verification, item.receipt) ? item.verification : null;
+    verdict.hidden = !view.focused || !current;
+    if (!verdict.hidden) {
+      verdict.dataset.outcome = finding?.result ?? "pending";
+      verdict.textContent = finding
+        ? `Verification · ${finding.result === "pass" ? "Passed" : finding.result === "fail" ? "Failed" : "Recorded"}`
+        : "Verification · Pending";
+    }
     if (current && context) {
       const next = nextWorkStep(item, Date.now(), getState().room.ownerId);
       resultElement("result-work-criteria").textContent = item.definitionOfDone;
-      const finding = matchesReceipt(item.verification, item.receipt) ? item.verification : null;
       resultElement("result-work-verification").textContent = finding?.summary ?? "";
       resultElement("result-work-verification-row").hidden = !finding?.summary;
       resultElement("result-work-next").textContent = next.memberId
@@ -242,9 +266,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!preserveSaved) forgetSelection();
     const view = resultView;
     finishResize();
-    resultView = null; resultReader.classList.remove("result-docked", "result-mobile"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
+    resultView = null; resultReader.classList.remove("result-docked", "result-mobile", "result-focused"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
     showCorrection(null);
     showReleaseChecks(null);
+    resultElement("result-verdict").hidden = true;
     resultElement("result-work-context")?.setAttribute("hidden", "");
     resultElement("result-work-action")?.setAttribute("hidden", "");
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
@@ -336,7 +361,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!message) { resultElement("result-use-status").textContent = uiText("result.conversationUnavailable"); return; }
     resultElement("result-use-status").textContent = "";
     if (onDiscuss(message, selection) === false) return;
-    if (wide.matches && resultView === view) {
+    if (!view.focused && wide.matches && resultView === view) {
       view.fromResults = false;
       saveSelection(view);
       resultStatus();
@@ -351,7 +376,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     onOriginal(view.originalId);
   });
   resultReader.addEventListener("keydown", event => {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeResult(); }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (resultView?.focused) onReturn(); else closeResult(); }
   });
   function loadExactResult(view) {
     const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
@@ -377,7 +402,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const item = getState().workItems[view.workItemId];
       const currentFirstResult = !view.previousCompletionEventId && item?.state === S.COMPLETED
         && !item.supersededBy && matchesReceipt(view.receipt, item.receipt);
-      if (message && currentFirstResult && !view.withdrawn && !view.recovered && value.result.text.body.length <= 1200) {
+      if (message && currentFirstResult && !view.withdrawn && !view.recovered && !view.focused && value.result.text.body.length <= 1200) {
         closeResult(false);
         onOriginal(message.id);
         return;
@@ -402,6 +427,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   });
   function openResult(view, title, focus = true) {
       resultView = view;
+      resultElement("result-verdict").hidden = true;
       showCorrection(null);
       showReleaseChecks(null);
       resultElement("result-work-context")?.setAttribute("hidden", "");
@@ -439,7 +465,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         fromResults: false, restoreDetails: false, recovered: true }, item.title, false);
     } catch { forgetSelection(); }
   }
-  function readResult(e) {
+  function readResult(e, { focused = false } = {}) {
     const read = e.target.closest("[data-read-result]");
     if (read && getState() && !isBusy()) {
       const item = getState().workItems[read.dataset.readResult], receipt = item?.receipt;
@@ -447,7 +473,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (!receipt?.nativeText && !compact) return true;
       const fromResults = Boolean(read.closest("#room-results-list"));
       if (fromResults && !currentResult(item)) return true;
-      const view = { generation: client.generation, roomId: getSession().roomId, memberId: getSession().member.id, workItemId: item.id,
+      const view = { focused, generation: client.generation, roomId: getSession().roomId, memberId: getSession().member.id, workItemId: item.id,
         fromResults, restoreDetails: !fromResults && Boolean(workRecord(item.id)?.querySelector(".work-details")?.open), previousCompletionEventId: receipt.nativeText?.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById };
       // Details are the entry path, not a second toolbar above the open result.
       // Restore them only when closing back to the originating control.
