@@ -57,6 +57,7 @@ async function inspect(client, policy, after, signal) {
 
 export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true }) {
   let state = checkpoint;
+  const remember = (after, inFlight = null) => { state = { after, inFlight }; save(state); };
   // A process may stop after saving the pointer and before delivering stdout.
   // Read back the same request before replaying that exact pointer.
   if (state.inFlight) {
@@ -67,33 +68,43 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
     const recovered = pointer(current, { id: saved.requestMessageId, openingEventId: saved.openingEventId }, policy, saved.openingSequence - 1);
     if (recovered) {
       if (recovered.requestRevision !== saved.requestRevision) {
-        state = { after: state.after, inFlight: recovered };
-        save(state);
+        remember(state.after, recovered);
       }
       return { status: "handoff", replay: true, after: state.after, ...recovered };
     }
-    state = { after: state.after, inFlight: null };
-    save(state);
+    remember(state.after);
   }
   for (;;) {
     signal.throwIfAborted();
     const { next, through } = await inspect(client, policy, state.after, signal);
     if (next) {
-      state = { after: next.openingSequence, inFlight: next };
-      save(state);
-      return { status: "handoff", replay: false, after: state.after, ...next };
+      remember(next.openingSequence, next);
+      return { status: "handoff", replay: false, after: state.after, source: "catch_up", ...next };
     }
     if (integer(through) && through > state.after) {
-      state = { after: through, inFlight: null };
-      save(state);
+      remember(through);
     }
     if (!wait) return { status: "no_work", after: state.after };
     for (;;) {
       signal.throwIfAborted();
       let change;
-      try { change = await client.waitForChange(state.after, { timeoutMs: 12000, signal }); }
+      try { change = await client.waitForChange(state.after, { timeoutMs: 12000, requestHints: true, signal }); }
       catch (error) { throw Object.assign(error, { handoffStage: "room_stream" }); }
-      if (change.changed) break; // The stream is a hint. Reread the scoped formal list.
+      if (!change.changed) {
+        if (integer(change.through) && change.through > state.after) remember(change.through);
+        continue;
+      }
+      const hint = change.requestHint;
+      if (!hint) break; // Older, incomplete or lagging streams use the scoped catch-up read.
+      if (matches({ ...hint, status: "open" }, policy)) {
+        const context = await client.replyContext(hint.id, { view: "compact", signal });
+        const exact = pointer(context, hint, policy, state.after);
+        if (!exact || exact.openingSequence !== change.sequence) break;
+        remember(exact.openingSequence, exact);
+        return { status: "handoff", replay: false, after: state.after, source: "stream_pointer",
+          streamObservedAt: hint.observedAt, pointerSavedAt: new Date().toISOString(), ...exact };
+      }
+      remember(change.sequence);
     }
   }
 }
@@ -116,35 +127,47 @@ function loadCheckpoint(file, policy) {
     save: state => atomicPrivateJson(file, { version: 1, binding, ...state }) };
 }
 
-async function main([configFile, connectionDirectory, mode, ...extra]) {
-  if (extra.length || mode !== undefined && mode !== "--once" || !isAbsolute(configFile ?? "")
-    || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once]");
-  const directory = dirname(realpathSync(configFile));
-  const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
-  assertPrivatePath(directory, true);
-  const policy = museHandoffPolicy(readPrivateJson(configFile, 8192), connection);
-  const owner = new WatchJournal(join(directory, "watch"));
-  const stop = new AbortController(), window = AbortSignal.timeout(policy.windowSeconds * 1000);
-  const signal = AbortSignal.any([stop.signal, window]);
-  const interrupt = () => stop.abort();
-  process.once("SIGINT", interrupt); process.once("SIGTERM", interrupt);
-  try {
-    const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
+export async function runMuseHandoff({ mode, windowMs, stop, run, makeWindow = AbortSignal.timeout }) {
+  const startedAt = new Date().toISOString();
+  let quietWindows = 0, lastQuietAt = null;
+  for (;;) {
+    const window = makeWindow(windowMs), signal = AbortSignal.any([stop, window]);
     for (;;) {
       try {
-        const result = await holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), signal, wait: mode !== "--once" });
-        console.log(JSON.stringify(result));
-        return;
+        const result = await run(signal);
+        return { ...result, startedAt, quietWindows, lastQuietAt };
       } catch (error) {
-        if (signal.aborted) {
-          console.log(JSON.stringify({ status: window.aborted ? "quiet_expired" : "stopped" }));
-          return;
+        if (stop.aborted) return { status: "stopped", startedAt, quietWindows, lastQuietAt };
+        if (window.aborted) {
+          quietWindows++;
+          lastQuietAt = new Date().toISOString();
+          if (mode !== "--stay-armed") return { status: "quiet_expired", startedAt, quietWindows, lastQuietAt };
+          break; // Keep the same process and lock. No host completion wakes a model here.
         }
         if (!(error instanceof TypeError) && error.name !== "TimeoutError" && ![429, 500, 502, 503, 504].includes(error.status)) throw error;
         await pause(1000, undefined, { signal }).catch(() => {});
       }
     }
+  }
+}
+
+async function main([configFile, connectionDirectory, mode, ...extra]) {
+  if (extra.length || mode !== undefined && !["--once", "--stay-armed"].includes(mode) || !isAbsolute(configFile ?? "")
+    || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed]");
+  const directory = dirname(realpathSync(configFile));
+  const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
+  assertPrivatePath(directory, true);
+  const policy = museHandoffPolicy(readPrivateJson(configFile, 8192), connection);
+  const owner = new WatchJournal(join(directory, "watch"));
+  const stop = new AbortController();
+  const interrupt = () => stop.abort();
+  process.once("SIGINT", interrupt); process.once("SIGTERM", interrupt);
+  try {
+    const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
+    const result = await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
+      run: signal => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), signal, wait: mode !== "--once" }) });
+    console.log(JSON.stringify(result));
   } finally { process.removeListener("SIGINT", interrupt); process.removeListener("SIGTERM", interrupt); owner.close(); }
 }
 

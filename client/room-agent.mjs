@@ -547,12 +547,13 @@ export class RoomAgentClient {
   }
   // A wake-up hint only. Consumers re-read their authorized queue before acting;
   // no streamed message body is used as executable input or saved as history.
-  async waitForChange(after, { signal, timeoutMs = 10000 } = {}) {
+  async waitForChange(after, { signal, timeoutMs = 10000, requestHints = false } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000)
       throw new Error("Choose a valid stream cursor and timeout");
     const deadline = AbortSignal.timeout(timeoutMs), controller = new AbortController();
     const stop = AbortSignal.any([controller.signal, deadline, ...(signal ? [signal] : [])]);
-    let reader;
+    let reader, through = after;
+    const idle = () => requestHints ? { changed: false, through } : { changed: false };
     try {
       await this.checkConnection({ signal: stop });
       const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/stream?after=${after}`,
@@ -563,7 +564,7 @@ export class RoomAgentClient {
       reader = response.body.getReader();
       const decoder = new TextDecoder(); let buffer = "";
       while (true) {
-        const chunk = await reader.read(); if (chunk.done) return { changed: false };
+        const chunk = await reader.read(); if (chunk.done) return idle();
         buffer += decoder.decode(chunk.value, { stream: true });
         if (buffer.length > 262144) throw new RoomClientError(200, "invalid_response", "Room stream frame exceeds its limit");
         let boundary;
@@ -574,13 +575,27 @@ export class RoomAgentClient {
           if (kind === "stream_lagging") return { changed: true };
           if (kind !== "room-event") continue;
           const id = /^id: ?([0-9]+)\r?$/m.exec(frame)?.[1], sequence = Number(id);
-          if (!id || !Number.isSafeInteger(sequence) || sequence <= after)
+          if (!id || !Number.isSafeInteger(sequence) || sequence <= through)
             throw new RoomClientError(200, "invalid_response", "Room returned an invalid stream cursor");
-          return { changed: true, sequence };
+          if (!requestHints) return { changed: true, sequence };
+          const data = /^data: ?(.+)\r?$/m.exec(frame)?.[1];
+          let row;
+          try { row = JSON.parse(data); } catch { return { changed: true }; }
+          const event = row?.event, message = event?.data;
+          if (row?.sequence !== sequence || event?.roomId !== this.#roomId || !validId(event.id)
+            || !validId(event.actorId) || typeof event.type !== "string") return { changed: true };
+          through = sequence;
+          if (event.type !== "message.posted" || message?.requestKind !== "reply") continue;
+          if (!validId(message.toMemberId) || !validId(message.messageId)
+            || message.workItemId != null && !validId(message.workItemId)) return { changed: true };
+          if (message.toMemberId !== this.#memberId || event.actorId === this.#memberId) continue;
+          return { changed: true, sequence, requestHint: { id: message.messageId, openingEventId: event.id,
+            requesterId: event.actorId, recipientId: message.toMemberId, workItemId: message.workItemId ?? null,
+            observedAt: new Date().toISOString() } };
         }
       }
     } catch (error) {
-      if (deadline.aborted && !signal?.aborted) return { changed: false };
+      if (deadline.aborted && !signal?.aborted) return idle();
       throw error;
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }

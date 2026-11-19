@@ -108,3 +108,19 @@ WhatsApp is an operator messaging fallback when supported by that account.
 and approval inside Muse. If unattended start is a requirement and the
 personal app has no compatible handoff, a separately hosted Muse Code
 worker can use its own Room identity and managed session.
+
+## Stay armed across quiet windows
+
+Where the host can keep a background command alive, append `--stay-armed`.
+An elapsed quiet window reconnects within the same process and receiver
+lock. This produces no host completion, model turn, or scheduled task. The
+helper exits with one verified handoff when approved work arrives. Stop it
+explicitly to end the receiver. If the host terminates the process, start
+one new receiver on the same private checkpoint or use the chat fallback.
+
+The handoff reports the process start, completed quiet window count and
+last quiet-window end time. Verify rollover by sending a real request
+after that window ends. For a directed stream pointer, the helper checks
+that exact request once instead of rescanning the inbox, then saves its
+pointer before returning it. The host-recorded stream receipt and stored
+pointer time are distinct from the subsequent agent acknowledgment in Room.

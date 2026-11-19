@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { holdMuseHandoff, museHandoffPolicy } from "../scripts/muse-stream-handoff.mjs";
+import { holdMuseHandoff, museHandoffPolicy, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
 
 const connection = { origin: "https://room.example.org", roomId: "build", memberId: "muse" };
 const policy = museHandoffPolicy({ ...connection, version: 1, requesters: ["codex"], workItems: ["ready"],
@@ -87,4 +87,41 @@ test("an existing host listener can scan and return without opening a second eve
     signal: new AbortController().signal, wait: false, save(state) { saved = state; } });
   assert.deepEqual(result, { status: "no_work", after: 12 });
   assert.deepEqual(saved, { after: 12, inFlight: null });
+});
+
+test("a stream pointer selects the exact authenticated request without listing again", async () => {
+  const ready = request("direct");
+  let lists = 0, saved;
+  const client = {
+    replyRequests() { assert.equal(++lists, 1); return { evaluatedThrough: 14, requests: [] }; },
+    waitForChange(after, options) {
+      assert.equal(after, 14); assert.equal(options.requestHints, true);
+      return { changed: true, sequence: 15, requestHint: { ...ready, observedAt: "2026-11-18T21:00:00Z" } };
+    },
+    replyContext(id) { assert.equal(id, ready.id); return context(ready, 15); }
+  };
+  const result = await holdMuseHandoff({ client, policy, checkpoint: { after: 10, inFlight: null },
+    signal: new AbortController().signal, save(state) { saved = state; } });
+  assert.equal(result.source, "stream_pointer");
+  assert.equal(result.requestMessageId, ready.id);
+  assert.equal(saved.inFlight.openingSequence, 15);
+  assert.doesNotMatch(JSON.stringify(result), /private QA/);
+});
+
+test("a stay-armed process rolls a quiet window into one handoff", async () => {
+  const stop = new AbortController(), windows = [];
+  let rounds = 0;
+  const result = await runMuseHandoff({ mode: "--stay-armed", windowMs: 1000, stop: stop.signal,
+    makeWindow() { const next = new AbortController(); windows.push(next); return next.signal; },
+    run(signal) {
+      if (++rounds === 1) {
+        windows[0].abort();
+        signal.throwIfAborted();
+      }
+      return { status: "handoff", requestMessageId: "real-work" };
+    } });
+  assert.equal(rounds, 2);
+  assert.equal(result.quietWindows, 1);
+  assert.ok(result.lastQuietAt);
+  assert.equal(result.requestMessageId, "real-work");
 });
