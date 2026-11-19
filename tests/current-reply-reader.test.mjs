@@ -301,3 +301,58 @@ test('the SDK asks for ask states and falls back once against a service that pre
  await old.replyRead('room_list_requests',{});
  assert.deepEqual(seen,[true,false,false],'asked once, fell back, then stopped asking');
 });
+
+
+function retainOutbox(store,{requestId='question',memberId='reader',roomId='commons',state='delivered',eventId='wake-evidence-1'}={}){
+ store.db.exec(`CREATE TABLE IF NOT EXISTS mcp_event_outbox (
+  subscription_id TEXT NOT NULL, event_id TEXT NOT NULL, document TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+  next_at INTEGER NOT NULL, lease TEXT, lease_until INTEGER,
+  PRIMARY KEY(subscription_id,event_id))`);
+ const document=JSON.stringify({eventId,name:'room.requested',timestamp:new Date().toISOString(),
+  data:{roomId,memberId,requestId,messageId:requestId},cursor:null});
+ store.db.prepare('INSERT INTO mcp_event_outbox(subscription_id,event_id,document,state,attempts,next_at) VALUES(?,?,?,?,0,?)')
+  .run('outbox-row',eventId,document,state,Date.now());
+}
+
+test('selected read reports a positively recorded webhook callback without leaking outbox internals',t=>{
+ const {store,keys}=fixture(t);
+ retainOutbox(store,{state:'delivered'});
+ const read=store.replyRequests.selected(keys.reader,'commons','question');
+ assert.deepEqual(read.current.wakeDelivery,{webhook:'delivered',hostEligibility:'unknown'});
+ assert.equal(Object.hasOwn(read.request,'wakeDelivery'),false);
+ const listed=store.replyRequests.list(keys.reader,'commons');
+ assert.equal(Object.hasOwn(listed.requests[0],'wakeDelivery'),false);
+ const packed=JSON.stringify(read);
+ assert.equal(/https?:|whsec_|subscription_id|outbox-row/i.test(packed),false);
+ validateReplyRead(read,{name:'room_read_request',args:{requestMessageId:'question'},roomId:'commons'});
+ const owner=store.replyRequests.selected(keys.owner,'commons','question');
+ assert.deepEqual(owner.current.wakeDelivery,{webhook:'delivered',hostEligibility:'unknown'});
+});
+
+test('selected read keeps webhook and host eligibility unknown without retained outbox evidence',t=>{
+ const {store,keys}=fixture(t);
+ const bare=store.replyRequests.selected(keys.reader,'commons','question');
+ assert.deepEqual(bare.current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
+ // Dead or cross-room/recipient/request rows are not positive evidence for this ask.
+ retainOutbox(store,{state:'dead',eventId:'dead-row'});
+ retainOutbox(store,{state:'delivered',eventId:'other-room',roomId:'other'});
+ retainOutbox(store,{state:'delivered',eventId:'other-member',memberId:'other'});
+ retainOutbox(store,{state:'delivered',eventId:'other-request',requestId:'someone-else'});
+ const read=store.replyRequests.selected(keys.reader,'commons','question');
+ assert.deepEqual(read.current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
+ assert.equal(Object.hasOwn(read.request,'acknowledgedAt'),false,'agent ack stays off the readout and is not invented');
+ validateReplyRead(read,{name:'room_read_request',args:{requestMessageId:'question'},roomId:'commons'});
+});
+
+test('non-participants are refused a selected read and never receive a wake readout',t=>{
+ const {store,keys}=fixture(t);
+ retainOutbox(store,{state:'delivered'});
+ let thrown;
+ try { store.replyRequests.selected(keys.other,'commons','question'); }
+ catch(error){ thrown=error; }
+ assert.ok(thrown);assert.equal(thrown.status,404);assert.equal(thrown.code,'reply_request_not_found');
+ assert.equal(Object.hasOwn(thrown,'current'),false);
+ assert.equal(Object.hasOwn(thrown,'wakeDelivery'),false);
+ assert.equal(JSON.stringify(thrown).includes('delivered'),false);
+});

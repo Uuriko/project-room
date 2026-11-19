@@ -31,6 +31,36 @@ function decodeBound(crypto,token,binding){
  if(!saved||!selectionKeys.every(key=>saved[key]===binding[key]))fail('reply_cursor_identity_changed','Continuation belongs to another viewer or selection');
  return saved;
 }
+
+const UNKNOWN_WAKE_DELIVERY = Object.freeze({ webhook: "unknown", hostEligibility: "unknown" });
+
+// Selected-request wakeup readout from retained mcp_event_outbox rows only.
+// queued / delivered (webhook 2xx) require positive evidence for this exact
+// room, request, and recipient. Missing table, swept, dead, or unrelated rows
+// stay unknown. Host-side filters are not Room evidence. Does not read pull
+// wakes (agent_work_wakes) or acknowledgedAt. Never returns URLs, secrets, or
+// subscription ids.
+export function selectedRequestWakeDelivery(store, { roomId, request, viewerId }) {
+  if (!request || !validId(roomId) || !validId(request.id) || !validId(request.recipientId)
+    || !viewerId || (viewerId !== request.requesterId && viewerId !== request.recipientId)) {
+    return undefined;
+  }
+  const db = store.db;
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_event_outbox'").get()) {
+    return UNKNOWN_WAKE_DELIVERY;
+  }
+  const rows = db.prepare(`SELECT state FROM mcp_event_outbox
+    WHERE json_extract(document,'$.data.roomId')=?
+      AND json_extract(document,'$.data.memberId')=?
+      AND (json_extract(document,'$.data.requestId')=? OR json_extract(document,'$.data.messageId')=?)`).all(
+    roomId, request.recipientId, request.id, request.id);
+  const states = new Set(rows.map(row => row.state));
+  const webhook = states.has("delivered") ? "delivered"
+    : states.has("pending") || states.has("leased") ? "queued"
+    : "unknown";
+  return { webhook, hostEligibility: "unknown" };
+}
+
 export function readCurrentReplies(store,token,roomId,mode,args,shape){
  if(!isCurrentRoom(store.db,roomId))return undefined;
  return store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
@@ -254,7 +284,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   const instructions=charterContext(room),work=request.workItemId?readCurrentWorkItem(db,roomId,request.workItemId):null;
   return stampReplyRead({...base,evaluatedThrough,selection:{direction:null,requestMessageId},request:structuredClone(request),roomCreatedEventId:created.id,sourceWindow:{complete:!hasMore,consistency:'frozen-conversation-current-preparation'},page:{cursor:args.cursor??null,checkpoint:null,items,rowBytes,limit,hasMore,nextCursor,completedCheckpoint:null,nextRead},nextRead,
    ...shape.responseTemplates(roomId,auth.member.id,request,answerBasis),
-   current:{evaluatedThrough,requesterAvailable:requester?.active===true,recipientAvailable:recipient?.active===true,contextEventId:contextEvent.id,contextSequence:context.row.seq,answerBasis,actions:{reply:canReply,answer:Boolean(answerBasis),decline:Boolean(answerBasis),cancel:request.status==='open'&&(auth.member.id===request.requesterId||auth.member.kind==='human'&&auth.member.id===room.ownerId)},blockedBy:denied?[denied]:[],workItemId:request.workItemId,instructionsRevision:room.charter?.revision??0},
+   current:{evaluatedThrough,requesterAvailable:requester?.active===true,recipientAvailable:recipient?.active===true,contextEventId:contextEvent.id,contextSequence:context.row.seq,answerBasis,actions:{reply:canReply,answer:Boolean(answerBasis),decline:Boolean(answerBasis),cancel:request.status==='open'&&(auth.member.id===request.requesterId||auth.member.kind==='human'&&auth.member.id===room.ownerId)},blockedBy:denied?[denied]:[],workItemId:request.workItemId,instructionsRevision:room.charter?.revision??0,wakeDelivery:selectedRequestWakeDelivery(store,{roomId,request,viewerId:auth.member.id})},
    preparation:{version:1,evaluatedThrough,room:{id:room.id,title:room.title,purpose:instructions.charter?.purpose??room.purpose??''},instructions,previousExchanges,work:work?currentWorkRecord(work):null,omitted:['other_work','other_messages','private_inbox','external_resources'],externalExecution:false}},auth.member.id);
  },{maxRecords:512}));
 }
