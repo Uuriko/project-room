@@ -56,6 +56,15 @@ pin its exact request under `requests`. One receiver runs per private
 directory. Keep the same policy and checkpoint across re-arms and upgrades.
 Use a new private directory if the seat, scope or starting cursor changes.
 
+A standalone formal request has no work item. To accept these from the
+configured requesters, add `"allowStandaloneRequests": true`. It still
+requires an addressed formal request in the bound Room from a listed
+requester. Requests attached to a work item still need an approved work item
+or an explicit request ID. Omission and `false` preserve the existing scope
+and checkpoint. To enable the new scope, use a fresh private directory and
+choose the starting cursor deliberately. Use a cursor before a known open
+request if you want to pick it up after a missed wake.
+
 ## One-paste instruction for Muse
 
 Paste into the same Muse conversation after configuring the helper. Replace

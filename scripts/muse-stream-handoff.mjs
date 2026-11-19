@@ -15,10 +15,13 @@ const ids = value => Array.isArray(value) && value.length <= 20 && new Set(value
 const fields = ["version", "origin", "roomId", "memberId", "requesters", "workItems", "requests", "bootstrapAfter", "windowSeconds"];
 
 export function museHandoffPolicy(policy, connection) {
-  if (!policy || Object.keys(policy).length !== fields.length || !fields.every(field => Object.hasOwn(policy, field))
+  if (!policy || !Object.keys(policy).every(field => fields.includes(field) || field === "allowStandaloneRequests")
+    || !fields.every(field => Object.hasOwn(policy, field))
+    || Object.hasOwn(policy, "allowStandaloneRequests") && typeof policy.allowStandaloneRequests !== "boolean"
     || policy.version !== 1 || ["origin", "roomId", "memberId"].some(field => policy[field] !== connection[field])
     || !ids(policy.requesters) || !policy.requesters.length || policy.requesters.includes(policy.memberId)
-    || !ids(policy.workItems) || !ids(policy.requests) || !policy.workItems.length && !policy.requests.length
+    || !ids(policy.workItems) || !ids(policy.requests)
+    || !policy.workItems.length && !policy.requests.length && !policy.allowStandaloneRequests
     || !integer(policy.bootstrapAfter) || !integer(policy.windowSeconds) || policy.windowSeconds < 1 || policy.windowSeconds > 600)
     throw Error("invalid_muse_handoff_policy");
   return policy;
@@ -26,7 +29,18 @@ export function museHandoffPolicy(policy, connection) {
 
 function matches(request, policy) {
   return request?.status === "open" && request.recipientId === policy.memberId && policy.requesters.includes(request.requesterId)
-    && (policy.requests.includes(request.id) || policy.workItems.includes(request.workItemId));
+    && (policy.requests.includes(request.id) || policy.workItems.includes(request.workItemId)
+      || policy.allowStandaloneRequests === true && request.workItemId === null);
+}
+
+export function museSeenAction(handoff, roomId) {
+  return { tool: "room_progress_request", arguments: {
+    roomId,
+    requestId: `muse-seen-${handoff.openingEventId}`,
+    requestMessageId: handoff.requestMessageId,
+    expectedRequestRevision: handoff.requestRevision,
+    progress: "acknowledged"
+  } };
 }
 
 function pointer(context, candidate, policy, after) {
@@ -117,6 +131,9 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
 
 function loadCheckpoint(file, policy) {
   const binding = [policy.origin, policy.roomId, policy.memberId, policy.requesters, policy.workItems, policy.requests, policy.bootstrapAfter];
+  // Existing configurations retain their saved cursor. Enabling a new
+  // class of requests requires an explicit starting cursor in a new scope.
+  if (policy.allowStandaloneRequests === true) binding.push("standalone");
   let value;
   try { lstatSync(file); value = readPrivateJson(file, 8192); }
   catch (error) {
@@ -238,15 +255,7 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
       if (result.status === "handoff") result.offeredAt = new Date().toISOString();
       atomicPrivateJson(statusFile, { pid: process.pid, ...result });
     }
-    if (result.status === "handoff") {
-      result.seenAction = { tool: "room_progress_request", arguments: {
-        roomId: policy.roomId,
-        requestId: `muse-seen-${result.openingEventId}`,
-        requestMessageId: result.requestMessageId,
-        expectedRequestRevision: result.requestRevision,
-        progress: "acknowledged"
-      } };
-    }
+    if (result.status === "handoff") result.seenAction = museSeenAction(result, policy.roomId);
     console.log(JSON.stringify(result));
   } catch (error) {
     if (!stop.signal.aborted) throw error;
