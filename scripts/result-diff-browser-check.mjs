@@ -210,8 +210,11 @@ test("the verdict links exact candidate release checks without claiming missing 
   f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: "revision-journey",
     expectedRevision: f.item().revision, completionEventId: completed.event.id, evidenceVersion: receipt.evidenceVersion,
     result: "pass", summary: "Archive scope only" });
+  const evidenceDigest = "sha256:" + "1".repeat(64), evidenceMessageId = "release-checks-build-receipt";
+  f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId, messageId: evidenceMessageId,
+    body: `room-release-receipt/1 build ${completed.event.id} ${candidateRevision} ${evidenceDigest}\nSigned archive manifest verified` });
   const report = { completionEventId: completed.event.id, evidenceVersion: receipt.evidenceVersion, candidateRevision,
-    checks: { build: { candidateRevision, status: "passed", summary: "Signed archive verified", evidenceDigest: "sha256:" + "1".repeat(64) } } };
+    checks: { build: { candidateRevision, status: "passed", summary: "Signed archive verified", evidenceDigest, evidenceMessageId } } };
   const note = f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
     messageId: "release-checks-evidence", body: "room-release-checks/1\n" + JSON.stringify(report) });
   const page = await f.login("owner");
@@ -227,7 +230,9 @@ test("the verdict links exact candidate release checks without claiming missing 
   assert.equal(await page.locator("#result-release-title").evaluate(node => document.activeElement === node), true);
   const source = page.getByRole("link", { name: "Open recorded evidence" });
   assert.equal(await source.getAttribute("href"), "#pr-record/message/" + note.event.data.messageId);
-  await source.click();
+  const receiptLink = page.getByRole("link", { name: "Open Build receipt" });
+  await receiptLink.click();
   await page.locator("#result-dialog").waitFor({ state: "hidden" });
-  assert.match(page.url(), /#pr-record\/message\/release-checks-evidence$/);
+  assert.match(page.url(), /#pr-record\/message\/release-checks-build-receipt$/);
+  await page.getByText(/Signed archive manifest verified/).first().waitFor();
 });

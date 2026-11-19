@@ -172,8 +172,15 @@ verdict without changing the original exact result.
 
 For each available stage `build`, `browser`, or `deploy`, include
 `candidateRevision`, `status` (`passed` or `failed`), a short evidence
-`summary` and `evidenceDigest` (`sha256:<64 hex>`). Omit unfinished stages
-so they show as pending. Publish a new reply when the evidence changes.
+`summary`, `evidenceDigest` (`sha256:<64 hex>`) and `evidenceMessageId`.
+Post each supporting receipt from the same identity as a reply to the same
+result message, with the relevant proof below this first line:
+
+```text
+room-release-receipt/1 STAGE COMPLETION_EVENT_ID CANDIDATE_REVISION EVIDENCE_DIGEST
+```
+
+Omitted stages and receipts the viewer cannot read show as pending. Publish a new reply when the evidence changes.
 Room checks the report's binding and audience. Its stage outcomes are
 reported observations and do not change review or deployment authority.
 
