@@ -35,7 +35,7 @@ const statefulRequest = request => withRequestState({ ...compactRequest(request)
   ...(request.progressState ? { progress: { state: request.progressState, note: request.progressNote ?? null, at: request.lastActivityAt ?? null } } : {}) }, request);
 // Keep metadata alongside the list so older clients can still validate their
 // exact per-request schema. Only recommend an existing, participant-bound read.
-function withOverdueActions(result) {
+function withOverdueActions(result, roomId) {
   const overdueActions = result.requests.filter(request => request.lifecycle?.state === "stale")
     .map(request => {
       const incoming = request.recipientId === result.viewerId;
@@ -46,7 +46,7 @@ function withOverdueActions(result) {
           : request.lifecycle.unresponsive
             ? "Read the request. Check whether delivery reached the recipient. If work must move, cancel this ask with a reason before reassigning it."
             : "Read the request. Confirm whether the recipient is still working. Clarify the blocker or cancel with a reason before reassigning.",
-        nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id, view: "compact" } }
+        nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: request.id, view: "compact" } }
       };
     });
   return overdueActions.length ? { ...result, overdueActions } : result;
@@ -121,7 +121,7 @@ export class ReplyRequests {
     options=selection;
     const {direction="incoming",status="open",expectedSessionBinding=null}=options;
     const shapeRequest=states?statefulRequest:compactRequest;
-    if(isCurrentRoom(this.store.db,roomId))return withOverdueActions(readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates}));
+    if(isCurrentRoom(this.store.db,roomId))return withOverdueActions(readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates}), roomId);
     if(options.cursor!==undefined||options.limit!==undefined)fail("invalid_reply_selection","Legacy request lists do not accept pagination; omit cursor and limit");
     if (!["incoming", "outgoing", "both"].includes(direction) || !["open", "answered", "declined", "cancelled", "all"].includes(status))
       fail("invalid_reply_selection", "Choose a request direction and current status");
@@ -140,7 +140,7 @@ export class ReplyRequests {
       // visible, so their horizon still reaches it.
       const evaluatedThrough = visibleSequenceHorizon(this.store.db, roomId, auth.member.id, room.sequence,
         auth.member.id === this.store.roomOwnerId(roomId));
-      return withOverdueActions({ viewerId: auth.member.id, evaluatedThrough, selection: { direction, status }, requests, nextReads });
+      return withOverdueActions({ viewerId: auth.member.id, evaluatedThrough, selection: { direction, status }, requests, nextReads }, roomId);
     }, { requestsOnly: true });
   }
   selected(token, roomId, requestMessageId, options = {}) {
