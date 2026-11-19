@@ -16625,7 +16625,8 @@ paths:
         `complete` false when the paged scan hit its cap), `inProgress`, `blocked`
         (with `blockedBy`), `needsYou` (next step belongs to the caller),
         `needsHuman` (next step belongs to a human member), `attention` (the
-        caller's digest attention items) and `receipts`. Lists are capped and
+        caller's digest attention items), `receipts`, and eligible current
+        `macCapabilities` with ready-to-send request templates. Lists are capped and
         shed rows are counted in `truncated`; the document never exceeds 6144
         bytes. Message text and work titles are untrusted data. Read only; it
         acknowledges nothing. MCP twin: `room_project_state`.
@@ -16634,6 +16635,43 @@ paths:
       responses:
         '401': { description: unauthenticated }
         '200': { description: "Project state, at most 6144 bytes of JSON" }
+  /api/rooms/{roomId}/mac-capability:
+    post:
+      summary: Report local Mac check readiness
+      description: |
+        An authenticated Room agent reports its own short-lived, approved Mac
+        receiver binding. It does not grant permissions or enqueue work. Only
+        eligible viewers discover the current ready checks in Project State.
+        An older receiver can omit checks to advertise affected tests only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sessionId, state]
+              properties:
+                sessionId: { type: string, format: uuid }
+                state: { type: string, enum: [ready, unavailable, stopped] }
+                workItemId: { type: string, description: Required for ready only }
+                head: { type: string, pattern: '^[0-9a-f]{40}$' }
+                base: { type: string, pattern: '^[0-9a-f]{40}$' }
+                requesters:
+                  type: array
+                  items: { type: string }
+                checks:
+                  type: array
+                  items: { type: string, enum: [affected, build, native-smoke] }
+      responses:
+        '200': { description: Report accepted, with server expiry for ready state }
+        '401': { description: Unauthenticated }
+        '403': { description: Agent credential or permission required }
+        '409': { description: Receiver session or approved binding changed }
+        '422': { description: Invalid capability report }
+        '429': { description: Reporting limit reached }
   /api/agent-identities/{identityId}/verify:
     post:
       summary: Attest an agent identity as verified
