@@ -40,9 +40,7 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
       }
       const rpc = await boundedJson(response);
       const value = rpc.result?.structuredContent;
-      const matches = name === "room_activation_pack"
-        ? value?.view === "brief" && value.room?.slug === config.roomId && value.you?.memberId === config.memberId
-        : value?.contractVersion === 1 && value.roomId === config.roomId && value.viewerId === config.memberId;
+      const matches = value?.contractVersion === 1 && value.roomId === config.roomId && value.viewerId === config.memberId;
       if (rpc.id !== "room-next" || rpc.error || rpc.result?.isError || !matches)
         throw new Error("Room did not return a matching next view. Check connection access and server support.");
       return value;
@@ -57,40 +55,6 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
       err("Room returned an invalid next view.");
       return 1;
     }
-    const workFallback = value.work?.nextRead;
-    if (!selection.cursor && value.work?.coverage === "unavailable"
-        && value.work.reason === "legacy_projection_budget"
-        && workFallback?.tool === "room_activation_pack" && workFallback.arguments?.roomId === config.roomId
-        && workFallback.arguments.view === "brief") {
-      try {
-        const pack = await call("room_activation_pack", { view: "brief" });
-        if (Array.isArray(pack.pickUp)) {
-          value.work.preview = pack.pickUp.filter(row => validId(row?.id)
-            && row.nextRead?.tool === "room_read_work" && row.nextRead.arguments?.workItemId === row.id)
-            .map(row => ({ id: row.id, title: row.title, state: row.state, untrusted: true,
-              command: ["room", "work", row.id] }));
-        }
-      } catch { /* Keep the unavailable status and next read if the preview fails. */ }
-    }
-    const fallback = value.requests?.nextRead;
-    if (!selection.cursor && value.requests?.coverage === "unavailable"
-        && value.requests.reason === "legacy_projection_budget"
-        && fallback?.tool === "room_list_requests" && fallback.arguments?.roomId === config.roomId
-        && fallback.arguments.direction === "incoming" && fallback.arguments.status === "open") {
-      try {
-        const list = await call("room_list_requests", { direction: "incoming", status: "open" });
-        if (list.selection?.direction === "incoming" && list.selection.status === "open"
-            && Number.isSafeInteger(list.evaluatedThrough) && list.evaluatedThrough >= 0
-            && !Object.hasOwn(list, "page") && Array.isArray(list.requests)
-            && list.requests.every(row => validId(row.id) && row.status === "open" && row.revision === 0
-              && row.recipientId === config.memberId)) {
-          value.requests = { coverage: "complete", evaluatedThrough: list.evaluatedThrough,
-            items: list.requests.map(row => ({ id: row.id, revision: row.revision,
-              nextRead: { tool: "room_read_request", arguments: { roomId: config.roomId, requestMessageId: row.id } } })),
-            nextRead: null };
-        }
-      } catch { /* Retain the server's unavailable status and recovery pointer. */ }
-    }
     for (const source of ["work", "requests"]) {
       const read = value[source]?.nextRead;
       const args = read?.arguments;
@@ -102,6 +66,11 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
     }
     for (const row of value.work?.items ?? []) {
       const args = row.nextRead?.arguments;
+      if (row.nextRead?.tool === "room_read_result" && args?.roomId === config.roomId
+          && args.workItemId === row.id && validId(args.workItemId) && validId(args.completionEventId)
+          && Object.keys(args).every(key => ["roomId", "workItemId", "completionEventId"].includes(key))) {
+        row.nextRead.command = ["room", "result", args.workItemId, "--completion", args.completionEventId];
+      }
       if (row.nextRead?.tool === "room_read_work" && validId(args?.workItemId)
           && (args.roomId === undefined || args.roomId === config.roomId)
           && args.brief === true && args.includeDiscussion !== true
@@ -113,7 +82,8 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
       const args = row.nextRead?.arguments;
       if (row.nextRead?.tool === "room_read_request" && validId(args?.requestMessageId)
           && (args.roomId === undefined || args.roomId === config.roomId)
-          && Object.keys(args).every(key => ["roomId", "requestMessageId"].includes(key))) {
+          && (args.view === undefined || args.view === "compact")
+          && Object.keys(args).every(key => ["roomId", "requestMessageId", "view"].includes(key))) {
         row.nextRead.command = ["room", "read", args.requestMessageId];
       }
     }
