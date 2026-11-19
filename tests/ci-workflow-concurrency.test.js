@@ -289,16 +289,23 @@ test("heavy pull-request jobs wait for ready-to-land", () => {
 
 test("Cloudflare CI runs canonical runtime then browser scripts and preserves failure", t => {
   const workflow = parse(readFileSync(join(WORKFLOWS, "test.yml"), "utf8"));
-  const step = workflow.jobs.cloudflare.steps.find(item => item.name === "Verify the shared Workers runtime and restart journey");
+  // #5961 shards the runtime suite: shard 1/2 in cloudflare, shard 2/2 in cloudflare-shard-2.
+  // The browser checks run after shard 2/2, which was the shorter shard.
+  const shard1 = workflow.jobs.cloudflare.steps.find(item => item.name === "Verify the shared Workers runtime (shard 1/2)");
+  assert.ok(shard1);
+  assert.equal(shard1["working-directory"], "cloudflare");
+  assert.equal(shard1["continue-on-error"], undefined);
+  assert.match(shard1.run, /--test-shard=1\/2/);
+  assert.doesNotMatch(shard1.run, /test:browser/);
+  const step = workflow.jobs["cloudflare-shard-2"].steps.find(item => item.name === "Verify the shared Workers runtime (shard 2/2) and restart journey");
   assert.ok(step);
   assert.equal(step["working-directory"], "cloudflare");
   assert.equal(step["continue-on-error"], undefined);
+  const evidence = workflow.jobs["cloudflare-shard-2"].steps.find(item => item.with?.name === "cloudflare-browser-evidence");
+  assert.ok(evidence && evidence.if.startsWith("always()"));
   const pkg = JSON.parse(readFileSync(new URL("../cloudflare/package.json", import.meta.url), "utf8"));
   assert.ok(pkg.scripts.test.startsWith("node --test "));
   assert.ok(pkg.scripts["test:browser"].startsWith("node --test "));
-  // #5961 shards the runtime suite: shard 1/2 here, shard 2/2 in cloudflare-shard-2.
-  const shard2 = workflow.jobs["cloudflare-shard-2"].steps.find(item => /shard 2\/2/.test(item.name ?? ""));
-  assert.ok(shard2 && /--test-shard=2\/2/.test(shard2.run) && shard2["working-directory"] === "cloudflare");
   const dir = mkdtempSync(join(tmpdir(), "cloudflare-ci-command-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const logger = `#!${process.execPath}
@@ -306,7 +313,7 @@ const args=process.argv.slice(2);
 if(args[0]==='-p'){console.log('a.check.mjs b.check.mjs');process.exit(0);}
 // getBuiltinModule works whether the stub loads as CommonJS or ESM (CI's TMPDIR sits under the type:module root).
 process.getBuiltinModule('node:fs').appendFileSync(process.env.CI_COMMAND_LOG,JSON.stringify([process.getBuiltinModule('node:path').basename(process.argv[1]),...args])+'\\n');
-if(process.env.FAIL_RUNTIME==='1'&&args.includes('--test-shard=1/2'))process.exitCode=17;
+if(process.env.FAIL_RUNTIME==='1'&&args.includes('--test-shard=2/2'))process.exitCode=17;
 `;
   writeFileSync(join(dir, "npm"), logger, { mode: 0o755 });
   writeFileSync(join(dir, "node"), logger, { mode: 0o755 });
@@ -317,7 +324,7 @@ if(process.env.FAIL_RUNTIME==='1'&&args.includes('--test-shard=1/2'))process.exi
       cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CI_COMMAND_LOG: log, FAIL_RUNTIME: fail ? "1" : "0" },
     });
     const calls = readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
-    const runtime = ["node", "--test", "--test-shard=1/2", "a.check.mjs", "b.check.mjs"];
+    const runtime = ["node", "--test", "--test-shard=2/2", "a.check.mjs", "b.check.mjs"];
     assert.deepEqual(calls, fail ? [runtime] : [runtime, ["npm", "run", "test:browser"]], result.stdout + result.stderr);
     assert.equal(result.status, fail ? 17 : 0, result.stdout + result.stderr);
   }
