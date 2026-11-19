@@ -72,6 +72,9 @@ async function runAffected(cwd, base) {
   } finally { clearTimeout(timeout); lines.close(); active = null; }
 }
 
+const networkCodes = ["ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ECONNREFUSED", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT"];
+const retryable = error => error.name === "TimeoutError" || networkCodes.includes(error.cause?.code ?? error.code);
+
 let stage = "read_input";
 async function main() {
   let bytes = "";
@@ -82,10 +85,14 @@ async function main() {
   const connection = readAgentConnection(input.connection);
   if (["origin", "roomId", "memberId"].some(key => connection[key] !== input[key])) throw Error("room_connection_changed");
   const client = new RoomAgentClient(connection);
-  stage = "check_room_access";
-  await client.checkConnection({ signal: AbortSignal.timeout(10000) });
   stage = "read_work_item";
-  const work = await client.workContext(input.workItemId, { signal: AbortSignal.timeout(10000) });
+  const readWork = () => client.workContext(input.workItemId, { signal: AbortSignal.timeout(13000) });
+  let work;
+  try { work = await readWork(); }
+  catch (error) {
+    if (!retryable(error)) throw error;
+    work = await readWork();
+  }
   stage = "inspect_worktree";
   const cwd = realpathSync((await git(input.worktree, ["rev-parse", "--show-toplevel"])).toString().trimEnd());
   const requestedBase = await revision(cwd, input.base), before = await source(cwd);
@@ -112,7 +119,7 @@ async function main() {
 main().catch(error => {
   const safe = ["invalid_input", "unsupported_worktree_entry", "room_connection_changed", "access_ended", "identity_mismatch", "config_not_found", "config_not_private"];
   const code = error.code ?? error.cause?.code ?? error.message;
-  const diagnostic = /^git_(rev-parse|diff|ls-files|merge-base)_(timeout|failed)$/.test(code) || [...safe, "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ECONNREFUSED", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "work_not_found", "invalid_response"].includes(code) ? code
+  const diagnostic = /^git_(rev-parse|diff|ls-files|merge-base)_(timeout|failed)$/.test(code) || [...safe, ...networkCodes, "work_not_found", "invalid_response"].includes(code) ? code
     : error.name === "TimeoutError" ? "timeout" : "unavailable";
   emit({ phase: "error", code: `${stage}: ${diagnostic}` });
   process.exitCode = 1;
