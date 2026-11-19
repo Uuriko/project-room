@@ -206,3 +206,53 @@ test("merge receipts: PR merges only, one clean line, parse back as merged, dete
   assert.equal(mergeReceiptId("o/r", sha), mergeReceiptId("o/r", sha));
   assert.notEqual(mergeReceiptId("o/r", sha), mergeReceiptId("o/r", "1" + sha.slice(1)));
 });
+
+test("Mac capability discovery is caller-scoped, bounded to a receiver session, and expires without a scheduler", async t => {
+  const f = createAcceptanceFixture();
+  let clock = Date.now();
+  f.store.now = () => clock;
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const workItemId = "capability-fixture";
+  f.store.command(f.keys.owner, "commons", { id: "capability-work", type: "work.proposed",
+    data: { workItemId, title: "Mac evidence", definitionOfDone: "Collect tests", accountableMemberId: "producer",
+      independentVerificationRequired: false, ownerDecisionRequired: false } });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const before = f.store.room("commons").sequence;
+  const body = { sessionId: "01234567-cafe-4123-8910-012345678901", state: "ready", workItemId,
+    head: "a".repeat(40), base: "b".repeat(40), requesters: ["reviewer"] };
+  const publish = (value, token = f.keys.producer) => fetch(`${origin}/api/rooms/commons/mac-capability`,
+    { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(value) });
+  const discover = token => readProjectState(f.store, token, "commons").macCapabilities;
+  assert.deepEqual(discover(f.keys.reviewer), []);
+  assert.equal((await publish(body, f.keys.owner)).status, 403);
+  assert.equal((await publish({ ...body, worktree: "/private/worktree" })).status, 422);
+  assert.equal((await publish(body)).status, 200);
+  assert.deepEqual(discover(f.keys.owner), []);
+  const [card] = discover(f.keys.reviewer);
+  assert.equal(card.head, body.head);
+  assert.equal(card.base, body.base);
+  assert.equal(Date.parse(card.expiresAt) - Date.parse(card.observedAt), 20_000);
+  assert.deepEqual(card.request, { tool: "room_request_reply",
+    arguments: { roomId: "commons", toMemberId: "producer", workItemId, body: `mac affected ${body.head}` } });
+  assert.equal("requesters" in card, false);
+  const replacement = { ...body, sessionId: "fedcba98-cafe-4123-8910-012345678901" };
+  assert.equal((await publish(replacement)).status, 409);
+  assert.equal((await publish({ ...body, head: "c".repeat(40) })).status, 409);
+  assert.equal((await publish({ sessionId: body.sessionId, state: "unavailable" })).status, 200);
+  assert.deepEqual(discover(f.keys.reviewer), []);
+  assert.equal((await publish(body)).status, 200);
+  clock += 20_000;
+  assert.deepEqual(discover(f.keys.reviewer), [], "no scheduler or stop required to expire a dead receiver");
+  assert.equal((await publish(replacement)).status, 200);
+  assert.equal((await publish({ sessionId: body.sessionId, state: "stopped" })).status, 409);
+  assert.equal((await publish({ sessionId: replacement.sessionId, state: "stopped" })).status, 200);
+  assert.deepEqual(discover(f.keys.reviewer), []);
+  assert.equal((await publish(replacement)).status, 409, "a late refresh cannot revive a stopped generation");
+  assert.equal(f.store.room("commons").sequence, before, "observations do not create work or Room events");
+});

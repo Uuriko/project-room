@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { closeSync, existsSync, readSync, realpathSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readAgentConnection } from "../client/agent-connection.mjs";
+import { RoomAgentClient } from "../client/room-agent.mjs";
 import { openRequestJournal, runRequestQueue } from "../client/request-runner.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
 import { assertPrivatePath, openPrivateRead, readPrivateJson } from "../room-acp/src/private-files.mjs";
@@ -75,6 +76,12 @@ async function main([path, connectionDirectory, ...extra]) {
   const stop = () => controller.abort();
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
+  const client = new RoomAgentClient(connection), sessionId = randomUUID();
+  const report = (state, fields = {}) => client.reportMacCapability({ sessionId, state, ...fields },
+    { signal: AbortSignal.timeout(2500) }).catch(() => null);
+  const checkout = { worktree: realpathSync(policy.worktree), base: policy.base, expectedHead: policy.head };
+  const capability = { workItemId: policy.workItemId, head: policy.head, base: policy.base, requesters: policy.requesters };
+  let nextReport = 0, reportedReady = false;
   let db;
   try {
     const journal = join(directory, "requests.sqlite");
@@ -84,15 +91,25 @@ async function main([path, connectionDirectory, ...extra]) {
     db = openRequestJournal(journal);
     let ready = false;
     await runRequestQueue({ connection, db, ...host, signal: controller.signal, intervalMs: 2000,
-      onPoll: () => {
+      async onPoll() {
         if (!ready) console.log(JSON.stringify({ status: "watching", workItemId: policy.workItemId, head: policy.head }));
         ready = true;
+        if (!approvalDigest || controller.signal.aborted || Date.now() < nextReport) return;
+        nextReport = Date.now() + 8000;
+        try { await inspectAffectedCheckout(checkout); }
+        catch {
+          if (reportedReady) await report("unavailable");
+          reportedReady = false;
+          return;
+        }
+        if (!controller.signal.aborted) reportedReady = (await report("ready", capability))?.state === "ready";
       },
       emit: event => console.log(JSON.stringify({ status: event.status, requestId: event.requestId,
         requestMessageId: event.receipt?.requestMessageId ?? event.requestMessageId,
         sequence: event.receipt?.sequence, hostExecuted: event.hostExecuted })),
     });
   } finally {
+    if (approvalDigest) await report("stopped");
     db?.close(); owner.close();
     process.removeListener("SIGTERM", stop);
     process.removeListener("SIGINT", stop);

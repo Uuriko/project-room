@@ -485,6 +485,9 @@ export class RoomAgentClient {
     }
     return value;
   }
+  async reportMacCapability(report, { signal } = {}) {
+    return await this.#request("/mac-capability", report, signal);
+  }
   async checkConnection({ signal } = {}) {
     if (!this.#memberId) throw new RoomClientError(0, "member_required", "Configure the expected agent member before checking access");
     // Round-2 #101: identity secrets are room-scoped at use, so /api/session
