@@ -206,6 +206,17 @@ test("release evidence binds the exact result, candidate and visible report with
   assert.equal((await read()).workThread.releaseChecks.checks[0].evidenceMessageId, evidence.event.data.messageId);
   record({ ...basis, completionEventId: "wrong-completion", checks: { build: passed } });
   assert.equal((await read()).workThread.releaseChecks.messageId, visible.event.data.messageId);
+  const deploy = f.post(`room-release-receipt/1 deploy ${completionEventId} ${candidateRevision} ${evidenceDigest}\nLive candidate confirmed`,
+    { replyToId: draft.event.data.messageId });
+  const deployed = record({ ...basis, checks: { build: passed, deploy: { ...passed, evidenceMessageId: deploy.event.data.messageId } } });
+  const late = record({ ...basis, checks: { build: { ...passed, summary: "Build replay after deploy" } } });
+  const assembled = (await read()).workThread.releaseChecks;
+  assert.equal(assembled.messageId, late.event.data.messageId);
+  assert.equal(assembled.checks[2].status, "passed");
+  assert.equal(assembled.checks[2].reportMessageId, deployed.event.data.messageId);
+  assert.equal(assembled.checks[2].evidenceMessageId, deploy.event.data.messageId);
+  record({ ...basis, checks: { deploy: { ...passed, evidenceMessageId: "missing" } } });
+  assert.equal((await read()).workThread.releaseChecks.checks[2].status, "pending");
   assert.equal(f.item().verification.eventId, verdict.event.id);
 });
 
