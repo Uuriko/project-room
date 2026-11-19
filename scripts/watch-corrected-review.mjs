@@ -1,7 +1,10 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
+import { WatchJournal } from "../client/watch-journal.mjs";
 import { validId } from "../src/events.js";
 
 export async function watchCorrectedReview(client, scope, { signal, onWaiting = () => {} } = {}) {
@@ -49,9 +52,15 @@ export async function watchCorrectedReview(client, scope, { signal, onWaiting = 
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const [directory, workItemId, priorCompletionEventId, cursor] = process.argv.slice(2);
+  let ownership;
   try {
     if (process.argv.length !== 6 || !/^\d+$/.test(cursor ?? "")) throw new Error("Usage: node scripts/watch-corrected-review.mjs <private connection directory> <work ID> <prior completion ID> <cursor>");
+    if (![workItemId, priorCompletionEventId].every(validId)) throw new Error("Choose a valid work and completion ID");
     const connection = readAgentConnection(directory);
+    const key = createHash("sha256").update(JSON.stringify([connection.origin, connection.roomId, connection.memberId, workItemId])).digest("hex");
+    // Use the existing watch lock so a second chat on this host cannot
+    // arm the same reviewer and work while the first watch is still parked.
+    ownership = new WatchJournal(join(directory, `corrected-review-${key}`));
     const result = await watchCorrectedReview(new RoomAgentClient(connection), {
       roomId: connection.roomId, memberId: connection.memberId, workItemId, priorCompletionEventId, after: Number(cursor)
     }, { signal: AbortSignal.timeout(15 * 60_000),
@@ -60,5 +69,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   } catch (error) {
     console.error(JSON.stringify({ status: "stopped", code: typeof error.code === "string" ? error.code : error.name }));
     process.exitCode = 1;
+  } finally {
+    ownership?.close();
   }
 }

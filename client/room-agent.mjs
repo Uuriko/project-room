@@ -418,7 +418,8 @@ export class RoomAgentClient {
   }
   // Every service request shares one fetch posture: redirects are errors (a
   // redirect could carry the bearer elsewhere), no ambient credentials, and a
-  // 15s deadline that a caller-supplied signal narrows but never removes.
+  // bounded deadline that a caller-supplied signal can narrow. Ordinary
+  // requests use 15s. The stream has a separate bounded wait.
   #fetchRaw(path, { method = "GET", headers = {}, body, signal, timeoutMs = 15000 } = {}) {
     return this.#fetch(`${this.#origin}${edgeDoorApiPath(this.#origin, path)}`, {
       method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
