@@ -73,7 +73,7 @@ function mentionCandidates(members, identityNames, includeInactive = false) {
         // "@QA-Friend-7", "@QA_Friend_7" or "@QAFriend7" all name "QA Friend 7".
         if (/\s/.test(name.trim())) {
           const words = name.trim().toLowerCase().split(/\s+/);
-          for (const joiner of ["-", "_", ""]) candidates.push({ memberId, lower: words.join(joiner), rank });
+          for (const joiner of ["-", "_", ""]) candidates.push({ memberId, lower: words.join(joiner), rank, alias: true });
         }
         for (const match of name.matchAll(/\s+/g)) {
           if (match.index > 0) candidates.push({ memberId, lower: name.slice(0, match.index).toLowerCase(), rank: 3 });
@@ -224,7 +224,7 @@ function parenthesizedMention(text, at, candidates) {
     else if (text[end] === ")" && --depth === 0) {
       const handle = text.slice(start, end).trim();
       const exact = handle && handle.length <= 128 && !handle.includes("@")
-        ? candidates.filter(candidate => candidate.rank < 3 && candidate.lower === handle.toLowerCase()) : [];
+        ? candidates.filter(candidate => !candidate.alias && candidate.rank < 3 && candidate.lower === handle.toLowerCase()) : [];
       const rank = exact.length ? Math.min(...exact.map(candidate => candidate.rank)) : null;
       return { handle: handle.length <= 128 ? handle : "", end: end + 1,
         ids: [...new Set(exact.filter(candidate => candidate.rank === rank).map(candidate => candidate.memberId))] };
