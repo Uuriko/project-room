@@ -48,3 +48,35 @@ test("a handle of only a retired member's name resolves to nobody and is flagged
 test("qualifier on the next line is prose, not a qualifier", () => {
   assert.deepEqual(resolve("@Member 2\n(Codex) review please"), ["ai_dot"]);
 });
+
+test("parenthesized mentions identify exactly one room label or member ID", () => {
+  for (const text of ["@(Build Worker) review", "@(ai_codex) review", "@(codex-comm-pilot) review"]) {
+    assert.deepEqual(resolve(text), ["ai_codex"], text);
+    assert.deepEqual(warn(text), [], text);
+  }
+  assert.deepEqual(resolve("@(Jill) review"), [], "a parenthesized first name is not a prefix lookup");
+  assert.equal(warn("@(Jill) review")[0].reason, "not_member");
+  assert.deepEqual(resolve("@(Grok Bot)"), []);
+  assert.deepEqual(resolve("sender@(Build Worker)"), []);
+  assert.deepEqual(resolve("@(unknown @Dot)"), []);
+  assert.deepEqual(resolve("@(broken\n@Dot"), ["ai_dot"]);
+  assert.deepEqual(resolve("@(Dot) and @Dot"), ["ai_dot"]);
+  assert.deepEqual(resolve("@Build-Worker"), ["ai_codex"], "bare tags retain generated aliases");
+  assert.deepEqual(resolve("@(Build-Worker)"), []);
+  assert.equal(warn("@(Build-Worker)")[0].reason, "not_member");
+  const withLiteral = { ...members, literal: { displayName: "Build-Worker", kind: "agent" } };
+  assert.deepEqual(resolveMentionTargetsInText(withLiteral, names, "@(Build-Worker)", "ai_grok"), ["literal"]);
+  assert.deepEqual(mentionTargetWarnings(withLiteral, names, "@(Build-Worker)", "ai_grok"), []);
+});
+
+test("nested parenthesized labels resolve and duplicate labels warn without waking either seat", () => {
+  const roster = { ...members,
+    muse: { displayName: "Jill (Muse)", kind: "agent" },
+    first: { displayName: "Claude Code", kind: "agent" },
+    second: { displayName: "Claude Code", kind: "agent" },
+  };
+  assert.deepEqual(resolveMentionTargetsInText(roster, names, "@(Jill (Muse))", "ai_grok"), ["muse"]);
+  assert.deepEqual(resolveMentionTargetsInText(roster, names, "@(Claude Code)", "ai_grok"), []);
+  assert.deepEqual(mentionTargetWarnings(roster, names, "@(Claude Code)", "ai_grok")[0].candidates.map(c => c.memberId),
+    ["first", "second"]);
+});

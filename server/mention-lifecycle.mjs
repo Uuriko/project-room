@@ -73,7 +73,7 @@ function mentionCandidates(members, identityNames, includeInactive = false) {
         // "@QA-Friend-7", "@QA_Friend_7" or "@QAFriend7" all name "QA Friend 7".
         if (/\s/.test(name.trim())) {
           const words = name.trim().toLowerCase().split(/\s+/);
-          for (const joiner of ["-", "_", ""]) candidates.push({ memberId, lower: words.join(joiner), rank });
+          for (const joiner of ["-", "_", ""]) candidates.push({ memberId, lower: words.join(joiner), rank, alias: true });
         }
         for (const match of name.matchAll(/\s+/g)) {
           if (match.index > 0) candidates.push({ memberId, lower: name.slice(0, match.index).toLowerCase(), rank: 3 });
@@ -213,6 +213,26 @@ export function identityNamesForRoom(db, roomId) {
 // mention of Grok (parity with tokenContinues in inbox-agent-routing.mjs).
 const handleContinues = (text, end) => end < text.length && /[\p{L}\p{N}\p{M}_-]/u.test(text[end]);
 
+// A parenthesized mention identifies one full room label or member ID.
+// Balance internal parentheses so e.g. @(Jill (Muse)) stays one token.
+function parenthesizedMention(text, at, candidates) {
+  if (text[at + 1] !== "(") return null;
+  const start = at + 2;
+  let depth = 1, end = start;
+  for (; end < text.length && text[end] !== "\n" && text[end] !== "\r"; end++) {
+    if (text[end] === "(") depth++;
+    else if (text[end] === ")" && --depth === 0) {
+      const handle = text.slice(start, end).trim();
+      const exact = handle && handle.length <= 128 && !handle.includes("@")
+        ? candidates.filter(candidate => !candidate.alias && candidate.rank < 3 && candidate.lower === handle.toLowerCase()) : [];
+      const rank = exact.length ? Math.min(...exact.map(candidate => candidate.rank)) : null;
+      return { handle: handle.length <= 128 ? handle : "", end: end + 1,
+        ids: [...new Set(exact.filter(candidate => candidate.rank === rank).map(candidate => candidate.memberId))] };
+    }
+  }
+  return { handle: "", end, ids: [] };
+}
+
 // "@Member 2 (codex-comm-pilot)" names one member and then qualifies it with a
 // parenthetical that names a DIFFERENT member (active or retired). Delivering
 // to the first label silently wakes the wrong agent (Dot got mail meant for
@@ -243,6 +263,13 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
   for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
     if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
     if (text[at + 1] === "_") continue;
+    const explicit = parenthesizedMention(text, at, candidates);
+    if (explicit) {
+      at = explicit.end - 1;
+      const [target] = explicit.ids;
+      if (explicit.ids.length === 1 && target !== senderMemberId && !found.includes(target)) found.push(target);
+      continue;
+    }
     const nameAt = at + 1;
     let matches = [], longest = 0;
     for (const candidate of candidates) {
@@ -286,6 +313,19 @@ export function mentionTargetWarnings(members, identityNames, text, senderMember
   for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
     if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
     if (text[at + 1] === "_") continue;
+    const explicit = parenthesizedMention(text, at, candidates);
+    if (explicit) {
+      at = explicit.end - 1;
+      if (!explicit.handle || explicit.ids.length === 1) continue;
+      const reason = explicit.ids.length ? "ambiguous" : "not_member";
+      const key = `${reason}:${explicit.handle.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      warnings.push(Object.freeze({ handle: explicit.handle, reason,
+        candidates: Object.freeze(explicit.ids.map(memberId =>
+          Object.freeze({ memberId, displayName: displayOf(memberId) }))) }));
+      continue;
+    }
     const nameAt = at + 1;
     let matches = [], longest = 0;
     for (const candidate of candidates) {

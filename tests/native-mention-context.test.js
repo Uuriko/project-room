@@ -69,6 +69,21 @@ test('zero subscriptions still permit a bounded ordinary mention without losing 
   assert.equal(outbox(f).length, 0); assert.equal(measured.value.duplicate, false);
 });
 
+test('a human or agent can wake the same native recipient with a parenthesized Room label', async t => {
+  const f = await nativeFixture(t);
+  const first = { messageId: 'human-explicit-wake', body: '@(ReceiverAgent) review this outcome.' };
+  const publish = () => f.store.command(f.owner, 'commons', { id: first.messageId, type: 'message.posted', data: first });
+  publish();
+  assert.equal(publish().duplicate, true);
+  f.post('agent-explicit-wake', { body: '@(ReceiverAgent) compare the exact result.' });
+  assert.equal(outbox(f).length, 2);
+  await f.runtime.drain();
+  await f.runtime.drain();
+  assert.equal(f.deliveries.length, 2);
+  for (const entry of f.deliveries) assert.equal(entry.body.data.memberId, f.principal.memberId);
+  assert.equal(outbox(f).length, 2);
+});
+
 test('edited, deleted and missing queued messages preserve the full callback fallback', async t => {
   for (const change of ['edited', 'deleted', 'missing']) {
     const f = await nativeFixture(t);
