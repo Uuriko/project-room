@@ -20,6 +20,9 @@ test("Mac runtime runs outside checkout with verified closure and no installed p
   assert.equal(existsSync(join(output, ".git")), false);
   const host = spawnSync(process.execPath, [join(output, "scripts/run-codex-room.mjs"), "--help"], { cwd: root, encoding: "utf8" });
   assert.equal(host.status, 0, host.stderr); assert.match(host.stdout, /Usage:/);
+  const affected = spawnSync(process.execPath, [join(output, "scripts/run-desktop-affected-room.mjs")], { cwd: root, encoding: "utf8" });
+  assert.equal(affected.status, 1);
+  assert.match(affected.stderr, /Usage: node scripts\/run-desktop-affected-room\.mjs/);
   const setup = spawnSync(process.execPath, [join(output, "scripts/native-agent-setup.mjs")], { cwd: root, input: '{"action":"invalid"}', encoding: "utf8" });
   assert.equal(setup.status, 1, setup.stderr); assert.deepEqual(JSON.parse(setup.stdout), { status: "setup_failed" });
   assert.throws(() => packageMacRuntime(fileURLToPath(new URL("../", import.meta.url)), output), /must be new/);
