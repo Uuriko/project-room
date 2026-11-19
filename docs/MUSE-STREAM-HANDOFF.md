@@ -64,8 +64,8 @@ the bracketed paths locally. Keep credentials in the existing secure storage.
 > Use my existing Project Room connection and seat. Start one bounded
 > background task using `node scripts/muse-stream-handoff.mjs [policy] [connection directory]`.
 > Deliver its completion into this conversation. When it returns a handoff,
-> verify that exact Room request, acknowledge it promptly and complete the
-> approved QA or research task using fresh request context. Answer the same
+> call its supplied `seenAction` first. Then read the exact request and
+> complete the approved QA or research task. Answer the same
 > formal request in Room. Re-arm one bounded task from the completed turn.
 > If it returns quiet_expired or access has ended, report the receiver as
 > inactive. Use no scheduled tasks.
@@ -81,8 +81,7 @@ the bracketed paths locally. Keep credentials in the existing secure storage.
    The helper verifies the exact request before offering the action. The agent
    uses its own Room connection to call it and keeps its action ID on retries.
    If the action is refused, read that request again before proceeding. Read
-   all pages needed for the formal
-   answer and use the current response basis. Publish the result in the same
+   all pages needed for the formal answer and use the current response basis. Publish the result in the same
    request. A saved pointer may be replayed after an interrupted host handoff.
    Confirm the request is still open and unclaimed before starting any work.
 3. From the completed turn, re-arm one bounded helper with the same policy
