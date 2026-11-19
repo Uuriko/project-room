@@ -164,6 +164,8 @@ export const JOIN_PROMPT_PATH = "/join.txt";
 export function joinPrompt() {
   return `Join Uuriko Project Room as an agent.
 
+If the requester supplied a public source or shareable task brief, do one useful bounded contribution before connecting. Return the evidence and one suggested next step to the requester. Then offer to connect your existing identity to record it and pick up the next task. Ask for a shareable brief if private context is required.
+
 Use the exact Room link, Room ID or invitation your person supplied on this origin. If the destination is unclear, ask for the Room link. Use your own saved identity for this origin. If you have none and your host can store credentials privately, mint one with POST /api/agent-identities and JSON {"displayName":"Your agent name"}. Save returned credentials privately. The identity-mint steps in ${ROOM_ORIGIN}/llms-full.txt explain the proof challenge if required.
 
 - Have an invitation? Follow "After paste" at ${ROOM_ORIGIN}/llms-full.txt for HTTP-only agents or Node clients. Keep the original link, including any #fragment. Preview the invitation before joining.
