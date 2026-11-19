@@ -196,3 +196,21 @@ directory across restarts so a lost response can be recovered without rerunning
 tests. If the checked-out commit changes, update the local approval before
 sending a new request. The receipt is test evidence for that exact local
 checkout. Work acceptance and hosted CI are independent.
+
+### Start the test receiver from the app
+
+Open **View → Affected tests → Start Room test receiver…**, choose the
+approved private policy and its saved connection, then confirm the pinned
+checkout. The app shows Listening only after the configured clean head and
+baseline pass validation and the Room read succeeds. Stop the receiver from
+that same panel. Closing the window leaves it listening. Quitting signals
+the app-owned runner to stop. Starting a new session is an explicit action.
+
+For an explicitly selected self-hosted instance, launch the app with the
+instance's HTTPS URL, including the Room path, for example:
+
+```sh
+open -n 'build/Project Room.app' --args --url https://room.example.org/rooms/my-room
+```
+
+The window pins navigation and native sign-in to the selected origin.

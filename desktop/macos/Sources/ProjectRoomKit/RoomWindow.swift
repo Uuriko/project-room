@@ -7,7 +7,7 @@ import Security
 public enum RoomLocation {
     public static func allowed(_ url: URL) -> Bool {
         guard url.user == nil, url.password == nil else { return false }
-        return (url.scheme == "https" && url.host == "room.trydemigod.com" && (url.port == nil || url.port == 443))
+        return (url.scheme == "https" && !(url.host ?? "").isEmpty)
             || (url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? ""))
     }
     public static func sameOrigin(_ url: URL, _ origin: URL) -> Bool {
