@@ -72,6 +72,8 @@ function workRows(items, auth, room, roomId, now, blockerFor) {
     return {
       id: row.id, title: row.title.slice(0, 160), revision: item.revision, reason: row.reason,
       ...(row.reason === "revise" ? correctionPreview(blockerFor(item)) : {}),
+      ...(row.reason === "verify" && item.receipt?.eventId ? { nextResultRead: { tool: "room_read_result",
+        arguments: { roomId, workItemId: item.id, completionEventId: item.receipt.eventId } } } : {}),
       nextRead: { tool: row.nextRead.tool, arguments: {
         roomId, brief: true, ...row.nextRead.arguments, ...(row.reason === "revise" ? { includeDiscussion: false } : {})
       } }

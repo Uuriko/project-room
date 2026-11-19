@@ -11,6 +11,8 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
+import { readWorkSelection } from "../client/work-preparation.mjs";
+import { readRoomNext } from "../server/room-next.mjs";
 import { spawn } from "node:child_process";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
@@ -84,6 +86,47 @@ test('selected result reads keep same-millisecond join floors for drafts and com
   assert.throws(() => f.store.workResult(late, 'commons', f.workItemId), { code: 'result_unavailable' });
   assert.throws(() => f.store.workResult(late, 'commons', f.workItemId, { draftMessageId: old.event.data.messageId }), { code: 'result_unavailable' });
   assert.equal(f.store.workResult(late, 'commons', f.workItemId, { draftMessageId: fresh.event.data.messageId }).result.text.body, 'Post-join draft');
+});
+
+test('one selected result read gives only the designated reviewer a current exact action', async t => {
+  const f = await setup(t);
+  const posted = f.post('PR qualification: the required unit job was skipped.');
+  f.mutate(T.WORK_STARTED);
+  const saved = f.mutate(T.WORK_COMPLETED, f.input(posted));
+  const reviewer = new RoomAgentClient({ ...f.config, memberId: 'reviewer', token: f.keys.reviewer });
+  const pickup = readRoomNext(f.store, f.keys.reviewer, 'commons').work.items.find(row => row.id === f.workItemId);
+  const { tool: readTool, arguments: { roomId: routeRoom, workItemId, completionEventId } } = pickup.nextResultRead;
+  assert.equal(readTool, 'room_read_result');
+  assert.equal(routeRoom, 'commons');
+  assert.equal(workItemId, f.workItemId);
+  assert.equal(completionEventId, saved.event.id);
+  const selected = await reviewer.workResult(workItemId, { completionEventId });
+  assert.equal(selected.result.text.body, posted.event.data.body);
+  assert.equal(selected.review.criteria, f.item().definitionOfDone);
+  const { tool, arguments: { roomId, ...basis }, inputRequired } = selected.review.action;
+  assert.equal(tool, 'room_record_verification');
+  assert.deepEqual(inputRequired, ['result', 'summary']);
+  assert.equal(roomId, 'commons');
+  assert.deepEqual(basis, { workItemId: f.workItemId, expectedRevision: f.item().revision,
+    completionEventId: saved.event.id, evidenceVersion: textVersion(posted.event.data.body) });
+  const reads = [];
+  const count = method => async (...args) => {
+    const payload = await reviewer[method](...args);
+    reads.push(Buffer.byteLength(JSON.stringify(payload)));
+    return payload;
+  };
+  const prepared = await readWorkSelection({ workContext: count('workContext'), workResult: count('workResult') },
+    { workItemId: f.workItemId, brief: true, includeResult: true }, { hosted: true });
+  assert.deepEqual(prepared.continuation.arguments, selected.review.action.arguments);
+  assert.equal(reads.length, 3);
+  t.diagnostic(JSON.stringify({ preparedReads: reads.length, preparedReadBytes: reads.reduce((sum, bytes) => sum + bytes, 0),
+    exactReads: 1, exactReadBytes: Buffer.byteLength(JSON.stringify(selected)) }));
+  assert.equal((await f.client.workResult(f.workItemId)).review, undefined);
+  assert.equal((await reviewer.workResult(f.workItemId, { draftMessageId: posted.event.data.messageId })).review, undefined);
+  const verdict = { ...basis, result: 'fail', summary: 'Unit qualification was skipped.' };
+  f.send(T.VERIFICATION_RECORDED, verdict, 'reviewer');
+  assert.equal((await reviewer.workResult(f.workItemId)).review, undefined);
+  assert.throws(() => f.send(T.VERIFICATION_RECORDED, verdict, 'reviewer'), /Stale Work Item revision/);
 });
 
 test("native text preserves exact stored UTF-8 and old post/proposal provenance across restart", async t => {
