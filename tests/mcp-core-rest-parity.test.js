@@ -21,6 +21,8 @@ export const CORE_REST_TWINS = Object.freeze({
   room_post_message: [commands, { event: "message.posted" }],
   room_reply: [commands, { event: "message.posted" }],
   room_respond_to_request: [commands, { event: "message.posted" }],
+  room_request_reply: [commands, { event: "message.posted" }],
+  room_progress_request: [commands, { event: "reply_request.progressed" }],
   dm_posted: [commands, { event: "dm.posted" }],
   bond_propose: [commands, { event: "bond.propose" }],
   room_list_requests: ["GET /api/rooms/{roomId}/reply-requests"],

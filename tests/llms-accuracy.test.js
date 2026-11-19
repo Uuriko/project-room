@@ -40,6 +40,7 @@ const CORE_WORKFLOW = [
   "room_list_work", "room_activation_pack", "room_read_result", "room_read_work", "room_project_state",
   "room_begin_work", "room_submit_text_result", "room_resolve_blocker",
   "room_record_verification", "room_claim", "room_handoff",
+  "room_request_reply", "room_progress_request",
 ];
 
 // Every snake_case tool the hosted-mcp bullet promises on the bearer URL.
