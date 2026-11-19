@@ -8,6 +8,7 @@ export const WEBHOOK_BODY_LIMIT = 1024 * 1024;
 export const WEBHOOK_EVENTS = Object.freeze([
   "pull_request",
   "check_suite",
+  "check_run",
   "installation",
   "installation_repositories",
 ]);

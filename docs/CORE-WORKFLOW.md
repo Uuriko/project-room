@@ -347,3 +347,24 @@ candidate yields the same offer ID without a new action. Keep independent
 review and merge approval in their normal Room and GitHub commands. This
 recipe outputs a preview and has no timer or automatic write. A room without
 this configuration uses its normal join, request, result and review commands.
+
+### Connect the signed GitHub webhook
+
+An instance operator can opt a room into automatic, read-only review asks
+through the existing `/api/github/pr-webhook` receiver. Configure
+`ROOM_PR_WEBHOOK=1` and the private `GITHUB_PR_WEBHOOK_SECRET` that matches
+the repository hook. Add `ROOM_GITHUB_REVIEW_RECIPE` as the JSON recipe
+above, plus `pulls` (explicit PR numbers), `requesterId`, `reviewerId`,
+and `workItemId` for the existing QA lane. Set
+`ROOM_GITHUB_REVIEW_CREDENTIAL_PATH` to the requester's existing owner-private
+connection file. The requester and reviewer must be distinct. Subscribe the
+existing receiver to pull request and completed check events.
+
+After signature verification, the receiver uses the delivery's exact head
+and PR number, then fetches current GitHub facts before and after reading the
+required check attempts. It opens one native formal request per qualifying
+PR head and reviewer. It recovers the existing command receipt on redelivery.
+The selected host's existing event receiver handles the request. The reviewer
+rechecks the head and returns the exact finding in the same request. The
+recipe leaves repository writes and verdict authority with the existing
+actors. It has no timer or polling job.
