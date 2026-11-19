@@ -376,3 +376,24 @@ test('selected readout finds the exact native wake key from the opening event th
  assert.match(plan,/USING (COVERING )?INDEX mcp_event_outbox_event/);
  assert.doesNotMatch(plan,/^SCAN mcp_event_outbox$/m);
 });
+
+test('an outbox without the exact-key index (native delivery off / pre-index schema) reports unknown and never scans',t=>{
+ const {store,keys}=fixture(t);
+ // Legacy table shape only: no mcp_event_outbox_event index.
+ store.db.exec(`CREATE TABLE IF NOT EXISTS mcp_event_outbox (
+  subscription_id TEXT NOT NULL, event_id TEXT NOT NULL, document TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+  next_at INTEGER NOT NULL, lease TEXT, lease_until INTEGER, PRIMARY KEY(subscription_id,event_id))`);
+ const key=nativeOutboxEventId('commons','reader','question');
+ store.db.prepare('INSERT INTO mcp_event_outbox(subscription_id,event_id,document,state,attempts,next_at) VALUES(?,?,?,?,0,?)')
+  .run('legacy-row',key,JSON.stringify({eventId:key,name:'room.requested',data:{roomId:'commons',memberId:'reader',requestId:'question',messageId:'question'}}),'delivered',Date.now());
+ let outboxQueries=0;const prepare=store.db.prepare.bind(store.db);
+ store.db.prepare=sql=>{if(/FROM mcp_event_outbox\b/.test(sql))outboxQueries++;return prepare(sql);};
+ try{
+  assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
+ }finally{store.db.prepare=prepare;}
+ assert.equal(outboxQueries,0,'no outbox row query runs without the index');
+ // Installing the real schema adds the index; the same row is then found by exact key.
+ store.db.exec(mcpEventSubscriptionsSchema);
+ assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'delivered',hostEligibility:'unknown'});
+});

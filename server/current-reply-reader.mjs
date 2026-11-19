@@ -47,7 +47,10 @@ export function selectedRequestWakeDelivery(store, { roomId, request, viewerId }
     return undefined;
   }
   const db = store.db;
-  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_event_outbox'").get()) {
+  // Native delivery never set up (no table) or an outbox created before the
+  // exact-key index: stay unknown rather than fall back to a document scan.
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_event_outbox'").get()
+    || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='mcp_event_outbox_event' AND tbl_name='mcp_event_outbox'").get()) {
     return UNKNOWN_WAKE_DELIVERY;
   }
   // Exact-key lookup through mcp_event_outbox_event (no document scan): the
