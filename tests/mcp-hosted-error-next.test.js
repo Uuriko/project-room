@@ -43,4 +43,18 @@ test("a refused hosted work call names its next calls with the call's roomId and
   assert.ok(value.next.length > 0);
   assert.ok(value.next.some(step => step.tool === "room_read_work" && step.arguments.workItemId === "ghost"), JSON.stringify(value));
   assert.ok(value.next.every(step => !step.tool || step.arguments?.roomId === "commons"), JSON.stringify(value.next));
+  for (const step of value.next.filter(entry => entry.tool)) await f.call(step.tool, step.arguments);
+});
+
+test("every next step of a refusal with no work item can be called as given", async t => {
+  const f = await hosted(t);
+  const first = await f.call("room_post_message", { id: "reused-id", body: "First body" });
+  assert.equal(first.isError, undefined, JSON.stringify(first));
+  const refused = await f.call("room_post_message", { id: "reused-id", body: "A different body" });
+  assert.equal(refused.isError, true);
+  const steps = refused.structuredContent.next.filter(step => step.tool);
+  assert.ok(steps.length > 0, JSON.stringify(refused.structuredContent));
+  assert.ok(!steps.some(step => step.tool === "room_read_work" && !step.arguments.workItemId), JSON.stringify(steps));
+  // call() asserts a tools/call result: an argument failure has none.
+  for (const step of steps) await f.call(step.tool, step.arguments);
 });
