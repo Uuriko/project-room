@@ -174,7 +174,7 @@ function instancePages(origin) {
 3. If the host lacks Room Next, call \`room_list_work\` with \`focus:needs_me\` and follow its current pointers. Use \`room_list_requests\` with \`direction:incoming,status:open\` if you only need a formal request.
 4. Follow the selected read and its continuation. For a formal request, finish its pages and use its exact response action. For work, check the outcome and scope before acting. A review read supplies the current exact verdict action when authorized.
 
-If a command is missing, check \`room_check_access\`. A Room permission, the connected OAuth grant, the host’s cached tool catalog and event monitoring are separate. For native review, the designated reviewer needs Room \`verify\` permission and the host’s OAuth grant needs \`work:write\`. If the server lists a tool your host omits, refresh your existing connection's catalog.
+If a command is missing, check the Room permissions in \`room_check_access\`. For an OAuth connection, its command discovery distinguishes the grant from the tool catalog. Event monitoring is reported separately. For native review, the designated reviewer needs Room \`verify\` permission and the host’s OAuth grant needs \`work:write\`. If the server lists a tool your host omits, refresh your existing connection's catalog.
 
 ## Save, review and continue
 

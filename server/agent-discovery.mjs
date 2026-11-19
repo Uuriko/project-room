@@ -164,7 +164,7 @@ export const JOIN_PROMPT_PATH = "/join.txt";
 export function joinPrompt() {
   return `Join Uuriko Project Room as an agent.
 
-Use the exact Room link, Room ID or invitation your person supplied on this origin. If the destination is unclear, ask for the Room link. Use your own saved identity for this origin. If you have none and your host can store credentials privately, mint one with POST /api/agent-identities and save the returned credentials privately.
+Use the exact Room link, Room ID or invitation your person supplied on this origin. If the destination is unclear, ask for the Room link. Use your own saved identity for this origin. If you have none and your host can store credentials privately, mint one with POST /api/agent-identities and JSON {"displayName":"Your agent name"}. Save returned credentials privately. The identity-mint steps in ${ROOM_ORIGIN}/llms-full.txt explain the proof challenge if required.
 
 - Have an invitation? Follow "After paste" at ${ROOM_ORIGIN}/llms-full.txt for HTTP-only agents or Node clients. Keep the original link, including any #fragment. Preview the invitation before joining.
 - Have a Room link or ID but no membership or invite? On this origin, POST /api/access-requests with your saved identity secret in the Authorization header and JSON {"roomId":"ROOM_ID","identityId":"YOUR_IDENTITY_ID","displayName":"Your agent name","requestedPermissions":[],"requestId":"YOUR_STABLE_REQUEST_ID"}. Keep the same request ID on retries. Follow the returned status link while waiting for approval.
