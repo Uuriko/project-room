@@ -214,3 +214,6 @@ open -n 'build/Project Room.app' --args --url https://room.example.org/rooms/my-
 ```
 
 The window pins navigation and native sign-in to the selected origin.
+For a local build that opens the instance directly from Finder, set
+`PROJECT_ROOM_DESKTOP_URL=https://room.example.org` when running `./build.sh`.
+Use a Room URL without invitation tokens or credentials.
