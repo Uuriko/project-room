@@ -1,20 +1,28 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createReadStream, realpathSync, lstatSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { promisify } from "node:util";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { validId } from "../src/events.js";
 
 const emit = value => process.stdout.write(JSON.stringify(value) + "\n");
-const git = (cwd, args) => execFileSync("/usr/bin/git", args, { cwd, timeout: 15000, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
-const revision = (cwd, ref) => git(cwd, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]).toString().trim();
+const runFile = promisify(execFile);
+async function git(cwd, args) {
+  try {
+    return (await runFile("/usr/bin/git", args, { cwd, timeout: 15000, maxBuffer: 16 * 1024 * 1024, encoding: "buffer" })).stdout;
+  } catch (error) {
+    throw Error(error.killed ? `git_${args[0]}_timeout` : `git_${args[0]}_failed`);
+  }
+}
+const revision = async (cwd, ref) => (await git(cwd, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`])).toString().trim();
 
 async function source(cwd) {
-  const head = revision(cwd, "HEAD");
-  const diff = git(cwd, ["diff", "--no-ext-diff", "--binary", head, "--"]);
-  const names = git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
+  const head = await revision(cwd, "HEAD");
+  const diff = await git(cwd, ["diff", "--no-ext-diff", "--binary", head, "--"]);
+  const names = await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
   const hash = createHash("sha256").update(JSON.stringify([head, diff.length])).update(diff).update(names);
   for (const name of names.toString().split("\0").filter(Boolean)) {
     const file = join(cwd, name), stat = lstatSync(file);
@@ -64,21 +72,28 @@ async function runAffected(cwd, base) {
   } finally { clearTimeout(timeout); lines.close(); active = null; }
 }
 
+let stage = "read_input";
 async function main() {
   let bytes = "";
   for await (const chunk of process.stdin) { bytes += chunk; if (bytes.length > 16384) throw Error("invalid_input"); }
   const input = JSON.parse(bytes);
   if (!validId(input.workItemId) || typeof input.base !== "string" || !/^[a-z\d_][\w./-]{0,255}$/i.test(input.base)) throw Error("invalid_input");
+  stage = "read_connection";
   const connection = readAgentConnection(input.connection);
   if (["origin", "roomId", "memberId"].some(key => connection[key] !== input[key])) throw Error("room_connection_changed");
   const client = new RoomAgentClient(connection);
+  stage = "check_room_access";
   await client.checkConnection({ signal: AbortSignal.timeout(10000) });
+  stage = "read_work_item";
   const work = await client.workContext(input.workItemId, { signal: AbortSignal.timeout(10000) });
-  const cwd = realpathSync(git(input.worktree, ["rev-parse", "--show-toplevel"]).toString().trimEnd());
-  const requestedBase = revision(cwd, input.base), before = await source(cwd);
-  const base = git(cwd, ["merge-base", requestedBase, before.head]).toString().trim();
+  stage = "inspect_worktree";
+  const cwd = realpathSync((await git(input.worktree, ["rev-parse", "--show-toplevel"])).toString().trimEnd());
+  const requestedBase = await revision(cwd, input.base), before = await source(cwd);
+  const base = (await git(cwd, ["merge-base", requestedBase, before.head])).toString().trim();
   emit({ phase: "running", head: before.head, roomId: connection.roomId });
+  stage = "run_tests";
   const outcome = await runAffected(cwd, base);
+  stage = "recheck_worktree";
   if ((await source(cwd)).fingerprint !== before.fingerprint) outcome.status = "stale";
   const evidence = { kind: "desktop_affected_tests", workRevisionAtStart: work.work.revision,
     head: before.head, base, dirty: before.dirty, worktreeFingerprint: `sha256:${before.fingerprint}`, ...outcome };
@@ -96,7 +111,9 @@ async function main() {
 
 main().catch(error => {
   const safe = ["invalid_input", "unsupported_worktree_entry", "room_connection_changed", "access_ended", "identity_mismatch", "config_not_found", "config_not_private"];
-  const code = error.code ?? error.message;
-  emit({ phase: "error", code: safe.includes(code) ? code : "local_check_unavailable" });
+  const code = error.code ?? error.cause?.code ?? error.message;
+  const diagnostic = /^git_(rev-parse|diff|ls-files|merge-base)_(timeout|failed)$/.test(code) || [...safe, "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ECONNREFUSED", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "work_not_found", "invalid_response"].includes(code) ? code
+    : error.name === "TimeoutError" ? "timeout" : "unavailable";
+  emit({ phase: "error", code: `${stage}: ${diagnostic}` });
   process.exitCode = 1;
 });
