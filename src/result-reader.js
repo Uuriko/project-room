@@ -119,13 +119,14 @@ export function installResultReader({ client, getState, getSession, sameSession,
     return Boolean(usableText(view) && !isRoomArchived(getState()) && client.owesHistory
       && !getState().messages.some(message => message.id === view.textMessageId));
   }
+  // During a release, a cached page may lack the new reader controls.
   function selectedWorkAction(view, item) {
     if (!usableText(view) || !item || !matchesReceipt(view.receipt, item.receipt) || item.supersededBy) return null;
     const state = getState(), next = nextWorkStep(item, Date.now(), state.room.ownerId);
     if (next.action !== "verify" && next.action !== "decide") return null;
     return workActions(item, state.members[getSession().member.id]).find(([action]) => action === next.action) ?? null;
   }
-  resultElement("result-work-action").addEventListener("click", () => {
+  resultElement("result-work-action")?.addEventListener("click", () => {
     const view = resultView, item = view && getState()?.workItems[view.workItemId];
     const action = selectedWorkAction(view, item);
     if (action && !isBusy()) onWorkAction(item, action[0]);
@@ -158,8 +159,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
     const context = resultElement("result-work-context");
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
-    context.hidden = !current;
-    if (current) {
+    if (context) context.hidden = !current;
+    if (current && context) {
       const next = nextWorkStep(item, Date.now(), getState().room.ownerId);
       resultElement("result-work-criteria").textContent = item.definitionOfDone;
       const finding = matchesReceipt(item.verification, item.receipt) ? item.verification : null;
@@ -171,9 +172,11 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
     const workAction = resultElement("result-work-action");
     const action = current && selectedWorkAction(view, item);
-    workAction.hidden = !action;
-    workAction.disabled = isBusy();
-    workAction.textContent = action?.[1] ?? "";
+    if (workAction) {
+      workAction.hidden = !action;
+      workAction.disabled = isBusy();
+      workAction.textContent = action?.[1] ?? "";
+    }
     const retry = resultElement("result-retry");
     resultElement("result-discuss").hidden = !resultDiscussionMessage(view) && !needsConversation(view);
     resultElement("result-discuss").disabled = !canDiscuss() || Boolean(view.resolving);
@@ -193,8 +196,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     finishResize();
     resultView = null; resultReader.classList.remove("result-docked", "result-mobile"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
     showCorrection(null);
-    resultElement("result-work-context").hidden = true;
-    resultElement("result-work-action").hidden = true;
+    resultElement("result-work-context")?.setAttribute("hidden", "");
+    resultElement("result-work-action")?.setAttribute("hidden", "");
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
@@ -349,8 +352,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function openResult(view, title, focus = true) {
       resultView = view;
       showCorrection(null);
-      resultElement("result-work-context").hidden = true;
-      resultElement("result-work-action").hidden = true;
+      resultElement("result-work-context")?.setAttribute("hidden", "");
+      resultElement("result-work-action")?.setAttribute("hidden", "");
       resultElement("result-options").open = false;
       resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
       resultElement("result-original").hidden = true;
