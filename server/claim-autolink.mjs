@@ -470,7 +470,8 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
 // public URL.
 export async function postPrWebhook(ctx) {
   const env = liveEnv();
-  if (!prWebhookEnabled(env)) ctx.reject(404, "not_found", "Not found");
+  const legacy = prWebhookEnabled(env);
+  if (!legacy && !env.ROOM_GITHUB_REVIEW_RECIPE) ctx.reject(404, "not_found", "Not found");
   ctx.rate(`pr-webhook:${ctx.remoteAddress ?? "unknown"}`, 120);
   const secret = typeof env[PR_WEBHOOK_SECRET_ENV] === "string" ? env[PR_WEBHOOK_SECRET_ENV] : "";
   if (!secret) ctx.reject(503, "webhook_unconfigured", "The PR webhook is enabled but its secret is not configured");
@@ -483,7 +484,7 @@ export async function postPrWebhook(ctx) {
   if (!check.ok) ctx.reject(401, "webhook_signature", "Bad webhook signature");
   const parsedEvent = parseEvent(ctx.req.headers, text);
   if (parsedEvent.ignored) return ctx.json(ctx.res, 200, { ok: true, ignored: true });
-  const result = parsedEvent.event === "pull_request" ? await handlePrWebhookPayload(ctx.store, parsedEvent.payload, {
+  const result = legacy && parsedEvent.event === "pull_request" ? await handlePrWebhookPayload(ctx.store, parsedEvent.payload, {
     nowMs: Date.now(),
     webhook: { rawBody: text, signature256: ctx.req.headers["x-hub-signature-256"], env },
   }) : null;
