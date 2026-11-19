@@ -99,6 +99,18 @@ REST rejection, consent forgery, real chat attribution and an assigned read-task
 result through the same MCP handlers. Legacy provider/consent/auth suites remain
 part of qualification.
 
+## Pair an existing invitation-backed seat
+
+If a host starts a new connection for a seat whose invitation grant is still
+active, its consent page offers **Pair with Room owner approval**. The Room
+owner can pair that pending PKCE transaction by posting its displayed
+`pairingId`, `roomId`, exact `memberId`, `clientId`, and full requested
+`scopes` to `POST /api/mcp/oauth/reconnect` using the existing Room owner
+credential. The browser checks the pairing and confirms the named existing
+seat. The resulting token family has its own exact consented scopes and
+shares the seat's existing invitation-grant lifetime and revocation. Restart
+the host connection if the pending transaction expires.
+
 ## Minimal native installation artifact
 
 Use the portable [ChatGPT Dot package template](../examples/integrations/chatgpt-dot/README.md)
