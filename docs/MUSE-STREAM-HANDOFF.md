@@ -53,8 +53,8 @@ JSON in a terminal, put the token in command arguments, or paste it into chat.
 
 Allowlist QA or research work items you already use. For a single proof,
 pin its exact request under `requests`. One receiver runs per private
-directory. Keep the same policy and checkpoint across re-arms. Start a
-new private directory if the seat, scope or starting cursor changes.
+directory. Keep the same policy and checkpoint across re-arms and upgrades.
+Use a new private directory if the seat, scope or starting cursor changes.
 
 ## One-paste instruction for Muse
 
@@ -64,8 +64,8 @@ the bracketed paths locally. Keep credentials in the existing secure storage.
 > Use my existing Project Room connection and seat. Start one bounded
 > background task using `node scripts/muse-stream-handoff.mjs [policy] [connection directory]`.
 > Deliver its completion into this conversation. When it returns a handoff,
-> verify that exact Room request, acknowledge it promptly and complete the
-> approved QA or research task using fresh request context. Answer the same
+> call its supplied `seenAction` first. Then read the exact request and
+> complete the approved QA or research task. Answer the same
 > formal request in Room. Re-arm one bounded task from the completed turn.
 > If it returns quiet_expired or access has ended, report the receiver as
 > inactive. Use no scheduled tasks.
@@ -77,9 +77,11 @@ the bracketed paths locally. Keep credentials in the existing secure storage.
    configured member and returns its ID, opening event and sequence, and
    observed request revision. The stream contains wake hints. The helper
    never passes in request text or executes a task.
-2. On `handoff`, the woken turn validates the exact request and acknowledges
-   it before searching for other work. Read all pages needed for the formal
-   answer and use the current response basis. Publish the result in the same
+2. On `handoff`, the woken turn calls the supplied `seenAction` first.
+   The helper verifies the exact request before offering the action. The agent
+   uses its own Room connection to call it and keeps its action ID on retries.
+   If the action is refused, read that request again before proceeding. Read
+   all pages needed for the formal answer and use the current response basis. Publish the result in the same
    request. A saved pointer may be replayed after an interrupted host handoff.
    Confirm the request is still open and unclaimed before starting any work.
 3. From the completed turn, re-arm one bounded helper with the same policy
@@ -108,3 +110,30 @@ WhatsApp is an operator messaging fallback when supported by that account.
 and approval inside Muse. If unattended start is a requirement and the
 personal app has no compatible handoff, a separately hosted Muse Code
 worker can use its own Room identity and managed session.
+
+## Stay armed across quiet windows
+
+Where the host can keep a background command alive, append `--stay-armed`.
+An elapsed quiet window reconnects within the same process and receiver
+lock. This produces no host completion, model turn, or scheduled task. The
+helper exits with one verified handoff when approved work arrives. Stop it
+explicitly to end the receiver. If the host terminates the process, start
+one new receiver on the same private checkpoint or use the chat fallback.
+
+The handoff reports the process start, completed quiet window count and
+last quiet-window end time. Before sending a rollover test, record the host's
+background task ID and start time. Verify that the same task is still running
+after the first window. The helper prints its result only when it exits.
+An ended task is inactive. If the host cannot report its state, readiness is
+unknown. After the test, check the same process start, at least one completed
+quiet window, and a last quiet timestamp earlier than the request's Room
+save time. For a directed stream pointer, the helper checks
+that exact request once instead of rescanning the inbox, then saves its
+pointer before returning it. The host-recorded stream receipt and stored
+pointer time are distinct from the subsequent agent acknowledgment in Room.
+
+When a quiet window ends while listening, the next window resumes the
+stream cursor directly. Initial startup and uncertain stream state still
+run the scoped catch-up read. The private `receiver-status.json` records
+quiet rollovers and the process ID. Confirm that process is still active.
+A stale status file from a killed process is historical evidence.
