@@ -151,11 +151,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
     list.replaceChildren();
     if (!report) return;
     resultElement("result-release-candidate").textContent = uiText("result.releaseCandidate", { revision: report.candidateRevision });
-    const stageLabels = { build: "Build", browser: "Browser", deploy: "Deploy" };
-    const statuses = { passed: "Passed", failed: "Failed", pending: "Pending" };
     for (const check of report.checks) {
       const row = document.createElement("li"), title = document.createElement("strong");
-      title.textContent = `${stageLabels[check.stage]} · ${statuses[check.status]}`;
+      title.textContent = uiText("result.releaseStage", { stage: uiText(`result.release.${check.stage}`), status: uiText(`result.release.${check.status}`) });
       row.append(title);
       if (check.summary) { const summary = document.createElement("p"); summary.textContent = check.summary; row.append(summary); }
       if (check.evidenceDigest) { const digest = document.createElement("code"); digest.textContent = check.evidenceDigest; row.append(digest); }
@@ -165,7 +163,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     note.href = `#pr-record/message/${encodeURIComponent(report.messageId)}`;
     note.textContent = uiText("result.releaseRecord");
     note.addEventListener("click", () => closeResult(false));
-    source.replaceChildren(document.createTextNode(uiText("result.releaseReporter", { name: memberLabel(report.reportedById) }) + " "), note);
+    source.replaceChildren(document.createTextNode(uiText("result.releaseReporter", { name: memberLabel(report.reportedById) })), " ", note);
   }
   function resultStatus() {
     mountResultReader();
@@ -182,7 +180,6 @@ export function installResultReader({ client, getState, getSession, sameSession,
       pointerSelection = null;
       view.body = "";
       showCorrection(null);
-      showReleaseChecks(null);
       showReleaseChecks(null);
       resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = true;
