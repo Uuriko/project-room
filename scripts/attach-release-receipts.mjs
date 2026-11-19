@@ -60,7 +60,7 @@ function stageEvidence(stage, value, candidate) {
   throw new Error(`Invalid or mismatched ${stage} receipt for the exact candidate.`);
 }
 
-export async function attachReleaseReceipts({ binding, inputs, readResult, post }) {
+export async function attachReleaseReceipts({ binding, inputs, readResult, lookup, post }) {
   const { workItemId, completionEventId, candidateRevision } = binding;
   if (typeof workItemId !== "string" || !workItemId || typeof completionEventId !== "string" || !completionEventId
       || !revision.test(candidateRevision)) throw new Error("Expected a work item, exact completion event and 40-hex candidate.");
@@ -85,7 +85,28 @@ export async function attachReleaseReceipts({ binding, inputs, readResult, post 
       || !digest.test(receipt.evidenceVersion) || !text?.messageId || candidates.size !== 1 || !candidates.has(candidateRevision)) {
     throw new Error("The selected completion does not name this exact candidate.");
   }
-  const send = (id, body) => post({ id, compact: true, workItemId, replyToId: text.messageId, body });
+  const previouslyAttached = selected.workThread?.releaseChecks?.checks ?? [];
+  if (previouslyAttached.some(check => check.evidenceMessageId && !prepared.some(item => item.stage === check.stage))) {
+    throw new Error("Missing an already attached stage. Restore its original receipt file before publishing.");
+  }
+  const send = async (id, body) => {
+    if (lookup) {
+      const prior = await lookup({ operationId: id });
+      if (prior.operationId !== id || (binding.roomId && prior.roomId !== binding.roomId)) {
+        throw new Error(`Unexpected Room lookup for operation ${id}.`);
+      }
+      if (prior.status === "recorded" && prior.eventType === "message.posted" && prior.eventId
+          && Number.isSafeInteger(prior.sequence) && prior.sequence > 0) {
+        return { messageId: id, sequence: prior.sequence, duplicate: true, recovered: true };
+      }
+      if (prior.status !== "not_recorded") throw new Error(`Unconfirmed Room lookup for operation ${id}.`);
+    }
+    try {
+      return await post({ id, compact: true, workItemId, replyToId: text.messageId, body });
+    } catch (error) {
+      throw new Error(`Unconfirmed Room write ${id}. Recover with the saved receipt files.`, { cause: error });
+    }
+  };
   const evidence = [];
   for (const { stage, id, body } of prepared) {
     evidence.push({ stage, ...await send(id, body) });
@@ -106,8 +127,10 @@ export function confirmedReceipt(saved, id) {
 }
 
 async function main() {
-  const { values } = parseArgs({ options: Object.fromEntries(
-    ["binding", "build", "browser", "deploy"].map(name => [name, { type: "string" }])) });
+  const { values } = parseArgs({ options: {
+    ...Object.fromEntries(["binding", "build", "browser", "deploy"].map(name => [name, { type: "string" }])),
+    recover: { type: "boolean", default: false }
+  } });
   const origin = new URL(process.env.ROOM_RELEASE_ORIGIN);
   if (origin.protocol !== "https:" || origin.username || origin.password || origin.href !== origin.origin + "/") {
     throw new Error("ROOM_RELEASE_ORIGIN must be an HTTPS origin.");
@@ -130,6 +153,7 @@ async function main() {
   }
   const output = await attachReleaseReceipts({ binding, inputs,
     readResult: args => call("room_read_result", args),
+    lookup: values.recover ? args => call("room_receipt", args) : undefined,
     post: async args => confirmedReceipt(await call("room_post_message", args), args.id) });
   console.log(JSON.stringify(output));
 }
