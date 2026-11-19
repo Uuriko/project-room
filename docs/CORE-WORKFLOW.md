@@ -160,6 +160,20 @@ look up its original operation ID before retrying.
 
 ### Link release checks after a verdict
 
+The Commons operator steps publish receipts when the package verification, browser run,
+and deploy smoke finish. Bind the steps once to the native result's room, work item,
+completion event and full candidate revision. Keep the operator artifacts outside the
+checkout. Each step calls `scripts/attach-release-receipts.mjs --binding FILE` with
+the available `--build FILE`, `--browser FILE` and `--deploy FILE` receipts, including
+earlier stages. Use the operator-configured `ROOM_RELEASE_ORIGIN` and the path to the
+existing saved connection in `ROOM_RELEASE_CONNECTION`. The browser adapter runs
+existing suites via `scripts/qualify-release-browser.mjs SHA REPORT SUITE...` and stores
+the TAP log beside the report. It requires a clean checkout of that exact SHA.
+
+Keep the files fixed after publication. Replaying the same inputs recovers writes
+with deterministic message IDs. An unavailable publication can be retried after a
+successful install using its saved deploy receipt.
+
 For a release result, name its full 40-hex candidate revision in the native
 text as `Candidate revision: SHA` on its own line. An exact `sourceRevision`
 JSON field also works. The release reporter can attach an ordinary Work Thread
