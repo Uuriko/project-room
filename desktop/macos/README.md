@@ -217,3 +217,18 @@ The window pins navigation and native sign-in to the selected origin.
 For a local build that opens the instance directly from Finder, set
 `PROJECT_ROOM_DESKTOP_URL=https://room.example.org` when running `./build.sh`.
 Use a Room URL without invitation tokens or credentials.
+
+### Discover current Mac checks from Room
+
+Read `room_project_state` and use your eligible `macCapabilities` entry. It
+includes the approved head and baseline and a complete `room_request_reply`
+template. Add a stable request ID, send once before the observation expires,
+then read the exact response to verify what ran.
+
+The app-owned receiver refreshes the observation during its existing request
+loop after rechecking the clean pinned checkout. Room uses its own clock and
+expires readiness after 20 seconds without refresh. Stop withdraws the entry
+when Room is reachable. An empty list means Room has no current eligible
+observation. Discovery is a runner report, and the receiver checks the exact
+checkout again before executing. Private paths and other requester IDs stay
+on the Mac. The feature adds no scheduled task.

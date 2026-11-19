@@ -236,7 +236,7 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
     let cursor = null, reportPending = false;
     try {
       const { requests, evaluatedThrough, runs, blockedBy = {} } = await client.agentWork({ signal });
-      onPoll();
+      await onPoll();
       cursor = evaluatedThrough;
       const owned = request => Object.hasOwn(runs, request.id);
       const recovering = new Set();
