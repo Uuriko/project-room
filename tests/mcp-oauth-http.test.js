@@ -783,9 +783,11 @@ test('room next and receipt discovery distinguish server availability from a nar
   const access = await f.rpc('tools/call', { name: 'room_check_access', arguments: {} });
   const discovery = access.body.result.structuredContent.commandDiscovery;
   assert.deepEqual(discovery.tools, {
-    room_next: 'available_on_server', room_receipt: 'available_on_server'
+    room_next: 'available_on_server', room_receipt: 'available_on_server',
+    room_record_verification: 'available_on_server'
   });
   for (const name of Object.keys(discovery.tools)) assert.ok(list.body.result.tools.some(entry => entry.name === name));
+  assert.equal(discovery.requiredOAuthScope.room_record_verification, "work:write");
   assert.match(discovery.next, /refresh the existing connection's tool catalog/);
   assert.deepEqual(discovery.whenMissingFromHost, {
     available_on_server: 'refresh_host_catalog', outside_connected_grant: 'use_authorized_tools',
@@ -815,7 +817,8 @@ test('room next and receipt discovery distinguish server availability from a nar
   const narrowList = await f.rpc('tools/list', {}, partial);
   const narrowAccess = await f.rpc('tools/call', { name: 'room_check_access', arguments: {} }, partial);
   assert.deepEqual(narrowAccess.body.result.structuredContent.commandDiscovery.tools, {
-    room_next: 'outside_connected_grant', room_receipt: 'outside_connected_grant'
+    room_next: 'outside_connected_grant', room_receipt: 'outside_connected_grant',
+    room_record_verification: 'outside_connected_grant'
   });
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
