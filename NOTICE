@@ -23,3 +23,11 @@ Copyright 2026 Block, Inc.
 client/operation-metrics.mjs adapts bounded numeric performance recording from
 block/buzz-app@3fca4520a53dc5618c908361e332b84ff45dba6a, under Apache-2.0.
 See third_party/buzz-metrics/NOTICE and LICENSE for source and modifications.
+
+Block Buzz GitHub change detection adaptation
+Copyright 2026 Block, Inc. Licensed under the Apache License, Version 2.0.
+client/github-review-recipe.mjs adapts the exact-head watch transition design from
+src/bundled/github/watch.ts in block/buzz-app@5a21469faa8c53d20105d58c592a48f68c6dcf7c.
+https://github.com/block/buzz-app/blob/5a21469faa8c53d20105d58c592a48f68c6dcf7c/src/bundled/github/watch.ts
+Room uses explicit check providers and names, exact candidate offers, replay-safe
+checkpoints, and event-triggered reads. Buzz merge policy and timers are omitted.
