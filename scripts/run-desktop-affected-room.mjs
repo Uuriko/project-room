@@ -15,7 +15,7 @@ const refusals = new Set(["worktree_mismatch", "checkout_not_pinned_clean_head",
 
 export function affectedRequestHost(policy) {
   if (!policy || Object.keys(policy).length !== fields.length || !fields.every(key => Object.hasOwn(policy, key))
-    || policy.version !== 1 || !validId(policy.roomId) || !validId(policy.memberId) || !validId(policy.workItemId)
+    || policy.version !== 1 || typeof policy.origin !== "string" || !policy.origin || !validId(policy.roomId) || !validId(policy.memberId) || !validId(policy.workItemId)
     || !sha(policy.head) || !sha(policy.base) || typeof policy.worktree !== "string" || !isAbsolute(policy.worktree)
     || !Array.isArray(policy.requesters) || !policy.requesters.length || policy.requesters.length > 20
     || new Set(policy.requesters).size !== policy.requesters.length || !policy.requesters.every(validId))
