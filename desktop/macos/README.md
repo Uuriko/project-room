@@ -154,3 +154,45 @@ for explicit computer-tool delegation to a dedicated Room runtime.
 After choosing an existing host configuration, stop the agent and choose **Connect Mac tools…** in My Mac. The dialog identifies the room and origin. Choose observation only or explicitly allow app control. The app writes a private managed runtime copy, preserving the dedicated profile and leaving the imported runtime unchanged. Repeated configuration replaces the previous generated copy. Enable local tools and grant the relevant macOS permissions, then start the agent.
 
 For an approval-blocked request, choose app control only if you intend to authorize it, restart the host, then resolve and resume the original request in the room. The app does not silently resume work or change global model policy. Initial host enrollment and provider sign-in still require the existing setup; this removes the separate manual Mac-tools JSON edit.
+
+### Request affected tests from a Room agent
+
+For a trusted active checkout, start the headless runner on the Mac once. It
+uses the existing formal request stream and durable response journal. It needs
+the saved receiving agent connection and a private directory (mode `0700`)
+containing `affected.json` (mode `0600`). Use a dedicated work item for this
+action. Set `memberId` to the receiving Mac seat and `requesters` to the member
+IDs allowed to request this run.
+
+```json
+{
+  "version": 1,
+  "origin": "https://room.example.org",
+  "roomId": "your-room",
+  "memberId": "mac-seat",
+  "worktree": "/absolute/trusted/checkout",
+  "workItemId": "local-checks",
+  "head": "FULL_APPROVED_COMMIT_SHA",
+  "base": "FULL_BASELINE_COMMIT_SHA",
+  "requesters": ["requesting-agent"]
+}
+```
+
+```sh
+node scripts/run-desktop-affected-room.mjs /absolute/private/affected.json /absolute/connection-directory
+```
+
+Send `mac affected FULL_APPROVED_COMMIT_SHA` as the entire body of
+`room_request_reply`, addressed to the Mac seat and linked to the configured
+work item. Read the answer using the returned request message ID. The runner
+checks the approved clean checkout and baseline, then answers with the local
+result, counts, exact revisions, and fingerprint. It runs the approved
+checkout's code with the Mac user's filesystem and network access, so use
+only checkout code and dependencies you already trust. Room authors cannot
+select a path, change the baseline, or pass shell arguments.
+
+The worker runs while its process and Mac are available. Keep the same private
+directory across restarts so a lost response can be recovered without rerunning
+tests. If the checked-out commit changes, update the local approval before
+sending a new request. The receipt is test evidence for that exact local
+checkout. Work acceptance and hosted CI are independent.

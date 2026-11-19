@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { createReadStream, realpathSync, lstatSync, readlinkSync } from "node:fs";
+import { existsSync, createReadStream, realpathSync, lstatSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { readAgentConnection } from "../client/agent-connection.mjs";
@@ -21,7 +22,7 @@ const revision = async (cwd, ref) => (await git(cwd, ["rev-parse", "--verify", "
 
 async function source(cwd) {
   const head = await revision(cwd, "HEAD");
-  const diff = await git(cwd, ["diff", "--no-ext-diff", "--binary", head, "--"]);
+  const diff = await git(cwd, ["diff", "--no-ext-diff", "--no-textconv", "--binary", head, "--"]);
   const names = await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
   const hash = createHash("sha256").update(JSON.stringify([head, diff.length])).update(diff).update(names);
   for (const name of names.toString().split("\0").filter(Boolean)) {
@@ -39,16 +40,16 @@ let active;
 function stop() {
   if (active?.pid) try { process.kill(-active.pid, "SIGKILL"); } catch { /* already exited */ }
 }
-process.once("SIGTERM", () => { stop(); process.exit(143); });
-process.once("SIGINT", () => { stop(); process.exit(130); });
 
-async function runAffected(cwd, base) {
+async function runAffected(cwd, base, signal) {
+  signal?.throwIfAborted();
   const start = performance.now();
   active = spawn(process.execPath, [join(cwd, "scripts/verify-affected.mjs"), `--base=${base}`], {
     cwd, detached: true, stdio: ["ignore", "pipe", "ignore"],
     env: Object.fromEntries(["HOME", "PATH", "LANG", "TMPDIR"].filter(key => process.env[key]).map(key => [key, process.env[key]]))
   });
   const timeout = setTimeout(stop, 285000);
+  signal?.addEventListener("abort", stop, { once: true });
   const lines = createInterface({ input: active.stdout });
   let selected = null, omitted = 0, tests = null, failed = null, terminalExit = null;
   lines.on("line", line => {
@@ -69,11 +70,31 @@ async function runAffected(cwd, base) {
       : exitCode === 0 && terminalExit === 0 && tests > 0 && failed === 0 ? "passed"
         : exitCode !== 0 && failed > 0 ? "failed" : "incomplete";
     return { status, selected, omitted, tests, failed, exitCode, elapsedMs: Math.round(performance.now() - start) };
-  } finally { clearTimeout(timeout); lines.close(); active = null; }
+  } finally {
+    clearTimeout(timeout); signal?.removeEventListener("abort", stop); lines.close(); active = null;
+  }
 }
 
 const networkCodes = ["ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ECONNREFUSED", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT"];
 const retryable = error => error.name === "TimeoutError" || networkCodes.includes(error.cause?.code ?? error.code);
+
+export async function collectAffectedEvidence({ worktree, base: baseRef, expectedHead, workRevision, signal, onStage = () => {} }) {
+  onStage("inspect_worktree");
+  const cwd = realpathSync((await git(worktree, ["rev-parse", "--show-toplevel"])).toString().trimEnd());
+  if (expectedHead && cwd !== worktree) throw Error("worktree_mismatch");
+  const before = await source(cwd);
+  if (expectedHead && (before.head !== expectedHead || before.dirty)) throw Error("checkout_not_pinned_clean_head");
+  const requestedBase = await revision(cwd, baseRef);
+  const base = (await git(cwd, ["merge-base", requestedBase, before.head])).toString().trim();
+  if (expectedHead && base !== baseRef) throw Error("baseline_not_ancestor");
+  onStage("run_tests", before.head);
+  const outcome = await runAffected(cwd, base, signal);
+  signal?.throwIfAborted();
+  onStage("recheck_worktree");
+  if ((await source(cwd)).fingerprint !== before.fingerprint) outcome.status = "stale";
+  return { kind: "desktop_affected_tests", workRevisionAtStart: workRevision,
+    head: before.head, base, dirty: before.dirty, worktreeFingerprint: `sha256:${before.fingerprint}`, ...outcome };
+}
 
 let stage = "read_input";
 async function main() {
@@ -93,20 +114,14 @@ async function main() {
     if (!retryable(error)) throw error;
     work = await readWork();
   }
-  stage = "inspect_worktree";
-  const cwd = realpathSync((await git(input.worktree, ["rev-parse", "--show-toplevel"])).toString().trimEnd());
-  const requestedBase = await revision(cwd, input.base), before = await source(cwd);
-  const base = (await git(cwd, ["merge-base", requestedBase, before.head])).toString().trim();
-  emit({ phase: "running", head: before.head, roomId: connection.roomId });
-  stage = "run_tests";
-  const outcome = await runAffected(cwd, base);
-  stage = "recheck_worktree";
-  if ((await source(cwd)).fingerprint !== before.fingerprint) outcome.status = "stale";
-  const evidence = { kind: "desktop_affected_tests", workRevisionAtStart: work.work.revision,
-    head: before.head, base, dirty: before.dirty, worktreeFingerprint: `sha256:${before.fingerprint}`, ...outcome };
+  const evidence = await collectAffectedEvidence({ worktree: input.worktree, base: input.base, workRevision: work.work.revision,
+    onStage: (name, head) => {
+      stage = name;
+      if (name === "run_tests") emit({ phase: "running", head, roomId: connection.roomId });
+    } });
   const id = `desktop-affected-${randomUUID()}`;
   const command = { id, type: "message.posted", data: { messageId: id, workItemId: input.workItemId,
-    body: `Local affected tests. ${outcome.status}. ${outcome.elapsedMs} ms.\n${JSON.stringify(evidence)}\nEvidence from this Mac’s selected checkout.` } };
+    body: `Local affected tests. ${evidence.status}. ${evidence.elapsedMs} ms.\n${JSON.stringify(evidence)}\nEvidence from this Mac’s selected checkout.` } };
   const send = () => client.command(command, { signal: AbortSignal.timeout(10000) });
   let receipt;
   try { receipt = await send(); }
@@ -116,11 +131,15 @@ async function main() {
   emit({ phase: "finished", evidence, operationId: id, recorded: Boolean(recorded), sequence: recorded ? receipt.sequence : null });
 }
 
-main().catch(error => {
-  const safe = ["invalid_input", "unsupported_worktree_entry", "room_connection_changed", "access_ended", "identity_mismatch", "config_not_found", "config_not_private"];
-  const code = error.code ?? error.cause?.code ?? error.message;
-  const diagnostic = /^git_(rev-parse|diff|ls-files|merge-base)_(timeout|failed)$/.test(code) || [...safe, ...networkCodes, "work_not_found", "invalid_response"].includes(code) ? code
-    : error.name === "TimeoutError" ? "timeout" : "unavailable";
-  emit({ phase: "error", code: `${stage}: ${diagnostic}` });
-  process.exitCode = 1;
-});
+if (process.argv[1] && existsSync(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  process.once("SIGTERM", () => { stop(); process.exit(143); });
+  process.once("SIGINT", () => { stop(); process.exit(130); });
+  main().catch(error => {
+    const safe = ["invalid_input", "unsupported_worktree_entry", "room_connection_changed", "access_ended", "identity_mismatch", "config_not_found", "config_not_private"];
+    const code = error.code ?? error.cause?.code ?? error.message;
+    const diagnostic = /^git_(rev-parse|diff|ls-files|merge-base)_(timeout|failed)$/.test(code) || [...safe, ...networkCodes, "work_not_found", "invalid_response"].includes(code) ? code
+      : error.name === "TimeoutError" ? "timeout" : "unavailable";
+    emit({ phase: "error", code: `${stage}: ${diagnostic}` });
+    process.exitCode = 1;
+  });
+}
