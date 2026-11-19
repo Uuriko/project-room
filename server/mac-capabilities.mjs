@@ -59,5 +59,5 @@ export function readMacCapabilities(store, { roomId, viewerId, members, items, n
       capabilityId: check === "affected" ? sessionId : `${sessionId}-${check}`,
       head, base, observedAt: iso(observedAt), expiresAt: iso(expiresAt),
       request: { tool: "room_request_reply", arguments: { roomId, toMemberId: memberId, workItemId, body: `mac ${check} ${head}` } }
-    }))).slice(0, 3);
+    }))).slice(0, 4);
 }

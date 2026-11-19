@@ -57,7 +57,7 @@ export const ROOM_STATE_ROUTES = Object.freeze([
         state: { type: "string", enum: ["ready", "unavailable", "stopped"] },
         workItemId: { type: "string" }, head: { type: "string" }, base: { type: "string" },
         requesters: { type: "array", items: { type: "string" } },
-        checks: { type: "array", items: { type: "string", enum: ["affected", "build", "native-smoke"] } }
+        checks: { type: "array", items: { type: "string", enum: ["affected", "build", "native-smoke", "draft-recovery"] } }
       } },
       response: { type: "object", properties: { state: { type: "string" }, expiresAt: { type: "string", format: "date-time" } } }
     }, events: [] })
