@@ -418,10 +418,11 @@ export class RoomAgentClient {
   }
   // Every service request shares one fetch posture: redirects are errors (a
   // redirect could carry the bearer elsewhere), no ambient credentials, and a
-  // 15s deadline that a caller-supplied signal narrows but never removes.
-  #fetchRaw(path, { method = "GET", headers = {}, body, signal } = {}) {
+  // bounded deadline that a caller-supplied signal can narrow. Ordinary
+  // requests use 15s. The stream has a separate bounded wait.
+  #fetchRaw(path, { method = "GET", headers = {}, body, signal, timeoutMs = 15000 } = {}) {
     return this.#fetch(`${this.#origin}${edgeDoorApiPath(this.#origin, path)}`, {
-      method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
       headers: { Authorization: `Bearer ${this.#token}`, ...headers },
       ...(body === undefined ? {} : { body })
     });
@@ -550,17 +551,18 @@ export class RoomAgentClient {
   }
   // A wake-up hint only. Consumers re-read their authorized queue before acting;
   // no streamed message body is used as executable input or saved as history.
-  async waitForChange(after, { signal, timeoutMs = 10000, requestHints = false } = {}) {
-    if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000)
+  async waitForChange(after, { signal, timeoutMs = 10000, requestHints = false, reviewWorkItemId } = {}) {
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000
+      || reviewWorkItemId !== undefined && (!validId(reviewWorkItemId) || requestHints))
       throw new Error("Choose a valid stream cursor and timeout");
     const deadline = AbortSignal.timeout(timeoutMs), controller = new AbortController();
     const stop = AbortSignal.any([controller.signal, deadline, ...(signal ? [signal] : [])]);
     let reader, through = after;
-    const idle = () => requestHints ? { changed: false, through } : { changed: false };
+    const idle = () => requestHints || reviewWorkItemId !== undefined ? { changed: false, through } : { changed: false };
     try {
       await this.checkConnection({ signal: stop });
       const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/stream?after=${after}`,
-        { signal: stop, headers: { Accept: "text/event-stream" } });
+        { signal: stop, timeoutMs: timeoutMs + 1000, headers: { Accept: "text/event-stream" } });
       if (!response.ok) throw this.#requestError(response, null, "Room stream unavailable");
       if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body)
         throw new RoomClientError(200, "invalid_response", "Room returned an invalid event stream");
@@ -580,7 +582,7 @@ export class RoomAgentClient {
           const id = /^id: ?([0-9]+)\r?$/m.exec(frame)?.[1], sequence = Number(id);
           if (!id || !Number.isSafeInteger(sequence) || sequence <= through)
             throw new RoomClientError(200, "invalid_response", "Room returned an invalid stream cursor");
-          if (!requestHints) return { changed: true, sequence };
+          if (!requestHints && reviewWorkItemId === undefined) return { changed: true, sequence };
           const data = /^data: ?(.+)\r?$/m.exec(frame)?.[1];
           let row;
           try { row = JSON.parse(data); } catch { return { changed: true }; }
@@ -588,6 +590,12 @@ export class RoomAgentClient {
           if (row?.sequence !== sequence || event?.roomId !== this.#roomId || !validId(event.id)
             || !validId(event.actorId) || typeof event.type !== "string") return { changed: true };
           through = sequence;
+          if (reviewWorkItemId !== undefined) {
+            if (message?.workItemId !== reviewWorkItemId || !["work.completed", "verification.recorded", "work.superseded"].includes(event.type)) continue;
+            return { changed: true, sequence, reviewHint: {
+              eventId: event.id, recordedAt: event.at, observedAt: new Date().toISOString()
+            } };
+          }
           if (event.type !== "message.posted" || message?.requestKind !== "reply") continue;
           if (!validId(message.toMemberId) || !validId(message.messageId)
             || message.workItemId != null && !validId(message.workItemId)) return { changed: true };
