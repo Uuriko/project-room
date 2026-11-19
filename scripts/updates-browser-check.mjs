@@ -551,6 +551,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
         await clickChrome(page, "#signout-button");
         await loginAccount("navigation-account-b", "Reader B");
       }
+      if (await page.locator("#updates-dialog").isVisible()) await page.locator("#updates-close").click();
       await page.locator("#message-input").fill(`Keep ${boundary} replacement draft`);
       await showExpectedUpdates(boundary === "room" ? "Private update in the other room" : "Private update for Reader B");
     }
