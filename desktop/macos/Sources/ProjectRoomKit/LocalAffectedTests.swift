@@ -1,8 +1,13 @@
 import AppKit
+import CryptoKit
 
 /// Native action for one chosen checkout and Room work item.
 @MainActor public final class LocalAffectedTests: NSObject {
     private let button = NSButton(title: "Run affected tests…", target: nil, action: nil)
+    private let receiverButton = NSButton(title: "Start Room test receiver…", target: nil, action: nil)
+    private let receiverStatus = NSTextField(wrappingLabelWithString: "Receiver stopped.")
+    private let receiver = NativeSetupProcess()
+    private var stoppingReceiver = false
     private let status = NSTextField(wrappingLabelWithString: "")
     private let window: NSWindow
     private let process = NativeSetupProcess()
@@ -10,17 +15,21 @@ import AppKit
     private var lastFolder: URL?
 
     public override init() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 155),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 230),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
         super.init()
         window.title = "Affected tests · Project Room"; window.isReleasedWhenClosed = false
         button.target = self; button.action = #selector(startOrCancel)
         button.bezelStyle = .rounded
         status.textColor = .secondaryLabelColor
-        let content = NSStackView(views: [button, status]); content.orientation = .vertical
+        receiverButton.target = self; receiverButton.action = #selector(startOrStopReceiver)
+        receiverButton.bezelStyle = .rounded
+        receiverStatus.textColor = .secondaryLabelColor
+        let content = NSStackView(views: [button, status, receiverButton, receiverStatus]); content.orientation = .vertical
         content.alignment = .leading; content.spacing = 12; content.translatesAutoresizingMaskIntoConstraints = false
         window.contentView!.addSubview(content)
         status.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        receiverStatus.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
         NSLayoutConstraint.activate([content.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 20),
             content.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 20),
             content.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -20)])
@@ -28,7 +37,97 @@ import AppKit
     }
 
     public func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
-    public func stop() { process.cancel() }
+    public func stop() { process.cancel(); receiver.cancel() }
+
+    @objc private func startOrStopReceiver() {
+        if receiver.isRunning {
+            stoppingReceiver = true
+            receiverButton.isEnabled = false
+            receiverStatus.stringValue = "Stopping the Room test receiver…"
+            receiver.cancel()
+            return
+        }
+        let picker = NSOpenPanel()
+        picker.title = "Choose the approved affected-test policy"
+        picker.canChooseFiles = true; picker.canChooseDirectories = false
+        picker.allowsMultipleSelection = false
+        picker.beginSheetModal(for: window) { [weak self] result in
+            guard let self, result == .OK, let policy = picker.url else { return }
+            self.chooseReceiverConnection(policy)
+        }
+    }
+
+    private func chooseReceiverConnection(_ policy: URL) {
+        let picker = NSOpenPanel()
+        picker.title = "Choose the receiver's saved Room connection.json"
+        picker.canChooseFiles = true; picker.canChooseDirectories = false
+        picker.allowsMultipleSelection = false; picker.directoryURL = lastConnection?.deletingLastPathComponent()
+        picker.beginSheetModal(for: window) { [weak self] result in
+            guard let self, result == .OK, let connection = picker.url else { return }
+            self.confirmReceiver(policy, connection: connection)
+        }
+    }
+
+    private func confirmReceiver(_ policy: URL, connection: URL) {
+        guard connection.lastPathComponent == "connection.json",
+              let bytes = try? FileHandle(forReadingFrom: policy).read(upToCount: 8193), bytes.count <= 8192,
+              let scope = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any],
+              let origin = scope["origin"] as? String, let item = scope["workItemId"] as? String,
+              let room = scope["roomId"] as? String, let member = scope["memberId"] as? String,
+              let head = scope["head"] as? String, let base = scope["base"] as? String,
+              let requesters = scope["requesters"] as? [String], let worktree = scope["worktree"] as? String else {
+            receiverStatus.stringValue = "Choose an affected-test policy and a saved connection.json."
+            return
+        }
+        let dialog = NSAlert()
+        dialog.messageText = "Start the Room test receiver?"
+        dialog.informativeText = """
+        Run the pinned checkout’s affected tests as your Mac user while the app is open.
+
+        \(worktree)
+        Head: \(head)
+        Baseline: \(base)
+        \(origin) · \(room) · \(item)
+        Receiving as \(member)
+        Allowed requesters: \(requesters.joined(separator: ", "))
+        """
+        let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        dialog.addButton(withTitle: "Start receiver")
+        dialog.addButton(withTitle: "Cancel")
+        dialog.beginSheetModal(for: window) { [weak self] result in
+            if result == .alertFirstButtonReturn { self?.runReceiver(policy, connection: connection, approvalDigest: digest) }
+        }
+    }
+
+    private func runReceiver(_ policy: URL, connection: URL, approvalDigest: String) {
+        guard let node = LocalRoomHostSetup.installedExecutable("node"),
+              let script = Bundle.main.resourceURL?.appendingPathComponent("room-runtime/scripts/run-desktop-affected-room.mjs"),
+              FileManager.default.isReadableFile(atPath: script.path) else {
+            receiverStatus.stringValue = "Node or the Room test receiver is unavailable."
+            return
+        }
+        stoppingReceiver = false
+        receiverStatus.stringValue = "Checking pinned worktree and Commons connection…"
+        do {
+            try receiver.startWatcher(node: URL(fileURLWithPath: node), script: script, policy: policy,
+                connection: connection.deletingLastPathComponent(), approvalDigest: approvalDigest, onEvent: { [weak self] event in
+                    guard let self, !self.stoppingReceiver else { return }
+                    if event["status"] as? String == "watching", let head = event["head"] as? String {
+                        self.receiverStatus.stringValue = "Listening for mac affected \(head)"
+                    } else if let sequence = event["sequence"] as? Int {
+                        self.receiverStatus.stringValue = "Listening · last test evidence posted at Room sequence \(sequence)."
+                    }
+                }, onFinish: { [weak self] success in
+                    guard let self else { return }
+                    self.receiverButton.title = "Start Room test receiver…"
+                    self.receiverButton.isEnabled = true
+                    self.receiverStatus.stringValue = self.stoppingReceiver || success
+                        ? "Receiver stopped." : "Receiver ended. Check the approved policy and saved connection."
+                    self.stoppingReceiver = false
+                })
+            receiverButton.title = "Stop Room test receiver"
+        } catch { receiverStatus.stringValue = "Could not start the Room test receiver." }
+    }
 
     @objc private func startOrCancel() {
         if process.isRunning { process.cancel(); status.stringValue = "Stopping local test run…"; return }

@@ -78,8 +78,7 @@ async function runAffected(cwd, base, signal) {
 const networkCodes = ["ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ECONNREFUSED", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT"];
 const retryable = error => error.name === "TimeoutError" || networkCodes.includes(error.cause?.code ?? error.code);
 
-export async function collectAffectedEvidence({ worktree, base: baseRef, expectedHead, workRevision, signal, onStage = () => {} }) {
-  onStage("inspect_worktree");
+export async function inspectAffectedCheckout({ worktree, base: baseRef, expectedHead }) {
   const cwd = realpathSync((await git(worktree, ["rev-parse", "--show-toplevel"])).toString().trimEnd());
   if (expectedHead && cwd !== worktree) throw Error("worktree_mismatch");
   const before = await source(cwd);
@@ -87,6 +86,12 @@ export async function collectAffectedEvidence({ worktree, base: baseRef, expecte
   const requestedBase = await revision(cwd, baseRef);
   const base = (await git(cwd, ["merge-base", requestedBase, before.head])).toString().trim();
   if (expectedHead && base !== baseRef) throw Error("baseline_not_ancestor");
+  return { cwd, before, base };
+}
+
+export async function collectAffectedEvidence({ worktree, base: baseRef, expectedHead, workRevision, signal, onStage = () => {} }) {
+  onStage("inspect_worktree");
+  const { cwd, before, base } = await inspectAffectedCheckout({ worktree, base: baseRef, expectedHead });
   onStage("run_tests", before.head);
   const outcome = await runAffected(cwd, base, signal);
   signal?.throwIfAborted();

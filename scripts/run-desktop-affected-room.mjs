@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-import { existsSync, realpathSync } from "node:fs";
+import { closeSync, existsSync, readSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { openRequestJournal, runRequestQueue } from "../client/request-runner.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
-import { assertPrivatePath, readPrivateJson } from "../room-acp/src/private-files.mjs";
+import { assertPrivatePath, openPrivateRead, readPrivateJson } from "../room-acp/src/private-files.mjs";
 import { validId } from "../src/events.js";
-import { collectAffectedEvidence } from "./desktop-affected.mjs";
+import { collectAffectedEvidence, inspectAffectedCheckout } from "./desktop-affected.mjs";
 
 const sha = value => typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
 const fields = ["version", "origin", "roomId", "memberId", "worktree", "workItemId", "head", "base", "requesters"];
@@ -45,14 +46,30 @@ export function affectedRequestHost(policy) {
 }
 
 async function main([path, connectionDirectory, ...extra]) {
-  if (extra.length || !isAbsolute(path ?? "") || !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/run-desktop-affected-room.mjs /absolute/private/affected.json /absolute/connection-directory");
+  const approvalDigest = /^--approval-digest=([0-9a-f]{64})$/.exec(extra[0] ?? "")?.[1];
+  if (extra.length > 1 || (extra.length === 1 && !approvalDigest) || !isAbsolute(path ?? "") || !isAbsolute(connectionDirectory ?? ""))
+    throw Error("Usage: node scripts/run-desktop-affected-room.mjs /absolute/private/affected.json /absolute/connection-directory [--approval-digest=SHA256]");
   const directory = dirname(realpathSync(path));
   assertPrivatePath(directory, true);
-  const policy = readPrivateJson(path, 8192);
+  let policy;
+  if (approvalDigest) {
+    const fd = openPrivateRead(path);
+    try {
+      const buffer = Buffer.alloc(8193);
+      const bytes = buffer.subarray(0, readSync(fd, buffer));
+      if (bytes.length > 8192 || createHash("sha256").update(bytes).digest("hex") !== approvalDigest)
+        throw Error("affected_policy_changed");
+      policy = JSON.parse(bytes.toString("utf8"));
+    } finally { closeSync(fd); }
+  } else policy = readPrivateJson(path, 8192);
   const connection = readAgentConnection(connectionDirectory);
   if (["origin", "roomId", "memberId"].some(key => policy[key] !== connection[key])) throw Error("room_connection_changed");
   const host = affectedRequestHost(policy);
+  // Confirm readiness before accepting requests. Re-check at execution after
+  // any time spent waiting, because the active checkout can still change.
+  if (approvalDigest) await inspectAffectedCheckout({
+    worktree: realpathSync(policy.worktree), base: policy.base, expectedHead: policy.head
+  });
   const owner = new WatchJournal(join(directory, "watch"));
   const controller = new AbortController();
   const stop = () => controller.abort();

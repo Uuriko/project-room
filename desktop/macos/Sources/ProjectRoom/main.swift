@@ -61,8 +61,14 @@ import ProjectRoomKit
 
 MainActor.assumeIsolated {
 let args = CommandLine.arguments
-let selected = args.firstIndex(of: "--url").flatMap { index in index + 1 < args.count ? URL(string: args[index + 1]) : nil } ?? URL(string: "https://room.trydemigod.com")!
-guard RoomLocation.allowed(selected) else { fputs("Only the first-party Room origin or a local development server is allowed.\n", stderr); exit(2) }
+let selected: URL?
+if let index = args.firstIndex(of: "--url") {
+    selected = index + 1 < args.count ? URL(string: args[index + 1]) : nil
+} else {
+    let bundledRoom = Bundle.main.object(forInfoDictionaryKey: "ProjectRoomDefaultURL") as? String
+    selected = URL(string: bundledRoom ?? "https://room.trydemigod.com")
+}
+guard let selected, RoomLocation.allowed(selected) else { fputs("Use an explicit HTTPS Room URL or a loopback development URL.\n", stderr); exit(2) }
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 let delegate = Application(url: selected, affectedOnly: args.contains("--affected-tests"))

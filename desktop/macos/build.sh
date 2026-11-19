@@ -39,6 +39,9 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
 PLIST
+if [[ -n "${PROJECT_ROOM_DESKTOP_URL:-}" ]]; then
+  plutil -insert ProjectRoomDefaultURL -string "$PROJECT_ROOM_DESKTOP_URL" "$app/Contents/Info.plist"
+fi
 plutil -insert ProjectRoomSourceRevision -string "$(git rev-parse HEAD)" "$app/Contents/Info.plist"
 source_dirty=false
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then source_dirty=true; fi
