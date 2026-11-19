@@ -851,6 +851,11 @@ const memberPermissionsUI = installMemberPermissions({ client, getState: () => s
 // One attention destination; historical palette names resolve here.
 // JDOT-COH-NAV begin
 updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), getContext: workNavigationContext,
+  onOpenPage() {
+    if (!document.querySelector(".result-focused:not([hidden])")) return;
+    closeResult(false);
+    leaveWorkSelection();
+  },
   actorLabel: memberId => state?.members[memberId]?.displayName ?? "",
   onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin, presentation: "thread" }),
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
@@ -2373,7 +2378,10 @@ function leaveWorkSelection() {
 }
 function setActiveChannel(id, preserveWork = false) {
   if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
-  if (!preserveWork) updatesUi?.close();
+  if (!preserveWork) {
+    updatesUi?.close();
+    if (document.querySelector(".result-focused:not([hidden])")) closeResult(false);
+  }
   const leftWork = !preserveWork && leaveWorkSelection();
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
   if (next === activeChannelId && !activeDirectMemberId && !currentThreadId && !requestMode && !assistantDraft) { if (leftWork) renderMessages(); return; }
@@ -2432,6 +2440,7 @@ function visibleConversationMessages() {
 }
 function openDirectMessage(memberId) {
   updatesUi?.close();
+  if (document.querySelector(".result-focused:not([hidden])")) closeResult(false);
   if (!Object.hasOwn(state?.members ?? {}, memberId) || state.members[memberId].active === false || state.members[memberId].identityRevoked || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
   requestEpoch++; requestReading = false; requestMode = null; assistantDraft = null;
