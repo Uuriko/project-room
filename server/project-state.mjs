@@ -19,6 +19,7 @@ import { readReceiptSignals } from "./receipt-signals.mjs";
 import { readResponseLatency, latencyLine } from "./response-latency.mjs";
 import { PREREQUISITE_GATED_STEPS, prerequisiteHold } from "../client/begin-work.mjs";
 import { nativePrerequisiteState, boardPrerequisiteState, observePrerequisites } from "./work-item-state.mjs";
+import { readMacCapabilities } from "./mac-capabilities.mjs";
 import { boardClaimId } from "./work-item-board.mjs";
 
 export const PROJECT_STATE_VERSION = 1;
@@ -51,7 +52,7 @@ export { parseReceipt };
 // `prerequisites` maps work id → observations ({id,state,satisfied}[]) for
 // not-yet-started work. Omitted entirely (pure callers), rows are unchanged.
 // When supplied, an item without an entry is unknown, not ready.
-export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, live, items, itemsComplete, members, receipts, receiptWindow, attention, latency = null, prerequisites = undefined }) {
+export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, live, items, itemsComplete, members, receipts, receiptWindow, attention, latency = null, prerequisites = undefined, macCapabilities = undefined }) {
   const member = id => (id == null || !members ? null : ownMember(members, id));
   const name = id => (id == null ? null : clip(member(id)?.displayName, 24) ?? String(id).slice(0, 12));
   const nowMs = typeof now === "number" ? now : Date.parse(now);
@@ -128,6 +129,7 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
     receipts: rows.sort((a, b) => b.seq - a.seq).slice(0, CAPS.receipts).map(r => ({ seq: r.seq, at: iso(Date.parse(r.at)), by: name(r.actorId), ...r.parsed })),
     receiptWindow: receiptWindow ?? null,
     ...(latency ? { latency } : {}),
+    ...(macCapabilities ? { macCapabilities } : {}),
     truncated: {}
   };
   const listed = new Set([...state.inProgress, ...state.blocked].map(row => row.id));
@@ -227,6 +229,7 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
     try { latency = latencyLine(readResponseLatency(store, token, roomId, { expectedSessionBinding })); } catch { latency = null; }
     return buildProjectState({
       roomId, viewerId, ownerId, sequence: head, now, latency,
+      macCapabilities: readMacCapabilities(store, { roomId, viewerId, members, items, now }),
       live: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID },
       items, itemsComplete: complete, members, receipts, prerequisites, receiptWindow: { fromSeq: floor + 1, throughSeq: head, source: receiptSource }, attention
     });
