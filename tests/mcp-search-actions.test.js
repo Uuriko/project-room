@@ -49,7 +49,10 @@ test("lean is opt-in: default core completes work and full stays available, lean
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
   assert.ok(full.some(tool => tool.name === "room_next"));
   assert.equal(core[0].name, "room_next");
+  for (const name of ["room_claim", "room_handoff"]) assert.ok(core.some(tool => tool.name === name), name);
   assert.ok(full.some(tool => tool.name === "room_wait_for_attention"));
+  assert.ok(full.some(tool => tool.name === "room_merge_members"));
+  assert.ok(!core.some(tool => tool.name === "room_merge_members"));
   assert.equal(new Set(full.map(tool => tool.name)).size, full.length, "full names remain unique");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
   const names = lean.map(tool => tool.name);
