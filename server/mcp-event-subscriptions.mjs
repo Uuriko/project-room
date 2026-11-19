@@ -1,4 +1,5 @@
 // Durable MCP Events receipts. A webhook receipt is not proof an agent ran.
+import { mcpOAuthToolAllowed } from "./mcp-oauth.mjs";
 import { recordWakeEvent } from "./wake-metrics.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { eventSigningKey, verifyMcpEventCallback, deliverMcpEvent } from "./mcp-events-wire.mjs";
@@ -139,7 +140,7 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
     return {};
   }
   // Call inside the same transaction that commits the durable Room wake signal.
-  function enqueueRequested({ roomId, memberId, requestId, messageId, eventId, context, timestamp = new Date(now()).toISOString() }) {
+  function enqueueRequested({ roomId, memberId, requestId, messageId, eventId, context, nextRead, timestamp = new Date(now()).toISOString() }) {
     const data = { roomId: thinId(roomId), memberId: thinId(memberId) };
     if (requestId !== undefined) data.requestId = thinId(requestId);
     if (messageId !== undefined) data.messageId = thinId(messageId);
@@ -158,7 +159,9 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
           door: "native-mcp", kind: "native-mcp", subjectId: memberId, reason: "native_callback_capacity" });
         continue;
       }
-      queued += Number(db.prepare("INSERT OR IGNORE INTO mcp_event_outbox(subscription_id,event_id,document,next_at) VALUES(?,?,?,?)").run(row.id, eventId, JSON.stringify(event), now()).changes);
+      const visibleEvent = nextRead && mcpOAuthToolAllowed(nextRead.tool, JSON.parse(row.principal).scopes)
+        ? { ...event, data: { ...data, nextRead } } : event;
+      queued += Number(db.prepare("INSERT OR IGNORE INTO mcp_event_outbox(subscription_id,event_id,document,next_at) VALUES(?,?,?,?)").run(row.id, eventId, JSON.stringify(visibleEvent), now()).changes);
     }
     return queued;
   }

@@ -1,5 +1,6 @@
 import {isCurrentRoom, readCurrentRecord, readCurrentWorkItem, withCurrentReadContext} from './current-room-repository.mjs';
 import {ServiceError} from './service-error.mjs';
+import {selectedWorkRead} from './work-context.mjs';
 import {nextWorkStep} from '../src/workflow.js';
 
 // Only resource accounting lives here. Attention and delivery cursors remain in
@@ -59,7 +60,7 @@ function workAttention(store, secret, roomId, memberId, from, through) {
       lastRead = sequence; read++;
       const next = item ? nextWorkStep(item, now, ownerId) : null;
       if (next?.needsAttention && next.memberId === memberId) items.push({kind: 'work', workItemId, workRevision: item.revision, sequence,
-        nextRead: {tool: 'room_read_work', arguments: {roomId, workItemId}}});
+        nextRead: selectedWorkRead(roomId, next)});
     }
   }));
   return {through: scanned, items};

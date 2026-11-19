@@ -103,8 +103,9 @@ for (const normalized of [false, true]) test(`native request wake carries the ex
   assert.equal(f.deliveries.length, 1);
   const pointer = JSON.parse(f.deliveries[0].body).data;
   assert.deepEqual(pointer, { roomId: 'commons', memberId: f.grant.member_id,
-    messageId: 'after-subscription', requestId: 'after-subscription' });
-  const fromWake = await call('room_read_request', { requestMessageId: pointer.requestId });
+    messageId: 'after-subscription', requestId: 'after-subscription',
+    nextRead: { tool: 'room_read_request', arguments: { roomId: 'commons', requestMessageId: 'after-subscription', view: 'compact' } } });
+  const fromWake = await call(pointer.nextRead.tool, pointer.nextRead.arguments);
   assert.equal(fromWake.request.id, 'after-subscription');
   assert.equal(fromWake.request.status, 'open');
   assert.equal(fromWake.page.hasMore, false);
@@ -117,8 +118,49 @@ test('native work assignment needs no desktop host registration and unsubscribe 
   assert.equal(f.store.agentHeartbeats.statusOf(f.grant.identity_id).hosts.length, 0);
   f.store.command(f.owner, 'commons', { id: 'native-assign', type: 'work.proposed', data: { workItemId: 'native-task', title: 'Review the plan', definitionOfDone: 'A concrete review', accountableMemberId: f.grant.member_id, mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false } });
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
+  assert.deepEqual(JSON.parse(f.deliveries[0].body).data.nextRead,
+    { tool: 'room_read_work', arguments: { roomId: 'commons', workItemId: 'native-task', brief: true } });
   assert.equal((await f.rpc('events/unsubscribe', { name: 'room.requested', arguments: { memberId: f.grant.member_id, roomId: 'commons' }, delivery: { mode: 'webhook', url: 'https://callback.example/events' } })).result.resultType, 'complete');
   f.mention('after-unsubscribe'); await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
+});
+
+test('review wake pins the completion and the selected read prepares its native verdict', async t => {
+  const f = await fixture(t);
+  const roomId = 'commons', workItemId = 'exact-result-wake';
+  const act = (id, type, data) => f.store.command(f.owner, roomId, { id, type, data: { workItemId, ...data } });
+  const producer = 'owner', reviewer = f.grant.member_id;
+  const call = async (name, args) => {
+    const response = await f.rpc('tools/call', { name, arguments: args });
+    assert.notEqual(response.result?.isError, true, JSON.stringify(response));
+    return response.result.structuredContent;
+  };
+  const member = f.store.room(roomId).state.members[reviewer];
+  f.store.command(f.owner, roomId, { id: 'verify-access', type: 'member.access_changed', data: {
+    memberId: reviewer, expectedMemberRevision: member.revision, active: true, permissions: [...new Set([...member.permissions, 'verify'])]
+  } });
+  assert.ok((await f.subscribe()).result.id);
+  act('propose', 'work.proposed', { title: 'Exact wake', definitionOfDone: 'Check the evidence',
+    accountableMemberId: producer, verifierMemberId: reviewer, mode: 'read', independentVerificationRequired: true });
+  act('accept', 'work.accepted', { expectedRevision: 0 });
+  act('start', 'work.started', { expectedRevision: 1 });
+  const posted = act('post', 'message.posted', { messageId: 'wake-evidence', body: 'Actual evidence' });
+  const completion = act('complete', 'work.completed', { expectedRevision: 2, evidenceKind: 'room_text',
+    evidenceMessageId: 'wake-evidence', evidenceMessageEventId: posted.event.id,
+    evidenceVersion: 'sha256:' + createHash('sha256').update('Actual evidence').digest('hex'),
+    previousCompletionEventId: null, producerId: producer, summary: 'Evidence submitted', nextAction: 'Review the evidence' });
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 1);
+  const { nextRead } = JSON.parse(f.deliveries[0].body).data;
+  assert.deepEqual(nextRead, { tool: 'room_read_result', arguments: {
+    roomId, workItemId, completionEventId: completion.event.id
+  } });
+  const selected = await call(nextRead.tool, nextRead.arguments);
+  assert.equal(selected.result.text.body, 'Actual evidence');
+  assert.equal(selected.review.action.arguments.expectedRevision, 3);
+  const verdict = await call(selected.review.action.tool, {
+    ...selected.review.action.arguments, result: 'pass', summary: 'Exact evidence checked'
+  });
+  assert.equal(verdict.status, 'recorded');
 });
 
 test('official pinned modern client uses invitation OAuth for attributed Room tools', { skip: !process.env.ROOM_MCP_REFERENCE_CLIENT }, async t => {
