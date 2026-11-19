@@ -94,10 +94,11 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const docked = !focused && wide.matches;
     resultReader.classList.toggle("result-focused", focused);
     const checks = resultElement("result-release-checks");
-    if (focused) resultElement("result-work-context").before(checks);
-    else resultElement("result-work-action").before(checks);
+    const checksBefore = resultElement(focused ? "result-work-context" : "result-work-action");
+    if (checks.nextElementSibling !== checksBefore) checksBefore.before(checks);
     resultReader.classList.toggle("result-docked", docked);
     resultReader.classList.toggle("result-mobile", !docked && !focused);
+    resultElement("close-result").hidden = focused;
     resize.hidden = !docked;
     applyWidth();
     const host = focused ? shell.querySelector(".room-main") : shell;
@@ -192,7 +193,6 @@ export function installResultReader({ client, getState, getSession, sameSession,
     mountResultReader();
     const view = resultView;
     if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
-    resultElement("close-result").hidden = view.focused === true;
     resultElement("close-result").textContent = wide.matches ? "×" : uiText("result.backConversation");
     resultElement("close-result").setAttribute("aria-label", uiText(wide.matches ? "result.closePreview" : "result.backConversation"));
     if (!clipboard.busy && resultElement("result-use-status").textContent === uiText("clipboard.pending")) resultElement("result-use-status").textContent = "";
@@ -258,7 +258,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement(action).hidden = !usableText(view);
       resultElement(action).disabled = action === "result-copy-text" && Boolean(view.copying || clipboard.busy);
     }
-    if (focused && (!focused.getClientRects().length || focused.disabled)) resultElement("close-result").focus({ preventScroll: true });
+    if (focused && (!focused.getClientRects().length || focused.disabled)) resultElement(view.focused ? "result-title" : "close-result").focus({ preventScroll: true });
     if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
   }
   function closeResult(restore = true, preserveSaved = false) {
@@ -412,7 +412,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const original = getState().messages.find(original => original.id === message?.replyToId && original.workItemId === view.workItemId && original.proposal);
       view.originalId = original?.id; resultElement("result-original").hidden = !original;
       view.loaded = true; view.retrying = false;
-      if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
+      if (document.activeElement === resultElement("result-retry")) resultElement(view.focused ? "result-title" : "close-result").focus({ preventScroll: true });
       resultStatus();
       if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
         resultElement("result-diff"), () => owns() && !view.withdrawn);
@@ -421,7 +421,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   resultElement("result-retry").addEventListener("click", () => {
     const view = resultView;
     if (!view?.error || isBusy() || !sameSession(view.generation, view.roomId, view.memberId)) return;
-    if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
+    if (document.activeElement === resultElement("result-retry")) resultElement(view.focused ? "result-title" : "close-result").focus({ preventScroll: true });
     view.error = false; view.retrying = true; resultStatus();
     loadExactResult(view);
   });

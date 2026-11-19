@@ -3502,7 +3502,7 @@ function syncWorkReturnControl() {
   const origin = currentWorkOrigin();
   button.disabled = false;
   button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message)\//.test(location.hash);
-  button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
+  button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
 }
 function clearWorkNavigation() {
   confirmedWorkNavigation = null;
@@ -3554,6 +3554,7 @@ function showWorkDestination(kind, id, presentation = "focus") {
         if (!card || workNavigationEpoch !== epoch || session !== identity || activeWorkNavigationId !== id) return;
         const button = card.querySelector("[data-read-result]");
         if (button) readResult({ target: button }, { focused: true });
+        syncWorkReturnControl();
       });
     }
   } else revealMessage(id);
@@ -3722,6 +3723,7 @@ async function restoreWorkOrigin(ticket) {
   syncWorkReturnControl();
 }
 function returnToCurrentRoom() {
+  const fromWorkThread = Boolean(document.querySelector(".result-focused:not([hidden])"));
   closeResult(false);
   updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++;
   const detail = activeWorkNavigationId && workRecord(activeWorkNavigationId)?.querySelector(".work-details");
@@ -3733,7 +3735,11 @@ function returnToCurrentRoom() {
   history.replaceState(workHistoryState(), "", destination.pathname + destination.search + destination.hash);
   updatesUi?.close();
   if ($("#board-dialog").open) $("#board-dialog").close();
-  if (workNavigationContext()) { workspaceUI?.showRooms(); switchThread(null); focusRecord($("#conversation-title")); }
+  if (workNavigationContext()) {
+    workspaceUI?.showRooms(); switchThread(null);
+    if (fromWorkThread) updatesUi?.open();
+    else focusRecord($("#conversation-title"));
+  }
   syncWorkReturnControl();
 }
 function replayWorkNavigation() {
@@ -3899,7 +3905,9 @@ function revealLocationHash() {
       else pendHashReveal(id);
       return;
     }
-    if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
+    if (current[1] === "work" && id !== null && (partialWorkSnapshot || state.workItems[id]?.receipt?.nativeText)) {
+      showWorkDestination("work", id, "thread");
+    } else if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
     return;
   }
   const rawWorkId = decodeFragment(hash.slice(1));
