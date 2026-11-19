@@ -169,6 +169,7 @@ earlier stages. Use the operator-configured `ROOM_RELEASE_ORIGIN` and the path t
 existing saved connection in `ROOM_RELEASE_CONNECTION`. The browser adapter runs
 existing suites via `scripts/qualify-release-browser.mjs SHA REPORT SUITE...` and stores
 the TAP log beside the report. It requires a clean checkout of that exact SHA.
+The scoped browser receipt passes when every check in the selected suites passes.
 
 Keep the files fixed after publication. Replaying the same inputs recovers writes
 with deterministic message IDs. An unavailable publication can be retried after a
