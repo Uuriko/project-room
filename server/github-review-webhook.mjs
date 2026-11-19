@@ -15,6 +15,8 @@ function selectedCandidates(binding, delivery) {
   }
   if (action !== "completed" || !["check_suite", "check_run"].includes(event)) return [];
   const checks = payload[event];
+  if (event === "check_run" && !binding.recipe.requiredChecks.some(check =>
+    check.app === checks?.app?.slug && check.name === checks?.name)) return [];
   if (!Array.isArray(checks?.pull_requests)) return [];
   const numbers = new Set(checks.pull_requests.map(pull => pull?.number));
   return binding.pulls.filter(number => numbers.has(number)).map(number => ({ number, head: checks.head_sha }));
@@ -134,7 +136,7 @@ export async function maybeDispatchGithubReview(store, delivery, env) {
     token: env.GH_TOKEN || env.GITHUB_TOKEN,
     async credential() {
       const { readPrivateJson } = await import("../room-acp/src/private-files.mjs");
-      const value = readPrivateJson(env.ROOM_GITHUB_REVIEW_CREDENTIAL_PATH, 4096);
+      const value = readPrivateJson(env.ROOM_GITHUB_REVIEW_CREDENTIAL_PATH);
       return value.identitySecret ?? value.token;
     }
   });
