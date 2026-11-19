@@ -131,6 +131,42 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const action = selectedWorkAction(view, item);
     if (action && !isBusy()) onWorkAction(item, action[0]);
   });
+  const releaseLink = resultElement("result-release-link"), releasePanel = resultElement("result-release-checks");
+  if (releaseLink && releasePanel) {
+    releaseLink.textContent = uiText("result.releaseChecks");
+    resultElement("result-release-title").textContent = uiText("result.releaseChecks");
+    releaseLink.addEventListener("click", event => {
+      event.preventDefault();
+      releasePanel.hidden = !releasePanel.hidden;
+      releaseLink.setAttribute("aria-expanded", String(!releasePanel.hidden));
+      if (!releasePanel.hidden) resultElement("result-release-title").focus();
+    });
+  }
+  function showReleaseChecks(report) {
+    if (!releaseLink || !releasePanel) return;
+    releaseLink.hidden = !report;
+    releaseLink.setAttribute("aria-expanded", "false");
+    releasePanel.hidden = true;
+    const list = resultElement("result-release-stages");
+    list.replaceChildren();
+    if (!report) return;
+    resultElement("result-release-candidate").textContent = uiText("result.releaseCandidate", { revision: report.candidateRevision });
+    const stageLabels = { build: "Build", browser: "Browser", deploy: "Deploy" };
+    const statuses = { passed: "Passed", failed: "Failed", pending: "Pending" };
+    for (const check of report.checks) {
+      const row = document.createElement("li"), title = document.createElement("strong");
+      title.textContent = `${stageLabels[check.stage]} · ${statuses[check.status]}`;
+      row.append(title);
+      if (check.summary) { const summary = document.createElement("p"); summary.textContent = check.summary; row.append(summary); }
+      if (check.evidenceDigest) { const digest = document.createElement("code"); digest.textContent = check.evidenceDigest; row.append(digest); }
+      list.append(row);
+    }
+    const source = resultElement("result-release-source"), note = document.createElement("a");
+    note.href = `#pr-record/message/${encodeURIComponent(report.messageId)}`;
+    note.textContent = uiText("result.releaseRecord");
+    note.addEventListener("click", () => closeResult(false));
+    source.replaceChildren(document.createTextNode(uiText("result.releaseReporter", { name: memberLabel(report.reportedById) }) + " "), note);
+  }
   function resultStatus() {
     mountResultReader();
     const view = resultView;
@@ -146,6 +182,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       pointerSelection = null;
       view.body = "";
       showCorrection(null);
+      showReleaseChecks(null);
+      showReleaseChecks(null);
       resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = true;
       resultElement("result-original").hidden = true;
@@ -157,6 +195,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
+    if (view.releaseChecks && getState().messages.some(message => message.id === view.releaseChecks.messageId && (message.deletedAt || message.editedAt))) {
+      view.releaseChecks = null;
+      showReleaseChecks(null);
+    }
     const context = resultElement("result-work-context");
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
     if (context) context.hidden = !current;
@@ -196,6 +238,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     finishResize();
     resultView = null; resultReader.classList.remove("result-docked", "result-mobile"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
     showCorrection(null);
+    showReleaseChecks(null);
     resultElement("result-work-context")?.setAttribute("hidden", "");
     resultElement("result-work-action")?.setAttribute("hidden", "");
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
@@ -317,6 +360,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       // and the receipt still names what it was verified against.
       view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
       showCorrection(view.withdrawn ? null : value.workThread?.correction);
+      view.releaseChecks = value.workThread?.releaseChecks;
+      showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
       resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
@@ -352,6 +397,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function openResult(view, title, focus = true) {
       resultView = view;
       showCorrection(null);
+      showReleaseChecks(null);
       resultElement("result-work-context")?.setAttribute("hidden", "");
       resultElement("result-work-action")?.setAttribute("hidden", "");
       resultElement("result-options").open = false;
