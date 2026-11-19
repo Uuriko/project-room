@@ -20,6 +20,9 @@ test('a plan orders prerequisites first and maps needs to plan-scoped workItemId
     ['ship-review', 'plan.ship.review', ['ship-docs', 'ship-fix']]
   ]);
   assert.ok(steps.every(step => step.name === 'room_propose_work' && !Object.hasOwn(step.args, 'needs') && !Object.hasOwn(step.args, 'key')));
+  const explicit = planSteps({ planId: 'ship', items: [item('review', { dependsOn: ['ship-fix'] }), item('fix')] });
+  assert.deepEqual(explicit.map(step => step.key), ['fix', 'review'], 'an explicit dependsOn on a plan item orders the plan');
+  assert.throws(() => planSteps({ planId: 'ship', items: [item('a', { dependsOn: ['ship-b'] }), item('b', { needs: ['a'] })] }), /wait for each other/);
 });
 
 test('a plan refuses duplicate keys, unknown or self needs, cycles and oversize input before anything is sent', () => {
@@ -36,23 +39,44 @@ test('a plan refuses duplicate keys, unknown or self needs, cycles and oversize 
   }
   assert.equal(validPlanArguments({ planId: 'p', items: [item('a', { title: '' })] }), false, 'each step must be a valid room_propose_work call');
   assert.equal(validPlanArguments({ planId: 'p', items: [item('a')] }), true);
+  for (const field of ['workItemId', 'requestId', 'expectedRevision']) {
+    assert.throws(() => planSteps({ planId: 'p', items: [item('a', { [field]: 'x' })] }), error => error.code === 'invalid_work_plan' && error.message.includes(field));
+    assert.equal(validPlanArguments({ planId: 'p', items: [item('a', { [field]: 'x' })] }), false);
+  }
   assert.deepEqual(planTool.inputSchema.required, ['planId', 'items']);
 });
+
+const none = async () => null;
 
 test('a refused item stops the plan and names the exact call that resumes it', async () => {
   const args = { planId: 'p', items: [item('a'), item('b', { needs: ['a'] }), item('c', { needs: ['b'] })] };
   const sent = [];
   const partial = await submitPlan(args, async step => {
     sent.push(step.key);
-    if (step.key === 'b') throw Object.assign(new Error('nope'), { code: 'command_rejected' });
+    if (step.key === 'b') throw Object.assign(new Error('nope'), { status: 409, code: 'command_rejected' });
     return { status: 'recorded', requestId: step.args.requestId, sequence: sent.length, duplicate: false };
-  });
+  }, { read: none });
   assert.deepEqual(sent, ['a', 'b']);
   assert.equal(partial.status, 'partial');
   assert.deepEqual(partial.recorded.map(entry => entry.workItemId), ['p-a']);
   assert.deepEqual([partial.refused.key, partial.refused.code], ['b', 'command_rejected']);
   assert.deepEqual(partial.notAttempted, ['c']);
   assert.deepEqual(partial.next[0], { tool: 'room_propose_plan', arguments: args, when: partial.next[0].when });
+});
+
+test('a lost connection is an unknown outcome to retry unchanged, not a refusal', async () => {
+  const args = { planId: 'p', items: [item('a'), item('b', { needs: ['a'] })] };
+  const lost = await submitPlan(args, async step => {
+    if (step.key === 'b') throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+    return { status: 'recorded', requestId: step.args.requestId, sequence: 1, duplicate: false };
+  }, { read: none });
+  assert.equal(lost.status, 'unconfirmed');
+  assert.equal(lost.unconfirmed.key, 'b');
+  assert.deepEqual(lost.next, [{ tool: 'room_propose_plan', arguments: args, when: lost.next[0].when }]);
+  const unread = await submitPlan(args, async () => assert.fail('nothing is written when the plan cannot be read'),
+    { read: async () => { throw new Error('offline'); } });
+  assert.equal(unread.status, 'unconfirmed');
+  assert.deepEqual(unread.recorded, []);
 });
 
 // Native (current-format) room: every fresh room is one, and a proposed item is
@@ -79,11 +103,22 @@ test('hosted room_propose_plan records each item as an ordinary proposal, replay
   assert.equal(again.value.status, 'recorded');
   assert.deepEqual(again.value.recorded.map(entry => entry.duplicate), [true, true]);
 
-  const changed = await f.call('room_propose_plan', { planId: 'ship', items: [items[0], { ...items[1], title: 'Another fix' }] });
+  assert.ok(again.value.next.every(step => step.arguments.roomId === 'commons'), 'hosted next steps carry roomId');
+
+  // A changed replay that also prepends a new item writes nothing at all.
+  const changed = await f.call('room_propose_plan', { planId: 'ship', items: [item('extra', { accountableMemberId: 'owner' }), items[0], { ...items[1], title: 'Another fix' }] });
   assert.equal(changed.isError, true);
-  assert.equal(changed.value.status, 'partial');
-  assert.deepEqual([changed.value.refused.key, changed.value.refused.code], ['fix', 'idempotency_conflict']);
+  assert.equal(changed.value.status, 'refused');
+  assert.equal(changed.value.code, 'plan_changed');
+  assert.deepEqual(changed.value.changed, [{ key: 'fix', workItemId: 'ship-fix', fields: ['title'] }]);
+  assert.ok(changed.value.next.every(step => step.arguments.roomId === 'commons'));
+  assert.equal(f.work('ship-extra'), null, 'the prepended item was not recorded');
   assert.equal(f.work('ship-fix').title, 'Task fix', 'the recorded proposal is unchanged');
+
+  // A plan whose recorded items all match may add new items.
+  const extended = await f.call('room_propose_plan', { planId: 'ship', items: [...items, item('docs', { needs: ['review'], accountableMemberId: 'owner' })] });
+  assert.equal(extended.value.status, 'recorded', JSON.stringify(extended.value));
+  assert.deepEqual(extended.value.recorded.map(entry => [entry.key, entry.duplicate]), [['fix', true], ['review', true], ['docs', false]]);
 });
 
 test('hosted room_propose_plan keeps the steer gate of room_propose_work for every item', async t => {

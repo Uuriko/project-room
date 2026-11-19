@@ -130,15 +130,36 @@ function notMemberPair(store, secret, args, error) {
 
 // A refused hosted tool call names its next calls, as the REST envelope
 // (agentErrorBody) already does, so an agent never has to guess what to try
-// (Vercel Board: every failure carries next[]). Tool steps get the call's
-// roomId, which every hosted room tool requires.
+// (Vercel Board: every failure carries next[]). Each tool step must be callable
+// here as given: it gets the call's roomId, a work read without a workItemId
+// becomes the room's work list, and a step this surface cannot call is dropped.
+/** The tools/call router's own argument check for a hosted tool. */
+function acceptedArgs(name, args) {
+  return isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
+    : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)
+      : WAKE_TOOLS.some(entry => entry.name === name) ? validWakeArgs(name, args)
+        : validRoomArgs(name, args);
+}
+
+function callableStep(step, roomId) {
+  if (!step.tool) return step;
+  const args = { ...(roomId ? { roomId } : {}), ...step.arguments };
+  if (HOSTED_TOOLS.some(entry => entry.name === step.tool) && acceptedArgs(step.tool, args)) return { ...step, arguments: args };
+  if (step.tool === "room_read_work" && roomId) return { tool: "room_list_work", arguments: { roomId } };
+  return null;
+}
+
 function withAgentNext(value, args) {
   if (value.next || typeof value.code !== "string" || !Number.isInteger(value.status)) return value;
   const roomId = validId(args?.roomId) ? args.roomId : undefined;
   const workItemId = validId(args?.workItemId) ? args.workItemId : undefined;
   const ax = agentErrorAx({ httpStatus: value.status, code: value.code, message: value.message, roomId, workItemId });
-  const next = ax.next.map(step => step.tool && roomId ? { ...step, arguments: { roomId, ...step.arguments } } : step);
-  return { ...value, reason: ax.reason, hint: ax.hint, next };
+  const seen = new Set(), next = [];
+  for (const step of ax.next.map(entry => callableStep(entry, roomId))) {
+    const id = step && JSON.stringify(step);
+    if (step && !seen.has(id)) { seen.add(id); next.push(step); }
+  }
+  return { ...value, reason: ax.reason, hint: ax.hint, ...(next.length > 0 ? { next } : {}) };
 }
 
 function failureValue(error) {
@@ -1321,11 +1342,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         if (value.status !== 500) return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
       }
     }
-    const accepted = isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
-      : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)
-        : WAKE_TOOLS.some(entry => entry.name === name) ? validWakeArgs(name, args)
-          : validRoomArgs(name, args);
-    if (!accepted) return argumentFailure(requestId, name, args, selected.inputSchema);
+    if (!acceptedArgs(name, args)) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
       if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
