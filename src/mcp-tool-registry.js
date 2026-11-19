@@ -89,6 +89,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_begin_work", core: true, blurb: "Begin the selected task at its current revision. Write work needs exact repository/ref/paths/expiry. Working is Room state.", focus: ["work"] },
   { name: "room_submit_text_result", core: true, blurb: "Submit your posted result as the task completion. Copy exact evidence fields from room_read_result; retry unchanged after an unknown outcome. Saved completion still needs any required review and owner acceptance.", focus: ["work"] },
   { name: "room_propose_work", focus: ["work"] },
+  { name: "room_propose_plan", focus: ["work"] },
   { name: "room_accept_work", focus: ["work"] },
   { name: "room_start_work", focus: ["work"] },
   { name: "room_block_work", focus: ["work"] },

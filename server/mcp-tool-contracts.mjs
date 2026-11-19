@@ -102,6 +102,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_link_work_claim_pr: { access: `write, Board writer holding the active claim; hidden from guest and read-only-tier agents`, cost: WRITE, rest: "POST /api/rooms/{roomId}/work-claims/{claimId}/update" },
   room_offer_help: { access: `write, room member with current invitation eligibility and capacity; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.help_offer_opened)` },
   room_propose_work: { access: `write, room member with steer; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.proposed)` },
+  room_propose_plan: { access: `write, room member with steer, checked per item; hidden from guest and read-only-tier agents`, cost: "one write per item, starts no AI", rest: `${COMMANDS} (work.proposed per item)` },
   room_record_completion: { access: `write, assigned room member with complete_work; write mode also needs current write authority and an active claim; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.completed)` },
   room_record_handoff: { access: `write, assigned member with accept_work and Board write access; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.handoff_recorded)` },
   room_record_verification: { access: `write, room member with designated verify authority; an independent review cannot be by its producer; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (verification.recorded)` },
