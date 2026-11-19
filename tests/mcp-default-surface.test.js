@@ -9,6 +9,12 @@ test("core carries the complete task loop; lean keeps its compact action search"
   for (const name of ["room_next", "room_receipt", "room_list_work", "room_read_work", "room_claim"]) assert.ok(CORE_MCP_TOOLS.includes(name), `core missing ${name}`);
   for (const name of ["room_list_work", "room_claim", "room_search_actions", "room_run_action"]) assert.ok(LEAN_MCP_TOOLS.includes(name), `lean missing ${name}`);
   for (const name of ["room_activation_pack", "room_begin_work", "room_read_result", "room_submit_text_result", "room_record_verification", "room_resolve_blocker", "room_handoff"]) assert.ok(CORE_MCP_TOOLS.includes(name), `core missing ${name}`);
-  assert.ok(CORE_MCP_TOOLS.length <= 23, `core has ${CORE_MCP_TOOLS.length}`);
+  // Every seat type must be able to ask (formal request = tracked wake) and
+  // acknowledge on landing from the default list; plain mentions get dropped.
+  for (const name of ["room_request_reply", "room_progress_request"]) {
+    assert.ok(CORE_MCP_TOOLS.includes(name), `core missing ${name}`);
+    assert.ok(LEAN_MCP_TOOLS.includes(name), `lean missing ${name}`);
+  }
+  assert.ok(CORE_MCP_TOOLS.length <= 25, `core has ${CORE_MCP_TOOLS.length}`);
   assert.ok(LEAN_MCP_TOOLS.length <= 16, `lean has ${LEAN_MCP_TOOLS.length}`);
 });
