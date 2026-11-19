@@ -77,6 +77,7 @@
   "src/invite-context.js",
   "src/join-watchdog.js",
   "src/join.js",
+  "src/mac-checks.js",
   "src/mcp-server-card.mjs",
   "src/mcp-tool-registry.js",
   "src/member-display-names.js",

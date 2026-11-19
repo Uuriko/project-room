@@ -44,7 +44,6 @@ import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js"
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
-import { reportMacCapability } from "./mac-capabilities.mjs";
 import { buildActivationPack, briefActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { readComposedRoomContext } from "./orient.mjs";
 import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
@@ -4148,7 +4147,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
       const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|mac-capability|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -4888,17 +4887,6 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         return json(res, 200, store.workResult(selected.token, roomId, params.get("workItemId"), {
           completionEventId: params.get("completionEventId"), draftMessageId: params.get("draftMessageId"), expectedSessionBinding: fence
         }));
-      }
-      if (route === "mac-capability" && req.method === "POST") {
-        if (!selected.bearer || auth.member.kind !== "agent" || isGuestAgentMemberId(auth.member.id))
-          reject(403, "access_denied", "An authenticated Room agent must report its own Mac capability");
-        const input = await body(req);
-        const current = roomAuth(selected, roomId, fence);
-        if (current.member.id !== auth.member.id || current.member.kind !== "agent" || current.member.active !== true)
-          reject(403, "access_denied", "Mac receiver membership changed");
-        const report = reportMacCapability(store, roomId, current.member.id, input);
-        if (report.error) reject(report.status, report.error, "Mac capability report refused");
-        return json(res, 200, report);
       }
       if (route === "capabilities" && req.method === "GET") {
         const search = url.searchParams.get("search");

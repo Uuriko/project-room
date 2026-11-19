@@ -79,10 +79,12 @@ import CryptoKit
             receiverStatus.stringValue = "Choose an affected-test policy and a saved connection.json."
             return
         }
+        let checks = (scope["checks"] as? [String] ?? ["affected"]).joined(separator: ", ")
         let dialog = NSAlert()
-        dialog.messageText = "Start the Room test receiver?"
+        dialog.messageText = "Start the Room check receiver?"
         dialog.informativeText = """
-        Run the pinned checkout’s affected tests as your Mac user while the app is open.
+        Run approved checks from the pinned checkout as your Mac user while the app is open.
+        Checks: \(checks)
 
         \(worktree)
         Head: \(head)
