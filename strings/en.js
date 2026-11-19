@@ -784,6 +784,8 @@ export default {
   "webmcp.confirmReview": "Let the agent send a review request to {member}?",
   "attention.firstUnread": "Jump to first unread (g then u)",
   "attention.noLoadedUnread": "No unread boundary in this conversation’s loaded messages.",
+  "work.thread.reviewCue": "Review or decision needed",
+  "work.thread.nextFor": "{name} · {action}",
   "work.focus.briefHelp": "Name one output, the allowed scope and how to check it. Choose who will do the work and review it.",
   "work.focus.goalHtml": "<p class=\"definition work-focus-summary\" data-work-focus-goal>Done when: {definition}</p>",
   "work.focus.resultHtml": "<p class=\"definition work-focus-summary\" data-work-focus-result>Current result: {summary}</p>"

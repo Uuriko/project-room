@@ -85,6 +85,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     cursor = null; hasMore = false; loadedPages = 0; incomplete = false; visitedCursors = new Set();
     badgeMore = false; badgeIncomplete = false; loading = false;
     if (dialog.open) dialog.close();
+    syncDecisionRows();
     list.replaceChildren(); status.textContent = ""; summary.textContent = ""; partial.textContent = "";
     paintBadge(); paintPaging();
   }
@@ -157,8 +158,21 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       }
     }
   }
+  function syncDecisionRows() {
+    if (!attention) return;
+    const workIds = new Set(items.filter(item => item.kind === "review_requested" || item.kind === "work")
+      .map(item => item.sourceRef?.workItemId).filter(Boolean));
+    const rows = [...attention.querySelectorAll(".attention-item")];
+    for (const row of rows) row.toggleAttribute("data-duplicate-update",
+      row.matches(".attention-decision, .attention-verification") && workIds.has(row.querySelector("[data-open-work]")?.dataset.openWork));
+    // Preserve management, diagnostics and pagination on the owner rollup.
+    const onlyDuplicates = rows.length && rows.every(row => row.hasAttribute("data-duplicate-update"))
+      && attention.querySelector("#attention-pages")?.hidden && !attention.querySelector("#attention-status")?.textContent;
+    decisions.hidden = filter === "mentions" || Boolean(onlyDuplicates);
+  }
+  if (attention) new MutationObserver(syncDecisionRows).observe(attention, { childList: true, subtree: true });
   function paint() {
-    decisions.hidden = filter === "mentions";
+    syncDecisionRows();
     for (const button of tabs.querySelectorAll("[role=tab]")) {
       const on = button.dataset.updateFilter === filter;
       button.setAttribute("aria-selected", on ? "true" : "false");
@@ -193,6 +207,12 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       const title = document.createElement("strong");
       title.textContent = item.title || item.kind;
       copy.append(title);
+      if (item.kind === "review_requested") {
+        const cue = document.createElement("p");
+        cue.className = "form-hint";
+        cue.textContent = uiText("work.thread.reviewCue");
+        copy.append(cue);
+      }
       const actions = document.createElement("div");
       actions.className = "updates-actions";
       for (const [name, label] of Object.entries(ACTION_LABELS)) {
