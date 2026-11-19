@@ -305,3 +305,37 @@ Activation briefs show up to three `yourWork` records in stable ID order before 
 `yourWorkCoverage.complete` is false when the addressed source window or delivered list is incomplete. Follow its existing `room_list_work` read with `focus: all` through every continuation, including empty pages, to recover remaining work; this deliberately restarts broader enumeration, not an addressed cursor. It includes ongoing work that `needs_me` does not select. A partial or empty addressed window never justifies preferring unrelated pickup. Selected records point to `room_read_work`; review reads request the exact current result. Re-read before acting. Source/charter provenance stays context-only.
 
 Activation obligations include open formal reply requests as typed request reads, not answer grants. Ordinary conversation replies do not close those requests. Bounded discovery is ID-ordered, not a global priority ranking. If coverage is incomplete, follow both `yourWorkCoverage.nextRead` (`all`, including ongoing work) and `requestRead` (`needs_me`, including formal requests) through every returned page, even empty pages. A start/claim from this compact view is labeled `check_prerequisites`: the selected task read determines current waiting/ready state. Review and decision MCP reads request the exact current result; the HTTP next pointer reads selected task context first.
+
+## Optional GitHub review recipe
+
+An operator can preview which GitHub PRs are ready for exact-result review.
+Keep one on-disk config per room and repository. For example:
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "roomId": "my-room",
+  "repository": "my-org/my-project",
+  "requiredChecks": [
+    { "app": "github-actions", "name": "verify" }
+  ]
+}
+```
+
+From the repository checkout, run
+`node scripts/github-review-recipe.mjs /private/recipe.json 123` using a GitHub
+CLI connection that can read the PR and checks. Save the JSON decision and
+supply that file as the optional third argument on the next event for PR 123.
+Serialize updates to that file per PR. With authenticated GitHub event intake,
+append `--event check_suite /private/delivery.json` to mark an event-driven
+invocation. The runner also handles `pull_request`, `pull_request_review`, and
+`check_run` hints. It fetches the current PR before and after reading its checks.
+
+A ready decision identifies a stable offer ID and the exact head and check
+attempts. A draft, closed PR, skipped check, or unsettled required check is
+held. A changed head or rerun can withdraw the earlier offer. An unchanged
+candidate yields the same offer ID without a new action. Keep independent
+review and merge approval in their normal Room and GitHub commands. This
+recipe outputs a preview and has no timer or automatic write. A room without
+this configuration uses its normal join, request, result and review commands.
