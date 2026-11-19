@@ -182,7 +182,7 @@ for (const representation of [null, 'normalized-current-v1']) test(`stale asks o
   const [recipient] = read('helper').overdueActions;
   assert.match(requester.guidance, /delivery.*cancel.*reassign/);
   assert.match(recipient.guidance, /Answer.*decline/);
-  assert.deepEqual(recipient.nextRead, {tool: 'room_read_request', arguments: {requestMessageId: 'ask', view: 'compact'}});
+  assert.deepEqual(recipient.nextRead, {tool: 'room_read_request', arguments: {roomId: 'commons', requestMessageId: 'ask', view: 'compact'}});
   assert.equal(read('other').overdueActions, undefined);
   assert.equal(read('asker', false).overdueActions, undefined);
   cmd('asker', 'cancel-ask', 'reply_request.cancelled', {requestMessageId: 'ask', expectedRequestRevision: 0, reason: 'Superseded'});

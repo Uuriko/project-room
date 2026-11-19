@@ -11,6 +11,7 @@ const FILTERS = [
 ];
 const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
 export const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
+const messageDestination = item => item.kind === "request" ? item.sourceRef?.requestId : item.sourceRef?.messageId;
 const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions" };
 
 export function queryFor(filter) {
@@ -219,7 +220,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         if(nativeAttention()&&name!=='open')continue;
         // Owner decisions are below this list; do not offer an Open action
         // unless this row has a supported work or conversation destination.
-        if (name === "open" && !item.sourceRef?.workItemId && !item.sourceRef?.messageId && operations.get(item.id)?.action !== "open") continue;
+        if (name === "open" && !item.sourceRef?.workItemId && !messageDestination(item) && operations.get(item.id)?.action !== "open") continue;
         const button = document.createElement("button");
         button.type = "button";
         button.className = name === "open" ? "button secondary" : "button ghost";
@@ -379,8 +380,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       return;
     }
     if (action === "open") {
-      const workItemId = operation.item.sourceRef?.workItemId;
-      const messageId = operation.item.sourceRef?.messageId;
+      const messageId = messageDestination(operation.item);
+      const workItemId = operation.item.kind === "request" ? null : operation.item.sourceRef?.workItemId;
       const opened = workItemId && onOpenWork ? onOpenWork(workItemId, origin)
         : messageId && onOpenMessage ? onOpenMessage(messageId, origin) : null;
       if (opened === false) { paintOperations(); status.textContent = "That source is no longer available in this room."; return; }
