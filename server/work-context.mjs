@@ -237,3 +237,10 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   }
   return withContentTrust(value);
 }
+
+export function selectedWorkRead(roomId, next) {
+  const { workItemId, completionEventId } = next;
+  if (next.action === "verify" && completionEventId)
+    return { tool: "room_read_result", arguments: { roomId, workItemId, completionEventId } };
+  return { tool: "room_read_work", arguments: { roomId, workItemId, brief: true } };
+}
