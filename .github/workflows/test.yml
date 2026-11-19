@@ -591,6 +591,7 @@ jobs:
           # Depth 2 gives the PR merge commit's first parent, which the i18n
           # ratchet scans. A depth-1 checkout looks like a modified baseline.
           fetch-depth: 2
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -610,20 +611,44 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
       - name: Rule checks, story tests, and page weight
+        env:
+          PLAYWRIGHT_VERSION: ${{ steps.pw.outputs.version }}
+          PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
         run: |
+          image=
+          if [ "$PLAYWRIGHT_VERSION" = 1.64.1 ]; then
+            image="$PLAYWRIGHT_IMAGE"
+            docker pull "$image" &
+          else
+            # A lockfile bump keeps the existing browser setup until the image is updated.
+            npx playwright install --with-deps chromium &
+          fi
+          browser_setup=$!
           set +e
-          npx playwright install --with-deps chromium &
-          install=$!
           npm run lint
           lint=$?
           node scripts/ci-affected.mjs --run-stories
           stories=$?
-          wait "$install"
-          install_status=$?
+          wait "$browser_setup"
+          setup_status=$?
           set -e
-          if [ "$install_status" -ne 0 ]; then exit "$install_status"; fi
           if [ "$lint" -ne 0 ] || [ "$stories" -ne 0 ]; then exit 1; fi
-          node scripts/ci-affected.mjs --run-page-weight
+          if [ "$setup_status" -ne 0 ]; then
+            if [ -z "$image" ]; then exit "$setup_status"; fi
+            echo "::warning::Playwright image pull failed; using the existing browser installer"
+            image=
+            npx playwright install --with-deps chromium
+          fi
+          if [ -n "$image" ]; then
+            node_dir="$(dirname "$(dirname "$(command -v node)")")"
+            docker run --rm --ipc=host \
+              --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
+              --mount "type=bind,src=$node_dir,dst=/toolchain,readonly" \
+              --workdir /workspace \
+              "$image" /toolchain/bin/node scripts/ci-affected.mjs --run-page-weight
+          else
+            node scripts/ci-affected.mjs --run-page-weight
+          fi
   test:
     needs: [changes, contract, lint, unit, browser, cloudflare, cloudflare-shard-2, visual-refresh-guard, friend-agent-e2e, coverage, safety-net]
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
