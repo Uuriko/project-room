@@ -228,7 +228,11 @@ test("a rooms:read key is refused 403 on every write tool family over MCP", asyn
 test("a read-only key still reaches the read tools of the same families", async t => {
   const { origin, roomId, issue } = await fixture(t);
   const reader = issue(["rooms:read"]);
-  for (const name of ["room_list_requests", "room_read_inbox", "room_read_board", "bounty_list"]) {
+  // room_read_inbox is NOT in this list: it reads the identity-wide
+  // inbox, so it is gated on mcp:inbox, not rooms:read (B5-4-F8; pinned
+  // in tests/scoped-key-mcp-inbox-gate.test.js). It used to be listed
+  // here, which pinned the bypass as expected behaviour.
+  for (const name of ["room_list_requests", "room_read_board", "bounty_list"]) {
     const result = await call(origin, name, sampleArgs(name, roomId), reader);
     assert.notEqual(result.value?.code, "insufficient_scope", name);
   }
