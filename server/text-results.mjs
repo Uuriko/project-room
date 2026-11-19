@@ -127,7 +127,7 @@ const RELEASE_STAGES = ["build", "browser", "deploy"];
 // the original exact result and verdict and can be read through their scope.
 function selectedReleaseChecks(db, state, work, result, viewerId, floor, messageRecords) {
   if (result.kind !== "room_text" || !result.text.body) return null;
-  const candidates = new Set([...result.text.body.matchAll(/(?:^Candidate revision: |"sourceRevision"\s*:\s*")([a-f0-9]{40})(?:"|$)/gm)].map(match => match[1]));
+  const candidates = new Set([...result.text.body.matchAll(/(?:^Candidate revision: |"sourceRevision"\s*:\s*")([a-f0-9]{40})(?:"|\r?$)/gm)].map(match => match[1]));
   if (candidates.size !== 1) return null;
   const [candidateRevision] = candidates;
   const { receipt, text } = result;
@@ -140,10 +140,11 @@ function selectedReleaseChecks(db, state, work, result, viewerId, floor, message
       AND sequence>? AND substr(json_extract(body,'$.data.body'),1,?)=?
     ORDER BY sequence DESC LIMIT 20`).all(state.room.id, work.id, text.messageId, JSON.stringify([...reporters]), text.postSequence,
       RELEASE_CHECKS_PREFIX.length, RELEASE_CHECKS_PREFIX);
+  const messages = messageRecords ?? messageRepository({ db }, state.room.id, state);
   for (const row of rows) {
     const posted = JSON.parse(row.body);
     const messageId = posted.data.messageId || row.id;
-    const message = (messageRecords ?? messageRepository({ db }, state.room.id, state)).get(messageId);
+    const message = messages.get(messageId);
     if (!message || message.deletedAt || message.editedAt || message.body !== posted.data.body
       || !textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecords)) continue;
     let report;
@@ -157,7 +158,17 @@ function selectedReleaseChecks(db, state, work, result, viewerId, floor, message
       if (!["passed", "failed"].includes(check?.status) || check.candidateRevision !== candidateRevision
         || typeof check.summary !== "string" || !check.summary.trim() || check.summary.length > 600
         || !/^sha256:[a-f0-9]{64}$/.test(check.evidenceDigest ?? "")) break;
-      checks.push({ stage, status: check.status, summary: check.summary, evidenceDigest: check.evidenceDigest });
+      const evidenceId = check.evidenceMessageId;
+      const evidence = typeof evidenceId === "string" && evidenceId.length <= 128 ? messages.get(evidenceId) : null;
+      const binding = `room-release-receipt/1 ${stage} ${receipt.eventId} ${candidateRevision} ${check.evidenceDigest}\n`;
+      if (!evidence || evidence.deletedAt || evidence.editedAt || evidence.authorId !== message.authorId
+        || evidence.workItemId !== work.id || evidence.replyToId !== text.messageId || !evidence.body?.startsWith(binding)
+        || !textVisibleToViewer(db, state, evidenceId, viewerId, floor, messages)) {
+        checks.push({ stage, status: "pending" });
+        continue;
+      }
+      checks.push({ stage, status: check.status, summary: check.summary, evidenceDigest: check.evidenceDigest,
+        evidenceMessageId: evidenceId, href: `#pr-record/message/${encodeURIComponent(evidenceId)}` });
     }
     if (checks.length === RELEASE_STAGES.length) return { candidateRevision, checks, messageId,
       completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion,

@@ -142,6 +142,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (!releasePanel.hidden) resultElement("result-release-title").focus();
     });
   }
+  function releaseEvidenceLink(href, label) {
+    const link = document.createElement("a");
+    link.href = href;
+    link.textContent = label;
+    link.addEventListener("click", () => closeResult(false));
+    return link;
+  }
   function showReleaseChecks(report) {
     if (!releaseLink || !releasePanel) return;
     releaseLink.hidden = !report;
@@ -157,12 +164,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
       row.append(title);
       if (check.summary) { const summary = document.createElement("p"); summary.textContent = check.summary; row.append(summary); }
       if (check.evidenceDigest) { const digest = document.createElement("code"); digest.textContent = check.evidenceDigest; row.append(digest); }
+      if (check.href) {
+        row.append(" ", releaseEvidenceLink(check.href, uiText("result.releaseStageEvidence", { stage: uiText(`result.release.${check.stage}`) })));
+      }
       list.append(row);
     }
-    const source = resultElement("result-release-source"), note = document.createElement("a");
-    note.href = `#pr-record/message/${encodeURIComponent(report.messageId)}`;
-    note.textContent = uiText("result.releaseRecord");
-    note.addEventListener("click", () => closeResult(false));
+    const source = resultElement("result-release-source");
+    const note = releaseEvidenceLink(`#pr-record/message/${encodeURIComponent(report.messageId)}`, uiText("result.releaseRecord"));
     source.replaceChildren(document.createTextNode(uiText("result.releaseReporter", { name: memberLabel(report.reportedById) })), " ", note);
   }
   function resultStatus() {
@@ -192,7 +200,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
-    if (view.releaseChecks && getState().messages.some(message => message.id === view.releaseChecks.messageId && (message.deletedAt || message.editedAt))) {
+    if (view.releaseChecks && getState().messages.some(message => (message.deletedAt || message.editedAt)
+      && (message.id === view.releaseChecks.messageId || view.releaseChecks.checks.some(check => check.evidenceMessageId === message.id)))) {
       view.releaseChecks = null;
       showReleaseChecks(null);
     }

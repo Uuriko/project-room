@@ -183,18 +183,27 @@ test("release evidence binds the exact result, candidate and visible report with
   const read = () => f.client.workResult(f.workItemId, { completionEventId });
   const record = (report, actor, extra) => f.post("room-release-checks/1\n" + JSON.stringify(report),
     { replyToId: draft.event.data.messageId, ...extra }, actor);
-  const passed = { candidateRevision, status: "passed", summary: "Archive verified", evidenceDigest: "sha256:" + "1".repeat(64) };
+  const evidenceDigest = "sha256:" + "1".repeat(64);
+  const evidence = f.post(`room-release-receipt/1 build ${completionEventId} ${candidateRevision} ${evidenceDigest}\nArchive manifest verified`,
+    { replyToId: draft.event.data.messageId });
+  const passed = { candidateRevision, status: "passed", summary: "Archive verified", evidenceDigest,
+    evidenceMessageId: evidence.event.data.messageId };
   const basis = { completionEventId, evidenceVersion, candidateRevision };
   const verdict = f.mutate(T.VERIFICATION_RECORDED, { result: "pass", completionEventId, evidenceVersion, summary: "Scoped PASS" }, "reviewer");
   record({ ...basis, candidateRevision: other, checks: { build: { ...passed, candidateRevision: other } } });
   record({ ...basis, checks: { build: { ...passed, candidateRevision: other } } });
   record({ ...basis, checks: { build: passed } }, "guest");
   assert.equal((await read()).workThread.releaseChecks, undefined);
+  record({ ...basis, checks: { build: { ...passed, evidenceMessageId: "missing" } } });
+  assert.equal((await read()).workThread.releaseChecks.checks[0].status, "pending");
+  record({ ...basis, checks: { browser: passed } });
+  assert.equal((await read()).workThread.releaseChecks.checks[1].status, "pending");
   const visible = record({ ...basis, checks: { build: passed } });
   assert.deepEqual((await read()).workThread.releaseChecks.checks.map(x => [x.stage, x.status]), [
     ["build", "passed"], ["browser", "pending"], ["deploy", "pending"]
   ]);
   assert.equal((await read()).workThread.releaseChecks.messageId, visible.event.data.messageId);
+  assert.equal((await read()).workThread.releaseChecks.checks[0].evidenceMessageId, evidence.event.data.messageId);
   record({ ...basis, completionEventId: "wrong-completion", checks: { build: passed } });
   assert.equal((await read()).workThread.releaseChecks.messageId, visible.event.data.messageId);
   assert.equal(f.item().verification.eventId, verdict.event.id);
