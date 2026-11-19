@@ -1,6 +1,7 @@
 import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
 import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
 import {validId} from '../src/events.js';
+import {nativeOutboxEventId} from './mcp-outbox-event-id.mjs';
 import {messageInHistory} from './history-visibility.mjs';
 import {charterContext} from '../src/room-charter.js';
 import {currentWorkRecord} from './work-context.mjs';
@@ -49,11 +50,18 @@ export function selectedRequestWakeDelivery(store, { roomId, request, viewerId }
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_event_outbox'").get()) {
     return UNKNOWN_WAKE_DELIVERY;
   }
-  const rows = db.prepare(`SELECT state FROM mcp_event_outbox
-    WHERE json_extract(document,'$.data.roomId')=?
-      AND json_extract(document,'$.data.memberId')=?
-      AND (json_extract(document,'$.data.requestId')=? OR json_extract(document,'$.data.messageId')=?)`).all(
-    roomId, request.recipientId, request.id, request.id);
+  // Exact-key lookup through mcp_event_outbox_event (no document scan): the
+  // native wake for a formal request is keyed by its opening room event; the
+  // request id covers emitters that key by message id. JSON fields are then
+  // re-checked on at most a few rows so a colliding key can never leak.
+  const keys = [...new Set([request.openingEventId, request.id].filter(validId))]
+    .map(source => nativeOutboxEventId(roomId, request.recipientId, source));
+  const rows = db.prepare(`SELECT state,json_extract(document,'$.data.roomId') AS roomId,
+      json_extract(document,'$.data.memberId') AS memberId,json_extract(document,'$.data.requestId') AS requestId,
+      json_extract(document,'$.data.messageId') AS messageId
+    FROM mcp_event_outbox WHERE event_id IN (${keys.map(() => "?").join(",")}) LIMIT 64`).all(...keys)
+    .filter(row => row.roomId === roomId && row.memberId === request.recipientId
+      && (row.requestId === request.id || row.messageId === request.id));
   const states = new Set(rows.map(row => row.state));
   const webhook = states.has("delivered") ? "delivered"
     : states.has("pending") || states.has("leased") ? "queued"

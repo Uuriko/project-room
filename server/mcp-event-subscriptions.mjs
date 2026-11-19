@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS mcp_event_outbox (
  PRIMARY KEY(subscription_id,event_id)
 );
 CREATE INDEX IF NOT EXISTS mcp_event_outbox_ready ON mcp_event_outbox(state,next_at);
+CREATE INDEX IF NOT EXISTS mcp_event_outbox_event ON mcp_event_outbox(event_id);
 `;
 const HOUR = 3600000;
 const hash = value => createHash("sha256").update(value).digest("hex");
