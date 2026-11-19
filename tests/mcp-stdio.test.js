@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import { setImmediate as tick } from "node:timers/promises";
 import { serveRoomMcp, MCP_VERSION } from "../client/mcp-stdio.mjs";
+import { validWorkArguments } from "../client/work-actions.mjs";
 import { RoomAgentClient, RoomClientError } from "../client/room-agent.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -32,6 +33,19 @@ function harness(t, client = {}, options = {}) {
 }
 const args = { requestId: "draft-one", workItemId: "work", packetId: "packet", basisRevision: 0, body: "A draft ☀️" };
 const receipt = command => ({ sequence: 4, duplicate: false, event: { id: "event", type: "message.posted", roomId: "commons", actorId: "agent", data: { ...command.data } } });
+
+test("room-bound stdio review action passes the local verification tool schema", async t => {
+  const parameters = { workItemId: "work", completionEventId: "completion", expectedRevision: 4, evidenceVersion: "sha256:proof" };
+  const remoteAction = { tool: "room_record_verification", arguments: { roomId: "commons", ...parameters } };
+  const h = harness(t, { workResult: async () => ({ review: { action: remoteAction } }) });
+  await h.ready();
+  const response = await h.rpc("tools/call", { name: "room_read_result", arguments: { workItemId: "work" } });
+  const action = response.result.structuredContent.review.action;
+  assert.deepEqual(action.arguments, parameters);
+  const verdict = { result: "pass", summary: "Verified the selected completion." };
+  assert.equal(validWorkArguments(action.tool, { ...action.arguments, ...verdict }), true);
+  assert.equal(validWorkArguments(remoteAction.tool, { ...remoteAction.arguments, ...verdict }), false);
+});
 
 test("MCP draft reply links are strict and must match the returned receipt", async t => {
   let sent;

@@ -16,7 +16,7 @@ const tool = (name, description, inputSchema, readOnlyHint = true) => ({
 const idField = { type: "string", minLength: 1, maxLength: 128 };
 const roomIdField = { ...idField, description: "Room id this identity is linked to." };
 const nextReadSchema = schema({
-  tool: { type: "string", enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request"] },
+  tool: { type: "string", enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request", "room_read_result"] },
   arguments: { type: "object" }
 }, ["tool", "arguments"]);
 const nextRead = { $ref: "#/$defs/nextRead" };
@@ -36,12 +36,14 @@ const roomNextOutput = {
     charterRevision: { type: ["integer", "null"] }, contentTrust: { type: "string" },
     work: nextPage(schema({
       id: idField, title: { type: "string", maxLength: 160 }, revision: { type: "integer", minimum: 0 },
-      reason: { type: "string" }, nextRead,
+      reason: { type: "string" }, nextRead, nextResultRead: nextRead,
       correction: schema({ reason: { type: "string" }, nextAction: { type: "string" }, truncated: { type: "boolean" } },
         ["reason", "nextAction", "truncated"])
     }, ["id", "title", "revision", "reason", "nextRead"])),
-    requests: nextPage(schema({ id: idField, revision: { type: "integer", minimum: 0 }, nextRead },
-      ["id", "revision", "nextRead"]))
+    requests: nextPage(schema({ id: idField, revision: { type: "integer", minimum: 0 }, nextRead,
+      savedAt: { type: "string", description: "When the Room recorded the request." },
+      latestRecipientProgress: schema({ state: { type: "string" }, at: { type: ["string", "null"] } }, ["state", "at"])
+    }, ["id", "revision", "nextRead"]))
   }, ["contractVersion", "roomId", "viewerId", "goal", "charterRevision", "contentTrust"]),
   anyOf: [{ required: ["work"] }, { required: ["requests"] }]
 };

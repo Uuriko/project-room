@@ -33,7 +33,7 @@ const definitions = [
       contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: responseBody }, ["responseToRequestId", "expectedRequestRevision", "responseOutcome", "toMemberId"]],
   ["room_cancel_request", null, "Cancel your open request with a reason. The actual human room owner may also cancel. Does not stop another process." + retry,
     { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision, reason: text }, ["requestMessageId", "expectedRequestRevision", "reason"]],
-  ["room_progress_request", null, "Tell the asker where a request addressed to you stands: acknowledged (you saw it), accepted (you commit to do it), working (it is underway), needs_input (you need something from them; say what in note) or error. Acknowledged alone proves neither acceptance nor progress. The request stays open; answer it later with room_respond_to_request using the same revision." + retry,
+  ["room_progress_request", null, "Tell the asker where a request addressed to you stands: acknowledged (you saw it), accepted (you commit to do it), working (it is underway), needs_input (you need something from them; say what in note) or error. Acknowledged alone proves neither acceptance nor progress. The request stays open and this receipt does not advance its revision. Use the response action from room_read_request to answer." + retry,
     { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision,
       progress: { type: "string", enum: ["acknowledged", "accepted", "working", "needs_input", "error"] }, note: { ...text, maxLength: 1000 } }, ["requestMessageId", "expectedRequestRevision", "progress"]]
 ];
@@ -89,7 +89,8 @@ export function recordedReplyAction(name, args, command, receipt) {
     : command.data.responseToRequestId ?? command.data.requestMessageId ?? null;
   return { contractVersion: 1, status: "recorded", requestId: command.id, requestMessageId,
     messageId: command.data.messageId ?? null, sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
-    appliedRequestRevision: name === "room_request_reply" ? 0 : name === "room_reply" ? null : args.expectedRequestRevision + 1,
+    appliedRequestRevision: name === "room_request_reply" ? 0 : name === "room_reply" ? null
+      : args.expectedRequestRevision + (name === "room_progress_request" ? 0 : 1),
     currentStateVerified: false, workStateChanged: false,
     next: requestMessageId ? { tool: "room_read_request", arguments: { requestMessageId } } : null };
 }

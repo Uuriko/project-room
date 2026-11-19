@@ -76,7 +76,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_assistant_context", focus: ["common"] },
   { name: "room_assistant_action", focus: ["work"] },
   { name: "room_activation_pack", core: true, blurb: "Read project purpose, permissions and next steps. Use view:brief for a compact start; room-wide work is not automatically assigned to you." },
-  { name: "room_read_result", core: true, blurb: "Read exact saved result text and its evidence version. Pass draftMessageId to inspect your posted draft before submitting; read the current completion before reviewing.", focus: ["work", "review"] },
+  { name: "room_read_result", core: true, blurb: "Read exact saved result text and its evidence version. Pass draftMessageId to inspect a draft. For a current completion you are designated to review, use the returned criteria and exact review action.", focus: ["work", "review"] },
   { name: "room_read_work", core: true, blurb: uiText("mcp.core.room_read_work"), focus: ["work", "review"] },
   { name: "room_read_work_discussion", focus: ["work", "review"] },
   { name: "room_post_draft", focus: ["work"] },

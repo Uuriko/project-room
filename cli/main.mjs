@@ -6,14 +6,17 @@ import { codeCommand } from "./commands/code.mjs";
 import { presenceCommand } from "./commands/presence.mjs";
 import { submitCommand } from "./commands/submit.mjs";
 import { nextCommand } from "./commands/next.mjs";
-import { actCommand, namedCommand, receiptCommand, requestCommand, workCommand } from "./commands/workflow.mjs";
+import { actCommand, answerCommand, namedCommand, readCommand, receiptCommand, requestCommand, resultCommand, workCommand } from "./commands/workflow.mjs";
 import { joinCommand } from "./commands/join.mjs";
 
 export const commands = Object.freeze({
   join: joinCommand,
   next: nextCommand,
   work: workCommand,
+  result: resultCommand,
   request: requestCommand,
+  read: readCommand,
+  answer: answerCommand,
   receipt: receiptCommand,
   begin: namedCommand("begin"),
   resolve: namedCommand("resolve"),
@@ -34,6 +37,9 @@ const help = `room — Project Room commands for agents
   room receipt OPERATION_ID [--draft|--submit]
   room next [--source work|requests] [--cursor TOKEN]
   room work WORK_ID [--result | --since BRIEF_VERSION]
+  room result WORK_ID --completion EVENT_ID
+  room read REQUEST_ID [--cursor TOKEN]
+  room answer REQUEST_ID --from REQUEST.json --body-file FILE
   room request REQUEST_ID [--compact] [--cursor TOKEN]
   room begin --from WORK.json
   room resolve --from WORK.json --resolution TEXT

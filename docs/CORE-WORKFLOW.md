@@ -32,8 +32,9 @@ work. A connection alone does not execute a task.
    to its work brief and also supplies the saved draft read in `draftRead`.
    Older connections can continue using the post, exact draft read, and
    submit sequence. Keep retry input unchanged after an unknown outcome.
-4. The named reviewer reads the exact completion with `room_read_result` and
-   records pass or fail with `room_record_verification`. On failure, the producer
+4. The named reviewer follows the exact completion pointer in Room Next and
+   sends the selected result’s `review.action` with a verdict and summary.
+   CLI agents save the output of `room result` for `room review --from`. On failure, the producer
    reads the correction, uses `room_resolve_blocker`, begins again and submits
    revised evidence. A review of old evidence cannot approve the replacement.
 5. When the task requires owner acceptance, its current work read identifies
@@ -81,22 +82,30 @@ Use the saved connection directly. The CLI returns JSON for each operation.
 | Find work and requests addressed to you | `room next` |
 | Open a task or correction | `room work WORK_ID` |
 | Refresh a retained task brief | `room work WORK_ID --since BRIEF_VERSION` |
-| Inspect the exact result for review | `room work WORK_ID --result` |
+| Inspect the completion selected for review | `room result WORK_ID --completion EVENT_ID` |
 | Check your exact write | `room receipt OPERATION_ID` |
-| Read a formal request | `room request REQUEST_ID [--compact] [--cursor TOKEN]` |
+| Read a formal request | `room read REQUEST_ID [--cursor TOKEN]` |
 | Begin the selected assignment | `room begin --from work.json` |
 | Record a resolution | `room resolve --from work.json --resolution TEXT` |
 | Submit exact evidence | `room submit --from work.json < result.json` |
 | Record an explicit verdict | `room review --from review.json --pass --summary TEXT` (or `--fail`) |
-| Respond to a formal request | `room respond --from request.json --answer --body-file FILE` (or `--decline`) |
+| Answer a formal request | `room answer REQUEST_ID --from request.json --body-file FILE` |
+| Decline a formal request | `room respond --from request.json --decline --body-file FILE` |
 
-Use `room request REQUEST_ID --compact` or `room_read_request` with
+Use `room read REQUEST_ID` or `room_read_request` with
 `view: "compact"` for the current conversation and the latest previous
 exchange. Follow the conversation pages. When older exchanges are omitted,
 `preparation.olderExchangeReads` lists exact earlier requests from oldest
 to newest. Open the relevant exchange directly when the ask refers to an
 older decision. `preparation.previousExchangesNextRead` opens full
 preparation for the same request when several exchanges are needed.
+
+Keep the complete read for `room answer --from`. A progress receipt leaves
+the answer revision unchanged. If a correction invalidates your saved read,
+review the returned `currentRead` before choosing a new answer. If the write
+response is lost, the CLI checks the operation receipt and the exact saved
+answer before reporting success. It returns the original operation ID if it
+cannot confirm the answer.
 
 Keep the full brief if you plan to refresh it with `--since`. Use its
 `briefVersion` for the same connection and task. A `briefUnchanged` response

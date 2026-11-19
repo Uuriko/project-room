@@ -25,25 +25,27 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
   const { config, name } = loadConnection({ project: cwd, env });
   try {
     const secret = await loadSecret(name, config.token, env);
-    const response = await fetchImpl(mcpUrl(config.origin), {
-      method: "POST", redirect: "error", signal: AbortSignal.timeout(10000),
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: bearerHeader(secret) },
-      body: JSON.stringify({
-        jsonrpc: "2.0", id: "room-next", method: "tools/call",
-        params: { name: "room_next", arguments: { roomId: config.roomId, ...selection } }
-      })
-    });
-    if (!response.ok) {
-      err(`Room read failed (HTTP ${response.status}).`);
-      return 1;
-    }
-    const rpc = await boundedJson(response);
-    const value = rpc.result?.structuredContent;
-    if (rpc.id !== "room-next" || rpc.error || rpc.result?.isError
-      || value?.contractVersion !== 1 || value.roomId !== config.roomId || value.viewerId !== config.memberId) {
-      err("Room did not return a matching next view. Check connection access and server support.");
-      return 1;
-    }
+    const call = async (name, args) => {
+      const response = await fetchImpl(mcpUrl(config.origin), {
+        method: "POST", redirect: "error", signal: AbortSignal.timeout(10000),
+        headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: bearerHeader(secret) },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: "room-next", method: "tools/call",
+          params: { name, arguments: { roomId: config.roomId, ...args } }
+        })
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`Room read failed (HTTP ${response.status}).`);
+      }
+      const rpc = await boundedJson(response);
+      const value = rpc.result?.structuredContent;
+      const matches = value?.contractVersion === 1 && value.roomId === config.roomId && value.viewerId === config.memberId;
+      if (rpc.id !== "room-next" || rpc.error || rpc.result?.isError || !matches)
+        throw new Error("Room did not return a matching next view. Check connection access and server support.");
+      return value;
+    };
+    const value = await call("room_next", selection);
     if (["work", "requests"].some(source => {
       const page = value[source];
       if (selection.source && selection.source !== source) return page !== undefined;
@@ -64,6 +66,11 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
     }
     for (const row of value.work?.items ?? []) {
       const args = row.nextRead?.arguments;
+      if (row.nextRead?.tool === "room_read_result" && args?.roomId === config.roomId
+          && args.workItemId === row.id && validId(args.workItemId) && validId(args.completionEventId)
+          && Object.keys(args).every(key => ["roomId", "workItemId", "completionEventId"].includes(key))) {
+        row.nextRead.command = ["room", "result", args.workItemId, "--completion", args.completionEventId];
+      }
       if (row.nextRead?.tool === "room_read_work" && validId(args?.workItemId)
           && (args.roomId === undefined || args.roomId === config.roomId)
           && args.brief === true && args.includeDiscussion !== true
@@ -75,8 +82,9 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
       const args = row.nextRead?.arguments;
       if (row.nextRead?.tool === "room_read_request" && validId(args?.requestMessageId)
           && (args.roomId === undefined || args.roomId === config.roomId)
-          && Object.keys(args).every(key => ["roomId", "requestMessageId"].includes(key))) {
-        row.nextRead.command = ["room", "request", args.requestMessageId];
+          && (args.view === undefined || args.view === "compact")
+          && Object.keys(args).every(key => ["roomId", "requestMessageId", "view"].includes(key))) {
+        row.nextRead.command = ["room", "read", args.requestMessageId];
       }
     }
     const output = JSON.stringify(value);

@@ -17,6 +17,13 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
         definitionOfDone: "Out of scope", accountableMemberId: f.observer.id, verifierMemberId: f.producer.id,
         independentVerificationRequired: true, mode: "read" });
     }
+    f.send(f.producer.key, "reply_request.progressed", { requestMessageId: "private-ask",
+      expectedRequestRevision: 0, progress: "acknowledged", note: "zq-private-progress-note-zq" });
+    if (representation === "legacy") {
+      // A large unrelated projection slice must not hide addressed work or requests.
+      f.store.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.roomNextTestPadding',?) WHERE id=?")
+        .run("x".repeat(300 * 1024), "commons");
+    }
     const before = f.stored();
     const room = f.store.room;
     f.store.room = () => { throw new Error("room next hydrated the whole Room"); };
@@ -31,6 +38,12 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.ok(privateMarkers(correction.correction.reason).length);
     assert.equal(correction.nextRead.arguments.includeDiscussion, false);
     assert.deepEqual(owner.value.requests.items.map(item => item.id), ["private-ask"]);
+    const [ask] = owner.value.requests.items;
+    assert.ok(Date.parse(ask.savedAt) <= Date.parse(ask.latestRecipientProgress.at));
+    assert.equal(ask.latestRecipientProgress.state, "acknowledged");
+    assert.equal(ask.nextRead.arguments.requestMessageId, "private-ask");
+    assert.equal(ask.nextRead.arguments.view, "compact");
+    assert.ok(!owner.text.includes("zq-private-progress-note-zq"));
     assert.ok(!owner.text.includes("zq-private-request-zq"));
 
     const observer = await f.mcp(f.triage, "room_next");
@@ -59,7 +72,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(code, 0, errors.join("\n"));
     const cli = JSON.parse(output[0]);
     // Opaque continuations intentionally differ on fresh issuance.
-    for (const [source, command] of [["work", "work"], ["requests", "request"]]) {
+    for (const [source, command] of [["work", "work"], ["requests", "read"]]) {
       assert.deepEqual(cli[source].items.map(row => {
         const { command: actual, ...nextRead } = row.nextRead;
         assert.deepEqual(actual, ["room", command, row.id]);
@@ -137,6 +150,7 @@ test("formal requests paginate independently with no work, and closed requests c
   assert.equal(first.ok, true, first.text);
   assert.deepEqual(first.value.work.items, []);
   assert.equal(first.value.requests.coverage, "partial");
+  assert.ok(first.value.requests.items.every(row => typeof row.savedAt === "string" && !row.latestRecipientProgress));
   const ids = first.value.requests.items.map(row => row.id);
   let pointer = first.value.requests.nextRead;
   for (let page = 0; pointer && page < 10; page++) {
