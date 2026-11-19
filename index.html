@@ -609,7 +609,11 @@
         <button id="room-instructions-close" class="button secondary" type="button">Close</button>
       </div>
     </dialog>
-    <section id="result-dialog" class="inline-result" role="region" aria-labelledby="result-title" hidden><div id="result-resize" role="separator" aria-orientation="vertical" aria-controls="result-dialog" tabindex="0"></div><header class="result-header"><h2 id="result-title" tabindex="-1">Result</h2><details id="result-options" class="result-options"><summary aria-label="Preview actions">⋯</summary><div><button id="result-copy-text" type="button" class="button ghost" hidden></button><button id="result-download" type="button" class="button ghost" hidden></button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></details><button id="close-result" type="button" class="button ghost"></button></header><p id="result-status" class="form-hint" role="status"></p><section class="result-correction" id="result-correction" aria-labelledby="result-correction-title" hidden>
+    <section id="result-dialog" class="inline-result" role="region" aria-labelledby="result-title" hidden><div id="result-resize" role="separator" aria-orientation="vertical" aria-controls="result-dialog" tabindex="0"></div><header class="result-header"><h2 id="result-title" tabindex="-1">Result</h2><details id="result-options" class="result-options"><summary aria-label="Preview actions">⋯</summary><div><button id="result-copy-text" type="button" class="button ghost" hidden></button><button id="result-download" type="button" class="button ghost" hidden></button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></details><button id="close-result" type="button" class="button ghost"></button></header><p id="result-status" class="form-hint" role="status"></p><dl class="result-work-context" id="result-work-context" hidden>
+        <div><dt>Review scope</dt><dd id="result-work-criteria"></dd></div>
+        <div id="result-work-verification-row" hidden><dt>Recorded verification</dt><dd id="result-work-verification"></dd></div>
+        <div><dt>Next</dt><dd id="result-work-next"></dd></div>
+      </dl><button id="result-work-action" type="button" class="button primary" hidden></button><section class="result-correction" id="result-correction" aria-labelledby="result-correction-title" hidden>
         <h3 id="result-correction-title"></h3>
         <p id="result-correction-summary"></p>
       </section>

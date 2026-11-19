@@ -847,7 +847,7 @@ const memberPermissionsUI = installMemberPermissions({ client, getState: () => s
 // One attention destination; historical palette names resolve here.
 // JDOT-COH-NAV begin
 updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), getContext: workNavigationContext,
-  onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin }),
+  onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin, presentation: "thread" }),
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
 // JDOT-COH-NAV end
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
@@ -2857,7 +2857,10 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   const actionName = esc(uiText("message.actionsAccessibleName", { author: displayName(m.authorId), time: messageActionTimeFormat.format(new Date(m.createdAt)) }));
   const menu = overflow ? ['<details class="message-more"><summary aria-label="', actionName, '" title="More actions">⋯</summary><div class="message-more-menu">', overflow, "</div></details>"].join("") : "";
   return `<div class="message-links">${requestControls(m)}${linked.map(i => {
-    const summary = session.member.kind === "human" ? (i.state === S.BLOCKED ? i.blocker?.reason : i.receipt?.summary) : null;
+    const postedResult = m.workItemId === i.id && (i.receipt?.nativeText?.messageId === m.id
+      || i.receiptHistory?.some(receipt => receipt.nativeText?.messageId === m.id));
+    const summary = session.member.kind === "human" && !postedResult
+      ? (i.state === S.BLOCKED ? i.blocker?.reason : i.receipt?.summary) : null;
     return `<span class="conversation-work"><a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">${esc(i.title)}</a>${doneChip(i)}${summary ? `<span class="conversation-work-summary">${esc(clipGraphemes(summary, 240))}${summary.length > 240 ? "…" : ""}</span>` : ""}</span>`;
   }).join("")}${replyHtml}${threadHtml}${menu}</div>`;
 }
@@ -3533,7 +3536,21 @@ function showWorkDestination(kind, id, presentation = "focus") {
   workNavigationEpoch++; updatesUi?.close();
   if ($("#board-dialog").open) $("#board-dialog").close();
   if (kind === "work" && presentation === "drafts") { revealDrafts(id); activeWorkNavigationId = id; }
-  else if (kind === "work") revealWork(id, presentation === "details"); else revealMessage(id);
+  else if (kind === "work") {
+    const selected = revealWork(id, presentation === "details");
+    if (presentation === "thread") {
+      const epoch = workNavigationEpoch, identity = session;
+      void Promise.resolve(selected).then(card => {
+        if (!card || workNavigationEpoch !== epoch || session !== identity || activeWorkNavigationId !== id) return;
+        const item = state.workItems[id];
+        if (item?.state === S.COMPLETED && item.receipt?.nativeText?.previousCompletionEventId
+          && ["verify", "decide"].includes(nextWorkStep(item, Date.now(), state.room.ownerId).action)) {
+          const button = card.querySelector("[data-read-result]");
+          if (button) readResult({ target: button });
+        }
+      });
+    }
+  } else revealMessage(id);
   syncWorkReturnControl();
 }
 // #3795: open the board on one claim's record — the destination behind
@@ -3642,6 +3659,7 @@ async function restoreWorkOrigin(ticket) {
   const origin = currentWorkOrigin(ticket);
   if (!origin || busy) { returnToCurrentRoom(); return; }
   const epoch = ++workNavigationEpoch;
+  if (origin.presentation === "thread") closeResult(false);
   updatesUi?.cancelPending();
   activeWorkNavigation = currentWorkOrigin(origin.previous) ? origin.previous : null;
   workspaceUI?.showRooms();
@@ -3727,6 +3745,7 @@ function replayWorkNavigation() {
     if (!targetOrigin.targetClaimId && $("#board-dialog").open) $("#board-dialog").close();
     const work = /^#pr-record\/work\/(.+)$/.exec(location.hash);
     if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
+    else if (work && targetOrigin.presentation === "thread") showWorkDestination("work", decodeFragment(work[1]), "thread");
     else revealLocationHash();
     syncWorkReturnControl();
     return true;
@@ -6721,6 +6740,7 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onWorkAction(item, action) { openWorkAction(item, action); },
   onOriginal(messageId) {
     searchCollapsed = true; $("#search-results").hidden = true;
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);

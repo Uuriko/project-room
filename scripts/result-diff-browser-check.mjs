@@ -107,7 +107,17 @@ for (const width of [1440, 390]) {
     assert.equal(firstReview.completionEventId, f.first.event.id);
     assert.equal(await reviewer.locator("#action-result-diff").textContent(), "", "closing review clears comparison bytes");
     const owner = await f.login("owner");
-    await clickWorkAction(await openConversationWork(owner, "revision-journey"), "decide");
+    await owner.locator("#topbar-updates").click();
+    const update = owner.locator('#updates-dialog .updates-row').filter({ hasText: "Revise a short result" });
+    const open = update.getByRole("button", { name: "Open Revise a short result", exact: true });
+    await open.waitFor();
+    await owner.waitForFunction(() => document.querySelector(".attention-decision[data-duplicate-update]"));
+    assert.equal(await owner.locator(".attention-decision[data-duplicate-update]").isVisible(), false);
+    await open.press("Enter");
+    await owner.locator("#result-correction-summary").getByText("Name the owner in the final line").waitFor();
+    assert.equal(await owner.locator("#result-work-criteria").textContent(), "Name the owner");
+    assert.equal(await owner.locator("#result-work-verification").textContent(), "Checked the named owner in result B");
+    await owner.locator("#result-work-action").press("Enter");
     await owner.locator("#action-result-diff").getByText(/Resubmitted result/).waitFor();
     assert.match(await owner.locator("#action-text-body").textContent(), /Result B/);
     await owner.locator('#action-fields [name="decision"]').selectOption("approved");

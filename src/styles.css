@@ -230,6 +230,10 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .definition { color: var(--muted); font-size: .8rem; line-height: 1.5; }
 .work-focus-summary { overflow-wrap: anywhere; }
 .work-facts { display: grid; gap: .35rem; margin: .8rem 0; }
+.result-work-context { margin: var(--space-3) 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
+.result-work-context dt { font-weight: 650; }
+.result-work-context dd { margin: 0 0 var(--space-2); color: var(--muted); }
+.attention-item[data-duplicate-update] { display: none; }
 .result-correction { border-inline-start: 2px solid var(--blue); padding-inline-start: .75rem; margin-block: .75rem; overflow-wrap: anywhere; }
 .result-correction h3 { font-size: var(--text-sm); margin: 0; }
 .result-correction p { margin-block: .25rem 0; white-space: pre-wrap; }
