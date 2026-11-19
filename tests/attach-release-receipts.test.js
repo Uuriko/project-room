@@ -6,7 +6,7 @@ test("publishes candidate-bound stage receipts and recovers a lost write by repl
   const candidateRevision = "a".repeat(40), evidenceVersion = "sha256:" + "b".repeat(64);
   const binding = { workItemId: "work-1", completionEventId: "completion-1", candidateRevision };
   const messages = new Map();
-  let loseReport = true;
+  let loseReport = true, postCalls = 0;
   const raw = x => Buffer.from(JSON.stringify(x));
   const build = raw({ sourceCommit: candidateRevision, sourceTree: "e".repeat(40), verified: true, files: 10, manifestSha256: "c".repeat(64) });
   const browser = raw({ sourceRevision: candidateRevision, clean: true, tests: 2, passed: 2, failed: 0, skipped: 0, exitCode: 0,
@@ -22,6 +22,7 @@ test("publishes candidate-bound stage receipts and recovers a lost write by repl
       text: { body: `Scope\nCandidate revision: ${candidateRevision}`, messageId: "result-1" }
     } }),
     post: args => {
+      postCalls++;
       const found = messages.get(args.id);
       if (found) assert.deepEqual(args, found);
       else messages.set(args.id, args);
@@ -36,8 +37,23 @@ test("publishes candidate-bound stage receipts and recovers a lost write by repl
   assert.equal(messages.size, 0);
   await assert.rejects(attachReleaseReceipts({ ...options, binding: { ...binding, completionEventId: "wrong-completion" } }), /selected completion/);
   assert.equal(messages.size, 0);
-  await assert.rejects(attachReleaseReceipts(options), /lost response/);
-  const result = await attachReleaseReceipts(options);
+  await assert.rejects(attachReleaseReceipts(options), /Unconfirmed Room write release-checks-/);
+  const lookup = ({ operationId }) => messages.has(operationId)
+    ? { operationId, status: "recorded", eventType: "message.posted", eventId: "event-1", sequence: 123 }
+    : { operationId, status: "not_recorded" };
+  const result = await attachReleaseReceipts({ ...options, lookup });
+  assert.equal(postCalls, 4);
+  assert.ok(result.report.recovered && result.evidence.every(stage => stage.recovered));
+  await assert.rejects(attachReleaseReceipts({ ...options, inputs: { build },
+    readResult: async () => ({ ...options.readResult(),
+      workThread: { releaseChecks: { checks: [{ stage: "browser", evidenceMessageId: "previous-browser" }] } } })
+  }), /Missing an already attached stage/);
+  assert.equal(postCalls, 4);
+  messages.delete(result.report.messageId);
+  const missing = await attachReleaseReceipts({ ...options, lookup });
+  assert.equal(postCalls, 5);
+  assert.equal(missing.report.messageId, result.report.messageId);
+  assert.equal(missing.report.duplicate, false);
   assert.equal(messages.size, 4);
   assert.equal(result.report.duplicate, true);
   assert.ok(result.evidence.every(stage => stage.duplicate));

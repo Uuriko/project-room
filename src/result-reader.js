@@ -201,7 +201,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
     if (view.releaseChecks && getState().messages.some(message => (message.deletedAt || message.editedAt)
-      && (message.id === view.releaseChecks.messageId || view.releaseChecks.checks.some(check => check.evidenceMessageId === message.id)))) {
+      && (message.id === view.releaseChecks.messageId || view.releaseChecks.checks.some(check => check.evidenceMessageId === message.id || check.reportMessageId === message.id)))) {
       view.releaseChecks = null;
       showReleaseChecks(null);
     }

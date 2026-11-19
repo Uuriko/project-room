@@ -179,9 +179,11 @@ existing suites via `scripts/qualify-release-browser.mjs SHA REPORT SUITE...` an
 the TAP log beside the report. It requires a clean checkout of that exact SHA.
 The scoped browser receipt passes when every check in the selected suites passes.
 
-Keep the files fixed after publication. Replaying the same inputs recovers writes
-with deterministic message IDs. An unavailable publication can be retried after a
-successful install using its saved deploy receipt.
+Keep the binding and original stage files together. If publication is interrupted,
+run the same publisher with `--recover` or the Commons operator's `publish SHA`
+step, using the saved files including any deploy receipt. Recovery checks each
+original operation ID with `room_receipt` and posts only an absent operation.
+Keep all previously attached stage files so a recovery cannot hide their checks.
 
 For a release result, name its full 40-hex candidate revision in the native
 text as `Candidate revision: SHA` on its own line. An exact `sourceRevision`
@@ -190,8 +192,9 @@ reply to the result message. Start its body with `room-release-checks/1` on its
 own line and send JSON with `completionEventId`, `evidenceVersion`,
 `candidateRevision` and `checks`. The reply must use the same `workItemId`.
 The work proposer, accountable producer, completion reporter, or owner can
-publish it. Room presents the newest matching visible report next to the
-verdict without changing the original exact result.
+publish it. Room uses the newest matching report that names each stage, so an
+older step published late cannot hide evidence for another stage. The verdict
+and original exact result keep their own records.
 
 For each available stage `build`, `browser`, or `deploy`, include
 `candidateRevision`, `status` (`passed` or `failed`), a short evidence
@@ -203,7 +206,7 @@ result message, with the relevant proof below this first line:
 room-release-receipt/1 STAGE COMPLETION_EVENT_ID CANDIDATE_REVISION EVIDENCE_DIGEST
 ```
 
-Omitted stages and receipts the viewer cannot read show as pending. Publish a new reply when the evidence changes.
+A stage with no report, or whose newest receipt the viewer cannot read, shows as pending. Publish a new reply when the evidence changes.
 Room checks the report's binding and audience. Its stage outcomes are
 reported observations and do not change review or deployment authority.
 
