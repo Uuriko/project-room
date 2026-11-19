@@ -77,6 +77,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
   }
   $("#result-options > summary").setAttribute("aria-label", uiText("result.previewActions"));
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
+  resultElement("result-correction-title").textContent = uiText("result.previousReview");
+  function showCorrection(correction) {
+    const text = typeof correction?.summary === "string" ? correction.summary : "";
+    resultElement("result-correction-summary").textContent = text;
+    resultElement("result-correction").hidden = !text;
+  }
   function usableText(view) {
     return view && view === resultView && view.loaded && !view.withdrawn && !view.error
       && sameSession(view.generation, view.roomId, view.memberId)
@@ -127,6 +133,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (view.withdrawn) {
       pointerSelection = null;
       view.body = "";
+      showCorrection(null);
       resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = true;
       resultElement("result-original").hidden = true;
@@ -156,6 +163,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const view = resultView;
     finishResize();
     resultView = null; resultReader.classList.remove("result-docked", "result-mobile"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
+    showCorrection(null);
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
@@ -274,6 +282,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       // than showing an empty box: the result was still reported and verified,
       // and the receipt still names what it was verified against.
       view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
+      showCorrection(view.withdrawn ? null : value.workThread?.correction);
       resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
@@ -308,6 +317,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   });
   function openResult(view, title, focus = true) {
       resultView = view;
+      showCorrection(null);
       resultElement("result-options").open = false;
       resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
       resultElement("result-original").hidden = true;

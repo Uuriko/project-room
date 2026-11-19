@@ -568,6 +568,7 @@ export default {
   "result.backConversation": "Back to conversation",
   "result.resize": "Resize preview",
   "result.searchCount": "{count} results",
+  "result.previousReview": "What the previous review flagged",
   "result.previewActions": "Preview actions",
   "connection.outageTitle": "Room temporarily unavailable",
   "connection.staleAvailability": "Last known availability · connection interrupted",
