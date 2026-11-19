@@ -27,19 +27,21 @@ import ProjectRoomKit
                     let afterReload = try String(contentsOfFile: args[index + 1], encoding: .utf8)
                     let previousDocument = try await room.webView.evaluateJavaScript("performance.timeOrigin") as? Double
                     room.webView.reload()
-                    var replaced = false
-                    for _ in 0..<200 {
-                        try await Task.sleep(nanoseconds: 100_000_000)
-                        if room.webView.isLoading { continue }
-                        if let current = try? await room.webView.evaluateJavaScript("performance.timeOrigin") as? Double,
-                           current != previousDocument {
-                            replaced = true
-                            break
-                        }
-                    }
-                    guard replaced else { throw NSError(domain: "RoomAcceptance", code: 1, userInfo: [NSLocalizedDescriptionKey: "Reload did not replace the document"]) }
+                    try await awaitNewDocument(room, previous: previousDocument)
                     let recovered = try await room.webView.callAsyncJavaScript(afterReload, arguments: [:], in: nil, contentWorld: .page)
                     print("WK_RELOAD_ACCEPTANCE \(String(describing: recovered))")
+                }
+                for index in args.indices where args[index] == "--navigate" {
+                    guard index + 2 < args.count, let destination = URL(string: args[index + 1]),
+                          RoomLocation.sameOrigin(destination, room.origin) else {
+                        throw NSError(domain: "RoomAcceptance", code: 1, userInfo: [NSLocalizedDescriptionKey: "Navigation must stay on the isolated fixture origin"])
+                    }
+                    let previous = try await room.webView.evaluateJavaScript("performance.timeOrigin") as? Double
+                    let step = try String(contentsOfFile: args[index + 2], encoding: .utf8)
+                    room.open(destination)
+                    try await awaitNewDocument(room, previous: previous)
+                    let outcome = try await room.webView.callAsyncJavaScript(step, arguments: [:], in: nil, contentWorld: .page)
+                    print("WK_NAVIGATION_ACCEPTANCE \(String(describing: outcome))")
                 }
                 if let output = CommandLine.arguments.firstIndex(of: "--screenshot"), output + 1 < CommandLine.arguments.count {
                     let shot = try await room.webView.takeSnapshot(configuration: nil)
@@ -70,6 +72,16 @@ import ProjectRoomKit
             } catch { fputs("WK_ACCEPTANCE_FAILED \(error)\n", stderr); exit(1) }
         }
     }
+    private func awaitNewDocument(_ room: RoomWindow, previous: Double?) async throws {
+        for _ in 0..<200 {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            if room.webView.isLoading { continue }
+            if let current = try? await room.webView.evaluateJavaScript("performance.timeOrigin") as? Double,
+               previous != nil, previous != current { return }
+        }
+        throw NSError(domain: "RoomAcceptance", code: 1, userInfo: [NSLocalizedDescriptionKey: "Navigation did not replace the document"])
+    }
+
 }
 try MainActor.assumeIsolated {
 let args = CommandLine.arguments

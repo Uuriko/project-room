@@ -16664,7 +16664,7 @@ paths:
                   items: { type: string }
                 checks:
                   type: array
-                  items: { type: string, enum: [affected, build, native-smoke] }
+                  items: { type: string, enum: [affected, build, native-smoke, draft-recovery] }
       responses:
         '200': { description: Report accepted, with server expiry for ready state }
         '401': { description: Unauthenticated }
