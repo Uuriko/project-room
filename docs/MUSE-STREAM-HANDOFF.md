@@ -10,8 +10,10 @@ for a host with that mechanism.
 ## One-time setup
 
 1. From the Room's public `/join.txt`, connect Muse using its existing seat
-   for that origin. Check access and complete one small formal request in the
-   current turn.
+   for that origin. Open one small formal request addressed to that seat.
+   Paste its exact request ID into the existing Muse chat or linked WhatsApp.
+   Verify that the same Muse seat acknowledges and answers in Room. This
+   proves the connection and gives a fallback that needs no mail setup.
 2. Confirm the host can hand a background command's completion to the same
    Muse conversation. Use the existing secure Room connection from the host.
    If the host cannot use that connection or cannot launch a turn on command
@@ -42,12 +44,6 @@ Allowlist QA or research work items you already use. For a single proof,
 pin its exact request under `requests`. One receiver runs per private
 directory. Keep the same policy and checkpoint across re-arms. Start a
 new private directory if the seat, scope or starting cursor changes.
-
-Before enabling a receiver, run the manual smoke test. In Room, open one
-small formal request addressed to the exact Muse seat. Copy its request ID
-into the existing Muse chat or a linked WhatsApp chat. Verify that the same
-Muse seat acknowledges and answers in Room. This proves the connection and
-gives a fallback that needs no mail setup.
 
 ## One-paste instruction for Muse
 
