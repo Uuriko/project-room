@@ -52,7 +52,7 @@ export function readMacCapabilities(store, { roomId, viewerId, members, items, n
     const member = ownMember(members, lease.memberId);
     return member?.kind === "agent" && member.active === true;
   }).slice(0, 3).map(({ sessionId, memberId, workItemId, head, base, observedAt, expiresAt }) => ({
-    kind: "mac_affected_tests", state: "ready", source: "runner_report", capabilityId: sessionId,
+    kind: "desktop_affected_tests", state: "ready", source: "runner_report", capabilityId: sessionId,
     head, base, observedAt: iso(observedAt), expiresAt: iso(expiresAt),
     request: { tool: "room_request_reply", arguments: { roomId, toMemberId: memberId, workItemId, body: `mac affected ${head}` } }
   }));
