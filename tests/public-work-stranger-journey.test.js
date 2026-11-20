@@ -121,6 +121,7 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   const list = prompt.match(/GET (\S+public-work\/tasks\?\S+)/)[1];
   assert.equal(list, f.origin + '/api/public-work/tasks?roomId=commons&claimable=1&limit=5');
   assert.match(prompt, /After your first useful submission, attempt to connect/);
+  assert.match(prompt, /public_work_my_review with that receipt ID or GET \/api\/public-work\/receipts\/RECEIPT_ID\/review with the same saved identity/);
   assert.match(prompt, /Repeat the claim and submit loop one task at a time/);
   assert.equal((await fetch(f.origin + '/join.txt?room=commons&room=other')).status, 400);
   const browse = async () => {
