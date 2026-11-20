@@ -867,7 +867,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
       actorId: receipt.event.actorId, sequence: receipt.sequence, duplicate: receipt.duplicate,
       currentStateVerified: false,
       ...Object.fromEntries(["replyToId", "workItemId", "toMemberId"].filter(key => receipt.event.data[key] !== undefined).map(key => [key, receipt.event.data[key]])),
-      ...Object.fromEntries(["note", "mentionWarnings", "statusHint", "wakeDelivery"].filter(key => Object.hasOwn(receipt, key)).map(key => [key, receipt[key]]))
+      ...Object.fromEntries(["note", "mentionWarnings", "statusHint", "wakeDelivery", "wakeDeliveryEvidence"].filter(key => Object.hasOwn(receipt, key)).map(key => [key, receipt[key]]))
     };
     if (limit === undefined) return compact;
     const nextRead = { tool: "room_read_result", arguments: { roomId, workItemId: args.workItemId, draftMessageId: messageId } };

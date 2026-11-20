@@ -190,7 +190,7 @@ export function stampInbox(inbox, viewerId) {
       from: message.from, at: Date.parse(message.at), sequence: message.sequence,
       nextRead: message.nextRead ?? { tool: "room_read_messages", arguments: { roomId, after: message.sequence - 1, limit: 1 } },
       ...(message.requestKind === "reply" ? {} : {
-        reply: { tool: "room_reply", arguments: { roomId, replyToId: message.replyToId, toMemberId: message.from } }
+        reply: { tool: "room_reply", arguments: { roomId, replyToId: message.replyToId ?? message.messageId, toMemberId: message.from } }
       })
     })),
     ...peerMessages.map((message, index) => ({

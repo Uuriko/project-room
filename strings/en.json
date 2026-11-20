@@ -598,6 +598,7 @@
   "composer.viewSaved": "View message",
   "composer.mentionUnresolved": " · A mention could not select a recipient. Choose a member to notify.",
   "composer.wakeDisposition": " · {name} — {status}",
+  "composer.wakeEvidenceUnknown": " · Wake status unavailable for this saved send.",
   "composer.wakeQueued": "Wake queued",
   "composer.noReceiver": "No receiver connected",
   "composer.wakeNotQueued": "Wake could not be queued",

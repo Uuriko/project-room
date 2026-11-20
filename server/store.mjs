@@ -7257,7 +7257,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const prior = this.db.prepare("SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, command.id);
       if (prior) {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
-        return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
+        return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true,
+          ...(command.type === T.DM_POSTED && command.data.quiet ? { notification: "quiet" }
+            : [T.MESSAGE_POSTED, T.DM_POSTED].includes(command.type) ? { wakeDeliveryEvidence: "unknown" } : {}) };
       }
       return withCurrentServingWriter(this.db,roomId,() => {
       // Exact replays of commands committed before the pause returned above.
@@ -7984,11 +7986,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     for (const [memberId, kind] of targets) {
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
-      if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
+      if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) {
+        delivery.push({ memberId, status: "not_queued" });
+        continue;
+      }
       // #5384: the agent's who-can-talk setting, enforced here at fan-out.
       if (!mayWake(this.db, state, roomId, senderMemberId, memberId)) {
         recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
           event: "suppressed_policy", kind, subjectId: memberId, reason: "talk_policy" });
+        delivery.push({ memberId, status: "not_queued" });
         continue;
       }
       const identityId = identityIdForWakeMember(this.db, roomId, memberId);
@@ -7999,6 +8005,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!identityId) {
         recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
+        delivery.push({ memberId, status: "no_receiver" });
         continue;
       }
       const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, requestId, eventId, actorId: senderMemberId, kind });
