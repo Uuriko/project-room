@@ -3,8 +3,8 @@ import { mayWake } from './agent-talk-policy.mjs';
 import { firstBlockedWakeTarget } from '../src/events.js';
 import { nextWorkStep } from '../src/workflow.js';
 import { mutedEvent } from './moderation.mjs';
-import { createHash } from 'node:crypto';
 import { createMcpEventSubscriptions } from './mcp-event-subscriptions.mjs';
+import { nativeOutboxEventId } from './mcp-outbox-event-id.mjs';
 import { authorizeMcpOAuthDescriptor } from './mcp-oauth.mjs';
 import { isWorkersRuntime } from './ip-blocklist.mjs';
 import { canonicalNativeMentionPolicyContext } from './native-mention-context.mjs';
@@ -58,7 +58,7 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
       ...(hasRequest ? { requestId } : {}),
       nextRead: hasRequest ? { tool: 'room_read_request', arguments: { roomId, requestMessageId: requestId, view: 'compact' } } : nextRead,
       context: { actorId, kind, ...(kind === 'work' ? { workItemId, workRevision } : {}), ...(kind === 'board' ? { workClaimId, claimBasis } : {}) },
-      eventId: 'mcp_' + createHash('sha256').update(JSON.stringify([roomId, memberId, eventId])).digest('hex') });
+      eventId: nativeOutboxEventId(roomId, memberId, eventId) });
   };
   const handler = async (message, { descriptor }) => {
     const result = value => ({ jsonrpc: '2.0', id: message.id, result: value });
