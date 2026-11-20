@@ -382,7 +382,7 @@ export class Bridge {
   async acknowledgeFormalReceipt(requestId, signalId) {
     const fence = this.fencingToken;
     const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(2000)]);
-    try {
+    const acknowledge = async () => {
       const context = await this.room.requestContext(requestId, null, { compact: true, signal });
       const request = context?.request, basis = context?.current?.answerBasis;
       if (context?.roomId !== this.connection.roomId || context.viewerId !== this.connection.memberId
@@ -407,6 +407,16 @@ export class Bridge {
       if (result?.event?.type === body.type && result.event.actorId === context.viewerId
         && result.event.data?.requestMessageId === requestId && result.event.data.progress === 'acknowledged')
         this.stageObserver.mark([signalId], 'formal_ack_recorded', id);
+    };
+    try {
+      try { await acknowledge(); }
+      catch (error) {
+        // A rejected context fence proves this write did not commit. Inspect
+        // the new correction once under the same deadline and listener lease.
+        if (!(error instanceof RoomError) || error.status !== 409
+          || error.code !== 'request_context_changed' || signal.aborted || fence !== this.fencingToken) throw error;
+        await acknowledge();
+      }
     } catch (error) {
       // The ordinary turn still checks all authority independently.
       this.log(`formal receipt not confirmed (${error instanceof RoomError ? error.code : 'internal'})`);
