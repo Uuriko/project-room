@@ -511,13 +511,13 @@ export class Bridge {
     try {
       let receipt = this.reviewReceipts.find(key);
       if (!receipt) {
+        const prompt = await readReview(this.room,binding);
+        if (!prompt || this.controller.signal.aborted) return;
         await this.agentReady();
         if (this.controller.signal.aborted) return;
         this.stageObserver.mark(signalIds,'session_preparing');
         const {sessionId} = await this.host.session(threadKey);
         this.stageObserver.mark(signalIds,'session_ready');
-        const prompt = await readReview(this.room,binding);
-        if (!prompt) return; // Changed, hidden or reassigned work remains with its current owner.
         await this.assertListener();
         const started = this.reviewReceipts.begin(signalId,{binding,signalId});
         if (!started.fresh) return;
