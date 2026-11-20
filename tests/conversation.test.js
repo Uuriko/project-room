@@ -216,6 +216,12 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   const esc = value => String(value).replaceAll("<", "&lt;");
   assert.match(mentionHtml("Ask @Instinct tomorrow", members, esc), /mention agent/);
   assert.match(mentionHtml("Ask @Instinct tomorrow", members, esc), /data-mention-id="instinct"/);
+  const exact = addressMember("Ask ", 4, members[0], { exact: true });
+  assert.equal(exact.body, "Ask @(instinct) ");
+  assert.equal(exact.toMemberId, "");
+  assert.match(mentionHtml(exact.body, [{ ...members[0], displayName: "Renamed" }], esc), /data-mention-id="instinct">@Renamed/);
+  assert.equal(messageMentionsMember(exact.body, members[0]), true);
+  assert.equal(removeMention(exact.body, members[0]), "Ask ");
   assert.equal(mentionHtml("Ask <script> @Maya", members, esc).includes("<script>"), false);
   assert.match(mentionHtml("Ask <script> @Maya", members, esc), /mention"/);
   assert.equal(messageMentionsMember("Ask @Maya tomorrow", members[1]), true);

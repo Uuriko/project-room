@@ -278,6 +278,7 @@ function validRoomArgs(name, args) {
   if (name === "bond_list") return args.id === undefined || validId(args.id);
   if (name === "dm_posted") {
     return validId(args.id) && validId(args.to) && validId(args.messageId)
+      && (args.quiet === undefined || typeof args.quiet === "boolean")
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
   if (name === "room_list_peer_dms") return args.threadId === undefined || validThreadId(args.threadId);
@@ -866,7 +867,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
       actorId: receipt.event.actorId, sequence: receipt.sequence, duplicate: receipt.duplicate,
       currentStateVerified: false,
       ...Object.fromEntries(["replyToId", "workItemId", "toMemberId"].filter(key => receipt.event.data[key] !== undefined).map(key => [key, receipt.event.data[key]])),
-      ...Object.fromEntries(["note", "mentionWarnings", "statusHint"].filter(key => Object.hasOwn(receipt, key)).map(key => [key, receipt[key]]))
+      ...Object.fromEntries(["note", "mentionWarnings", "statusHint", "wakeDelivery"].filter(key => Object.hasOwn(receipt, key)).map(key => [key, receipt[key]]))
     };
     if (limit === undefined) return compact;
     const nextRead = { tool: "room_read_result", arguments: { roomId, workItemId: args.workItemId, draftMessageId: messageId } };
@@ -954,6 +955,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   }
   if (name === "dm_posted") {
     const built = friendBondCommand("dm", { to: args.to, body: args.body, messageId: args.messageId });
+    if (args.quiet !== undefined) built.data.quiet = args.quiet;
     return commandReceipt(store, secret, roomId, { id: args.id, type: built.type, data: built.data }, "posted");
   }
   throw new ServiceError(500, "internal", "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.");

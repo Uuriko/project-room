@@ -200,13 +200,14 @@ export function memberDoneChip(member, { workItems } = {}) {
   return { label: "Done", title, workItemId: done.id };
 }
 
-// Mentions are text only: inserting "@DisplayName" never changes a message's
+// Mentions are text only: inserting a mention never changes a message's
 // audience. A message becomes a direct message only when the sender
 // explicitly picks a recipient in the composer ("Everyone" -> a member).
 // Replying to or @-mentioning someone in the room stays public, room-visible
 // chat; the @mention is just a highlight/notification for that member.
-export function addressMember(text, caret, member) {
+export function addressMember(text, caret, member, { exact = false } = {}) {
   if (!member?.displayName) return { body: String(text ?? ""), caret: Number.isInteger(caret) ? caret : String(text ?? "").length, toMemberId: "" };
+  if (exact && member.id) member = { ...member, displayName: `(${member.id})` };
   const found = mentionQuery(text, caret);
   if (found) return insertMention(text, caret, found.start, member);
   const value = String(text ?? "");
@@ -273,15 +274,16 @@ export function mentionHtml(body, members, esc) {
   const text = String(body ?? "");
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
   if (!names.length) return markdownHtml(esc(text));
-  const pattern = new RegExp(`@(?:${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");
+  const pattern = new RegExp(`@(?:\\(([A-Za-z0-9_.:-]{1,128})\\)|${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");
   let out = "", last = 0, match;
   while ((match = pattern.exec(text))) {
     out += markdownHtml(esc(text.slice(last, match.index)));
     const label = match[0].slice(1);
-    const member = names.find(m => m.displayName === label);
+    const member = names.find(m => match[1] ? m.id === match[1] : m.displayName === label);
     const kind = member?.kind === "agent" ? " agent" : "";
+    const displayMention = member ? `@${member.displayName}` : match[0];
     const chip = member?.id
-      ? `<button type="button" class="mention${kind}" data-mention-id="${esc(member.id)}">${esc(match[0])}</button>`
+      ? `<button type="button" class="mention${kind}" data-mention-id="${esc(member.id)}">${esc(displayMention)}</button>`
       : `<span class="mention${kind}">${esc(match[0])}</span>`;
     out += chip;
     last = match.index + match[0].length;
@@ -367,8 +369,9 @@ export function composerPlaceholder({ workKind = null, inThread = false, channel
 
 export function removeMention(text, member) {
   if (!member?.displayName) return String(text ?? "");
-  const label = `@${member.displayName}`;
   const value = String(text ?? "");
+  const exactLabel = `@(${member.id})`;
+  const label = member.id && value.includes(exactLabel) ? exactLabel : `@${member.displayName}`;
   let from = 0;
   while (from <= value.length) {
     const i = value.indexOf(label, from);
@@ -395,8 +398,9 @@ export function replyAuthorToAddress(viewerId, author) {
 
 export function messageMentionsMember(body, member) {
   if (!member?.displayName) return false;
-  const label = `@${member.displayName}`;
   const text = String(body ?? "");
+  const exactLabel = `@(${member.id})`;
+  const label = member.id && text.includes(exactLabel) ? exactLabel : `@${member.displayName}`;
   let from = 0;
   while (from <= text.length) {
     const i = text.indexOf(label, from);

@@ -779,7 +779,7 @@ const shapes = {
   "bond.decline": "bondId",
   "bond.revoke": "bondId",
   "bond.list": "",
-  [T.DM_POSTED]: "to body messageId"
+  [T.DM_POSTED]: "to body messageId quiet"
 };
 
 // W4-44 H2: the classified command surface, exported for the
@@ -824,11 +824,13 @@ export function validateCommand(command) {
   // Agents guess data.text. Name data.body before the generic unexpected-field refusal.
   const messageBody = "message.posted requires data.body (a string), not text";
   if (command.type === T.MESSAGE_POSTED && Object.hasOwn(command.data, "text")) fail(422, "invalid_command", messageBody);
+  if (Object.hasOwn(command.data, "quiet") && typeof command.data.quiet !== "boolean")
+    fail(422, "invalid_command", "quiet must be a boolean");
   const allowed = shapes[command.type].split(" ");
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedHumanRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option", "attempt"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "dependsOn", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedHumanRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option", "attempt"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", "quiet", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "dependsOn", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -7670,10 +7672,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
       }
+      let wakeDelivery = [];
       if (command.type === T.MESSAGE_POSTED) {
         recordReceiptSignal(this.db, { roomId, at: incoming.at, actorId: auth.member.id, body: command.data.body,
           eventId: incoming.id, journalSeq: sequence, toMemberId: command.data.toMemberId });
-        this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id, requestMode === "open" ? command.data.messageId : undefined);
+        wakeDelivery = this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id, requestMode === "open" ? command.data.messageId : undefined);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
         this.humanPush.notifyPosted({
           roomId, state, senderMemberId: auth.member.id,
@@ -7681,12 +7684,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           messageId: command.data.messageId || incoming.id, sequence, eventId: incoming.id
         });
       }
-      if (command.type === T.DM_POSTED && incoming.data?.toIdentityId
+      if (command.type === T.DM_POSTED && !command.data.quiet && incoming.data?.toIdentityId
         && dmTalkAllowed(this.db, state, roomId, auth.member.id, incoming.data.toIdentityId, this.now())) {
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
-        this.enqueueNativeMcpEvent?.({ roomId, identityId: incoming.data.toIdentityId,
+        const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, identityId: incoming.data.toIdentityId,
           messageId: incoming.data.messageId ?? incoming.id, eventId: incoming.id, actorId: auth.member.id, kind: "dm" });
         const { woken, signal } = wakeForAgent(this, {
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
@@ -7697,6 +7700,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // body). Fire-and-forget; never fails the command.
         if (woken) this.agentHeartbeats.pushNotify({ identityId: incoming.data.toIdentityId,
           eventType: "dm.posted", roomId, id: incoming.data.messageId ?? incoming.id, ts: this.now() });
+        const memberId = talkMemberForIdentity(this.db, roomId, incoming.data.toIdentityId, this.now());
+        if (memberId) wakeDelivery.push(this.messageWakeDisposition(roomId, memberId, woken || nativeQueued > 0));
       }
       // RC-2026-09-24-203: push doorbell for bond proposals. Both parties
       // (not the proposer, who is online by definition) get a pointer-only
@@ -7806,6 +7811,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.archiveMessages(roomId, { keepNewest: this.messageProjectionWindow, dryRun: false });
       }
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
+        ...(command.type === T.DM_POSTED && command.data.quiet ? { notification: "quiet" } : {}),
+        ...(wakeDelivery.length ? { wakeDelivery } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
       });
     }, {
@@ -7953,9 +7960,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
+  messageWakeDisposition(roomId, memberId, queued) {
+    if (queued) return { memberId, status: "queued" };
+    // An active native subscription may have refused admission due to capacity.
+    // In that case report that nothing queued, without claiming no receiver.
+    const subscribed = this.nativeMcpEventsEnabled && this.db.prepare(
+      "SELECT 1 FROM mcp_event_subscriptions WHERE state='active' AND expires_at>? AND json_extract(document,'$.arguments.roomId')=? AND json_extract(document,'$.arguments.memberId')=? LIMIT 1"
+    ).get(this.now(), roomId, memberId);
+    return { memberId, status: subscribed ? "not_queued" : "no_receiver" };
+  }
+
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId, requestId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
-    if (targets.size === 0) return;
+    const delivery = [];
     // Decision #25: trial seats receive mention wakes in their room. Guest
     // members are seated through guest_members, never identity_links, so
     // an identity_links-only lookup silently drops every trial-seat wake.
@@ -7984,7 +8001,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
-      this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, requestId, eventId, actorId: senderMemberId, kind });
+      const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, requestId, eventId, actorId: senderMemberId, kind });
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
@@ -7996,7 +8013,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           eventType: kind === "dm" ? "dm.posted" : "message.posted",
           roomId, id: data.messageId ?? eventId, ts: this.now() });
       }
+      delivery.push(this.messageWakeDisposition(roomId, memberId, woken || nativeQueued > 0));
     }
+    return delivery;
   }
 
   // #658: mention lifecycle tracking. Called inside command()'s transaction
