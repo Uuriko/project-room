@@ -9,6 +9,8 @@ import { defaultServerArgs } from "./server/boot-options.mjs";
 import { wireNodeJobs } from "./server/jobs.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./server/version.mjs";
 import { growthCollector } from "./src/growth-emit.js";
@@ -91,7 +93,7 @@ const server = paused ? createServer((req, res) => {
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
-}) : createRoomServer(serverArgs);
+}) : createRoomServer({ ...serverArgs, gzipAsset: promisify(gzip) });
 server.on('close', () => nodeJobs?.stop());
 // Track C C11 — growth collector persistence. The snapshot lives in its own
 // JSON file next to the store file; it never touches the store schema. Any

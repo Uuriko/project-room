@@ -156,6 +156,16 @@ const assetType = path => path.endsWith(".tgz") ? "application/gzip" : path.ends
   : path.endsWith(".png") ? "image/png" : path.endsWith(".ttf") ? "font/ttf" : path.endsWith(".woff2") ? "font/woff2" : path.endsWith(".txt") ? "text/plain"
   : path.endsWith(".webmanifest") ? "application/manifest+json" : path.endsWith(".json") ? "application/json" : path.endsWith(".sh") ? "text/plain"
   : "text/markdown; charset=utf-8";
+// A specific coding takes precedence over a wildcard, including gzip;q=0.
+function acceptsAssetGzip(header) {
+  const codings = String(header ?? "").toLowerCase().split(",").map(value => {
+    const [name, ...parameters] = value.trim().split(";");
+    const quality = parameters.find(parameter => parameter.trim().startsWith("q="));
+    return [name.trim(), quality === undefined ? 1 : Number(quality.trim().slice(2))];
+  });
+  const [, quality = 0] = codings.find(([name]) => name === "gzip") ?? codings.find(([name]) => name === "*") ?? [];
+  return quality > 0 && quality <= 1;
+}
 const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ["/offers", ["offers.html", "text/html"]],
@@ -409,7 +419,7 @@ export const CREDENTIAL_WRITE_REFILL_PER_SECOND = 1;
 export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
 export function createRoomServer({ store, origin, instanceCard, hostedDiscovery = false, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
-  assetFallbacks = {}, loadAsset = defaultAssetLoader(assetRoot, assetFallbacks), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
+  assetFallbacks = {}, loadAsset = defaultAssetLoader(assetRoot, assetFallbacks), gzipAsset = null, resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, gmailAuth = null, directSendFetch = null, enableDeferredInbox = false,
@@ -885,6 +895,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   const pageLinks = (requestUrl, pathname) => publicPageLinks(requestUrl, pathname, advertisedOrigin(expectedOrigin()));
   const advertise = text => advertisedText(text, expectedOrigin());
   const advertiseHtml = html => advertisedHtml(html, expectedOrigin());
+  const compressedPublicAssets = new Map();
   const advertisedPageCache = new Map(); // `${asset path}\n${origin}` -> { source, payload }; at most one entry per static page
   // Avoid local-instance sign-in collisions; namespacing is not host isolation.
   const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
@@ -2770,6 +2781,27 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           else {
             payload = Buffer.from(advertiseHtml(frontDoor.toString("utf8")));
             advertisedPageCache.set(cacheKey, { source: Buffer.from(frontDoor), payload }); // own copy: a later in-place change to the loader's buffer must not alias the snapshot
+          }
+        }
+        // A direct Room URL already needs the workspace. Start its root
+        // module early without downloading the workspace at the public door.
+        if (gzipAsset && shell && url.searchParams.has("room")) {
+          payload = Buffer.from(payload.toString("utf8").replace(/<head>/i, '$&<link rel="modulepreload" href="/src/app.js">'));
+        }
+        // Only public, allowlisted static bytes are eligible. Room snapshots,
+        // authenticated API reads, agent responses and streams are untouched.
+        if (gzipAsset && payload.length >= 1024
+          && (shell || path.startsWith("src/") && ["text/javascript", "text/css"].includes(type))) {
+          res.setHeader("Vary", "Accept-Encoding");
+          if (acceptsAssetGzip(req.headers["accept-encoding"])) {
+            let cached = compressedPublicAssets.get(path);
+            if (!cached?.source.equals(payload)) {
+              cached = { source: Buffer.from(payload), encoded: gzipAsset(payload) };
+              compressedPublicAssets.set(path, cached);
+              cached.encoded.catch(() => { if (compressedPublicAssets.get(path) === cached) compressedPublicAssets.delete(path); });
+            }
+            payload = await cached.encoded;
+            res.setHeader("Content-Encoding", "gzip");
           }
         }
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
