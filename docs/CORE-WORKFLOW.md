@@ -183,6 +183,11 @@ of the assigned release producer. Use `--verify-path /docs/agents/paste` or anot
 same-origin path when the release requires a specific live check. Rerun with the
 same binding, work revision and evidence to recover an interrupted publication.
 
+When the build performs packaged storage smoke tests, include those original
+reports' digests, candidate revision, storage representation and passing check
+names in its receipt. Keep the original reports with the stage files. A verifier
+can confirm both fixture runs from the exact result without a separate lookup.
+
 The Commons operator steps publish receipts when the package verification, browser run,
 and deploy smoke finish. Bind the steps once to the native result's room, work item,
 completion event and full candidate revision. Keep the operator artifacts outside the

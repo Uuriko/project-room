@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { attachReleaseReceipts, confirmedReceipt, prepareReleaseReview, submitReleaseReview } from "../scripts/attach-release-receipts.mjs";
+import { attachReleaseReceipts, confirmedReceipt, packageFixtureEvidence, prepareReleaseReview, submitReleaseReview } from "../scripts/attach-release-receipts.mjs";
 
 test("publishes candidate-bound stage receipts and recovers a lost write by replay", async () => {
   const candidateRevision = "a".repeat(40), evidenceVersion = "sha256:" + "b".repeat(64);
@@ -88,6 +88,14 @@ test("release review requires complete exact evidence before its single completi
       liveVersion: { sourceRevision: candidateRevision }, databasePreserved: true, pinPreserved: true,
       signedCardVerifiedBeforeShutdown: true, before: { rooms: 1, events: 3 }, after: { rooms: 1, events: 3 } }
   };
+  const report = storage => Buffer.from(JSON.stringify({
+    source: candidateRevision, storage, checks: ["fixture-storage-representation", "exact-stamped-source"],
+    passed: true, disposableDataRemoved: true
+  }));
+  const reports = { legacy: report("legacy"), normalized: report("normalized") };
+  assert.throws(() => packageFixtureEvidence({ ...reports, normalized: reports.legacy }, candidateRevision), /normalized package fixture/);
+  assert.throws(() => packageFixtureEvidence(reports, "f".repeat(40)), /legacy package fixture/);
+  input.build.packageFixtures = packageFixtureEvidence(reports, candidateRevision);
   const inputs = Object.fromEntries(Object.entries(input).map(([stage, value]) => [stage, Buffer.from(JSON.stringify(value))]));
   const prepare = overrides => prepareReleaseReview({ inputs, candidateRevision, origin, verificationPath: "/docs/agents/paste",
     servingRevision: candidateRevision, verificationDigest: "sha256:" + sha, ...overrides });
@@ -98,6 +106,13 @@ test("release review requires complete exact evidence before its single completi
   assert.match(body, /https:\/\/local-room\.example\/api\/version/);
   assert.match(body, /https:\/\/local-room\.example\/docs\/agents\/paste/);
   assert.match(body, /build: [\s\S]+browser: [\s\S]+deploy: /);
+  assert.match(body, /"packageFixtures":\[{"storage":"legacy"/);
+  assert.match(body, /"storage":"normalized"/);
+  assert.notEqual(...input.build.packageFixtures.map(report => report.evidenceDigest));
+  const mismatched = Buffer.from(JSON.stringify({
+    ...input.build, packageFixtures: [input.build.packageFixtures[0], input.build.packageFixtures[0]]
+  }));
+  assert.throws(() => prepare({ inputs: { ...inputs, build: mismatched } }), /mismatched packaged storage/);
   const operations = new Map();
   const next = { action: "in_progress", memberId: "producer" };
   let currentRevision = 4, posts = 0, submissions = 0, draftArgs;
