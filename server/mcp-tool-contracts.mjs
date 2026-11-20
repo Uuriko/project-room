@@ -68,6 +68,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_search_actions: { access: `read, ${ANY}; lists only actions this identity may call`, cost: READ, rest: "none; REST discovery is docs/openapi.yaml" },
   room_run_action: { access: "same as the wrapped action", cost: "same as the wrapped action", rest: "the wrapped action's own REST twin" },
   room_list_work: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims" },
+  room_read_public_review: { access: "read, current owner or designated reviewer", cost: READ, rest: "GET /api/rooms/{roomId}/public-work/receipts/{receiptId}" },
+  room_record_public_review: { access: "write, current designated verifier or decision-maker", cost: WRITE, rest: "POST /api/rooms/{roomId}/public-work/receipts/{receiptId}/verify or /decide" },
   room_read_work: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims/{claimId}" },
   room_claim: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `POST /api/rooms/{roomId}/work-claims/{claimId}/claim; ${COMMANDS} (claim.acquired, claim.renewed, claim.released)` },
   room_handoff: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (work.handoff_recorded)` },
