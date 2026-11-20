@@ -10,7 +10,6 @@ import assert from "node:assert/strict";
 import { browserPlan } from "../scripts/browser-shards.mjs";
 import { canonicalBrowserScript } from "../scripts/browser-suites.mjs";
 import {
-  addServedClientEdges,
   isSafetyBrowser,
   isSafetyUnitTest,
   selectAffectedBrowser,
@@ -53,33 +52,26 @@ test("the safety net is a union, and a docs-only diff still selects it", () => {
 });
 
 
-test("served client changes account for all seven affected work checks, including budget omissions", () => {
-  const plan = selectAffectedBrowser(["src/app.js"]);
-  const names = ["action-recovery", "assisted-work", "draft-return", "native-result", "refine-draft", "visual-regression", "work-reuse"];
-  const accounted = [...plan.selected, ...plan.omitted].map(row => row.test);
-  for (const name of names) assert.ok(accounted.includes(`scripts/${name}-browser-check.mjs`), name);
-  assert.equal(new Set(accounted).size, accounted.length);
-  assert.ok(plan.omitted.length > 0, "bounded selection must disclose related checks that did not fit");
-  for (const row of plan.omitted) assert.equal(plan.files.includes(row.test), false);
-  assert.equal(plan.coverage, "affected");
-  assert.equal(plan.budgetMs, 600000);
+test("shared browser changes run every check, including slow and indirectly loaded suites", () => {
+  const full = browserPlan(canonicalBrowserScript());
+  for (const file of ["src/app.js", "index.html", "server/http.mjs", "scripts/runtime-package.mjs"]) {
+    const selection = selectAffectedBrowser([file]);
+    assert.equal(selection.coverage, "full", file);
+    assert.deepEqual(selection.files, full.files, file);
+    assert.equal(selection.plan.planHash, full.planHash, file);
+    assert.deepEqual(selection.omitted, [], file);
+    assert.equal(selection.budgetMs, null, file);
+  }
 });
 
-test("served edges follow HTML assets and room fixtures, excluding unrelated Playwright pages", () => {
-  const sources = {
-    "index.html": '<script src="./src/entry.js"></script><link href="./src/styles.css" rel="stylesheet">',
-    "scripts/room.mjs": 'import { chromium } from "playwright";',
-    "scripts/unrelated.mjs": 'import { chromium } from "playwright";',
-  };
-  const reverse = new Map([["server/http.mjs", new Set(["scripts/fixture.mjs"])],
-    ["scripts/fixture.mjs", new Set(["scripts/room.mjs"])]]);
-  addServedClientEdges({ reverse, read: file => sources[file], known: new Set([...Object.keys(sources), "src/entry.js", "src/styles.css"]),
-    codeFiles: ["scripts/room.mjs", "scripts/unrelated.mjs"] });
-  assert.deepEqual([...reverse.get("src/entry.js")], ["index.html"]);
-  assert.deepEqual([...reverse.get("src/styles.css")], ["index.html"]);
-  assert.deepEqual([...reverse.get("index.html")], ["scripts/room.mjs"]);
+test("a change isolated to a browser check still uses targeted selection", () => {
+  const file = "scripts/updates-browser-check.mjs";
+  const selection = selectAffectedBrowser([file]);
+  assert.equal(selection.coverage, "affected");
+  assert.ok(selection.files.includes(file));
+  assert.ok(selection.files.length < browserPlan(canonicalBrowserScript()).files.length);
+  assert.equal(selection.budgetMs, null);
 });
-
 
 test("browser evidence persists affected scope and omissions even for an empty shard", t => {
   const dir = mkdtempSync(join(tmpdir(), "browser-selection-"));
