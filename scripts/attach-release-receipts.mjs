@@ -20,7 +20,8 @@ export function packageFixtureEvidence(reports, candidateRevision) {
         || report.passed !== true || report.disposableDataRemoved !== true || !fixtureChecks(report.checks)) {
       throw new Error(`Invalid or mismatched ${storage} package fixture report.`);
     }
-    return { storage, source: report.source, checks: report.checks, evidenceDigest: "sha256:" + hash(raw) };
+    return { storage, source: report.source, checks: report.checks, evidenceDigest: "sha256:" + hash(raw),
+      passedCheckCount: report.checks.length };
   });
 }
 
@@ -33,13 +34,14 @@ function stageEvidence(stage, value, candidate) {
         || !fixtureModes.every((mode, at) => {
           const report = packageFixtures[at];
           return report?.storage === mode && report.source === candidate && digest.test(report.evidenceDigest)
-            && fixtureChecks(report.checks);
+            && fixtureChecks(report.checks)
+            && (report.passedCheckCount === undefined || report.passedCheckCount === report.checks.length);
         }))) throw new Error("Invalid or mismatched packaged storage fixture evidence.");
 
     return { status: "passed", summary: `Runtime package verified, ${files} files.`,
       proof: { sourceCommit, sourceTree, manifestSha256, files, verified,
-        ...(packageFixtures ? { packageFixtures: packageFixtures.map(({storage, source, checks, evidenceDigest}) =>
-          ({storage, source, checks, evidenceDigest})) } : {}) } };
+        ...(packageFixtures ? { packageFixtures: packageFixtures.map(({storage, source, checks, evidenceDigest, passedCheckCount}) =>
+          ({storage, source, checks, evidenceDigest, ...(passedCheckCount === undefined ? {} : {passedCheckCount})})) } : {}) } };
   }
   if (stage === "build" && value?.sourceCommit === candidate && value.verified === false
       && ["package", "verify", "instance-card", "staged-legacy", "staged-normalized"].includes(value.failurePhase)) {
@@ -167,13 +169,15 @@ export function prepareReleaseReview({ inputs, candidateRevision, origin, verifi
     if (!raw) throw new Error(`Missing ${stage} evidence before release review.`);
     const { status, summary, proof } = stageEvidence(stage, JSON.parse(raw.toString("utf8")), candidateRevision);
     if (status !== "passed") throw new Error(`Release review requires passing ${stage} evidence.`);
-    return `${stage}: ${summary} sha256:${hash(raw)}\n${JSON.stringify(proof)}`;
+    return { stage, summary, proof, evidenceDigest: "sha256:" + hash(raw) };
   });
+  const fixtures = checks[0].proof.packageFixtures;
+  const digestLabel = fixtures?.every(fixture => fixture.passedCheckCount !== undefined) ? "response-body digest " : "";
   const body = [
     `Candidate revision: ${candidateRevision}`,
     `Serving revision: ${new URL("/api/version", origin).href}`,
-    `Live verification: ${verification.href} (HTTP 200, ${verificationDigest})`,
-    ...checks
+    `Live verification: ${verification.href} (HTTP 200, ${digestLabel}${verificationDigest})`,
+    ...checks.map(({stage, summary, proof, evidenceDigest}) => `${stage}: ${summary} ${evidenceDigest}\n${JSON.stringify(proof)}`)
   ].join("\n\n");
   if (body.length > 4096) throw new Error("The prepared release evidence exceeds the Room text limit.");
   return body;
