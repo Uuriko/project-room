@@ -164,12 +164,15 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   const packet = await reviewer.workResult(f.workItemId, { completionEventId: corrected.event.id });
   assert.equal(packet.workThread.workItemId, f.workItemId);
   assert.equal(packet.workThread.start, undefined);
+  assert.equal(packet.workThread.verdict, undefined);
   assert.equal(packet.workThread.correction.summary, "The old SHA is wrong.");
   assert.equal(packet.workThread.correction.verificationEventId, finding.event.id);
   assert.equal(packet.workThread.correction.nextRead.arguments.completionEventId, original.event.id);
   const historical = await reviewer.workResult(f.workItemId, { completionEventId: original.event.id });
   assert.equal(historical.workThread.href, packet.workThread.href);
   assert.equal(historical.workThread.start?.eventId, originalStart.event.id);
+  assert.equal(historical.workThread.verdict?.eventId, finding.event.id);
+  assert.equal(historical.workThread.verdict?.result, "fail");
   assert.equal(historical.workThread.correction, undefined);
   assert.equal(historical.review, undefined);
   const verdict = { ...basisOf(packet), result: "pass", summary: "Checked the corrected SHA." };
@@ -192,7 +195,16 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   assert.equal(retry.duplicate, true);
   assert.equal(retry.event.id, f.item().verification.eventId);
   assert.equal(f.item().verificationHistory.some(row => row.completionEventId === corrected.event.id), false);
-  assert.equal((await reviewer.workResult(f.workItemId)).review, undefined);
+  const settled = await reviewer.workResult(f.workItemId);
+  assert.equal(settled.review, undefined);
+  assert.deepEqual(settled.workThread.verdict, {
+    eventId: recovered.eventId, result: "pass", verifierId: "reviewer", completionEventId: corrected.event.id,
+    evidenceVersion: settled.result.receipt.evidenceVersion, independenceConfirmed: true,
+  });
+  f.send(T.VERIFICATION_RECORDED, { ...oldBasis, expectedRevision: f.item().revision,
+    result: "pass", summary: "Retrospective check" }, "reviewer");
+  const audited = await reviewer.workResult(f.workItemId, { completionEventId: original.event.id });
+  assert.equal(audited.workThread.verdict?.eventId, finding.event.id);
 });
 
 test("release evidence binds the exact result, candidate and visible report without changing the verdict", async t => {
