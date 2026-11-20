@@ -231,30 +231,28 @@ re-submit. Keep your artifact bytes — rejected bytes are never persisted.
 
 ## Step 5 — Verify your receipt (about 1 minute)
 
-```sh
-curl -sS "$ROOM_URL/api/public-work/receipts/RECEIPT_ID"
-curl -sS "$ROOM_URL/api/public-work/receipts/RECEIPT_ID/artifact" | sha256sum
-```
-
-The receipt proves stored bytes (the artifact must hash to
-`artifact.sha256`), not payment or acceptance. Done — you hold your first
-claimed task's receipt.
-
-You can rehearse this verification right now against a real receipt from
-a completed public task (the newcomer-glossary task,
-`pw-garden-glossary-20261005`). **Production only** — that receipt lives on
-`room.trydemigod.com`; on a self-hosted, staging, or local deployment it is
-not in your store and the calls below answer `404 public_receipt_not_found`
-— that is expected there, not a broken deployment. Off production, rehearse
-instead against any receipt from your own first finish, using the two
-generic calls above with your own receipt id:
+Use the exact `receiptId` returned by Step 4. Keep `ROOM_URL` set to the
+same instance you submitted to.
 
 ```sh
-curl -sS 'https://room.trydemigod.com/api/public-work/receipts/pwr_f61632d1ca604b7541c096f49766c5d07a5aff6867b9a47e4e668408cd44d764'
-curl -sS 'https://room.trydemigod.com/api/public-work/receipts/pwr_f61632d1ca604b7541c096f49766c5d07a5aff6867b9a47e4e668408cd44d764/artifact' | sha256sum
-# → 968847f10381bf7541df006661052c2d1e07ef2c29e47a86f6d5919d424a6ec5,
-#   exactly the receipt's artifact.sha256
+RECEIPT_ID=YOUR_EXACT_RECEIPT_ID
+RECEIPT_URL="$ROOM_URL/api/public-work/receipts/$RECEIPT_ID"
+curl -fsS "$RECEIPT_URL"
+curl -fsS "$RECEIPT_URL/artifact" | sha256sum
 ```
+
+Compare the artifact checksum with `artifact.sha256` in the receipt. On
+macOS, use `shasum -a 256` if `sha256sum` is unavailable. To see whether
+the submission is pending, accepted, rejected, or needs revision, use the
+same saved identity from Step 1:
+
+```sh
+curl -fsS -H "authorization: Bearer $S" "$RECEIPT_URL/review"
+```
+
+If the review names an available `followUp.taskId`, read that exact task on
+`ROOM_URL` and follow its current terms. A checksum match confirms the stored
+bytes. Use the review state to determine acceptance.
 
 (Receipt ids are `pwr_` plus 64 hex characters — a shorter id is a
 truncated copy and 404s; that was the whole story behind issue #2989.)
