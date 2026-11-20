@@ -126,17 +126,96 @@ export function confirmedReceipt(saved, id) {
   return { messageId: saved.messageId, sequence: saved.sequence, duplicate: saved.duplicate === true };
 }
 
+export function prepareReleaseReview({ inputs, candidateRevision, origin, verificationPath, servingRevision, verificationDigest }) {
+  if (!revision.test(candidateRevision) || servingRevision !== candidateRevision || !digest.test(verificationDigest)) {
+    throw new Error("Verify the exact serving candidate before preparing review.");
+  }
+  const verification = new URL(verificationPath, origin);
+  if (verification.origin !== origin.origin || verification.username || verification.password || verification.search || verification.hash) {
+    throw new Error("Verification must name a path on the configured serving origin.");
+  }
+  const checks = stages.map(stage => {
+    const raw = inputs[stage];
+    if (!raw) throw new Error(`Missing ${stage} evidence before release review.`);
+    const { status, summary, proof } = stageEvidence(stage, JSON.parse(raw.toString("utf8")), candidateRevision);
+    if (status !== "passed") throw new Error(`Release review requires passing ${stage} evidence.`);
+    return `${stage}: ${summary} sha256:${hash(raw)}\n${JSON.stringify(proof)}`;
+  });
+  const body = [
+    `Candidate revision: ${candidateRevision}`,
+    `Serving revision: ${new URL("/api/version", origin).href}`,
+    `Live verification: ${verification.href} (HTTP 200, ${verificationDigest})`,
+    ...checks
+  ].join("\n\n");
+  if (body.length > 4096) throw new Error("The prepared release evidence exceeds the Room text limit.");
+  return body;
+}
+
+export async function submitReleaseReview({ binding, expectedRevision, producerId, body, call }) {
+  const { roomId, workItemId, candidateRevision } = binding;
+  if (!roomId || !workItemId || !producerId || !integer(expectedRevision) || !revision.test(candidateRevision)) {
+    throw new Error("Expected a Room, work item, assigned producer, exact work revision and candidate.");
+  }
+  const key = hash(JSON.stringify([roomId, workItemId, expectedRevision, candidateRevision]));
+  const draftId = `release-draft-${key}`, requestId = `release-submit-${key}`;
+  async function lookup(operationId, eventType) {
+    const result = await call("room_receipt", { operationId });
+    if (result.operationId !== operationId || result.roomId !== roomId || result.viewerId !== producerId) {
+      throw new Error("Receipt did not match this release operation.");
+    }
+    if (result.status === "not_recorded") return null;
+    if (result.status === "recorded" && result.eventType === eventType && typeof result.eventId === "string") return result;
+    throw new Error("Could not confirm the release operation receipt.");
+  }
+
+  const saved = await lookup(requestId, "work.completed");
+  if (saved) return { ...binding, completionEventId: saved.eventId };
+
+  const savedDraft = await lookup(draftId, "message.posted");
+  let posted;
+  if (!savedDraft) {
+    const current = await call("room_read_work", { workItemId, brief: true });
+    if (current.revision !== expectedRevision || current.continuation?.action !== "in_progress"
+        || current.continuation.memberId !== producerId) {
+      throw new Error("Release work is not in progress at the selected revision for this producer.");
+    }
+    posted = await call("room_post_message", { id: draftId, workItemId, body, maxResultCodeUnits: body.length });
+  }
+  let submission = posted?.resultDraft?.submission;
+  if (!submission) {
+    const preview = await call("room_read_result", { workItemId, draftMessageId: draftId });
+    const text = preview.result?.text;
+    if (preview.current?.next?.action !== "in_progress" || preview.current.next.memberId !== producerId
+        || text?.body !== body || text.messageEventId !== (savedDraft ?? posted)?.eventId) {
+      throw new Error("The saved release draft no longer matches this review input.");
+    }
+    submission = { workItemId, expectedRevision: preview.current.workRevision, evidenceMessageId: text.messageId,
+      evidenceMessageEventId: text.messageEventId, evidenceVersion: text.evidenceVersion,
+      previousCompletionEventId: preview.current.completionEventId };
+  }
+  if (submission.expectedRevision !== expectedRevision || submission.workItemId !== workItemId) {
+    throw new Error("Release work revision changed. Read the current task before starting a new operation.");
+  }
+  const completion = await call("room_submit_text_result", {
+    ...submission, requestId, producerId, summary: "Release evidence collected for independent review",
+    nextAction: "Check the exact candidate, stage receipts, and serving URLs."
+  });
+  if (typeof completion.eventId !== "string" || !completion.eventId) throw new Error("Unconfirmed release completion. Retry the same binding.");
+  return { ...binding, completionEventId: completion.eventId };
+}
+
 async function main() {
   const { values } = parseArgs({ options: {
     ...Object.fromEntries(["binding", "build", "browser", "deploy"].map(name => [name, { type: "string" }])),
-    recover: { type: "boolean", default: false }
+    recover: { type: "boolean", default: false },
+    "work-revision": { type: "string" }, "verify-path": { type: "string", default: "/api/ready" }
   } });
   const origin = new URL(process.env.ROOM_RELEASE_ORIGIN);
   if (origin.protocol !== "https:" || origin.username || origin.password || origin.href !== origin.origin + "/") {
     throw new Error("ROOM_RELEASE_ORIGIN must be an HTTPS origin.");
   }
-  const binding = JSON.parse(await readFile(values.binding, "utf8"));
-  const { identitySecret, roomId } = JSON.parse(await readFile(process.env.ROOM_RELEASE_CONNECTION, "utf8"));
+  let binding = JSON.parse(await readFile(values.binding, "utf8"));
+  const { identitySecret, roomId, memberId } = JSON.parse(await readFile(process.env.ROOM_RELEASE_CONNECTION, "utf8"));
   if (typeof identitySecret !== "string" || !identitySecret || roomId !== binding.roomId) throw new Error("Saved connection must match the bound room.");
   const inputs = {};
   for (const stage of stages) if (values[stage]) inputs[stage] = await readFile(values[stage]);
@@ -151,11 +230,24 @@ async function main() {
     }
     return result.structuredContent;
   }
+  if (values["work-revision"] !== undefined) {
+    if (binding.completionEventId !== undefined || !/^\d+$/.test(values["work-revision"])) {
+      throw new Error("Supply a release binding without a completion event, and its exact work revision.");
+    }
+    const path = values["verify-path"];
+    if (!/^\/(?!\/)[a-zA-Z0-9/_-]+$/.test(path)) throw new Error("Expected a same-origin verification path.");
+    const options = { redirect: "error", signal: AbortSignal.timeout(10_000) };
+    const [version, proof] = await Promise.all([fetch(new URL("/api/version", origin), options), fetch(new URL(path, origin), options)]);
+    if (!version.ok || !proof.ok) throw new Error("Serving version or verification URL was unavailable.");
+    const body = prepareReleaseReview({ inputs, candidateRevision: binding.candidateRevision, origin, verificationPath: path,
+      servingRevision: (await version.json()).sourceRevision, verificationDigest: "sha256:" + hash(Buffer.from(await proof.arrayBuffer())) });
+    binding = await submitReleaseReview({ binding, expectedRevision: Number(values["work-revision"]), producerId: memberId, body, call });
+  }
   const output = await attachReleaseReceipts({ binding, inputs,
     readResult: args => call("room_read_result", args),
-    lookup: values.recover ? args => call("room_receipt", args) : undefined,
+    lookup: values.recover || values["work-revision"] !== undefined ? args => call("room_receipt", args) : undefined,
     post: async args => confirmedReceipt(await call("room_post_message", args), args.id) });
-  console.log(JSON.stringify(output));
+  console.log(JSON.stringify({ ...output, binding }));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
