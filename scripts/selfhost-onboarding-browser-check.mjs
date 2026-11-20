@@ -110,7 +110,12 @@ test("self-host: empty database signup, chat, restart and fresh-browser login pr
   await login.locator('[name="password"]').fill(password);
   await login.locator('button[type="submit"]').click();
   await returning.locator("#main").waitFor({ state: "visible" });
-  await returning.locator("[data-message-record-id]").filter({ hasText: message }).waitFor();
   assert.equal(new URL(returning.url()).searchParams.get("room"), roomId, "login returns to the original room");
+  const recovered = returning.locator("[data-message-record-id]").filter({ hasText: message });
+  await recovered.waitFor({ state: "attached" });
+  const conversation = returning.getByRole("button", { name: "Conversation", exact: true });
+  if (await conversation.isVisible()) await conversation.click();
+  await recovered.waitFor({ state: "visible" });
+  assert.equal(await recovered.count(), 1, "fresh login can open the one committed message");
   await fresh.close();
 });
