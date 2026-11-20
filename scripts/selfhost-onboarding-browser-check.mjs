@@ -14,6 +14,15 @@ import { chromium } from "playwright";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
+async function revealCommittedMessage(page, message) {
+  const recovered = page.locator("[data-message-record-id]").filter({ hasText: message });
+  await recovered.waitFor({ state: "attached" });
+  const conversation = page.getByRole("button", { name: "Conversation", exact: true });
+  if (await conversation.isVisible()) await conversation.click();
+  await recovered.waitFor({ state: "visible" });
+  return recovered;
+}
+
 test("self-host: empty database signup, chat, restart and fresh-browser login preserve the same room", { timeout: 60000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-selfhost-onboarding-"));
   let child, exited, browser;
@@ -94,8 +103,8 @@ test("self-host: empty database signup, chat, restart and fresh-browser login pr
   await start();
   await page.goto(`${origin}/?room=${roomId}`);
   await page.locator("#main").waitFor({ state: "visible" });
-  await sent.waitFor();
-  assert.equal(await sent.count(), 1, "the committed message survives server restart exactly once");
+  const afterRestart = await revealCommittedMessage(page, message);
+  assert.equal(await afterRestart.count(), 1, "the committed message survives server restart exactly once");
   assert.equal(new URL(page.url()).searchParams.get("room"), roomId);
   assert.deepEqual(errors, []);
   await context.close();
@@ -111,11 +120,7 @@ test("self-host: empty database signup, chat, restart and fresh-browser login pr
   await login.locator('button[type="submit"]').click();
   await returning.locator("#main").waitFor({ state: "visible" });
   assert.equal(new URL(returning.url()).searchParams.get("room"), roomId, "login returns to the original room");
-  const recovered = returning.locator("[data-message-record-id]").filter({ hasText: message });
-  await recovered.waitFor({ state: "attached" });
-  const conversation = returning.getByRole("button", { name: "Conversation", exact: true });
-  if (await conversation.isVisible()) await conversation.click();
-  await recovered.waitFor({ state: "visible" });
+  const recovered = await revealCommittedMessage(returning, message);
   assert.equal(await recovered.count(), 1, "fresh login can open the one committed message");
   await fresh.close();
 });
