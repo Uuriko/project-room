@@ -195,6 +195,15 @@ export class ProjectOffers {
         ? { enabled: true, repositoryRef: row.public_ref, files: JSON.parse(row.public_files) } : null })) };
     });
   }
+  publishedProjectSource(roomId) {
+    return this.db.prepare(`SELECT json_extract(o.terms, '$.repositoryUrl') AS repository
+      FROM project_offers o JOIN rooms r ON r.id=o.room_id
+      WHERE o.room_id=? AND o.status='published' AND r.archived_at IS NULL
+        AND json_extract(o.terms, '$.kind')='project'
+        AND json_type(o.terms, '$.repositoryUrl')='text'
+        AND NOT EXISTS (SELECT 1 FROM public_unpublish u WHERE u.kind='room' AND u.target=o.room_id)
+      ORDER BY o.created_at DESC,o.offer_id LIMIT 1`).get(roomId)?.repository ?? null;
+  }
   list({ limit = 20, after = null } = {}) {
     const size = Number(limit);
     check(Number.isInteger(size) && size > 0 && size <= 100, 'limit must be 1 through 100');
