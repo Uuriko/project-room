@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
 
 const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -159,4 +160,62 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   assert.notEqual(nextFinish.body.receipt.receiptId,finish.body.receipt.receiptId);
   assert.deepEqual(await browse(), []);
   assert.equal(await fetch(f.origin + '/join.txt?room=commons').then(r => r.text()), prompt);
+});
+
+
+test('a member and an outside agent contend for the same published lease', async t => {
+  const f = await fixture(t);
+  const owner = f.store.issueAccessKey('commons','owner');
+  const mint = async displayName => {
+    const result = await f.call('POST','/api/agent-identities',{body:{displayName}});
+    assert.equal(result.status,201);
+    return result.body;
+  };
+  const [member,outside] = await Promise.all([mint('Existing member'),mint('First contribution')]);
+  linkWithProof(f.store,owner,'commons',member,{permissions:[]});
+  assert.ok(f.store.authenticate(member.secret,'commons').member.id);
+  const prompt = await fetch(f.origin+'/join.txt?room=commons').then(r => r.text());
+  assert.match(prompt,/If no eligible Room work is ready, check the published tasks below/);
+  assert.match(prompt,/both admitted and outside agents use the same public claim/);
+  const listPath = '/api/public-work/tasks?roomId=commons&claimable=1';
+  const lists = await Promise.all([member,outside].map(({secret}) => f.call('GET',listPath,{secret})));
+  assert.deepEqual(lists[0].body.tasks,lists[1].body.tasks);
+  const task = lists[0].body.tasks[0];
+  assert.equal(task.taskId,'journey:open');
+  const path = '/api/public-work/tasks/'+encodeURIComponent(task.taskId);
+  const claimBody = {requestId:'shared-claim',expectedTermsVersion:task.termsVersion};
+  const outcomes = await Promise.all([member,outside].map(({secret}) => f.call('POST',path+'/claim',{secret,body:claimBody})));
+  assert.deepEqual(outcomes.map(o => o.status).sort(),[200,409]);
+  const winner = outcomes.findIndex(o => o.status===200), holder = [member,outside][winner];
+  const loser = [member,outside][1-winner];
+  const finishBody = {requestId:'shared-finish',expectedTermsVersion:task.termsVersion,generation:outcomes[winner].body.task.claim.generation,
+    artifactText:'Evidence from the sole claim holder',checksReported:[]};
+  assert.equal((await f.call('POST',path+'/finish',{secret:loser.secret,body:finishBody})).status,403);
+  const finished = await f.call('POST',path+'/finish',{secret:holder.secret,body:finishBody});
+  assert.equal(finished.status,200);
+  assert.equal(finished.body.receipt.artifact.sha256,sha256(finishBody.artifactText));
+});
+
+
+test('admission preserves the original outside lease and does not require a second claim', async t => {
+  const f = await fixture(t);
+  const minted = await f.call('POST','/api/agent-identities',{body:{displayName:'Joining contributor'}});
+  assert.equal(minted.status,201);
+  const {secret} = minted.body;
+  const path = '/api/public-work/tasks/journey%3Aopen';
+  const task = (await f.call('GET',path)).body;
+  const body = {requestId:'claim-before-admission',expectedTermsVersion:task.termsVersion};
+  const before = await f.call('POST',path+'/claim',{secret,body});
+  assert.equal(before.status,200);
+  const owner = f.store.issueAccessKey('commons','owner');
+  linkWithProof(f.store,owner,'commons',minted.body,{permissions:[]});
+  assert.ok(f.store.authenticate(secret,'commons').member.id);
+  const recovered = await f.call('POST',path+'/claim',{secret,body});
+  assert.equal(recovered.status,200);
+  assert.equal(recovered.body.task.claim.generation,before.body.task.claim.generation);
+  assert.equal(recovered.body.task.claim.identityId,before.body.task.claim.identityId);
+  const finish = await f.call('POST',path+'/finish',{secret,body:{requestId:'finish-after-admission',
+    expectedTermsVersion:task.termsVersion,generation:before.body.task.claim.generation,artifactText:'Same contributor, same lease',checksReported:[]}});
+  assert.equal(finish.status,200);
+  assert.equal(finish.body.receipt.artifact.sha256,sha256('Same contributor, same lease'));
 });
