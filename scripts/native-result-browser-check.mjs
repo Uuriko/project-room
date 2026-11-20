@@ -370,6 +370,7 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "phone" : "de
   assert.equal(await f.page.locator("#close-result").evaluate(node => node === document.activeElement), true, "hidden retry hands keyboard focus to Close");
   assert.equal(await f.page.locator("#message-input").inputValue(), "Keep my steering draft.");
   await f.capture(mobile ? "retry-phone" : "retry-desktop");
+  await f.page.unroute("**/work-result?**");
   await f.page.keyboard.press("Escape"); await f.page.locator("#result-dialog").waitFor({ state: "hidden" });
   await f.page.reload(); await f.page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await f.page.locator("#message-input").inputValue(), "Keep my steering draft.");
@@ -441,6 +442,10 @@ test("a room session that ends under a live account says so and points back to t
   await clickChrome(page, "#nav-rooms");
   await page.locator('[data-account-room="commons"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
+  // The room can open on Updates. Use its Conversation action to reach the draft.
+  await page.locator("#updates-close:visible, #message-input:visible").first().waitFor();
+  const conversation = page.locator("#updates-close");
+  if (await conversation.isVisible()) await conversation.click();
   await page.locator("#message-input").fill("A draft that must survive.");
   let dead = false;
   await page.route(url => /\/api\/rooms\/commons(\?|$)/.test(new URL(url).pathname + new URL(url).search), route =>
