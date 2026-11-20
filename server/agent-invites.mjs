@@ -844,22 +844,26 @@ export class AgentInvites {
 }
 
 const withConnect = (store, roomId, memberId, body) => {
-  const connect = connectFields();
   if (!isCurrentRoom(store.db, roomId)) {
     const starter = starterFor(store, roomId, memberId);
-    return { ...body, connect, ...(starter ? { starter } : {}) };
+    return { ...body, connect: connectFields(), ...(starter ? { starter } : {}) };
   }
   const pickup = {
-    action: "find-work", tool: "room_next", arguments: { roomId },
+    action: "find-work", tool: "room_next", arguments: { roomId }, path: "/mcp",
     description: "Find addressed work and open requests. Follow the selected nextRead and any partial source pages."
   };
   const fallback = { tool: "room_list_work", arguments: { roomId, focus: "needs_me" } };
-  const recovery = body.next.filter(step => ["save-identity-secret", "rotate"].includes(step.action));
+  const credential = body.identitySecret
+    ? { action: "save-identity-secret", description: "Save the durable identitySecret from this response privately before connecting." }
+    : body.mcpToken ? null
+    : { action: "reuse-identity", description: "Reuse the saved identity credential on this instance. This replay does not issue a new connection token." };
+  const recovery = body.next.filter(step => step.action === "rotate");
+  const next = [...(credential ? [credential] : []), ...recovery, pickup];
   return {
-    ...body, connect,
+    ...body, connect: { mcpUrl: "/mcp", httpHeader: connectFields().httpHeader },
     nextWork: { tool: pickup.tool, arguments: pickup.arguments, coverage: "not-evaluated", fallback },
-    next: [...recovery, pickup],
-    nextActions: [{ ...pickup, transport: "mcp", path: "/mcp" }]
+    next,
+    nextActions: next.map(step => step === pickup ? { ...step, transport: "mcp" } : step)
   };
 };
 

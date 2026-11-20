@@ -37,23 +37,32 @@ const inventory=s=>Object.fromEntries(['agent_identities','identity_links','even
 test('existing agent lost-response retry preserves identity/grants and finishes first useful task under review',async t=>{
  const{s,peer,inviter,issued,ownerKey,reviewerKey}=fixture(t),beforeIdentities=s.db.prepare('SELECT count(*) n FROM agent_identities').get().n;
  const options={displayName:'Friend existing agent',identitySecret:peer.secret,requestId:'journey-redeem'};
- const first=s.invites.redeem(issued.code,options),before=inventory(s),replay=s.invites.redeem(issued.code,options);
+ const server=createRoomServer({store:s});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const origin='http://127.0.0.1:'+server.address().port;
+ t.after(()=>{server.closeStreams();server.closeAllConnections();return new Promise(resolve=>server.close(resolve));});
+ const {identitySecret,...input}=options;
+ const res=await fetch(origin+'/api/agent-invites/redeem',{method:'POST',headers:{Authorization:'Bearer '+identitySecret,'Content-Type':'application/json'},
+  body:JSON.stringify({code:issued.code,...input})});
+ assert.equal(res.status,201);
+ const first=await res.json(),before=inventory(s),replay=s.invites.redeem(issued.code,options);
+ const endpoint=new URL(first.connect.mcpUrl,origin);
+ assert.equal(endpoint.href,origin+'/mcp');
+ assert.equal(new URL(first.nextActions.at(-1).path,origin).href,endpoint.href);
  assert.equal(replay.duplicate,true);assert.equal(replay.mcpToken,null);assert.equal(replay.identitySecret,undefined);assert.deepEqual(inventory(s),before);assert.equal(s.db.prepare('SELECT count(*) n FROM agent_identities').get().n,beforeIdentities);
  assert.equal(s.authenticate(peer.secret,'friend-home').member.id,peer.identityId);assert.deepEqual(s.authenticate(peer.secret,'commons').member.permissions,['accept_work','complete_work']);assert.deepEqual(s.authenticate(inviter.secret,'commons').member.permissions,['invite_member']);assert.equal(s.db.prepare('SELECT count(*) n FROM agent_connections').get().n,0);
  assert.deepEqual(first.nextWork,{tool:'room_next',arguments:{roomId:'commons'},coverage:'not-evaluated',
   fallback:{tool:'room_list_work',arguments:{roomId:'commons',focus:'needs_me'}}});
  assert.deepEqual(first.next.map(step=>step.tool),['room_next']);
  assert.deepEqual(first.nextActions.map(step=>step.tool),['room_next']);
- assert.deepEqual(replay.next.map(step=>step.action),['rotate','find-work']);
+ assert.deepEqual(replay.next.map(step=>step.action),['reuse-identity','rotate','find-work']);
+ assert.equal(replay.nextActions[0].action,'reuse-identity');
+ assert.equal(replay.connect.mcpUrl,'/mcp');
  assert.equal(first.starter,undefined);
  const cmd=(key,id,type,data)=>s.command(key,'commons',{id,type,data}),item=()=>JSON.parse(s.db.prepare("SELECT body FROM work_entities WHERE work_id='task'").get().body);
  cmd(ownerKey,'propose','work.proposed',{workItemId:'task',title:'Useful shared task',definitionOfDone:'Save and review useful result',accountableMemberId:first.memberId,verifierMemberId:'reviewer',independentVerificationRequired:true,ownerDecisionRequired:true,humanDecisionMakerId:'owner',mode:'read'});
- const server=createRoomServer({store:s});
- await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- const origin='http://127.0.0.1:'+server.address().port;
- t.after(()=>{server.closeStreams();server.closeAllConnections();return new Promise(resolve=>server.close(resolve));});
  async function mcp(pointer, token=first.mcpToken.credential){
-  const res=await fetch(origin+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+  const res=await fetch(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
    body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:pointer.tool,arguments:pointer.arguments}})});
   return (await res.json()).result;
  }
@@ -67,6 +76,18 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
  assert.ok(fallback.structuredContent.work.some(item=>item.id==='task'));
  const crossed=await mcp({...first.nextWork,arguments:{roomId:'friend-home'}});
  assert.equal(crossed.isError,true);
+ const chatInvite=s.invites.create(inviter.secret,'commons',{profile:'chat'});
+ const chat=s.invites.redeem(chatInvite.code,{displayName:'Chat-only guest'});
+ assert.equal(typeof chat.identitySecret,'string');
+ assert.equal(chat.next[0].action,'save-identity-secret');
+ assert.equal(chat.nextActions[0].action,'save-identity-secret');
+ cmd(ownerKey,'chat-task','work.proposed',{workItemId:'chat-task',title:'Permission witness',definitionOfDone:'Report the scope gap',
+  accountableMemberId:chat.memberId,mode:'read'});
+ const chatPickup=(await mcp(chat.nextWork,chat.mcpToken.credential)).structuredContent;
+ assert.equal(chatPickup.work.items[0].reason,'permission_required');
+ const chatBrief=(await mcp(chatPickup.nextRead,chat.mcpToken.credential)).structuredContent;
+ assert.equal(chatBrief.continuation.action,'permission_required');
+ assert.equal(chatBrief.continuation.tool,null);
  cmd(peer.secret,'accept','work.accepted',{workItemId:'task',expectedRevision:0});const body='First useful saved result',posted=cmd(peer.secret,'saved','message.posted',{messageId:'saved',body,workItemId:'task'}),version=textVersion(body);
  const done=cmd(peer.secret,'done','work.completed',{workItemId:'task',expectedRevision:1,evidenceKind:'room_text',evidenceMessageId:'saved',evidenceMessageEventId:posted.event.id,evidenceVersion:version,previousCompletionEventId:null,producerId:peer.identityId,summary:'Saved useful work',nextAction:'Independent review'});
  cmd(reviewerKey,'verify','verification.recorded',{workItemId:'task',expectedRevision:2,result:'pass',completionEventId:done.event.id,evidenceVersion:version,summary:'Reviewed exact saved result'});
