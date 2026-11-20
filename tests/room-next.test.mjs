@@ -143,6 +143,31 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
   });
 }
 
+test("Room Next finds legacy addressed work beyond two non-actionable windows", async t => {
+  const f = await privateWorkFixture(t, "legacy");
+  for (let i = 0; i < 36; i++) {
+    const id = `a-${String(i).padStart(2, "0")}`;
+    f.send(f.owner, "work.proposed", {
+      workItemId: id, title: id, definitionOfDone: "Save a result", accountableMemberId: f.observer.id,
+      verifierMemberId: f.reviewer.id, independentVerificationRequired: true
+    });
+  }
+  for (let i = 0; i < 6; i++) {
+    const id = `z-assigned-${i}`;
+    f.send(f.owner, "work.proposed", {
+      workItemId: id, title: id, definitionOfDone: "Save a result", accountableMemberId: f.reviewer.id, mode: "read"
+    });
+  }
+  const first = await f.mcp(f.reviewer, "room_next", { view: "pickup" });
+  assert.equal(first.ok, true, first.text);
+  assert.deepEqual(first.value.work.items.map(item => item.id), [0, 1, 2, 3].map(i => `z-assigned-${i}`));
+  assert.equal(first.value.work.coverage, "partial");
+  const second = await f.mcp(f.reviewer, "room_next", first.value.work.nextRead.arguments);
+  assert.equal(second.ok, true, second.text);
+  assert.deepEqual(second.value.work.items.map(item => item.id), [4, 5].map(i => `z-assigned-${i}`));
+  assert.equal(second.value.work.coverage, "complete");
+});
+
 test("an empty work page advances, keeps ongoing work, and invalidates stale authority", async t => {
   const f = await privateWorkFixture(t, "normalized-current-v1");
   for (let i = 0; i < 16; i++) {
