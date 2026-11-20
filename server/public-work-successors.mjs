@@ -66,7 +66,7 @@ export class PublicWorkSuccessors {
         fail(409, 'stale_review_receipt', 'Follow-up must identify the exact original submission');
       const review = this.store.publicWorkReviews.current(scope);
       if (review.revision !== input.expectedReviewRevision) fail(409, 'stale_review', 'Review changed; inspect it again');
-      if (review.state !== 'revision_requested') fail(409, 'follow_up_not_requested', 'An explicit revision request is required');
+      if (!['accepted', 'revision_requested'].includes(review.state)) fail(409, 'follow_up_not_requested', 'The original result must be accepted or explicitly sent back for revision');
       if (scope.offer.status !== 'published') fail(409, 'follow_up_unavailable', 'Original offer must still be published');
       if (this.db.prepare('SELECT 1 FROM public_work_successors WHERE parent_receipt_id=?').get(receiptId)) fail(409, 'follow_up_exists', 'This submission already has a follow-up task');
       check(input.terms?.reward?.kind === 'unpaid' && scope.offer.reward.kind === 'unpaid', 'Follow-up must be unpaid');
