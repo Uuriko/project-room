@@ -138,7 +138,7 @@ export class ReplyRequests {
       const nextReads = requests.map(request => ({ requestMessageId: request.id,
         http: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(request.id)}` },
         nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } } }));
-      // At most 500 retained subjects; no bodies and no mutable paging boundary.
+      // Legacy lists return metadata only. Keep the existing response byte budget.
       if (Buffer.byteLength(JSON.stringify({ requests, nextReads })) > 1048576) fail("reply_list_too_large", "Narrow the current request selection", 413);
       // F-S6c-3: evaluatedThrough is the viewer's visible horizon, not the
       // raw room sequence — the raw sequence counts private events past

@@ -1,5 +1,5 @@
 import { validId } from "../src/events.js";
-import { MAX_REPLY_REQUESTS, REPLY_POLICY_VERSION } from "../src/reply-requests.js";
+import { REPLY_POLICY_VERSION } from "../src/reply-requests.js";
 
 // Metadata only. Use the same projection when producing a notice and validating
 // its saved form, so a read pointer cannot become a suggested write on restart.
@@ -32,7 +32,7 @@ export function hasRequestSupport(snapshot) {
 
 export function requestNotices(snapshot) {
   const requests = snapshot.state.replyRequests === undefined ? {} : snapshot.state.replyRequests, notices = new Map();
-  if (!requests || typeof requests !== "object" || Array.isArray(requests) || Object.keys(requests).length > MAX_REPLY_REQUESTS) throw new Error("Invalid request snapshot");
+  if (!requests || typeof requests !== "object" || Array.isArray(requests)) throw new Error("Invalid request snapshot");
   for (const [id, request] of Object.entries(requests)) {
     const recipient = snapshot.state.members[request?.recipientId], requester = snapshot.state.members[request?.requesterId];
     const r = Object.fromEntries(fields.map(key => [key, key === "recipientAvailable"

@@ -6,7 +6,7 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { applyEvent, replay, event } from "../src/events.js";
-import { replyContextOwners, MAX_REPLY_REQUESTS, prepareReplyPost } from "../src/reply-requests.js";
+import { replyContextOwners, prepareReplyPost } from "../src/reply-requests.js";
 import { DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { auditReplyRequests, REPLY_PAGE_BYTES } from "../server/reply-requests.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
@@ -211,12 +211,10 @@ test("full request history audit rejects matching forged checkpoints and project
   }
 });
 
-test("request map is bounded and unsupported event policies cannot be silently interpreted", () => {
+test("unsupported request event policies cannot be silently interpreted", () => {
   const original = replay(initialRoom()), stamped = event({ roomId: "commons", actorId: "owner", type: "message.posted",
     data: { messageId: "request", toMemberId: "another", body: "Question", requestKind: "reply", requestPolicyVersion: 1 } });
   for (const value of [null, 0, 2, "1"]) assert.throws(() => applyEvent(original, { ...stamped, data: { ...stamped.data, requestPolicyVersion: value } }), /Unsupported reply/);
-  original.replyRequests = Object.fromEntries(Array.from({ length: MAX_REPLY_REQUESTS }, (_, i) => [`r${i}`, {}]));
-  assert.throws(() => applyEvent(original, stamped), /capacity/);
 });
 
 test("selected exchange freezes pages, exposes basis only after context is drained, and stays read-only", t => {

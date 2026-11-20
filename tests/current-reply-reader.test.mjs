@@ -23,6 +23,22 @@ test('normalized current requests list does not report an existing incoming obli
  const {store,keys}=fixture(t),listed=store.replyRequests.list(keys.reader,'commons');
  assert.deepEqual(listed.requests.map(request=>request.id),['question']);
 });
+test('normalized room opens and recovers an exact request after 500 historical requests',t=>{
+ const {store,keys}=fixture(t,(_events,add)=>{
+  for(let i=0;i<499;i++){
+   const id=`settled-${i}`;
+   add('message.posted',{messageId:id,toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Earlier question'});
+   add('reply_request.cancelled',{requestMessageId:id,expectedRequestRevision:0,reason:'Settled'});
+  }
+ });
+ const command={id:'open-after-500',type:'message.posted',data:{messageId:'after-500',toMemberId:'reader',requestKind:'reply',body:'New useful work'}};
+ const opened=store.command(keys.owner,'commons',command), retry=store.command(keys.owner,'commons',command);
+ assert.equal(retry.sequence,opened.sequence);assert.equal(retry.duplicate,true);
+ const read=store.replyRequests.selected(keys.reader,'commons','after-500');
+ assert.equal(read.page.items[0].sequence,opened.sequence);
+ assert.equal(read.current.answerBasis.contextEventId,opened.event.id);
+ assert.throws(()=>store.replyRequests.selected(keys.other,'commons','after-500'),error=>error.status===404);
+});
 test('bounded witnessed refill finds an addressed request behind unrelated requests',t=>{
  const {store,keys}=fixture(t,(_events,add)=>{
   for(let i=0;i<18;i++)add('message.posted',{messageId:`a-noise-${String(i).padStart(2,'0')}`,toMemberId:'other',requestKind:'reply',requestPolicyVersion:1,body:'Private'});

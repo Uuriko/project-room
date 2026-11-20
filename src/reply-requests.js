@@ -1,10 +1,9 @@
-import { currentRecordReplyCount,currentRecordReplyOwner } from './current-record-context.js';
+import { currentRecordReplyOwner } from './current-record-context.js';
 // Shared request semantics. Deliberately independent of events, storage and UI.
 export const REPLY_CANCELLED = "reply_request.cancelled";
 export const REPLY_PROGRESSED = "reply_request.progressed";
 export const REPLY_PROGRESS_STATES = Object.freeze(["acknowledged", "accepted", "working", "needs_input", "error"]);
 export const REPLY_POLICY_VERSION = 1;
-export const MAX_REPLY_REQUESTS = 500;
 // Keep a worst-case escaped answer plus its envelope inside one 64 KiB
 // selected-context page. Questions and cancellation reasons retain 4,096.
 export const MAX_REPLY_RESPONSE_CHARS = 8192;
@@ -164,7 +163,6 @@ export function prepareReplyPost(state, incoming) {
     "Invalid answer credential");
   if (mode === "open") {
     requireValid(data.toMemberId !== incoming.actorId, "A reply request needs another participant");
-    requireValid((currentRecordReplyCount(state) ?? Object.keys(state.replyRequests ?? {}).length) < MAX_REPLY_REQUESTS, "Reply request capacity reached");
   } else {
     const request = replyRequest(state, data.responseToRequestId);
     openRevision(request, data.expectedRequestRevision);

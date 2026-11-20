@@ -272,7 +272,7 @@ export function validateReplyRead(result, { name, args, roomId }) {
     && result.scope.externalExecution === false && result.scope.acknowledges === false);
   if (name === "room_list_requests") {
     assert(result.selection?.direction === (args.direction ?? "incoming") && result.selection.status === (args.status ?? "open")
-      && Array.isArray(result.requests) && result.requests.length <= 500);
+      && Array.isArray(result.requests));
     const ids = new Set();
     for (const request of result.requests) {
       assert(listedRequestKeys(request) && validRequest(request) && !ids.has(request.id)

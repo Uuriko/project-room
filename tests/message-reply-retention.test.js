@@ -5,7 +5,9 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {RoomStore} from '../server/store.mjs';
 import {initialRoom} from '../server/bootstrap.mjs';
-import {replyFollowUp,MAX_REPLY_REQUESTS} from '../src/reply-requests.js';
+import {requestNotices} from '../client/request-notices.mjs';
+import {validateReplyRead} from '../client/reply-actions.mjs';
+import {replyFollowUp} from '../src/reply-requests.js';
 import {setTier} from '../server/autonomy-tiers.mjs';
 
 function setup(t,window=4){
@@ -42,16 +44,31 @@ test('answered request follow-up survives automatic archival and reopen without 
  assert.equal(f.store.room('commons').state.messages.find(m=>m.id==='a-one').body,null);
  f.reopen();assert.equal(replyFollowUp(f.store.room('commons').state,'q-one','owner'),null);
 });
-test('answer retention adds at most one response per admitted request at the existing request cap',t=>{
- const f=setup(t,null);
- for(let i=0;i<MAX_REPLY_REQUESTS;i++){const q=f.request(i);f.answer(i,q);}
- assert.throws(()=>f.request('overflow'),/capacity/);
+test('legacy room accepts requests beyond 500 and preserves reads and answer retention',t=>{
+ const f=setup(t,null), prior=500;
+ for(let i=0;i<prior;i++){const q=f.request(i);f.answer(i,q);}
+ const data={messageId:'q-500',body:'Please report the current result.',toMemberId:'agent',requestKind:'reply'};
+ const command={id:'request-after-500',type:'message.posted',data};
+ const opened=f.store.command(f.keys.owner,'commons',command);
+ const retry=f.store.command(f.keys.owner,'commons',command);
+ assert.equal(retry.sequence,opened.sequence);
+ assert.equal(retry.duplicate,true);
+ assert.equal(f.store.replyRequests.selected(f.keys.agent,'commons',data.messageId).page.items[0].sequence,opened.sequence);
+ const args={direction:'outgoing',status:'all'};
+ const listed=f.store.replyRequests.list(f.keys.owner,'commons',args);
+ assert.equal(validateReplyRead(listed,{name:'room_list_requests',args,roomId:'commons'}).requests.length,prior+1);
+ const notices=requestNotices({roomId:'commons',viewerId:'agent',state:f.store.room('commons').state});
+ assert.equal(notices.get(JSON.stringify(['request',data.messageId])).payload.condition,'reply_requested');
+ f.answer(prior,opened);
  for(let i=0;i<8;i++)f.command('owner','message.posted',{messageId:`tail-${i}`,body:`Settled ${i}.`});
  assert.equal(f.store.archiveMessages('commons',{keepNewest:4,dryRun:false}).ok,true);
  const state=f.store.room('commons').state;
- assert.equal(Object.keys(state.replyRequests).length,MAX_REPLY_REQUESTS);
- assert.equal(state.messages.filter(m=>m.id.startsWith('a-')).length,MAX_REPLY_REQUESTS);
- assert.equal(state.messages.length,MAX_REPLY_REQUESTS*2+4,'only request roots, their recorded responses and newest tail');
- assert.ok(replyFollowUp(state,'q-0','owner'));assert.ok(replyFollowUp(state,`q-${MAX_REPLY_REQUESTS-1}`,'owner'));
+ assert.equal(Object.keys(state.replyRequests).length,prior+1);
+ assert.equal(state.messages.filter(m=>m.id.startsWith('a-')).length,prior+1);
+ assert.equal(state.messages.length,(prior+1)*2+4,'only request roots, their recorded responses and newest tail');
+ assert.ok(replyFollowUp(state,'q-0','owner'));assert.ok(replyFollowUp(state,`q-${prior}`,'owner'));
  assert.equal(f.store.checkMessagesParity().ok,true);
+ f.reopen();
+ assert.equal(f.store.replyRequests.selected(f.keys.agent,'commons',data.messageId).request.status,'answered');
+ assert.ok(replyFollowUp(f.store.room('commons').state,'q-0','owner'));
 });
