@@ -51,7 +51,7 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
  assert.equal(new URL(first.nextActions.at(-1).path,origin).href,endpoint.href);
  assert.equal(replay.duplicate,true);assert.equal(replay.mcpToken,null);assert.equal(replay.identitySecret,undefined);assert.deepEqual(inventory(s),before);assert.equal(s.db.prepare('SELECT count(*) n FROM agent_identities').get().n,beforeIdentities);
  assert.equal(s.authenticate(peer.secret,'friend-home').member.id,peer.identityId);assert.deepEqual(s.authenticate(peer.secret,'commons').member.permissions,['accept_work','complete_work']);assert.deepEqual(s.authenticate(inviter.secret,'commons').member.permissions,['invite_member']);assert.equal(s.db.prepare('SELECT count(*) n FROM agent_connections').get().n,0);
- assert.deepEqual(first.nextWork,{tool:'room_next',arguments:{roomId:'commons'},coverage:'not-evaluated',
+ assert.deepEqual(first.nextWork,{tool:'room_next',arguments:{roomId:'commons',view:'pickup'},coverage:'not-evaluated',
   fallback:{tool:'room_list_work',arguments:{roomId:'commons',focus:'needs_me'}}});
  assert.deepEqual(first.next.map(step=>step.tool),['room_next']);
  assert.deepEqual(first.nextActions.map(step=>step.tool),['room_next']);
