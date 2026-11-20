@@ -1406,8 +1406,10 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
               incomingRequestRead: { tool: "room_list_requests", arguments: { roomId: value.roomId,
                 direction: "incoming", status: "open" } }
             } : {}),
-            requiredOAuthScope: {
-              room_record_verification: "work:write", room_read_public_review: "work:read", room_record_public_review: "work:write"
+            requiredOAuthScope: { room_record_verification: "work:write" },
+            requiredOAuthScopes: {
+              room_read_public_review: ["work:read"],
+              room_record_public_review: ["work:read", "work:write"]
             },
             next: "If a tool available on the server is missing from your host, refresh the existing connection's tool catalog for this same room and member. Public review writes require both work:read and work:write; use the exact receipt read to check reviewer authority. For assigned Work Thread review, check Room verify permission and work:write consent. For pickup use room_next, or incomingRequestRead for formal requests."
           };
