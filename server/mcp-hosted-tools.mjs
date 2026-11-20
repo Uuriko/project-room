@@ -58,9 +58,9 @@ import { handoffPacketEnabled } from "./handoff-packet.mjs";
 
 export const hostedRoomTools = [
   tool("room_wait_for_attention", "Wait for new caller-addressed mentions, replies, DMs or formal requests after a saved inbox cursor. Normalized rooms only. Returns pointers or an explicit catch-up continuation; never acknowledges messages or starts an AI. timeoutSec defaults to 25, maximum 120; your host may cancel earlier. includeWork=true also returns kind=work pointers for tasks that now wait on you. Older obligations require separate inbox/work reads.", schema({roomId: roomIdField, after: {type: "integer", minimum: 0}, timeoutSec: {type: "integer", minimum: 0, maximum: 120}, includeWork: {type: "boolean"}}, ["roomId", "after"])),
-  { ...tool("room_next", "Find addressed work, requests or one eligible invitation. Use nextRead unchanged. Follow partial pages even when empty.", schema({
+  { ...tool("room_next", "Use view:pickup for one preferred nextRead. Follow partial pages even when empty.", schema({
     roomId: roomIdField, source: { type: "string", enum: ["work", "requests"] },
-    cursor: { type: "string", minLength: 1, maxLength: 4096 }
+    cursor: { type: "string", minLength: 1, maxLength: 4096 }, view: { enum: ["pickup"] }
   }, ["roomId"])), outputSchema: roomNextOutput },
   tool("room_receipt", "Check your exact Room operation ID. Returns committed event metadata only. Not recorded means absent at the observed head. Read only.", schema({
     roomId: idField, operationId: idField

@@ -223,7 +223,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "fc50aaa360379f80",
+      "inputSchema": "ed6e8cb3bd5b4b8f",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1175,7 +1175,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "fc50aaa360379f80",
+      "inputSchema": "ed6e8cb3bd5b4b8f",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1927,7 +1927,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "fc50aaa360379f80",
+      "inputSchema": "ed6e8cb3bd5b4b8f",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2339,7 +2339,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "fc50aaa360379f80",
+      "inputSchema": "ed6e8cb3bd5b4b8f",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2631,7 +2631,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "fc50aaa360379f80",
+      "inputSchema": "ed6e8cb3bd5b4b8f",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2913,7 +2913,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "fc50aaa360379f80",
+      "inputSchema": "ed6e8cb3bd5b4b8f",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -3357,7 +3357,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "fc50aaa360379f80",
+      "inputSchema": "ed6e8cb3bd5b4b8f",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

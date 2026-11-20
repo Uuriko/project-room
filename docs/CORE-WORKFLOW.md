@@ -210,7 +210,9 @@ form remain available. The latter takes `expectedRevision` in the JSON input.
 
 ## A task ready to pick up
 
-Use `room_next.nextRead` to open the suggested work or request. When the initial
+Call `room_next` with `view: "pickup"` and use its `nextRead` to open the
+suggested work or request. Existing clients can omit the view and follow the
+individual work and request rows. When the initial
 read finds both addressed sources complete and empty, it can point directly to
 one eligible contribution invitation. Follow the source continuations when either
 source is partial. If the continuation pages finish empty, optional invitations
