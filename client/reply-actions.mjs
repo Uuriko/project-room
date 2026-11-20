@@ -191,6 +191,19 @@ const listedRequestKeys = request => {
     && (!extras.includes("progress") || validProgress(request.progress))
     && (!extras.includes("lifecycle") || validLifecycle(request.lifecycle));
 };
+const selectedContextFields = ["contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason"];
+const selectedProgressFields = ["acknowledgedAt", "lastActivityAt", "progressState", "progressNote", "progressEventId"];
+function selectedRequestKeys(request) {
+  if (!request) return false;
+  const stamped = Object.hasOwn(request, "answerCredential");
+  const progress = selectedProgressFields.some(key => Object.hasOwn(request, key));
+  return keys(request, [...requestFields, ...selectedContextFields, ...(stamped ? ["answerCredential"] : []),
+    ...(progress ? selectedProgressFields : [])])
+    && (!progress || date(request.acknowledgedAt) && date(request.lastActivityAt)
+      && Date.parse(request.acknowledgedAt) <= Date.parse(request.lastActivityAt)
+      && validProgress({ state: request.progressState, note: request.progressNote, at: request.lastActivityAt })
+      && validId(request.progressEventId));
+}
 function validRequest(request) {
   return request && ["id", "openingEventId", "requesterId", "recipientId", "contextEventId"].every(key => validId(request[key]))
     && request.requesterId !== request.recipientId && nullableId(request.workItemId)
@@ -374,8 +387,7 @@ export function validateReplyRead(result, { name, args, roomId }) {
     // answerCredential: the server's stamp on an answered or declined request.
     const stamped = Object.hasOwn(request ?? {}, "answerCredential");
     assert(!stamped || ["answered", "declined"].includes(request.status) && ANSWER_CREDENTIALS.includes(request.answerCredential));
-    assert(keys(request, [...requestFields, "contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason",
-      ...(stamped ? ["answerCredential"] : [])])
+    assert(selectedRequestKeys(request)
       && validRequest(request) && request.id === requestMessageId && validId(request.contextMessageId)
       && current?.evaluatedThrough === result.evaluatedThrough && current.contextEventId === request.contextEventId
       && integer(current.contextSequence) && current.contextSequence > 0 && current.contextSequence <= result.evaluatedThrough
@@ -513,7 +525,7 @@ function validateCurrentReplyRead(result,{name,args,roomId}) {
     &&result.sourceWindow.consistency==='frozen-conversation-current-preparation'
     &&page.checkpoint===null&&page.completedCheckpoint===null&&Array.isArray(page.items)&&page.items.length<=Math.min(page.limit,8));
   const request=result.request,current=result.current;
-  assert(keys(request,[...requestFields,'contextMessageId','terminalActorId','responseMessageId','responseContextSequence','reason',...(Object.hasOwn(request??{},'answerCredential')?['answerCredential']:[])])&&validRequest(request)&&request.id===args.requestMessageId&&validId(request.contextMessageId)
+  assert(selectedRequestKeys(request)&&validRequest(request)&&request.id===args.requestMessageId&&validId(request.contextMessageId)
     &&[request.requesterId,request.recipientId].includes(result.viewerId)
     &&current?.evaluatedThrough===result.evaluatedThrough&&current.contextEventId===request.contextEventId
     &&integer(current.contextSequence)&&current.contextSequence>0&&current.contextSequence<=result.evaluatedThrough
