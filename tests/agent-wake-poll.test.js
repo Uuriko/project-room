@@ -718,12 +718,17 @@ test("a final prerequisite gate releases each eligible accepted successor to its
   assert.deepEqual(recovered.map(wake => [wake.workItemId, wake.eventId]), [
     ["unleased-successor", accepted.event.id],
   ], "reconnect recovers one signal bound to the original acceptance");
-  const acknowledge = () => post(origin, "/api/agent-heartbeats/ack", {
-    signalIds: [recovered[0].signalId], fencingToken: reconnected.listener.fencingToken,
-  }, other.secret);
+  const signalId = recovered[0].signalId;
+  const acknowledge = (fencingToken = reconnected.listener.fencingToken) =>
+    post(origin, "/api/agent-heartbeats/ack", { signalIds: [signalId], fencingToken }, other.secret);
+  const staleAck = await acknowledge(offline.listener.fencingToken);
+  assert.equal(staleAck.status, 200);
+  assert.deepEqual((await staleAck.json()).acknowledged, []);
+  assert.deepEqual((await poll(other, "unleased")).map(wake => wake.signalId), [signalId],
+    "a displaced listener cannot consume the retained signal");
   const ack = await acknowledge();
   assert.equal(ack.status, 200);
-  assert.deepEqual((await ack.json()).acknowledged, [recovered[0].signalId]);
+  assert.deepEqual((await ack.json()).acknowledged, [signalId]);
   assert.deepEqual((await (await acknowledge()).json()).acknowledged, []);
   assert.deepEqual(await poll(other, "unleased"), [], "the acknowledged signal does not return");
   cmd(receiver.secret, "work.started", { workItemId: "ready-a", expectedRevision: 1 });

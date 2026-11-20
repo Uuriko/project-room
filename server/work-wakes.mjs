@@ -205,12 +205,18 @@ export class WorkWakes {
     }
     return bounded ? { signals: result, more: window.more, through: window.through } : result;
   }
-  ack(agentId, signalIds, roomId = null) {
+  ack(agentId, signalIds, roomId = null, fencingToken = null) {
     if (!this.available) return [];
     const acknowledged = [], at = this.store.now();
+    // Dependency wakes are visible only to the current room listener. Keep
+    // settlement under the same fence even after a previous listener exits.
     const statement = this.db.prepare(`UPDATE agent_work_wakes SET delivered_at=? WHERE agent_id=? AND signal_id=?
-      AND delivered_at IS NULL AND invalidated_at IS NULL AND (? IS NULL OR room_id=?)`);
-    for (const id of signalIds) if (statement.run(at, agentId, id, roomId, roomId).changes) acknowledged.push(id);
+      AND delivered_at IS NULL AND invalidated_at IS NULL AND (? IS NULL OR room_id=?)
+      AND (json_extract(pointer, '$.dependencyBasis') IS NULL OR EXISTS (
+        SELECT 1 FROM agent_wake_listener_leases l WHERE l.agent_id=agent_work_wakes.agent_id
+        AND l.room_key=agent_work_wakes.room_id AND l.lease_expires_at>? AND l.fencing_token=?
+      ))`);
+    for (const id of signalIds) if (statement.run(at, agentId, id, roomId, roomId, at, fencingToken).changes) acknowledged.push(id);
     return acknowledged;
   }
 }
