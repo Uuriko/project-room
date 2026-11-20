@@ -88,10 +88,25 @@ test('selected result reads keep same-millisecond join floors for drafts and com
   assert.equal(f.store.workResult(late, 'commons', f.workItemId, { draftMessageId: fresh.event.data.messageId }).result.text.body, 'Post-join draft');
 });
 
+test('selected results omit a start outside the reviewer’s history', async t => {
+  const f = await setup(t), now = Date.now(); f.store.now = () => now;
+  const start = f.mutate(T.WORK_STARTED);
+  f.send(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: 'since_join' }, 'owner');
+  f.send(T.MEMBER_ADDED, { memberId: 'late', displayName: 'Late', kind: 'human', permissions: [] }, 'owner');
+  const late = f.store.issueAccessKey('commons', 'late');
+  const posted = f.post('Evidence posted after joining');
+  f.mutate(T.WORK_COMPLETED, f.input(posted));
+  const result = f.store.workResult(late, 'commons', f.workItemId);
+  assert.equal(start.event.at, posted.event.at);
+  assert.equal(result.result.text.body, posted.event.data.body);
+  assert.equal(result.workThread.start, undefined);
+  assert.equal(f.store.workResult(f.keys.owner, 'commons', f.workItemId).workThread.start?.eventId, start.event.id);
+});
+
 test('one selected result read gives only the designated reviewer a current exact action', async t => {
   const f = await setup(t);
   const posted = f.post('PR qualification: the required unit job was skipped.');
-  f.mutate(T.WORK_STARTED);
+  const start = f.mutate(T.WORK_STARTED);
   const saved = f.mutate(T.WORK_COMPLETED, f.input(posted));
   const reviewer = new RoomAgentClient({ ...f.config, memberId: 'reviewer', token: f.keys.reviewer });
   const pickup = readRoomNext(f.store, f.keys.reviewer, 'commons').work.items.find(row => row.id === f.workItemId);
@@ -102,6 +117,9 @@ test('one selected result read gives only the designated reviewer a current exac
   assert.equal(completionEventId, saved.event.id);
   const selected = await reviewer.workResult(workItemId, { completionEventId });
   assert.equal(selected.result.text.body, posted.event.data.body);
+  assert.deepEqual(selected.workThread.start, {
+    eventId: start.event.id, sequence: start.sequence, at: start.event.at, actorId: 'producer',
+  });
   assert.equal(selected.review.criteria, f.item().definitionOfDone);
   const { tool, arguments: { roomId, ...basis }, inputRequired } = selected.review.action;
   assert.equal(tool, 'room_record_verification');
@@ -131,6 +149,7 @@ test('one selected result read gives only the designated reviewer a current exac
 
 test("a corrected thread keeps the earlier finding and one retry-safe current verdict", async t => {
   const f = await setup(t);
+  const originalStart = f.mutate(T.WORK_STARTED);
   const original = f.mutate(T.WORK_COMPLETED, f.input(f.post("Old PR evidence")));
   const reviewer = new RoomAgentClient({ ...f.config, memberId: "reviewer", token: f.keys.reviewer });
   const basisOf = read => {
@@ -144,11 +163,13 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   const corrected = f.mutate(T.WORK_COMPLETED, f.input(f.post("Corrected PR evidence")));
   const packet = await reviewer.workResult(f.workItemId, { completionEventId: corrected.event.id });
   assert.equal(packet.workThread.workItemId, f.workItemId);
+  assert.equal(packet.workThread.start, undefined);
   assert.equal(packet.workThread.correction.summary, "The old SHA is wrong.");
   assert.equal(packet.workThread.correction.verificationEventId, finding.event.id);
   assert.equal(packet.workThread.correction.nextRead.arguments.completionEventId, original.event.id);
   const historical = await reviewer.workResult(f.workItemId, { completionEventId: original.event.id });
   assert.equal(historical.workThread.href, packet.workThread.href);
+  assert.equal(historical.workThread.start?.eventId, originalStart.event.id);
   assert.equal(historical.workThread.correction, undefined);
   assert.equal(historical.review, undefined);
   const verdict = { ...basisOf(packet), result: "pass", summary: "Checked the corrected SHA." };
