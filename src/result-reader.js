@@ -156,7 +156,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     else link.addEventListener("click", () => closeResult(false));
     return link;
   }
-  function showReleaseChecks(report) {
+  function showReleaseChecks(report, servingRevision) {
     if (!releaseLink || !releasePanel) return;
     const focused = resultView?.focused === true;
     releaseLink.hidden = !report || focused;
@@ -165,7 +165,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const list = resultElement("result-release-stages");
     list.replaceChildren();
     if (!report) return;
-    resultElement("result-release-candidate").textContent = uiText("result.releaseCandidate", { revision: report.candidateRevision });
+    const scope = resultElement("result-release-candidate");
+    const serving = /^[0-9a-f]{40}$/.test(servingRevision ?? "") ? servingRevision : null;
+    const servingText = serving
+      ? uiText("result.releaseServing", { revision: serving })
+      : uiText("result.releaseServingUnknown");
+    const candidateText = uiText("result.releaseCandidate", { revision: report.candidateRevision });
+    scope.replaceChildren(document.createTextNode(candidateText), document.createElement("br"), document.createTextNode(servingText));
     for (const check of report.checks) {
       const row = document.createElement("li"), title = document.createElement("strong");
       title.textContent = uiText("result.releaseStage", { stage: uiText(`result.release.${check.stage}`), status: uiText(`result.release.${check.status}`) });
@@ -392,7 +398,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
       showCorrection(view.withdrawn ? null : value.workThread?.correction);
       view.releaseChecks = value.workThread?.releaseChecks;
-      showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
+      showReleaseChecks(view.withdrawn ? null : view.releaseChecks, value.servingRevision);
       resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
