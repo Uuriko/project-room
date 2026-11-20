@@ -1,15 +1,18 @@
 // Explicit host opt-in for pointer-only work delivery on the heartbeat pull path.
 // Separate additive tables leave the existing mention/DM journal readable by old hosts.
 import { readWakeWindow } from './wake-delivery-window.mjs';
-import { randomUUID } from "node:crypto";
-import { nextWorkStep } from "../src/workflow.js";
+import { createHash, randomUUID } from "node:crypto";
+import { nextWorkStep, workActions } from "../src/workflow.js";
 import { firstBlockedWakeTarget } from "../src/events.js";
 import { sessionRecord } from "../src/work-item-session.js";
 import { heldUntil } from "./attention.mjs";
 import { mutedEvent } from "./moderation.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { selectedWorkRead } from "./work-context.mjs";
+import { outsidePrivateWork, selectedWorkRead } from "./work-context.mjs";
 import { recordWakeEvent } from "./wake-metrics.mjs";
+import { isCurrentRoom } from "./current-room-repository.mjs";
+import { boardClaimId } from "./work-item-board.mjs";
+import { boardPrerequisiteState, nativePrerequisiteState } from "./work-item-state.mjs";
 
 export const workWakeSchema = `
   CREATE TABLE IF NOT EXISTS agent_work_wake_hosts (
@@ -73,7 +76,54 @@ export class WorkWakes {
     // the work store's emitted vs acked reconciles instead of leaking.
     if (invalidated > 0) recordWakeEvent(this.db, { at, roomId, store: "work",
       event: "invalidated", kind: "work", n: invalidated });
-    const next = nextWorkStep(item, at, state.room.ownerId), memberId = next.memberId;
+    this.emitWork(roomId, state, item, incoming, at);
+    this.releaseSuccessors(roomId, before, state, item, incoming, at);
+  }
+
+  scopedReceiver(roomId, agentId, now, hostId = null) {
+    // The lease table is installed only when a runtime opts into listener leases.
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_wake_listener_leases'").get()) return false;
+    return Boolean(this.db.prepare(`SELECT 1 FROM agent_wake_listener_leases l
+      JOIN agent_work_wake_hosts h ON h.agent_id=l.agent_id AND h.host_id=l.listener_id AND h.enabled=1
+      WHERE l.room_key=? AND l.lease_expires_at>? AND (h.room_id IS NULL OR h.room_id=l.room_key)
+        AND (? IS NULL OR l.agent_id=?) AND (? IS NULL OR l.listener_id=?) LIMIT 1`)
+      .get(roomId, now, agentId, agentId, hostId, hostId));
+  }
+
+  successorBasis(roomId, state, item, memberId, at) {
+    const ids = this.store.workClaims.get(roomId, boardClaimId(item.id))?.dependsOn ?? item.dependsOn ?? [];
+    if (!ids.length || item.state !== "accepted") return null;
+    const parties = this.store.privateWorkParties(roomId, { workIds: [item.id, ...ids] });
+    if (outsidePrivateWork(parties.get(item.id), item, memberId)) return null;
+    const evidence = [];
+    for (const id of ids) {
+      const parent = state.workItems[id];
+      if (!nativePrerequisiteState(parent, at).satisfied || outsidePrivateWork(parties.get(id), parent, memberId)
+        || !boardPrerequisiteState(this.store.workClaims.get(roomId, boardClaimId(id))).satisfied) return null;
+      evidence.push([id, parent.receipt.eventId, parent.receipt.evidenceVersion]);
+    }
+    return createHash("sha256").update(JSON.stringify(evidence)).digest("hex");
+  }
+
+  releaseSuccessors(roomId, before, state, prerequisite, incoming, at) {
+    // Normalized writes project selected records, not the room's reverse edges.
+    if (!nativePrerequisiteState(prerequisite, at).satisfied
+      || nativePrerequisiteState(before.workItems[prerequisite.id], at).satisfied
+      || isCurrentRoom(this.db, roomId) || !this.scopedReceiver(roomId, null, at)) return;
+    for (const item of Object.values(state.workItems)) {
+      if (item.state !== "accepted" || !item.dependsOn?.includes(prerequisite.id)) continue;
+      const memberId = item.accountableMemberId;
+      const agentId = this.store.identities.identityIdForMember(roomId, memberId);
+      if (!agentId || !this.scopedReceiver(roomId, agentId, at)) continue;
+      const basis = this.successorBasis(roomId, state, item, memberId, at);
+      if (basis) this.emitWork(roomId, state, item, incoming, at, basis);
+    }
+  }
+
+  emitWork(roomId, state, item, incoming, at, dependencyBasis = null) {
+    const id = item.id, next = nextWorkStep(item, at, state.room.ownerId), memberId = next.memberId;
+    if (dependencyBasis && (!["start", "claim"].includes(next.action)
+      || !workActions(item, state.members[memberId], at).some(([action]) => action === next.action))) return;
     if (!next.needsAttention || !memberId || memberId === incoming.actorId) return;
     // #3345: the consent/permission gates below are designed suppressions;
     // count them so the work store's attempt denominator is complete
@@ -84,7 +134,9 @@ export class WorkWakes {
       return;
     }
     const nextRead = selectedWorkRead(roomId, next);
-    this.store.enqueueNativeMcpEvent?.({ roomId, memberId, eventId: incoming.id, actorId: incoming.actorId,
+    // Successor wakes use the elected pull receiver. A native webhook keeps its
+    // original one-event/one-recipient binding to the directly changed item.
+    if (!dependencyBasis) this.store.enqueueNativeMcpEvent?.({ roomId, memberId, eventId: incoming.id, actorId: incoming.actorId,
       kind: "work", workItemId: id, workRevision: item.revision, nextRead });
     const agentId = this.store.identities.identityIdForMember(roomId, memberId);
     if (!agentId || !this.optedIn(agentId, roomId)) {
@@ -94,10 +146,13 @@ export class WorkWakes {
     }
     const pointer = { kind: "work", roomId, workItemId: id, workRevision: item.revision,
       action: next.action, completionEventId: next.completionEventId, evidenceVersion: next.evidenceVersion,
-      eventId: incoming.id, nextRead };
+      eventId: incoming.id, nextRead, ...(dependencyBasis ? { dependencyBasis } : {}) };
+    const eventKey = dependencyBasis
+      ? "ready_" + createHash("sha256").update(JSON.stringify([id, item.revision, next.action, dependencyBasis])).digest("hex")
+      : incoming.id;
     const inserted = this.db.prepare(`INSERT OR IGNORE INTO agent_work_wakes
       VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL)`)
-      .run(`ww_${randomUUID()}`, agentId, roomId, memberId, id, item.revision, incoming.id, incoming.actorId, JSON.stringify(pointer), at);
+      .run(`ww_${randomUUID()}`, agentId, roomId, memberId, id, item.revision, eventKey, incoming.actorId, JSON.stringify(pointer), at);
     // #3345: one audited outcome per work-wake attempt (insert = emitted;
     // INSERT OR IGNORE on the (agent, room, event) key = coalesced).
     recordWakeEvent(this.db, { at, roomId, store: "work",
@@ -105,7 +160,8 @@ export class WorkWakes {
     // #3262: a genuinely new work signal releases the room-hosted poll
     // waiter, mirroring enqueueWake — otherwise a host parked on the poll
     // door sleeps through the assignment until its wait expires.
-    if (inserted.changes > 0) this.store.agentHeartbeats?._releaseWakeWaiter(agentId, roomId);
+    if (inserted.changes > 0 && (!dependencyBasis || !this.store.wakeQueue.pauseStatus(roomId, memberId)))
+      this.store.agentHeartbeats?._releaseWakeWaiter(agentId, roomId);
   }
   pending(agentId, { roomId = null, hostId = null, limit = 50, after = null, bounded = false, order = "oldest" } = {}) {
     // Existing hostless callers retain their mention/DM contract. New work delivery
@@ -130,7 +186,11 @@ export class WorkWakes {
       if (!item || item.revision !== row.work_revision || !this.permitted(state, item, row.member_id, row.actor_id)
           || memberships.get(key) !== agentId
           || memberPolicy.paused) continue;
-      const next = nextWorkStep(item, now, state.room.ownerId), pointer = JSON.parse(row.pointer);
+      const next = nextWorkStep(item, now, state.room.ownerId);
+      const { dependencyBasis, ...pointer } = JSON.parse(row.pointer);
+      if (dependencyBasis && (!this.scopedReceiver(row.room_id, agentId, now, hostId)
+        || !workActions(item, state.members[row.member_id], now).some(([action]) => action === next.action)
+        || this.successorBasis(row.room_id, state, item, row.member_id, now) !== dependencyBasis)) continue;
       if (!next.needsAttention || next.memberId !== row.member_id || next.action !== pointer.action) continue;
       const prefs = memberPolicy.prefs;
       // The digest deadline is anchored, so polling shortly after its hour still delivers.
