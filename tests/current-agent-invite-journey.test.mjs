@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {RoomStore} from '../server/store.mjs';
+import {createRoomServer} from '../server/http.mjs';
 import {createLegacyInviteJourney,initializeCurrentInviteJourney} from './helpers/current-agent-invite-journey.mjs';
 function fixture(t,options){
  const legacy=new RoomStore(':memory:');t.after(()=>legacy.close());
@@ -33,15 +34,39 @@ test('invitation replay cannot rotate a friend existing global identity without 
 import {textVersion} from '../server/text-results.mjs';
 import {auditRecovery} from '../server/recovery.mjs';
 const inventory=s=>Object.fromEntries(['agent_identities','identity_links','events','commands','current_room_records','current_room_record_proofs','current_room_head','operator_actions','agent_invite_codes','agent_invite_redeem_receipts','referrals','agent_connections'].map(table=>[table,s.db.prepare('SELECT * FROM '+table).all()]));
-test('existing agent lost-response retry preserves identity/grants and finishes first useful task under review',t=>{
+test('existing agent lost-response retry preserves identity/grants and finishes first useful task under review',async t=>{
  const{s,peer,inviter,issued,ownerKey,reviewerKey}=fixture(t),beforeIdentities=s.db.prepare('SELECT count(*) n FROM agent_identities').get().n;
  const options={displayName:'Friend existing agent',identitySecret:peer.secret,requestId:'journey-redeem'};
  const first=s.invites.redeem(issued.code,options),before=inventory(s),replay=s.invites.redeem(issued.code,options);
  assert.equal(replay.duplicate,true);assert.equal(replay.mcpToken,null);assert.equal(replay.identitySecret,undefined);assert.deepEqual(inventory(s),before);assert.equal(s.db.prepare('SELECT count(*) n FROM agent_identities').get().n,beforeIdentities);
  assert.equal(s.authenticate(peer.secret,'friend-home').member.id,peer.identityId);assert.deepEqual(s.authenticate(peer.secret,'commons').member.permissions,['accept_work','complete_work']);assert.deepEqual(s.authenticate(inviter.secret,'commons').member.permissions,['invite_member']);assert.equal(s.db.prepare('SELECT count(*) n FROM agent_connections').get().n,0);
- assert.equal(first.nextWork.coverage,'not-evaluated');assert.equal(first.starter,undefined);
+ assert.deepEqual(first.nextWork,{tool:'room_next',arguments:{roomId:'commons'},coverage:'not-evaluated',
+  fallback:{tool:'room_list_work',arguments:{roomId:'commons',focus:'needs_me'}}});
+ assert.deepEqual(first.next.map(step=>step.tool),['room_next']);
+ assert.deepEqual(first.nextActions.map(step=>step.tool),['room_next']);
+ assert.deepEqual(replay.next.map(step=>step.action),['rotate','find-work']);
+ assert.equal(first.starter,undefined);
  const cmd=(key,id,type,data)=>s.command(key,'commons',{id,type,data}),item=()=>JSON.parse(s.db.prepare("SELECT body FROM work_entities WHERE work_id='task'").get().body);
  cmd(ownerKey,'propose','work.proposed',{workItemId:'task',title:'Useful shared task',definitionOfDone:'Save and review useful result',accountableMemberId:first.memberId,verifierMemberId:'reviewer',independentVerificationRequired:true,ownerDecisionRequired:true,humanDecisionMakerId:'owner',mode:'read'});
+ const server=createRoomServer({store:s});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const origin='http://127.0.0.1:'+server.address().port;
+ t.after(()=>{server.closeStreams();server.closeAllConnections();return new Promise(resolve=>server.close(resolve));});
+ async function mcp(pointer, token=first.mcpToken.credential){
+  const res=await fetch(origin+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+   body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:pointer.tool,arguments:pointer.arguments}})});
+  return (await res.json()).result;
+ }
+ const pickup=await mcp(first.nextWork);
+ assert.equal(pickup?.isError,undefined);
+ assert.equal(pickup.structuredContent.viewerId,peer.identityId);
+ assert.equal(pickup.structuredContent.nextRead.arguments.workItemId,'task');
+ const brief=await mcp(pickup.structuredContent.nextRead);
+ assert.equal(brief.structuredContent.continuation.action,'accept');
+ const fallback=await mcp(first.nextWork.fallback);
+ assert.ok(fallback.structuredContent.work.some(item=>item.id==='task'));
+ const crossed=await mcp({...first.nextWork,arguments:{roomId:'friend-home'}});
+ assert.equal(crossed.isError,true);
  cmd(peer.secret,'accept','work.accepted',{workItemId:'task',expectedRevision:0});const body='First useful saved result',posted=cmd(peer.secret,'saved','message.posted',{messageId:'saved',body,workItemId:'task'}),version=textVersion(body);
  const done=cmd(peer.secret,'done','work.completed',{workItemId:'task',expectedRevision:1,evidenceKind:'room_text',evidenceMessageId:'saved',evidenceMessageEventId:posted.event.id,evidenceVersion:version,previousCompletionEventId:null,producerId:peer.identityId,summary:'Saved useful work',nextAction:'Independent review'});
  cmd(reviewerKey,'verify','verification.recorded',{workItemId:'task',expectedRevision:2,result:'pass',completionEventId:done.event.id,evidenceVersion:version,summary:'Reviewed exact saved result'});
