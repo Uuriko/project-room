@@ -180,9 +180,29 @@ export function stampWorkResult(value, viewerId) {
 export function stampInbox(inbox, viewerId) {
   if (!inbox || typeof inbox !== "object") return inbox;
   const markFrom = row => markIfOther(row, viewerId, row?.from);
+  const directMessages = (inbox.directMessages ?? []).map(markFrom);
+  const { roomId, peerMessages = [] } = inbox;
+  // Index the two authorized result lists without duplicating their bodies or
+  // implying the room-message cursor also fences standing peer DM history.
+  const addressedMessages = roomId ? [
+    ...directMessages.map((message, index) => ({
+      source: "directMessages", index, messageId: message.messageId ?? message.replyToId,
+      from: message.from, at: Date.parse(message.at), sequence: message.sequence,
+      nextRead: message.nextRead ?? { tool: "room_read_messages", arguments: { roomId, after: message.sequence - 1, limit: 1 } },
+      ...(message.requestKind === "reply" ? {} : {
+        reply: { tool: "room_reply", arguments: { roomId, replyToId: message.replyToId, toMemberId: message.from } }
+      })
+    })),
+    ...peerMessages.map((message, index) => ({
+      source: "peerMessages", index, messageId: message.messageId, from: message.fromIdentityId, at: message.at,
+      nextRead: { tool: "room_list_peer_dms", arguments: { roomId, threadId: message.threadId } },
+      reply: { tool: "dm_posted", arguments: { roomId, to: message.fromIdentityId } }
+    }))
+  ].sort((a, b) => b.at - a.at || a.messageId.localeCompare(b.messageId)) : undefined;
   return withContentTrust({
     ...inbox,
-    directMessages: (inbox.directMessages ?? []).map(markFrom),
+    ...(addressedMessages ? { addressedMessages } : {}),
+    directMessages,
     mentions: (inbox.mentions ?? []).map(row => markIfOther(row, viewerId, row?.from)),
     directMentions: (inbox.directMentions ?? []).map(markFrom),
     dmRequests: (inbox.dmRequests ?? []).map(row => markIfOther(row, viewerId, row?.requesterId)),

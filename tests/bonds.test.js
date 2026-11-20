@@ -342,6 +342,7 @@ test("peer DM queues directed wakes for fresh and offline wakeable recipients wi
     to: friend.identityId, messageId, body: "you are here"
   }));
   assert.equal(online.status, 201);
+  assert.deepEqual(online.body.wakeDelivery, [{ memberId: friend.identityId, status: "queued" }]);
   const pendingAfterOnline = fixture.store.agentHeartbeats.pendingWakes(friend.identityId);
   assert.deepEqual(pendingAfterOnline.filter(row => row.kind === "dm").map(row => row.messageId), [messageId]);
   // #3257: the bond proposal itself also left a durable wake for the friend.
@@ -379,6 +380,43 @@ test("peer DM queues directed wakes for fresh and offline wakeable recipients wi
   const broadcast = await jsonOf(await get(origin,
     `/api/agent-webhooks/${roomSub.body.subscriptionId}/deliveries`, stranger.secret));
   assert.equal(broadcast.body.deliveries.some(row => row.eventType === "dm.posted" || String(row.eventType).startsWith("bond.")), false);
+});
+
+test("the addressed inbox finds both private routes and reports a missing receiver on send", async t => {
+  const { origin, roomId, owner, friend, stranger, command, fixture } = await roomOf(t);
+  const peerId = randomUUID(), roomMessageId = randomUUID(), quietId = randomUUID();
+  const postPath = `/api/rooms/${roomId}/commands`;
+  const inboxPath = `/api/rooms/${roomId}/agent-inbox`;
+  let at = Date.now();
+  fixture.store.now = () => at;
+  const peer = await jsonOf(await command(owner.secret, "dm.posted", { to: friend.identityId, messageId: peerId, body: "Private peer message" }));
+  assert.equal(peer.status, 201);
+  assert.deepEqual(peer.body.wakeDelivery, [{ memberId: friend.identityId, status: "no_receiver" }]);
+  at += 1000;
+  const direct = await jsonOf(await command(owner.secret, "message.posted", {
+    toMemberId: friend.identityId, messageId: roomMessageId, body: "Private room message",
+  }));
+  assert.equal(direct.status, 201);
+  assert.deepEqual(direct.body.wakeDelivery, [{ memberId: friend.identityId, status: "no_receiver" }]);
+  const quietCommand = { id: randomUUID(), type: "dm.posted", data: { to: friend.identityId, messageId: quietId, body: "FYI only", quiet: true } };
+  at += 1000;
+  const quiet = await jsonOf(await post(origin, postPath, quietCommand, owner.secret));
+  assert.equal(quiet.status, 201);
+  assert.equal(quiet.body.notification, "quiet");
+  assert.equal(quiet.body.wakeDelivery, undefined);
+  const retry = await jsonOf(await post(origin, postPath, quietCommand, owner.secret));
+  assert.equal(retry.body.duplicate, true);
+  assert.equal(retry.body.event.id, quiet.body.event.id);
+  const inbox = (await jsonOf(await get(origin, inboxPath, friend.secret))).body;
+  assert.deepEqual(inbox.addressedMessages.map(item => item.messageId), [quietId, roomMessageId, peerId]);
+  const [, roomPointer, peerPointer] = inbox.addressedMessages;
+  assert.equal(inbox[peerPointer.source][peerPointer.index].body, "Private peer message");
+  assert.equal(inbox[roomPointer.source][roomPointer.index].body, "Private room message");
+  assert.equal(roomPointer.reply.arguments.toMemberId, owner.identityId);
+  assert.equal(peerPointer.nextRead.arguments.threadId, peer.body.event.data.threadId);
+  assert.equal(peerPointer.reply.arguments.to, owner.identityId);
+  const strangerInbox = (await jsonOf(await get(origin, inboxPath, stranger.secret))).body;
+  assert.deepEqual(strangerInbox.addressedMessages, []);
 });
 
 test("M1: a member id colliding with a party identity id sees no peer DMs or bonds", async t => {

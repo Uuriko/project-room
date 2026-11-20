@@ -222,12 +222,19 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         }) : ""].filter(Boolean).join(" · ");
         copy.append(meta);
       }
-      const runtime = ["waiting_receiver", "start_unknown"].includes(item.reviewRuntime?.status)
+      const runtime = ["waiting_receiver", "claimed", "started", "start_unknown"].includes(item.reviewRuntime?.status)
         ? reviewRuntimeLabel(item.reviewRuntime.status) : "";
       if (runtime || item.kind === "review_requested") {
         const cue = document.createElement("p");
         cue.className = "form-hint";
         cue.textContent = runtime || uiText("work.thread.reviewCue");
+        if (runtime && Number.isFinite(item.reviewRuntime?.observedAt)) {
+          const observed = document.createElement("time");
+          const date = new Date(item.reviewRuntime.observedAt);
+          observed.dateTime = date.toISOString();
+          observed.textContent = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+          cue.append(" · ", observed);
+        }
         copy.append(cue);
       }
       const actions = document.createElement("div");
