@@ -5,7 +5,7 @@ import { StageObserver } from './stage-observer.mjs';
 // successful ordinary empty turn has a persisted silent disposition.
 // Incomplete execution stays available for explicit recovery.
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, renameSync, linkSync, unlinkSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, linkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { configDir } from "./credentials.mjs";
 import { RoomClient, RoomError } from "./room.mjs";
@@ -13,7 +13,7 @@ import { AgentHost } from "./agent-host.mjs";
 import { ThreadQueue } from "./queue.mjs";
 import { buildPrompt, buildClaimPrompt, buildFormalPrompt } from "./prompt.mjs";
 import { readCompleteRequest, prepareFormalDelivery, deliverFormal } from './formal-delivery.mjs';
-import { reviewBinding, readReview, reviewOutput, deliverReview } from './review-wake.mjs';
+import { reviewBinding, readReview, reviewOutput, deliverReview, recordedReview } from './review-wake.mjs';
 import { renderTurn } from "./render.mjs";
 import { SessionMap } from "./sessions.mjs";
 import { PermissionBroker, decisionOf, DEFAULT_PERMISSION_TIMEOUT_MS } from "./permission.mjs";
@@ -99,6 +99,11 @@ class TurnReceipts {
     if (!this.dir && !this.memory.has(key)) return undefined;
     try { return this.read(key); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
   }
+  keys() {
+    if (!this.dir) return [...this.memory.keys()];
+    try { return readdirSync(this.dir).filter(name=>/^[a-f0-9]{64}\.json$/.test(name)).map(name=>name.slice(0,-5)); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; return []; }
+  }
   save(key, receipt) {
     if (!this.dir) { this.memory.set(key, receipt); return; }
     const path = join(this.dir, key + ".json"), temporary = path + "." + randomUUID() + ".tmp";
@@ -136,6 +141,10 @@ export class Bridge {
     this.claimReceipts = new TurnReceipts(connection, env, persistSessions);
     this.chatReceipts = new TurnReceipts(connection, env, persistSessions, "chat-turns");
     this.reviewReceipts = new TurnReceipts(connection, env, persistSessions, 'work-review-turns');
+    this.reviewRecoveries = new Set();
+    this.reviewInFlight = new Set();
+    this.reviewRecoveryScanned = false;
+    this.reviewRecoveryAt = 0;
     this.parkedThreads = new TurnReceipts(connection, env, persistSessions, "chat-blocked-threads");
     this.replyWindows = new TurnReceipts(connection, env, persistSessions, "chat-reply-windows");
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
@@ -497,6 +506,8 @@ export class Bridge {
   async reviewSignalTurn(threadKey, {signalId, binding}) {
     const signalIds = [signalId];
     const key = this.reviewReceipts.key(signalId);
+    if (this.reviewInFlight.has(key)) return;
+    this.reviewInFlight.add(key);
     try {
       let receipt = this.reviewReceipts.find(key);
       if (!receipt) {
@@ -508,7 +519,7 @@ export class Bridge {
         const prompt = await readReview(this.room,binding);
         if (!prompt) return; // Changed, hidden or reassigned work remains with its current owner.
         await this.assertListener();
-        const started = this.reviewReceipts.begin(signalId,{binding});
+        const started = this.reviewReceipts.begin(signalId,{binding,signalId});
         if (!started.fresh) return;
         receipt = started.receipt;
         const {recorder, stopReason} = await this.host.prompt(threadKey,prompt,{sessionId,
@@ -525,24 +536,62 @@ export class Bridge {
         this.reviewReceipts.save(key,receipt);
         if (this.reviewReceipts.dir) this.stageObserver.mark(signalIds,'durable_result_saved',receipt.requestId);
       }
-      if (!Object.entries(binding).every(([field,value])=>receipt.binding?.[field]===value)) return;
+      if (receipt.signalId !== signalId || !Object.entries(binding).every(([field,value])=>receipt.binding?.[field]===value)) return;
       if (receipt.phase === 'result') {
         await this.assertListener();
         if (!receipt.attempted) this.reviewReceipts.save(key,{...receipt,attempted:true});
+        this.reviewRecoveries.add(key);
         await deliverReview(this.room,binding,receipt,this.fencingToken);
-        this.reviewReceipts.save(key,{phase:'posted',requestId:receipt.requestId,binding});
+        this.reviewReceipts.save(key,{phase:'posted',requestId:receipt.requestId,binding,signalId});
+        this.reviewRecoveries.delete(key);
         this.stats.posted++;
         this.stageObserver.mark(signalIds,'reply_posted',receipt.requestId);
       } else if (receipt.phase !== 'posted') return;
       await this.ack(signalIds);
     } catch (error) {
       if (error instanceof RoomError && error.status === 409 && error.code === 'command_rejected') {
+        this.reviewRecoveries.delete(key);
+        const blocked = this.reviewReceipts.find(key);
+        if (blocked?.phase === 'result') this.reviewReceipts.save(key,{...blocked,phase:'needs_review'});
         this.log(`exact review ${binding.workItemId} changed before filing; wake remains available`);
         return;
       }
       this.seen.delete(signalId);
       this.log(`exact review delivery failed (${error.code ?? error.message}); retaining work for recovery`);
+    } finally { this.reviewInFlight.delete(key); }
+  }
+
+  async recoverReviewReceipts() {
+    if (!this.reviewRecoveryScanned) {
+      for (const key of this.reviewReceipts.keys()) {
+        let receipt;
+        try { receipt = this.reviewReceipts.find(key); }
+        catch { this.log('invalid saved exact review receipt; inspect local state'); continue; }
+        if (receipt?.phase === 'result' && receipt.attempted === true && typeof receipt.signalId === 'string'
+          && this.reviewReceipts.key(receipt.signalId) === key) this.reviewRecoveries.add(key);
+      }
+      this.reviewRecoveryScanned = true;
     }
+    if (!this.reviewRecoveries.size || Date.now() < this.reviewRecoveryAt) return;
+    this.reviewRecoveryAt = Date.now() + 10000;
+    const key = [...this.reviewRecoveries].find(candidate=>!this.reviewInFlight.has(candidate));
+    if (!key) return;
+    this.reviewRecoveries.delete(key);
+    const receipt = this.reviewReceipts.find(key);
+    if (receipt?.phase !== 'result' || receipt.attempted !== true) return;
+    this.reviewInFlight.add(key);
+    try {
+      // A missing receipt never creates a verdict here. The original wake
+      // can still drive a retry if the command did not commit.
+      if (!await recordedReview(this.room,receipt.requestId,2500)) return;
+      const {requestId,binding,signalId} = receipt;
+      this.reviewReceipts.save(key,{phase:'posted',requestId,binding,signalId});
+      this.stats.posted++;
+      this.log(`recovered recorded exact review ${binding.workItemId} by operation receipt`);
+    } catch (error) {
+      this.reviewRecoveries.add(key);
+      this.log(`exact review receipt recovery deferred (${error.code ?? error.message})`);
+    } finally { this.reviewInFlight.delete(key); }
   }
 
   async turn(threadKey, batch) {
@@ -897,6 +946,7 @@ export class Bridge {
 
   async pollOnce() {
     if (!(await this.lease())) { await sleep(5000, this.controller.signal); return; }
+    await this.recoverReviewReceipts();
     this.formalAckAvailable = this.firstFormalAck;
     // Drain every queued page in this cycle: signals on later pages are
     // just as queued as the first page's, and a first-page signal that
