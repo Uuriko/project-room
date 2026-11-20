@@ -101,8 +101,11 @@ Use `room read REQUEST_ID` or `room_read_request` with
 `view: "compact"` for the current conversation and the latest previous
 exchange. Follow the conversation pages. When older exchanges are omitted,
 `preparation.olderExchangeReads` lists exact earlier requests from oldest
-to newest. Open the relevant exchange directly when the ask refers to an
-older decision. `preparation.previousExchangesNextRead` opens full
+to newest. When a correction's earlier exchanges fit the compact context
+budget, `preparation.retainedEarlierExchanges` carries them in the same read.
+Read them before `preparation.previousExchanges`. If they are absent and the
+ask refers to an older decision, open the relevant exchange directly.
+`preparation.previousExchangesNextRead` opens full
 preparation for the same request when several exchanges are needed.
 
 Keep the complete read for `room answer --from`. A progress receipt leaves

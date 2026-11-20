@@ -433,15 +433,19 @@ test("follow-up preparation carries bounded completed exchanges for the same pai
 
 for (const normalized of [false, true]) test(`compact request pages preserve current answer binding (${normalized ? "normalized" : "legacy"})`, async t => {
   const f = fixture(t, [], normalized ? { representation: "normalized-current-v1" } : {});
-  const first = f.open("guest", { body: "Earlier decision with context" });
-  f.send("agent", f.answer(first, first.receipt, { messageId: "compact-first-answer" }));
-  const second = f.open("guest", { replyToId: "compact-first-answer" });
+  const first = f.open("guest", { body: "Research brief scope: how should evidence about library access be qualified?" });
+  const earlierDecision = "Keep branch-specific observations separate from citywide claims.";
+  f.send("agent", f.answer(first, first.receipt, { messageId: "compact-first-answer", body: earlierDecision }));
+  const second = f.open("guest", { replyToId: "compact-first-answer", body: "Confirm the brief format." });
   f.send("agent", f.answer(second, second.receipt, { messageId: "compact-second-answer" }));
-  const third = f.open("guest", { replyToId: "compact-second-answer", body: "Use option A" });
+  const third = f.open("guest", { replyToId: "compact-second-answer", body: "Review the library access brief using the survey as citywide evidence." });
   const id = third.command.data.messageId;
   const read = options => f.store.replyRequests.selected(f.keys.agent, "commons", id, options);
-  const stale = read({ view: "compact" }).current.answerBasis;
-  const correction = f.post("guest", { messageId: "compact-correction", body: "Correction: use option B", replyToId: id });
+  const original = read({ view: "compact" });
+  assert.equal(original.preparation.retainedEarlierExchanges, undefined);
+  const stale = original.current.answerBasis;
+  const correctionBody = "Correction: the survey covered one branch. Apply our original evidence decision.";
+  const correction = f.post("guest", { messageId: "compact-correction", body: correctionBody, replyToId: id });
   assert.throws(() => f.send("agent", f.answer(third, third.receipt, stale)));
   const full = read({ view: "full" });
   const compact = read({ view: "compact" });
@@ -451,28 +455,60 @@ for (const normalized of [false, true]) test(`compact request pages preserve cur
   assert.equal(compact.current.contextEventId, correction.event.id);
   assert.deepEqual(compact.responseActions, full.responseActions);
   assert.deepEqual(compact.preparation.previousExchanges, full.preparation.previousExchanges.slice(-1));
+  assert.deepEqual(compact.preparation.retainedEarlierExchanges, full.preparation.previousExchanges.slice(0, -1));
+  assert.equal(compact.preparation.retainedEarlierExchanges[0].messages.at(-1).body, earlierDecision);
+  assert.equal(compact.preparation.retainedEarlierExchanges[0].messages[0].untrusted, true);
+  const tampered = structuredClone(compact);
+  tampered.preparation.retainedEarlierExchanges[0].messages[0].toMemberId = "reviewer";
+  assert.throws(() => validateReplyRead(tampered, { name: "room_read_request", roomId: "commons", args: { requestMessageId: id, view: "compact" } }));
   assert.equal(compact.preparation.previousExchangesOmitted, 1);
   const older = compact.preparation.olderExchangeReads;
   assert.deepEqual(older, [{ tool: "room_read_request",
     arguments: { requestMessageId: first.command.data.messageId, view: "compact" } }]);
   const oldest = f.store.replyRequests.selected(f.keys.agent, "commons", older[0].arguments.requestMessageId, older[0].arguments);
-  assert.equal(oldest.page.items[0].message.body, "Earlier decision with context");
+  assert.equal(oldest.page.items[0].message.body, first.command.data.body);
   assert.deepEqual(compact.preparation.previousExchangesNextRead.arguments, { requestMessageId: id, view: "full" });
-  assert.ok(Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(full)));
+  assert.ok(Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(original)) + 4096);
   const page = read({ view: "compact", limit: 1 });
   assert.equal(page.current.answerBasis, null);
   const args = { view: "compact", limit: 1, cursor: page.page.nextCursor, requestMessageId: id };
   if (page.nextRead) assert.deepEqual(page.nextRead.arguments, args);
   const rest = read(args);
   validateReplyRead(rest, { name: "room_read_request", roomId: "commons", args });
-  assert.equal(rest.page.items.at(-1).message.body, "Correction: use option B");
+  assert.equal(rest.page.items.at(-1).message.body, correctionBody);
   assert.deepEqual(rest.responseActions, full.responseActions);
   assert.throws(() => f.store.replyRequests.selected(f.keys.reviewer, "commons", id, { view: "compact" }), { code: "reply_request_not_found" });
-  const answer = f.answer(third, correction);
-  const recorded = f.send("agent", answer);
+  const answer = f.answer(third, correction, { body: "Revise the brief. The survey can support a branch-specific observation only." });
+  f.send("agent", answer); // Simulate an interrupted caller that never receives this write result.
+  const recorded = f.store.operationReceipt(f.keys.agent, "commons", answer.id);
+  assert.equal(recorded.status, "recorded");
+  assert.equal(f.store.operationReceipt(f.keys.reviewer, "commons", answer.id).status, "not_recorded");
+  const settled = read({ view: "compact" });
+  assert.equal(settled.request.status, "answered");
+  assert.equal(settled.request.terminalEventId, recorded.eventId);
   const repeated = f.send("agent", answer);
   assert.equal(repeated.duplicate, true);
-  assert.equal(recorded.event.id, repeated.event.id);
+  assert.equal(recorded.eventId, repeated.event.id);
+  assert.equal(f.store.headSequence("commons"), recorded.sequence);
+});
+
+test("compact correction with a large earlier decision keeps exact continuation reads", t => {
+  const f = fixture(t, [], { representation: "normalized-current-v1" });
+  const first = f.open();
+  const decision = "🧪".repeat(1200);
+  f.send("agent", f.answer(first, first.receipt, { messageId: "large-decision", body: decision }));
+  const second = f.open("guest", { replyToId: "large-decision" });
+  f.send("agent", f.answer(second, second.receipt, { messageId: "recent-answer" }));
+  const third = f.open("guest", { replyToId: "recent-answer" });
+  const id = third.command.data.messageId;
+  f.post("guest", { messageId: "large-correction", body: "Correction: apply the first exchange's decision.", replyToId: id });
+  const read = (requestId, options) => f.store.replyRequests.selected(f.keys.agent, "commons", requestId, options);
+  const compact = read(id, { view: "compact" });
+  assert.equal(compact.preparation.retainedEarlierExchanges, undefined);
+  assert.deepEqual(compact.preparation.previousExchanges, read(id).preparation.previousExchanges.slice(-1));
+  const earlier = compact.preparation.olderExchangeReads[0].arguments;
+  assert.equal(read(earlier.requestMessageId, earlier).page.items.at(-1).message.body, decision);
+  assert.ok(Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(read(id))));
 });
 
 test("follow-up refuses withdrawn context and oversized history instead of silently omitting it", t => {
