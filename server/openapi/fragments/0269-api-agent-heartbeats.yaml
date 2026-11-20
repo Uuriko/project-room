@@ -36,9 +36,13 @@
         are active. This capability permits an explicit newest poll in that
         same room; it grants no new room access, execution or acknowledgement.
         An acquired room-scoped lease also includes `listener.firstFormalAckRoomId`.
-        It advertises support for a first-only `reply_request.progressed` write
-        through the commands endpoint, using that room's listener fence and
-        the inspected context event as `ifUnacknowledgedContextEventId`.
+        A first-only `reply_request.progressed` command uses the inspected
+        posted context event as `ifUnacknowledgedContextEventId`. The recipient
+        must supply the room's listener fence while their scoped lease is live.
+        With no live scoped lease, the designated recipient can send the same
+        conditional command. A note is optional in either case. The command
+        checks the current posted context event and request revision. This
+        does not attest to edits made in place to an existing message.
         No capability is advertised for an unselected or contended lease.
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
         host), optional `mode` (defaults to `wakeable` — the host can wait on
