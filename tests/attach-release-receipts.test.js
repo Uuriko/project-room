@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { attachReleaseReceipts, confirmedReceipt } from "../scripts/attach-release-receipts.mjs";
+import { attachReleaseReceipts, confirmedReceipt, prepareReleaseReview, submitReleaseReview } from "../scripts/attach-release-receipts.mjs";
 
 test("publishes candidate-bound stage receipts and recovers a lost write by replay", async () => {
   const candidateRevision = "a".repeat(40), evidenceVersion = "sha256:" + "b".repeat(64);
@@ -74,4 +74,57 @@ test("publishes candidate-bound stage receipts and recovers a lost write by repl
     } });
   const failures = JSON.parse(messages.get(failed.report.messageId).body.split("\n")[1]);
   assert.deepEqual(Object.values(failures.checks).map(check => check.status), ["failed", "failed", "failed"]);
+});
+
+test("release review requires complete exact evidence before its single completion and recovers both lost responses", async () => {
+  const candidateRevision = "a".repeat(40), sha = "c".repeat(64);
+  const origin = new URL("https://local-room.example");
+  const binding = { roomId: "test", workItemId: "release", candidateRevision };
+  const input = {
+    build: { sourceCommit: candidateRevision, sourceTree: candidateRevision, manifestSha256: sha, files: 10, verified: true },
+    browser: { sourceRevision: candidateRevision, clean: true, tests: 1, passed: 1, failed: 0, skipped: 0, elapsedMs: 7,
+      exitCode: 0, tapDigest: "sha256:" + sha, suites: ["scripts/result-diff-browser-check.mjs"] },
+    deploy: { oldRevision: "b".repeat(40), newRevision: candidateRevision, phase: "complete", ready: true,
+      liveVersion: { sourceRevision: candidateRevision }, databasePreserved: true, pinPreserved: true,
+      signedCardVerifiedBeforeShutdown: true, before: { rooms: 1, events: 3 }, after: { rooms: 1, events: 3 } }
+  };
+  const inputs = Object.fromEntries(Object.entries(input).map(([stage, value]) => [stage, Buffer.from(JSON.stringify(value))]));
+  const prepare = overrides => prepareReleaseReview({ inputs, candidateRevision, origin, verificationPath: "/docs/agents/paste",
+    servingRevision: candidateRevision, verificationDigest: "sha256:" + sha, ...overrides });
+  assert.throws(() => prepare({ inputs: { build: inputs.build } }), /Missing browser/);
+  assert.throws(() => prepare({ servingRevision: input.deploy.oldRevision }), /exact serving candidate/);
+  assert.throws(() => prepare({ verificationPath: "https://retired.example/docs/" }), /configured serving origin/);
+  const body = prepare();
+  assert.match(body, /https:\/\/local-room\.example\/api\/version/);
+  assert.match(body, /https:\/\/local-room\.example\/docs\/agents\/paste/);
+  assert.match(body, /build: [\s\S]+browser: [\s\S]+deploy: /);
+  const operations = new Map();
+  const next = { action: "in_progress", memberId: "producer" };
+  let currentRevision = 4, posts = 0, submissions = 0, draftArgs;
+  const call = (name, args) => {
+    if (name === "room_receipt") return { ...args, roomId: "test", viewerId: "producer", status: "not_recorded", ...operations.get(args.operationId) };
+    if (name === "room_read_work") return { revision: currentRevision, continuation: next };
+    if (name === "room_post_message") {
+      posts++;
+      draftArgs = args;
+      operations.set(args.id, { status: "recorded", eventId: "draft-event", eventType: "message.posted" });
+      throw new Error("draft response lost");
+    }
+    if (name === "room_read_result") return { current: { next, workRevision: currentRevision, completionEventId: null },
+      result: { text: { body: draftArgs.body, messageId: draftArgs.id, messageEventId: "draft-event", evidenceVersion: "sha256:" + sha } } };
+    assert.equal(name, "room_submit_text_result");
+    submissions++;
+    assert.equal(args.evidenceMessageId, draftArgs.id);
+    operations.set(args.requestId, { status: "recorded", eventId: "completion-event", eventType: "work.completed" });
+    throw new Error("completion response lost");
+  };
+  const request = { binding, expectedRevision: 3, producerId: "producer", body, call };
+  await assert.rejects(submitReleaseReview(request), /not in progress at the selected revision/);
+  assert.equal(posts, 0);
+  currentRevision = 3;
+  await assert.rejects(submitReleaseReview(request), /draft response lost/);
+  await assert.rejects(submitReleaseReview(request), /completion response lost/);
+  assert.equal((await submitReleaseReview(request)).completionEventId, "completion-event");
+  assert.equal(posts, 1);
+  assert.equal(submissions, 1);
 });

@@ -163,6 +163,16 @@ look up its original operation ID before retrying.
 
 ### Link release checks after a verdict
 
+For post-deployment review, collect the build, browser and deploy receipts before
+submitting a result. Start the assigned release work, then run
+`scripts/attach-release-receipts.mjs --binding FILE --work-revision REV --build FILE --browser FILE --deploy FILE`.
+For this mode the binding contains the room, work item and candidate revision.
+The publisher verifies the serving revision and includes all three stage proofs
+and two absolute serving URLs in the exact result. The release checks are then
+attached to that completion. Use `--verify-path /docs/agents/paste` or another
+same-origin path when the release requires a specific live check. Rerun with the
+same binding, work revision and evidence to recover an interrupted publication.
+
 The Commons operator steps publish receipts when the package verification, browser run,
 and deploy smoke finish. Bind the steps once to the native result's room, work item,
 completion event and full candidate revision. Keep the operator artifacts outside the
