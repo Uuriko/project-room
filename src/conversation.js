@@ -207,7 +207,7 @@ export function memberDoneChip(member, { workItems } = {}) {
 // chat; the @mention is just a highlight/notification for that member.
 export function addressMember(text, caret, member, { exact = false } = {}) {
   if (!member?.displayName) return { body: String(text ?? ""), caret: Number.isInteger(caret) ? caret : String(text ?? "").length, toMemberId: "" };
-  if (exact && member.id) member = { ...member, displayName: "(" + member.id + ")" };
+  if (exact && member.id) member = { ...member, displayName: `(${member.id})` };
   const found = mentionQuery(text, caret);
   if (found) return insertMention(text, caret, found.start, member);
   const value = String(text ?? "");
@@ -281,8 +281,9 @@ export function mentionHtml(body, members, esc) {
     const label = match[0].slice(1);
     const member = names.find(m => match[1] ? m.id === match[1] : m.displayName === label);
     const kind = member?.kind === "agent" ? " agent" : "";
+    const displayMention = member ? `@${member.displayName}` : match[0];
     const chip = member?.id
-      ? `<button type="button" class="mention${kind}" data-mention-id="${esc(member.id)}">${esc("@" + member.displayName)}</button>`
+      ? `<button type="button" class="mention${kind}" data-mention-id="${esc(member.id)}">${esc(displayMention)}</button>`
       : `<span class="mention${kind}">${esc(match[0])}</span>`;
     out += chip;
     last = match.index + match[0].length;
