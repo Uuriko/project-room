@@ -459,8 +459,12 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     host?.querySelector("#conversation-title")?.focus();
   }
   dialog.querySelector("#updates-close").addEventListener("click", openConversation);
-  dialog.addEventListener("keydown", event => {
-    if (event.key === "Escape") { event.preventDefault(); openConversation(); }
+  document.addEventListener("keydown", event => {
+    // A pending action can disable the focused control and move focus to body.
+    if (event.key !== "Escape" || event.defaultPrevented || !isOpen() || event.target.closest?.("dialog")) return;
+    if (!dialog.contains(event.target) && event.target !== document.body) return;
+    event.preventDefault();
+    openConversation();
   });
   tabs.addEventListener("click", event => {
     const button = event.target.closest("[data-update-filter]");
