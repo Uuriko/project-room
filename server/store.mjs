@@ -18,7 +18,7 @@ import { bootstrapLegacyWriteProofs, configureWriteIntegrity, beginWriteProofFra
 const OPERATOR_QA_ARCHIVE = Symbol("operator QA room archive");
 const OPERATOR_LIFECYCLE_ARCHIVE = Symbol("operator lifecycle archive on owner behalf");
 import { authenticateMcpOAuthRequest } from './mcp-oauth.mjs';
-import { assertListenerFence } from "./listener-fence.mjs";
+import { assertListenerFence, liveListenerLease } from "./listener-fence.mjs";
 import { isWriteSql } from './sql-write-classification.mjs';
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems, readWorkItem } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
@@ -7235,9 +7235,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       assertListenerFence(this, auth, roomId, listenerToken);
       const firstAck = command.type === T.REPLY_REQUEST_PROGRESSED
         && Object.hasOwn(command.data, "ifUnacknowledgedContextEventId");
-      if (firstAck && (listenerToken === undefined || command.data.progress !== "acknowledged"
-        || !validId(command.data.ifUnacknowledgedContextEventId) || Object.hasOwn(command.data, "note")))
-        fail(422, "invalid_first_ack", "First acknowledgment requires a room listener lease and the exact context event, without a note");
+      // A live room listener lease must fence the first acknowledgment. Without
+      // one, the same recipient-scoped compare-and-set below still applies.
+      if (firstAck && (listenerToken === undefined && liveListenerLease(this, auth, roomId) || command.data.progress !== "acknowledged"
+        || !validId(command.data.ifUnacknowledgedContextEventId)))
+        fail(422, "invalid_first_ack", "First acknowledgment requires the exact context event, and the room listener lease while one is live");
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and vote in
       // polls; drafts (message.posted carrying a workItemId) need the
