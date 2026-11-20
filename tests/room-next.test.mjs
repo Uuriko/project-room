@@ -10,6 +10,26 @@ import { mcpOAuthToolAllowed } from "../server/mcp-oauth.mjs";
 import { privateMarkers, privateWorkFixture } from "./helpers/private-work-fixture.mjs";
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`room next gives an idle agent a bounded read and honors the Room pause (${representation})`, async t => {
+    const f = await privateWorkFixture(t, representation);
+    const active = await f.mcp(f.triage, "room_next");
+    assert.equal(active.ok, true, active.text);
+    assert.deepEqual(active.value.ifIdle, {
+      status: "browse_invitations", after: "addressed_work_and_request_pages",
+      nextRead: { tool: "room_list_work", arguments: { roomId: "commons", focus: "help_wanted", limit: 1 } }
+    });
+    const pointer = active.value.ifIdle.nextRead;
+    const available = await f.mcp(f.triage, pointer.tool, pointer.arguments);
+    assert.equal(available.ok, true, available.text);
+    f.store.wakeQueue.pause(f.owner, "commons", { requestId: "pause-triage-invitations", reason: null },
+      null, { memberId: f.triage.id });
+    const paused = await f.mcp(f.triage, "room_next");
+    assert.deepEqual(paused.value.ifIdle, { status: "paused" });
+    const addressed = await f.mcp(f.producer, "room_next");
+    assert.equal(addressed.value.ifIdle, undefined);
+    assert.ok(addressed.value.requests.items.length);
+  });
+
   test(`room next uses the same private-view boundary through MCP and CLI (${representation})`, async t => {
     const f = await privateWorkFixture(t, representation);
     for (let n = 0; n < 4; n++) {
