@@ -13,6 +13,7 @@ import { AgentHost } from "./agent-host.mjs";
 import { ThreadQueue } from "./queue.mjs";
 import { buildPrompt, buildClaimPrompt, buildFormalPrompt } from "./prompt.mjs";
 import { readCompleteRequest, prepareFormalDelivery, deliverFormal } from './formal-delivery.mjs';
+import { reviewBinding, readReview, reviewOutput, deliverReview } from './review-wake.mjs';
 import { renderTurn } from "./render.mjs";
 import { SessionMap } from "./sessions.mjs";
 import { PermissionBroker, decisionOf, DEFAULT_PERMISSION_TIMEOUT_MS } from "./permission.mjs";
@@ -41,6 +42,7 @@ export const CLAIM_WAKE_REASONS = Object.freeze(["assigned"]);
 // (reassign-after-done, admin re-wake, wake regeneration) has no receipt.
 export const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
 export const CLAIM_KEY = "work-claim:";
+const REVIEW_KEY = '\0work-review:';
 export const MAX_CLAIM_NOTE = 1500;
 export const ORDINARY_REPLY_WINDOW_MS = 60000;
 // The person who put the claim on the Board is who asked for the work.
@@ -133,6 +135,7 @@ export class Bridge {
     this.room = new RoomClient({ signal:this.controller.signal, apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
     this.claimReceipts = new TurnReceipts(connection, env, persistSessions);
     this.chatReceipts = new TurnReceipts(connection, env, persistSessions, "chat-turns");
+    this.reviewReceipts = new TurnReceipts(connection, env, persistSessions, 'work-review-turns');
     this.parkedThreads = new TurnReceipts(connection, env, persistSessions, "chat-blocked-threads");
     this.replyWindows = new TurnReceipts(connection, env, persistSessions, "chat-reply-windows");
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
@@ -321,6 +324,16 @@ export class Bridge {
     if (this.seen.has(signal.signalId)) return;
     this.seen.add(signal.signalId);
     try {
+      if (signal.kind === 'work') {
+        const binding = reviewBinding(signal, this.connection.roomId);
+        // The wake does not identify an author. Hosts that restrict senders
+        // must keep it available through the normal exact Work Thread read.
+        if (binding && this.respondTo === 'anyone') {
+          const key = REVIEW_KEY + JSON.stringify([binding.workItemId,binding.completionEventId,binding.expectedRevision]);
+          this.queue.push(key, { signalId:signal.signalId, binding });
+        }
+        return;
+      }
       if (signal.workClaim) { await this.acceptClaim(signal); return; }
       if (!signal.messageId || !["mention", "dm", "reply", "direct"].includes(signal.kind)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
       const selected = await this.readThread(signal.messageId, {selected:true});
@@ -481,8 +494,63 @@ export class Bridge {
     }
   }
 
+  async reviewSignalTurn(threadKey, {signalId, binding}) {
+    const signalIds = [signalId];
+    const key = this.reviewReceipts.key(signalId);
+    try {
+      let receipt = this.reviewReceipts.find(key);
+      if (!receipt) {
+        await this.agentReady();
+        if (this.controller.signal.aborted) return;
+        this.stageObserver.mark(signalIds,'session_preparing');
+        const {sessionId} = await this.host.session(threadKey);
+        this.stageObserver.mark(signalIds,'session_ready');
+        const prompt = await readReview(this.room,binding);
+        if (!prompt) return; // Changed, hidden or reassigned work remains with its current owner.
+        await this.assertListener();
+        const started = this.reviewReceipts.begin(signalId,{binding});
+        if (!started.fresh) return;
+        receipt = started.receipt;
+        const {recorder, stopReason} = await this.host.prompt(threadKey,prompt,{sessionId,
+          onDispatched:()=>this.stageObserver.mark(signalIds,'prompt_dispatch_attempt',receipt.requestId),
+          onFirstOutput:kind=>this.stageObserver.mark(signalIds,'first_observable_output',receipt.requestId,kind)});
+        this.stats.turns++;
+        const output = reviewOutput(recorder,stopReason);
+        if (!output) {
+          this.reviewReceipts.save(key,{...receipt,phase:'needs_review',body:'No supported final verdict. Use the exact Work Thread action.'});
+          this.log(`exact review ${binding.workItemId} needs evidence or manual review; wake remains pending`);
+          return;
+        }
+        receipt = {...receipt,phase:'result',result:output.result,body:output.summary};
+        this.reviewReceipts.save(key,receipt);
+        if (this.reviewReceipts.dir) this.stageObserver.mark(signalIds,'durable_result_saved',receipt.requestId);
+      }
+      if (!Object.entries(binding).every(([field,value])=>receipt.binding?.[field]===value)) return;
+      if (receipt.phase === 'result') {
+        await this.assertListener();
+        if (!receipt.attempted) this.reviewReceipts.save(key,{...receipt,attempted:true});
+        await deliverReview(this.room,binding,receipt,this.fencingToken);
+        this.reviewReceipts.save(key,{phase:'posted',requestId:receipt.requestId,binding});
+        this.stats.posted++;
+        this.stageObserver.mark(signalIds,'reply_posted',receipt.requestId);
+      } else if (receipt.phase !== 'posted') return;
+      await this.ack(signalIds);
+    } catch (error) {
+      if (error instanceof RoomError && error.status === 409 && error.code === 'command_rejected') {
+        this.log(`exact review ${binding.workItemId} changed before filing; wake remains available`);
+        return;
+      }
+      this.seen.delete(signalId);
+      this.log(`exact review delivery failed (${error.code ?? error.message}); retaining work for recovery`);
+    }
+  }
+
   async turn(threadKey, batch) {
     if (this.controller.signal.aborted) return;
+    if (threadKey.startsWith(REVIEW_KEY)) {
+      for (const item of batch) await this.reviewSignalTurn(threadKey, item);
+      return;
+    }
     if (threadKey.startsWith(CLAIM_KEY)) return this.claimTurn(threadKey, batch);
     try {
       const fresh = [], replay = new Map(), unique = new Set();
