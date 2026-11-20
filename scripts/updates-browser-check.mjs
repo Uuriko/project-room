@@ -68,6 +68,8 @@ async function setup(t, storeOptions = {}) {
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  // These journeys begin from Conversation before explicitly opening Updates.
+  await page.locator("#updates-close").click();
   await page.waitForFunction(() => {
     const badge = document.querySelector("#updates-count");
     return badge && (badge.hidden || badge.textContent === "");
@@ -441,6 +443,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await oldOpen.click(); await roomDelay.entered;
   await page.locator("#updates-close").click();
   await openAccountRoom("updates-other");
+  if (await page.locator("#updates-dialog").isVisible()) await page.locator("#updates-close").click();
   await page.locator("#message-input").fill("Replacement room draft");
   await showExpectedUpdates("Private update in the other room");
   const roomDestination = page.url();
@@ -471,6 +474,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await openAccountRoom("updates-other");
   const otherHistoryCard = card(sharedHistoryId);
   assert.equal(await otherHistoryCard.count(), 0, "switching rooms does not reveal a contextual work card");
+  if (await page.locator("#updates-dialog").isVisible()) await page.locator("#updates-close").click();
   await page.locator("#message-input").fill("Keep the current room history draft");
   await page.goBack();
   await page.waitForFunction(() => new URL(location.href).searchParams.get("room") === "updates-other" && location.hash === "#pr-view/rooms");
@@ -495,6 +499,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.locator("#updates-close").click();
   await clickChrome(page, "#signout-button");
   await loginAccount("navigation-account-b", "Reader B");
+  if (await page.locator("#updates-dialog").isVisible()) await page.locator("#updates-close").click();
   await page.locator("#message-input").fill("Replacement account draft");
   await showExpectedUpdates("Private update for Reader B");
   const accountDestination = page.url();
@@ -546,6 +551,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
         await clickChrome(page, "#signout-button");
         await loginAccount("navigation-account-b", "Reader B");
       }
+      if (await page.locator("#updates-dialog").isVisible()) await page.locator("#updates-close").click();
       await page.locator("#message-input").fill(`Keep ${boundary} replacement draft`);
       await showExpectedUpdates(boundary === "room" ? "Private update in the other room" : "Private update for Reader B");
     }
@@ -1560,7 +1566,7 @@ test("Updates refresh live without stealing focus and filter permission decision
   const first=page.getByRole('button',{name:'Open @owner live-first',exact:true});await first.waitFor();await first.focus();
   post('live-second');
   await page.getByRole('button',{name:'Open @owner live-second',exact:true}).waitFor();
-  assert.equal(await first.evaluate(n=>n===document.activeElement),true);
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Open @owner live-first');
   await page.setViewportSize({width:390,height:844});
   store.command(owner,'commons',command(T.MEMBER_ADDED,{memberId:'applicant',displayName:'Applicant',kind:'human',permissions:[]}));
   const applicant=store.issueAccessKey('commons','applicant');

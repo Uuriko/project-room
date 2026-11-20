@@ -604,7 +604,11 @@ const client = new RoomClient({
       if (!location.hash) restoreResultSelection();
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
-    if (firstSnapshot) revealLocationHash();
+    if (firstSnapshot) {
+      revealLocationHash();
+      if (session.member.kind !== "agent" && !savedRoomDestination() && $("#result-dialog").hidden
+        && !$("#board-dialog").open && !$("#message-input").value) updatesUi?.open("needs", false);
+    }
     else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
     retryPendingHashReveal();
     resumeConfirmedWorkNavigation();
@@ -847,6 +851,12 @@ const memberPermissionsUI = installMemberPermissions({ client, getState: () => s
 // One attention destination; historical palette names resolve here.
 // JDOT-COH-NAV begin
 updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), getContext: workNavigationContext,
+  onOpenPage() {
+    if (!document.querySelector(".result-focused:not([hidden])")) return;
+    closeResult(false);
+    leaveWorkSelection();
+  },
+  actorLabel: memberId => state?.members[memberId]?.displayName ?? "",
   onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin, presentation: "thread" }),
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
 // JDOT-COH-NAV end
@@ -2368,6 +2378,10 @@ function leaveWorkSelection() {
 }
 function setActiveChannel(id, preserveWork = false) {
   if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
+  if (!preserveWork) {
+    updatesUi?.close();
+    if (document.querySelector(".result-focused:not([hidden])")) closeResult(false);
+  }
   const leftWork = !preserveWork && leaveWorkSelection();
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
   if (next === activeChannelId && !activeDirectMemberId && !currentThreadId && !requestMode && !assistantDraft) { if (leftWork) renderMessages(); return; }
@@ -2426,6 +2440,8 @@ function visibleConversationMessages() {
 }
 function openDirectMessage(memberId) {
   if (!Object.hasOwn(state?.members ?? {}, memberId) || state.members[memberId].active === false || state.members[memberId].identityRevoked || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
+  updatesUi?.close();
+  if (document.querySelector(".result-focused:not([hidden])")) closeResult(false);
   saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
   requestEpoch++; requestReading = false; requestMode = null; assistantDraft = null;
   leaveWorkSelection();
@@ -3473,6 +3489,9 @@ async function readSelectedWorkRecord(id, expandDetails) {
     return null;
   }
 }
+function savedRoomDestination() {
+  return Boolean(location.hash && location.hash !== "#pr-view/rooms") || accountHomeFromLocation();
+}
 function workNavigationContext() {
   const member = session?.member?.id;
   return state && member && state.members?.[member]?.id === member && state.members[member].active !== false && !$("#main").hidden
@@ -3492,7 +3511,7 @@ function syncWorkReturnControl() {
   const origin = currentWorkOrigin();
   button.disabled = false;
   button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message)\//.test(location.hash);
-  button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
+  button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
 }
 function clearWorkNavigation() {
   confirmedWorkNavigation = null;
@@ -3533,7 +3552,7 @@ function sameWorkOrigin(a, b) {
   return key(a) ? key(a) === key(b) : a.focus === b.focus;
 }
 function showWorkDestination(kind, id, presentation = "focus") {
-  workNavigationEpoch++; updatesUi?.close();
+  workNavigationEpoch++; updatesUi?.close(); closeResult(false);
   if ($("#board-dialog").open) $("#board-dialog").close();
   if (kind === "work" && presentation === "drafts") { revealDrafts(id); activeWorkNavigationId = id; }
   else if (kind === "work") {
@@ -3542,12 +3561,9 @@ function showWorkDestination(kind, id, presentation = "focus") {
       const epoch = workNavigationEpoch, identity = session;
       void Promise.resolve(selected).then(card => {
         if (!card || workNavigationEpoch !== epoch || session !== identity || activeWorkNavigationId !== id) return;
-        const item = state.workItems[id];
-        if (item?.state === S.COMPLETED && item.receipt?.nativeText?.previousCompletionEventId
-          && ["verify", "decide"].includes(nextWorkStep(item, Date.now(), state.room.ownerId).action)) {
-          const button = card.querySelector("[data-read-result]");
-          if (button) readResult({ target: button });
-        }
+        const button = card.querySelector("[data-read-result]");
+        if (button) readResult({ target: button }, { focused: true });
+        syncWorkReturnControl();
       });
     }
   } else revealMessage(id);
@@ -3716,6 +3732,8 @@ async function restoreWorkOrigin(ticket) {
   syncWorkReturnControl();
 }
 function returnToCurrentRoom() {
+  const fromWorkThread = Boolean(document.querySelector(".result-focused:not([hidden])"));
+  closeResult(false);
   updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++;
   const detail = activeWorkNavigationId && workRecord(activeWorkNavigationId)?.querySelector(".work-details");
   if (detail) detail.open = false;
@@ -3726,7 +3744,11 @@ function returnToCurrentRoom() {
   history.replaceState(workHistoryState(), "", destination.pathname + destination.search + destination.hash);
   updatesUi?.close();
   if ($("#board-dialog").open) $("#board-dialog").close();
-  if (workNavigationContext()) { workspaceUI?.showRooms(); switchThread(null); focusRecord($("#conversation-title")); }
+  if (workNavigationContext()) {
+    workspaceUI?.showRooms(); switchThread(null);
+    if (fromWorkThread) updatesUi?.open();
+    else focusRecord($("#conversation-title"));
+  }
   syncWorkReturnControl();
 }
 function replayWorkNavigation() {
@@ -3892,7 +3914,9 @@ function revealLocationHash() {
       else pendHashReveal(id);
       return;
     }
-    if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
+    if (current[1] === "work" && id !== null && (partialWorkSnapshot || state.workItems[id]?.receipt)) {
+      showWorkDestination("work", id, "thread");
+    } else if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
     return;
   }
   const rawWorkId = decodeFragment(hash.slice(1));
@@ -6740,6 +6764,7 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onReturn() { $("#work-navigation-return").click(); },
   onWorkAction(item, action) { openWorkAction(item, action); },
   onOriginal(messageId) {
     searchCollapsed = true; $("#search-results").hidden = true;
