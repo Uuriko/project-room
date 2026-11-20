@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, rmSync } from "node:fs";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generatedAgentPages, publicAssetPaths } from "../server/public-assets.mjs";
@@ -61,4 +63,30 @@ test("the production edge serves every public asset with the content type for it
     if (!res || res.status !== 200 || !EXPECTED[extname(path)].test(type)) wrong.push(`${path} -> ${res?.status} ${type}`);
   }
   assert.deepEqual(wrong, []);
+});
+
+test("Node negotiates compression on public startup assets and preloads the workspace for direct room URLs", async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, gzipAsset: promisify(gzip) });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const get = (path, encoding = "gzip") => fetch(origin + path, { headers: { "Accept-Encoding": encoding } });
+  const [encoded, identity, landing, direct, health] = await Promise.all([
+    get("/src/app.js"), get("/src/app.js", "gzip;q=0, *;q=1"), get("/"), get("/?room=commons"), get("/api/health")
+  ]);
+  assert.equal(encoded.headers.get("content-encoding"), "gzip");
+  assert.match(encoded.headers.get("vary"), /Accept-Encoding/i);
+  assert.equal(identity.headers.get("content-encoding"), null);
+  assert.equal(await encoded.text(), await identity.text());
+  const hint = '<link rel="modulepreload" href="/src/app.js">';
+  assert.ok(!(await landing.text()).includes(hint));
+  assert.ok((await direct.text()).includes(hint));
+  assert.equal(health.headers.get("content-encoding"), null);
+  await health.text();
 });
