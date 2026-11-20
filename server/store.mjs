@@ -745,7 +745,7 @@ const shapes = {
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
-  [T.REPLY_REQUEST_PROGRESSED]: "requestMessageId expectedRequestRevision progress note",
+  [T.REPLY_REQUEST_PROGRESSED]: "requestMessageId expectedRequestRevision progress note ifUnacknowledgedContextEventId",
   [T.POLL_VOTED]: "messageId option active",
   ...PIN_COMMAND_SHAPES,
   [T.CHANNEL_CREATED]: "channelId name",
@@ -7233,6 +7233,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ? { member: ownMember(operatorAuthority.members, operatorAuthority.ownerId), kind: "operator" }
         : this.authenticate(token, roomId, expectedSessionBinding);
       assertListenerFence(this, auth, roomId, listenerToken);
+      const firstAck = command.type === T.REPLY_REQUEST_PROGRESSED
+        && Object.hasOwn(command.data, "ifUnacknowledgedContextEventId");
+      if (firstAck && (listenerToken === undefined || command.data.progress !== "acknowledged"
+        || !validId(command.data.ifUnacknowledgedContextEventId) || Object.hasOwn(command.data, "note")))
+        fail(422, "invalid_first_ack", "First acknowledgment requires a room listener lease and the exact context event, without a note");
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and vote in
       // polls; drafts (message.posted carrying a workItemId) need the
@@ -7285,6 +7290,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ?? this.canonicalMessageEditContext(roomId, command);
       let room = messageContext?.room ?? this.room(roomId);
       if(!isArchivedOwnerPrivacyEvent(room.state,{type:command.type,actorId:auth.member.id}))refuseArchivedWrite(room.state);
+      if (firstAck) {
+        const { ifUnacknowledgedContextEventId, ...data } = command.data;
+        const requests = room.state.replyRequests ?? {};
+        const request = Object.hasOwn(requests, data.requestMessageId) ? requests[data.requestMessageId] : null;
+        if (request?.recipientId !== auth.member.id)
+          fail(404, "request_not_found", "No reply request addressed to this recipient");
+        if (request.status !== "open" || request.revision !== data.expectedRequestRevision
+          || request.contextEventId !== ifUnacknowledgedContextEventId)
+          fail(409, "request_context_changed", "Read the current addressed request before acknowledging");
+        if (request.acknowledgedAt != null || request.progressEventId != null)
+          fail(409, "request_already_acknowledged", "The request already has recipient progress");
+        // This is a live-write precondition, not a new event format. Keep it in
+        // the command fingerprint and replay the existing progress event.
+        command = { ...command, data };
+      }
       room = prepareMessageCommand(this, roomId, room, command, auth.member.id);
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
         // DMs are open by default: only an explicit denial (blocked /

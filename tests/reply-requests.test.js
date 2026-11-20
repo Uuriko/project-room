@@ -843,3 +843,71 @@ for (const outcome of ['answered', 'cancelled']) test(`history checkpoints do no
   assert.deepEqual(f.store.replyRequests.list(f.keys.agent, 'commons', { status: 'all' }).requests.map(r => r.id), [fresh.command.data.messageId]);
   assert.throws(() => f.store.replyRequests.selected(f.keys.agent, 'commons', old.command.data.messageId), { code: 'reply_request_not_found' });
 });
+
+for (const representation of [undefined, "normalized-current-v1"]) {
+  test(`fenced first acknowledgment binds current context and preserves progress in ${representation ?? "legacy"} storage`, t => {
+    const f = fixture(t, [], representation ? { representation } : {});
+    const roomId = "commons";
+    const recipient = f.store.identities.create("Receiving runtime");
+    linkWithProof(f.store, f.keys.owner, roomId, recipient, { permissions: [] });
+    const lease = f.store.agentHeartbeats.acquireListenerLease({
+      agentId: recipient.identityId, roomId, listenerId: "receiver"
+    });
+    assert.equal(lease.acquired, true);
+    const token = { listenerToken: lease.fencingToken };
+    const send = (command, options) => f.store.command(recipient.secret, roomId, command, null, options);
+    const read = q => f.store.replyRequests.selected(recipient.secret, roomId, q.command.data.messageId, { view: "compact" });
+    const open = id => f.open("owner", { toMemberId: recipient.identityId }, id);
+    const guard = (q, suffix, context = q.receipt.event.id) => ({
+      id: `first-ack-${suffix}`,
+      type: "reply_request.progressed",
+      data: { requestMessageId: q.command.data.messageId, expectedRequestRevision: 0,
+        progress: "acknowledged", ifUnacknowledgedContextEventId: context }
+    });
+
+    const q = open("guarded-q");
+    const original = guard(q, "stale");
+    assert.throws(() => send(original), error => error.code === "invalid_first_ack");
+    const correction = f.post("owner", {
+      messageId: "guarded-correction", body: "Use the corrected criteria.",
+      replyToId: q.command.data.messageId, toMemberId: recipient.identityId
+    });
+    assert.equal(read(q).request.revision, 0);
+    assert.throws(() => send(original, token), error => error.code === "request_context_changed");
+    assert.equal(f.store.operationReceipt(recipient.secret, roomId, original.id).status, "not_recorded");
+
+    const current = guard(q, "current", correction.event.id);
+    const committed = send(current, token);
+    assert.equal(committed.event.data.ifUnacknowledgedContextEventId, undefined);
+    assert.equal(read(q).request.progressState, "acknowledged");
+    const recovered = f.store.operationReceipt(recipient.secret, roomId, current.id);
+    assert.equal(recovered.status, "recorded");
+    assert.equal(send(current, token).event.id, committed.event.id);
+    assert.throws(() => send({ ...current, data: { ...current.data, ifUnacknowledgedContextEventId: original.data.ifUnacknowledgedContextEventId } }, token),
+      error => error.code === "idempotency_conflict");
+
+    for (const progress of ["accepted", "working", "needs_input", "error"]) {
+      const separate = open(`first-ack-${progress}-q`);
+      const late = guard(separate, progress);
+      const { ifUnacknowledgedContextEventId: _, ...plain } = late.data;
+      send({ ...late, id: `manual-${progress}`, data: { ...plain, progress, note: "Keep this progress." } });
+      assert.throws(() => send(late, token), error => error.code === "request_already_acknowledged");
+      assert.equal(read(separate).request.progressState, progress);
+      assert.equal(read(separate).request.progressNote, "Keep this progress.");
+      assert.equal(f.store.operationReceipt(recipient.secret, roomId, late.id).status, "not_recorded");
+    }
+
+    const closed = open("first-ack-closed-q");
+    f.send("owner", f.cancel(closed));
+    assert.throws(() => send(guard(closed, "closed"), token), error => error.code === "request_context_changed");
+    assert.throws(() => send(guard(f.open("owner", {}, "foreign-target"), "foreign"), token),
+      error => error.code === "request_not_found");
+
+    f.store.agentHeartbeats.releaseListenerLease({
+      agentId: recipient.identityId, roomId, fencingToken: lease.fencingToken
+    });
+    assert.throws(() => send(current, token), error => error.code === "stale_listener");
+    assert.equal(f.store.operationReceipt(recipient.secret, roomId, current.id).status, "recorded");
+    auditRecovery(f.store);
+  });
+}
