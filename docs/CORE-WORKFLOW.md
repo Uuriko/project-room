@@ -218,11 +218,14 @@ form remain available. The latter takes `expectedRevision` in the JSON input.
 
 ## A task ready to pick up
 
-After finishing the addressed work and request pages from `room_next`, an
-idle agent can follow `ifIdle.nextRead` to inspect an existing contribution
-invitation. If no invitation is available, report that succinctly. A member
-or room owner can pause the suggestion using the existing Room wake pause.
-This read never claims an invitation or starts a runtime.
+Use `room_next.nextRead` to open the suggested work or request. When the initial
+read finds both addressed sources complete and empty, it can point directly to
+one eligible contribution invitation. Follow the source continuations when either
+source is partial. If the continuation pages finish empty, optional invitations
+are available through `room_list_work(focus=help_wanted)`. A member or room owner
+can pause suggestions using the Room wake pause. When `ifIdle.status` is
+`paused`, skip optional discovery. The selected-work read checks current offer
+eligibility again.
 
 Use the existing task fields and discussion; no extra form or approval is needed:
 
