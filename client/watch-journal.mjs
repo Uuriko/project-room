@@ -21,16 +21,15 @@ const schemas = {
   ]
 };
 const normalize = sql => sql.replace(/\s+/g, " ").trim();
-const busy = error => error.errcode === 5 || error.errcode === 6;
+const busy = error => [5, 6].includes(error.errcode & 0xff);
 function privatePath(path, directory = false) {
   const stat = lstatSync(path);
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)
       || (stat.mode & 0o077) || (process.getuid && stat.uid !== process.getuid())) throw new WatchError("private_state_required");
 }
 function openDatabase(path, kind, create, version = 1) {
-  let fresh = false;
   if (create) {
-    try { closeSync(openSync(path, "wx", 0o600)); fresh = true; }
+    try { closeSync(openSync(path, "wx", 0o600)); }
     catch (error) { if (error.code !== "EEXIST") throw error; }
   }
   privatePath(path);
@@ -41,8 +40,17 @@ function openDatabase(path, kind, create, version = 1) {
   const db = new DatabaseSync(path, { timeout: kind === "owner" ? 0 : 1000 });
   try {
     const id = kind === "owner" ? OWNER_ID : STATE_ID;
-    if (fresh) {
-      db.exec(`BEGIN IMMEDIATE; PRAGMA application_id=${id}; PRAGMA user_version=${version}; ${schemas[kind].join(";")}; COMMIT;`);
+    if (create) {
+      // An exclusive file create publishes an empty SQLite file before its
+      // schema is committed. Either starter may initialize that blank file,
+      // but only while holding the SQLite write lock.
+      db.exec("BEGIN IMMEDIATE");
+      if (db.prepare("PRAGMA application_id").get().application_id === 0
+        && db.prepare("PRAGMA user_version").get().user_version === 0
+        && !db.prepare("SELECT 1 FROM sqlite_master LIMIT 1").get()) {
+        db.exec(`PRAGMA application_id=${id}; PRAGMA user_version=${version}; ${schemas[kind].join(";")};`);
+      }
+      db.exec("COMMIT");
     }
     const catalog = db.prepare("SELECT sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' ORDER BY name").all().map(row => normalize(row.sql)).sort();
     if (db.prepare("PRAGMA application_id").get().application_id !== id
@@ -131,10 +139,12 @@ export class WatchJournal {
     privatePath(path, true);
     const canonical = realpathSync(path);
     try {
-      this.#owner = openDatabase(join(canonical, "ownership.sqlite"), "owner", create);
-      if (acquire) {
-        try { this.#owner.exec("BEGIN IMMEDIATE"); this.#held = true; }
-        catch (error) { if (busy(error)) throw new WatchError("already_watching"); throw error; }
+      try {
+        this.#owner = openDatabase(join(canonical, "ownership.sqlite"), "owner", create);
+        if (acquire) { this.#owner.exec("BEGIN IMMEDIATE"); this.#held = true; }
+      } catch (error) {
+        if (acquire && busy(error)) throw new WatchError("already_watching");
+        throw error;
       }
       this.#db = openDatabase(join(canonical, "watch.sqlite"), "state", create, version);
       this.#version = this.#db.prepare("PRAGMA user_version").get().user_version;
