@@ -30,19 +30,19 @@ const boardClaimToolsOn = () => /^(1|true|on)$/i.test(flagEnv("ROOM_BOARD_CLAIM_
 // filtering this table, so core entry order IS the core catalog order);
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
-  { name: "room_next", core: true, blurb: "Find addressed work and open requests. Follow partial pages even when empty, and use the selected nextRead unchanged.", focus: ["common"] },
+  { name: "room_next", core: true, blurb: "Find work, requests or an invitation. Follow nextRead and empty partial pages.", focus: ["common"] },
   { name: "room_receipt", core: true, blurb: "Read your operation receipt by exact ID. No write.", focus: ["common", "work"] },
-  { name: "room_needs_me", core: true, blurb: "Cross-room attention and messages. Pass the full cursor as since; continue while hasMore, even when empty.", focus: ["common"] },
+  { name: "room_needs_me", core: true, blurb: "Read cross-room attention. Pass since unchanged while hasMore, even when empty.", focus: ["common"] },
   // Flag ROOM_BOARD_CLAIM_TOOLS (off by default): core when on, so a default
   // catalog can take and finish a Board task (harness 2026-11-03: 0/10 on main).
   ...(boardClaimToolsOn() ? [
     { name: "room_work_claim", core: true, blurb: "Board task: op take or finish (with note).", focus: ["work"] }] : []),
-  { name: "room_read_messages", core: true, blurb: "Read room messages oldest first; latest:true for newest, view:digest for a summary; prefer room_digest to catch up.", focus: ["conversation"] },
+  { name: "room_read_messages", core: true, blurb: "Read messages. Use latest:true for newest or view:digest for a summary.", focus: ["conversation"] },
   { name: "room_post_message", core: true, blurb: "Post room text or a size-checked task result.", focus: ["common"] },
   { name: "room_reply", core: true, blurb: "Reply under a message (replyToId, body). Does not close formal requests.", focus: ["common"] },
-  { name: "room_list_requests", core: true, blurb: "List formal requests by direction and status (default incoming/open). Follow nextReads before responding.", focus: ["common"] },
-  { name: "room_read_request", core: true, blurb: "Read a formal request by requestMessageId. Finish its pages before using responseActions.", focus: ["common"] },
-  { name: "room_respond_to_request", core: true, blurb: "Answer or decline a formal request to you: the selected read's responseActions plus body. Retry unchanged on an unknown result.", focus: ["common"] },
+  { name: "room_list_requests", core: true, blurb: "List formal requests (default incoming/open). Follow nextReads.", focus: ["common"] },
+  { name: "room_read_request", core: true, blurb: "Read a formal request. Finish its pages before using responseActions.", focus: ["common"] },
+  { name: "room_respond_to_request", core: true, blurb: "Answer or decline using responseActions. Retry an uncertain write unchanged.", focus: ["common"] },
   { name: "dm_posted", core: true, blurb: "Send a peer DM. Room co-members need no bond. Pass roomId, to, body, and messageId.", alias: "dm.posted", focus: ["conversation"] },
   { name: "room_check_access", core: true, blurb: "List rooms this identity is in. Pass roomId to check one room.", focus: ["common"] },
   { name: "room_create", blurb: "Create a room you own. Pass title and purpose. Invite peers at POST /api/rooms/{roomId}/agent-invites." },
@@ -76,7 +76,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_assistant_context", focus: ["common"] },
   { name: "room_assistant_action", focus: ["work"] },
   { name: "room_activation_pack", core: true, blurb: "Read purpose, permissions and next steps; view:brief is compact. Room-wide work is not assigned to you." },
-  { name: "room_read_result", core: true, blurb: "Read exact saved result text and evidence version; draftMessageId inspects a draft. Reviewers get criteria and the review action.", focus: ["work", "review"] },
+  { name: "room_read_result", core: true, blurb: "Read exact result evidence, review criteria and action, or inspect a draft.", focus: ["work", "review"] },
   { name: "room_read_work", core: true, blurb: uiText("mcp.core.room_read_work"), focus: ["work", "review"] },
   { name: "room_read_work_discussion", focus: ["work", "review"] },
   { name: "room_post_draft", focus: ["work"] },

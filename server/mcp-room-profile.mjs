@@ -628,7 +628,8 @@ async function boardClaimCall(store, secret, name, args) {
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal) {
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
-  if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args));
+  if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
+    () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 })));
   if (BOARD_CLAIM_TOOLS.includes(name)) return boardClaimCall(store, secret, name, args);
   if (name === 'room_wait_for_attention') return waitForAttention(store, secret, args.roomId, {...args, signal});
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId, oauthIdentity: /^(oat|iat)_/.test(secret ?? "") ? identity : null, claimSec: args.claimSec ?? 0 });
