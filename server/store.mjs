@@ -7235,11 +7235,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       assertListenerFence(this, auth, roomId, listenerToken);
       const firstAck = command.type === T.REPLY_REQUEST_PROGRESSED
         && Object.hasOwn(command.data, "ifUnacknowledgedContextEventId");
-      // A live room listener lease must fence the first acknowledgment. Without
-      // one, the same recipient-scoped compare-and-set below still applies.
-      if (firstAck && (listenerToken === undefined && liveListenerLease(this, auth, roomId) || command.data.progress !== "acknowledged"
-        || !validId(command.data.ifUnacknowledgedContextEventId)))
-        fail(422, "invalid_first_ack", "First acknowledgment requires the exact context event, and the room listener lease while one is live");
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and vote in
       // polls; drafts (message.posted carrying a workItemId) need the
@@ -7268,6 +7263,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           ...(command.type === T.DM_POSTED && command.data.quiet ? { notification: "quiet" }
             : [T.MESSAGE_POSTED, T.DM_POSTED].includes(command.type) ? { wakeDeliveryEvidence: "unknown" } : {}) };
       }
+      // A new first acknowledgment must use the live room listener lease.
+      // Same-actor, same-input recovery above returns the earlier receipt;
+      // it adds no event even if a listener acquired a lease in the meantime.
+      if (firstAck && (listenerToken === undefined && liveListenerLease(this, auth, roomId) || command.data.progress !== "acknowledged"
+        || !validId(command.data.ifUnacknowledgedContextEventId)))
+        fail(422, "invalid_first_ack", "First acknowledgment requires the exact context event, and the room listener lease while one is live");
       return withCurrentServingWriter(this.db,roomId,() => {
       // Exact replays of commands committed before the pause returned above.
       refusePausedAgentWrite(this, roomId, auth.member, command);
