@@ -35,6 +35,10 @@
         `wakeSelection:{version:1,newest:true,roomId}` when bounded wake indexes
         are active. This capability permits an explicit newest poll in that
         same room; it grants no new room access, execution or acknowledgement.
+        An acquired room-scoped lease also includes `listener.firstFormalAckRoomId`.
+        It advertises support for a first-only `reply_request.progressed` write
+        through the commands endpoint, using that room's listener fence and
+        the inspected context event as `ifUnacknowledgedContextEventId`.
         No capability is advertised for an unselected or contended lease.
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
         host), optional `mode` (defaults to `wakeable` — the host can wait on
@@ -107,7 +111,7 @@
                         schemes: { type: array, items: { type: string }, example: ["bearer"] }
                         credentials: { type: string, description: never echoed }
       responses:
-        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], wakeSelection?: { version: 1, newest: true, roomId }, listener?: { acquired, fencingToken?, leaseExpiresAt, renewed? | activeListenerId } (only when listenerLease was sent) }" }
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], wakeSelection?: { version: 1, newest: true, roomId }, listener?: { acquired, fencingToken?, leaseExpiresAt, renewed?, firstFormalAckRoomId? | activeListenerId } (only when listenerLease was sent) }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '422': { description: invalid_heartbeat }
