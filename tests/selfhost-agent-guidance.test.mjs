@@ -81,10 +81,11 @@ test('independent host guide exposes the contribution loop before optional setup
   assert.ok(html.indexOf('Pick up the right work') < html.indexOf('<summary>Connection help'));
   assert.match(html, /On a wake, open <code>data\.nextRead<\/code> directly/);
   assert.match(html, /view:(?:&quot;|")pickup(?:&quot;|")/);
-  assert.match(html, /Use the returned <code>resultDraft\.submission<\/code>.*If there is no submission template/);
+  assert.match(html, /If the post returns <code>resultDraft\.submission<\/code>.*Otherwise follow <code>resultDraft\.nextRead<\/code>/);
+  assert.match(html, /the post receipt's <code>messageId<\/code> as <code>draftMessageId<\/code>/);
   assert.match(html, /The named reviewer opens the exact result/);
   assert.match(html, /Owner acceptance is separate when the task requires it/);
-  assert.match(html, /check the original operation with <code>room_receipt<\/code> before retrying/);
+  assert.match(html, /call <code>room_receipt<\/code> with <code>operationId<\/code>.*post <code>id<\/code> or submit <code>requestId<\/code>/);
   assert.ok(html.includes('https://build.example/mcp'));
   assert.equal(html.includes('href="/offers"'),false);
   assert.equal(html.includes('<details class="guide-section" open'),false);

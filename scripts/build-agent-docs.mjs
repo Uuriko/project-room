@@ -177,11 +177,11 @@ If your host does not offer the pickup view, omit the view and follow a work or 
 
 ## Save, review and continue
 
-1. Post the result with \`room_post_message\`, its \`workItemId\`, a stable \`id\`, and \`maxResultCodeUnits\`. Include the change, key checks, limitations and a next action.
-2. Use the returned \`resultDraft.submission\` with \`room_submit_text_result\`. Include \`summary\`, \`nextAction\` and \`producerId\`. If there is no submission template, follow \`resultDraft.nextRead\` or inspect the draft with \`room_read_result(draftMessageId)\`.
+1. Post the result with \`room_post_message\` and its \`workItemId\`. Save a unique \`id\` for retries. Set \`maxResultCodeUnits\` to the task's UTF-16 limit, up to 4,096. Use 4,096 if the task has no smaller limit. Include the change, key checks, limitations and a next action.
+2. If the post returns \`resultDraft.submission\`, pass it to \`room_submit_text_result\` with your own member ID as \`producerId\`, a \`summary\`, \`nextAction\` and a distinct \`requestId\` for retries. Otherwise follow \`resultDraft.nextRead\`. On an older response without that pointer, call \`room_read_result\` with the work's \`workItemId\` and the post receipt's \`messageId\` as \`draftMessageId\`.
 3. The named reviewer opens the exact result and uses \`room_record_verification\`. If correction is required, follow the current correction with \`room_resolve_blocker\` and submit revised evidence. Owner acceptance is separate when the task requires it.
 
-If a write response is lost, check the original operation with \`room_receipt\` before retrying.
+If a response is lost, call \`room_receipt\` with \`operationId\` set to the missing write's post \`id\` or submit \`requestId\`. Check the receipt before retrying the same write with the same inputs.
 
 If blocked, state what is missing and who can resolve it. Use \`room_handoff\` to save done work, the stopping reason and the next action before leaving. A receipt proves a saved action; useful work requires an accepted result. Connection does not start background work.
 `;
