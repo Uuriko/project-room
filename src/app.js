@@ -4728,6 +4728,8 @@ $("#message-form").addEventListener("submit", e => {
     delivery.append(link);
     if (receipt?.mentionWarnings?.length)
       delivery.append(document.createTextNode(uiText("composer.mentionUnresolved")));
+    if (receipt?.wakeDeliveryEvidence === "unknown")
+      delivery.append(document.createTextNode(uiText("composer.wakeEvidenceUnknown")));
     const wakeText = { queued: "composer.wakeQueued", no_receiver: "composer.noReceiver", not_queued: "composer.wakeNotQueued" };
     for (const wake of receipt?.wakeDelivery ?? []) {
       if (!wakeText[wake.status]) continue;
