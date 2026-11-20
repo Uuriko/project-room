@@ -44,8 +44,10 @@ export async function runManagedExactReview({ connection, selection, journalDire
   try {
     const filename = join(directory, "review-run.json");
     const saved = readRun(filename);
-    if (saved?.phase === "provider_start_uncertain" || saved?.phase === "stale_revision")
-      return { status: saved.phase, operationId, provider: saved.provider };
+    const stale = provider => ({ status: "stale_revision", operationId, provider,
+      nextRead: { tool: "room_read_result", arguments: { roomId: connection.roomId, workItemId: target.workItemId } } });
+    if (saved?.phase === "provider_start_uncertain") return { status: saved.phase, operationId };
+    if (saved?.phase === "stale_revision") return stale(saved.provider);
     if (saved && !["verdict_prepared", "recorded"].includes(saved.phase)) throw new Error("Unknown managed review journal phase");
     let run = saved;
     const writeRun = value => atomicPrivateJson(filename, value);
@@ -86,7 +88,7 @@ export async function runManagedExactReview({ connection, selection, journalDire
     catch (error) {
       if (error.code === "stale_revision") {
         writeRun({ ...run, phase: "stale_revision" });
-        return { status: "stale_revision", operationId, provider: run.provider };
+        return stale(run.provider);
       }
       const original = await receipt(operationId, { signal });
       return original ? finish(original) : { status: "verdict_unconfirmed", operationId, provider: run.provider };
