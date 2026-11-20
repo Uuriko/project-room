@@ -37,6 +37,15 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
 }
 const record = revealRecord;
 const input = page => page.locator("#message-input");
+async function enterConversation(page) {
+  const updates = page.locator("#updates-dialog");
+  await updates.waitFor({ state: "visible" });
+  assert.equal(await input(page).isVisible(), false);
+  await updates.getByRole("button", { name: "Conversation", exact: true }).click();
+  await updates.waitFor({ state: "hidden" });
+  await input(page).waitFor({ state: "visible" });
+}
+
 const idle = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled);
 const failed = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
 const saved = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#request-mode-bar").hidden);
@@ -48,6 +57,8 @@ async function mode(page, id, kind) {
 
 for (const width of [1280, 390, 320]) test(`request journey at ${width}px: request, clarify and answer stay in chat without closing work`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width, height: 900 }), owner = await f.login("owner"), guest = await f.login("guest");
+  await enterConversation(owner);
+  await enterConversation(guest);
   const before = structuredClone(f.state().workItems);
   await input(owner).fill("Keep my ordinary draft");
   await openComposerOptions(owner); await owner.locator("#request-reply").click();
@@ -149,6 +160,7 @@ test("lost committed answer remains exact and read-only across reload, then retr
 
 test("unconfirmed receipt locks the exact request; ordinary drafts remain separate", { timeout: 60000 }, async t => {
   const f = await setup(t), page = await f.login("owner");
+  await enterConversation(page);
   await input(page).fill("Ordinary draft"); await openComposerOptions(page); await page.locator("#request-reply").click();
   await input(page).fill("An explicit question"); await page.locator("#message-to-select").selectOption("guest");
   let alter = true; const commands = [];
@@ -263,6 +275,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
 test("host answer survives closing the requester and returning in an independent browser session", { timeout: 60000 }, async t => {
   const f = await setup(t, { width: 390, height: 844 });
   const owner = await f.login("owner");
+  await enterConversation(owner);
   await openComposerOptions(owner); await owner.locator("#request-reply").click();
   await input(owner).fill("Summarize the local reference task.");
   await owner.locator("#message-to-select").selectOption("producer");
