@@ -40,9 +40,42 @@ import { isHelpTool, buildHelpCommand, recordedHelpAction, helpUsesExpectedRevis
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
 import { markIfOther, stampAssistantResult, withContentTrust } from "./content-trust.mjs";
 import { withDefaultRoomId } from "./mcp-request-defaults.mjs";
+import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 
 const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work", "room_map"]);
 const roomIdField = { type: "string", minLength: 1, maxLength: 128, description: "Room id this identity is linked to." };
+
+const PUBLIC_REVIEW_READ = "room_read_public_review";
+const PUBLIC_REVIEW_WRITE = "room_record_public_review";
+const publicReviewId = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" };
+const publicReviewVersion = { type: "integer", minimum: 1 };
+const publicReviewOutcomes = ["PASS", "FAIL", "accepted", "rejected", "revision_requested"];
+const publicReviewTools = [
+  { name: PUBLIC_REVIEW_READ, description: "Read one exact public contribution receipt, its artifact bytes and review actions. Owner or designated reviewer only.",
+    inputSchema: { properties: { receiptId: publicReviewId }, required: ["receiptId"] },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+  { name: PUBLIC_REVIEW_WRITE, description: "Record one authorized verification or decision on the exact public receipt. Use the returned action arguments, adding a stable requestId and a concise reason. Retry unchanged after an unknown response.",
+    inputSchema: { properties: { receiptId: publicReviewId, requestId: publicReviewId, taskId: publicReviewId, expectedTermsVersion: publicReviewVersion,
+      generation: publicReviewVersion, expectedReviewRevision: { type: "integer", minimum: 0 }, artifactSha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      outcome: { type: "string", enum: publicReviewOutcomes }, reason: { type: "string", minLength: 1, maxLength: 2000, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" } },
+      required: ["receiptId", "requestId", "taskId", "expectedTermsVersion", "generation", "expectedReviewRevision", "artifactSha256", "outcome", "reason"] },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+];
+
+function publicReviewResult(roomId, view) {
+  const { receipt, review, authority } = view;
+  const argumentsFor = outcome => ({
+    roomId, receiptId: receipt.receiptId, taskId: receipt.taskId, expectedTermsVersion: receipt.termsVersion,
+    generation: receipt.generation, expectedReviewRevision: review.revision, artifactSha256: receipt.artifact.sha256, outcome
+  });
+  const outcomes = [];
+  if (authority.canVerify) outcomes.push("PASS", "FAIL");
+  if (authority.acceptReady) outcomes.push("accepted");
+  if (authority.canDecide) outcomes.push("rejected", "revision_requested");
+  return withContentTrust({ ...view, actions: outcomes.map(outcome => ({
+    tool: PUBLIC_REVIEW_WRITE, arguments: argumentsFor(outcome), inputRequired: ["requestId", "reason"]
+  })) });
+}
 
 function withRoomId(entry) {
   return {
@@ -63,11 +96,11 @@ function withRoomId(entry) {
 export function hostedStdioToolDefinitions() {
   // The bounty tools are hosted-only: the escrow lives in RoomStore, so there
   // is no stdio equivalent to filter against.
-  return [...roomTools.filter(entry => !ALREADY_HOSTED.has(entry.name)), ...bountyTools, ...trustTools].map(withRoomId);
+  return [...roomTools.filter(entry => !ALREADY_HOSTED.has(entry.name)), ...bountyTools, ...trustTools, ...publicReviewTools].map(withRoomId);
 }
 
 export function isHostedStdioTool(name) {
-  if (isBountyTool(name) || isTrustTool(name)) return true;
+  if (isBountyTool(name) || isTrustTool(name) || publicReviewTools.some(tool => tool.name === name)) return true;
   return typeof name === "string" && !ALREADY_HOSTED.has(name) && roomTools.some(entry => entry.name === name);
 }
 
@@ -77,6 +110,8 @@ export function validHostedStdioArgs(name, args) {
   const { roomId, ...rest } = args;
   if (isBountyTool(name)) return validBountyToolArguments(name, rest);
   if (isTrustTool(name)) return validTrustToolArguments(name, rest);
+  const review = publicReviewTools.find(tool => tool.name === name);
+  if (review) return !diagnoseArguments(withRoomId(review).inputSchema, args);
   return validRoomToolArguments(name, rest);
 }
 
@@ -203,6 +238,7 @@ function enforceHostedStdioCallVisibility(store, secret, memberId, name) {
 const HOSTED_STDIO_WRITE_TOOLS = new Set([
   "room_assistant_action",
   "room_introduce_outside_agent",
+  PUBLIC_REVIEW_WRITE,
   "room_begin_work", "room_link_work_claim_pr", "room_set_member_claim_cap",
   "room_post_draft", "room_close_work_claim",
 ]);
@@ -396,6 +432,22 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     const command = buildWorkCommand(name, rest, identity, { expectedRevision });
     return recorded(store, secret, roomId, identity, command,
       receipt => withWorkDeprecation(name, recordedWorkAction(name, command, receipt)));
+  }
+  if (name === PUBLIC_REVIEW_READ) {
+    const value = store.readTransaction(() => {
+      const view = store.publicWorkReviews.inspect(roomId, auth.member.id, rest.receiptId);
+      return publicReviewResult(roomId, { ...view, artifact: {
+        ...store.publicWorkClaims.artifact(rest.receiptId, { memberId: auth.member.id }), untrusted: true
+      } });
+    });
+    return { value, isError: false };
+  }
+  if (name === PUBLIC_REVIEW_WRITE) {
+    const { receiptId, outcome, ...input } = rest;
+    const view = outcome === "PASS" || outcome === "FAIL"
+      ? store.publicWorkReviews.verify(roomId, auth.member.id, receiptId, { ...input, verdict: outcome })
+      : store.publicWorkReviews.decide(roomId, auth.member.id, receiptId, { ...input, decision: outcome });
+    return { value: publicReviewResult(roomId, view), isError: false };
   }
   if (name === "room_read_result") {
     return { value: store.workResult(secret, roomId, rest.workItemId, {

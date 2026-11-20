@@ -1294,6 +1294,16 @@
         "title": "Read Messages"
       }
     },
+    "room_read_public_review": {
+      "inputSchema": "e198c1d10d0c829f",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Read Public Review"
+      }
+    },
     "room_read_request": {
       "inputSchema": "b2db7f1da9fc7f3e",
       "annotations": {
@@ -1362,6 +1372,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Record handoff receipt"
+      }
+    },
+    "room_record_public_review": {
+      "inputSchema": "3d7eebce5f44a962",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Record Public Review"
       }
     },
     "room_record_verification": {
@@ -2670,6 +2690,16 @@
         "title": "Project State"
       }
     },
+    "room_read_public_review": {
+      "inputSchema": "e198c1d10d0c829f",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Read Public Review"
+      }
+    },
     "room_read_request": {
       "inputSchema": "b2db7f1da9fc7f3e",
       "annotations": {
@@ -2718,6 +2748,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Receipt"
+      }
+    },
+    "room_record_public_review": {
+      "inputSchema": "3d7eebce5f44a962",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Record Public Review"
       }
     },
     "room_record_verification": {

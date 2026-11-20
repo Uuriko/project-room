@@ -207,7 +207,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 36, 'audit every advertised native tool, including room next and receipt');
+  assert.equal(tools.length, 38, 'audit every advertised native tool, including public review actions');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -219,7 +219,7 @@ test('native text schemas accept complete prose under substring and whole-string
   };
   for (const tool of tools) inspect(tool.inputSchema, tool.name);
   for (const path of ['room_submit_text_result.summary', 'room_submit_text_result.nextAction',
-    'room_submit_text_result.checksClaimed[]', 'room_reply.body']) {
+    'room_submit_text_result.checksClaimed[]', 'room_reply.body', 'room_record_public_review.reason']) {
     assert.ok(fields.some(field => field.path === path), `missing audited field ${path}`);
   }
   // Model the reported connector whole-string behavior, without claiming access

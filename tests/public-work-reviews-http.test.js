@@ -6,15 +6,19 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { PublicWorkClaimsClient } from '../client/public-work-claims.mjs';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
+import { mcpOAuthToolAllowed } from '../server/mcp-oauth.mjs';
 
 const root = '/api/rooms/commons/public-work';
-async function fixture(t, representation = 'legacy') {
+async function fixture(t, representation = 'legacy', agentReview = false) {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom(), representation === 'legacy' ? {} : { representation });
   const ownerKey = store.issueAccessKey('commons', 'owner');
   store.command(ownerKey, 'commons', { id: 'review-add-peer', type: 'member.added', data: { memberId: 'review-peer', displayName: 'Peer', kind: 'human', permissions: [] } });
   const peerKey = store.issueAccessKey('commons', 'review-peer');
-  const terms = { kind: 'task', title: 'Review an actual contribution', summary: 'One scoped change', acceptanceCriteria: ['Return exact bytes'], repositoryUrl: 'https://github.com/Example/Project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } };
-  store.projectOffers.create('commons', 'owner', { requestId: 'review-create', offerId: 'review:offer', terms, reviewerMemberIds: ['owner'] });
+  const reviewer = agentReview ? store.identities.create('Independent reviewer') : null;
+  const reviewerId = reviewer ? linkWithProof(store, ownerKey, 'commons', reviewer, { permissions: ['verify'] }).memberId : 'owner';
+  const terms = { kind: 'task', title: 'Review an actual contribution', summary: 'One scoped change', acceptanceCriteria: ['Return exact bytes'], repositoryUrl: 'https://github.com/Example/Project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: agentReview ? 'agent' : 'human' } };
+  store.projectOffers.create('commons', 'owner', { requestId: 'review-create', offerId: 'review:offer', terms, reviewerMemberIds: [reviewerId] });
   store.projectOffers.transition('commons', 'owner', 'review:offer', 'publish', { requestId: 'review-publish', expectedRevision: 1 });
   store.publicWorkClaims.enable('commons', 'owner', 'review:offer', { requestId: 'review-enable', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['src/review.js'] });
   const identity = store.identities.create('Contributor');
@@ -27,7 +31,7 @@ async function fixture(t, representation = 'legacy') {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = (path, data, key = ownerKey, method = data ? 'POST' : 'GET') => fetch(origin + path, { method, headers: { Origin: origin, ...(key ? { Authorization: `Bearer ${key}` } : {}), ...(data ? { 'Content-Type': 'application/json' } : {}) }, ...(data ? { body: JSON.stringify(data) } : {}) });
   const decision = (requestId = 'review-decision', decision = 'accepted') => ({ requestId, expectedReviewRevision: 0, taskId: receipt.taskId, expectedTermsVersion: receipt.termsVersion, generation: receipt.generation, artifactSha256: receipt.artifact.sha256, decision, reason: 'Feedback for contributor' });
-  return { store, ownerKey, peerKey, identity, other, receipt, artifactText, server, origin, call, decision };
+  return { store, ownerKey, peerKey, identity, other, receipt, artifactText, server, origin, call, decision, reviewer };
 }
 const read = async (response, status = 200) => { assert.equal(response.status, status, await response.clone().text()); return response.json(); };
 
@@ -55,6 +59,50 @@ for (const representation of ['legacy', 'normalized-current-v1']) test(`owner re
       review: { state: 'accepted', verificationVerdict: null, verificationReviewerKind: null, verifiedAt: null, decidedAt: outcome.review.decision.at } });
   assert.equal(await (await f.call('/api/public-work/receipts/' + f.receipt.receiptId + '/artifact', undefined, null)).text(), f.artifactText);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM bounty_journal').get().n, before);
+});
+
+test('hosted MCP reviewer reads exact public artifact and records verification and decision without a connector handoff', async t => {
+  const f = await fixture(t, 'normalized-current-v1', true);
+  const readTool = 'room_read_public_review', recordTool = 'room_record_public_review', selection = { roomId: 'commons', receiptId: f.receipt.receiptId };
+  const mcp = async (method, params, key = f.reviewer.secret) => {
+    const response = await f.call('/mcp', { jsonrpc: '2.0', id: 1, method, params }, key);
+    const reply = await read(response);
+    return reply.result?.structuredContent ?? reply.result ?? reply.error;
+  };
+  const callTool = (name, args, key) => mcp('tools/call', { name, arguments: args }, key);
+  assert.equal(mcpOAuthToolAllowed(readTool, ['work:read']), true);
+  assert.equal(mcpOAuthToolAllowed(recordTool, ['work:read']), false);
+  assert.equal(mcpOAuthToolAllowed(recordTool, ['work:write']), false);
+  assert.equal(mcpOAuthToolAllowed(recordTool, ['work:read', 'work:write']), true);
+  const tools = await mcp('tools/list', { focus: 'review' });
+  assert.ok(tools.tools.some(tool => tool.name === readTool));
+  assert.ok(tools.tools.some(tool => tool.name === recordTool));
+  const publicTools = await mcp('tools/list', {}, null);
+  assert.ok(!publicTools.tools.some(tool => [readTool, recordTool].includes(tool.name)));
+  const selected = await callTool(readTool, selection);
+  assert.equal(selected.artifact.artifactText, f.artifactText);
+  assert.equal(selected.artifact.sha256, f.receipt.artifact.sha256);
+  assert.equal(selected.artifact.untrusted, true);
+  assert.equal(selected.review.revision, 0);
+  assert.ok(!selected.actions.some(action => action.arguments.outcome === 'accepted'));
+  const verify = selected.actions.find(action => action.arguments.outcome === 'PASS');
+  assert.equal(verify.tool, recordTool);
+  const proof = { ...verify.arguments, requestId: 'native-public-pass', reason: 'Checked exact artifact against the published criteria' };
+  assert.equal((await callTool(recordTool, { ...proof, artifactSha256: '0'.repeat(64) })).code, 'stale_review_receipt');
+  assert.equal((await callTool(readTool, selection, f.identity.secret)).status, 403);
+  assert.equal((await callTool(recordTool, proof, f.identity.secret)).status, 403);
+  const verified = await callTool(recordTool, proof);
+  assert.equal(verified.review.verification.verdict, 'PASS');
+  assert.deepEqual(await callTool(recordTool, proof), verified);
+  const accept = verified.actions.find(action => action.arguments.outcome === 'accepted');
+  assert.equal(accept.arguments.expectedReviewRevision, 1);
+  const decision = { ...accept.arguments, requestId: 'native-public-accept', reason: 'Verified the published scope' };
+  const accepted = await callTool(recordTool, decision);
+  assert.equal(accepted.review.state, 'accepted');
+  assert.deepEqual(accepted.actions, []);
+  assert.deepEqual(await callTool(recordTool, decision), accepted);
+  assert.equal(accepted.history.length, 2);
+  assert.equal((await f.call(root + '/receipts/' + selection.receiptId)).status, 200);
 });
 
 test('only submitting global identity reads sanitized feedback with no room admission or writes', async t => {
