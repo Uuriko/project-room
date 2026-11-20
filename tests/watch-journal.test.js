@@ -315,11 +315,22 @@ test("a second process cannot acquire a live or paused owner and can recover aft
   assert.deepEqual(probe(f.directory), { acquired: true }, "OS-owned lock recovers without deleting files or a PID lease");
 });
 
-test("simultaneous starter processes grant lifetime ownership to exactly one contender", { timeout: 15000 }, async t => {
-  const f = fixture(t); f.open().close();
+test("simultaneous starter processes grant lifetime ownership to exactly one contender on a cold journal", { timeout: 15000 }, async t => {
+  const f = fixture(t);
   const candidates = await Promise.all([contender(f), contender(f)]);
   const results = await Promise.all(candidates.map(candidate => candidate.start()));
   assert.equal(results.filter(result => result.acquired).length, 1);
   assert.deepEqual(results.find(result => !result.acquired), { acquired: false, code: "already_watching" });
   assert.deepEqual(probe(f.directory), { acquired: false, code: "already_watching" });
+});
+
+
+test("an interrupted first creation leaves blank files that the next owner can initialize", t => {
+  const f = fixture(t);
+  mkdirSync(f.directory, { mode: 0o700 });
+  writeFileSync(join(f.directory, "ownership.sqlite"), "", { mode: 0o600 });
+  writeFileSync(join(f.directory, "watch.sqlite"), "", { mode: 0o600 });
+  const journal = f.open();
+  assert.equal(journal.status().state, "held");
+  assert.equal(journal.state(), null);
 });
