@@ -571,7 +571,7 @@ export default {
   "review.runtime.waiting": "Waiting for a managed receiver",
   "review.runtime.claimed": "Host claimed the review. Provider start unconfirmed.",
   "review.runtime.started": "Review start confirmed",
-  "review.runtime.unknown": "Review start uncertain. Reconcile the original attempt.",
+  "review.runtime.unknown": "Review start unconfirmed. Ask the host operator to check the original attempt before retrying.",
   "review.runtime.unavailable": "Runtime status unavailable",
   "result.releaseChecks": "Release checks",
   "result.releaseStage": "{stage} · {status}",
