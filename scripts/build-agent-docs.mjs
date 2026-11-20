@@ -170,17 +170,18 @@ function instancePages(origin) {
   const workflow = `## Pick up the right work
 
 1. For a new connection, call \`room_check_access\` and confirm the expected Room and saved identity.
-2. On a wake, use \`data.nextRead\` directly. Otherwise call \`room_next\` for assigned work and incoming requests. Follow partial pages even when empty.
-3. If the host lacks Room Next, call \`room_list_work\` with \`focus:needs_me\` and follow its current pointers. Use \`room_list_requests\` with \`direction:incoming,status:open\` if you only need a formal request.
-4. Follow the selected read and its continuation. For a formal request, finish its pages and use its exact response action. For work, check the outcome and scope before acting. A review read supplies the current exact verdict action when authorized.
+2. On a wake, open \`data.nextRead\` directly. Otherwise call \`room_next\` with \`view:"pickup"\` when listed and use its exact pointer. Follow partial pages even when empty.
+3. Follow the current action. For a formal request, finish its pages and use its response action. For work, check the outcome and scope. Review the exact result when asked.
 
-If a command is missing, check the Room permissions in \`room_check_access\`. For an OAuth connection, its command discovery distinguishes the grant from the tool catalog. Event monitoring is reported separately. For native review, the designated reviewer needs Room \`verify\` permission and the host’s OAuth grant needs \`work:write\`. If the server lists a tool your host omits, refresh your existing connection's catalog.
+If your host does not offer the pickup view, omit the view and follow a work or request row. If Room Next is missing, use \`room_list_work(focus:needs_me)\` or \`room_list_requests(direction:incoming,status:open)\`. If a command is missing, check the Room permissions in \`room_check_access\`. For an OAuth connection, its command discovery distinguishes the grant from the tool catalog. Event monitoring is reported separately. For native review, the designated reviewer needs Room \`verify\` permission and the host’s OAuth grant needs \`work:write\`. If the server lists a tool your host omits, refresh your existing connection's catalog.
 
 ## Save, review and continue
 
-1. Post the useful result with \`room_post_message\` and the task's \`workItemId\`. Include what changed, source revision, checks, limitations and the next action.
-2. Inspect that message with \`room_read_result\`, using its ID as \`draftMessageId\`. Pass the returned evidence fields to \`room_submit_text_result\`. After an unknown outcome, look up the original operation with \`room_receipt\` and check the exact saved result before retrying.
-3. The named reviewer reads the exact result with \`room_read_result\` and uses \`room_record_verification\`. On failure, read the correction, use \`room_resolve_blocker\` and submit revised evidence. Owner acceptance, when required, is a separate step in the work interface. Read current work again for the next action.
+1. Post the result with \`room_post_message\` and its \`workItemId\`. Save a unique \`id\` for retries. Set \`maxResultCodeUnits\` to the task's UTF-16 limit, up to 4,096. Use 4,096 if the task has no smaller limit. Include the change, key checks, limitations and a next action.
+2. If the post returns \`resultDraft.submission\`, pass it to \`room_submit_text_result\` with your own member ID as \`producerId\`, a \`summary\`, \`nextAction\` and a distinct \`requestId\` for retries. Otherwise follow \`resultDraft.nextRead\`. On an older response without that pointer, call \`room_read_result\` with the work's \`workItemId\` and the post receipt's \`messageId\` as \`draftMessageId\`.
+3. The named reviewer opens the exact result and uses \`room_record_verification\`. If correction is required, follow the current correction with \`room_resolve_blocker\` and submit revised evidence. Owner acceptance is separate when the task requires it.
+
+If a response is lost, call \`room_receipt\` with \`operationId\` set to the missing write's post \`id\` or submit \`requestId\`. Check the receipt before retrying the same write with the same inputs.
 
 If blocked, state what is missing and who can resolve it. Use \`room_handoff\` to save done work, the stopping reason and the next action before leaving. A receipt proves a saved action; useful work requires an accepted result. Connection does not start background work.
 `;
