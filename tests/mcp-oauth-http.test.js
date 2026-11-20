@@ -207,7 +207,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 36, 'audit every advertised native tool, including room next and receipt');
+  assert.equal(tools.length, 38, 'audit every advertised native tool, including public review actions');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -219,7 +219,7 @@ test('native text schemas accept complete prose under substring and whole-string
   };
   for (const tool of tools) inspect(tool.inputSchema, tool.name);
   for (const path of ['room_submit_text_result.summary', 'room_submit_text_result.nextAction',
-    'room_submit_text_result.checksClaimed[]', 'room_reply.body']) {
+    'room_submit_text_result.checksClaimed[]', 'room_reply.body', 'room_record_public_review.reason']) {
     assert.ok(fields.some(field => field.path === path), `missing audited field ${path}`);
   }
   // Model the reported connector whole-string behavior, without claiming access
@@ -642,6 +642,34 @@ for (const normalized of [false, true]) test(`OAuth exact-result review preserve
   assert.equal(accepted.body.result?.structuredContent.status, 'recorded', JSON.stringify(accepted.body));
   const read = await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId, includeResult: true } });
   assert.equal(read.body.result.structuredContent.next.action, 'complete');
+});
+
+test('public review read gives exact evidence without advertising ungranted actions', async t => {
+  const f = await setup(t, { normalized: true });
+  const roomId = 'commons', taskId = 'oauth-public-review';
+  const terms = { kind: 'task', title: 'Check exact artifact', summary: 'Public scope', acceptanceCriteria: ['Read exact bytes'],
+    repositoryUrl: 'https://github.com/example/project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'agent' } };
+  f.store.projectOffers.create(roomId, 'owner', { requestId: 'public-create', offerId: taskId, terms, reviewerMemberIds: ['friend-dot'] });
+  f.store.projectOffers.transition(roomId, 'owner', taskId, 'publish', { requestId: 'public-publish', expectedRevision: 1 });
+  f.store.publicWorkClaims.enable(roomId, 'owner', taskId, { requestId: 'public-enable', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['README.md'] });
+  const outside = f.store.identities.create('Outside contributor');
+  const claimed = f.store.publicWorkClaims.act(taskId, outside.secret, 'claim', { requestId: 'public-claim', expectedTermsVersion: 1 });
+  const { receipt } = f.store.publicWorkClaims.act(taskId, outside.secret, 'finish', {
+    requestId: 'public-finish', expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText: 'Exact evidence', checksReported: []
+  });
+  const consent = await f.consent({ scope: 'work:read' });
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const exchanged = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  assert.equal(exchanged.status, 200);
+  const { access_token } = await exchanged.json();
+  const read = token => f.rpc('tools/call', { name: 'room_read_public_review', arguments: { receiptId: receipt.receiptId } }, token);
+  const observed = (await read(access_token)).body.result.structuredContent;
+  assert.equal(observed.artifact.artifactText, 'Exact evidence');
+  assert.equal(observed.authority.canVerify, true, 'Room reviewer standing is still accurately described');
+  assert.deepEqual(observed.actions, []);
+  assert.equal(observed.actionAvailability, 'outside_connected_grant');
+  const complete = (await read()).body.result.structuredContent;
+  assert.ok(complete.actions.some(action => action.arguments.outcome === 'PASS'));
 });
 
 // The exact-result review above is one command. These two cover the rest of
