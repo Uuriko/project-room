@@ -106,7 +106,7 @@ test('removing owned mutation guards cannot turn missing current membership into
 });
 
 import { event } from '../src/events.js';
-for(const requests of [499,500])test(`complete qualified request count${requests} survives sparse command context`,t=>{
+for(const requests of [499,500])test(`opening request ${requests+1} preserves qualified counts in sparse command context`,t=>{
   const store=new RoomStore(':memory:');t.after(()=>store.close());
   const events=[...initialRoom(),event({id:'join-worker',roomId:'commons',actorId:'owner',type:'member.added',
     data:{memberId:'worker',displayName:'Worker',kind:'agent',permissions:[]}})];
@@ -114,11 +114,13 @@ for(const requests of [499,500])test(`complete qualified request count${requests
     data:{messageId:'request-'+i,body:'Please help',toMemberId:'worker',requestKind:'reply',requestPolicyVersion:1}}));
   store.initialize(events,{representation:'normalized-current-v1'});
   const token=store.issueAccessKey('commons','owner');store.room=()=>{throw Error('unbounded room read');};
-  const command={id:'at-capacity',type:'message.posted',data:{messageId:'new-request',body:'A new request',toMemberId:'worker',requestKind:'reply'}};
-  if(requests===500)assert.throws(()=>store.command(token,'commons',command),/Reply request capacity reached/);
-  else assert.equal(store.command(token,'commons',command).duplicate,false);
-  assert.equal(readCurrentHead(store.db,'commons').counts.replyRequests,500);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM current_room_records WHERE room_id='commons' AND domain='replyRequests'").get().n,500);
+  const command={id:'new-request-command',type:'message.posted',data:{messageId:'new-request',body:'A new request',toMemberId:'worker',requestKind:'reply'}};
+  const opened=store.command(token,'commons',command),retry=store.command(token,'commons',command);
+  assert.equal(opened.duplicate,false);
+  assert.equal(retry.duplicate,true);
+  assert.equal(retry.sequence,opened.sequence);
+  assert.equal(readCurrentHead(store.db,'commons').counts.replyRequests,requests+1);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM current_room_records WHERE room_id='commons' AND domain='replyRequests'").get().n,requests+1);
 });
 
 import { readCurrentRoomForAudit } from '../server/current-room-repository.mjs';
