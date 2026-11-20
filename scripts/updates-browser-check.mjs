@@ -1584,3 +1584,19 @@ test("Updates refresh live without stealing focus and filter permission decision
   await page.locator('#updates-close').click();assert.equal(await page.locator('#message-input').inputValue(),'Keep my conversation draft');
   assert.deepEqual(errors,[]);
 });
+
+test("a formal reply request opens its original private message from Updates", {timeout: 30000}, async t => {
+  const {store, agent, page, selectUpdatesFilter} = await setup(t);
+  store.command(agent, "commons", command(T.MESSAGE_POSTED, {
+    messageId: "formal-open-from-updates", toMemberId: "owner", requestKind: "reply",
+    body: "Please confirm the fallback guide"
+  }));
+  await page.locator("#topbar-updates").click();
+  await selectUpdatesFilter("Needs me", "needs");
+  const open = page.getByRole("button", {name: "Open Please confirm the fallback guide", exact: true});
+  await open.waitFor();
+  await open.press("Enter");
+  await page.locator("#updates-dialog").waitFor({state: "hidden"});
+  await page.waitForFunction(() => document.activeElement?.dataset.messageRecordId === "formal-open-from-updates");
+  await page.locator('[data-message-id="formal-open-from-updates"][data-message-action="request-answered"]').waitFor();
+});

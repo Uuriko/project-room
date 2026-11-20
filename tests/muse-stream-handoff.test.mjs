@@ -267,3 +267,30 @@ test("a standalone request survives a new receiver invocation with the original 
   current = { ...current, progressState: "acknowledged" };
   assert.equal(await replay(), undefined);
 });
+
+test("receiver acknowledges only after saving the exact pointer and recovers the same write", async () => {
+  const ask = request("signed-off");
+  let checkpoint = {after: 10, inFlight: null};
+  let progress = {};
+  const calls = [];
+  const client = {
+    replyRequests: () => ({evaluatedThrough: 10, requests: [ask]}),
+    replyContext: () => context({...ask, ...progress}, 11),
+    replyAction(name, args) {
+      assert.equal(checkpoint.inFlight.requestMessageId, ask.id);
+      assert.equal(name, "room_progress_request");
+      assert.equal(args.progress, "acknowledged");
+      calls.push(args);
+      progress = {acknowledgedAt: "2026-11-19T00:00:00Z", progressState: "acknowledged", progressNote: args.note};
+      if (calls.length === 1) throw new TypeError("Response interrupted");
+      return {status: "recorded", sequence: 12, duplicate: true};
+    }
+  };
+  const run = () => holdMuseHandoff({client, policy, checkpoint, receiverAck: true,
+    signal: new AbortController().signal, save(state) { checkpoint = state; }});
+  await assert.rejects(run(), /interrupted/);
+  const recovered = await run();
+  assert.equal(recovered.receiverAcknowledgment.sequence, 12);
+  assert.equal(recovered.receiverAcknowledgment.duplicate, true);
+  assert.deepEqual(calls[0], calls[1]);
+});
