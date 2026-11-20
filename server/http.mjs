@@ -2693,7 +2693,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         let page;
         try {
           if (url.searchParams.getAll('workAfter').length > 1) reject(422, 'invalid_feed_cursor', 'Invalid public task page; reload the room');
-          page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin(), workAfter:url.searchParams.get('workAfter') ?? '' });
+          page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin(), workAfter:url.searchParams.get('workAfter') ?? '', contributionPrompt: true });
         } catch (error) {
           if (error?.code !== 'invalid_feed_cursor' || roomPage[2] || !acceptPrefersHtml(req.headers.accept)) throw error;
           return sendPage(422, publicTaskPageExpired(roomPage[1]), null, `/r/${roomPage[1]}`, 'no-store');
