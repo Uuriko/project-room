@@ -40,12 +40,15 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
       }
       const rpc = await boundedJson(response);
       const value = rpc.result?.structuredContent;
+      if (args.view === "pickup" && rpc.id === "room-next" && rpc.error?.code === -32602
+        && rpc.error.data?.unexpected?.length === 1 && rpc.error.data.unexpected[0] === "view")
+        return call(name, selection);
       const matches = value?.contractVersion === 1 && value.roomId === config.roomId && value.viewerId === config.memberId;
       if (rpc.id !== "room-next" || rpc.error || rpc.result?.isError || !matches)
         throw new Error("Room did not return a matching next view. Check connection access and server support.");
       return value;
     };
-    const value = await call("room_next", selection);
+    const value = await call("room_next", { ...selection, view: "pickup" });
     if (["work", "requests"].some(source => {
       const page = value[source];
       if (selection.source && selection.source !== source) return page !== undefined;
