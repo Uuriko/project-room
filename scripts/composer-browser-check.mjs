@@ -278,7 +278,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await options.count(), 1);
     await mentionList.locator("[data-mention-id='maya']").click();
     await mentionList.waitFor({ state: "hidden" });
-    assert.match(await input.inputValue(), /@Maya/);
+    assert.match(await input.inputValue(), /@\(maya\)/);
     assert.equal(await page.locator("#message-to-select").inputValue(), "", "an inserted @mention is text-only and never selects a DM recipient");
     assert.equal(await page.evaluate(() => document.activeElement.id), "message-input");
     await input.fill("");

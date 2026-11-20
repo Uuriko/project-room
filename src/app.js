@@ -4704,13 +4704,14 @@ $("#message-form").addEventListener("submit", e => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
+    let receipt;
     try {
       if (sharedRequest) {
         await humanExperience.submit(sendingCommand, askRoom, stagedFileIds);
         if (generation === client.generation && state) maybeShowGuestUpgradeHint();
         return;
       }
-      await client.send(sendingCommand);
+      receipt = await client.send(sendingCommand);
     } catch (error) {
       if (generation !== client.generation || !state) return;
       throw mapDmConsentRefusal(sendingCommand, error) ?? error;
@@ -4724,7 +4725,17 @@ $("#message-form").addEventListener("submit", e => {
     delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
     const link = document.createElement("a");
     link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
-    delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
+    delivery.append(link);
+    if (receipt?.mentionWarnings?.length)
+      delivery.append(document.createTextNode(uiText("composer.mentionUnresolved")));
+    const wakeText = { queued: "composer.wakeQueued", no_receiver: "composer.noReceiver", not_queued: "composer.wakeNotQueued" };
+    for (const wake of receipt?.wakeDelivery ?? []) {
+      if (!wakeText[wake.status]) continue;
+      const member = state.members[wake.memberId];
+      delivery.append(document.createTextNode(uiText("composer.wakeDisposition", {
+        name: member?.displayName ?? wake.memberId, status: uiText(wakeText[wake.status]),
+      })));
+    }
     delivery.hidden = false;
     await commitComposerFiles(data.messageId);
     if (!ownsSendingDraft()) return;
@@ -5099,13 +5110,13 @@ function renderMentions() {
   input.setAttribute("aria-activedescendant", `mention-option-${mentionIndex}`);
 }
 function chooseMention(member) {
-  const name = member && humanExperience.assistantName(member.id);
-  applyMentionMember(name ? { ...member, displayName: name } : member);
+  const assistantName = member && humanExperience.assistantName(member.id);
+  applyMentionMember(assistantName ? { ...member, displayName: assistantName } : member, { exact: !assistantName });
 }
-function applyMentionMember(member) {
+function applyMentionMember(member, { exact = true } = {}) {
   const input = $("#message-input");
   if (!input || !member) return;
-  const next = addressMember(input.value, input.selectionStart, member);
+  const next = addressMember(input.value, input.selectionStart, member, { exact });
   input.value = next.body;
   // Mentions are text only: never change the DM recipient select here.
   // A message becomes a DM only when the sender explicitly picks a recipient.
