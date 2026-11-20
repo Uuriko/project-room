@@ -108,6 +108,17 @@ test("release review requires complete exact evidence before its single completi
   assert.match(body, /build: [\s\S]+browser: [\s\S]+deploy: /);
   assert.match(body, /"packageFixtures":\[{"storage":"legacy"/);
   assert.match(body, /"storage":"normalized"/);
+  assert.match(body, /response-body digest sha256:/);
+  assert.equal((body.match(/"passedCheckCount":2/g) ?? []).length, 2);
+  const oldFixtures = input.build.packageFixtures.map(({passedCheckCount, ...fixture}) => fixture);
+  const oldBuild = Buffer.from(JSON.stringify({ ...input.build, packageFixtures: oldFixtures }));
+  const oldBody = prepare({ inputs: { ...inputs, build: oldBuild } });
+  assert.match(oldBody, /HTTP 200, sha256:/);
+  assert.doesNotMatch(oldBody, /passedCheckCount|response-body digest/);
+  const miscount = Buffer.from(JSON.stringify({ ...input.build, packageFixtures: [
+    { ...input.build.packageFixtures[0], passedCheckCount: 21 }, input.build.packageFixtures[1]
+  ] }));
+  assert.throws(() => prepare({ inputs: { ...inputs, build: miscount } }), /mismatched packaged storage/);
   assert.notEqual(...input.build.packageFixtures.map(report => report.evidenceDigest));
   const mismatched = Buffer.from(JSON.stringify({
     ...input.build, packageFixtures: [input.build.packageFixtures[0], input.build.packageFixtures[0]]
