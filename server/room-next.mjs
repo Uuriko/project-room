@@ -119,9 +119,15 @@ function legacyWorkPage(store, roomId, auth, room, cursor) {
   if (!position) return unavailable(roomId, "work", "cursor_changed");
   // Load one bounded key window, and advance only over the keys examined.
   const windowLimit = PAGE_SIZE * WORK_SEARCH_WINDOWS;
-  const keys = store.db.prepare(`SELECT item.key FROM rooms, json_each(rooms.projection, '$.workItems') AS item
-    WHERE rooms.id=? AND item.key COLLATE BINARY>? ORDER BY item.key COLLATE BINARY LIMIT ?`);
-  const rows = keys.all(roomId, position.after, windowLimit + 1);
+  const keys = store.db.prepare(`SELECT item.key FROM work_projection_items AS item
+    WHERE item.room_id=? AND item.key COLLATE BINARY>?
+      AND (json_extract(item.value,'$.accountableMemberId')=? OR json_extract(item.value,'$.verifierMemberId')=?
+        OR json_extract(item.value,'$.humanDecisionMakerId')=? OR json_extract(item.value,'$.handoff.triageMemberId')=?
+        OR (? AND json_extract(item.value,'$.handoff.open')=1 AND json_extract(item.value,'$.handoff.triageMemberId') IS NULL))
+    ORDER BY item.key COLLATE BINARY LIMIT ?`);
+  const memberId = auth.member.id;
+  const rows = keys.all(roomId, position.after, memberId, memberId, memberId, memberId,
+    Number(memberId === room.ownerId), windowLimit + 1);
   const ids = rows.slice(0, windowLimit).map(row => row.key);
   const parties = store.privateWorkParties(roomId, { workIds: ids });
   const visible = [...readWorkItems(store.db, roomId, ids).values()].filter(item => {
@@ -190,7 +196,7 @@ function boundedPage(roomId, source, getPage) {
   }
 }
 
-export function readRoomNext(store, secret, roomId, { source, cursor } = {}) {
+export function readRoomNext(store, secret, roomId, { source, cursor } = {}, readInvitation) {
   if (!validRoomNextSelection({ source, cursor }))
     throw new ServiceError(422, "invalid_arguments", "Choose a source and its returned cursor");
   return store.readTransaction(() => {
@@ -223,17 +229,28 @@ export function readRoomNext(store, secret, roomId, { source, cursor } = {}) {
         { tool: "room_list_requests", arguments: { roomId, direction: "incoming", status: "open" } })
       : boundedPage(roomId, "requests", () => current
         ? requestPage(store, secret, roomId, auth, cursor) : legacyRequestPage(store, secret, roomId, auth, room, cursor));
-    // Pull-only discovery. Keep invitations behind the existing eligible-work
-    // reader and make addressed obligations take precedence on every page.
+    const correction = packet.work?.items.find(item => item.reason === "revise");
+    const addressed = correction ?? packet.requests?.items[0] ?? packet.work?.items[0];
+    packet.nextRead = addressed?.nextRead ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
+
     if (!source && !room.archivedAt && auth.member.kind === "agent"
-      && auth.member.permissions.includes("accept_work")
-      && !packet.work.items.length && !packet.requests.items.length) {
+      && auth.member.permissions.includes("accept_work") && !addressed) {
       const paused = store.wakeQueue.pauseStatus(roomId, auth.member.id);
-      packet.ifIdle = paused ? { status: "paused" } : {
-        status: "browse_invitations",
-        after: "addressed_work_and_request_pages",
-        nextRead: { tool: "room_list_work", arguments: { roomId, focus: "help_wanted", limit: 1 } }
-      };
+      const addressedComplete = packet.work.coverage === "complete" && packet.requests.coverage === "complete";
+      if (paused) packet.ifIdle = { status: "paused" };
+      else if (addressedComplete && readInvitation) {
+        const listing = readInvitation();
+        const invite = listing.work?.[0];
+        if (invite) {
+          packet.nextRead = { ...invite.nextRead, arguments: { roomId, ...invite.nextRead.arguments } };
+          packet.ifIdle = { status: "invitation", workItemId: invite.id, title: invite.title.slice(0, 160),
+            revision: invite.revision, helpEventId: invite.help.eventId, nextRead: packet.nextRead };
+        } else {
+          packet.ifIdle = listing.selection?.available === false
+            ? { status: "unavailable", reason: listing.selection.reason }
+            : { status: "no_invitation" };
+        }
+      }
     }
     if (Buffer.byteLength(JSON.stringify(packet)) > MAX_BYTES)
       throw new ServiceError(409, "current_room_context_unavailable", "Read one source at a time");

@@ -10,23 +10,56 @@ import { mcpOAuthToolAllowed } from "../server/mcp-oauth.mjs";
 import { privateMarkers, privateWorkFixture } from "./helpers/private-work-fixture.mjs";
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
-  test(`room next gives an idle agent a bounded read and honors the Room pause (${representation})`, async t => {
+  test(`room next selects one eligible invitation and honors the Room pause (${representation})`, async t => {
     const f = await privateWorkFixture(t, representation);
     const active = await f.mcp(f.triage, "room_next");
     assert.equal(active.ok, true, active.text);
-    assert.deepEqual(active.value.ifIdle, {
-      status: "browse_invitations", after: "addressed_work_and_request_pages",
-      nextRead: { tool: "room_list_work", arguments: { roomId: "commons", focus: "help_wanted", limit: 1 } }
-    });
-    const pointer = active.value.ifIdle.nextRead;
-    const available = await f.mcp(f.triage, pointer.tool, pointer.arguments);
-    assert.equal(available.ok, true, available.text);
+    assert.equal(active.value.nextRead, null);
+    assert.deepEqual(active.value.ifIdle, representation === "legacy"
+      ? { status: "no_invitation" }
+      : { status: "unavailable", reason: "current_help_index_unavailable" });
+
+    if (representation === "legacy") {
+      for (const workItemId of ["secret", "open"]) {
+        f.send(f.producer.key, "work.help_updated", { workItemId, expectedRevision: f.rev(workItemId),
+          expectedHelpRevision: 0, status: "open", scope: "Check one existing issue",
+          expiresAt: new Date(Date.now() + 3600000).toISOString() });
+      }
+      for (let n = 0; n < 18; n++) {
+        f.send(f.owner, "work.proposed", { workItemId: `a-unrelated-${n}`, title: "Unrelated work",
+          definitionOfDone: "Leave this to the assignee", accountableMemberId: f.observer.id, mode: "read" });
+      }
+      const before = f.stored();
+      const old = await f.mcp(f.triage, "room_list_work", { focus: "help_wanted", limit: 1 });
+      const selected = await f.mcp(f.triage, "room_next");
+      assert.equal(selected.ok, true, selected.text);
+      assert.equal(selected.value.work.coverage, "complete");
+      assert.equal(selected.value.ifIdle.status, "invitation");
+      assert.equal(selected.value.ifIdle.workItemId, "open");
+      assert.equal(selected.value.ifIdle.helpEventId, old.value.work[0].help.eventId);
+      assert.deepEqual(selected.value.nextRead, { ...old.value.work[0].nextRead,
+        arguments: { roomId: "commons", ...old.value.work[0].nextRead.arguments } });
+      assert.deepEqual(selected.value.nextRead, selected.value.ifIdle.nextRead);
+      const selectedWork = await f.mcp(f.triage, selected.value.nextRead.tool, selected.value.nextRead.arguments);
+      assert.equal(selectedWork.ok, true, selectedWork.text);
+      assert.equal(selectedWork.value.help.canOffer, true);
+      assert.equal(f.stored(), before);
+
+      f.send(f.producer.key, "work.help_updated", { workItemId: "open", expectedRevision: f.rev("open"),
+        expectedHelpRevision: 1, status: "withdrawn" });
+      const stale = await f.mcp(f.triage, selected.value.nextRead.tool, selected.value.nextRead.arguments);
+      assert.equal(stale.value.help.canOffer, false);
+      assert.equal((await f.mcp(f.triage, "room_next")).value.ifIdle.status, "no_invitation");
+    }
+
     f.store.wakeQueue.pause(f.owner, "commons", { requestId: "pause-triage-invitations", reason: null },
       null, { memberId: f.triage.id });
     const paused = await f.mcp(f.triage, "room_next");
     assert.deepEqual(paused.value.ifIdle, { status: "paused" });
+    assert.equal(paused.value.nextRead, null);
     const addressed = await f.mcp(f.producer, "room_next");
     assert.equal(addressed.value.ifIdle, undefined);
+    assert.deepEqual(addressed.value.nextRead, addressed.value.work.items.find(item => item.reason === "revise").nextRead);
     assert.ok(addressed.value.requests.items.length);
   });
 
@@ -128,6 +161,8 @@ test("an empty work page advances, keeps ongoing work, and invalidates stale aut
   assert.equal(first.ok, true, first.text);
   assert.equal(first.value.work.coverage, "partial");
   assert.deepEqual(first.value.work.items, []);
+  assert.deepEqual(first.value.nextRead, first.value.work.nextRead);
+  assert.equal(first.value.ifIdle, undefined);
   const args = first.value.work.nextRead.arguments;
   const second = await f.mcp(f.reviewer, "room_next", args);
   assert.equal(second.ok, true, second.text);

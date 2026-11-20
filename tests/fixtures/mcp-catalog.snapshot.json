@@ -83,7 +83,7 @@
   },
   "core": {
     "dm_posted": {
-      "inputSchema": "7369f86ea9f3d082",
+      "inputSchema": "948552295c3ae810",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -242,6 +242,16 @@
         "title": "Post Message"
       }
     },
+    "room_progress_request": {
+      "inputSchema": "fae616f03de6a2c0",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
+      }
+    },
     "room_project_state": {
       "inputSchema": "9c4dedb9bd1af453",
       "annotations": {
@@ -320,6 +330,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Reply"
+      }
+    },
+    "room_request_reply": {
+      "inputSchema": "5e2548789d658d07",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Request Reply"
       }
     },
     "room_resolve_blocker": {
@@ -535,7 +555,7 @@
       }
     },
     "dm_posted": {
-      "inputSchema": "7369f86ea9f3d082",
+      "inputSchema": "948552295c3ae810",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1265,7 +1285,7 @@
       }
     },
     "room_read_inbox": {
-      "inputSchema": "ee592ebb81a15aae",
+      "inputSchema": "ecd65666964d4b35",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2209,7 +2229,7 @@
       }
     },
     "dm_posted": {
-      "inputSchema": "7369f86ea9f3d082",
+      "inputSchema": "948552295c3ae810",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2379,7 +2399,7 @@
       }
     },
     "room_read_inbox": {
-      "inputSchema": "ee592ebb81a15aae",
+      "inputSchema": "ecd65666964d4b35",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -3217,7 +3237,7 @@
   },
   "enrolled": {
     "dm_posted": {
-      "inputSchema": "7369f86ea9f3d082",
+      "inputSchema": "948552295c3ae810",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -3376,6 +3396,16 @@
         "title": "Post Message"
       }
     },
+    "room_progress_request": {
+      "inputSchema": "fae616f03de6a2c0",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
+      }
+    },
     "room_project_state": {
       "inputSchema": "9c4dedb9bd1af453",
       "annotations": {
@@ -3454,6 +3484,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Reply"
+      }
+    },
+    "room_request_reply": {
+      "inputSchema": "5e2548789d658d07",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Request Reply"
       }
     },
     "room_resolve_blocker": {
