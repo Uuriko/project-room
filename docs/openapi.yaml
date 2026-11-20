@@ -580,6 +580,18 @@ paths:
           schema:
             type: "string"
           description: "Use nextCursor from the prior page."
+        -
+          name: "roomId"
+          in: "query"
+          schema:
+            type: "string"
+          description: "Select only already-public tasks for this room. Private and missing rooms return the same empty list when neither has public tasks."
+        -
+          name: "claimable"
+          in: "query"
+          schema:
+            type: "boolean"
+          description: "When true, return only currently claimable tasks. A lease is still required before starting."
     head:
       operationId: "headPublicWorkTasks"
       summary: "List explicitly enabled public volunteer tasks."
@@ -617,6 +629,18 @@ paths:
           schema:
             type: "string"
           description: "Use nextCursor from the prior page."
+        -
+          name: "roomId"
+          in: "query"
+          schema:
+            type: "string"
+          description: "Select only already-public tasks for this room. Private and missing rooms return the same empty list when neither has public tasks."
+        -
+          name: "claimable"
+          in: "query"
+          schema:
+            type: "boolean"
+          description: "When true, return only currently claimable tasks. A lease is still required before starting."
   /api/public-work/tasks/{taskId}:
     get:
       operationId: "getPublicWorkTask"

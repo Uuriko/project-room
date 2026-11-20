@@ -17,14 +17,14 @@ import { createRoomServer } from '../server/http.mjs';
 
 const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
-function seedOffer(store, offerId, { title, criteria }) {
-  store.projectOffers.create('commons', 'owner', { requestId: `journey-create-${offerId}`, offerId,
+function seedOffer(store, offerId, { title, criteria, roomId = 'commons', files = ['docs/JOURNEY.md'] }) {
+  store.projectOffers.create(roomId, 'owner', { requestId: `journey-create-${offerId}`, offerId,
     reviewerMemberIds: ['owner'],
     terms: { kind: 'task', title, summary: 'Volunteer stranger-journey fixture', acceptanceCriteria: criteria,
       repositoryUrl: 'https://github.com/Example/Project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } } });
-  store.projectOffers.transition('commons', 'owner', offerId, 'publish', { requestId: `journey-publish-${offerId}`, expectedRevision: 1 });
-  store.publicWorkClaims.enable('commons', 'owner', offerId, { requestId: `journey-enable-${offerId}`,
-    expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['docs/JOURNEY.md'] });
+  store.projectOffers.transition(roomId, 'owner', offerId, 'publish', { requestId: `journey-publish-${offerId}`, expectedRevision: 1 });
+  store.publicWorkClaims.enable(roomId, 'owner', offerId, { requestId: `journey-enable-${offerId}`,
+    expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files });
 }
 
 async function fixture(t) {
@@ -106,4 +106,57 @@ test('stranger journey: mint identity, read, claim, finish, verify receipt and a
   const after = await f.call('POST', '/api/public-work/match', { body: { limit: 5 } });
   assert.equal(after.status, 200);
   assert.ok(!after.body.recommendations.some(r => r.task.taskId === 'journey:open'), 'submitted task leaves recommendations');
+});
+
+
+test('the same project prompt routes outsiders to fresh work and the lease admits only one worker', async t => {
+  const f = await fixture(t);
+  f.store.initialize(initialRoom('other'));
+  f.store.initialize(initialRoom('private-without-public-work'));
+  seedOffer(f.store, 'another-room', {roomId:'other', title:'Foreign task', criteria:['Do not pick this']});
+  seedOffer(f.store, 'next-in-commons', {title:'Next task', criteria:['Return one result'], files:['docs/NEXT.md']});
+  const prompt = await fetch(f.origin + '/join.txt?room=commons').then(r => r.text());
+  const list = prompt.match(/GET (\S+public-work\/tasks\?\S+)/)[1];
+  assert.equal(list, f.origin + '/api/public-work/tasks?roomId=commons&claimable=1&limit=5');
+  assert.match(prompt, /After your first useful submission, attempt to connect/);
+  assert.match(prompt, /Repeat the appropriate loop one task at a time/);
+  assert.equal((await fetch(f.origin + '/join.txt?room=commons&room=other')).status, 400);
+  const browse = async () => {
+    const response = await fetch(list);
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body.error));
+    return body.tasks.map(task => task.taskId);
+  };
+  assert.deepEqual(await browse(), ['journey:open', 'next-in-commons']);
+  for (const room of ['private-without-public-work','missing']) {
+    const result = await f.call('GET', `/api/public-work/tasks?roomId=${room}`);
+    assert.deepEqual(result.body, {tasks:[],claimableCount:0,nextCursor:null});
+  }
+  const [a,b] = await Promise.all(['Outside one','Outside two'].map(displayName =>
+    f.call('POST','/api/agent-identities',{body:{displayName}}).then(r => r.body.secret)));
+  const path = '/api/public-work/tasks/journey%3Aopen';
+  const basis = (await f.call('GET',path)).body;
+  const input = {requestId:'race-claim',expectedTermsVersion:basis.termsVersion};
+  const claims = await Promise.all([a,b].map(secret => f.call('POST',path+'/claim',{secret,body:input})));
+  assert.deepEqual(claims.map(r => r.status).sort(), [200,409]);
+  const winner = claims.findIndex(r => r.status === 200), secret = [a,b][winner];
+  assert.equal(claims[1-winner].body.error.code, 'public_work_claim_conflict');
+  const body = {requestId:'race-finish',expectedTermsVersion:basis.termsVersion,generation:claims[winner].body.task.claim.generation,
+    artifactText:'One admitted contribution',checksReported:[]};
+  const finish = await f.call('POST',path+'/finish',{secret,body});
+  assert.equal(finish.status,200);
+  const recovered = await f.call('POST',path+'/finish',{secret,body});
+  assert.equal(recovered.body.receipt.receiptId,finish.body.receipt.receiptId);
+  assert.deepEqual(await browse(), ['next-in-commons']);
+  const nextPath = '/api/public-work/tasks/next-in-commons';
+  const nextBasis = (await f.call('GET',nextPath)).body;
+  const nextClaim = await f.call('POST',nextPath+'/claim',{secret,body:{requestId:'next-claim',expectedTermsVersion:nextBasis.termsVersion}});
+  assert.equal(nextClaim.status,200);
+  const nextFinish = await f.call('POST',nextPath+'/finish',{secret,body:{requestId:'next-finish',
+    expectedTermsVersion:nextBasis.termsVersion,generation:nextClaim.body.task.claim.generation,
+    artifactText:'The same outside agent finished the next task',checksReported:[]}});
+  assert.equal(nextFinish.status,200);
+  assert.notEqual(nextFinish.body.receipt.receiptId,finish.body.receipt.receiptId);
+  assert.deepEqual(await browse(), []);
+  assert.equal(await fetch(f.origin + '/join.txt?room=commons').then(r => r.text()), prompt);
 });

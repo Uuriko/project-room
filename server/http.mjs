@@ -63,7 +63,7 @@ import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventRows, redactMessageTree } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
+import { discoveryDoc, projectContributionPrompt, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { advertisedOrigin, advertisedText, advertisedHtml, isHostedOrigin } from "./advertised-origin.mjs";
 import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
@@ -2263,6 +2263,11 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
         }
         let docBody = discoveryBody(discovery);
+        if (discovery === discoveryDoc('/join.txt') && url.searchParams.has('room')) {
+          const rooms = url.searchParams.getAll('room');
+          if (rooms.length !== 1 || !validId(rooms[0])) reject(400, 'invalid_room', 'Specify one valid room ID');
+          docBody = projectContributionPrompt(expectedOrigin(), rooms[0]);
+        }
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy
         // asset carries the base catalog; the node server injects the live
@@ -2318,7 +2323,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
       if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {
-        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
+        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable", "roomId"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
         if (url.pathname === "/api/public-work/tasks" && url.searchParams.has("claimable") && !["1", "true"].includes(url.searchParams.get("claimable"))) reject(422, "invalid_public_work", "Unsupported query parameters");
         const action = publicWorkTaskMatch?.[2];
         if (action) {
@@ -2371,7 +2376,12 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         }
         return json(res, 200, publicWorkTaskMatch
           ? store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1]))
-          : store.publicWorkClaims.list({ limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "", claimable: ["1", "true"].includes(url.searchParams.get("claimable")) }), req.method === "HEAD");
+          : store.publicWorkClaims.list({
+            limit: Number(url.searchParams.get("limit") ?? 20),
+            after: url.searchParams.get("after") ?? "",
+            claimable: url.searchParams.has("claimable"),
+            roomId: url.searchParams.get("roomId"),
+          }), req.method === "HEAD");
       }
       const projectOfferPublicMatch = /^\/api\/project-offers\/([^/]{1,128})(?:\/(brief.md))?$/.exec(url.pathname);
       if (url.pathname === "/api/project-offers" || projectOfferPublicMatch) {
