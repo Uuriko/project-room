@@ -421,28 +421,22 @@ jobs:
             pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
           fi
           wait "$pid"
-      - name: Verify the shared Workers runtime and restart journey
+      - name: Verify the shared Workers runtime (shard 1/2)
         if: needs.changes.outputs.docs_only != 'true'
         working-directory: cloudflare
         env:
           WRANGLER_SEND_METRICS: "false"
-        # Shard 1/2 of the Workers suite plus the browser checks. Shard 2/2 runs in
+        # Shard 1/2 of the Workers suite. Shard 2/2 and the browser checks run in
         # cloudflare-shard-2 in parallel; the serial suite was ~575s of a ~10 min job.
-        run: |
-          node --test --test-shard=1/2 $(node -p "require('./package.json').scripts.test.replace(/^node --test /, '')")
-          npm run test:browser
+        # Shard 1 alone took 246s against shard 2's 181s (job 133851192142), so the
+        # 23s browser checks moved to shard 2 to even the two jobs out.
+        run: node --test --test-shard=1/2 $(node -p "require('./package.json').scripts.test.replace(/^node --test /, '')")
       - name: Build exact assets and validate the deployment bundle
         if: needs.changes.outputs.docs_only != 'true'
         working-directory: cloudflare
         env:
           WRANGLER_SEND_METRICS: "false"
         run: node ../scripts/worker-ci-build.mjs
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always() && needs.changes.outputs.docs_only != 'true'
-        with:
-          name: cloudflare-browser-evidence
-          path: cloudflare/test-results/
-          if-no-files-found: ignore
   cloudflare-shard-2:
     needs: [changes]
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
@@ -497,12 +491,20 @@ jobs:
             pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
           fi
           wait "$pid"
-      - name: Verify the shared Workers runtime (shard 2/2)
+      - name: Verify the shared Workers runtime (shard 2/2) and restart journey
         if: needs.changes.outputs.docs_only != 'true'
         working-directory: cloudflare
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: node --test --test-shard=2/2 $(node -p "require('./package.json').scripts.test.replace(/^node --test /, '')")
+        run: |
+          node --test --test-shard=2/2 $(node -p "require('./package.json').scripts.test.replace(/^node --test /, '')")
+          npm run test:browser
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && needs.changes.outputs.docs_only != 'true'
+        with:
+          name: cloudflare-browser-evidence
+          path: cloudflare/test-results/
+          if-no-files-found: ignore
   # The aggregator below is named "test". The package workflows that
   # used that job id are gone. This job keeps the name and passes only when
   # the suite jobs above have succeeded. Default success() also fails when any
