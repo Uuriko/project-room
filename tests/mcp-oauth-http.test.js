@@ -812,7 +812,8 @@ test('room next and receipt discovery distinguish server availability from a nar
   const discovery = access.body.result.structuredContent.commandDiscovery;
   assert.deepEqual(discovery.tools, {
     room_next: 'available_on_server', room_receipt: 'available_on_server',
-    room_record_verification: 'available_on_server'
+    room_record_verification: 'available_on_server',
+    room_read_public_review: 'available_on_server', room_record_public_review: 'available_on_server'
   });
   for (const name of Object.keys(discovery.tools)) assert.ok(list.body.result.tools.some(entry => entry.name === name));
   assert.equal(discovery.requiredOAuthScope.room_record_verification, "work:write");
@@ -846,12 +847,23 @@ test('room next and receipt discovery distinguish server availability from a nar
   const narrowAccess = await f.rpc('tools/call', { name: 'room_check_access', arguments: {} }, partial);
   assert.deepEqual(narrowAccess.body.result.structuredContent.commandDiscovery.tools, {
     room_next: 'outside_connected_grant', room_receipt: 'outside_connected_grant',
-    room_record_verification: 'outside_connected_grant'
+    room_record_verification: 'outside_connected_grant',
+    room_read_public_review: 'outside_connected_grant', room_record_public_review: 'outside_connected_grant'
   });
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
   const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
   assert.match(denied.body.error?.data?.hint ?? '', /outside the connected agent grant/);
+
+  const reviewConsent = await f.consent({ scope: 'rooms:read work:read' });
+  const reviewCode = new URL(reviewConsent.headers.get('location')).searchParams.get('code');
+  const reviewGrant = await f.exchange({ grant_type: 'authorization_code', code: reviewCode,
+    client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const reviewToken = (await reviewGrant.json()).access_token;
+  const scopedAccess = await f.rpc('tools/call', { name: 'room_check_access', arguments: {} }, reviewToken);
+  const scopedTools = scopedAccess.body.result.structuredContent.commandDiscovery.tools;
+  assert.equal(scopedTools.room_read_public_review, 'available_on_server');
+  assert.equal(scopedTools.room_record_public_review, 'outside_connected_grant');
 });
 
 test('bounded result preparation does not widen a chat-only write grant', async t => {
