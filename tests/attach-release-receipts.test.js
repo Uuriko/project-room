@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { generateKeyPair, publicKeyToJwk, signCardJws } from "../server/agent-card-signing.mjs";
 import { attachReleaseReceipts, confirmedReceipt, packageFixtureEvidence, prepareReleaseReview, submitReleaseReview } from "../scripts/attach-release-receipts.mjs";
 
 test("publishes candidate-bound stage receipts and recovers a lost write by replay", async () => {
@@ -37,6 +39,8 @@ test("publishes candidate-bound stage receipts and recovers a lost write by repl
   assert.equal(messages.size, 0);
   await assert.rejects(attachReleaseReceipts({ ...options, binding: { ...binding, completionEventId: "wrong-completion" } }), /selected completion/);
   assert.equal(messages.size, 0);
+  await assert.rejects(attachReleaseReceipts({ ...options, expectedBody: "prepared signed packet" }), /differs from the prepared signed packet/);
+  assert.equal(postCalls, 0);
   await assert.rejects(attachReleaseReceipts(options), /Unconfirmed Room write release-checks-/);
   const lookup = ({ operationId }) => messages.has(operationId)
     ? { operationId, status: "recorded", eventType: "message.posted", eventId: "event-1", sequence: 123 }
@@ -124,6 +128,28 @@ test("release review requires complete exact evidence before its single completi
     ...input.build, packageFixtures: [input.build.packageFixtures[0], input.build.packageFixtures[0]]
   }));
   assert.throws(() => prepare({ inputs: { ...inputs, build: mismatched } }), /mismatched packaged storage/);
+  const { privateKey, publicKey } = generateKeyPair();
+  const jku = new URL("/.well-known/jwks.json", origin).href;
+  const keyId = "instance-key";
+  const jwks = { keys: [publicKeyToJwk({ publicKey, keyId })] };
+  const qualification = Object.fromEntries([
+    ["build", "build.json"], ["browser", "browser.json"], ["deploy", "deployment-result.json"]
+  ].map(([stage, file]) => [file, createHash("sha256").update(inputs[stage]).digest("hex")]));
+  const proof = {
+    schema: "project-room-batch-source-to-package/1", origin: origin.origin, ...binding,
+    composition: { previous: input.deploy.oldRevision, revision: candidateRevision, tree: input.build.sourceTree },
+    package: { manifestSha256: sha, files: 10 }, qualification
+  };
+  const signed = card => ({ proof: card, signature: signCardJws({ card, privateKey, keyId, jku }) });
+  const provenance = signed(proof);
+  const bound = sourceProof => prepare({ binding, sourceProof, jwks });
+  const signedBody = bound(provenance);
+  assert.deepEqual(JSON.parse(signedBody.split("\n").at(-1)), provenance);
+  assert.doesNotMatch(signedBody, /"packageFixtures"/, "full stage receipts stay linked separately");
+  assert.match(signedBody, /response-body digest sha256:/);
+  assert.throws(() => bound(signed({ ...proof, workItemId: "other-work" })), /does not match/);
+  assert.throws(() => bound(signed({ ...proof, qualification: { ...qualification, "browser.json": sha } })), /does not match/);
+  assert.throws(() => bound({ ...provenance, proof: { ...proof, publicTip: input.deploy.oldRevision } }), /signature/);
   const operations = new Map();
   const next = { action: "in_progress", memberId: "producer" };
   let currentRevision = 4, posts = 0, submissions = 0, draftArgs;
@@ -144,7 +170,7 @@ test("release review requires complete exact evidence before its single completi
     operations.set(args.requestId, { status: "recorded", eventId: "completion-event", eventType: "work.completed" });
     throw new Error("completion response lost");
   };
-  const request = { binding, expectedRevision: 3, producerId: "producer", body, call };
+  const request = { binding, expectedRevision: 3, producerId: "producer", body: signedBody, call };
   await assert.rejects(submitReleaseReview(request), /not in progress at the selected revision/);
   assert.equal(posts, 0);
   currentRevision = 3;
