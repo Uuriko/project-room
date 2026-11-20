@@ -304,11 +304,13 @@ route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "De
   route("/oauth/register", ["POST"], "public", "Register public MCP client metadata for configured exact callback URLs; unavailable without configured MCP OAuth clients. Registration grants no Room access.", "registerMcpOAuthClient"),
   route("/api/mcp/oauth/reconnect", ["POST"], "room-owner",
     "Pair a pending OAuth request to an existing invitation-backed agent. Browser consent and PKCE still apply.",
-    "pairExistingMcpOAuthAgent", { requestBodies: { POST: {
-      type: "object", required: ["pairingId", "roomId", "memberId", "clientId", "scopes"],
-      properties: { pairingId: { type: "string", pattern: "^[a-f0-9]{64}$" }, roomId: { type: "string" },
-        memberId: { type: "string" }, clientId: { type: "string" }, scopes: { type: "array", items: { type: "string" } } }
-    } } }),
+    "pairExistingMcpOAuthAgent", { successStatuses: ["200"],
+      successDescriptions: { "200": "Pending request paired to the existing seat. Browser consent and token exchange still follow." },
+      requestBodies: { POST: { required: true, content: { "application/json": { schema: {
+        type: "object", required: ["pairingId", "roomId", "memberId", "clientId", "scopes"],
+        properties: { pairingId: { type: "string", pattern: "^[a-f0-9]{64}$" }, roomId: { type: "string" },
+          memberId: { type: "string" }, clientId: { type: "string" }, scopes: { type: "array", items: { type: "string" } } }
+      } } } } } }),
   route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
   route("/api/oauth/sessions/revoke-all", ["POST"], "account-session", "Kill every OAuth session for the signed-in account: all refresh families and access tokens die immediately, across all clients.", "oauthSessionsRevokeAll"),
   route("/api/oauth/sessions/{id}", ["DELETE"], "account-session", "Kill one OAuth session (token family) owned by the signed-in account. Unknown ids and other users' families both answer 404.", "oauthSessionRevoke"),
@@ -615,6 +617,7 @@ export function buildOpenApiJson({ origin }) {
         description: AUTH_DESCRIPTION[entry.auth] ?? "",
         responses: operationResponses(entry, method),
       };
+      if (entry.auth === "room-owner") op.security = [{ roomBearer: [] }];
       if (entry.path.includes("{")) {
         op.parameters = [...entry.path.matchAll(/\{([^}]+)\}/g)].map(m => ({
           name: m[1], in: "path", required: true, schema: { type: "string" },
