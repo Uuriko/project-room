@@ -10,12 +10,12 @@ import {join} from 'node:path';
 import {mcpEventSubscriptionsSchema} from '../server/mcp-event-subscriptions.mjs';
 import {nativeOutboxEventId} from '../server/mcp-outbox-event-id.mjs';
 
-function fixture(t,extend=()=>{}){
+function fixture(t,extend=()=>{},representation='normalized-current-v1'){
  const store=new RoomStore(':memory:');t.after(()=>store.close());const events=initialRoom();
  const add=(type,data,actorId='owner')=>events.push(event({roomId:'commons',actorId,type,data}));
  for(const memberId of ['reader','other'])add('member.added',{memberId,displayName:memberId,kind:'agent',permissions:[]});
  add('message.posted',{messageId:'question',toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Please save useful work'});
- extend(events,add,store);store.initialize(events,{representation:'normalized-current-v1'});
+ extend(events,add,store);store.initialize(events,representation ? {representation} : {});
  const keys=Object.fromEntries(['owner','reader','other'].map(id=>[id,store.issueAccessKey('commons',id)]));
  return {store,keys,events};
 }
@@ -320,7 +320,7 @@ test('selected read reports a positively recorded webhook callback without leaki
  const {store,keys}=fixture(t);
  retainOutbox(store,{state:'delivered'});
  const read=store.replyRequests.selected(keys.reader,'commons','question');
- assert.deepEqual(read.current.wakeDelivery,{webhook:'delivered',hostEligibility:'unknown'});
+ assert.deepEqual(read.current.wakeDelivery,{webhook:'delivered',pull:'unknown',hostEligibility:'unknown',recipientProgressAt:null});
  assert.equal(Object.hasOwn(read.request,'wakeDelivery'),false);
  const listed=store.replyRequests.list(keys.reader,'commons');
  assert.equal(Object.hasOwn(listed.requests[0],'wakeDelivery'),false);
@@ -328,13 +328,13 @@ test('selected read reports a positively recorded webhook callback without leaki
  assert.equal(/https?:|whsec_|subscription_id|outbox-row|mcp_[0-9a-f]{16}/i.test(packed),false);
  validateReplyRead(read,{name:'room_read_request',args:{requestMessageId:'question'},roomId:'commons'});
  const owner=store.replyRequests.selected(keys.owner,'commons','question');
- assert.deepEqual(owner.current.wakeDelivery,{webhook:'delivered',hostEligibility:'unknown'});
+ assert.deepEqual(owner.current.wakeDelivery,{webhook:'delivered',pull:'unknown',hostEligibility:'unknown',recipientProgressAt:null,nextAction:'check_recipient_progress'});
 });
 
 test('selected read keeps webhook and host eligibility unknown without retained outbox evidence',t=>{
  const {store,keys}=fixture(t);
  const bare=store.replyRequests.selected(keys.reader,'commons','question');
- assert.deepEqual(bare.current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
+ assert.deepEqual(bare.current.wakeDelivery,{webhook:'unknown',pull:'unknown',hostEligibility:'unknown',recipientProgressAt:null});
  // Dead or cross-room/recipient/request rows are not positive evidence for this ask.
  retainOutbox(store,{state:'dead'});
  // Rows under this request's exact key whose document names another room,
@@ -345,7 +345,7 @@ test('selected read keeps webhook and host eligibility unknown without retained 
  retainOutbox(store,{state:'delivered',requestId:'someone-else'});
  retainOutbox(store,{state:'delivered',source:'someone-else'});
  const read=store.replyRequests.selected(keys.reader,'commons','question');
- assert.deepEqual(read.current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
+ assert.deepEqual(read.current.wakeDelivery,{webhook:'unknown',pull:'unknown',hostEligibility:'unknown',recipientProgressAt:null});
  assert.equal(Object.hasOwn(read.request,'acknowledgedAt'),false,'agent ack stays off the readout and is not invented');
  validateReplyRead(read,{name:'room_read_request',args:{requestMessageId:'question'},roomId:'commons'});
 });
@@ -368,10 +368,10 @@ test('selected readout finds the exact native wake key from the opening event th
  const opening=first.request.openingEventId;assert.ok(opening);
  // A matching document under a non-derived key is invisible: no document scan.
  retainOutbox(store,{state:'delivered',eventId:'wake-evidence-unkeyed'});
- assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
+ assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'unknown',pull:'unknown',hostEligibility:'unknown',recipientProgressAt:null});
  // The key the runtime emits for a formal request (room, recipient, opening event).
  retainOutbox(store,{state:'pending',source:opening});
- assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'queued',hostEligibility:'unknown'});
+ assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'queued',pull:'unknown',hostEligibility:'unknown',recipientProgressAt:null});
  const plan=store.db.prepare("EXPLAIN QUERY PLAN SELECT state FROM mcp_event_outbox WHERE event_id IN (?,?) LIMIT 64").all('a','b').map(r=>r.detail).join(' ');
  assert.match(plan,/USING (COVERING )?INDEX mcp_event_outbox_event/);
  assert.doesNotMatch(plan,/^SCAN mcp_event_outbox$/m);
@@ -390,10 +390,39 @@ test('an outbox without the exact-key index (native delivery off / pre-index sch
  let outboxQueries=0;const prepare=store.db.prepare.bind(store.db);
  store.db.prepare=sql=>{if(/FROM mcp_event_outbox\b/.test(sql))outboxQueries++;return prepare(sql);};
  try{
-  assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'unknown',hostEligibility:'unknown'});
+  assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'unknown',pull:'unknown',hostEligibility:'unknown',recipientProgressAt:null});
  }finally{store.db.prepare=prepare;}
  assert.equal(outboxQueries,0,'no outbox row query runs without the index');
  // Installing the real schema adds the index; the same row is then found by exact key.
  store.db.exec(mcpEventSubscriptionsSchema);
- assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'delivered',hostEligibility:'unknown'});
+ assert.deepEqual(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery,{webhook:'delivered',pull:'unknown',hostEligibility:'unknown',recipientProgressAt:null});
+});
+
+for (const representation of [null, 'normalized-current-v1']) test(`selected delivery separates pull settlement from recipient progress (${representation ?? 'legacy'})`, t => {
+  const {store, keys}=fixture(t, undefined, representation);
+  const receiver=store.identities.create('Historical linked receiver');
+  store.db.prepare('INSERT INTO identity_links (room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)')
+    .run('commons',receiver.identityId,'reader',Date.now());
+  store.agentHeartbeats.enqueueWake({agentId:receiver.identityId,kind:'mention',roomId:'another-room',messageId:'question'});
+  store.agentHeartbeats.enqueueWake({agentId:'other-worker',kind:'mention',roomId:'commons',messageId:'question'});
+  const show=()=>store.replyRequests.selected(keys.owner,'commons','question').current.wakeDelivery;
+  assert.equal(show().pull,'unknown');
+  assert.equal(show().nextAction,'check_receiver_connection');
+  store.agentHeartbeats.enqueueWake({agentId:receiver.identityId,kind:'mention',roomId:'commons',messageId:'question'});
+  assert.equal(show().pull,'queued');
+  assert.equal(show().nextAction,'check_delivery');
+  assert.equal(show().recipientProgressAt,null);
+  const plan=store.db.prepare("EXPLAIN QUERY PLAN SELECT delivered_at FROM agent_wake_signals WHERE agent_id=? AND COALESCE(room_id,'')=? AND message_id=?")
+    .all(receiver.identityId,'commons','question');
+  assert.match(plan[0].detail,/SEARCH.*USING INDEX agent_wake_signals_coalesce/);
+  store.db.prepare('UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND room_id=? AND message_id=?')
+    .run(Date.now(),receiver.identityId,'commons','question');
+  assert.equal(show().pull,'settled');
+  assert.equal(show().recipientProgressAt,null);
+  assert.equal(show().nextAction,'check_recipient_progress');
+  assert.equal(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery.nextAction,undefined);
+  const progress=event({roomId:'commons',actorId:'reader',type:'reply_request.progressed',data:{requestMessageId:'question',expectedRequestRevision:0,progress:'acknowledged'}});
+  store.command(keys.reader,'commons',{id:progress.id,type:progress.type,data:progress.data});
+  assert.ok(Date.parse(show().recipientProgressAt));
+  assert.equal(show().nextAction,undefined);
 });

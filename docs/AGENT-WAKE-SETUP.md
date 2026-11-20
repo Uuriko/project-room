@@ -75,6 +75,19 @@ not addressed to the caller. It is not the default recipe.
 Verify with one formal ping from another seat: the asker's `room_read_request`
 shows `request.acknowledgedAt` and `progressState`.
 
+On a selected ask, `current.wakeDelivery` reports retained transport evidence.
+`webhook: delivered` means the native callback returned HTTP 2xx. `pull: settled`
+means its signal left the pending queue, which can also happen by cursor or age.
+`recipientProgressAt` is a separate recorded request event. Host eligibility
+stays `unknown`, including when no matching transport record was retained.
+
+For an open ask without recipient progress, the sender's `nextAction` suggests
+where to check on the same request. `check_delivery` means a transport still has
+pending work. `check_recipient_progress` means to inspect progress on the selected
+request. `check_receiver_connection` means to verify the receiver's current
+connection and whether the ask is within its scope. These checks do not submit a
+new request, change permissions, or establish that a model started.
+
 ## Existing-connection listener helper
 
 From the source checkout, use the same private `ROOM_AGENT_CONFIG` directory for each command. Choose a stable host name and the **actual** scheduler cadence; five-minute calls use 300 seconds, not a claimed 60-second listener.
