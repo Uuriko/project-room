@@ -2,7 +2,7 @@ import { clipboard } from "./clipboard.js";
 import { canReplyToResult } from "./result-availability.js";
 import { uiText } from "./strings.js";
 import { WORK_STATES as S, isRoomArchived } from "./events.js";
-import { matchesReceipt, nextWorkStep, workActions } from "./workflow.js";
+import { matchesReceipt, nextWorkStep, workActions, reviewRuntimeLabel } from "./workflow.js";
 import { currentResult } from "./work-selectors.js";
 
 // Owns only the pinned reader view. Session, composer, and work mutations stay
@@ -221,6 +221,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.releaseChecks = null;
       showReleaseChecks(null);
     }
+    if (!earlier && view.loaded && !view.error && !view.withdrawn && !item?.verification) {
+      const runtime = reviewRuntimeLabel(view.reviewRuntime?.status);
+      if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
+    }
     const context = resultElement("result-work-context");
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
     if (context) context.hidden = !current;
@@ -385,6 +389,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (value?.result?.receipt?.eventId !== view.receipt.completionEventId
         || value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion) throw new Error("Pinned version changed");
       view.reportedById = value.result.receipt.reportedById;
+      view.reviewRuntime = value.reviewRuntime;
       view.previousCompletionEventId = value.result.receipt.nativeText?.previousCompletionEventId;
       // Text taken out of the room is served as an absence, so say so rather
       // than showing an empty box: the result was still reported and verified,
