@@ -184,6 +184,19 @@ function selectedReleaseChecks(db, state, work, result, viewerId, floor, message
     completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion, untrusted: true } : null;
 }
 
+// Read the last start for this completion interval, without borrowing a
+// start from a previous result when a correction was submitted directly.
+function selectedStart(db, roomId, workItemId, completionEventId, floor) {
+  const row = db.prepare(`SELECT id,sequence,json_extract(body,'$.type') AS type,
+      json_extract(body,'$.actorId') AS actorId,json_extract(body,'$.at') AS at
+    FROM events WHERE room_id=? AND json_extract(body,'$.data.workItemId')=?
+      AND sequence < (SELECT sequence FROM events WHERE room_id=? AND id=?)
+      AND json_extract(body,'$.type') IN ('work.started','work.completed')
+    ORDER BY sequence DESC LIMIT 1`).get(roomId, workItemId, roomId, completionEventId);
+  if (row?.type !== 'work.started' || row.sequence < (floor?.sequence ?? 0)) return null;
+  return { eventId: row.id, sequence: row.sequence, actorId: row.actorId, at: row.at };
+}
+
 export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null }) {
   const work = state.workItems[workItemId];
   let result;
@@ -213,8 +226,11 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const correction = result.text?.body === null ? null
     : precedingCorrection(db, state, work, result.receipt, viewerId, floor, messageRecords);
   const releaseChecks = selectedReleaseChecks(db, state, work, result, viewerId, floor, messageRecords);
+  const start = result.receipt && result.text?.body !== null
+    ? selectedStart(db, state.room.id, workItemId, result.receipt.eventId, floor) : null;
   return { contractVersion: 1, roomId: state.room.id, workItemId,
-    workThread: { workItemId, href: workThreadHref(workItemId), ...(correction ? { correction } : {}), ...(releaseChecks ? { releaseChecks } : {}) },
+    workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}),
+      ...(correction ? { correction } : {}), ...(releaseChecks ? { releaseChecks } : {}) },
     selection: { completionEventId, draftMessageId }, result,
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
