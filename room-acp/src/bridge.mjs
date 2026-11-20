@@ -769,7 +769,7 @@ export class Bridge {
       : buildPrompt({roomTitle:this.title, thread, wakes, firstTurn:created});
     const started = {...receipt, phase:'started', ...(formal ? {formalContext:formal} : {})};
     this.chatReceipts.save(key, started);
-    let body, formalDelivery, formalPending, formalDraft, silent = false;
+    let body, formalDelivery, formalPending, formalDraft, formalFailure, silent = false;
     try {
       const {recorder, stopReason} = await this.host.prompt(receipt.threadKey, prompt, {sessionId,
         onDispatched: () => this.stageObserver.mark(receipt.signalIds, 'prompt_dispatch_attempt', receipt.requestId),
@@ -788,8 +788,14 @@ export class Bridge {
     } catch (error) {
       this.log(`turn failed: ${error.message}`);
       if (this.controller.signal.aborted) return;
-      body = formal ? 'The agent turn failed. This request remains open.'
-        : renderTurn({text:'', tools:new Map()}, {error:error.message});
+      if (formal) {
+        body = 'The agent turn failed. This request remains open.';
+        formalFailure = { id:receipt.requestId, type:'reply_request.progressed', data:{
+          requestMessageId:formal.request.id, expectedRequestRevision:formal.request.revision,
+          ifCurrentContextEventId:formal.request.contextEventId, progress:'error',
+          note:body
+        }};
+      } else body = renderTurn({text:'', tools:new Map()}, {error:error.message});
     }
     // Save the exact filled recipe and answer BEFORE the first network send.
     // Drop the input copy after execution, retaining it only for an interrupted
@@ -799,7 +805,7 @@ export class Bridge {
     // silent turn as new work. The explicit disposition records why no post exists.
     this.chatReceipts.save(key, silent ? {...result, phase:'discarded', disposition:'silent'}
       : {...result, phase:'result', body, ordinaryChat:!formal, ...(formalDelivery ? {formalDelivery} : {}),
-        ...(formalPending ? {formalPending} : {}), ...(formalDraft ? {formalDraft} : {})});
+        ...(formalPending ? {formalPending} : {}), ...(formalDraft ? {formalDraft} : {}), ...(formalFailure ? {formalFailure} : {})});
     if (!silent && this.chatReceipts.dir) this.stageObserver.mark(receipt.signalIds, 'durable_result_saved', receipt.requestId);
   }
 
@@ -874,6 +880,19 @@ export class Bridge {
           receipt = {...receipt, ordinaryReplyWindow:reservation.window};
           this.chatReceipts.save(key, receipt); // Before POST; exact ambiguous retries remain authorized.
         }
+      }
+      if (receipt.phase === "result" && receipt.formalFailure) {
+        const { formalFailure, body: _body, ...rest } = receipt;
+        const path=`/api/rooms/${encodeURIComponent(this.connection.roomId)}/commands`;
+        try {
+          await this.room.request(path,{body:formalFailure,listenerToken:this.fencingToken});
+          receipt = {...rest,phase:'posted'};
+          this.stats.posted++;
+        } catch(error) {
+          if (!(error instanceof RoomError) || error.status !== 409 || error.code !== 'request_context_changed') throw error;
+          receipt = {...rest,phase:'discarded'};
+        }
+        this.chatReceipts.save(key,receipt);
       }
       if (receipt.phase === "result") {
         if (receipt.formalDelivery && !receipt.formalReview) {

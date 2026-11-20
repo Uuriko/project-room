@@ -934,6 +934,20 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.throws(() => send({ ...current, data: { ...current.data, ifUnacknowledgedContextEventId: original.data.ifUnacknowledgedContextEventId } }, token),
       error => error.code === "idempotency_conflict");
 
+    const failure = { id: "scoped-failed-turn", type: "reply_request.progressed", data: {
+      requestMessageId: q.command.data.messageId, expectedRequestRevision: 0, progress: "error",
+      note: "The review did not finish.", ifCurrentContextEventId: correction.event.id
+    }};
+    assert.throws(() => send({ ...failure, data: { ...failure.data,
+      ifCurrentContextEventId: q.receipt.event.id } }, token), { code: "request_context_changed" });
+    const failed = send(failure, token);
+    const selected = read(q).request;
+    assert.equal(selected.progressState, "error");
+    assert.equal(selected.contextEventId, correction.event.id);
+    assert.equal(selected.acknowledgedAt, committed.event.at);
+    assert.equal(failed.event.data.ifCurrentContextEventId, undefined);
+    assert.equal(send(failure, token).event.id, failed.event.id);
+
     for (const progress of ["accepted", "working", "needs_input", "error"]) {
       const separate = open(`first-ack-${progress}-q`);
       const late = guard(separate, progress);
