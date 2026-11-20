@@ -83,6 +83,7 @@ import {
   AgentHeartbeats, HeartbeatError, agentHeartbeatSchema,
   HEARTBEAT_STALE_AFTER_MS,
 } from "../server/agent-heartbeats.mjs";
+import { textVersion } from "../server/text-results.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const T0 = 1_750_000_000_000;
@@ -625,6 +626,90 @@ test("poll returns the opted-in host's pending work wakes, like heartbeat (#3262
   // Consent is per host: the registered host that never opted in sees none.
   const lurker = await (await get(origin, "/api/agent-wakes/poll?hostId=lurker&waitMs=0", identity.secret)).json();
   assert.deepEqual(lurker.pendingWakes, [], "a host that never opted in sees no work wakes on poll either");
+});
+
+test("a final prerequisite gate releases each eligible accepted successor to its scoped listener", async t => {
+  const f = createAcceptanceFixture({ dmConsent: true });
+  const origin = await startServer(t, f);
+  const { store } = f;
+  const receiver = store.identities.create("Dependency receiver");
+  const other = store.identities.create("Other receiver");
+  const link = (identity, memberId) => linkWithProof(store, f.keys.owner, "commons", identity, {
+    memberId, displayName: memberId, permissions: ["accept_work"]
+  });
+  link(receiver, "ready-receiver");
+  link(other, "unleased-receiver");
+  const cmd = (key, type, data, id = randomUUID()) => store.command(key, "commons", { id, type, data });
+  const row = workItemId => store.room("commons").state.workItems[workItemId];
+  async function setupHost(identity, hostId, leased) {
+    const response = await post(origin, "/api/agent-heartbeats", { hostId, mode: "pull-only",
+      workWakes: true, ...(leased ? { listenerLease: { roomId: "commons" } } : {}) }, identity.secret);
+    assert.equal(response.status, 200);
+    return response.json();
+  }
+  const lease = await setupHost(receiver, "receiver", true);
+  assert.equal(lease.listener.acquired, true);
+  await setupHost(receiver, "other-host", false);
+  await setupHost(other, "unleased", false);
+
+  const parent = "test-handoff";
+  cmd(f.keys.producer, "work.accepted", { workItemId: parent, expectedRevision: row(parent).revision });
+  cmd(f.keys.producer, "work.started", { workItemId: parent, expectedRevision: row(parent).revision });
+  const makeSuccessor = (id, accountableMemberId, identity) => {
+    cmd(f.keys.owner, "work.proposed", { workItemId: id, title: id, definitionOfDone: "Use the accepted result",
+      dependsOn: [parent], accountableMemberId, mode: "read" });
+    cmd(identity.secret, "work.accepted", { workItemId: id, expectedRevision: row(id).revision });
+  };
+  for (const id of ["ready-a", "ready-b"]) makeSuccessor(id, "ready-receiver", receiver);
+  makeSuccessor("unleased-successor", "unleased-receiver", other);
+  const poll = async (identity = receiver, hostId = "receiver") => {
+    const response = await get(origin, `/api/agent-wakes/poll?hostId=${hostId}&waitMs=0&roomId=commons`, identity.secret);
+    assert.equal(response.status, 200);
+    return (await response.json()).pendingWakes.filter(wake => wake.action === "start");
+  };
+  assert.deepEqual(await poll(), []);
+  const body = "Exact prerequisite evidence";
+  const postResult = cmd(f.keys.producer, "message.posted", { messageId: "ready-evidence", workItemId: parent, body });
+  const evidenceVersion = textVersion(body);
+  const complete = cmd(f.keys.producer, "work.completed", { workItemId: parent, expectedRevision: row(parent).revision,
+    evidenceKind: "room_text", evidenceMessageId: "ready-evidence", evidenceMessageEventId: postResult.event.id,
+    evidenceVersion, previousCompletionEventId: null, producerId: "producer", summary: "Exact result", nextAction: "Review it" });
+  assert.deepEqual(await poll(), [], "publication alone does not satisfy the prerequisite");
+  cmd(f.keys.reviewer, "verification.recorded", { workItemId: parent, expectedRevision: row(parent).revision,
+    result: "pass", completionEventId: complete.event.id, evidenceVersion, summary: "Reviewed exact result" });
+  assert.deepEqual(await poll(), [], "independent review alone does not bypass the owner decision");
+
+  cmd(f.keys.owner, "message.posted", { messageId: "ready-approval", body: "The prerequisite is accepted." });
+  const approve = { workItemId: parent, expectedRevision: row(parent).revision, decision: "approved",
+    completionEventId: complete.event.id, evidenceVersion, reason: "Acceptance criteria met", sourceMessageId: "ready-approval" };
+  let released = 0;
+  t.after(store.agentHeartbeats.addWakeWaiter(receiver.identityId, "receiver",
+    { roomId: "commons", onWake: () => { released++; } }));
+  const accepted = cmd(f.keys.owner, "owner.decision_recorded", approve, "dependency-approval");
+  cmd(f.keys.owner, "owner.decision_recorded", approve, "dependency-approval");
+  assert.equal(released, 1, "the new work releases the parked listener");
+  const wakes = await poll();
+  assert.deepEqual(wakes.map(w => w.workItemId).sort(), ["ready-a", "ready-b"]);
+  for (const wake of wakes) {
+    assert.equal(wake.eventId, accepted.event.id);
+    assert.equal(wake.workRevision, 1);
+    assert.equal(wake.nextRead.tool, "room_read_work");
+    assert.equal(wake.nextRead.arguments.workItemId, wake.workItemId);
+    assert.equal(wake.dependencyBasis, undefined);
+  }
+  assert.deepEqual(await poll(receiver, "other-host"), []);
+  assert.deepEqual(await poll(other, "unleased"), []);
+  cmd(receiver.secret, "work.started", { workItemId: "ready-a", expectedRevision: 1 });
+  assert.deepEqual((await poll()).map(w => w.workItemId), ["ready-b"], "a changed successor invalidates its signal");
+  store.wakeQueue.pause(f.keys.owner, "commons", { requestId: "dependency-wake-pause", reason: null },
+    null, { memberId: "ready-receiver" });
+  assert.deepEqual(await poll(), [], "pause hides an already queued successor");
+  store.wakeQueue.resume(f.keys.owner, "commons", { requestId: "dependency-wake-resume", reason: null },
+    null, { memberId: "ready-receiver" });
+  assert.deepEqual((await poll()).map(w => w.workItemId), ["ready-b"]);
+  cmd(f.keys.owner, "message.posted", { messageId: "private-prerequisite", workItemId: parent,
+    toMemberId: "producer", requestKind: "reply", body: "Review the private prerequisite." });
+  assert.deepEqual(await poll(), [], "a now-private prerequisite withholds its successor signal");
 });
 
 test("a work transition releases a waiting poll with the work wake (#3262)", async t => {
