@@ -9,13 +9,37 @@ const integer = value => Number.isSafeInteger(value) && value >= 0;
 const hash = value => createHash("sha256").update(value).digest("hex");
 const stages = ["build", "browser", "deploy"];
 
+const fixtureModes = ["legacy", "normalized"];
+const fixtureChecks = checks => Array.isArray(checks) && checks.length > 0 && checks.length <= 32
+  && checks.every(check => typeof check === "string" && /^[a-z0-9-]{1,70}$/.test(check));
+
+export function packageFixtureEvidence(reports, candidateRevision) {
+  return fixtureModes.map(storage => {
+    const raw = reports[storage], report = raw && JSON.parse(raw.toString("utf8"));
+    if (!revision.test(candidateRevision) || report?.source !== candidateRevision || report.storage !== storage
+        || report.passed !== true || report.disposableDataRemoved !== true || !fixtureChecks(report.checks)) {
+      throw new Error(`Invalid or mismatched ${storage} package fixture report.`);
+    }
+    return { storage, source: report.source, checks: report.checks, evidenceDigest: "sha256:" + hash(raw) };
+  });
+}
+
 function stageEvidence(stage, value, candidate) {
   if (stage === "build" && value?.sourceCommit === candidate && value.verified === true
       && revision.test(value.sourceTree) && /^[a-f0-9]{64}$/.test(value.manifestSha256)
       && integer(value.files) && value.files > 0) {
-    const { sourceCommit, sourceTree, manifestSha256, files, verified } = value;
+    const { sourceCommit, sourceTree, manifestSha256, files, verified, packageFixtures } = value;
+    if (packageFixtures !== undefined && (!Array.isArray(packageFixtures) || packageFixtures.length !== fixtureModes.length
+        || !fixtureModes.every((mode, at) => {
+          const report = packageFixtures[at];
+          return report?.storage === mode && report.source === candidate && digest.test(report.evidenceDigest)
+            && fixtureChecks(report.checks);
+        }))) throw new Error("Invalid or mismatched packaged storage fixture evidence.");
+
     return { status: "passed", summary: `Runtime package verified, ${files} files.`,
-      proof: { sourceCommit, sourceTree, manifestSha256, files, verified } };
+      proof: { sourceCommit, sourceTree, manifestSha256, files, verified,
+        ...(packageFixtures ? { packageFixtures: packageFixtures.map(({storage, source, checks, evidenceDigest}) =>
+          ({storage, source, checks, evidenceDigest})) } : {}) } };
   }
   if (stage === "build" && value?.sourceCommit === candidate && value.verified === false
       && ["package", "verify", "instance-card", "staged-legacy", "staged-normalized"].includes(value.failurePhase)) {
