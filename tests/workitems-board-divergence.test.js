@@ -244,3 +244,15 @@ test("backfill: a pre-diverged rework fixture is repaired with no room events; a
   assert.equal(foreignFinal.state, "claimed");
   assert.equal(foreignFinal.owner, "mallory");
 });
+
+test("B3 (#3613): board re-mapping preserves a review's per-criterion outcomes", () => {
+  const it = item({ state: "working", claim: liveClaimFields() });
+  const outcomes = [{ criterion: "docs updated", verdict: "pass" }, { criterion: "tests green", verdict: "fail" }];
+  const existing = { reviews: [{ memberId: "sage", verdict: "approve", summary: "ok", url: null, at: at(3 * H), criteriaOutcomes: outcomes }] };
+  const row = boardClaimForWorkItem(it, factsFor([]), { nowMs: NOW, existing });
+  assert.deepEqual(row.reviews.at(-1).criteriaOutcomes, outcomes);
+  // A review without outcomes re-maps exactly as before.
+  const plain = boardClaimForWorkItem(it, factsFor([]), { nowMs: NOW,
+    existing: { reviews: [{ memberId: "sage", verdict: "approve", summary: "ok", url: null, at: at(3 * H) }] } });
+  assert.deepEqual(plain.reviews.at(-1), { memberId: "sage", verdict: "approve", summary: "ok", url: null, at: at(3 * H) });
+});
