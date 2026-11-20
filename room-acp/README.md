@@ -159,6 +159,17 @@ session (one per claim). The reply is posted as a note on the claim, so it shows
 in the claim's thread on the Board. Only claims created by someone the bridge
 answers are run; other claim wakes (CI, review, lease) are acknowledged and skipped.
 
+Native Work Thread reviews use the current completion and revision from an
+existing work wake subscription. An unrestricted receiver opens one fresh
+session for that selection, reads its exact evidence and review action, and
+records a verdict through the existing Room command. The Room rechecks the
+reviewer and evidence binding at write time. The receiver checks the original
+operation receipt after an uncertain response. Its normal listener loop checks
+unresolved recorded operations even if a committed verdict retired the wake.
+Other native work actions,
+sender-restricted receivers, and reviews without a conclusive model verdict
+keep the action available through the Work Thread.
+
 ## Authority reads
 
 The runtime checks only the room owner, its own membership, its explicitly
