@@ -168,16 +168,20 @@ test('an OAuth producer gets an executable stage when the composite begin is not
     const read = await call(f, 'room_read_work', { workItemId, brief: true }); calls++;
     const { continuation } = read.body.result.structuredContent;
     assert.equal(continuation.action, expected);
-    assert.equal(continuation.tool, 'room_begin_work', 'the existing continuation is unchanged');
     const capability = continuation.capability;
     const beginOffered = mcpOAuthToolAllowed('room_begin_work', ['work:write']);
     if (beginOffered) { assert.equal(capability.status, 'available'); return; }
-    assert.equal(capability.connection.grant, 'not_offered');
+    assert.deepEqual(capability.connection, { kind: 'oauth', exposed: true, grant: 'allowed' });
     assert.equal(capability.via, 'alternative');
-    assert.equal(capability.alternative.tool, expected === 'accept' ? 'room_accept_work' : 'room_start_work');
+    assert.equal(continuation.tool, expected === 'accept' ? 'room_accept_work' : 'room_start_work');
+    assert.equal(capability.tool, continuation.tool);
+    assert.deepEqual(capability.alternative, {
+      tool: continuation.tool, arguments: continuation.arguments, inputRequired: continuation.inputRequired
+    });
+    assert.equal(continuation.arguments.expectedRevision, continuation.workRevision);
     const begin = await call(f, 'room_begin_work', { workItemId }, undefined);
     assert.equal(refused(begin), true, 'the composite really is refused on this connection'); calls++; failed++;
-    const stage = await call(f, capability.alternative.tool, { ...capability.alternative.arguments }); calls++;
+    const stage = await call(f, continuation.tool, continuation.arguments); calls++;
     assert.equal(refused(stage), false, JSON.stringify(stage.body));
   }
   assert.equal(f.store.room('commons').state.workItems[workItemId].state, 'working');

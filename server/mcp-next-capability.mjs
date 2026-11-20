@@ -57,8 +57,15 @@ export function connectionCapability(continuation, { connection, exposed, allowe
     const args = continuation.arguments ?? {};
     if (stage && typeof args.workItemId === "string" && allowed(stage.tool, connection.scopes) && exposed(stage.tool)) {
       const alternative = { tool: stage.tool, arguments: { ...(args.roomId ? { roomId: args.roomId } : {}), workItemId: args.workItemId, expectedRevision: continuation.workRevision }, inputRequired: stage.inputRequired };
-      return { ...continuation, capability: { ...out, status: "available", via: "alternative", alternative, blockedBy: null,
-        recovery: `${tool} is not offered to OAuth connections; use alternative (one stage per call) and read the task again after it.` } };
+      return {
+        ...continuation,
+        ...alternative,
+        capability: {
+          ...out, tool: stage.tool, connection: { kind: connection.kind, exposed: true, grant: "allowed" },
+          status: "available", via: "alternative", alternative, blockedBy: null,
+          recovery: "This connection advances one stage per call. Read the task again after this stage."
+        }
+      };
     }
     return blocked("oauth_not_offered", `This server offers ${tool} to no OAuth consent, so reconnecting will not help. Do not retry here; report the step as blocked on this connection.`);
   }
