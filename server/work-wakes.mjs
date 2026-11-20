@@ -86,8 +86,8 @@ export class WorkWakes {
     return Boolean(this.db.prepare(`SELECT 1 FROM agent_wake_listener_leases l
       JOIN agent_work_wake_hosts h ON h.agent_id=l.agent_id AND h.host_id=l.listener_id AND h.enabled=1
       WHERE l.room_key=? AND l.lease_expires_at>? AND (h.room_id IS NULL OR h.room_id=l.room_key)
-        AND (? IS NULL OR l.agent_id=?) AND (? IS NULL OR l.listener_id=?) LIMIT 1`)
-      .get(roomId, now, agentId, agentId, hostId, hostId));
+        AND l.agent_id=? AND (? IS NULL OR l.listener_id=?) LIMIT 1`)
+      .get(roomId, now, agentId, hostId, hostId));
   }
 
   successorBasis(roomId, state, item, memberId, at) {
@@ -109,12 +109,14 @@ export class WorkWakes {
     // Normalized writes project selected records, not the room's reverse edges.
     if (!nativePrerequisiteState(prerequisite, at).satisfied
       || nativePrerequisiteState(before.workItems[prerequisite.id], at).satisfied
-      || isCurrentRoom(this.db, roomId) || !this.scopedReceiver(roomId, null, at)) return;
+      || isCurrentRoom(this.db, roomId)) return;
     for (const item of Object.values(state.workItems)) {
       if (item.state !== "accepted" || !item.dependsOn?.includes(prerequisite.id)) continue;
       const memberId = item.accountableMemberId;
       const agentId = this.store.identities.identityIdForMember(roomId, memberId);
-      if (!agentId || !this.scopedReceiver(roomId, agentId, at)) continue;
+      // Retain readiness for an opted-in host even when its lease is absent.
+      // Delivery still requires the elected room listener and current evidence.
+      if (!agentId || !this.optedIn(agentId, roomId)) continue;
       const basis = this.successorBasis(roomId, state, item, memberId, at);
       if (basis) this.emitWork(roomId, state, item, incoming, at, basis);
     }
@@ -160,7 +162,9 @@ export class WorkWakes {
     // #3262: a genuinely new work signal releases the room-hosted poll
     // waiter, mirroring enqueueWake — otherwise a host parked on the poll
     // door sleeps through the assignment until its wait expires.
-    if (inserted.changes > 0 && (!dependencyBasis || !this.store.wakeQueue.pauseStatus(roomId, memberId)))
+    if (inserted.changes > 0 && (!dependencyBasis || (
+      this.scopedReceiver(roomId, agentId, at) && !this.store.wakeQueue.pauseStatus(roomId, memberId)
+    )))
       this.store.agentHeartbeats?._releaseWakeWaiter(agentId, roomId);
   }
   pending(agentId, { roomId = null, hostId = null, limit = 50, after = null, bounded = false, order = "oldest" } = {}) {
@@ -201,12 +205,18 @@ export class WorkWakes {
     }
     return bounded ? { signals: result, more: window.more, through: window.through } : result;
   }
-  ack(agentId, signalIds, roomId = null) {
+  ack(agentId, signalIds, roomId = null, fencingToken = null) {
     if (!this.available) return [];
     const acknowledged = [], at = this.store.now();
+    // Dependency wakes are visible only to the current room listener. Keep
+    // settlement under the same fence even after a previous listener exits.
     const statement = this.db.prepare(`UPDATE agent_work_wakes SET delivered_at=? WHERE agent_id=? AND signal_id=?
-      AND delivered_at IS NULL AND invalidated_at IS NULL AND (? IS NULL OR room_id=?)`);
-    for (const id of signalIds) if (statement.run(at, agentId, id, roomId, roomId).changes) acknowledged.push(id);
+      AND delivered_at IS NULL AND invalidated_at IS NULL AND (? IS NULL OR room_id=?)
+      AND (json_extract(pointer, '$.dependencyBasis') IS NULL OR EXISTS (
+        SELECT 1 FROM agent_wake_listener_leases l WHERE l.agent_id=agent_work_wakes.agent_id
+        AND l.room_key=agent_work_wakes.room_id AND l.lease_expires_at>? AND l.fencing_token=?
+      ))`);
+    for (const id of signalIds) if (statement.run(at, agentId, id, roomId, roomId, at, fencingToken).changes) acknowledged.push(id);
     return acknowledged;
   }
 }

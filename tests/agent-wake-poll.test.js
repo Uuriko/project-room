@@ -650,7 +650,14 @@ test("a final prerequisite gate releases each eligible accepted successor to its
   const lease = await setupHost(receiver, "receiver", true);
   assert.equal(lease.listener.acquired, true);
   await setupHost(receiver, "other-host", false);
-  await setupHost(other, "unleased", false);
+  const offline = await setupHost(other, "unleased", true);
+  assert.equal(offline.listener.acquired, true);
+  const disconnect = await post(origin, "/api/agent-heartbeats", {
+    hostId: "unleased", listenerLease: { roomId: "commons" },
+    disconnect: { fencingToken: offline.listener.fencingToken },
+  }, other.secret);
+  assert.equal(disconnect.status, 200);
+  assert.equal((await disconnect.json()).released, true);
 
   const parent = "test-handoff";
   cmd(f.keys.producer, "work.accepted", { workItemId: parent, expectedRevision: row(parent).revision });
@@ -704,7 +711,26 @@ test("a final prerequisite gate releases each eligible accepted successor to its
     assert.equal(wake.dependencyBasis, undefined);
   }
   assert.deepEqual(await poll(receiver, "other-host"), []);
-  assert.deepEqual(await poll(other, "unleased"), []);
+  assert.deepEqual(await poll(other, "unleased"), [], "an offline receiver cannot read the retained signal");
+  const reconnected = await setupHost(other, "unleased", true);
+  assert.equal(reconnected.listener.acquired, true);
+  const recovered = await poll(other, "unleased");
+  assert.deepEqual(recovered.map(wake => [wake.workItemId, wake.eventId]), [
+    ["unleased-successor", accepted.event.id],
+  ], "reconnect recovers one signal bound to the original acceptance");
+  const signalId = recovered[0].signalId;
+  const acknowledge = (fencingToken = reconnected.listener.fencingToken) =>
+    post(origin, "/api/agent-heartbeats/ack", { signalIds: [signalId], fencingToken }, other.secret);
+  const staleAck = await acknowledge(offline.listener.fencingToken);
+  assert.equal(staleAck.status, 200);
+  assert.deepEqual((await staleAck.json()).acknowledged, []);
+  assert.deepEqual((await poll(other, "unleased")).map(wake => wake.signalId), [signalId],
+    "a displaced listener cannot consume the retained signal");
+  const ack = await acknowledge();
+  assert.equal(ack.status, 200);
+  assert.deepEqual((await ack.json()).acknowledged, [signalId]);
+  assert.deepEqual((await (await acknowledge()).json()).acknowledged, []);
+  assert.deepEqual(await poll(other, "unleased"), [], "the acknowledged signal does not return");
   cmd(receiver.secret, "work.started", { workItemId: "ready-a", expectedRevision: 1 });
   assert.deepEqual((await poll()).map(w => w.workItemId), ["ready-b"], "a changed successor invalidates its signal");
   store.wakeQueue.pause(f.keys.owner, "commons", { requestId: "dependency-wake-pause", reason: null },
