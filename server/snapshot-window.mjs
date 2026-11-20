@@ -123,8 +123,17 @@ function viewerFilter(store, roomId, viewerId) {
   return { dmMessageVisible, roomEventVisible, peerContext };
 }
 
+// The browser still needs the status and linkage of older exchanges when it
+// pages their messages or restores a draft. Full settled records remain
+// available on the addressed request readers; open records stay actionable.
+function browserRequestRecord(request) {
+  if (request.status === "open") return request;
+  const { id, requesterId, recipientId, workItemId, status, revision, contextEventId, responseMessageId } = request;
+  return { id, requesterId, recipientId, workItemId, status, revision, contextEventId, responseMessageId };
+}
+
 // The member snapshot. windowed uses the shared message window and byte budget.
-export function readRoomSnapshot(store, token, roomId, fence, { view = "full", helpContext = false, offerContext = false, auditView = "full", windowed = false, visibility = null, workCursor = null } = {}) {
+export function readRoomSnapshot(store, token, roomId, fence, { view = "full", helpContext = false, offerContext = false, auditView = "full", windowed = false, visibility = null, workCursor = null, compactRequests = false } = {}) {
   if (view === "orientation") {
     if (helpContext || offerContext || auditView !== "full" || windowed) fail(422, "invalid_snapshot_view", "Orientation does not accept snapshot context options");
     return readAgentOrientation(store, token, roomId, fence, {cursor:workCursor});
@@ -212,11 +221,14 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
   const replyRequests = Object.fromEntries(Object.entries(snapshot.state.replyRequests ?? {}).filter(([, request]) =>
     [request.requesterId, request.recipientId].includes(snapshot.viewerId)
     && messageInHistory({ id: request.id, createdAt: request.createdAt }, historyFloor)));
+  const browserRequests = compactRequests && windowed
+    ? Object.fromEntries(Object.entries(replyRequests).map(([id, request]) => [id, browserRequestRecord(request)]))
+    : replyRequests;
   const nextState = {
     ...snapshot.state,
     ...(snapshot.state.workItems === undefined ? {} : { workItems }),
     messages: shown,
-    ...(snapshot.state.replyRequests === undefined ? {} : { replyRequests }),
+    ...(snapshot.state.replyRequests === undefined ? {} : { replyRequests: browserRequests }),
     eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible).map(event => {
       if (!privateWorkEvent(event)) return event;
       const workItemId = privateWorkEventId(event);

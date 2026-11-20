@@ -478,6 +478,7 @@ const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
   auditView: "activity",
+  compactRequests: true,
   // Older history loads on a reader gesture, not 250 ms after open: on a busy
   // room the background fill was most of a phone's bytes (~3 MB per open).
   lazyHistory: true,

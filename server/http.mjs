@@ -4869,6 +4869,9 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         const snapshotView = params.get("view") ?? "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        const replyView = req.headers["x-project-room-reply-view"];
+        if (replyView !== undefined && (replyView !== "browser-v1" || fullRead || snapshotView !== "full"))
+          reject(422, "invalid_snapshot_view", "Choose the browser reply view only on a windowed room read");
         if (fullRead) {
           res.setHeader("Deprecation", "true");
           res.setHeader("Link", `</api/rooms/${encodeURIComponent(roomId)}>; rel="successor-version"`);
@@ -4880,6 +4883,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           offerContext: offerContext === "1",
           auditView: auditHeader ? "activity" : "full",
           windowed: snapshotView === "full" && !fullRead,
+          compactRequests: replyView === "browser-v1",
           visibility: { dmMessageVisible, roomEventVisible, peerContext }
         }));
       }
