@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { verifyCardJws } from "../server/agent-card-signing.mjs";
 
 const revision = /^[a-f0-9]{40}$/;
 const digest = /^sha256:[a-f0-9]{64}$/;
@@ -86,7 +87,7 @@ function stageEvidence(stage, value, candidate) {
   throw new Error(`Invalid or mismatched ${stage} receipt for the exact candidate.`);
 }
 
-export async function attachReleaseReceipts({ binding, inputs, readResult, lookup, post, requirePreparedEvidence = false }) {
+export async function attachReleaseReceipts({ binding, inputs, readResult, lookup, post, requirePreparedEvidence = false, expectedBody }) {
   const { workItemId, completionEventId, candidateRevision } = binding;
   if (typeof workItemId !== "string" || !workItemId || typeof completionEventId !== "string" || !completionEventId
       || !revision.test(candidateRevision)) throw new Error("Expected a work item, exact completion event and 40-hex candidate.");
@@ -110,6 +111,9 @@ export async function attachReleaseReceipts({ binding, inputs, readResult, looku
   if (selected.workItemId !== workItemId || receipt?.eventId !== completionEventId
       || !digest.test(receipt.evidenceVersion) || !text?.messageId || candidates.size !== 1 || !candidates.has(candidateRevision)) {
     throw new Error("The selected completion does not name this exact candidate.");
+  }
+  if (expectedBody !== undefined && text.body !== expectedBody) {
+    throw new Error("The saved release result differs from the prepared signed packet.");
   }
   if (requirePreparedEvidence &&
       prepared.some(({ stage, check }) => !text.body.split("\n").includes(`${stage}: ${check.summary} ${check.evidenceDigest}`))) {
@@ -156,7 +160,37 @@ export function confirmedReceipt(saved, id) {
   return { messageId: saved.messageId, sequence: saved.sequence, duplicate: saved.duplicate === true };
 }
 
-export function prepareReleaseReview({ inputs, candidateRevision, origin, verificationPath, servingRevision, verificationDigest }) {
+function checkedSourceProof({ sourceProof, jwks, origin, binding, checks }) {
+  const { proof, signature } = sourceProof ?? {};
+  const jwksUrl = new URL("/.well-known/jwks.json", origin).href;
+  let header;
+  try {
+    header = JSON.parse(Buffer.from(signature?.protected ?? "", "base64url").toString("utf8"));
+  } catch {
+    throw new Error("Invalid release source proof signature header.");
+  }
+  const key = Array.isArray(jwks?.keys) && jwks.keys.find(item => item?.kid === header?.kid
+    && item.kty === "OKP" && item.crv === "Ed25519" && typeof item.x === "string");
+  if (header?.jku !== jwksUrl || !key
+      || !verifyCardJws({ card: proof, jws: signature, publicKey: Buffer.from(key.x, "base64url").toString("base64") })) {
+    throw new Error("Invalid release source proof signature.");
+  }
+  const [build, browser, deploy] = checks;
+  if (!binding || proof?.schema !== "project-room-batch-source-to-package/1" || proof.origin !== origin.origin
+      || proof.roomId !== binding.roomId || proof.workItemId !== binding.workItemId
+      || binding.candidateRevision !== build.proof.sourceCommit || proof.composition?.revision !== binding.candidateRevision
+      || proof.composition?.previous !== deploy.proof.oldRevision
+      || proof.composition?.tree !== build.proof.sourceTree || proof.package?.manifestSha256 !== build.proof.manifestSha256
+      || proof.package?.files !== build.proof.files || proof.qualification?.["build.json"] !== build.evidenceDigest.slice(7)
+      || proof.qualification?.["browser.json"] !== browser.evidenceDigest.slice(7)
+      || proof.qualification?.["deployment-result.json"] !== deploy.evidenceDigest.slice(7)) {
+    throw new Error("Release source proof does not match the exact work, candidate and stage receipts.");
+  }
+  return `Signed source-to-package proof (same-origin JWKS).\n${JSON.stringify({ proof, signature })}`;
+}
+
+export function prepareReleaseReview({ inputs, candidateRevision, origin, verificationPath, servingRevision, verificationDigest,
+  binding, sourceProof, jwks }) {
   if (!revision.test(candidateRevision) || servingRevision !== candidateRevision || !digest.test(verificationDigest)) {
     throw new Error("Verify the exact serving candidate before preparing review.");
   }
@@ -173,11 +207,15 @@ export function prepareReleaseReview({ inputs, candidateRevision, origin, verifi
   });
   const fixtures = checks[0].proof.packageFixtures;
   const digestLabel = fixtures?.every(fixture => fixture.passedCheckCount !== undefined) ? "response-body digest " : "";
+  const signed = sourceProof === undefined ? null : checkedSourceProof({ sourceProof, jwks, origin, binding, checks });
   const body = [
     `Candidate revision: ${candidateRevision}`,
     `Serving revision: ${new URL("/api/version", origin).href}`,
     `Live verification: ${verification.href} (HTTP 200, ${digestLabel}${verificationDigest})`,
-    ...checks.map(({stage, summary, proof, evidenceDigest}) => `${stage}: ${summary} ${evidenceDigest}\n${JSON.stringify(proof)}`)
+    ...(signed ? [
+      `Checks: package verified (${checks[0].proof.files} files), browser ${checks[1].proof.passed}/${checks[1].proof.tests} passed, deploy ready.`,
+      signed
+    ] : checks.map(({ stage, summary, proof, evidenceDigest }) => `${stage}: ${summary} ${evidenceDigest}\n${JSON.stringify(proof)}`))
   ].join("\n\n");
   if (body.length > 4096) throw new Error("The prepared release evidence exceeds the Room text limit.");
   return body;
@@ -240,6 +278,7 @@ async function main() {
   const { values } = parseArgs({ options: {
     ...Object.fromEntries(["binding", "build", "browser", "deploy"].map(name => [name, { type: "string" }])),
     recover: { type: "boolean", default: false },
+    "source-proof": { type: "string" },
     "work-revision": { type: "string" }, "verify-path": { type: "string", default: "/api/ready" }
   } });
   const origin = new URL(process.env.ROOM_RELEASE_ORIGIN);
@@ -263,6 +302,9 @@ async function main() {
     return result.structuredContent;
   }
   const prepare = values["work-revision"] !== undefined;
+  const sourceProofPath = values["source-proof"];
+  if (sourceProofPath !== undefined && !prepare) throw new Error("A source proof belongs in the first exact release result.");
+  let expectedBody;
   if (prepare) {
     if (typeof memberId !== "string" || !memberId) throw new Error("The saved connection needs the assigned release producer's memberId.");
     if (binding.completionEventId !== undefined || !/^\d+$/.test(values["work-revision"])) {
@@ -281,13 +323,21 @@ async function main() {
     const proof = await fetch(new URL(path, origin), options);
     if (!proof.ok) throw new Error("Live verification URL was unavailable.");
     const verificationDigest = "sha256:" + hash(Buffer.from(await proof.arrayBuffer()));
+    let sourceProof, jwks;
+    if (sourceProofPath !== undefined) {
+      sourceProof = JSON.parse(await readFile(sourceProofPath, "utf8"));
+      const keys = await fetch(new URL("/.well-known/jwks.json", origin), options);
+      if (!keys.ok) throw new Error("Serving source proof verification key was unavailable.");
+      jwks = await keys.json();
+    }
     const after = await readVersion();
     if (after !== before) throw new Error("Serving revision changed while collecting review evidence.");
     const body = prepareReleaseReview({ inputs, candidateRevision: binding.candidateRevision, origin, verificationPath: path,
-      servingRevision: after, verificationDigest });
+      servingRevision: after, verificationDigest, binding, sourceProof, jwks });
+    if (sourceProofPath !== undefined) expectedBody = body;
     binding = await submitReleaseReview({ binding, expectedRevision: Number(values["work-revision"]), producerId: memberId, body, call });
   }
-  const output = await attachReleaseReceipts({ binding, inputs, requirePreparedEvidence: prepare,
+  const output = await attachReleaseReceipts({ binding, inputs, requirePreparedEvidence: prepare && expectedBody === undefined, expectedBody,
     readResult: args => call("room_read_result", args),
     lookup: values.recover || prepare ? args => call("room_receipt", args) : undefined,
     post: async args => confirmedReceipt(await call("room_post_message", args), args.id) });
