@@ -100,10 +100,18 @@ test('authenticated member and listener identity must agree', async t => {
     error => error.status === 403 && error.code === 'listener_identity_mismatch');
 });
 
-test('an ACP receipt lands before a worker runs and exact retry survives a lost reply', async t => {
+test('an acknowledged backlog entry and a delayed receipt leave fresh and unrelated intake usable', async t => {
   const { fixture, connection, token } = await setup(t);
   const { store } = fixture.f;
   const messageId = 'pre-worker-request';
+  store.command(fixture.ownerKey, 'commons', {
+    id: 'open-older-request', type: 'message.posted',
+    data: { messageId: 'older-request', toMemberId: connection.memberId, requestKind: 'reply', body: 'Older request.' }
+  });
+  store.command(connection.identitySecret, 'commons', {
+    id: 'ack-older-request', type: 'reply_request.progressed',
+    data: { requestMessageId: 'older-request', expectedRequestRevision: 0, progress: 'acknowledged' }
+  });
   store.command(fixture.ownerKey, 'commons', {
     id: 'open-pre-worker-request', type: 'message.posted',
     data: { messageId, toMemberId: connection.memberId, requestKind: 'reply', body: 'Review the exact result.' }
@@ -113,15 +121,24 @@ test('an ACP receipt lands before a worker runs and exact retry survives a lost 
     data: { messageId: 'pre-worker-correction', toMemberId: connection.memberId, replyToId: messageId,
       body: 'Use the corrected result.' }
   });
+  store.command(fixture.ownerKey, 'commons', {
+    id: 'post-unrelated-message', type: 'message.posted',
+    data: { messageId: 'unrelated-message', toMemberId: connection.memberId, body: 'Separate conversation.' }
+  });
   store.agentHeartbeats.releaseListenerLease({
     agentId: connection.identityId, roomId: connection.roomId,
     fencingToken: token
   });
   const observations = [];
   const bridge = new Bridge({ connection, persistSessions: false, minPollIntervalMs: 0, host: {}, observeStage: event => observations.push(event) });
-  const calls = [];
+  const calls = [], selected = [];
+  const requestContext = bridge.room.requestContext.bind(bridge.room);
+  bridge.room.requestContext = (id, ...rest) => { selected.push(id); return requestContext(id, ...rest); };
+  let releaseReceipt;
+  const delayed = new Promise(resolve => { releaseReceipt = resolve; });
   const request = bridge.room.request.bind(bridge.room);
   bridge.room.request = async (path, options) => {
+    if (options?.body?.type === 'reply_request.progressed') await delayed;
     const result = await request(path, options);
     if (options?.body?.type === 'reply_request.progressed') {
       calls.push({ id: options.body.id, context: options.body.data.ifUnacknowledgedContextEventId, duplicate: result.duplicate });
@@ -132,16 +149,25 @@ test('an ACP receipt lands before a worker runs and exact retry survives a lost 
   const queued = [];
   bridge.queue.push = (key, wake) => {
     queued.push([key, wake]);
-    assert.equal(store.replyRequests.selected(connection.identitySecret, 'commons', messageId).request.progressState, 'acknowledged');
     return true;
   };
-  await bridge.pollOnce();
-  assert.equal(bridge.firstFormalAck, true);
+  try {
+    await bridge.pollOnce();
+    assert.equal(bridge.firstFormalAck, true);
+    assert.deepEqual(selected, [messageId]);
+    const olderIndex = queued.findIndex(([key]) => key === 'older-request');
+    assert.ok(olderIndex >= 0 && olderIndex < queued.findIndex(([key]) => key === messageId));
+    assert.ok(queued.some(([key]) => key === 'unrelated-message'));
+    assert.equal(store.replyRequests.selected(connection.identitySecret, 'commons', messageId).request.acknowledgedAt, undefined);
+    assert.ok(bridge.formalAckInFlight);
+  } finally {
+    releaseReceipt();
+    await bridge.formalAckInFlight;
+  }
+  assert.equal(store.replyRequests.selected(connection.identitySecret, 'commons', messageId).request.progressState, 'acknowledged');
   assert.deepEqual(calls.map(call => call.duplicate), [false, true]);
   assert.equal(calls[0].id, calls[1].id);
   assert.ok(calls.every(call => call.context === correction.event.id));
-  assert.ok(queued.length >= 1);
-  assert.ok(queued.every(([key]) => key === messageId));
   const recorded = observations.filter(event => event.stage === 'formal_ack_recorded');
   assert.equal(recorded.length, 1);
   assert.ok(recorded[0].elapsedMs >= 0);

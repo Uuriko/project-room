@@ -323,7 +323,9 @@ export function readMessageContext(store, token, roomId, messageId, expectedSess
       ? readCurrentRecord(store.db, roomId, 'replyRequests', messageId, b)
       : store.room(roomId).state.replyRequests?.[messageId];
     const replyRequest = request && [request.requesterId, request.recipientId].includes(auth.member.id)
-      ? {id:request.id, requesterId:request.requesterId, recipientId:request.recipientId, status:request.status} : null;
+      ? {id:request.id, requesterId:request.requesterId, recipientId:request.recipientId, status:request.status,
+        ...(request.recipientId === auth.member.id ? {firstAckPending:request.status === 'open'
+          && request.acknowledgedAt == null && request.progressEventId == null} : {})} : null;
     return withContentTrust({roomId, messageContextVersion:1, thread:stampThread({...message, replies:[]}, auth.member.id), ...(replyRequest ? {replyRequest} : {})});
   }));
 }
