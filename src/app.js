@@ -5108,12 +5108,13 @@ function renderMentions() {
   input.setAttribute("aria-activedescendant", `mention-option-${mentionIndex}`);
 }
 function chooseMention(member) {
-  applyMentionMember(member);
+  const assistantName = member && humanExperience.assistantName(member.id);
+  applyMentionMember(assistantName ? { ...member, displayName: assistantName } : member, { exact: !assistantName });
 }
-function applyMentionMember(member) {
+function applyMentionMember(member, { exact = true } = {}) {
   const input = $("#message-input");
   if (!input || !member) return;
-  const next = addressMember(input.value, input.selectionStart, member, { exact: true });
+  const next = addressMember(input.value, input.selectionStart, member, { exact });
   input.value = next.body;
   // Mentions are text only: never change the DM recipient select here.
   // A message becomes a DM only when the sender explicitly picks a recipient.
