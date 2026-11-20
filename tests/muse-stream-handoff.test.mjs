@@ -260,6 +260,22 @@ test("interrupted delivery preserves the receiver’s ACK and still offers the w
   assert.equal(await recover(), undefined);
 });
 
+test("interrupted recovery drops an offer cleared during its exact read", async () => {
+  const selected = request("ready", { contextEventId: "ctx-ready", progressState: "acknowledged",
+    progressNote: "Receiving runtime read and verified this exact request; model acceptance is separate." });
+  const original = { requestMessageId: "ready", openingEventId: "open-ready", openingSequence: 15,
+    roomCreatedEventId: "room-birth", offeredAt: "2026-11-20T19:48:01Z", receiverAcknowledgment: { sequence: 16 } };
+  for (const replacement of [null, { ...original, offeredAt: "2026-11-20T19:48:02Z" }]) {
+    let pending = original;
+    const result = await recoverMuseHandoff({ policy, signal: new AbortController().signal, offers: [original],
+      currentOffer: () => pending, delay: async () => {},
+      client: { async replyContextForHint() { pending = replacement; return context(selected, 15); } },
+      record: () => assert.fail("same request does not mean the same local offer")
+    });
+    assert.equal(result, undefined);
+  }
+});
+
 test("interrupted delivery never reopens settled work or replays a different room", async () => {
   const offer = { requestMessageId: "ready", openingEventId: "open-ready", openingSequence: 15,
     roomCreatedEventId: "room-birth", offeredAt: "2026-11-18T21:00:00Z" };

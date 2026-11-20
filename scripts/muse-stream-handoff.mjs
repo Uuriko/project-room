@@ -202,13 +202,19 @@ export async function runMuseHandoff({ mode, windowMs, stop, run, onRollover = (
 
 // The host registers this process separately so it survives delivery of the
 // primary helper's stdout. It has no Room stream and no recurring timer.
+function sameRecoveryOffer(first, second) {
+  return second && ["requestMessageId", "roomCreatedEventId", "openingEventId", "openingSequence", "requestRevision", "offeredAt"]
+    .every(key => first[key] === second[key])
+    && first.receiverAcknowledgment?.sequence === second.receiverAcknowledgment?.sequence;
+}
+
 export async function recoverMuseHandoff({ client, policy, signal, offers, currentOffer, record,
   graceMs = 6500, now = Date.now, delay = pause }) {
   for await (const offer of offers) {
     if (!offer) continue;
     await delay(Math.max(0, Date.parse(offer.offeredAt) + graceMs - now()), undefined, { signal });
     const pending = currentOffer();
-    if (!pending || pending.openingEventId !== offer.openingEventId) continue;
+    if (!sameRecoveryOffer(offer, pending)) continue;
     const context = await client.replyContextForHint(pending.requestMessageId, { signal });
     if (context.roomCreatedEventId !== pending.roomCreatedEventId) throw Error("muse_handoff_identity_changed");
     const receipt = pending.receiverAcknowledgment;
@@ -217,6 +223,7 @@ export async function recoverMuseHandoff({ client, policy, signal, offers, curre
       policy, pending.openingSequence - 1, receiverAck);
     if (!exact || exact.openingSequence !== pending.openingSequence || receiverAck && !exact.receiverSeen) continue;
     const { contextEventId, receiverSeen, ...handoff } = exact;
+    if (!sameRecoveryOffer(pending, currentOffer())) continue;
     record(handoff);
     return { status: "handoff", source: "interrupted_delivery", replay: true,
       after: exact.openingSequence, originalOfferedAt: pending.offeredAt, ...handoff,
