@@ -95,6 +95,7 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { accountTermsSchema, publicAbuseSchema, publicUnpublishSchema, recordSignupTerms } from "./legal-store.mjs"; // terms, public reports, unpublish (G-SEC-11, G-SEC-14)
 import { roomAssistantSchema } from "./room-assistant.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
+import { reviewRuntimeSchema, recordReviewRuntime, reviewRuntimeFor } from "./review-runtime.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema, workClaimInboxIndexSchema } from "./work-claim-sqlite.mjs";
@@ -1085,7 +1086,7 @@ function roomSchemaStamp() {
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
     accessRequestSchema, pairingSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
-    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
+    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, reviewRuntimeSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN, INTEGRITY_ROOM_HASH_COLUMN, INTEGRITY_METADATA_HASH_COLUMN, INTEGRITY_SNAPSHOT_WATERMARK_COLUMN,
@@ -2050,6 +2051,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(oauthPendingSchema);
       this.db.exec(gmailSchema);
       this.db.exec(requestRunSchema);
+      this.db.exec(reviewRuntimeSchema);
       this.db.exec(roomAssistantSchema);
       // Fresh recovery stores must include the same additive growth columns
       // as HTTP registration; otherwise NDJSON replay rejects existing rows.
@@ -6699,6 +6701,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
+  reportReviewRuntime(token, roomId, input, binding = null) {
+    if (!validId(input?.workItemId)) fail(422, "invalid_review_runtime", "Choose a work item");
+    return this.transaction(() => {
+      const { member } = this.authenticate(token, roomId, binding);
+      const work = readWorkItem(this.db, roomId, input.workItemId);
+      if (!work) fail(404, "work_not_found", "Work item not found in this Room");
+      assertSelectedWorkVisible(this, roomId, work.id, work, member.id);
+      const room = isCurrentRoom(this.db, roomId) ? readCurrentRecord(this.db,roomId,'metadata','room')
+        : JSON.parse(this.db.prepare("SELECT json_extract(projection,'$.room') AS room FROM rooms WHERE id=?").get(roomId).room);
+      if (room?.archivedAt) fail(409, "review_runtime_stale", "Room is archived");
+      return recordReviewRuntime(this.db, roomId, work, member, input, this.now());
+    });
+  }
   workResult(token, roomId, workItemId, { completionEventId = null, draftMessageId = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -6722,7 +6737,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerId: auth.member.id, reviewer: auth.member, floor: this.historyFloor(roomId, auth.member.id, row.sequence), messageRecords }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
-      return stampWorkResult({ ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+      const runtime = value.result?.kind !== "draft" && value.result?.receipt?.eventId === value.current.completionEventId
+        && value.result?.text?.body != null && reviewRuntimeFor(this, roomId, work, value.current.next, this.now());
+      return stampWorkResult({ ...value, ...(runtime ? { reviewRuntime: runtime } : {}), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null }, auth.member.id);
     });
   }

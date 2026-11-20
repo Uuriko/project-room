@@ -1,3 +1,4 @@
+import { reviewRuntimeLabel } from "./workflow.js";
 import { uiText } from "./strings.js";
 // Updates destination. Needs me, Mentions, and All activity.
 // The badge counts actionable items only. Opening a row marks it read.
@@ -221,10 +222,12 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         }) : ""].filter(Boolean).join(" · ");
         copy.append(meta);
       }
-      if (item.kind === "review_requested") {
+      const runtime = ["waiting_receiver", "start_unknown"].includes(item.reviewRuntime?.status)
+        ? reviewRuntimeLabel(item.reviewRuntime.status) : "";
+      if (runtime || item.kind === "review_requested") {
         const cue = document.createElement("p");
         cue.className = "form-hint";
-        cue.textContent = uiText("work.thread.reviewCue");
+        cue.textContent = runtime || uiText("work.thread.reviewCue");
         copy.append(cue);
       }
       const actions = document.createElement("div");
@@ -253,7 +256,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       for(let step=0;step<(append?1:Math.max(1,budget));step++){
         const page=await client.roomRead('/needs-me'+(after?'?cursor='+encodeURIComponent(after):''));if(!page||!current())return false;
         if(page.contractVersion!==2||!Array.isArray(page.items)||typeof page.complete!=='boolean'||page.coverage?.mode!=='native_bounded'||page.complete!==(page.cursor===null))throw Error('Could not verify this attention page.');
-        for(const source of page.items){if(!source||typeof source.id!=='string'||typeof source.kind!=='string'||typeof source.summary!=='string')throw Error('Could not verify this attention item.');const item={id:source.kind+':'+source.id,roomId:source.roomId,kind:source.kind,title:source.summary,state:'open',sourceRef:source.kind==='work'?{workItemId:source.id}:{messageId:source.id}};merged.set(item.id,item);}
+        for(const source of page.items){if(!source||typeof source.id!=='string'||typeof source.kind!=='string'||typeof source.summary!=='string')throw Error('Could not verify this attention item.');const item={id:source.kind+':'+source.id,roomId:source.roomId,kind:source.kind,title:source.summary,state:'open',reviewRuntime:source.reviewRuntime,sourceRef:source.kind==='work'?{workItemId:source.id}:{messageId:source.id}};merged.set(item.id,item);}
         pages++;more=!page.complete;const following=page.cursor;if(more&&(typeof following!=='string'||!following||seen.has(following)))throw Error('Attention page did not advance. Refresh to continue.');after=following;if(!more)break;seen.add(after);
       }
       items=[...merged.values()];cursor=after;hasMore=more;loadedPages=pages;visitedCursors=seen;incomplete=true;filter='needs';actionable=items.length;badgeMore=hasMore;badgeIncomplete=false;loading=false;paintBadge();paint();status.textContent=notice;return true;
