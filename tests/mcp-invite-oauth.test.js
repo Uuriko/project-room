@@ -62,7 +62,13 @@ test('owner pairs a fresh OAuth request to the same invited seat without changin
   assert.equal((await submit('allow_reconnect')).status, 400);
   assert.equal((await pair(firstToken, input)).status, 401);
   assert.equal((await pair(f.owner, { ...input, scopes: ['rooms:read'] })).status, 409);
-  assert.equal((await pair(f.owner, input)).status, 200);
+  const paired = await pair(f.owner, input);
+  const spec = await (await fetch(f.base + '/openapi.json')).json();
+  const operation = spec.paths['/api/mcp/oauth/reconnect'].post;
+  assert.equal(paired.status, 200);
+  assert.deepEqual(operation.security, [{ roomBearer: [] }]);
+  assert.deepEqual(operation.requestBody.content['application/json'].schema.required, Object.keys(input));
+  assert.deepEqual(Object.keys(operation.responses).filter(status => status.startsWith('2')), [String(paired.status)]);
   assert.match(await (await submit('check_reconnect')).text(), /Friend native agent/);
   assert.equal((await submit('allow_reconnect', '')).status, 403);
   const response = await submit('allow_reconnect');
