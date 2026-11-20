@@ -4,6 +4,7 @@
 // be redeemed and never returns the code.
 import { validId } from "../../src/events.js";
 import { diagnoseArguments } from "../mcp-arg-errors.mjs";
+import { connectFields } from "./agent-connect.mjs";
 
 const object = { type: "object" };
 
@@ -39,7 +40,7 @@ async function redeemInvite(ctx) {
   // score the join, journal the would-be decision, admit anyway.
   ctx.jevShadowAdmission("agent-invite:redeem", { roomId: redeemedInvite.roomId, identityId: redeemedInvite.identityId,
     displayName: redeemedInvite.displayName ?? data.displayName, card: null });
-  return ctx.json(ctx.res, 201, redeemedInvite);
+  return ctx.json(ctx.res, 201, { ...redeemedInvite, connect: connectFields(ctx.expectedOrigin()) });
 }
 
 function inviteAvailability(ctx) {
