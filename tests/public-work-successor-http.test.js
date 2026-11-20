@@ -6,7 +6,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { PublicWorkClaimsClient } from '../client/public-work-claims.mjs';
 
-async function fixture(t) {
+async function fixture(t, decision = 'revision_requested') {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey('commons', 'owner');
   store.command(ownerKey, 'commons', { id: 'follow-peer', type: 'member.added', data: { memberId: 'peer', displayName: 'Peer', kind: 'human', permissions: [] } });
@@ -19,7 +19,7 @@ async function fixture(t) {
   const claimed = store.publicWorkClaims.act('follow:parent', producer.secret, 'claim', { requestId: 'parent-claim', expectedTermsVersion: 1 });
   const { receipt } = store.publicWorkClaims.act('follow:parent', producer.secret, 'finish', { requestId: 'parent-finish', expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText: 'Immutable original artifact', checksReported: [] });
   const binding = { taskId: receipt.taskId, expectedTermsVersion: receipt.termsVersion, generation: receipt.generation, artifactSha256: receipt.artifact.sha256 };
-  store.publicWorkReviews.decide('commons', 'owner', receipt.receiptId, { ...binding, requestId: 'ask-revision', expectedReviewRevision: 0, decision: 'revision_requested', reason: 'Private feedback must not become public instructions' });
+  store.publicWorkReviews.decide('commons', 'owner', receipt.receiptId, { ...binding, requestId: 'ask-revision', expectedReviewRevision: 0, decision, reason: 'Private feedback must not become public instructions' });
   const input = { ...binding, requestId: 'publish-follow-up', expectedReviewRevision: 1, successorTaskId: 'follow:child', terms: { ...terms, title: 'Owner-authored follow-up' }, repositoryRef: 'main', files: ['src/result.js'] };
   const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
@@ -31,16 +31,12 @@ async function fixture(t) {
 }
 async function json(response, status = 200) { assert.equal(response.status, status, await response.clone().text()); return response.json(); }
 
-test('owner HTTP publication leads to saved-identity follow-up claim and a fresh review without altering the parent', async t => {
-  const f = await fixture(t), before = f.snapshot();
+for (const decision of ['revision_requested', 'accepted']) test(`owner can publish a claimable follow-up after ${decision} without altering the parent`, async t => {
+  const f = await fixture(t, decision), before = f.snapshot();
   const client = new PublicWorkClaimsClient({ origin: f.origin, identitySecret: f.producer.secret });
-  // The parent's canonical read before publication. The read composes the
-  // review outcome onto the stored record (#3733) — the fixture parent was
-  // decided revision_requested — so "unaltered" is pinned against this
-  // composed read, not against the minted record.
   const parentRead = await client.readReceipt(f.receipt.receiptId);
-  assert.equal(parentRead.state, 'revision_requested');
-  assert.equal(parentRead.review.state, 'revision_requested');
+  assert.equal(parentRead.state, decision === 'accepted' ? 'verified' : decision);
+  assert.equal(parentRead.review.state, decision);
   const created = await json(await f.call());
   assert.equal(created.task.claim.state, 'unclaimed');
   assert.equal(JSON.stringify(created.task).includes('Private feedback'), false);
@@ -70,6 +66,12 @@ test('owner follow-up HTTP rejects unauthorized, stale and ambiguous requests wi
   await json(await f.call({ ...f.input, terms: { ...f.input.terms, title: 'Changed replay' } }), 409);
   await json(await f.call({ ...f.input, requestId: 'rival-follow-up', successorTaskId: 'follow:rival' }), 409);
   assert.deepEqual(f.snapshot(), created);
+});
+
+test('rejected public work cannot produce a linked continuation', async t => {
+  const f = await fixture(t, 'rejected'), before = f.snapshot();
+  await json(await f.call(), 409);
+  assert.deepEqual(f.snapshot(), before);
 });
 
 test('revocation during an uploaded follow-up body blocks publication and journal insertion', async t => {

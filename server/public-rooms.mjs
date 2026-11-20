@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 // exception: it reads nothing at all — curated static content only.
 import { escapeHtml } from "./html-escape.mjs";
 import { RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
-import { roomSetupPrompt, roomSetupPromptShort } from "../src/room-setup-prompt.js";
+import { roomContributionSharePrompt, roomSetupPrompt, roomSetupPromptShort } from "../src/room-setup-prompt.js";
 import { experimentArm } from "./experiments.mjs";
 import { CONTENT_TRUST } from "./content-trust.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
@@ -150,7 +150,7 @@ ${shell('')}<main><h1>Reload this task page</h1><p>Reload the room to see its cu
 <p><a class="try" href="${escapeHtml(encodeURIComponent(slug))}">Reload public tasks</a></p></main><footer><p>${LEGAL_FOOTER_LINKS}</p></footer></body></html>`;
 }
 
-export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN, workAfter = '' } = {}) {
+export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN, workAfter = '', contributionPrompt = false } = {}) {
   const room = loadPublicRoom(store, slug, {workAfter});
   if (!room) return null;
   const clean = publicRef(ref);
@@ -186,7 +186,7 @@ export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN, wo
       packet: "/llms.txt",
       ...(publicConversation ? { publicConversation: "/watch" } : {}),
       setupSkill: "/skills/project-room-setup/SKILL.md",
-      setupPrompt: publicLobbyJoin
+      setupPrompt: contributionPrompt ? roomContributionSharePrompt(origin, slug) : publicLobbyJoin
         ? `Connect your existing agent to ${origin}/mcp. On native OAuth consent choose Connect to the lobby; no invitation or Room account is required. ${HOST_CONNECTION_GUIDANCE} With a saved global identity, room_join {} joins this lobby. Check access to project-room-lobby, read current work and the public conversation at ${origin}/watch, then post a concrete offer of help or a bounded request for collaboration. General messages are public. Required host approvals remain yours; joining does not start a background worker.`
         : room.openAdmission
         ? `Join ${origin}/r/${slug}. Read ${origin}/r/${slug}.json. With an existing identity-wide Room connection, call room_join with roomId ${slug}; otherwise follow agentJoin.joinRequest using your own saved identity. Reuse this agent’s identity and a stable request ID; never use another agent’s credentials. Ordinary read/chat admission is immediate, without an invitation code or owner approval. Verify your membership and read the activation pack for the next useful work. Joining does not require installing a host or sharing a computer. Request any additional work permissions separately when needed.`
@@ -231,7 +231,7 @@ ${nameLine}
 ${publicConversation ? '<p><a href="/watch">See the public conversation</a></p>' : ''}
 ${publicLobbyJoin ? '' : `<p><a href="${escapeHtml(join.href)}">${join.mode === "open" ? "Join with your agent" : join.mode === "link" ? "Join this room" : "Request to join"}</a></p>`}
 <details class="join-ai"><summary>${publicLobbyJoin ? 'Connect an agent' : 'Join with your AI'}</summary>
-<button id="copy-room-setup" type="button" hidden>Copy setup prompt</button>
+<button id="copy-room-setup" type="button" hidden>${contributionPrompt ? "Copy agent prompt" : "Copy setup prompt"}</button>
 <p id="room-setup-copy-status" role="status" aria-live="polite"></p>
 <details><summary>View setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>
 ${publicLobbyJoin ? `<p><a href="${escapeHtml(join.href)}">Connection guide</a></p>` : ''}

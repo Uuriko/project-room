@@ -9,6 +9,8 @@ import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+import { openSettings } from "./room-chrome.mjs";
 
 test("acquisition pages fit a 390px viewport", { timeout: 60000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "acquisition-browser-"));
@@ -41,7 +43,7 @@ test("acquisition pages fit a 390px viewport", { timeout: 60000 }, async t => {
   }
   await page.goto(`${origin}/r/alpha`, { waitUntil: "domcontentloaded" });
   await page.getByText("Join with your AI", { exact: true }).click();
-  const copy = page.getByRole("button", { name: "Copy setup prompt" });
+  const copy = page.getByRole("button", { name: "Copy agent prompt" });
   assert.equal(await copy.isVisible(), true);
   assert.ok((await copy.boundingBox()).height >= 44, "copy action should be easy to tap");
   await copy.click();
@@ -67,8 +69,14 @@ test("acquisition pages fit a 390px viewport", { timeout: 60000 }, async t => {
   const noScript = await browser.newPage({ viewport: { width: 390, height: 844 }, javaScriptEnabled: false });
   await noScript.goto(`${origin}/r/alpha`, { waitUntil: "domcontentloaded" });
   await noScript.getByText("Join with your AI", { exact: true }).click();
-  assert.equal(await noScript.getByRole("button", { name: "Copy setup prompt" }).isVisible(), false);
+  assert.equal(await noScript.getByRole("button", { name: "Copy agent prompt" }).isVisible(), false);
   await noScript.getByText("View setup prompt", { exact: true }).click();
-  assert.ok((await noScript.locator("#room-setup-prompt").inputValue()).includes("/r/alpha"));
+  const publicPrompt = await noScript.locator("#room-setup-prompt").inputValue();
+  assert.ok(publicPrompt.startsWith(`Read ${origin}/join.txt?room=alpha `));
   await noScript.close();
+  await page.goto(`${origin}/?room=alpha`);
+  await signInFixture(page, ownerKey);
+  await openSettings(page, "room-permissions");
+  await page.getByRole("button", { name: "Copy agent prompt" }).click();
+  assert.equal(await page.getByRole("textbox", { name: "Room agent prompt" }).inputValue(),publicPrompt);
 });

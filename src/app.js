@@ -1,6 +1,6 @@
 import { createDirectConversationWindow, createMessageSelection, createConversationDirectory } from "./direct-conversation-window.js";
 import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
-import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
+import { roomContributionSharePrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
@@ -6218,7 +6218,7 @@ function syncAcquisitionControls() {
     if (!invitation.hidden) {
       const href = roomSetupLink(location.origin, state.room.id, state.room.publicPage?.enabled === true);
       $("#agent-page-link").href = href;
-      $("#agent-page-prompt").value = roomSetupPrompt(href);
+      $("#agent-page-prompt").value = roomContributionSharePrompt(location.origin, state.room.id);
       $("#agent-page-copy").disabled = acquisitionBusy;
     }
   }
@@ -6271,8 +6271,8 @@ $("#agent-page-copy")?.addEventListener("click", async () => {
   try {
     if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
     await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => setTimeout(() => reject(new Error("Clipboard unavailable")), 800))]);
-    notice("Setup prompt copied.");
-  } catch { notice("Copy the selected setup prompt."); }
+    notice("Agent prompt copied.");
+  } catch { notice("Copy the selected agent prompt."); }
 });
 $("#public-name-toggle")?.addEventListener("change", () => {
   if (!session?.member?.id) return;

@@ -109,13 +109,14 @@ test('results read one bounded page on demand and Show more reads the next page'
   await f.page.locator('#owner-results-open').click(); await f.page.locator('#owner-results-more').waitFor({ state: 'visible' }); assert.equal(await f.page.locator('[data-result-receipt]').count(), 20); assert.equal(reads.length, 1); assert.equal(reads[0].searchParams.get('limit'), '20');
   await f.page.locator('#owner-results-more').click(); await f.page.locator('#owner-results-more').waitFor({ state: 'hidden' }); assert.equal(await f.page.locator('[data-result-receipt]').count(), 21); assert.equal(reads.length, 2); assert.ok(reads[1].searchParams.get('after'));
 });
-async function prepareFollowUp(f) {
+async function prepareFollowUp(f, decision = 'revision_requested') {
   await open(f); assert.equal(await row(f).locator('[data-open-follow-up]').count(), 0);
-  await decide(f, 'revision_requested', 'Private contributor feedback must not become public terms.');
+  await decide(f, decision, 'Private contributor feedback must not become public terms.');
   await row(f).locator('[data-open-follow-up]').click();
   const form = f.page.locator('#owner-follow-up-form'); await form.waitFor({ state: 'visible' });
   assert.equal(await form.locator('[name=title]').evaluate(node => node === document.activeElement), true);
-  assert.equal(await form.locator('[name=summary]').inputValue(), 'A small public contribution');
+  assert.equal(await form.locator('[name=summary]').inputValue(), decision === 'accepted' ? '' : 'A small public contribution');
+  if (decision === 'accepted') assert.equal(await form.locator('[name=criteria]').inputValue(), '');
   assert.doesNotMatch(await form.locator('[name=summary]').inputValue(), /Private contributor/);
   await form.locator('[name=title]').fill('Explicit follow-up <script>window.badChild=true</script>');
   await form.locator('[name=summary]').fill('Publicly requested improvement');
@@ -125,8 +126,8 @@ async function prepareFollowUp(f) {
   return form;
 }
 const followUpRecorded = f => f.page.locator('#owner-offer-status').filter({ hasText: 'Follow-up published' }).waitFor();
-for (const width of [1280, 320]) test(`explicit follow-up is unassigned, preserves parent bytes, and reports withdrawn child at ${width}px`, { timeout: 45000 }, async t => {
-  const f = await setup(t, { width }), form = await prepareFollowUp(f), posts = [];
+for (const [width, decision] of [[1280, 'revision_requested'], [320, 'revision_requested'], [1280, 'accepted']]) test(`explicit follow-up after ${decision} preserves parent bytes and reports withdrawn child at ${width}px`, { timeout: 45000 }, async t => {
+  const f = await setup(t, { width }), form = await prepareFollowUp(f, decision), posts = [];
   f.page.on('request', request => { if (request.url().endsWith('/follow-up')) posts.push(request.postDataJSON()); });
   await form.getByRole('button', { name: 'Publish follow-up' }).click();
   assert.equal(posts.length, 0); assert.equal(f.store.publicWorkSuccessors.link(f.receipt.receiptId), null);
@@ -137,7 +138,7 @@ for (const width of [1280, 320]) test(`explicit follow-up is unassigned, preserv
   assert.equal(child.claim.state, 'unclaimed'); assert.equal(child.claim.identityId, null); assert.deepEqual(child.files, ['follow-up.txt']); assert.equal(child.repositoryRef, 'follow-up-branch');
   assert.deepEqual(child.acceptanceCriteria, ['New readable result', 'Keep the original unchanged']);
   const parentBytes = await fetch(`${f.origin}/api/public-work/receipts/${f.receipt.receiptId}/artifact`); assert.equal(await parentBytes.text(), f.artifactText);
-  assert.equal(f.store.publicWorkClaims.read(f.receipt.taskId).claim.state, 'submitted');
+  assert.equal(f.store.publicWorkClaims.read(f.receipt.taskId).claim.state, decision === 'accepted' ? 'verified' : 'submitted');
   const feedback = await (await fetch(`${f.origin}/api/public-work/receipts/${f.receipt.receiptId}/review`, { headers: { Authorization: `Bearer ${f.identity.secret}` } })).json();
   assert.deepEqual(feedback.followUp, { taskId: childId, termsVersion: 1, available: true });
   const outside = await createAgentIdentity(f.origin, 'Different disposable successor contributor'), client = new PublicWorkClaimsClient({ origin: f.origin, identitySecret: outside.secret });
