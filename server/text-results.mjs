@@ -5,6 +5,7 @@ import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer,
 import { nextWorkStep, workActions, workThreadHref } from "../src/workflow.js";
 import { messageInHistory } from "./history-visibility.mjs";
 import { WORK_REVISION_TYPES } from "../src/events.js";
+import { SOURCE_REVISION } from "./version.mjs";
 
 const check = condition => { if (!condition) throw new Error("Native result evidence requires reconciliation"); };
 export const textVersion = body => {
@@ -215,6 +216,9 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const releaseChecks = selectedReleaseChecks(db, state, work, result, viewerId, floor, messageRecords);
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     workThread: { workItemId, href: workThreadHref(workItemId), ...(correction ? { correction } : {}), ...(releaseChecks ? { releaseChecks } : {}) },
+    // Release reports describe a candidate. This is the separate public
+    // process fact served by /api/version on the host answering this read.
+    ...(releaseChecks && /^[0-9a-f]{40}$/.test(SOURCE_REVISION) ? { servingRevision: SOURCE_REVISION } : {}),
     selection: { completionEventId, draftMessageId }, result,
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
