@@ -195,8 +195,8 @@ export class Bridge {
     } }, signal);
   }
 
-  async refreshRoom({ memberIds = [] } = {}) {
-    const value = await this.room.room({ authorityFor: [...new Set([...memberIds, this.permissionApproverId].filter(Boolean))] });
+  async refreshRoom({ memberIds = [], signal } = {}) {
+    const value = await this.room.room({ authorityFor: [...new Set([...memberIds, this.permissionApproverId].filter(Boolean))], signal });
     this.members = value?.state?.members ?? {};
     this.ownerId = value?.state?.room?.ownerId ?? null;
     this.title = value?.state?.room?.title ?? this.connection.roomId;
@@ -216,17 +216,17 @@ export class Bridge {
       unresolved:new Set(value.authoritySelection?.unresolvedMemberIds??[])};
   }
 
-  async assertListener() {
+  async assertListener(signal) {
     if (!this.fencingToken || this.controller.signal.aborted) throw new RoomError(409, "stale_listener", "No active runtime lease");
-    const result = await this.room.checkListener(this.fencingToken);
+    const result = await this.room.checkListener(this.fencingToken, { signal });
     if (result?.listener?.valid !== true) throw new RoomError(409, "stale_listener", "Listener validation failed");
   }
 
-  async messageAuthority(messageIds) {
+  async messageAuthority(messageIds, signal) {
     const authors = [];
-    for (const id of messageIds) authors.push((await this.readThread(id, {selected:true})).thread?.authorId);
-    const authority = await this.refreshRoom({memberIds:authors.filter(Boolean)});
-    await this.assertListener();
+    for (const id of messageIds) authors.push((await this.readThread(id, {selected:true, signal})).thread?.authorId);
+    const authority = await this.refreshRoom({memberIds:authors.filter(Boolean), signal});
+    await this.assertListener(signal);
     return new Map(messageIds.map((id,index) => [id,
       authority.unresolved.has(authors[index]) ? 'unresolved'
         : authority.members[this.connection.memberId] && authority.me.active !== false
@@ -234,12 +234,12 @@ export class Bridge {
             ownerId:authority.ownerId,respondTo:this.respondTo}) ? 'allowed' : 'denied']));
   }
 
-  async authorized({ messageIds, claimId, requireRunnable = false } = {}) {
+  async authorized({ messageIds, claimId, requireRunnable = false, signal } = {}) {
     if (this.controller.signal.aborted) throw new Error("bridge stopped");
     if (!claimId) {
       // Old receipts lack original source IDs; they cannot authorize disclosure.
       if (!Array.isArray(messageIds) || !messageIds.length) return false;
-      const statuses = [...(await this.messageAuthority(messageIds)).values()];
+      const statuses = [...(await this.messageAuthority(messageIds, signal)).values()];
       if (statuses.includes('unresolved'))
         throw new RoomError(409, 'authority_member_unresolved', 'A request author is unresolved; retain the wake without executing or acknowledging it');
       return statuses.every(status => status === 'allowed');
@@ -263,6 +263,7 @@ export class Bridge {
     if (this.fencingToken && Date.now() < this.leaseRenewAt) return true;
     const value = await this.room.heartbeat({ hostId: this.connection.hostId, cadenceSeconds: this.cadenceSeconds });
     this.fencingToken = value?.listener?.acquired ? value.listener.fencingToken : null;
+    this.firstFormalAck = Boolean(this.fencingToken && value.listener.firstFormalAckRoomId === this.connection.roomId);
     const selection = value?.wakeSelection;
     this.freshWakeDiscovery = Boolean(this.queue.concurrency > 1 && this.fencingToken && selection?.version === 1 && selection.newest === true
       && selection.roomId === this.connection.roomId && Object.keys(selection).sort().join(',') === 'newest,roomId,version');
@@ -298,7 +299,7 @@ export class Bridge {
 
   async readThread(messageId, options) {
     try { return await this.room.thread(messageId, options); }
-    catch (error) { this.stopForContextLimit(error); throw error; }
+    catch (error) { if (!options?.signal) this.stopForContextLimit(error); throw error; }
   }
 
   async threadRoot(messageId, {selection = false} = {}) {
@@ -332,6 +333,12 @@ export class Bridge {
       const root = rootSelection.thread;
       // An "@agent allow" answer to a pending permission ask is not a new turn.
       if (this.permissions?.isPending(root.id) && decisionOf(message.body)) { await this.ack([signal.signalId]); return; }
+      if (this.formalAckAvailable && !this.formalAckInFlight && rootSelection.replyRequest?.firstAckPending === true
+        && rootSelection.replyRequest.recipientId === this.connection.memberId) {
+        this.formalAckAvailable = false;
+        this.formalAckInFlight = this.acknowledgeFormalReceipt(root.id, signal.signalId)
+          .finally(() => { this.formalAckInFlight = null; });
+      }
       let eligible = priority === true && this.freshWakeDiscovery && this.queue.concurrency > 1
         && !rootSelection.replyRequest && root.requestKind !== "reply"
         && Number.isSafeInteger(signal.createdAt) && signal.createdAt >= 0
@@ -350,6 +357,40 @@ export class Bridge {
 
   // A Board claim assigned to this agent: one session per claim, reply as a
   // claim note so it lands in that claim's thread.
+  async acknowledgeFormalReceipt(requestId, signalId) {
+    const fence = this.fencingToken;
+    const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(2000)]);
+    try {
+      const context = await this.room.requestContext(requestId, null, { compact: true, signal });
+      const request = context?.request, basis = context?.current?.answerBasis;
+      if (context?.roomId !== this.connection.roomId || context.viewerId !== this.connection.memberId
+        || request?.id !== requestId || request.recipientId !== context.viewerId || request.status !== 'open'
+        || request.acknowledgedAt != null || context.page?.hasMore !== false || !basis
+        || basis.contextEventId !== request.contextEventId || !request.contextMessageId) return;
+      if (!(await this.authorized({ messageIds: [...new Set([requestId, request.contextMessageId])], signal }))
+        || signal.aborted || fence !== this.fencingToken) return;
+      const key = JSON.stringify([context.roomId, context.viewerId, requestId, basis.expectedRequestRevision, basis.contextEventId]);
+      const id = 'acp-first-ack-' + createHash('sha256').update(key).digest('hex');
+      const body = { id, type: 'reply_request.progressed', data: {
+        requestMessageId: requestId, expectedRequestRevision: basis.expectedRequestRevision,
+        progress: 'acknowledged', ifUnacknowledgedContextEventId: basis.contextEventId
+      }};
+      const path = `/api/rooms/${encodeURIComponent(context.roomId)}/commands`;
+      let result;
+      try { result = await this.room.request(path, { body, listenerToken: fence, signal }); }
+      catch (error) {
+        if (!(error instanceof RoomError) || error.status !== 0 || signal.aborted) throw error;
+        result = await this.room.request(path, { body, listenerToken: fence, signal });
+      }
+      if (result?.event?.type === body.type && result.event.actorId === context.viewerId
+        && result.event.data?.requestMessageId === requestId && result.event.data.progress === 'acknowledged')
+        this.stageObserver.mark([signalId], 'formal_ack_recorded', id);
+    } catch (error) {
+      // The ordinary turn still checks all authority independently.
+      this.log(`formal receipt not confirmed (${error instanceof RoomError ? error.code : 'internal'})`);
+    }
+  }
+
   async acceptClaim(signal) {
     if (!CLAIM_WAKE_REASONS.includes(signal.reason)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
     let claim;
@@ -788,6 +829,7 @@ export class Bridge {
 
   async pollOnce() {
     if (!(await this.lease())) { await sleep(5000, this.controller.signal); return; }
+    this.formalAckAvailable = this.firstFormalAck;
     // Drain every queued page in this cycle: signals on later pages are
     // just as queued as the first page's, and a first-page signal that
     // cannot ack yet (a long turn, a parked receipt) must not hide them.
@@ -835,6 +877,7 @@ export class Bridge {
       }
     }
     this.stop();
+    await this.formalAckInFlight;
     await this.queue.idle();
     // Say goodbye so presence stops reading "listening" right away and
     // mentions show as queued. Best effort: a crash still ages out.
