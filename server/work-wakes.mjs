@@ -114,7 +114,7 @@ export class WorkWakes {
       if (item.state !== "accepted" || !item.dependsOn?.includes(prerequisite.id)) continue;
       const memberId = item.accountableMemberId;
       const agentId = this.store.identities.identityIdForMember(roomId, memberId);
-      if (!agentId || !this.scopedReceiver(roomId, agentId, at) || this.store.wakeQueue.pauseStatus(roomId, memberId)) continue;
+      if (!agentId || !this.scopedReceiver(roomId, agentId, at)) continue;
       const basis = this.successorBasis(roomId, state, item, memberId, at);
       if (basis) this.emitWork(roomId, state, item, incoming, at, basis);
     }
@@ -160,7 +160,8 @@ export class WorkWakes {
     // #3262: a genuinely new work signal releases the room-hosted poll
     // waiter, mirroring enqueueWake — otherwise a host parked on the poll
     // door sleeps through the assignment until its wait expires.
-    if (inserted.changes > 0) this.store.agentHeartbeats?._releaseWakeWaiter(agentId, roomId);
+    if (inserted.changes > 0 && (!dependencyBasis || !this.store.wakeQueue.pauseStatus(roomId, memberId)))
+      this.store.agentHeartbeats?._releaseWakeWaiter(agentId, roomId);
   }
   pending(agentId, { roomId = null, hostId = null, limit = 50, after = null, bounded = false, order = "oldest" } = {}) {
     // Existing hostless callers retain their mention/DM contract. New work delivery
