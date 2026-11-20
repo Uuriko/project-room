@@ -1,0 +1,27 @@
+  /api/rooms/{roomId}/review-runtime:
+    post:
+      operationId: "reportExactReviewRuntime"
+      summary: Report a managed review runtime observation
+      description: Report claimed, started, or start_unknown for the current exact review basis. Only its designated agent reviewer may report. This does not grant execution authority.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [workItemId, completionEventId, evidenceVersion, expectedRevision, attemptId, phase]
+              properties:
+                workItemId: { type: string }
+                completionEventId: { type: string }
+                evidenceVersion: { type: string }
+                expectedRevision: { type: integer }
+                attemptId: { type: string }
+                phase: { type: string, enum: [claimed, started, start_unknown] }
+      responses:
+        '200': { description: Review runtime observation }
+        '401': { description: Unauthenticated }
+        '403': { description: Reporter is not the reviewer }
+        '409': { description: Exact action is stale or a different attempt is already observed }

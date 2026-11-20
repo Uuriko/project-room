@@ -363,3 +363,15 @@ export function diffResultSummary(rows) {
 export function workResume(item, now = Date.now(), ownerId = null, next = nextWorkStep(item, now, ownerId)) {
   return { ...workProgress(item, now), next: { action: next.action, label: next.label, memberId: next.memberId } };
 }
+
+
+export function reviewRuntimeLabel(status) {
+  const key = {
+    waiting_receiver: "review.runtime.waiting",
+    claimed: "review.runtime.claimed",
+    started: "review.runtime.started",
+    start_unknown: "review.runtime.unknown",
+    unavailable: "review.runtime.unavailable"
+  }[status];
+  return typeof key === "string" ? uiText(key) : "";
+}

@@ -1,3 +1,4 @@
+import { reviewRuntimeFor } from "./review-runtime.mjs";
 import {createHmac,createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
 import {INBOX_WORK_ROLES} from './current-inbox-indexes.mjs';
 import {readCurrentRecord,readCurrentWorkSummaryForViewer,chargeCurrentReadBudget,isCurrentRoom,readCurrentHead,readCurrentWorkItem,readCurrentOverviewWindow,currentVisibleHorizon,withCurrentReadContext} from './current-room-repository.mjs';
@@ -144,6 +145,8 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
           &&stepFor(item).needsAttention).map(item=>({
         id:item.id,title:item.title,state:item.state,revision:item.revision,mode:item.mode,
         next:stepFor(item),
+        ...(focus==='needs_me'&&stepFor(item).action==='verify'
+          ? {reviewRuntime:reviewRuntimeFor(store,roomId,item,stepFor(item),store.now())}:{}),
         nextRead:{tool:'room_read_work',arguments:{workItemId:item.id}},
         ...(focus==='results'?(()=>{const current=readCurrentWorkItem(store.db,roomId,item.id);return {
           result:currentResult(current),nextResultRead:current.receipt.nativeText

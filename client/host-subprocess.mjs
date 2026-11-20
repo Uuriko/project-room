@@ -68,7 +68,7 @@ export function isolatedHostCommand(config, cwd) {
   return { command: BWRAP, args };
 }
 
-export function hostSubprocess(config, { cwd, env, signal, input = "", maxBytes = 32768, isolate = false } = {}) {
+export function hostSubprocess(config, { cwd, env, signal, input = "", maxBytes = 32768, isolate = false, onOutput } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error("Host cancelled")); return; }
     const grouped = process.platform !== "win32";
@@ -94,7 +94,10 @@ export function hostSubprocess(config, { cwd, env, signal, input = "", maxBytes 
     child.stdout.on("data", chunk => {
       size += chunk.length;
       if (size > maxBytes) stop(`Host output exceeded ${maxBytes / 1024} KiB; reconcile the original attempt`);
-      else chunks.push(chunk);
+      else {
+        chunks.push(chunk);
+        try { onOutput?.(chunk); } catch { stop("Host observation failed; reconcile the original attempt"); }
+      }
     });
     child.on("close", code => {
       clearTimeout(timer); signal?.removeEventListener("abort", abort); kill();

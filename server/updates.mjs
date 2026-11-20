@@ -1,3 +1,4 @@
+import { reviewRuntimeFor } from "./review-runtime.mjs";
 import {isCurrentRoom} from './current-room-repository.mjs';
 import {combineCurrentEventPages} from './current-room-events.mjs';
 import { messageRepository } from "./message-repository.mjs";
@@ -124,7 +125,8 @@ function draft(fields) {
     basis: fields.basis,
     terminal: fields.terminal ?? null,
     untrusted: true,
-    next: fields.next ?? null
+    next: fields.next ?? null,
+    ...(fields.reviewRuntime ? {reviewRuntime:fields.reviewRuntime}: {})
   };
 }
 
@@ -284,6 +286,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
       title: clip(item.title || item.id), actor: item.accountableMemberId ?? null,
       createdAt: iso(item.createdAt ?? at), updatedAt: at,
       basis: `${item.revision}|${item.receipt?.eventId ?? ""}|${next.action}`,
+      reviewRuntime: reviewRuntimeFor(store,roomId,item,next,now),
       sourceRef: { workItemId: item.id },
       next: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(item.id)}` }
     }));
