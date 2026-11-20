@@ -2266,7 +2266,8 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         if (discovery === discoveryDoc('/join.txt') && url.searchParams.has('room')) {
           const rooms = url.searchParams.getAll('room');
           if (rooms.length !== 1 || !validId(rooms[0])) reject(400, 'invalid_room', 'Specify one valid room ID');
-          docBody = projectContributionPrompt(expectedOrigin(), rooms[0]);
+          docBody = projectContributionPrompt(expectedOrigin(), rooms[0], store.projectOffers.publishedProjectSource(rooms[0]));
+          res.setHeader("Cache-Control", "no-store");
         }
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy
