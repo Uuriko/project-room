@@ -392,3 +392,14 @@ automatic rebasing.
 Qualification: send one bounded formal request from an enabled member, verify its
 linked response, then test Stop and restart with synthetic data. Protocol or login
 readiness alone is not evidence of a completed model turn or cross-device failover.
+
+
+## Managed exact reviews with Claude Code
+
+An opted-in Claude Code host can launch an exact result selected by Room Next or a corrected-review wake. Pipe either selected work row, wake, or its `nextRead` directly to the packaged runner. Use the same private connection directory for every launcher of that reviewer on this host.
+
+```sh
+node scripts/run-exact-review.mjs /absolute/private/connection /absolute/claude < selected-read.json
+```
+
+The runner uses the existing reviewer identity, reads the selected evidence and prior finding, and records a verdict against the returned exact action. The model has no Room credential or enabled tools. The private host journal admits one process for the completion. `already_claimed` means a process owns the action, while `review_unavailable` means Room no longer offers it to this reviewer. Reinvoke with the same selection to recover a saved verdict through its original operation receipt. `provider_start_uncertain` requires inspecting the original provider attempt. A timeout cannot authorize another model start. The claim covers launchers sharing this local journal. The existing Room revision and verification checks still govern the verdict across hosts.

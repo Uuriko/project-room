@@ -104,6 +104,7 @@ optional.push("client/codex-runtime.mjs", "client/codex-shared-assistant.mjs", "
 optional.push("client/codex-host-status.mjs", "client/codex-supervisor.mjs");
 optional.push("src/agent-connection-readiness.js"); // Shared read-only setup/readiness projection.
 optional.push("client/codex-request-supervisor.mjs");
+optional.push("client/managed-exact-review.mjs", "scripts/run-exact-review.mjs", "scripts/watch-corrected-review.mjs", "cli/selected-basis.mjs", "cli/room-response.mjs");
 optional.push("server/handoff-packet.mjs"); // grok/handoff-packet
 optional.push("scripts/agent-doctor.mjs");
 optional.push("scripts/bootstrap-agent-room.mjs");
