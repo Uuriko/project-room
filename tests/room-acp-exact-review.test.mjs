@@ -142,3 +142,24 @@ test('a review that lands while the agent works wins over its stale verdict',asy
   assert.notEqual(f.pendingRows().invalidated_at,null);
   assert.deepEqual(f.counts,{prompt:1,write:1,receipt:0,ack:0});
 });
+
+test('an already settled review is checked without allocating a model session',async t=>{
+  const f = await setup(t);
+  let sessions=0, reads=0;
+  const session=f.bridge.host.session, request=f.bridge.room.request;
+  f.bridge.host.session=async(...args)=>{
+    sessions++;
+    return session(...args);
+  };
+  f.bridge.room.request=async(path,options)=>{
+    if(path.includes('/work-result?')) reads++;
+    return request(path,options);
+  };
+  f.recordCompetingVerdict();
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(reads,1);
+  assert.equal(sessions,0);
+  assert.equal(f.verdict()?.result,'fail');
+  assert.deepEqual(f.counts,{prompt:0,write:0,receipt:0,ack:0});
+});
