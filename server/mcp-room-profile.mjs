@@ -1319,8 +1319,12 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
         const outcome = await callHostedStdioTool(store, secret, name, args);
-        const value = name === "room_read_work" && !outcome.isError
+        let value = name === "room_read_work" && !outcome.isError
           ? selectedReadCapability(outcome.value, { store, secret, identity, oauthPrincipal }) : boardIdHint(store, args, outcome);
+        if (name === "room_read_public_review" && !outcome.isError && oauthPrincipal
+            && !mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes)) {
+          value = { ...value, actions: [], actionAvailability: "outside_connected_grant" };
+        }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, outcome.isError) };
       }
       if (INBOX_TOOLS.some(entry => entry.name === name)) {
