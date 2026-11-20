@@ -413,10 +413,26 @@ test("the addressed inbox finds both private routes and reports a missing receiv
   assert.equal(inbox[peerPointer.source][peerPointer.index].body, "Private peer message");
   assert.equal(inbox[roomPointer.source][roomPointer.index].body, "Private room message");
   assert.equal(roomPointer.reply.arguments.toMemberId, owner.identityId);
+  assert.equal(roomPointer.reply.arguments.replyToId, roomMessageId);
   assert.equal(peerPointer.nextRead.arguments.threadId, peer.body.event.data.threadId);
   assert.equal(peerPointer.reply.arguments.to, owner.identityId);
   const strangerInbox = (await jsonOf(await get(origin, inboxPath, stranger.secret))).body;
   assert.deepEqual(strangerInbox.addressedMessages, []);
+  const unlinked = "unlinked-review-agent";
+  const added = await jsonOf(await command(owner.secret, "member.added", {
+    memberId: unlinked, displayName: "Unlinked review agent", kind: "agent", permissions: [],
+  }));
+  assert.equal(added.status, 201);
+  const exact = { id: randomUUID(), type: "message.posted", data: {
+    messageId: randomUUID(), body: "@(unlinked-review-agent) Review when connected.",
+  } };
+  const sent = await jsonOf(await post(origin, postPath, exact, owner.secret));
+  assert.deepEqual(sent.body.wakeDelivery, [{ memberId: unlinked, status: "no_receiver" }]);
+  const repeated = await jsonOf(await post(origin, postPath, exact, owner.secret));
+  assert.equal(repeated.body.event.id, sent.body.event.id);
+  assert.equal(repeated.body.duplicate, true);
+  assert.equal(repeated.body.wakeDeliveryEvidence, "unknown");
+  assert.equal(repeated.body.wakeDelivery, undefined);
 });
 
 test("M1: a member id colliding with a party identity id sees no peer DMs or bonds", async t => {

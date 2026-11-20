@@ -93,6 +93,7 @@ export function recordedReplyAction(name, args, command, receipt) {
       : args.expectedRequestRevision + (name === "room_progress_request" ? 0 : 1),
     currentStateVerified: false, workStateChanged: false,
     ...(receipt.wakeDelivery ? { wakeDelivery: receipt.wakeDelivery } : {}),
+    ...(receipt.wakeDeliveryEvidence ? { wakeDeliveryEvidence: receipt.wakeDeliveryEvidence } : {}),
     next: requestMessageId ? { tool: "room_read_request", arguments: { requestMessageId } } : null };
 }
 export async function submitReplyAction(client, identity, name, args, { signal } = {}) {
