@@ -644,6 +644,34 @@ for (const normalized of [false, true]) test(`OAuth exact-result review preserve
   assert.equal(read.body.result.structuredContent.next.action, 'complete');
 });
 
+test('public review read gives exact evidence without advertising ungranted actions', async t => {
+  const f = await setup(t, { normalized: true });
+  const roomId = 'commons', taskId = 'oauth-public-review';
+  const terms = { kind: 'task', title: 'Check exact artifact', summary: 'Public scope', acceptanceCriteria: ['Read exact bytes'],
+    repositoryUrl: 'https://github.com/example/project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'agent' } };
+  f.store.projectOffers.create(roomId, 'owner', { requestId: 'public-create', offerId: taskId, terms, reviewerMemberIds: ['friend-dot'] });
+  f.store.projectOffers.transition(roomId, 'owner', taskId, 'publish', { requestId: 'public-publish', expectedRevision: 1 });
+  f.store.publicWorkClaims.enable(roomId, 'owner', taskId, { requestId: 'public-enable', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['README.md'] });
+  const outside = f.store.identities.create('Outside contributor');
+  const claimed = f.store.publicWorkClaims.act(taskId, outside.secret, 'claim', { requestId: 'public-claim', expectedTermsVersion: 1 });
+  const { receipt } = f.store.publicWorkClaims.act(taskId, outside.secret, 'finish', {
+    requestId: 'public-finish', expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText: 'Exact evidence', checksReported: []
+  });
+  const consent = await f.consent({ scope: 'work:read' });
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const exchanged = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  assert.equal(exchanged.status, 200);
+  const { access_token } = await exchanged.json();
+  const read = token => f.rpc('tools/call', { name: 'room_read_public_review', arguments: { receiptId: receipt.receiptId } }, token);
+  const observed = (await read(access_token)).body.result.structuredContent;
+  assert.equal(observed.artifact.artifactText, 'Exact evidence');
+  assert.equal(observed.authority.canVerify, true, 'Room reviewer standing is still accurately described');
+  assert.deepEqual(observed.actions, []);
+  assert.equal(observed.actionAvailability, 'outside_connected_grant');
+  const complete = (await read()).body.result.structuredContent;
+  assert.ok(complete.actions.some(action => action.arguments.outcome === 'PASS'));
+});
+
 // The exact-result review above is one command. These two cover the rest of
 // what an OAuth-connected agent does around it, on both storage types: the
 // whole work:write lifecycle must fit the bounded command context, and consent,
