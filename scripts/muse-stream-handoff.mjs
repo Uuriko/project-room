@@ -101,7 +101,9 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
     if (recovered) {
       // Replay our own recorded acknowledgment with its original inspected context.
       if (recovered.receiverSeen && validId(saved.contextEventId)) recovered.contextEventId = saved.contextEventId;
-      if (recovered.requestRevision !== saved.requestRevision) {
+      // Checkpoint a changed revision or exact inspected context before writing,
+      // so a later restart replays this write instead of a stale saved context.
+      if (recovered.requestRevision !== saved.requestRevision || recovered.contextEventId !== saved.contextEventId) {
         remember(state.after, recovered);
       }
       return offer({ status: "handoff", replay: true, after: state.after, ...recovered });

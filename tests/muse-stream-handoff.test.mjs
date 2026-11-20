@@ -323,3 +323,39 @@ test("receiver acknowledgment is refused for an inspected context that changed, 
   assert.equal(second.receiverAcknowledgment.duplicate, false);
   assert.equal(recorded, 1);
 });
+
+test("a stale refusal, a committed re-read ack with a lost response and a restart replay the re-read context", async () => {
+  const ask = request("combined", {contextEventId: "ctx-A"});
+  let checkpoint = {after: 10, inFlight: null}, serverContext = "ctx-A", ack = null;
+  const ops = new Map(), sent = [];
+  const client = {
+    replyRequests: () => ({evaluatedThrough: 10, requests: [ask]}),
+    replyContext: () => context({...ask, contextEventId: serverContext,
+      ...(ack ? {acknowledgedAt: "t", progressState: "acknowledged", progressNote: ack.note} : {})}, 11),
+    command(command) {
+      sent.push(command);
+      const fingerprint = JSON.stringify(command.data), prior = ops.get(command.id);
+      if (prior) {
+        if (prior.fingerprint !== fingerprint) throw Object.assign(Error("Operation ID reused with different input"), {status: 409, code: "idempotency_conflict"});
+        return {event: {id: prior.eventId}, sequence: prior.sequence, duplicate: true};
+      }
+      if (sent.length === 1) serverContext = "ctx-B"; // clarification B lands at the same revision
+      if (command.data.ifUnacknowledgedContextEventId !== serverContext)
+        throw Object.assign(Error("Read the current addressed request before acknowledging"), {status: 409, code: "request_context_changed"});
+      ack = command.data; ops.set(command.id, {fingerprint, eventId: "ack-B", sequence: 14});
+      throw new TypeError("Response interrupted"); // committed, response lost
+    }
+  };
+  const run = () => holdMuseHandoff({client, policy, checkpoint, receiverAck: true,
+    signal: new AbortController().signal, save(state) { checkpoint = state; }});
+  await assert.rejects(run(), /current addressed request/);
+  assert.equal(ack, null);
+  await assert.rejects(run(), /interrupted/);
+  assert.equal(sent[1].data.ifUnacknowledgedContextEventId, "ctx-B");
+  assert.equal(checkpoint.inFlight.contextEventId, "ctx-B", "the re-read context is checkpointed before the write");
+  const recovered = await run();
+  assert.deepEqual(sent[2], sent[1]);
+  assert.equal(recovered.receiverAcknowledgment.duplicate, true);
+  assert.equal(recovered.receiverAcknowledgment.sequence, 14);
+  assert.equal(ops.size, 1);
+});
