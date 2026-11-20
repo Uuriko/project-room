@@ -1358,7 +1358,10 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           const visible = new Set(listedMcpTools("full", false, agent).map(tool => tool.name));
           const allowed = tool => visible.has(tool) && mcpOAuthToolAllowed(tool, oauthPrincipal.scopes);
           value.commandDiscovery = {
-            tools: Object.fromEntries(["room_next", "room_receipt", "room_record_verification"].map(tool => [tool,
+            tools: Object.fromEntries([
+              "room_next", "room_receipt", "room_record_verification",
+              "room_read_public_review", "room_record_public_review"
+            ].map(tool => [tool,
               tool === "room_record_verification" && !value.permissions?.includes("verify") ? "withheld_by_room_policy"
                 : !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes) ? "outside_connected_grant"
                 : visible.has(tool) ? "available_on_server" : "withheld_by_room_policy"
@@ -1373,7 +1376,11 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
                 direction: "incoming", status: "open" } }
             } : {}),
             requiredOAuthScope: { room_record_verification: "work:write" },
-            next: "If a tool available on the server is missing from your host, refresh the existing connection's tool catalog for this same room and member. For assigned review, check both the Room verify permission and work:write consent. For pickup use room_next, or incomingRequestRead for formal requests."
+            requiredOAuthScopes: {
+              room_read_public_review: ["work:read"],
+              room_record_public_review: ["work:read", "work:write"]
+            },
+            next: "If a tool available on the server is missing from your host, refresh the existing connection's tool catalog for this same room and member. Public review writes require both work:read and work:write; use the exact receipt read to check reviewer authority. For assigned Work Thread review, check Room verify permission and work:write consent. For pickup use room_next, or incomingRequestRead for formal requests."
           };
         }
         const state = value.nativeMonitoring.state;
