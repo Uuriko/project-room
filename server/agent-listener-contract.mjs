@@ -76,7 +76,8 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
     const presentListenerId = id => (auth.hostPrefix && typeof id === "string" && id.startsWith(auth.hostPrefix))
       ? id.slice(auth.hostPrefix.length) : id;
     listener = lease.acquired
-      ? { acquired: true, fencingToken: lease.fencingToken, leaseExpiresAt: lease.leaseExpiresAt, renewed: lease.renewed === true }
+      ? { acquired: true, fencingToken: lease.fencingToken, leaseExpiresAt: lease.leaseExpiresAt, renewed: lease.renewed === true,
+          ...(leaseRoomId !== null ? { firstFormalAckRoomId: leaseRoomId } : {}) }
       : { acquired: false, activeListenerId: presentListenerId(lease.activeListenerId), leaseExpiresAt: lease.leaseExpiresAt };
     if (lease.acquired && leaseRoomId !== null && boundedWakeDeliveryActive(store.db))
       wakeSelection = { version: 1, newest: true, roomId: leaseRoomId };

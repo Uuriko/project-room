@@ -263,6 +263,7 @@ export class Bridge {
     if (this.fencingToken && Date.now() < this.leaseRenewAt) return true;
     const value = await this.room.heartbeat({ hostId: this.connection.hostId, cadenceSeconds: this.cadenceSeconds });
     this.fencingToken = value?.listener?.acquired ? value.listener.fencingToken : null;
+    this.firstFormalAck = Boolean(this.fencingToken && value.listener.firstFormalAckRoomId === this.connection.roomId);
     const selection = value?.wakeSelection;
     this.freshWakeDiscovery = Boolean(this.queue.concurrency > 1 && this.fencingToken && selection?.version === 1 && selection.newest === true
       && selection.roomId === this.connection.roomId && Object.keys(selection).sort().join(',') === 'newest,roomId,version');
@@ -332,6 +333,11 @@ export class Bridge {
       const root = rootSelection.thread;
       // An "@agent allow" answer to a pending permission ask is not a new turn.
       if (this.permissions?.isPending(root.id) && decisionOf(message.body)) { await this.ack([signal.signalId]); return; }
+      if (this.formalAckAvailable && rootSelection.replyRequest?.recipientId === this.connection.memberId
+        && rootSelection.replyRequest.status === 'open') {
+        this.formalAckAvailable = false;
+        await this.acknowledgeFormalReceipt(root.id, signal.signalId);
+      }
       let eligible = priority === true && this.freshWakeDiscovery && this.queue.concurrency > 1
         && !rootSelection.replyRequest && root.requestKind !== "reply"
         && Number.isSafeInteger(signal.createdAt) && signal.createdAt >= 0
@@ -350,6 +356,39 @@ export class Bridge {
 
   // A Board claim assigned to this agent: one session per claim, reply as a
   // claim note so it lands in that claim's thread.
+  async acknowledgeFormalReceipt(requestId, signalId) {
+    const fence = this.fencingToken;
+    try {
+      const context = await this.room.requestContext(requestId, null, { compact: true, timeoutMs: 2000 });
+      const request = context?.request, basis = context?.current?.answerBasis;
+      if (context?.roomId !== this.connection.roomId || context.viewerId !== this.connection.memberId
+        || request?.id !== requestId || request.recipientId !== context.viewerId || request.status !== 'open'
+        || request.acknowledgedAt != null || context.page?.hasMore !== false || !basis
+        || basis.contextEventId !== request.contextEventId || !request.contextMessageId) return;
+      if (!(await this.authorized({ messageIds: [...new Set([requestId, request.contextMessageId])] }))) return;
+      const key = JSON.stringify([context.roomId, context.viewerId, requestId, basis.expectedRequestRevision, basis.contextEventId]);
+      const id = 'acp-first-ack-' + createHash('sha256').update(key).digest('hex');
+      const body = { id, type: 'reply_request.progressed', data: {
+        requestMessageId: requestId, expectedRequestRevision: basis.expectedRequestRevision,
+        progress: 'acknowledged', ifUnacknowledgedContextEventId: basis.contextEventId
+      }};
+      const path = `/api/rooms/${encodeURIComponent(context.roomId)}/commands`;
+      let result;
+      try { result = await this.room.request(path, { body, listenerToken: fence, timeoutMs: 2000 }); }
+      catch (error) {
+        if (!(error instanceof RoomError) || error.status !== 0 || this.controller.signal.aborted) throw error;
+        result = await this.room.request(path, { body, listenerToken: fence, timeoutMs: 2000 });
+      }
+      if (result?.event?.type === body.type && result.event.actorId === context.viewerId
+        && result.event.data?.requestMessageId === requestId && result.event.data.progress === 'acknowledged')
+        this.stageObserver.mark([signalId], 'formal_ack_recorded', id);
+    } catch (error) {
+      if (!(error instanceof RoomError) || [401, 403, 429].includes(error.status) || error.code === 'stale_listener') throw error;
+      // A missed receipt leaves the wake and existing execution path intact.
+      this.log(`formal receipt not confirmed (${error.code})`);
+    }
+  }
+
   async acceptClaim(signal) {
     if (!CLAIM_WAKE_REASONS.includes(signal.reason)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
     let claim;
@@ -788,6 +827,7 @@ export class Bridge {
 
   async pollOnce() {
     if (!(await this.lease())) { await sleep(5000, this.controller.signal); return; }
+    this.formalAckAvailable = this.firstFormalAck;
     // Drain every queued page in this cycle: signals on later pages are
     // just as queued as the first page's, and a first-page signal that
     // cannot ack yet (a long turn, a parked receipt) must not hide them.

@@ -173,9 +173,9 @@ export class RoomClient {
       return value;
     });
   }
-  requestContext(requestMessageId, cursor = null) {
+  requestContext(requestMessageId, cursor = null, { compact = false, timeoutMs } = {}) {
     return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/reply-context?requestMessageId=${encodeURIComponent(requestMessageId)}`
-      + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''));
+      + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '') + (compact ? '&view=compact' : ''), { timeoutMs });
   }
   async post({ body, replyToId = null, toMemberId: directTo = null, messageId = `acp-${randomUUID()}`, requestId = randomUUID(), listenerToken = this.listenerToken }) {
     const parent = replyToId ? (await this.thread(replyToId, {selected:true})).thread : null;

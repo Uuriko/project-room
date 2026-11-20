@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assertListenerFence } from '../server/listener-fence.mjs';
 import { Bridge } from '../room-acp/src/bridge.mjs';
-import { RoomClient } from '../room-acp/src/room.mjs';
+import { RoomClient, RoomError } from '../room-acp/src/room.mjs';
 import { join } from '../room-acp/src/join.mjs';
 import { join as pathJoin } from 'node:path';
 import { startRoom } from './room-acp-fixture.mjs';
@@ -98,4 +98,52 @@ test('authenticated member and listener identity must agree', async t => {
   assert.throws(() => fixture.f.store.transaction(() => assertListenerFence(fixture.f.store,
     { identityId: connection.identityId, member: { id: 'different-member' } }, connection.roomId, token)),
     error => error.status === 403 && error.code === 'listener_identity_mismatch');
+});
+
+test('an ACP receipt lands before a worker runs and exact retry survives a lost reply', async t => {
+  const { fixture, connection, token } = await setup(t);
+  const { store } = fixture.f;
+  const messageId = 'pre-worker-request';
+  store.command(fixture.ownerKey, 'commons', {
+    id: 'open-pre-worker-request', type: 'message.posted',
+    data: { messageId, toMemberId: connection.memberId, requestKind: 'reply', body: 'Review the exact result.' }
+  });
+  const correction = store.command(fixture.ownerKey, 'commons', {
+    id: 'correct-pre-worker-request', type: 'message.posted',
+    data: { messageId: 'pre-worker-correction', toMemberId: connection.memberId, replyToId: messageId,
+      body: 'Use the corrected result.' }
+  });
+  store.agentHeartbeats.releaseListenerLease({
+    agentId: connection.identityId, roomId: connection.roomId,
+    fencingToken: token
+  });
+  const observations = [];
+  const bridge = new Bridge({ connection, persistSessions: false, minPollIntervalMs: 0, host: {}, observeStage: event => observations.push(event) });
+  const calls = [];
+  const request = bridge.room.request.bind(bridge.room);
+  bridge.room.request = async (path, options) => {
+    const result = await request(path, options);
+    if (options?.body?.type === 'reply_request.progressed') {
+      calls.push({ id: options.body.id, context: options.body.data.ifUnacknowledgedContextEventId, duplicate: result.duplicate });
+      if (calls.length === 1) throw new RoomError(0, 'network', 'Lost first response');
+    }
+    return result;
+  };
+  const queued = [];
+  bridge.queue.push = (key, wake) => {
+    queued.push([key, wake]);
+    assert.equal(store.replyRequests.selected(connection.identitySecret, 'commons', messageId).request.progressState, 'acknowledged');
+    return true;
+  };
+  await bridge.pollOnce();
+  assert.equal(bridge.firstFormalAck, true);
+  assert.deepEqual(calls.map(call => call.duplicate), [false, true]);
+  assert.equal(calls[0].id, calls[1].id);
+  assert.ok(calls.every(call => call.context === correction.event.id));
+  assert.ok(queued.length >= 1);
+  assert.ok(queued.every(([key]) => key === messageId));
+  const recorded = observations.filter(event => event.stage === 'formal_ack_recorded');
+  assert.equal(recorded.length, 1);
+  assert.ok(recorded[0].elapsedMs >= 0);
+  t.diagnostic(`Loopback receipt to recovered durable acknowledgment: ${recorded[0].elapsedMs.toFixed(1)} ms`);
 });
