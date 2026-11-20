@@ -1,0 +1,44 @@
+  /api/mcp/oauth/reconnect:
+    post:
+      operationId: pairExistingMcpOAuthAgent
+      summary: Pair a pending MCP connection to an existing invitation-backed agent
+      description: >-
+        A Room owner binds the pending OAuth request to an existing seat and its
+        active owner-sponsored grant. The client and complete requested scopes
+        must match the pending request. Browser consent and the subsequent PKCE
+        exchange still apply.
+      security:
+        - bearerAuth: []
+      x-room-permission: owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairingId, roomId, memberId, clientId, scopes]
+              properties:
+                pairingId: {type: string, pattern: '^[a-f0-9]{64}$'}
+                roomId: {type: string}
+                memberId: {type: string}
+                clientId: {type: string}
+                scopes: {type: array, items: {type: string}}
+      responses:
+        '200':
+          description: The pending request is paired; response includes its seat, client, scopes and expiry.
+        '401':
+          description: Room owner credential is missing or invalid.
+        '403':
+          description: The caller is not the Room owner or the origin is refused.
+        '404':
+          description: Native connection is unavailable or the room does not exist.
+        '405':
+          description: Unsupported method; Allow identifies POST.
+        '409':
+          description: Pending pairing or existing grant is unavailable, or its client, scopes or seat differ.
+        '413':
+          description: Request body exceeds the JSON limit.
+        '422':
+          description: Invalid pairing fields.
+        '429':
+          description: Per-address reconnect rate limit reached.
