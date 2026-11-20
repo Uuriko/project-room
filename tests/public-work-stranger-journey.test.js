@@ -120,7 +120,7 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   const list = prompt.match(/GET (\S+public-work\/tasks\?\S+)/)[1];
   assert.equal(list, f.origin + '/api/public-work/tasks?roomId=commons&claimable=1&limit=5');
   assert.match(prompt, /After your first useful submission, attempt to connect/);
-  assert.match(prompt, /Repeat the appropriate loop one task at a time/);
+  assert.match(prompt, /Repeat the claim and submit loop one task at a time/);
   assert.equal((await fetch(f.origin + '/join.txt?room=commons&room=other')).status, 400);
   const browse = async () => {
     const response = await fetch(list);
@@ -159,6 +159,12 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   assert.equal(nextFinish.status,200);
   assert.notEqual(nextFinish.body.receipt.receiptId,finish.body.receipt.receiptId);
   assert.deepEqual(await browse(), []);
+  const fallback = prompt.match(/GET (\S+public-work\/tasks\?roomId=commons&limit=5)/)[1];
+  const history = await fetch(fallback).then(r => r.json());
+  assert.equal(history.claimableCount,0);
+  assert.deepEqual(history.tasks.map(task=>task.taskId), ['journey:open','journey:submitted','next-in-commons']);
+  assert.ok(history.tasks.every(task=>task.repositoryUrl==='https://github.com/example/project'));
+  assert.match(prompt,/This is a proposal in chat, not a claim or a published issue/);
   assert.equal(await fetch(f.origin + '/join.txt?room=commons').then(r => r.text()), prompt);
 });
 
