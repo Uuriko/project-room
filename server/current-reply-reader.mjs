@@ -1,6 +1,8 @@
 import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
 import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
 import {validId} from '../src/events.js';
+import {nativeOutboxEventId} from './mcp-outbox-event-id.mjs';
+import {identityIdForWakeMember} from './wake-identity-resolution.mjs';
 import {messageInHistory} from './history-visibility.mjs';
 import {charterContext} from '../src/room-charter.js';
 import {currentWorkRecord} from './work-context.mjs';
@@ -31,6 +33,58 @@ function decodeBound(crypto,token,binding){
  if(!saved||!selectionKeys.every(key=>saved[key]===binding[key]))fail('reply_cursor_identity_changed','Continuation belongs to another viewer or selection');
  return saved;
 }
+
+function hasDeliveryIndex(db, table, name) {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name=? AND tbl_name=?").get(name, table));
+}
+
+function retainedWebhookStatus(db, roomId, request) {
+  if (!hasDeliveryIndex(db, "mcp_event_outbox", "mcp_event_outbox_event")) return "unknown";
+  // Exact-key lookup through mcp_event_outbox_event (no document scan): the
+  // native wake for a formal request is keyed by its opening room event; the
+  // request id covers emitters that key by message id. JSON fields are then
+  // re-checked on at most a few rows so a colliding key can never leak.
+  const keys = [...new Set([request.openingEventId, request.id].filter(validId))]
+    .map(source => nativeOutboxEventId(roomId, request.recipientId, source));
+  const rows = db.prepare(`SELECT state,json_extract(document,'$.data.roomId') AS roomId,
+      json_extract(document,'$.data.memberId') AS memberId,json_extract(document,'$.data.requestId') AS requestId,
+      json_extract(document,'$.data.messageId') AS messageId
+    FROM mcp_event_outbox WHERE event_id IN (${keys.map(() => "?").join(",")}) LIMIT 64`).all(...keys)
+    .filter(row => row.roomId === roomId && row.memberId === request.recipientId
+      && (row.requestId === request.id || row.messageId === request.id));
+  const states = new Set(rows.map(row => row.state));
+  if (states.has("delivered")) return "delivered";
+  return states.has("pending") || states.has("leased") ? "queued" : "unknown";
+}
+
+function retainedPullStatus(db, roomId, request) {
+  if (!hasDeliveryIndex(db, "agent_wake_signals", "agent_wake_signals_coalesce")) return "unknown";
+  const identity = identityIdForWakeMember(db, roomId, request.recipientId);
+  if (!identity) return "unknown";
+  const row = db.prepare(`SELECT created_at, delivered_at FROM agent_wake_signals
+    WHERE agent_id=? AND COALESCE(room_id, '')=? AND message_id=?`).get(identity, roomId, request.id);
+  if (!row || row.created_at < Date.parse(request.createdAt)) return "unknown";
+  // Both cursor fast-forward and pruning can settle a mention. This is queue
+  // state; it cannot establish that the runtime read or acknowledged the ask.
+  return row.delivered_at == null ? "queued" : "settled";
+}
+
+// Read only for the parties of this exact selected request. The persisted
+// formal progress timestamp is distinct from either transport or runtime start.
+export function selectedRequestWakeDelivery(store, { roomId, request, viewerId }) {
+  if (!request || !validId(roomId) || !validId(request.id) || !validId(request.recipientId)
+    || !viewerId || (viewerId !== request.requesterId && viewerId !== request.recipientId)) return undefined;
+  const webhook = retainedWebhookStatus(store.db, roomId, request);
+  const pull = retainedPullStatus(store.db, roomId, request);
+  const recipientProgressAt = request.acknowledgedAt ?? null;
+  const value = { webhook, pull, hostEligibility: "unknown", recipientProgressAt };
+  if (request.status === "open" && viewerId === request.requesterId && !recipientProgressAt) {
+    value.nextAction = webhook === "queued" || pull === "queued" ? "check_delivery"
+      : webhook === "delivered" || pull === "settled" ? "check_recipient_progress" : "check_receiver_connection";
+  }
+  return value;
+}
+
 export function readCurrentReplies(store,token,roomId,mode,args,shape){
  if(!isCurrentRoom(store.db,roomId))return undefined;
  return store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
@@ -254,7 +308,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   const instructions=charterContext(room),work=request.workItemId?readCurrentWorkItem(db,roomId,request.workItemId):null;
   return stampReplyRead({...base,evaluatedThrough,selection:{direction:null,requestMessageId},request:structuredClone(request),roomCreatedEventId:created.id,sourceWindow:{complete:!hasMore,consistency:'frozen-conversation-current-preparation'},page:{cursor:args.cursor??null,checkpoint:null,items,rowBytes,limit,hasMore,nextCursor,completedCheckpoint:null,nextRead},nextRead,
    ...shape.responseTemplates(roomId,auth.member.id,request,answerBasis),
-   current:{evaluatedThrough,requesterAvailable:requester?.active===true,recipientAvailable:recipient?.active===true,contextEventId:contextEvent.id,contextSequence:context.row.seq,answerBasis,actions:{reply:canReply,answer:Boolean(answerBasis),decline:Boolean(answerBasis),cancel:request.status==='open'&&(auth.member.id===request.requesterId||auth.member.kind==='human'&&auth.member.id===room.ownerId)},blockedBy:denied?[denied]:[],workItemId:request.workItemId,instructionsRevision:room.charter?.revision??0},
+   current:{evaluatedThrough,requesterAvailable:requester?.active===true,recipientAvailable:recipient?.active===true,contextEventId:contextEvent.id,contextSequence:context.row.seq,answerBasis,actions:{reply:canReply,answer:Boolean(answerBasis),decline:Boolean(answerBasis),cancel:request.status==='open'&&(auth.member.id===request.requesterId||auth.member.kind==='human'&&auth.member.id===room.ownerId)},blockedBy:denied?[denied]:[],workItemId:request.workItemId,instructionsRevision:room.charter?.revision??0,wakeDelivery:selectedRequestWakeDelivery(store,{roomId,request,viewerId:auth.member.id})},
    preparation:{version:1,evaluatedThrough,room:{id:room.id,title:room.title,purpose:instructions.charter?.purpose??room.purpose??''},instructions,previousExchanges,work:work?currentWorkRecord(work):null,omitted:['other_work','other_messages','private_inbox','external_resources'],externalExecution:false}},auth.member.id);
  },{maxRecords:512}));
 }
