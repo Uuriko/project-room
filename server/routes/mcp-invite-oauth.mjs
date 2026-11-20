@@ -58,7 +58,21 @@ async function handleInviteConsent(ctx) {
       recovery: data.decision === "allow_public" ? publicRecovery : MCP_INVITE_RECOVERY });
   }
 }
+async function handleOwnerReconnect({ req, res, inviteOAuth, remoteAddress, rate, bearer, body, json }) {
+  if (!inviteOAuth) return json(res, 404, { error: "native_connection_unavailable" });
+  rate(`oauth-owner-reconnect:${remoteAddress}`, 12);
+  const token = bearer(req);
+  if (!token) return json(res, 401, { error: "room_owner_credential_required" });
+  res.setHeader("Cache-Control", "no-store");
+  return json(res, 200, inviteOAuth.authorizeReconnect(token, await body(req)));
+}
+
 export const MCP_INVITE_OAUTH_ROUTES = [{
+  id: "mcp.oauth.reconnect", method: "POST", path: "/api/mcp/oauth/reconnect", auth: "bearer",
+  capability: null, events: [], scope: "worker", handler: handleOwnerReconnect,
+  parity: "exempt:existing room owner pairs a pending OAuth request for an existing seat",
+  schema: { response: { type: "object" } },
+}, {
   id: "mcp.invite.consent", method: "POST", path: "/oauth/invite", auth: "none",
   capability: null, events: [], scope: "worker", handler: handleInviteConsent,
   parity: "exempt:human native plugin consent; agent uses the resulting scoped OAuth grant",
