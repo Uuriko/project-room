@@ -843,19 +843,28 @@ export class AgentInvites {
   }
 }
 
-// Machine-readable next steps for an agent that just redeemed an invite.
-// Same shape and vocabulary as SIGNUP_NEXT in agent-identities.mjs
-// (RC-2026-09-18-018) so the two entry paths feel like one product; the
-// steps are tailored to the invite path: this agent already has a room and
-// a member id, so the guidance is the room's first moves (meet the
-// members, say hello, advertise what you can do, find work). Room-scoped
-// paths are built with the joined room's id so every step is immediately
-// actionable — no room lookup first. A redeem cannot rename a member, so
-// when the name fell back to the default the first step explains how to
-// redo the redeem with the wanted displayName.
 const withConnect = (store, roomId, memberId, body) => {
-  const starter = isCurrentRoom(store.db, roomId) ? null : starterFor(store, roomId, memberId);
-  return { ...body, connect: connectFields(), ...(starter ? { starter } : {}), ...(isCurrentRoom(store.db, roomId) ? { nextWork: { tool: 'room_list_work', arguments: { focus: 'needs_me' }, coverage: 'not-evaluated' } } : {}) };
+  if (!isCurrentRoom(store.db, roomId)) {
+    const starter = starterFor(store, roomId, memberId);
+    return { ...body, connect: connectFields(), ...(starter ? { starter } : {}) };
+  }
+  const pickup = {
+    action: "find-work", tool: "room_next", arguments: { roomId }, path: "/mcp",
+    description: "Find addressed work and open requests. Follow the selected nextRead and any partial source pages."
+  };
+  const fallback = { tool: "room_list_work", arguments: { roomId, focus: "needs_me" } };
+  const credential = body.identitySecret
+    ? { action: "save-identity-secret", description: "Save the durable identitySecret from this response privately before connecting." }
+    : body.mcpToken ? null
+    : { action: "reuse-identity", description: "Reuse the saved identity credential on this instance. This replay does not issue a new connection token." };
+  const recovery = body.next.filter(step => step.action === "rotate");
+  const next = [...(credential ? [credential] : []), ...recovery, pickup];
+  return {
+    ...body, connect: { mcpUrl: "/mcp", httpHeader: connectFields().httpHeader },
+    nextWork: { tool: pickup.tool, arguments: pickup.arguments, coverage: "not-evaluated", fallback },
+    next,
+    nextActions: next.map(step => step === pickup ? { ...step, transport: "mcp" } : step)
+  };
 };
 
 const DEFAULT_INVITE_NAME = "Invited agent";

@@ -113,7 +113,10 @@ function roomCapability(context, step) {
 
 export function workContinuation(context, options = {}) {
   const step = continuationStep(context, options);
-  return { ...step, capability: roomCapability(context, step) };
+  const capability = roomCapability(context, step);
+  if (capability.room === "not_permitted") return { ...step, action: "permission_required",
+    label: "Ask the room owner to adjust permissions or reassign this step", guidance: capability.recovery, capability };
+  return { ...step, capability };
 }
 
 function continuationStep(context, { hosted = false, brief = true } = {}) {
