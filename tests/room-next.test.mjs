@@ -223,6 +223,54 @@ test("composite OAuth scope admits only the combined read grant", () => {
   }
 });
 
+test("legacy pickup finds a failed formal request outside the first page without changing continuation", async t => {
+  const f = await privateWorkFixture(t, "legacy");
+  f.store.dmConsents.request("commons", "owner", f.observer.id, "fixture");
+  f.store.dmConsents.decide("commons", f.observer.id, "owner", "approve");
+  for (let i = 0; i < 19; i++) {
+    f.send(f.owner, "message.posted", {
+      messageId: `request-${String(i).padStart(2, "0")}`, toMemberId: f.observer.id, requestKind: "reply",
+      body: "Inspect the original release result."
+    });
+  }
+  const requestMessageId = "request-18";
+  const correction = f.send(f.owner, "message.posted", {
+    messageId: "corrected-input", replyToId: requestMessageId, toMemberId: f.observer.id,
+    body: "Inspect the corrected release result and use its new candidate."
+  });
+  f.send(f.observer.key, "reply_request.progressed", {
+    requestMessageId, expectedRequestRevision: 0, ifCurrentContextEventId: correction.event.id,
+    progress: "error", note: "Receiver failed during preparation."
+  });
+
+  const args = { source: "requests" };
+  const ordinary = await f.mcp(f.observer, "room_next", args);
+  const pickup = await f.mcp(f.observer, "room_next", { ...args, view: "pickup" });
+  assert.equal(pickup.ok, true, pickup.text);
+  assert.deepEqual(pickup.value.requests.items, ordinary.value.requests.items);
+  assert.equal(pickup.value.requests.coverage, ordinary.value.requests.coverage);
+  const [ordinaryPage, pickupPage] = await Promise.all([ordinary, pickup].map(result => {
+    const next = result.value.requests.nextRead;
+    return f.mcp(f.observer, next.tool, next.arguments);
+  }));
+  assert.deepEqual(pickupPage.value.requests.items, ordinaryPage.value.requests.items);
+  assert.ok(!pickup.value.requests.items.some(row => row.id === requestMessageId));
+  assert.equal(pickup.value.nextRead.arguments.requestMessageId, requestMessageId);
+  const pointer = pickup.value.nextRead;
+  const exact = await f.mcp(f.observer, pointer.tool, pointer.arguments);
+  assert.equal(exact.ok, true, exact.text);
+  assert.equal(exact.value.current.answerBasis.contextEventId, correction.event.id);
+  assert.equal(exact.value.page.items.find(item => item.kind === "context").message.id, "corrected-input");
+
+  const observer = await f.mcp(f.triage, "room_next", { ...args, view: "pickup" });
+  assert.notEqual(observer.value.nextRead?.arguments?.requestMessageId, requestMessageId);
+  f.send(f.owner, "reply_request.cancelled", { requestMessageId, expectedRequestRevision: 0, reason: "Resolved separately." });
+  const closed = await f.mcp(f.observer, pointer.tool, pointer.arguments);
+  assert.deepEqual(closed.value.responseActions, []);
+  const after = await f.mcp(f.observer, "room_next", { ...args, view: "pickup" });
+  assert.notEqual(after.value.nextRead?.arguments?.requestMessageId, requestMessageId);
+});
+
 test("formal requests paginate independently with no work, and closed requests cannot be answered", async t => {
   const f = await privateWorkFixture(t, "normalized-current-v1");
   f.store.dmConsents.request("commons", "owner", f.observer.id, "fixture");
