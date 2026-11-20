@@ -151,15 +151,19 @@ function legacyWorkPage(store, roomId, auth, room, cursor) {
     nextRead: hasMore ? read(roomId, "work", position.encode(after)) : null };
 }
 
+const requestRead = (roomId, id) => ({
+  tool: "room_read_request", arguments: { roomId, requestMessageId: id, view: "compact" }
+});
+
 function requestRows(requests, roomId) {
   return requests.map(row => ({
     id: row.id, revision: row.revision, savedAt: row.createdAt,
     ...(row.progress ? { latestRecipientProgress: { state: row.progress.state, at: row.progress.at } } : {}),
-    nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: row.id, view: "compact" } }
+    nextRead: requestRead(roomId, row.id)
   }));
 }
 
-function legacyRequestPage(store, secret, roomId, auth, room, cursor) {
+function legacyRequestPage(store, secret, roomId, auth, room, cursor, preferRecovery) {
   const position = pageCursor(store, cursorBinding(auth, roomId, "requests", room.sequence), cursor);
   if (!position) return unavailable(roomId, "requests", "cursor_changed");
   const page = store.replyRequests.list(secret, roomId, {
@@ -168,7 +172,11 @@ function legacyRequestPage(store, secret, roomId, auth, room, cursor) {
   const rows = page.requests.filter(row => row.id > position.after).sort((a, b) => a.id < b.id ? -1 : 1);
   const selected = rows.slice(0, PAGE_SIZE);
   const more = rows.length > selected.length;
+  // The legacy reader already loads the bounded, authorized open requests.
+  // Pick a recovery without moving rows or invalidating a list continuation.
+  const recovery = preferRecovery && !cursor && rows.find(row => row.progress?.state === "error");
   return {
+    ...(recovery ? { recoveryRead: requestRead(roomId, recovery.id) } : {}),
     coverage: more ? "partial" : "complete", evaluatedThrough: page.evaluatedThrough,
     items: requestRows(selected, roomId),
     nextRead: more ? read(roomId, "requests", position.encode(selected.at(-1).id)) : null
@@ -233,16 +241,23 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
         { tool: "room_activation_pack", arguments: { roomId, view: "brief" } })
       : boundedPage(roomId, "work", () => current
         ? workPage(store, roomId, auth, room, cursor) : legacyWorkPage(store, roomId, auth, room, cursor));
-    if (includeRequests) packet.requests = requestsOverBudget
-      ? unavailable(roomId, "requests", "legacy_projection_budget",
-        { tool: "room_list_requests", arguments: { roomId, direction: "incoming", status: "open" } })
-      : boundedPage(roomId, "requests", () => current
-        ? requestPage(store, secret, roomId, auth, cursor) : legacyRequestPage(store, secret, roomId, auth, room, cursor));
+    let recoveryRead;
+    if (includeRequests) {
+      const { recoveryRead: recovery, ...requests } = requestsOverBudget
+        ? unavailable(roomId, "requests", "legacy_projection_budget",
+          { tool: "room_list_requests", arguments: { roomId, direction: "incoming", status: "open" } })
+        : boundedPage(roomId, "requests", () => current
+          ? requestPage(store, secret, roomId, auth, cursor)
+          : legacyRequestPage(store, secret, roomId, auth, room, cursor, view === "pickup"));
+      packet.requests = requests;
+      recoveryRead = recovery;
+    }
     // The default stays readable by clients with the original closed output schema.
     if (view === "pickup") {
       const correction = packet.work?.items.find(item => item.reason === "revise");
-      const addressed = correction ?? packet.requests?.items[0] ?? packet.work?.items[0];
-      packet.nextRead = addressed?.nextRead ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
+      const addressed = correction?.nextRead ?? recoveryRead
+        ?? packet.requests?.items[0]?.nextRead ?? packet.work?.items[0]?.nextRead;
+      packet.nextRead = addressed ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
 
       if (!source && !room.archivedAt && auth.member.kind === "agent"
         && auth.member.permissions.includes("accept_work") && !addressed) {
