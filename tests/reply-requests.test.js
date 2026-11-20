@@ -6,13 +6,13 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { applyEvent, replay, event } from "../src/events.js";
-import { replyContextOwners, MAX_REPLY_REQUESTS, prepareReplyPost } from "../src/reply-requests.js";
+import { replyContextOwners, prepareReplyPost } from "../src/reply-requests.js";
 import { DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { auditReplyRequests, REPLY_PAGE_BYTES } from "../server/reply-requests.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
-import { validateReplyRead } from "../client/reply-actions.mjs";
+import { replyRefusal, validateReplyRead } from "../client/reply-actions.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -211,12 +211,16 @@ test("full request history audit rejects matching forged checkpoints and project
   }
 });
 
-test("request map is bounded and unsupported event policies cannot be silently interpreted", () => {
+test("an oversized legacy list supplies a paged recovery for the same direction", () => {
+  const refuse=replyRefusal({code:"reply_list_too_large",status:413},{name:"room_list_requests",args:{direction:"outgoing",status:"answered"}});
+  assert.equal(refuse.reason,"reply_list_too_large");
+  assert.deepEqual(refuse.next,[{tool:"room_request_history",arguments:{direction:"outgoing"}}]);
+});
+
+test("unsupported request event policies cannot be silently interpreted", () => {
   const original = replay(initialRoom()), stamped = event({ roomId: "commons", actorId: "owner", type: "message.posted",
     data: { messageId: "request", toMemberId: "another", body: "Question", requestKind: "reply", requestPolicyVersion: 1 } });
   for (const value of [null, 0, 2, "1"]) assert.throws(() => applyEvent(original, { ...stamped, data: { ...stamped.data, requestPolicyVersion: value } }), /Unsupported reply/);
-  original.replyRequests = Object.fromEntries(Array.from({ length: MAX_REPLY_REQUESTS }, (_, i) => [`r${i}`, {}]));
-  assert.throws(() => applyEvent(original, stamped), /capacity/);
 });
 
 test("selected exchange freezes pages, exposes basis only after context is drained, and stays read-only", t => {

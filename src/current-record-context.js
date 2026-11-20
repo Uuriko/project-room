@@ -15,7 +15,6 @@ export function bindCurrentRecordContext(state, { replyRequestCount, replyOwner,
 export function inheritCurrentRecordContext(previous, next) {
   const context=contexts.get(previous);if(context)contexts.set(next,context);
 }
-export const currentRecordReplyCount = state => contexts.get(state)?.replyRequestCount;
 
 export function currentRecordReplyOwner(state,messageId) {
  const value=contexts.get(state)?.replyOwner?.(messageId);
