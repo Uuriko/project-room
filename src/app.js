@@ -4732,7 +4732,9 @@ $("#message-form").addEventListener("submit", e => {
     for (const wake of receipt?.wakeDelivery ?? []) {
       if (!wakeText[wake.status]) continue;
       const member = state.members[wake.memberId];
-      delivery.append(document.createTextNode(" · " + (member?.displayName ?? wake.memberId) + " — " + uiText(wakeText[wake.status])));
+      delivery.append(document.createTextNode(uiText("composer.wakeDisposition", {
+        name: member?.displayName ?? wake.memberId, status: uiText(wakeText[wake.status]),
+      })));
     }
     delivery.hidden = false;
     await commitComposerFiles(data.messageId);
