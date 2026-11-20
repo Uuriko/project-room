@@ -745,7 +745,7 @@ const shapes = {
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
-  [T.REPLY_REQUEST_PROGRESSED]: "requestMessageId expectedRequestRevision progress note ifUnacknowledgedContextEventId",
+  [T.REPLY_REQUEST_PROGRESSED]: "requestMessageId expectedRequestRevision progress note ifUnacknowledgedContextEventId ifCurrentContextEventId",
   [T.POLL_VOTED]: "messageId option active",
   ...PIN_COMMAND_SHAPES,
   [T.CHANNEL_CREATED]: "channelId name",
@@ -7235,6 +7235,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       assertListenerFence(this, auth, roomId, listenerToken);
       const firstAck = command.type === T.REPLY_REQUEST_PROGRESSED
         && Object.hasOwn(command.data, "ifUnacknowledgedContextEventId");
+      const exactProgress = command.type === T.REPLY_REQUEST_PROGRESSED
+        && Object.hasOwn(command.data, "ifCurrentContextEventId");
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and vote in
       // polls; drafts (message.posted carrying a workItemId) need the
@@ -7269,6 +7271,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (firstAck && (listenerToken === undefined && liveListenerLease(this, auth, roomId) || command.data.progress !== "acknowledged"
         || !validId(command.data.ifUnacknowledgedContextEventId)))
         fail(422, "invalid_first_ack", "First acknowledgment requires the exact context event, and the room listener lease while one is live");
+      if (exactProgress && (firstAck || !validId(command.data.ifCurrentContextEventId)))
+        fail(422, "invalid_progress_context", "Progress needs one exact context event");
       return withCurrentServingWriter(this.db,roomId,() => {
       // Exact replays of commands committed before the pause returned above.
       refusePausedAgentWrite(this, roomId, auth.member, command);
@@ -7293,16 +7297,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ?? this.canonicalMessageEditContext(roomId, command);
       let room = messageContext?.room ?? this.room(roomId);
       if(!isArchivedOwnerPrivacyEvent(room.state,{type:command.type,actorId:auth.member.id}))refuseArchivedWrite(room.state);
-      if (firstAck) {
-        const { ifUnacknowledgedContextEventId, ...data } = command.data;
+      if (firstAck || exactProgress) {
+        const { ifUnacknowledgedContextEventId, ifCurrentContextEventId, ...data } = command.data;
         const requests = room.state.replyRequests ?? {};
         const request = Object.hasOwn(requests, data.requestMessageId) ? requests[data.requestMessageId] : null;
         if (request?.recipientId !== auth.member.id)
           fail(404, "request_not_found", "No reply request addressed to this recipient");
         if (request.status !== "open" || request.revision !== data.expectedRequestRevision
-          || request.contextEventId !== ifUnacknowledgedContextEventId)
-          fail(409, "request_context_changed", "Read the current addressed request before acknowledging");
-        if (request.acknowledgedAt != null || request.progressEventId != null)
+          || request.contextEventId !== (ifUnacknowledgedContextEventId ?? ifCurrentContextEventId))
+          fail(409, "request_context_changed", firstAck
+            ? "Read the current addressed request before acknowledging" : "Read the current addressed request before reporting progress");
+        if (firstAck && (request.acknowledgedAt != null || request.progressEventId != null))
           fail(409, "request_already_acknowledged", "The request already has recipient progress");
         // This is a live-write precondition, not a new event format. Keep it in
         // the command fingerprint and replay the existing progress event.
