@@ -29,6 +29,7 @@ import { applyPullRequestWebhook, publicNamespaceSqlExclusion, isPublicClaimName
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { MAX_CLAIM_HISTORY } from "./work-claims.mjs";
 import { parseEvent, verifyWebhook, WEBHOOK_BODY_LIMIT } from "./github-app/verify.mjs";
+import { maybeDispatchGithubReview } from "./github-review-webhook.mjs";
 
 // Claim ids in the wild: plan-pr-autolink, fo-sec06-invite-race,
 // qa7-10-m53-tmpdir, ready-WK41-E3, claude-code-drops.
@@ -469,7 +470,8 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
 // public URL.
 export async function postPrWebhook(ctx) {
   const env = liveEnv();
-  if (!prWebhookEnabled(env)) ctx.reject(404, "not_found", "Not found");
+  const legacy = prWebhookEnabled(env);
+  if (!legacy && !env.ROOM_GITHUB_REVIEW_RECIPE) ctx.reject(404, "not_found", "Not found");
   ctx.rate(`pr-webhook:${ctx.remoteAddress ?? "unknown"}`, 120);
   const secret = typeof env[PR_WEBHOOK_SECRET_ENV] === "string" ? env[PR_WEBHOOK_SECRET_ENV] : "";
   if (!secret) ctx.reject(503, "webhook_unconfigured", "The PR webhook is enabled but its secret is not configured");
@@ -481,17 +483,16 @@ export async function postPrWebhook(ctx) {
   });
   if (!check.ok) ctx.reject(401, "webhook_signature", "Bad webhook signature");
   const parsedEvent = parseEvent(ctx.req.headers, text);
-  if (parsedEvent.ignored || parsedEvent.event !== "pull_request") {
-    return ctx.json(ctx.res, 200, { ok: true, ignored: true });
-  }
-  const result = await handlePrWebhookPayload(ctx.store, parsedEvent.payload, {
+  if (parsedEvent.ignored) return ctx.json(ctx.res, 200, { ok: true, ignored: true });
+  const result = legacy && parsedEvent.event === "pull_request" ? await handlePrWebhookPayload(ctx.store, parsedEvent.payload, {
     nowMs: Date.now(),
-    // RES-0140: the settlement export re-verifies the delivery itself, so
-    // it receives the same raw body and signature header the route just
-    // checked, plus the env the route read its secret from.
     webhook: { rawBody: text, signature256: ctx.req.headers["x-hub-signature-256"], env },
-  });
-  if (!result.ok) return ctx.json(ctx.res, 200, { ok: true, ignored: true, reason: result.reason });
+  }) : null;
+  let review;
+  try { review = await maybeDispatchGithubReview(ctx.store, parsedEvent, env); }
+  catch { return ctx.json(ctx.res, 503, { ok: false, reason: "review_evidence_unavailable" }); }
+  if (!result?.ok) return ctx.json(ctx.res, 200, review.length ? { ok: true, review }
+    : { ok: true, ignored: true, ...(result?.reason ? { reason: result.reason } : {}) });
   // Minimal by design: claim id, PR number, and state. Nothing else.
   return ctx.json(ctx.res, 200, {
     ok: true,
@@ -499,6 +500,7 @@ export async function postPrWebhook(ctx) {
     action: result.action,
     linked: result.linked ? result.linked.claimId : null,
     settled: result.settled.map(entry => ({ claimId: entry.claimId, outcome: entry.outcome })),
+    ...(review.length ? { review } : {}),
   });
 }
 
