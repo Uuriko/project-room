@@ -463,3 +463,76 @@ test('accepted callback without execution leaves the original request stale unti
   await subscriptions.drain();
   assert.equal(callbacks, 1);
 });
+
+test('an ACP exception reports open-request error without taking over the correction', async t => {
+  const f = await fixture(t), bridge = f.make();
+  f.store.command(f.seeded.owner, 'commons', {id:'requester-correction', type:'message.posted',
+    data:{messageId:'requester-correction', body:'Check the exact corrected result.', replyToId:'dm', toMemberId:'worker'}});
+  await f.ready(bridge);
+  const before = await f.read(bridge);
+  bridge.host.prompt = async () => { throw new Error('private tool response'); };
+  await bridge.turn('dm', [f.wake]);
+  const failed = await f.read(bridge);
+  assert.equal(failed.request.status, 'open');
+  assert.equal(failed.request.contextEventId, before.request.contextEventId);
+  assert.equal(failed.request.contextMessageId, 'requester-correction');
+  assert.equal(failed.request.progressState, 'error');
+  assert.doesNotMatch(failed.request.progressNote, /private tool response/);
+
+  const retry = f.make();
+  await f.ready(retry);
+  await retry.turn('dm', [{...f.wake, signalId:'explicit-retry'}]);
+  const finished = await f.read(retry);
+  assert.equal(finished.request.status, 'answered');
+  assert.equal(finished.page.items.filter(item => item.kind === 'answered').length, 1);
+  assert.equal(finished.request.acknowledgedAt, failed.request.acknowledgedAt);
+});
+
+test('a newer requester correction fences out an obsolete ACP failure report', async t => {
+  const f = await fixture(t), bridge = f.make();
+  await f.ready(bridge);
+  bridge.host.prompt = async () => {
+    f.store.command(f.seeded.owner, 'commons', {id:'newer-correction', type:'message.posted',
+      data:{messageId:'newer-correction', body:'Use this correction instead.', replyToId:'dm', toMemberId:'worker'}});
+    throw new Error('old turn failed');
+  };
+  await bridge.turn('dm', [f.wake]);
+  const selected = await f.read(bridge);
+  assert.equal(selected.request.status, 'open');
+  assert.equal(selected.request.contextMessageId, 'newer-correction');
+  assert.equal(selected.request.progressState, undefined);
+  assert.equal(selected.page.items.filter(item => item.kind === 'context').length, 1);
+});
+
+test('a lost ACP failure receipt recovers the frozen progress operation without another model turn', async t => {
+  const f = await fixture(t);
+  let turns = 0, lost = false;
+  const operations = [];
+  const transport = async (url, options) => {
+    const response = await fetch(url, options);
+    if (options?.body && JSON.parse(options.body).type === 'reply_request.progressed') {
+      operations.push(options.body);
+      if (!lost) {
+        lost = true;
+        throw new Error('committed progress response lost');
+      }
+    }
+    return response;
+  };
+  const bridge = f.make(transport);
+  await f.ready(bridge);
+  bridge.host.prompt = async () => { turns++; throw new Error('model failed'); };
+  await bridge.turn('dm', [f.wake]);
+  const saved = await f.read(bridge);
+  const retry = f.make(transport);
+  await f.ready(retry);
+  await retry.turn('dm', [f.wake]);
+  const current = await f.read(retry);
+  assert.equal(turns, 1);
+  assert.equal(f.counts.prompts, 0);
+  assert.equal(operations.length, 2);
+  assert.equal(operations[0], operations[1]);
+  assert.equal(current.request.progressState, 'error');
+  assert.equal(current.request.progressEventId, saved.request.progressEventId);
+  assert.equal(current.request.contextMessageId, 'dm');
+});
