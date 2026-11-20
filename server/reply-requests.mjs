@@ -1,4 +1,4 @@
-import {readCurrentReplies} from './current-reply-reader.mjs';
+import {readCurrentReplies,selectedRequestWakeDelivery} from './current-reply-reader.mjs';
 import {isCurrentRoom} from './current-room-repository.mjs';
 import { messageRepository } from "./message-repository.mjs";
 import { randomUUID } from "node:crypto";
@@ -319,7 +319,8 @@ export class ReplyRequests {
           contextEventId: context.id, contextSequence: context.sequence, answerBasis,
           actions: { reply: true, answer: Boolean(answerBasis), decline: Boolean(answerBasis),
             cancel: open && (auth.member.id === request.requesterId || auth.member.kind === "human" && auth.member.id === state.room.ownerId) },
-          workItemId: request.workItemId, instructionsRevision: state.room.charter?.revision ?? 0 } });
+          workItemId: request.workItemId, instructionsRevision: state.room.charter?.revision ?? 0,
+          wakeDelivery: selectedRequestWakeDelivery(this.store, { roomId, request, viewerId: auth.member.id }) } });
       }
       return stampReplyRead(result, auth.member.id);
     });
