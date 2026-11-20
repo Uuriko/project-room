@@ -17,7 +17,7 @@
 // `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
 //             agent-credential | room-member | mcp | browser-session |
-//             account-session
+//             account-session | room-owner
 import { agentErrorAx } from "../src/agent-error.mjs";
 
 const route = (path, methods, auth, summary, operationId, extra = {}) =>
@@ -302,6 +302,13 @@ route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "De
   route("/oauth/authorize", ["GET", "POST"], "account-session", "OAuth 2.0 authorization-code consent: GET renders the consent screen (or 302 to login); POST records allow/deny and 302s to the registered redirect_uri with a code or access_denied. PKCE S256 mandatory.", "oauthAuthorize", { operationIds: { GET: "getOauthAuthorize", POST: "postOauthAuthorize" } }),
   route("/oauth/invite", ["POST"], "public", "Preview or accept native agent invitation consent with same-origin browser and a short-lived nonce cookie; requires configured OAuth client.", "confirmNativeAgentInvitation"),
   route("/oauth/register", ["POST"], "public", "Register public MCP client metadata for configured exact callback URLs; unavailable without configured MCP OAuth clients. Registration grants no Room access.", "registerMcpOAuthClient"),
+  route("/api/mcp/oauth/reconnect", ["POST"], "room-owner",
+    "Pair a pending OAuth request to an existing invitation-backed agent. Browser consent and PKCE still apply.",
+    "pairExistingMcpOAuthAgent", { requestBodies: { POST: {
+      type: "object", required: ["pairingId", "roomId", "memberId", "clientId", "scopes"],
+      properties: { pairingId: { type: "string", pattern: "^[a-f0-9]{64}$" }, roomId: { type: "string" },
+        memberId: { type: "string" }, clientId: { type: "string" }, scopes: { type: "array", items: { type: "string" } } }
+    } } }),
   route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
   route("/api/oauth/sessions/revoke-all", ["POST"], "account-session", "Kill every OAuth session for the signed-in account: all refresh families and access tokens die immediately, across all clients.", "oauthSessionsRevokeAll"),
   route("/api/oauth/sessions/{id}", ["DELETE"], "account-session", "Kill one OAuth session (token family) owned by the signed-in account. Unknown ids and other users' families both answer 404.", "oauthSessionRevoke"),
@@ -587,6 +594,7 @@ const AUTH_DESCRIPTION = {
   "identity-scoped": "The identityId that filed the request.",
   "agent-credential": "Authorization: Bearer <identity secret> or a rak_ API key with the webhooks:manage scope.",
   "room-member": "A room credential: room key or a room-linked identity secret.",
+  "room-owner": "Bearer credential for the current human Room owner.",
   "browser-session": "Browser session: the room_session cookie or a room Bearer <redacted>. POST /api/session is open - the access key in the body mints the session.",
   "account-session": "Account browser session: the account_session cookie plus X-Session-Binding (human sign-in).",
   mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list includes four join documents and anonymous public-work recommend/read tools. Saved-identity public-work writes and own feedback require no room membership.",
