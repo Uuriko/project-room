@@ -682,12 +682,18 @@ test("a final prerequisite gate releases each eligible accepted successor to its
   cmd(f.keys.owner, "message.posted", { messageId: "ready-approval", body: "The prerequisite is accepted." });
   const approve = { workItemId: parent, expectedRevision: row(parent).revision, decision: "approved",
     completionEventId: complete.event.id, evidenceVersion, reason: "Acceptance criteria met", sourceMessageId: "ready-approval" };
+  store.wakeQueue.pause(f.keys.owner, "commons", { requestId: "ready-before-gate-pause", reason: null },
+    null, { memberId: "ready-receiver" });
   let released = 0;
   t.after(store.agentHeartbeats.addWakeWaiter(receiver.identityId, "receiver",
     { roomId: "commons", onWake: () => { released++; } }));
   const accepted = cmd(f.keys.owner, "owner.decision_recorded", approve, "dependency-approval");
   cmd(f.keys.owner, "owner.decision_recorded", approve, "dependency-approval");
-  assert.equal(released, 1, "the new work releases the parked listener");
+  assert.equal(released, 0, "readiness during a pause does not release the listener");
+  assert.deepEqual(await poll(), []);
+  store.wakeQueue.resume(f.keys.owner, "commons", { requestId: "ready-before-gate-resume", reason: null },
+    null, { memberId: "ready-receiver" });
+  assert.equal(released, 1, "resume releases the parked listener for held ready work");
   const wakes = await poll();
   assert.deepEqual(wakes.map(w => w.workItemId).sort(), ["ready-a", "ready-b"]);
   for (const wake of wakes) {
