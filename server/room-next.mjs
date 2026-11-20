@@ -11,6 +11,7 @@ import { workRoleHolder } from "./work-context.mjs";
 
 const PAGE_SIZE = 4;
 const WORK_SEARCH_WINDOWS = 4;
+const LEGACY_WORK_SEARCH_LIMIT = 48;
 const CORRECTION_CHARS = 400;
 const CORRECTION_FIELD_BYTES = 650;
 const MAX_BYTES = 16 * 1024;
@@ -118,9 +119,10 @@ function workPage(store, roomId, auth, room, cursor) {
 function legacyWorkPage(store, roomId, auth, room, cursor) {
   const position = pageCursor(store, cursorBinding(auth, roomId, "work", room.sequence), cursor);
   if (!position) return unavailable(roomId, "work", "cursor_changed");
-  // Load one bounded key window, and advance only over the keys examined.
-  const windowLimit = PAGE_SIZE * WORK_SEARCH_WINDOWS;
-  const keys = store.db.prepare(`SELECT item.key FROM work_projection_items AS item
+  // Preserve the original search depth even for large referenced work items.
+  // Search farther only when the additional hydrated records fit the budget.
+  const originalLimit = PAGE_SIZE * WORK_SEARCH_WINDOWS;
+  const keys = store.db.prepare(`SELECT item.key, length(CAST(item.value AS BLOB)) AS bytes FROM work_projection_items AS item
     WHERE item.room_id=? AND item.key COLLATE BINARY>?
       AND (json_extract(item.value,'$.accountableMemberId')=? OR json_extract(item.value,'$.verifierMemberId')=?
         OR json_extract(item.value,'$.humanDecisionMakerId')=? OR json_extract(item.value,'$.handoff.triageMemberId')=?
@@ -128,8 +130,14 @@ function legacyWorkPage(store, roomId, auth, room, cursor) {
     ORDER BY item.key COLLATE BINARY LIMIT ?`);
   const memberId = auth.member.id;
   const rows = keys.all(roomId, position.after, memberId, memberId, memberId, memberId,
-    Number(memberId === room.ownerId), windowLimit + 1);
-  const ids = rows.slice(0, windowLimit).map(row => row.key);
+    Number(memberId === room.ownerId), LEGACY_WORK_SEARCH_LIMIT + 1);
+  let bytes = 0;
+  const ids = [];
+  for (const row of rows.slice(0, LEGACY_WORK_SEARCH_LIMIT)) {
+    if (ids.length >= originalLimit && bytes + row.bytes > LEGACY_WORK_BYTES) break;
+    ids.push(row.key);
+    bytes += row.bytes;
+  }
   const parties = store.privateWorkParties(roomId, { workIds: ids });
   const visible = [...readWorkItems(store.db, roomId, ids).values()].filter(item => {
     const allowed = parties.get(item.id);
