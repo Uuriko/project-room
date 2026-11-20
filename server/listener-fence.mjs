@@ -16,3 +16,12 @@ export function assertListenerFence(store, auth, roomId, token) {
   if (!lease || lease.token !== token || lease.expires <= store.agentHeartbeats.now())
     throw new ServiceError(409, 'stale_listener', 'The runtime no longer holds this room listener lease');
 }
+
+// True while this credential's identity holds an unexpired room listener lease.
+export function liveListenerLease(store, auth, roomId) {
+  const identityId = auth.identityId ?? auth.member?.identityId;
+  if (!identityId) return false;
+  store.agentHeartbeats.ensureListenerSchema();
+  const lease = store.db.prepare('SELECT lease_expires_at AS expires FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?').get(identityId, roomId);
+  return Boolean(lease && lease.expires > store.agentHeartbeats.now());
+}

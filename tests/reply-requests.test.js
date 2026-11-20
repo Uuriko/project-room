@@ -845,6 +845,43 @@ for (const outcome of ['answered', 'cancelled']) test(`history checkpoints do no
 });
 
 for (const representation of [undefined, "normalized-current-v1"]) {
+  test(`unleased receiver first acknowledgment refuses an inspected context that changed and records once in ${representation ?? "legacy"} storage`, t => {
+    const f = fixture(t, [], representation ? { representation } : {});
+    const roomId = "commons";
+    const recipient = f.store.identities.create("Muse receiver");
+    linkWithProof(f.store, f.keys.owner, roomId, recipient, { permissions: [] });
+    const send = command => f.store.command(recipient.secret, roomId, command);
+    const read = q => f.store.replyRequests.selected(recipient.secret, roomId, q.command.data.messageId, { view: "compact" });
+    const q = f.open("owner", { toMemberId: recipient.identityId }, "muse-q");
+    const inspected = read(q).request;
+    const ack = context => ({ id: `muse-seen-${inspected.openingEventId}`, type: "reply_request.progressed",
+      data: { requestMessageId: inspected.id, expectedRequestRevision: inspected.revision, progress: "acknowledged",
+        note: "Receiving runtime read and verified this exact request; model acceptance is separate.", ifUnacknowledgedContextEventId: context } });
+    const stale = ack(inspected.contextEventId);
+    f.post("owner", { messageId: "muse-correction", body: "Use the corrected target.", replyToId: inspected.id, toMemberId: recipient.identityId });
+    assert.equal(read(q).request.revision, inspected.revision);
+    assert.throws(() => send(stale), error => error.code === "request_context_changed");
+    assert.equal(read(q).request.acknowledgedAt ?? null, null);
+    assert.equal(f.store.operationReceipt(recipient.secret, roomId, stale.id).status, "not_recorded");
+    const current = ack(read(q).request.contextEventId);
+    const before = f.store.headSequence(roomId);
+    const committed = send(current);
+    assert.equal(committed.event.data.ifUnacknowledgedContextEventId, undefined);
+    assert.equal(read(q).request.progressState, "acknowledged");
+    assert.equal(read(q).request.progressNote, current.data.note);
+    const replay = send(current);
+    assert.equal(replay.duplicate, true);
+    assert.equal(replay.event.id, committed.event.id);
+    assert.equal(f.store.headSequence(roomId), before + 1, "one acknowledgment event");
+    assert.throws(() => send({ ...current, id: "second-first-ack" }), error => error.code === "request_already_acknowledged");
+    const leased = f.open("owner", { toMemberId: recipient.identityId }, "muse-leased-q");
+    assert.equal(f.store.agentHeartbeats.acquireListenerLease({ agentId: recipient.identityId, roomId, listenerId: "receiver" }).acquired, true);
+    assert.throws(() => send({ ...ack(read(leased).request.contextEventId), id: "unleased-while-live",
+      data: { ...ack(read(leased).request.contextEventId).data, requestMessageId: read(leased).request.id } }), error => error.code === "invalid_first_ack");
+  });
+}
+
+for (const representation of [undefined, "normalized-current-v1"]) {
   test(`fenced first acknowledgment binds current context and preserves progress in ${representation ?? "legacy"} storage`, t => {
     const f = fixture(t, [], representation ? { representation } : {});
     const roomId = "commons";

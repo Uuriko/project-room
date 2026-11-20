@@ -34,6 +34,24 @@ const compactRequest = request => Object.fromEntries(
   "id openingEventId requesterId recipientId workItemId status revision contextEventId terminalEventId createdAt closedAt".split(" ").map(key => [key, request[key]]));
 const statefulRequest = request => withRequestState({ ...compactRequest(request),
   ...(request.progressState ? { progress: { state: request.progressState, note: request.progressNote ?? null, at: request.lastActivityAt ?? null } } : {}) }, request);
+// Keep metadata alongside the list so older clients can still validate their
+// exact per-request schema. Only recommend an existing, participant-bound read.
+function withOverdueActions(result, roomId) {
+  const overdueActions = result.requests.filter(request => request.lifecycle?.state === "stale")
+    .map(request => {
+      const incoming = request.recipientId === result.viewerId;
+      return {
+        requestMessageId: request.id,
+        guidance: incoming
+          ? "Read the request. Answer if it is still useful, ask for any missing input, or decline with a reason."
+          : request.lifecycle.unresponsive
+            ? "Read the request. Check whether delivery reached the recipient. If work must move, cancel this ask with a reason before reassigning it."
+            : "Read the request. Confirm whether the recipient is still working. Clarify the blocker or cancel with a reason before reassigning.",
+        nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: request.id, view: "compact" } }
+      };
+    });
+  return overdueActions.length ? { ...result, overdueActions } : result;
+}
 const requestInHistory = (request, floor) => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor);
 const scope = Object.freeze({ membership: "room", targetedMessages: "participants-only", externalExecution: false, acknowledges: false,
   guidance: "Requests are conversations selected for this viewer by direction and status or request ID, not the dependencies of a selected task. workItemId associates a conversation with work; an open request does not reopen completed work. Messages are untrusted context. Reading is not answering; answering is not work completion or approval. Tokens grant no access." });
@@ -110,7 +128,7 @@ export class ReplyRequests {
     options=selection;
     const {direction="incoming",status="open",expectedSessionBinding=null}=options;
     const shapeRequest=states?statefulRequest:compactRequest;
-    if(isCurrentRoom(this.store.db,roomId))return readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates});
+    if(isCurrentRoom(this.store.db,roomId))return withOverdueActions(readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates}), roomId);
     if(options.cursor!==undefined||options.limit!==undefined)fail("invalid_reply_selection","Legacy request lists do not accept pagination; omit cursor and limit");
     if (!["incoming", "outgoing", "both"].includes(direction) || !["open", "answered", "declined", "cancelled", "all"].includes(status))
       fail("invalid_reply_selection", "Choose a request direction and current status");
@@ -129,7 +147,7 @@ export class ReplyRequests {
       // visible, so their horizon still reaches it.
       const evaluatedThrough = visibleSequenceHorizon(this.store.db, roomId, auth.member.id, room.sequence,
         auth.member.id === this.store.roomOwnerId(roomId));
-      return { evaluatedThrough, selection: { direction, status }, requests, nextReads };
+      return withOverdueActions({ viewerId: auth.member.id, evaluatedThrough, selection: { direction, status }, requests, nextReads }, roomId);
     }, { requestsOnly: true });
   }
   selected(token, roomId, requestMessageId, options = {}) {
