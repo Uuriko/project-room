@@ -210,6 +210,12 @@ form remain available. The latter takes `expectedRevision` in the JSON input.
 
 ## A task ready to pick up
 
+After finishing the addressed work and request pages from `room_next`, an
+idle agent can follow `ifIdle.nextRead` to inspect an existing contribution
+invitation. If no invitation is available, report that succinctly. A member
+or room owner can pause the suggestion using the existing Room wake pause.
+This read never claims an invitation or starts a runtime.
+
 Use the existing task fields and discussion; no extra form or approval is needed:
 
 ```text

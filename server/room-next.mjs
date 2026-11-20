@@ -204,6 +204,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor } = {}) {
           length(CAST(json_extract(projection,'$.workItems') AS BLOB)) AS workBytes,
           length(CAST(json_extract(projection,'$.replyRequests') AS BLOB)) AS requestBytes,
           json_extract(projection,'$.room.ownerId') AS ownerId, json_extract(projection,'$.room.purpose') AS purpose,
+          json_extract(projection,'$.room.archivedAt') AS archivedAt,
           json_extract(projection,'$.room.charter') AS charter FROM rooms WHERE id=?`).get(roomId);
     const charter = current ? room.charter : JSON.parse(room.charter ?? "null");
     packet.goal = String(charter?.purpose ?? room.purpose ?? "").slice(0, 800);
@@ -222,6 +223,18 @@ export function readRoomNext(store, secret, roomId, { source, cursor } = {}) {
         { tool: "room_list_requests", arguments: { roomId, direction: "incoming", status: "open" } })
       : boundedPage(roomId, "requests", () => current
         ? requestPage(store, secret, roomId, auth, cursor) : legacyRequestPage(store, secret, roomId, auth, room, cursor));
+    // Pull-only discovery. Keep invitations behind the existing eligible-work
+    // reader and make addressed obligations take precedence on every page.
+    if (!source && !room.archivedAt && auth.member.kind === "agent"
+      && auth.member.permissions.includes("accept_work")
+      && !packet.work.items.length && !packet.requests.items.length) {
+      const paused = store.wakeQueue.pauseStatus(roomId, auth.member.id);
+      packet.ifIdle = paused ? { status: "paused" } : {
+        status: "browse_invitations",
+        after: "addressed_work_and_request_pages",
+        nextRead: { tool: "room_list_work", arguments: { roomId, focus: "help_wanted", limit: 1 } }
+      };
+    }
     if (Buffer.byteLength(JSON.stringify(packet)) > MAX_BYTES)
       throw new ServiceError(409, "current_room_context_unavailable", "Read one source at a time");
     return packet;
