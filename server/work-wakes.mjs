@@ -81,6 +81,8 @@ export class WorkWakes {
   }
 
   scopedReceiver(roomId, agentId, now, hostId = null) {
+    // The lease table is installed only when a runtime opts into listener leases.
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_wake_listener_leases'").get()) return false;
     return Boolean(this.db.prepare(`SELECT 1 FROM agent_wake_listener_leases l
       JOIN agent_work_wake_hosts h ON h.agent_id=l.agent_id AND h.host_id=l.listener_id AND h.enabled=1
       WHERE l.room_key=? AND l.lease_expires_at>? AND (h.room_id IS NULL OR h.room_id=l.room_key)
