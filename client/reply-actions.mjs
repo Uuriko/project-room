@@ -132,7 +132,8 @@ export function replyRefusal(cause, { name, args = {} } = {}) {
       reply_history_changed: ["The saved history boundary no longer matches. Reconcile the original selection and room history before starting a reviewed new read; never silently reset the checkpoint.", []],
       reply_context_unavailable: ["Current context is unavailable to this connection. Ask the requester for a visible clarification through an authorized channel before answering.", []],
       reply_entry_too_large: ["A selected entry exceeds the read budget. Smaller pages cannot split that entry; request a separately authorized export or clarification.", []],
-      reply_list_too_large: ["Narrow the request direction or status selection before reading again.", []],
+      reply_list_too_large: ["Narrow the direction or status, or page through request history. Read each selected request directly for its current status before acting.",
+        [{ tool: "room_request_history", arguments: { direction: args.direction ?? "incoming" } }]],
       invalid_response: ["The response did not validate for this room, identity or read window. Do not use it as answer context. Check the connection and reconcile the original read.", [{ tool: "room_check_access" }]]
     };
     const known = Object.hasOwn(recovery, cause?.code), code = known ? cause.code : "read_failed";

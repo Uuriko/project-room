@@ -12,7 +12,7 @@ import { auditReplyRequests, REPLY_PAGE_BYTES } from "../server/reply-requests.m
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
-import { validateReplyRead } from "../client/reply-actions.mjs";
+import { replyRefusal, validateReplyRead } from "../client/reply-actions.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -209,6 +209,12 @@ test("full request history audit rejects matching forged checkpoints and project
     assert.deepEqual(f.store.rebuildProjection("commons").state, changed);
     assert.throws(() => auditRecovery(f.store), /Reply request history/);
   }
+});
+
+test("an oversized legacy list supplies a paged recovery for the same direction", () => {
+  const refuse=replyRefusal({code:"reply_list_too_large",status:413},{name:"room_list_requests",args:{direction:"outgoing",status:"answered"}});
+  assert.equal(refuse.reason,"reply_list_too_large");
+  assert.deepEqual(refuse.next,[{tool:"room_request_history",arguments:{direction:"outgoing"}}]);
 });
 
 test("unsupported request event policies cannot be silently interpreted", () => {

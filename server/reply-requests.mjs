@@ -139,7 +139,7 @@ export class ReplyRequests {
         http: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(request.id)}` },
         nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } } }));
       // Legacy lists return metadata only. Keep the existing response byte budget.
-      if (Buffer.byteLength(JSON.stringify({ requests, nextReads })) > 1048576) fail("reply_list_too_large", "Narrow the current request selection", 413);
+      if (Buffer.byteLength(JSON.stringify({ requests, nextReads })) > 1048576) fail("reply_list_too_large", "Narrow the selection or use paged reply history for this direction", 413);
       // F-S6c-3: evaluatedThrough is the viewer's visible horizon, not the
       // raw room sequence — the raw sequence counts private events past
       // the viewer's horizon and lets them compute how many hidden events
