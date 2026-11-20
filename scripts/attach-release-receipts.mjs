@@ -60,7 +60,7 @@ function stageEvidence(stage, value, candidate) {
   throw new Error(`Invalid or mismatched ${stage} receipt for the exact candidate.`);
 }
 
-export async function attachReleaseReceipts({ binding, inputs, readResult, lookup, post }) {
+export async function attachReleaseReceipts({ binding, inputs, readResult, lookup, post, requirePreparedEvidence = false }) {
   const { workItemId, completionEventId, candidateRevision } = binding;
   if (typeof workItemId !== "string" || !workItemId || typeof completionEventId !== "string" || !completionEventId
       || !revision.test(candidateRevision)) throw new Error("Expected a work item, exact completion event and 40-hex candidate.");
@@ -84,6 +84,10 @@ export async function attachReleaseReceipts({ binding, inputs, readResult, looku
   if (selected.workItemId !== workItemId || receipt?.eventId !== completionEventId
       || !digest.test(receipt.evidenceVersion) || !text?.messageId || candidates.size !== 1 || !candidates.has(candidateRevision)) {
     throw new Error("The selected completion does not name this exact candidate.");
+  }
+  if (requirePreparedEvidence &&
+      prepared.some(({ stage, check }) => !text.body.split("\n").includes(`${stage}: ${check.summary} ${check.evidenceDigest}`))) {
+    throw new Error("The stage files no longer match the evidence in the submitted release result.");
   }
   const previouslyAttached = selected.workThread?.releaseChecks?.checks ?? [];
   if (previouslyAttached.some(check => check.evidenceMessageId && !prepared.some(item => item.stage === check.stage))) {
@@ -230,24 +234,33 @@ async function main() {
     }
     return result.structuredContent;
   }
-  if (values["work-revision"] !== undefined) {
+  const prepare = values["work-revision"] !== undefined;
+  if (prepare) {
     if (binding.completionEventId !== undefined || !/^\d+$/.test(values["work-revision"])) {
       throw new Error("Supply a release binding without a completion event, and its exact work revision.");
     }
     const path = values["verify-path"];
     if (!/^\/(?!\/)[a-zA-Z0-9/_-]+$/.test(path)) throw new Error("Expected a same-origin verification path.");
     const options = { redirect: "error", signal: AbortSignal.timeout(10_000) };
-    const [version, proof] = await Promise.all([fetch(new URL("/api/version", origin), options), fetch(new URL(path, origin), options)]);
-    if (!version.ok || !proof.ok) throw new Error("Serving version or verification URL was unavailable.");
+    const readVersion = async () => {
+      const response = await fetch(new URL("/api/version", origin), options);
+      if (!response.ok) throw new Error("Serving version was unavailable.");
+      return (await response.json()).sourceRevision;
+    };
+    const before = await readVersion();
+    if (before !== binding.candidateRevision) throw new Error("Verify the exact serving candidate before preparing review.");
+    const proof = await fetch(new URL(path, origin), options);
+    if (!proof.ok) throw new Error("Live verification URL was unavailable.");
+    const verificationDigest = "sha256:" + hash(Buffer.from(await proof.arrayBuffer()));
     const body = prepareReleaseReview({ inputs, candidateRevision: binding.candidateRevision, origin, verificationPath: path,
-      servingRevision: (await version.json()).sourceRevision, verificationDigest: "sha256:" + hash(Buffer.from(await proof.arrayBuffer())) });
+      servingRevision: await readVersion(), verificationDigest });
     binding = await submitReleaseReview({ binding, expectedRevision: Number(values["work-revision"]), producerId: memberId, body, call });
   }
-  const output = await attachReleaseReceipts({ binding, inputs,
+  const output = await attachReleaseReceipts({ binding, inputs, requirePreparedEvidence: prepare,
     readResult: args => call("room_read_result", args),
-    lookup: values.recover || values["work-revision"] !== undefined ? args => call("room_receipt", args) : undefined,
+    lookup: values.recover || prepare ? args => call("room_receipt", args) : undefined,
     post: async args => confirmedReceipt(await call("room_post_message", args), args.id) });
-  console.log(JSON.stringify({ ...output, binding }));
+  console.log(JSON.stringify(prepare ? { ...output, binding } : output));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
