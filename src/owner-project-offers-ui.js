@@ -145,14 +145,15 @@ export function installOwnerProjectOffers({ client, getState, getSession, host }
   });
   const resultStates = { pending: 'Review pending', accepted: 'Accepted', rejected: 'Rejected', revision_requested: 'Revision requested' };
   const publicOfferUrl = id => `${['getdasha.com', 'www.getdasha.com'].includes(location.hostname) ? 'https://room.trydemigod.com' : ''}/offers?offer=${encodeURIComponent(id)}`;
+  const followUpEligible = row => row && ['accepted', 'revision_requested'].includes(row.review.state) && row.offer.status === 'published' && !row.followUp;
   function canFollowUp(row) {
     const member = getState()?.members?.[getSession()?.member?.id];
-    return resultsFresh && row?.review.state === 'revision_requested' && row.offer.status === 'published' && !row.followUp && member && member.active !== false && scope === currentScope();
+    return resultsFresh && followUpEligible(row) && member && member.active !== false && scope === currentScope();
   }
   function followUpView(row) {
     if (row.followUp && !resultsFresh) return '<p class="form-hint">Refresh results to check follow-up availability.</p>';
     if (row.followUp) return row.followUp.available ? `<p><a href="${escape(publicOfferUrl(row.followUp.taskId))}" target="_blank" rel="noopener noreferrer">View follow-up</a> · Not assigned automatically.</p>` : '<p class="form-hint">Follow-up unavailable.</p>';
-    return row.review.state === 'revision_requested' && row.offer.status === 'published' ? '<button type="button" class="button secondary" data-open-follow-up>Open follow-up</button>' : '';
+    return followUpEligible(row) ? '<button type="button" class="button secondary" data-open-follow-up>Open follow-up</button>' : '';
   }
   function checkedResult(row) {
     const receipt = row?.receipt, review = row?.review, authority = row?.authority;
@@ -224,7 +225,9 @@ export function installOwnerProjectOffers({ client, getState, getSession, host }
       const row = results.find(item => item.receipt.receiptId === openFollowUp.closest('[data-result-receipt]').dataset.resultReceipt); if (!canFollowUp(row)) return;
       followUpId = row.receipt.receiptId; followUpDirty = false; followUpForm.reset(); followUpForm.hidden = false;
       $('#owner-follow-up-context').textContent = `After: ${row.offer.title}. The original submission stays unchanged.`;
-      for (const [key, value] of Object.entries({ title: `Follow-up: ${row.offer.title}`.slice(0, 200), summary: row.offer.summary, criteria: row.offer.acceptanceCriteria.join('\n'), repositoryRef: row.task.repositoryRef, files: row.task.files.join('\n') })) followUpForm.elements[key].value = value;
+      const defaults = { repositoryRef: row.task.repositoryRef, files: row.task.files.join('\n') };
+      if (row.review.state === 'revision_requested') Object.assign(defaults, { title: `Follow-up: ${row.offer.title}`.slice(0, 200), summary: row.offer.summary, criteria: row.offer.acceptanceCriteria.join('\n') });
+      for (const [key, value] of Object.entries(defaults)) followUpForm.elements[key].value = value;
       controlState(); followUpForm.scrollIntoView({ block: 'center' }); followUpForm.elements.title.focus(); return;
     }
     const action = event.target.closest('[data-review-decision]'); if (!action || busy || pending || followUpId) return;

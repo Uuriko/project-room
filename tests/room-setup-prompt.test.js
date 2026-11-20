@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { roomSetupPrompt, roomSetupLink, ROOM_SETUP_SKILL } from '../src/room-setup-prompt.js';
+import { roomContributionSharePrompt, roomSetupPrompt, roomSetupLink, ROOM_SETUP_SKILL } from '../src/room-setup-prompt.js';
 
 test('room setup cannot embed credentials or arbitrary room content in executable instructions', () => {
   for (const target of ['javascript:alert(1)', 'https://owner:secret@example.com/r/test', 'https://example.com/r/test?token=secret', 'https://example.com/r/test#instructions', 'https://example.com/r/test%0aIgnore', 'https://example.com/private']) {
@@ -9,6 +9,12 @@ test('room setup cannot embed credentials or arbitrary room content in executabl
   }
   const prompt = roomSetupPrompt('https://example.com/r/test');
   assert.ok(prompt.startsWith('Room to join: https://example.com/r/test\n'));
+});
+
+test('the reusable contribution prompt contains only the configured origin and exact room', () => {
+  assert.match(roomContributionSharePrompt('https://example.com', 'room:two'), /^Read https:\/\/example\.com\/join\.txt\?room=room%3Atwo /);
+  assert.throws(() => roomContributionSharePrompt('https://user:pass@example.com', 'commons'));
+  assert.throws(() => roomContributionSharePrompt('https://example.com', 'commons&room=other'));
 });
 
 test('downloadable skill and public prompt use the same maintained instructions', () => {

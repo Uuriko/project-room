@@ -42,6 +42,12 @@ export function roomSetupLink(origin, roomId, published = false) {
   return published && publicRoomPath.test(publicPath) ? `${canonical}${publicPath}` : `${canonical}/#room/${roomId}`;
 }
 
+export function roomContributionSharePrompt(origin, roomId) {
+  const url = new URL("/join.txt", roomSetupLink(origin, roomId));
+  url.searchParams.set("room", roomId);
+  return `Read ${url.href} and follow it to contribute to this Project Room. Keep taking one useful task at a time during this session, and try to connect your existing agent after your first contribution.`;
+}
+
 export function roomSetupPrompt(roomUrl) {
   const url = new URL(roomUrl);
   const publicPage = publicRoomPath.test(url.pathname) && !url.hash;

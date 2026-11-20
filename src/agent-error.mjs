@@ -621,7 +621,7 @@ const AX_NAMED_RECOVERIES = {
   email_reply_unresolved: ["Resolve the existing mailbox draft attempt first.", "Resolve the existing draft attempt, then retry."],
   email_source_collision: ["An existing source has a different origin. Use the existing source or choose a different origin.", "Use the existing source, or create the new one under a different origin."],
   face_not_enabled: ["The public face is not enabled. Enable the public face before rotating its code.", "Enable the public face first, then rotate its code."],
-  follow_up_not_requested: ["An explicit revision request is required first.", "Request a revision explicitly, then follow up."],
+  follow_up_not_requested: ["The original result must be accepted or explicitly sent back for revision.", "Read the current review before publishing a follow-up."],
   grant_active: ["Membership administration is already granted to this identity — nothing to transfer.", "Treat it as done; the grant is already active."],
   guest_session_ended: ["Your previous browser identity expired. Sign out before joining as a new guest.", "Sign out, then join again as a new guest."],
   halt_active: ["A halt is active on this work. A steer/decide member must clear the exact halt before further work mutations.", "Ask a steer/decide member to clear the exact halt; do not mutate work until then."],
