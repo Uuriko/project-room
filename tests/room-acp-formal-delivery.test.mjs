@@ -61,6 +61,41 @@ test('ACP answer completes a real normalized reply request, rather than posting 
   assert.equal(f.counts.prompts, 1);
 });
 
+for (const cancelled of [false, true]) test(`ACP prepares formal context once after session startup (${cancelled ? 'cancelled' : 'corrected'})`, async t => {
+  const f = await fixture(t);
+  const bridge = f.make();
+  const sequence = [];
+  const readContext = bridge.room.requestContext.bind(bridge.room);
+  bridge.room.requestContext = (...args) => {
+    sequence.push('context');
+    return readContext(...args);
+  };
+  bridge.host.session = async () => {
+    sequence.push('session');
+    if (cancelled) {
+      f.store.command(f.seeded.owner, 'commons', {id:'cancel-during-session',type:'reply_request.cancelled',
+        data:{requestMessageId:'dm',expectedRequestRevision:0,reason:'No longer needed'}});
+    } else {
+      f.store.command(f.seeded.owner, 'commons', {id:'correct-during-session',type:'message.posted',
+        data:{messageId:'latest-correction',replyToId:'dm',toMemberId:'worker',body:'Use the corrected release evidence.'}});
+    }
+    return {sessionId:'synthetic',created:true};
+  };
+  await f.ready(bridge);
+  await bridge.turn('dm', [f.wake]);
+  assert.deepEqual(sequence, ['session','context']);
+  const current = await f.read(bridge);
+  if (cancelled) {
+    assert.equal(current.request.status, 'cancelled');
+    assert.equal(f.counts.prompts, 0);
+  } else {
+    assert.equal(current.request.contextMessageId, 'latest-correction');
+    assert.equal(current.request.status, 'answered');
+    assert.equal(f.counts.prompts, 1);
+    assert.match(f.counts.prompt[0].text, /Use the corrected release evidence/);
+  }
+});
+
 test('lost committed formal response retries the frozen recipe after restart without a second execution or event', async t => {
   const f = await fixture(t,{text:JSON.stringify({outcome:'answered',body:syntheticAnswer4141})}); let lose = true;
   const first = f.make(async (url, options) => {
@@ -305,8 +340,8 @@ for (const terminalLimit of [false,true]) test(`actual wake redelivery survives 
     const observer=new RoomClient(f.connection);
     assert.ok((await observer.poll({hostId:f.connection.hostId,waitMs:0})).pendingWakes.some(w=>w.signalId===initial.signalId));
   }else{
-    // Two failures, successful preparation, then the fresh post-session check.
-    assert.equal(preparations,4);assert.equal(f.counts.prompts,1);assert.equal((await f.read(bridge,'retry-formal')).request.status,'answered');
+    // Two failures and one successful post-session preparation.
+    assert.equal(preparations,3);assert.equal(f.counts.prompts,1);assert.equal((await f.read(bridge,'retry-formal')).request.status,'answered');
     assert.equal((await poll()).pendingWakes.some(w=>w.signalId===initial.signalId),false);
   }
 });

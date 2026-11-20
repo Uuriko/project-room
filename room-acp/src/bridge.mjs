@@ -714,13 +714,13 @@ export class Bridge {
     await this.agentReady();
     if (this.controller.signal.aborted) return;
     const selected = await this.readThread(receipt.threadKey, {selected:true});
-    let formal = selected.replyRequest?.recipientId === this.connection.memberId
-      ? await readCompleteRequest(this.room, receipt.threadKey) : null;
-    if (formal && (formal.request.status !== 'open' || formal.current?.actions?.answer !== true)) {
+    const incomingRequest = selected.replyRequest?.recipientId === this.connection.memberId
+      ? selected.replyRequest : null;
+    if (incomingRequest && incomingRequest.status !== 'open') {
       this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
     }
     let thread = selected.thread;
-    if (!formal) {
+    if (!incomingRequest) {
       // A fact is only a conservative context refusal, never cached authority.
       // Source-author/listener checks above and this selected classification are fresh for every new batch.
       const rootHash = createHash('sha256').update(JSON.stringify(selected.thread)).digest('hex');
@@ -753,13 +753,11 @@ export class Bridge {
     this.stageObserver.mark(receipt.signalIds, 'session_preparing', receipt.requestId);
     const {sessionId, created} = await this.host.session(receipt.threadKey);
     this.stageObserver.mark(receipt.signalIds, 'session_ready', receipt.requestId);
-    if (formal) {
-      // Session startup may wait while the requester cancels or adds context.
-      // Only the fresh complete request can authorize and prepare this turn.
-      formal = await readCompleteRequest(this.room, receipt.threadKey);
-      if (formal.request.status !== 'open' || formal.current?.actions?.answer !== true) {
-        this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
-      }
+    // Session startup may overlap a correction or cancellation. Read the
+    // complete request once afterwards, when its context can authorize the turn.
+    const formal = incomingRequest ? await readCompleteRequest(this.room, receipt.threadKey) : null;
+    if (formal && (formal.request.status !== 'open' || formal.current?.actions?.answer !== true)) {
+      this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
     }
     if (!(await this.authorized({messageIds:receipt.messageIds}))) {
       this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
