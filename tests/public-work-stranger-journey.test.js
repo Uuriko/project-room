@@ -15,6 +15,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { linkWithProof } from './helpers/link-with-proof.mjs';
+import { unpublishPublic } from '../server/legal-store.mjs';
 
 const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -120,6 +121,7 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   const list = prompt.match(/GET (\S+public-work\/tasks\?\S+)/)[1];
   assert.equal(list, f.origin + '/api/public-work/tasks?roomId=commons&claimable=1&limit=5');
   assert.match(prompt, /After your first useful submission, attempt to connect/);
+  assert.match(prompt, /public_work_my_review with that receipt ID or GET \/api\/public-work\/receipts\/RECEIPT_ID\/review with the same saved identity/);
   assert.match(prompt, /Repeat the claim and submit loop one task at a time/);
   assert.equal((await fetch(f.origin + '/join.txt?room=commons&room=other')).status, 400);
   const browse = async () => {
@@ -168,6 +170,40 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   assert.equal(await fetch(f.origin + '/join.txt?room=commons').then(r => r.text()), prompt);
 });
 
+
+
+test('the first read-only contribution can use a room’s explicitly published project before any task exists', async t => {
+  const f = await fixture(t);
+  for (const id of ['new-project', 'other-project']) f.store.initialize(initialRoom(id));
+  const create = (roomId, offerId, repositoryUrl, kind = 'project') => f.store.projectOffers.create(roomId, 'owner', {
+    requestId: 'create-'+offerId, offerId, reviewerMemberIds: ['owner'],
+    terms: { kind, title: 'Project brief', summary: 'Scope is deliberately absent from the prompt', acceptanceCriteria: ['Verify one claim'],
+      repositoryUrl, reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } }
+  });
+  const publish = (roomId, offerId) => f.store.projectOffers.transition(roomId, 'owner', offerId, 'publish', { requestId: 'publish-'+offerId, expectedRevision: 1 });
+  create('new-project', 'draft-project', 'https://github.com/example/draft');
+  create('new-project', 'bare-task', 'https://github.com/example/task', 'task');
+  publish('new-project', 'bare-task');
+  create('other-project', 'foreign-project', 'https://github.com/example/foreign');
+  publish('other-project', 'foreign-project');
+  const read = () => fetch(f.origin+'/join.txt?room=new-project');
+  const before = await (await read()).text();
+  assert.doesNotMatch(before, /github\.com|Published project repository/);
+  assert.match(before, /public-work\/tasks\?roomId=new-project&limit=5/);
+  create('new-project', 'public-project', 'https://github.com/example/published');
+  publish('new-project', 'public-project');
+  assert.deepEqual((await f.call('GET', '/api/public-work/tasks?roomId=new-project')).body.tasks, []);
+  const response = await read();
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const prompt = await response.text();
+  assert.match(prompt, /Published project repository for read-only discovery: https:\/\/github\.com\/example\/published/);
+  assert.doesNotMatch(prompt, /example\/(draft|foreign|task)|deliberately absent/);
+  assert.doesNotMatch(prompt, /public-work\/tasks\?roomId=new-project&limit=5/);
+  assert.match(prompt, /claimable=1.*limit=5/);
+  assert.match(prompt, /public reads without credentials/);
+  unpublishPublic(f.store.db, { kind: 'room', id: 'new-project', byAccount: 'operator', now: Date.now() });
+  assert.equal(await (await read()).text(), before);
+});
 
 test('a member and an outside agent contend for the same published lease', async t => {
   const f = await fixture(t);
