@@ -236,6 +236,7 @@ async function main() {
   }
   const prepare = values["work-revision"] !== undefined;
   if (prepare) {
+    if (typeof memberId !== "string" || !memberId) throw new Error("The saved connection needs the assigned release producer's memberId.");
     if (binding.completionEventId !== undefined || !/^\d+$/.test(values["work-revision"])) {
       throw new Error("Supply a release binding without a completion event, and its exact work revision.");
     }
@@ -252,8 +253,10 @@ async function main() {
     const proof = await fetch(new URL(path, origin), options);
     if (!proof.ok) throw new Error("Live verification URL was unavailable.");
     const verificationDigest = "sha256:" + hash(Buffer.from(await proof.arrayBuffer()));
+    const after = await readVersion();
+    if (after !== before) throw new Error("Serving revision changed while collecting review evidence.");
     const body = prepareReleaseReview({ inputs, candidateRevision: binding.candidateRevision, origin, verificationPath: path,
-      servingRevision: await readVersion(), verificationDigest });
+      servingRevision: after, verificationDigest });
     binding = await submitReleaseReview({ binding, expectedRevision: Number(values["work-revision"]), producerId: memberId, body, call });
   }
   const output = await attachReleaseReceipts({ binding, inputs, requirePreparedEvidence: prepare,

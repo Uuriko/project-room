@@ -177,7 +177,9 @@ submitting a result. Start the assigned release work, then run
 For this mode the binding contains the room, work item and candidate revision.
 The publisher verifies the serving revision and includes all three stage proofs
 and two absolute serving URLs in the exact result. The release checks are then
-attached to that completion. Use `--verify-path /docs/agents/paste` or another
+attached to that completion. The JSON output adds a `binding` object with the
+confirmed completion event. This mode uses the saved connection's `memberId`
+of the assigned release producer. Use `--verify-path /docs/agents/paste` or another
 same-origin path when the release requires a specific live check. Rerun with the
 same binding, work revision and evidence to recover an interrupted publication.
 
