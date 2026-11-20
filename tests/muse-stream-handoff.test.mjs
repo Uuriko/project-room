@@ -231,6 +231,35 @@ test("interrupted delivery waits once, then rechecks and replays only the exact 
   assert.equal(result.requestRevision, 2);
 });
 
+test("interrupted delivery preserves the receiver’s ACK and still offers the work once", async () => {
+  const selected = request("ready", { contextEventId: "ctx-ready" });
+  let current = selected, checkpoint = { after: 10, inFlight: null }, writes = 0;
+  const signal = new AbortController().signal;
+  const client = {
+    replyRequests: () => ({ evaluatedThrough: 15, requests: [selected] }),
+    replyContext: () => context(current, 15),
+    replyContextForHint: () => context(current, 15),
+    command(command) {
+      writes++;
+      current = { ...current, progressState: "acknowledged", acknowledgedAt: "2026-11-20T19:48:00Z", progressNote: command.data.note };
+      return { event: { id: "first-ack" }, sequence: 16, duplicate: false };
+    }
+  };
+  const primary = await holdMuseHandoff({ client, policy, checkpoint, signal, receiverAck: true,
+    save(value) { checkpoint = value; }, wait: false });
+  let pending = { ...checkpoint.inFlight, offeredAt: "2026-11-20T19:48:01Z", receiverAcknowledgment: primary.receiverAcknowledgment };
+  const offers = [pending], records = [];
+  const recover = () => recoverMuseHandoff({ client, policy, signal, offers, currentOffer: () => pending,
+    record(exact) { records.push(exact.openingEventId); pending = null; }, delay: async () => {} });
+  const replay = await recover();
+  assert.equal(replay.source, "interrupted_delivery");
+  assert.equal(replay.requestMessageId, selected.id);
+  assert.deepEqual(replay.receiverAcknowledgment, primary.receiverAcknowledgment);
+  assert.deepEqual(records, [selected.openingEventId]);
+  assert.equal(writes, 1);
+  assert.equal(await recover(), undefined);
+});
+
 test("interrupted delivery never reopens settled work or replays a different room", async () => {
   const offer = { requestMessageId: "ready", openingEventId: "open-ready", openingSequence: 15,
     roomCreatedEventId: "room-birth", offeredAt: "2026-11-18T21:00:00Z" };

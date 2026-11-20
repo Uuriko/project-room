@@ -211,12 +211,16 @@ export async function recoverMuseHandoff({ client, policy, signal, offers, curre
     if (!pending || pending.openingEventId !== offer.openingEventId) continue;
     const context = await client.replyContextForHint(pending.requestMessageId, { signal });
     if (context.roomCreatedEventId !== pending.roomCreatedEventId) throw Error("muse_handoff_identity_changed");
+    const receipt = pending.receiverAcknowledgment;
+    const receiverAck = integer(receipt?.sequence) && receipt.sequence > pending.openingSequence;
     const exact = pointer(context, { id: pending.requestMessageId, openingEventId: pending.openingEventId },
-      policy, pending.openingSequence - 1);
-    if (!exact || exact.openingSequence !== pending.openingSequence) continue;
-    record(exact);
+      policy, pending.openingSequence - 1, receiverAck);
+    if (!exact || exact.openingSequence !== pending.openingSequence || receiverAck && !exact.receiverSeen) continue;
+    const { contextEventId, receiverSeen, ...handoff } = exact;
+    record(handoff);
     return { status: "handoff", source: "interrupted_delivery", replay: true,
-      after: exact.openingSequence, originalOfferedAt: pending.offeredAt, ...exact };
+      after: exact.openingSequence, originalOfferedAt: pending.offeredAt, ...handoff,
+      ...(receiverAck ? { receiverAcknowledgment: receipt } : {}) };
   }
 }
 
@@ -234,7 +238,7 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
     if (!pending || pending.openingEventId !== status.openingEventId
       || pending.requestMessageId !== status.requestMessageId || pending.openingSequence !== status.openingSequence
       || readOptionalPrivate(receiptFile)?.openingEventId === pending.openingEventId) return null;
-    return { ...pending, offeredAt: status.offeredAt };
+    return { ...pending, offeredAt: status.offeredAt, receiverAcknowledgment: status.receiverAcknowledgment };
   };
   const watcher = watch(directory);
   const changes = on(watcher, "change", { signal });
