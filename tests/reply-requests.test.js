@@ -880,6 +880,13 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.throws(() => send({ ...current, id: "second-first-ack" }), error => error.code === "request_already_acknowledged");
     const leased = f.open("owner", { toMemberId: recipient.identityId }, "muse-leased-q");
     assert.equal(f.store.agentHeartbeats.acquireListenerLease({ agentId: recipient.identityId, roomId, listenerId: "receiver" }).acquired, true);
+    const duringLease = f.store.headSequence(roomId);
+    const retained = send(current);
+    assert.equal(retained.duplicate, true);
+    assert.equal(retained.event.id, committed.event.id);
+    assert.equal(retained.sequence, committed.sequence);
+    assert.equal(f.store.headSequence(roomId), duringLease, "no new acknowledgment while the lease is live");
+    assert.throws(() => send({ ...current, data: { ...current.data, note: "Changed retry" } }), error => error.code === "idempotency_conflict");
     assert.throws(() => send({ ...ack(read(leased).request.contextEventId), id: "unleased-while-live",
       data: { ...ack(read(leased).request.contextEventId).data, requestMessageId: read(leased).request.id } }), error => error.code === "invalid_first_ack");
   });
