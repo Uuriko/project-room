@@ -197,6 +197,21 @@ function selectedStart(db, roomId, workItemId, completionEventId, floor) {
   return { eventId: row.id, sequence: row.sequence, actorId: row.actorId, at: row.at };
 }
 
+// Surface the exact verdict that governed this completion. A later audit
+// of a historical result did not govern that result or the current gate.
+function selectedVerdict(db, roomId, work, receipt, floor) {
+  const matches = verdict => verdict && !verdict.historical
+    && verdict.completionEventId === receipt.eventId && verdict.evidenceVersion === receipt.evidenceVersion;
+  const verdict = matches(work.verification) ? work.verification : work.verificationHistory.findLast(matches);
+  if (!verdict) return null;
+  if (floor) {
+    const row = db.prepare("SELECT sequence FROM events WHERE room_id=? AND id=?").get(roomId, verdict.eventId);
+    if (!row || row.sequence < floor.sequence) return null;
+  }
+  const { eventId, result, verifierId, completionEventId, evidenceVersion, independenceConfirmed } = verdict;
+  return { eventId, result, verifierId, completionEventId, evidenceVersion, independenceConfirmed };
+}
+
 export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null }) {
   const work = state.workItems[workItemId];
   let result;
@@ -226,10 +241,11 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const correction = result.text?.body === null ? null
     : precedingCorrection(db, state, work, result.receipt, viewerId, floor, messageRecords);
   const releaseChecks = selectedReleaseChecks(db, state, work, result, viewerId, floor, messageRecords);
-  const start = result.receipt && result.text?.body !== null
-    ? selectedStart(db, state.room.id, workItemId, result.receipt.eventId, floor) : null;
+  const visibleReceipt = result.text?.body === null ? null : result.receipt;
+  const start = visibleReceipt ? selectedStart(db, state.room.id, workItemId, visibleReceipt.eventId, floor) : null;
+  const verdict = visibleReceipt ? selectedVerdict(db, state.room.id, work, visibleReceipt, floor) : null;
   return { contractVersion: 1, roomId: state.room.id, workItemId,
-    workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}),
+    workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
       ...(correction ? { correction } : {}), ...(releaseChecks ? { releaseChecks } : {}) },
     selection: { completionEventId, draftMessageId }, result,
     ...(review ? { review } : {}),
