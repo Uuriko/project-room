@@ -35,7 +35,7 @@ async function setup(t, {respondTo, pending = false} = {}) {
   const connection = {apiBase:`http://127.0.0.1:${server.address().port}`,roomId,memberId,credential:identity.secret,hostId};
   const counts = {prompt:0,write:0,receipt:0,ack:0};
   function make() {
-    const bridge = new Bridge({connection,respondTo,env:{ROOM_ACP_HOME:join(f.directory,'acp-host')},host:{
+    const bridge = new Bridge({connection,respondTo,waitMs:0,env:{ROOM_ACP_HOME:join(f.directory,'acp-host')},host:{
       session:async()=>({sessionId:'fixture-review-session'}),prompt:async(_key,prompt)=>{
         counts.prompt++;
         assert.match(prompt[0].text,/Evidence for the agenda is ready/);
@@ -90,6 +90,33 @@ test('a work wake a host cannot act on stays pending without a turn or transport
   assert.deepEqual(f.counts,{prompt:0,write:0,receipt:0,ack:0});
   assert.equal(f.pendingRows().delivered_at,null);
   assert.equal(f.verdict(),undefined);
+});
+
+test('a restarted receiver reconciles an uncertain committed verdict even after Room invalidated its wake',async t=>{
+  const f = await setup(t);
+  const request = f.bridge.room.request;
+  f.bridge.room.request = async(path,options)=>{
+    if (path==='/mcp') throw new RoomError(503,'unavailable','Immediate receipt check unavailable');
+    const response = await request(path,options);
+    if (options?.body?.type==='verification.recorded') throw new RoomError(0,'network','Committed response lost');
+    return response;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.verdict()?.result,'pass');
+  assert.notEqual(f.pendingRows().invalidated_at,null);
+  assert.deepEqual(f.counts,{prompt:1,write:1,receipt:0,ack:0});
+  const restarted = f.make();
+  const poll = restarted.room.poll.bind(restarted.room);
+  restarted.room.poll = async args=>{
+    const page = await poll(args);
+    assert.equal(page.pendingWakes.some(wake=>wake.signalId===f.wake.signalId),false);
+    return page;
+  };
+  await restarted.pollOnce();
+  await restarted.queue.idle();
+  assert.equal(restarted.stats.posted,1);
+  assert.deepEqual(f.counts,{prompt:1,write:1,receipt:1,ack:0});
 });
 
 test('inconclusive exact review remains available after the model stops',async t=>{

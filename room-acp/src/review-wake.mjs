@@ -44,8 +44,8 @@ export function reviewOutput(recorder, stopReason) {
   return { result:value.result, summary:value.summary };
 }
 
-async function recorded(room, operationId) {
-  const value = await room.request('/mcp', { body:{ jsonrpc:'2.0', id:1, method:'tools/call',
+export async function recordedReview(room, operationId, timeoutMs) {
+  const value = await room.request('/mcp', { timeoutMs, body:{ jsonrpc:'2.0', id:1, method:'tools/call',
     params:{ name:'room_receipt', arguments:{ roomId:room.roomId, operationId } } } });
   const found = value?.result?.structuredContent;
   if (value?.result?.isError || found?.roomId !== room.roomId || found.viewerId !== room.memberId
@@ -57,7 +57,7 @@ async function recorded(room, operationId) {
 
 export async function deliverReview(room, binding, receipt, listenerToken) {
   const operationId = receipt.requestId;
-  if (receipt.attempted && await recorded(room,operationId)) return;
+  if (receipt.attempted && await recordedReview(room,operationId)) return;
   const body = { id:operationId, type:verification, data:{ ...binding, result:receipt.result, summary:receipt.body } };
   let value;
   try {
@@ -65,7 +65,7 @@ export async function deliverReview(room, binding, receipt, listenerToken) {
   } catch (error) {
     // Committing a verdict can invalidate the wake itself. Check here while
     // the binder and operation ID are available, without waiting for redelivery.
-    if (error instanceof RoomError && (error.status === 0 || error.status >= 500) && await recorded(room,operationId)) return;
+    if (error instanceof RoomError && (error.status === 0 || error.status >= 500) && await recordedReview(room,operationId)) return;
     throw error;
   }
   if (value?.event?.type !== verification || value.event.actorId !== room.memberId

@@ -164,7 +164,9 @@ existing work wake subscription. An unrestricted receiver opens one fresh
 session for that selection, reads its exact evidence and review action, and
 records a verdict through the existing Room command. The Room rechecks the
 reviewer and evidence binding at write time. The receiver checks the original
-operation receipt after an uncertain response. Other native work actions,
+operation receipt after an uncertain response. Its normal listener loop checks
+unresolved recorded operations even if a committed verdict retired the wake.
+Other native work actions,
 sender-restricted receivers, and reviews without a conclusive model verdict
 keep the action available through the Work Thread.
 
