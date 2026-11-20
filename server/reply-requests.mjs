@@ -13,6 +13,7 @@ import { messageInHistory, visibleSequenceHorizon } from "./history-visibility.m
 import { withRequestState } from "./request-states.mjs";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
+const RETAINED_EARLIER_EXCHANGE_BYTES = 4096;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const encode = value => Buffer.from(JSON.stringify(value)).toString("base64url");
 const fail = (code, message, status = 422) => { throw Object.assign(new Error(message), { code, status }); };
@@ -75,7 +76,12 @@ export function compactReplySelection(selected) {
   // Preserve all selected-read and history visibility checks before projecting
   // the payload. A conversation cursor follows the same window in either view.
   const preparation = selected.preparation;
-  const omitted = Math.max(0, preparation.previousExchanges.length - 1);
+  const earlier = preparation.previousExchanges.slice(0, -1);
+  // Corrections can depend on any decision in this explicit follow-up chain.
+  // Carry the complete earlier exchanges when they fit, without guessing
+  // relevance from prose or changing the compact contract for installed clients.
+  const retainEarlier = earlier.length > 0 && selected.request.contextMessageId !== requestMessageId
+    && Buffer.byteLength(JSON.stringify(earlier)) <= RETAINED_EARLIER_EXCHANGE_BYTES;
   const nextRead = selected.nextRead && {
     ...selected.nextRead, arguments: { ...selected.nextRead.arguments, view: "compact" }
   };
@@ -83,9 +89,10 @@ export function compactReplySelection(selected) {
     ...(nextRead ? { nextRead, page: { ...selected.page, nextRead } } : {}),
     preparation: { ...preparation,
       previousExchanges: preparation.previousExchanges.slice(-1),
-      previousExchangesOmitted: omitted,
-      ...(omitted ? {
-        olderExchangeReads: preparation.previousExchanges.slice(0, -1).map(exchange => ({
+      previousExchangesOmitted: earlier.length,
+      ...(retainEarlier ? { retainedEarlierExchanges: earlier } : {}),
+      ...(earlier.length ? {
+        olderExchangeReads: earlier.map(exchange => ({
           tool: "room_read_request", arguments: { requestMessageId: exchange.requestMessageId, view: "compact" }
         })),
         previousExchangesNextRead: {
