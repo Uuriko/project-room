@@ -944,7 +944,7 @@ export class AgentHeartbeats {
             event: "acked", door, kind: row?.kind ?? "", subjectId: agentId, ref: signalId, sentAt: row?.createdAt ?? null });
         }
       }
-      const workAcked = this.store.workWakes?.ack(agentId, signalIds, roomId) ?? [];
+      const workAcked = this.store.workWakes?.ack(agentId, signalIds, roomId, fencingToken) ?? [];
       for (const signalId of workAcked) {
         recordWakeEvent(this.db, { at, roomId, store: "work",
           event: "acked", door, kind: "work", subjectId: agentId });
