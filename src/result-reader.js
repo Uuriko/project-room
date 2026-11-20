@@ -223,7 +223,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
     if (!earlier && view.loaded && !view.error && !view.withdrawn && !item?.verification) {
       const runtime = reviewRuntimeLabel(view.reviewRuntime?.status);
-      if (runtime) resultElement("result-status").append(" · " + runtime);
+      if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
     }
     const context = resultElement("result-work-context");
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
