@@ -8,8 +8,8 @@ import { createRoomServer } from '../server/http.mjs';
 import { PublicWorkClaimsClient } from '../client/public-work-claims.mjs';
 
 const root = '/api/rooms/commons/public-work';
-async function fixture(t) {
-  const store = new RoomStore(':memory:'); store.initialize(initialRoom());
+async function fixture(t, representation = 'legacy') {
+  const store = new RoomStore(':memory:'); store.initialize(initialRoom(), representation === 'legacy' ? {} : { representation });
   const ownerKey = store.issueAccessKey('commons', 'owner');
   store.command(ownerKey, 'commons', { id: 'review-add-peer', type: 'member.added', data: { memberId: 'review-peer', displayName: 'Peer', kind: 'human', permissions: [] } });
   const peerKey = store.issueAccessKey('commons', 'review-peer');
@@ -31,8 +31,8 @@ async function fixture(t) {
 }
 const read = async (response, status = 200) => { assert.equal(response.status, status, await response.clone().text()); return response.json(); };
 
-test('owner retains withdrawn submissions and records one explicit decision without moving rewards or bytes', async t => {
-  const f = await fixture(t), before = f.store.db.prepare('SELECT count(*) AS n FROM bounty_journal').get().n;
+for (const representation of ['legacy', 'normalized-current-v1']) test(`owner reviews a withdrawn submission exactly once on ${representation}`, async t => {
+  const f = await fixture(t, representation), before = f.store.db.prepare('SELECT count(*) AS n FROM bounty_journal').get().n;
   f.store.projectOffers.transition('commons', 'owner', 'review:offer', 'withdraw', { requestId: 'review-withdraw', expectedRevision: 2 });
   const listed = await read(await f.call(root + '/results'));
   assert.equal(listed.results.length, 1); assert.equal(listed.results[0].offer.status, 'withdrawn');

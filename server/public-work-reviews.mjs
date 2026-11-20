@@ -5,6 +5,7 @@ import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { PublicWorkSettlement } from './public-work-settlement.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { currentInviteContext, isCurrentRoom, readCurrentWorkItem } from './current-room-repository.mjs';
 
 // Private review is a separate fact. Submission bytes, leases and work
 // gates are never changed here. Two deliberate exceptions, both inside
@@ -65,9 +66,12 @@ export class PublicWorkReviews {
     return true;
   }
   hasTable(name) { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }
+  memberState(roomId, memberIds) {
+    return currentInviteContext(this.store, roomId, { memberIds })?.room.state ?? this.store.room(roomId).state;
+  }
   scope(roomId, actorId, receiptId) {
     check(validId(roomId) && validId(actorId) && validId(receiptId), 'Invalid review identifier');
-    const { state } = this.store.room(roomId);
+    let state = this.memberState(roomId, [actorId]);
     const actor = knownMember(state, actorId);
     if (state.room.archivedAt) fail(409, 'room_archived', 'Archived rooms cannot review contributions');
     if (!this.hasTable('public_work_receipts')) fail(404, 'review_not_found', 'Contribution not found in this room');
@@ -77,7 +81,11 @@ export class PublicWorkReviews {
     if (!row) fail(404, 'review_not_found', 'Contribution not found in this room');
     const offerRow = this.db.prepare('SELECT * FROM project_offers WHERE offer_id=? AND room_id=?').get(row.offer_id, roomId);
     const offer = this.store.projectOffers.record(offerRow, true);
-    const work = offer.workItemId ? state.workItems[offer.workItemId] : null;
+    const current = isCurrentRoom(this.db, roomId);
+    if (current) state = this.memberState(roomId, [actorId, ...offer.reviewerMemberIds]);
+    const work = offer.workItemId
+      ? current ? readCurrentWorkItem(this.db, roomId, offer.workItemId) : state.workItems[offer.workItemId]
+      : null;
     if (offer.workItemId && (!work || work.state === 'superseded')) fail(409, 'review_policy_changed', 'Linked work review policy is unavailable');
     const receipt = JSON.parse(row.receipt_json), policy = roomPolicy(state);
     const fingerprint = canonicalJson({ receiptId, taskId: receipt.taskId, termsVersion: receipt.termsVersion,
@@ -167,7 +175,7 @@ export class PublicWorkReviews {
     check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || validId(after)), 'Invalid result page');
     return this.store.readTransaction(() => {
       this.store.projectOffers.requireOwner(roomId, actorId);
-      knownMember(this.store.room(roomId).state, actorId);
+      knownMember(this.memberState(roomId, [actorId]), actorId);
       if (!this.hasTable('public_work_receipts')) return { results: [], nextCursor: null };
       const rows = this.db.prepare(`SELECT r.receipt_id FROM public_work_receipts r JOIN public_work_tasks t ON t.offer_id=r.offer_id
         WHERE t.room_id=? AND r.receipt_id>? ORDER BY r.receipt_id LIMIT ?`).all(roomId, after, limit + 1);
@@ -235,7 +243,7 @@ export class PublicWorkReviews {
       // member (the same gate scope() opens with), so a revoked member
       // cannot replay. Fresh requests fall through to the full checks.
       check(validId(roomId) && validId(actorId) && validId(receiptId), 'Invalid review identifier');
-      knownMember(this.store.room(roomId).state, actorId);
+      knownMember(this.memberState(roomId, [actorId]), actorId);
       const encoded = canonicalJson({ action, receiptId, ...input });
       if (this.hasTable('public_work_review_requests')) {
         const previous = this.db.prepare('SELECT * FROM public_work_review_requests WHERE room_id=? AND actor_id=? AND request_id=?').get(roomId, actorId, input.requestId);
