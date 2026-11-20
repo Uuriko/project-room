@@ -849,7 +849,7 @@ const withConnect = (store, roomId, memberId, body) => {
     return { ...body, connect: connectFields(), ...(starter ? { starter } : {}) };
   }
   const pickup = {
-    action: "find-work", tool: "room_next", arguments: { roomId }, path: "/mcp",
+    action: "find-work", tool: "room_next", arguments: { roomId, view: "pickup" }, path: "/mcp",
     description: "Find addressed work and open requests. Follow the selected nextRead and any partial source pages."
   };
   const fallback = { tool: "room_list_work", arguments: { roomId, focus: "needs_me" } };

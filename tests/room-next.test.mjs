@@ -12,8 +12,14 @@ import { privateMarkers, privateWorkFixture } from "./helpers/private-work-fixtu
 for (const representation of ["legacy", "normalized-current-v1"]) {
   test(`room next selects one eligible invitation and honors the Room pause (${representation})`, async t => {
     const f = await privateWorkFixture(t, representation);
-    const active = await f.mcp(f.triage, "room_next");
+    const active = await f.mcp(f.triage, "room_next", { view: "pickup" });
     assert.equal(active.ok, true, active.text);
+    const original = await f.mcp(f.triage, "room_next");
+    assert.equal(original.ok, true, original.text);
+    const { nextRead, ifIdle, ...oldPacket } = active.value;
+    assert.deepEqual(original.value, oldPacket, "the original input returns only the original output fields");
+    const invalid = await f.mcp(f.triage, "room_next", { view: "invalid" });
+    assert.equal(invalid.ok, false);
     assert.equal(active.value.nextRead, null);
     assert.deepEqual(active.value.ifIdle, representation === "legacy"
       ? { status: "no_invitation" }
@@ -31,7 +37,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       }
       const before = f.stored();
       const old = await f.mcp(f.triage, "room_list_work", { focus: "help_wanted", limit: 1 });
-      const selected = await f.mcp(f.triage, "room_next");
+      const selected = await f.mcp(f.triage, "room_next", { view: "pickup" });
       assert.equal(selected.ok, true, selected.text);
       assert.equal(selected.value.work.coverage, "complete");
       assert.equal(selected.value.ifIdle.status, "invitation");
@@ -49,15 +55,15 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
         expectedHelpRevision: 1, status: "withdrawn" });
       const stale = await f.mcp(f.triage, selected.value.nextRead.tool, selected.value.nextRead.arguments);
       assert.equal(stale.value.help.canOffer, false);
-      assert.equal((await f.mcp(f.triage, "room_next")).value.ifIdle.status, "no_invitation");
+      assert.equal((await f.mcp(f.triage, "room_next", { view: "pickup" })).value.ifIdle.status, "no_invitation");
     }
 
     f.store.wakeQueue.pause(f.owner, "commons", { requestId: "pause-triage-invitations", reason: null },
       null, { memberId: f.triage.id });
-    const paused = await f.mcp(f.triage, "room_next");
+    const paused = await f.mcp(f.triage, "room_next", { view: "pickup" });
     assert.deepEqual(paused.value.ifIdle, { status: "paused" });
     assert.equal(paused.value.nextRead, null);
-    const addressed = await f.mcp(f.producer, "room_next");
+    const addressed = await f.mcp(f.producer, "room_next", { view: "pickup" });
     assert.equal(addressed.value.ifIdle, undefined);
     assert.deepEqual(addressed.value.nextRead, addressed.value.work.items.find(item => item.reason === "revise").nextRead);
     assert.ok(addressed.value.requests.items.length);
@@ -157,7 +163,7 @@ test("an empty work page advances, keeps ongoing work, and invalidates stale aut
   });
   f.send(f.reviewer.key, "work.accepted", { workItemId: id, expectedRevision: f.rev(id) });
   f.send(f.reviewer.key, "work.started", { workItemId: id, expectedRevision: f.rev(id) });
-  const first = await f.mcp(f.reviewer, "room_next");
+  const first = await f.mcp(f.reviewer, "room_next", { view: "pickup" });
   assert.equal(first.ok, true, first.text);
   assert.equal(first.value.work.coverage, "partial");
   assert.deepEqual(first.value.work.items, []);

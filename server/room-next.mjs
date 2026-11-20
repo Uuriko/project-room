@@ -27,8 +27,9 @@ const unavailable = (roomId, source, reason, nextRead = read(roomId, source)) =>
   coverage: "unavailable", reason, items: [], nextRead
 });
 
-export function validRoomNextSelection({ source, cursor }) {
-  return (source === undefined || source === "work" || source === "requests")
+export function validRoomNextSelection({ source, cursor, view }) {
+  return (view === undefined || view === "pickup")
+    && (source === undefined || source === "work" || source === "requests")
     && (cursor === undefined || source !== undefined && typeof cursor === "string"
       && /^[A-Za-z0-9_-]{1,4096}$/.test(cursor));
 }
@@ -196,8 +197,8 @@ function boundedPage(roomId, source, getPage) {
   }
 }
 
-export function readRoomNext(store, secret, roomId, { source, cursor } = {}, readInvitation) {
-  if (!validRoomNextSelection({ source, cursor }))
+export function readRoomNext(store, secret, roomId, { source, cursor, view } = {}, readInvitation) {
+  if (!validRoomNextSelection({ source, cursor, view }))
     throw new ServiceError(422, "invalid_arguments", "Choose a source and its returned cursor");
   return store.readTransaction(() => {
     const auth = store.authenticate(secret, roomId);
@@ -229,26 +230,29 @@ export function readRoomNext(store, secret, roomId, { source, cursor } = {}, rea
         { tool: "room_list_requests", arguments: { roomId, direction: "incoming", status: "open" } })
       : boundedPage(roomId, "requests", () => current
         ? requestPage(store, secret, roomId, auth, cursor) : legacyRequestPage(store, secret, roomId, auth, room, cursor));
-    const correction = packet.work?.items.find(item => item.reason === "revise");
-    const addressed = correction ?? packet.requests?.items[0] ?? packet.work?.items[0];
-    packet.nextRead = addressed?.nextRead ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
+    // The default stays readable by clients with the original closed output schema.
+    if (view === "pickup") {
+      const correction = packet.work?.items.find(item => item.reason === "revise");
+      const addressed = correction ?? packet.requests?.items[0] ?? packet.work?.items[0];
+      packet.nextRead = addressed?.nextRead ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
 
-    if (!source && !room.archivedAt && auth.member.kind === "agent"
-      && auth.member.permissions.includes("accept_work") && !addressed) {
-      const paused = store.wakeQueue.pauseStatus(roomId, auth.member.id);
-      const addressedComplete = packet.work.coverage === "complete" && packet.requests.coverage === "complete";
-      if (paused) packet.ifIdle = { status: "paused" };
-      else if (addressedComplete && readInvitation) {
-        const listing = readInvitation();
-        const invite = listing.work?.[0];
-        if (invite) {
-          packet.nextRead = { ...invite.nextRead, arguments: { roomId, ...invite.nextRead.arguments } };
-          packet.ifIdle = { status: "invitation", workItemId: invite.id, title: invite.title.slice(0, 160),
-            revision: invite.revision, helpEventId: invite.help.eventId, nextRead: packet.nextRead };
-        } else {
-          packet.ifIdle = listing.selection?.available === false
-            ? { status: "unavailable", reason: listing.selection.reason }
-            : { status: "no_invitation" };
+      if (!source && !room.archivedAt && auth.member.kind === "agent"
+        && auth.member.permissions.includes("accept_work") && !addressed) {
+        const paused = store.wakeQueue.pauseStatus(roomId, auth.member.id);
+        const addressedComplete = packet.work.coverage === "complete" && packet.requests.coverage === "complete";
+        if (paused) packet.ifIdle = { status: "paused" };
+        else if (addressedComplete && readInvitation) {
+          const listing = readInvitation();
+          const invite = listing.work?.[0];
+          if (invite) {
+            packet.nextRead = { ...invite.nextRead, arguments: { roomId, ...invite.nextRead.arguments } };
+            packet.ifIdle = { status: "invitation", workItemId: invite.id, title: invite.title.slice(0, 160),
+              revision: invite.revision, helpEventId: invite.help.eventId, nextRead: packet.nextRead };
+          } else {
+            packet.ifIdle = listing.selection?.available === false
+              ? { status: "unavailable", reason: listing.selection.reason }
+              : { status: "no_invitation" };
+          }
         }
       }
     }
