@@ -126,12 +126,12 @@ export class RoomClient {
   ack({ signalIds, fencingToken }) {
     return this.request("/api/agent-heartbeats/ack", { body: { signalIds, ...(fencingToken ? { fencingToken } : {}) } });
   }
-  checkListener(fencingToken) {
-    return this.request(`/api/agent-heartbeats?roomId=${encodeURIComponent(this.roomId)}`, { listenerToken: fencingToken });
+  checkListener(fencingToken, { signal } = {}) {
+    return this.request(`/api/agent-heartbeats?roomId=${encodeURIComponent(this.roomId)}`, { listenerToken: fencingToken, signal });
   }
-  async room({ authorityFor = null } = {}) {
+  async room({ authorityFor = null, signal } = {}) {
     const path = `/api/rooms/${encodeURIComponent(this.roomId)}`;
-    if (authorityFor === null) return this.request(path);
+    if (authorityFor === null) return this.request(path, { signal });
     const unavailable = () => {
       throw new RoomError(409, 'selected_authority_unavailable', 'Room does not provide complete selected authority; no full-snapshot fallback is allowed');
     };
@@ -141,7 +141,7 @@ export class RoomClient {
     const query = new URLSearchParams({ view: 'authority' });
     for (const id of requested) query.append('memberId', id);
     let value;
-    try { value = await this.request(path + '?' + query); }
+    try { value = await this.request(path + '?' + query, { signal }); }
     catch (error) {
       if (error instanceof RoomError && error.status === 422 && error.code === 'invalid_snapshot_view') unavailable();
       throw error;
@@ -166,16 +166,16 @@ export class RoomClient {
   claimNote(claimId, note, requestId = randomUUID(), listenerToken = this.listenerToken) {
     return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}/update`, { body: { note, requestId }, listenerToken });
   }
-  thread(messageId, {selected = false} = {}) {
-    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(messageId)}/thread${selected ? '?view=message' : ''}`).then(value => {
+  thread(messageId, {selected = false, signal} = {}) {
+    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(messageId)}/thread${selected ? '?view=message' : ''}`, { signal }).then(value => {
       if (selected && (value?.messageContextVersion !== 1 || value.roomId !== this.roomId || value.thread?.id !== messageId))
         throw new RoomError(409, 'selected_message_context_unavailable', 'Room does not provide the addressed message context required by this listener');
       return value;
     });
   }
-  requestContext(requestMessageId, cursor = null, { compact = false, timeoutMs } = {}) {
+  requestContext(requestMessageId, cursor = null, { compact = false, signal } = {}) {
     return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/reply-context?requestMessageId=${encodeURIComponent(requestMessageId)}`
-      + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '') + (compact ? '&view=compact' : ''), { timeoutMs });
+      + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '') + (compact ? '&view=compact' : ''), { signal });
   }
   async post({ body, replyToId = null, toMemberId: directTo = null, messageId = `acp-${randomUUID()}`, requestId = randomUUID(), listenerToken = this.listenerToken }) {
     const parent = replyToId ? (await this.thread(replyToId, {selected:true})).thread : null;
