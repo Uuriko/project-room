@@ -45,7 +45,9 @@ const lockPath = process.env.ROOM_INSTANCE_LOCK_PATH || join(dirname(filename), 
 const instanceLock = paused ? null : acquireInstanceLock(lockPath);
 let store = null;
 try {
-  store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(process.env) });
+  const projectionByteLimit = process.env.ROOM_LEGACY_PROJECTION_BYTES === undefined
+    ? undefined : Number(process.env.ROOM_LEGACY_PROJECTION_BYTES);
+  store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(process.env), projectionByteLimit });
   if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); store = null; throw new Error("Provision a room before deployment"); }
 } catch (error) { instanceLock?.release(); throw error; }
 // Event-push dispatch: after an event commit journals webhook deliveries,
