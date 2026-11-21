@@ -4,7 +4,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { operatorNormalization } from '../server/operator-normalization.mjs';
 import { readBoard } from '../server/board-read.mjs';
-import { closeWork } from '../server/work-claims.mjs';
+import { closeWork, createWork } from '../server/work-claims.mjs';
 import { event } from '../src/events.js';
 
 test('retained normalized Board mirrors keep the canonical task visibility', t => {
@@ -33,6 +33,9 @@ test('retained normalized Board mirrors keep the canonical task visibility', t =
     assert.ok(mirror);
     store.workClaims.set(roomId, closeWork(mirror, 'owner', { authority: true, reason: 'Retain synthetic mirror history' }));
   }
+  const historical = createWork({ id: 'historical', title: 'Historical Board title',
+    workItemId: 'no-current-item' }, { agentId: 'owner' });
+  store.workClaims.set(roomId, closeWork(historical, 'owner', { authority: true }));
   const query = new URLSearchParams({ state: 'closed' });
   const rowFor = (actor, id) => readBoard(store, keys[actor], roomId, null, query).claims.find(row => row.id === id);
   const observerBefore = rowFor('observer', 'private-work');
@@ -43,6 +46,7 @@ test('retained normalized Board mirrors keep the canonical task visibility', t =
   assert.equal(rowFor('observer', 'private-work').title, null);
   assert.deepEqual(rowFor('observer', 'private-work').history, []);
   assert.equal(rowFor('observer', 'shared-work').title, 'Shared Board title');
+  assert.equal(rowFor('observer', 'historical').title, 'Historical Board title');
   assert.equal(rowFor('worker', 'private-work').title, 'Private Board title');
   assert.equal(store.workClaims.get(roomId, 'private-work').title, 'Private Board title');
 });
