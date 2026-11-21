@@ -1322,6 +1322,14 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         const outcome = await callHostedStdioTool(store, secret, name, args);
         let value = name === "room_read_work" && !outcome.isError
           ? selectedReadCapability(outcome.value, { store, secret, identity, oauthPrincipal }) : boardIdHint(store, args, outcome);
+        if (name === "room_read_result" && !outcome.isError && oauthPrincipal && value.workThread?.pendingCorrection?.action) {
+          const { tool } = value.workThread.pendingCorrection.action;
+          const definition = HOSTED_TOOLS.find(entry => entry.name === tool);
+          if (!mcpOAuthToolAllowed(tool, oauthPrincipal.scopes)
+            || !definition || catalogCallDenial(resolveCatalogAgent(store, identity), definition)) {
+            delete value.workThread.pendingCorrection.action;
+          }
+        }
         if (name === "room_read_public_review" && !outcome.isError && oauthPrincipal
             && !mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes)) {
           value = { ...value, actions: [], actionAvailability: "outside_connected_grant" };

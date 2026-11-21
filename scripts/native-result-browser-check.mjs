@@ -729,6 +729,7 @@ test("focused failed result shows the current correction and its authorized acti
   await correction.waitFor({ state: "visible" });
   assert.equal(await correction.locator("h3").textContent(), "Correction needed");
   assert.equal(await f.page.locator("#result-correction-summary").textContent(), "The candidate SHA is stale.");
+  assert.match(await f.page.locator("#result-work-next").textContent(), /Check the current candidate/);
   await f.page.locator("#result-work-action").click();
   await f.page.locator("#action-fields [name=resolution]").fill("Checked the current candidate.");
   await f.save.click();
