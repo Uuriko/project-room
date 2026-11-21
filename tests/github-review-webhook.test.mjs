@@ -46,7 +46,9 @@ test("exact webhook review uses one native request across redelivery, and stale 
   assert.deepEqual(await dispatchGithubReview(store, binding, delivery(head), options), [{ number: 6319, status: "replayed" }]);
   assert.equal(store.headSequence("commons"), saved);
   assert.equal(calls, 3, "durable redelivery lookup must skip GitHub");
-  current = snapshot(newHead);
+  current = { ...snapshot(newHead), correction: {
+    reviewId: 42, previousHead: head, count: 1, body: "Correct the rendering", notes: [{ id: 17, body: "Handle both output modes" }],
+  } };
   const suite = { event: "check_suite", action: "completed", payload: { repository: { full_name: repo },
     check_suite: { head_sha: newHead, pull_requests: [{ number: 6319 }, { number: 6319 }] } } };
   const concurrent = await Promise.all([dispatchGithubReview(store, binding, suite, options), dispatchGithubReview(store, binding, suite, options)]);
@@ -55,6 +57,11 @@ test("exact webhook review uses one native request across redelivery, and stale 
   assert.equal(inbox.requests.length, 2);
   const body = store.snapshot(reviewer.identitySecret, "commons").state.messages.find(message => message.id === inbox.requests[0].id).body;
   assert.match(body, /Candidate revision: [ac]{40}/);
+  const corrected = store.snapshot(reviewer.identitySecret, "commons").state.messages.find(message =>
+    message.body.includes(`Candidate revision: ${newHead}`));
+  assert.match(corrected.body, new RegExp(`requested changes on revision ${head}`));
+  assert.match(corrected.body, /pullrequestreview-42/);
+  assert.match(corrected.body, /discussion_r17/);
 });
 
 test("authoritative GitHub reads pause before checking stale candidates and recheck the exact head before posting", async () => {
@@ -67,4 +74,27 @@ test("authoritative GitHub reads pause before checking stale candidates and rech
   assert.equal(urls.length, 1);
   assert.deepEqual(await observeWebhookPull(recipe, { number: 6319, head }, { fetchImpl }), { reason: "pull_changed" });
   assert.equal(urls.length, 4);
+});
+
+
+test("eligible GitHub replacement retains the prior requested change and checks the head again", async () => {
+  const recipe = { version: 1, enabled: true, roomId: "commons", repository: repo.toLowerCase(),
+    requiredChecks: [{ app: "github-actions", name: "safety-net" }] };
+  const pull = sha => ({ base: { repo: { full_name: repo } }, number: 6319, head: { sha }, state: "open", draft: false, merged: false });
+  const check = { id: 81, app: { slug: "github-actions" }, name: "safety-net", head_sha: newHead,
+    status: "completed", conclusion: "success" };
+  const review = (id, author, commit, state) => ({ id, user: { id: author }, commit_id: commit, state });
+  const oldChange = review(34, 8, head, "CHANGES_REQUESTED");
+  const approvedHistory = [review(28, 2, head, "CHANGES_REQUESTED"), review(32, 2, newHead, "APPROVED")];
+  const observe = (replies) => observeWebhookPull(recipe, { number: 6319, head: newHead }, {
+    fetchImpl: async () => Response.json(replies.shift()),
+  });
+  const result = await observe([pull(newHead), { check_runs: [check] }, [oldChange, ...approvedHistory,
+    review(35, 8, newHead, "COMMENTED")], [{ id: 88, body: "Use a common renderer" }], pull(newHead)]);
+  assert.deepEqual(result.snapshot.correction, { reviewId: 34, previousHead: head, count: 1, body: "",
+    notes: [{ id: 88, body: "Use a common renderer" }] });
+  assert.deepEqual(await observe([pull(newHead), { check_runs: [check] },
+    [review(36, 8, newHead, "CHANGES_REQUESTED")], pull(newHead)]), { reason: "changes_requested_on_current_head" });
+  assert.deepEqual(await observe([pull(newHead), { check_runs: [check] },
+    [oldChange], [], pull(head)]), { reason: "pull_changed" });
 });
