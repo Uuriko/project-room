@@ -940,7 +940,9 @@ test('native reviewer follows Room Next to private project findings on the same 
       criterion,observation:'Only the designated reviewer reads this',nextAction:'Check the source'})});
   assert.equal(filed.status,200);
   const pickup = (await f.rpc('tools/call',{name:'room_next',arguments:{view:'pickup'}})).body.result.structuredContent;
-  assert.equal(pickup.nextRead.tool,'room_read_project_discoveries');
-  const finding = await f.rpc('tools/call',{name:pickup.nextRead.tool,arguments:pickup.nextRead.arguments});
+  assert.equal(pickup.nextRead,null);
+  const { nextRead } = pickup.ifIdle.discoveryReview;
+  assert.equal(nextRead.tool,'room_read_project_discoveries');
+  const finding = await f.rpc('tools/call',{name:nextRead.tool,arguments:nextRead.arguments});
   assert.equal(finding.body.result.structuredContent.findings[0].receiptId,(await filed.json()).receiptId);
 });
