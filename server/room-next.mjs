@@ -240,8 +240,15 @@ function recentRoomResult(store, roomId) {
 // message records a finding. Its key follows source evidence, never Room head.
 function investigationLead(store, roomId, charter, goal) {
   const project = store.projectOffers.publishedProject(roomId);
-  const receipt = project && store.publicWorkClaims.latestPublicReceiptLead(roomId, project.repositoryUrl);
-  const result = !project && recentRoomResult(store, roomId);
+  if (project) {
+    const receipt = store.publicWorkClaims.latestPublicReceiptLead(roomId, project.repositoryUrl);
+    const publicLead = unrecordedInvestigation(store, roomId, charter, goal, { project, receipt });
+    if (publicLead) return publicLead;
+  }
+  return unrecordedInvestigation(store, roomId, charter, goal, { result: recentRoomResult(store, roomId) });
+}
+
+function unrecordedInvestigation(store, roomId, charter, goal, { project, receipt, result }) {
   const criterion = project?.acceptanceCriteria[0] ?? charter?.outputs ?? goal;
   if (!criterion) return null;
   const basis = project
@@ -279,7 +286,12 @@ function investigationLead(store, roomId, charter, goal) {
     ...(receipt && { taskPath: receipt.taskPath, receiptPath: receipt.receiptPath, artifactPath: receipt.artifactPath }),
     guidance: "Follow the selected evidence. A better evidenced bottleneck or optimization within this scope is also useful. Check existing work first. An empty partial page is inconclusive. Record the source, check, observation and smallest next step, or a scoped clean result. Keep restricted evidence with its original audience. For a Room-safe note, start body with record.bodyPrefix and append your result. This checkpoint deduplicates delivery; it does not reserve the check.",
     record: { tool: "room_post_message", arguments: { roomId, id, messageId: id, compact: true },
-      inputRequired: ["body"], bodyPrefix }
+      inputRequired: ["body"], bodyPrefix,
+      onMessageExists: {
+        readPath: "/api/rooms/" + encodeURIComponent(roomId) + "/messages/" + encodeURIComponent(id) + "/thread",
+        guidance: "After a confirmed message-ID collision, read the recorded finding. If your Room-safe observation adds evidence, reply with your own stable id and body. Retry that reply unchanged.",
+        reply: { tool: "room_post_message", arguments: { roomId, replyToId: id, compact: true }, inputRequired: ["id", "body"] }
+      } }
   };
 }
 

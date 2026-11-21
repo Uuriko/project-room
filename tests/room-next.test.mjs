@@ -508,19 +508,6 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal((await f.mcp(f.triage, retry.tool, args)).value.duplicate, true);
     assert.equal((await pickup(f.broad)).value.investigation, undefined);
     assert.equal((await pickup(f.triage)).value.nextRead, null);
-    f.send(f.owner, "work.proposed", { workItemId: "room-proof", title: "Check experiment", definitionOfDone: "Observed result",
-      accountableMemberId: f.producer.id, mode: "read" });
-    f.send(f.producer.key, "work.accepted", { workItemId: "room-proof", expectedRevision: f.rev("room-proof") });
-    f.send(f.producer.key, "work.started", { workItemId: "room-proof", expectedRevision: f.rev("room-proof") });
-    const resultMessage = f.send(f.producer.key, "message.posted", { messageId: "room-proof-text", body: "Reproduced experiment", workItemId: "room-proof" });
-    f.send(f.producer.key, "work.completed", { workItemId: "room-proof", expectedRevision: f.rev("room-proof"), evidenceKind: "room_text",
-      evidenceMessageId: "room-proof-text", evidenceMessageEventId: resultMessage.event.id,
-      evidenceVersion: textVersion("Reproduced experiment"),
-      previousCompletionEventId: null, producerId: f.producer.id, summary: "Reproduced", nextAction: "None", checksClaimed: ["Experiment"] });
-    const newResult = (await pickup(f.triage)).value.investigation;
-    assert.equal(newResult.basis.workItemId, "room-proof");
-    assert.notEqual(newResult.record.arguments.id, retry.arguments.id);
-    assert.ok((await f.mcp(f.triage, newResult.nextRead.tool, newResult.nextRead.arguments)).ok);
     f.store.projectOffers.create("commons", "owner", { requestId: "create-dry", offerId: "dry-project",
       reviewerMemberIds: ["owner"], terms: { kind: "project", title: "Public project", summary: "Public terms",
         acceptanceCriteria: ["Check a public source"], reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" },
@@ -551,6 +538,46 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
         params: { name: receipt.nextRead.tool, arguments: receipt.nextRead.arguments } }) });
     const rpc = await exact.json();
     assert.equal(rpc.result?.structuredContent?.claim.submittedReceiptId, finished.receipt.receiptId);
+
+    const peerLead = (await pickup(f.broad)).value.investigation;
+    assert.deepEqual(peerLead.record, receipt.record);
+    const firstPost = await f.mcp(f.triage, receipt.record.tool, {
+      ...receipt.record.arguments, body: receipt.record.bodyPrefix + "Public artifact reproduced."
+    });
+    assert.ok(firstPost.ok, firstPost.text);
+    const secondBody = "The artifact also needs the forwarding citation.";
+    const collision = await f.mcp(f.broad, peerLead.record.tool, {
+      ...peerLead.record.arguments, body: peerLead.record.bodyPrefix + secondBody
+    });
+    assert.equal(collision.value.status, 409);
+    assert.equal(collision.value.message, "Message already exists");
+    const recovery = peerLead.record.onMessageExists;
+    const thread = await fetch(f.origin + recovery.readPath, { headers: { Authorization: "Bearer " + f.broad.secret } });
+    assert.equal(thread.status, 200);
+    assert.match(await thread.text(), /Public artifact reproduced/);
+    const replyArgs = { ...recovery.reply.arguments, id: "second-citation-finding", body: secondBody };
+    const reply = await f.mcp(f.broad, recovery.reply.tool, replyArgs);
+    assert.ok(reply.ok, reply.text);
+    assert.equal(reply.value.replyToId, receipt.record.arguments.messageId);
+    assert.equal((await f.mcp(f.broad, recovery.reply.tool, replyArgs)).value.duplicate, true);
+    assert.equal((await pickup(f.triage)).value.nextRead, null, "both unchanged bases were recorded");
+    f.send(f.owner, "work.proposed", { workItemId: "room-proof", title: "Check experiment", definitionOfDone: "Observed result",
+      accountableMemberId: f.producer.id, mode: "read" });
+    f.send(f.producer.key, "work.accepted", { workItemId: "room-proof", expectedRevision: f.rev("room-proof") });
+    f.send(f.producer.key, "work.started", { workItemId: "room-proof", expectedRevision: f.rev("room-proof") });
+    const resultMessage = f.send(f.producer.key, "message.posted", { messageId: "room-proof-text", body: "Reproduced experiment", workItemId: "room-proof" });
+    f.send(f.producer.key, "work.completed", { workItemId: "room-proof", expectedRevision: f.rev("room-proof"), evidenceKind: "room_text",
+      evidenceMessageId: "room-proof-text", evidenceMessageEventId: resultMessage.event.id,
+      evidenceVersion: textVersion("Reproduced experiment"),
+      previousCompletionEventId: null, producerId: f.producer.id, summary: "Reproduced", nextAction: "None", checksClaimed: ["Experiment"] });
+    const newResult = (await pickup(f.triage)).value.investigation;
+    assert.equal(newResult.basis.workItemId, "room-proof");
+    assert.notEqual(newResult.record.arguments.id, retry.arguments.id);
+    assert.ok((await f.mcp(f.triage, newResult.nextRead.tool, newResult.nextRead.arguments)).ok);
+    const savedResult = await f.mcp(f.triage, newResult.record.tool, { ...newResult.record.arguments,
+      body: newResult.record.bodyPrefix + "The separately selected Room result reproduces." });
+    assert.ok(savedResult.ok, savedResult.text);
+    assert.equal((await pickup(f.broad)).value.nextRead, null, "recording the changed Room result consumes only its basis");
 
     assert.equal((await pickup(f.producer)).value.investigation, undefined);
   });
