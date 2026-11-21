@@ -1,5 +1,6 @@
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
+import { nativeOutboxEventId } from "./mcp-outbox-event-id.mjs";
 
 export const reviewRuntimeSchema = `
   CREATE TABLE IF NOT EXISTS review_runtime_reports (
@@ -65,6 +66,23 @@ export function reviewRuntimeFor(store, roomId, work, next, now) {
       .get(now,agentId,roomId,work.receipt.eventId,next.memberId,work.id,work.revision);
     if (wake?.delivered_at != null) return { status:"wake_acknowledged", source:"managed_pull_wake", observedAt:wake.delivered_at };
     if (wake?.no_listener) return { status:"waiting_receiver", source:"managed_pull_wake", observedAt:wake.created_at };
+  }
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='mcp_event_outbox_event' AND tbl_name='mcp_event_outbox'").get()) {
+    // A webhook response records delivery only. Keep runtime status independent
+    // and match the exact current review before exposing this transport evidence.
+    const delivery = db.prepare(`SELECT state FROM mcp_event_outbox
+      WHERE event_id=? AND state IN ('pending','leased','delivered')
+        AND json_extract(document,'$.data.roomId')=?
+        AND json_extract(document,'$.data.memberId')=?
+        AND json_extract(document,'$.data.nextRead.tool')='room_read_result'
+        AND json_extract(document,'$.data.nextRead.arguments.roomId')=?
+        AND json_extract(document,'$.data.nextRead.arguments.workItemId')=?
+        AND json_extract(document,'$.data.nextRead.arguments.completionEventId')=?
+        AND json_extract(document,'$._roomPolicy.workRevision')=?
+      ORDER BY state='delivered' DESC LIMIT 1`)
+      .get(nativeOutboxEventId(roomId, next.memberId, work.receipt.eventId),
+        roomId, next.memberId, roomId, work.id, work.receipt.eventId, work.revision);
+    if (delivery) return { status:"unavailable", webhook:delivery.state === "delivered" ? "delivered" : "queued" };
   }
   return { status:"unavailable" };
 }
