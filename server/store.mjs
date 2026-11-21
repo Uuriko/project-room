@@ -6746,7 +6746,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
       const runtime = value.result?.kind !== "draft" && value.result?.receipt?.eventId === value.current.completionEventId
-        && value.result?.text?.body != null && reviewRuntimeFor(this, roomId, work, value.current.next, this.now());
+        && value.result?.text?.body != null && reviewRuntimeFor(this, roomId, work, value.current.next, this.now(), { includeClaim: true });
       return stampWorkResult({ ...value, ...(runtime ? { reviewRuntime: runtime } : {}), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null }, auth.member.id);
     });
