@@ -187,6 +187,12 @@ for (const normalized of [false, true]) test(`pickup skips a rejected exact resu
     mode: 'read', dependsOn: [workItemId] });
   command('dependent-accept', 'work.accepted', { workItemId: dependent, expectedRevision: 0 }, f.identity.secret);
   assert.equal((await read('room_read_work', { workItemId: dependent })).continuation.action, 'wait_prerequisites');
+  command('report-reversed', 'verification.recorded', { ...verdict, expectedRevision: 4, result: 'pass', summary: 'The exact result passes on recheck.' });
+  const passed = await read('room_read_work', { workItemId });
+  assert.equal(passed.work.blocker, null);
+  assert.equal(passed.work.verification.result, 'pass');
+  assert.equal(passed.continuation.action, 'complete');
+  assert.equal((await read('room_read_work', { workItemId: dependent })).continuation.action, 'start');
 });
 
 test('a designated verifier without Room verify authority is told so instead of being sent to the tool', async t => {
