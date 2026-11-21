@@ -3,7 +3,7 @@
 // full backup-cycle against a real RoomStore fixture.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -181,11 +181,13 @@ test("cli: generated backup command works on first use with a missing destinatio
   assert.ok(line);
   assert.equal(existsSync(dest), false);
   const path = [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter);
-  await execFileAsync("/bin/sh", ["-c", line.slice("* * * * * ".length)], {
+  await execFileAsync("/bin/sh", ["-c", "umask 022 && " + line.slice("* * * * * ".length)], {
     env: { ...process.env, PATH: path },
     timeout: 10_000,
   });
-  assert.ok(existsSync(join(dest, "backup-verify.log")));
+  assert.equal(statSync(dirname(dest)).mode & 0o777, 0o700);
+  assert.equal(statSync(dest).mode & 0o777, 0o700);
+  assert.equal(statSync(join(dest, "backup-verify.log")).mode & 0o777, 0o600);
   const state = JSON.parse(readFileSync(join(dest, "backup-verify-state.json"), "utf8"));
   assert.equal(state.lastResult.ok, true);
   assert.ok(existsSync(state.lastResult.backup));

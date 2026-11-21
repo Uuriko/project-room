@@ -297,7 +297,7 @@ async function main() {
     process.stdout.write(
       `# project-room F001: automated backup + restore verification\n` +
       `# Runs every minute; the script itself skips until the schedule ("${schedule.spec}") is due.\n` +
-      `* * * * * cd ${shQuote(root)} && mkdir -p ${shQuote(destination)} && node scripts/backup-verify.mjs --db ${shQuote(db)} --to ${shQuote(to)} --schedule ${shQuote(schedule.spec)} >> ${shQuote(join(destination, "backup-verify.log"))} 2>&1\n`);
+      `* * * * * cd ${shQuote(root)} && umask 077 && mkdir -p ${shQuote(destination)} && node scripts/backup-verify.mjs --db ${shQuote(db)} --to ${shQuote(to)} --schedule ${shQuote(schedule.spec)} >> ${shQuote(join(destination, "backup-verify.log"))} 2>&1\n`);
     return;
   }
   const nowMs = Date.now();
