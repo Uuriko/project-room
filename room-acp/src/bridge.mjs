@@ -33,7 +33,7 @@ const sleep = (ms, signal) => new Promise(resolve => {
 });
 
 // Claim wakes the bridge turns into work. Others (ci, review, lease) are acked.
-export const CLAIM_WAKE_REASONS = Object.freeze(["assigned"]);
+export const CLAIM_WAKE_REASONS = Object.freeze(["assigned", "ready_work"]);
 // Terminal claim states, mirroring TERMINAL_CLAIM_STATES in
 // server/work-claims.mjs (STATES there has no "cancelled" state: cancel is a
 // verb that lands a claim in "closed"). A fresh wake naming a claim already

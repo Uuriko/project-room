@@ -20,7 +20,8 @@ import { ServiceError } from "./service-error.mjs";
 // referrals): store.mjs sits above this module in the import graph, so the
 // binding is only safe to dereference once modules are fully loaded.
 import { PILOT_LIMITS } from "./store.mjs";
-import { resolveNamedReviewers, hasCurrentReview, createWork, claimWork } from "./work-claims.mjs";
+import { resolveNamedReviewers, hasCurrentReview, createWork, claimWork, isTerminalClaimState } from "./work-claims.mjs";
+import { boardPrerequisiteState } from "./work-item-state.mjs";
 import { runAutomations } from "./event-automations.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -176,6 +177,47 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
     console.error("work claim wake failed:", error?.message ?? error);
     return null;
   }
+}
+
+
+// When a Board prerequisite first becomes satisfied, wake each now-startable
+// dependent's owner with a stable ready_work message id. enqueueWake already
+// INSERT OR IGNOREs on (agent, room, messageId), so a redelivery or a
+// repeated hook call does not create a second signal.
+export function claimReadyWorkBasis(deps) {
+  const evidence = [...deps]
+    .map(dep => [dep.id, dep.revision ?? "none", dep.state, dep.premiseFlag ?? null, dep.supersededBy ?? null])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return createHash("sha256").update(JSON.stringify(evidence)).digest("hex");
+}
+
+export function readyWorkMessageId(dependent, basis) {
+  return `work-claim:${dependent.id}:ready_work:${dependent.revision ?? "none"}:${basis}`;
+}
+
+export function wakeReadyDependents(store, roomId, prerequisite, { actorId = null } = {}) {
+  if (!boardPrerequisiteState(prerequisite).satisfied) return [];
+  let claims;
+  try { claims = store.workClaims.list(roomId); } catch { return []; }
+  const byId = new Map(claims.map(item => [item.id, item]));
+  byId.set(prerequisite.id, prerequisite);
+  const woken = [];
+  for (const dependent of byId.values()) {
+    if (dependent.id === prerequisite.id) continue;
+    if (!(dependent.dependsOn ?? []).includes(prerequisite.id)) continue;
+    if (isTerminalClaimState(dependent.state) || dependent.supersededBy) continue;
+    if (!dependent.owner) continue;
+    const deps = (dependent.dependsOn ?? []).map(id => byId.get(id));
+    if (deps.some(dep => !dep || !boardPrerequisiteState(dep).satisfied)) continue;
+    const messageId = readyWorkMessageId(dependent, claimReadyWorkBasis(deps));
+    try {
+      const result = enqueueClaimWake(store, roomId, dependent.owner, messageId, { reason: "ready_work", actorId });
+      if (result?.enqueued) woken.push({ memberId: dependent.owner, claimId: dependent.id, messageId });
+    } catch (error) {
+      console.error("dependent ready_work wake failed:", error?.message ?? error);
+    }
+  }
+  return woken;
 }
 
 // hw-h2-needs-me-review-asks (3): one wake per new head for each reviewer the
