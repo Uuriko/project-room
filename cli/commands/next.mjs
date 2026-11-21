@@ -93,6 +93,10 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
         row.nextRead.command = ["room", "read", args.requestMessageId];
       }
     }
+    // The wire schema keeps newer exact reads in the open ifIdle extension.
+    // Shell consumers have always followed the preferred action at nextRead.
+    if (value.nextRead === null)
+      value.nextRead = value.ifIdle?.discoveryReview?.nextRead ?? value.ifIdle?.investigation?.nextRead ?? null;
     const output = JSON.stringify(value);
     if (output.includes(secret) || output.includes(config.token)) {
       err("Room returned invalid credential content.");

@@ -253,7 +253,7 @@ test('idle Room Next gives only the designated reviewer the pending exact public
  const reviewRead=pending.ifIdle.nextRead;
  const catalog=(await f.rpc({jsonrpc:'2.0',id:1,method:'tools/list'},reviewer.secret)).body.result.tools;
  const schema=catalog.find(tool=>tool.name==='room_next').outputSchema;
- assert.ok(schema.$defs.nextRead.properties.tool.enum.includes(reviewRead.tool),'exact public review handoff must be allowed by the advertised output schema');
+ assert.ok(schema.$defs.read.properties.tool.enum.includes(reviewRead.tool),'exact public review handoff must be allowed by the advertised output schema');
  const reviewTools=(await f.rpc({jsonrpc:'2.0',id:1,method:'tools/list',params:{focus:'review'}},reviewer.secret)).body.result.tools;
  assert.ok(reviewTools.some(tool=>tool.name===reviewRead.tool));
  const exact=value(await f.call(reviewRead.tool,reviewRead.arguments,reviewer.secret));

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { getTier } from "./autonomy-tiers.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { nextReviewerProject } from "./project-discoveries.mjs";
 import { activationObligations } from "./activation-obligations.mjs";
 import { conversationCursorCodec } from "./conversation-sync.mjs";
@@ -7,7 +10,8 @@ import {
   readCurrentRecord, readCurrentWorkItem, readCurrentWorkPrivacy, withCurrentReadContext
 } from "./current-room-repository.mjs";
 import { ServiceError } from "./service-error.mjs";
-import { readWorkItems } from "./work-repository.mjs";
+import { currentResult } from "../src/work-selectors.js";
+import { readWorkItem, readWorkItems } from "./work-repository.mjs";
 import { workRoleHolder } from "./work-context.mjs";
 
 const PAGE_SIZE = 4;
@@ -216,7 +220,82 @@ function boundedPage(roomId, source, getPage) {
   }
 }
 
-export function readRoomNext(store, secret, roomId, { source, cursor, view, consideredDiscovery } = {}, readInvitation, { allowPublicReview = false, discoveryOrigin } = {}) {
+// Check the four newest completion events by the existing room/type index.
+// Only a still-current Room-wide result can become a shared investigation.
+function recentRoomResult(store, roomId) {
+  const rows = store.db.prepare(`SELECT id, json_extract(body, '$.data.workItemId') AS workItemId
+    FROM events WHERE room_id=? AND json_extract(body, '$.type')='work.completed'
+    ORDER BY rowid DESC LIMIT 4`).all(roomId);
+  const restricted = store.privateWorkParties(roomId, { workIds: rows.map(row => row.workItemId) });
+  for (const row of rows) {
+    if (restricted.has(row.workItemId)) continue;
+    const item = readWorkItem(store.db, roomId, row.workItemId);
+    const result = currentResult(item);
+    if (result?.completionEventId === row.id) return { workItemId: item.id, ...result };
+  }
+  return null;
+}
+
+// A bounded read suggests one check. Only a contributor's subsequent Room
+// message records a finding. Its key follows source evidence, never Room head.
+function investigationLead(store, roomId, charter, goal) {
+  const project = store.projectOffers.publishedProject(roomId);
+  if (project) {
+    const receipt = store.publicWorkClaims.latestPublicReceiptLead(roomId, project.repositoryUrl);
+    const publicLead = unrecordedInvestigation(store, roomId, charter, goal, { project, receipt });
+    if (publicLead) return publicLead;
+  }
+  return unrecordedInvestigation(store, roomId, charter, goal, { result: recentRoomResult(store, roomId) });
+}
+
+function unrecordedInvestigation(store, roomId, charter, goal, { project, receipt, result }) {
+  const criterion = project?.acceptanceCriteria[0] ?? charter?.outputs ?? goal;
+  if (!criterion) return null;
+  const basis = project
+    ? { projectId: project.id, version: project.version, revision: project.revision,
+      ...(receipt && { taskId: receipt.taskId, receiptId: receipt.receiptId }) }
+    : { charterRevision: charter?.revision ?? null, criterion, ...(result && { workItemId: result.workItemId, completionEventId: result.completionEventId }) };
+  const digest = createHash("sha256").update(JSON.stringify([roomId, basis])).digest("hex").slice(0, 32);
+  const checkpoint = "investigation-" + digest;
+  const bodyPrefix = "Room investigation " + checkpoint + "\n";
+  // Inspect only an exact, general-channel checkpoint. Other messages, DMs
+  // and work-linked results cannot attest to this particular check.
+  const saved = store.db.prepare(`SELECT seq, substr(body,1,?) AS prefix, length(body)>? AS hasResult
+    FROM messages WHERE room_id=? AND message_id=? AND channel_id='general'
+    AND coalesce(to_member_id,'')='' AND coalesce(work_item_id,'')='' AND coalesce(reply_to_id,'')=''
+    AND deleted_at IS NULL`);
+  let id = checkpoint;
+  for (let n = 0; n < 3; n++) {
+    const previous = saved.get(bodyPrefix.length, bodyPrefix.length, roomId, id);
+    if (!previous) break;
+    if (previous.prefix === bodyPrefix && previous.hasResult) return null;
+    id = checkpoint + "-" + previous.seq;
+    if (n === 2) return null;
+  }
+  const nextRead = receipt
+    ? { tool: "public_work_read_task", arguments: { taskId: receipt.taskId } }
+    : result ? (result.kind === "room_text"
+      ? { tool: "room_read_result", arguments: { roomId, workItemId: result.workItemId, completionEventId: result.completionEventId } }
+      : { tool: "room_read_work", arguments: { roomId, workItemId: result.workItemId, brief: true, includeResult: true } })
+      : { tool: "room_list_work", arguments: { roomId, focus: "results", limit: 1 } };
+  return { basis, criterion, nextRead,
+    question: receipt
+      ? "Does the cited artifact reproduce one acceptance criterion of the selected public task?"
+      : "Which observed result supports this criterion, or which specific bottleneck prevents it?",
+    ...(project && { projectPath: project.path, ...(project.repositoryUrl && { repositoryUrl: project.repositoryUrl }) }),
+    ...(receipt && { taskPath: receipt.taskPath, receiptPath: receipt.receiptPath, artifactPath: receipt.artifactPath }),
+    guidance: "Follow the selected evidence. A better evidenced bottleneck or optimization within this scope is also useful. Check existing work first. An empty partial page is inconclusive. Record the source, check, observation and smallest next step, or a scoped clean result. Keep restricted evidence with its original audience. For a Room-safe note, start body with record.bodyPrefix and append your result. This checkpoint deduplicates delivery; it does not reserve the check.",
+    record: { tool: "room_post_message", arguments: { roomId, id, messageId: id, compact: true },
+      inputRequired: ["body"], bodyPrefix,
+      onMessageExists: {
+        readPath: "/api/rooms/" + encodeURIComponent(roomId) + "/messages/" + encodeURIComponent(id) + "/thread",
+        guidance: "After a confirmed message-ID collision, read the recorded finding. If your Room-safe observation adds evidence, reply with your own stable id and body. Retry that reply unchanged.",
+        reply: { tool: "room_post_message", arguments: { roomId, replyToId: id, compact: true }, inputRequired: ["id", "body"] }
+      } }
+  };
+}
+
+export function readRoomNext(store, secret, roomId, { source, cursor, view, consideredDiscovery } = {}, readInvitation, { allowPublicReview = false, allowInvestigation = false, discoveryOrigin } = {}) {
   if (!validRoomNextSelection({ source, cursor, view, consideredDiscovery }))
     throw new ServiceError(422, "invalid_arguments", "Choose a source and its returned cursor");
   return store.readTransaction(() => {
@@ -311,6 +390,9 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
         }
       }
 
+      const canInvestigate = allowInvestigation && auth.member.kind === "agent"
+        && auth.member.permissions.includes("accept_work") && !isGuestAgentMemberId(auth.member.id)
+        && (auth.member.id === room.ownerId || getTier(store.db, roomId, auth.member.id)?.autonomyTier !== "t1_readonly");
       if (discoveryOrigin && combined && !room.archivedAt && !addressed
           && workCoverage !== "unavailable" && requestCoverage !== "unavailable"
           && !store.wakeQueue.pauseStatus(roomId, auth.member.id)) {
@@ -319,7 +401,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
         const position = pageCursor(store, binding, checkpoint);
         if (!position) throw new ServiceError(422, "invalid_discovery_checkpoint", "Omit the stale checkpoint to restart finding review");
         const project = nextReviewerProject(store, roomId, auth.member.id, discoveryOrigin, position.after);
-        if (project && !addressedComplete && packet.nextRead?.tool === "room_next") {
+        if ((project || canInvestigate) && !addressedComplete && packet.nextRead?.tool === "room_next") {
           // The selected source continuation remembers any other unfinished
           // source so the last empty page can finish the combined pickup.
           const args = packet.nextRead.arguments;
@@ -334,11 +416,18 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
           }
         } else if (project && addressedComplete) {
           const nextRead = { tool: "room_read_project_discoveries", arguments: { roomId, offerId: project.offerId, limit: 5 } };
-          packet.discoveryReview = { nextRead, consideredDiscovery: position.encode(project.after),
+          packet.ifIdle ??= { status: "unavailable", reason: "invitation_not_selected" };
+          packet.ifIdle.discoveryReview = { nextRead, consideredDiscovery: position.encode(project.after),
             path: '/api/rooms/' + encodeURIComponent(roomId) + '/project-offers/' + encodeURIComponent(project.offerId) + '/discoveries' };
-          if (!packet.nextRead) {
-            packet.nextRead = nextRead;
-            packet.ifIdle = { status: "project_discovery", nextRead };
+        }
+        if (canInvestigate && addressedComplete && !packet.nextRead && !packet.ifIdle?.discoveryReview &&
+          (packet.ifIdle?.status === "no_invitation" || packet.ifIdle?.reason === "current_help_index_unavailable")) {
+          const lead = investigationLead(store, roomId, charter, packet.goal);
+          if (lead) {
+            // Older clients validate top-level read names against a closed enum.
+            // Its ifIdle extension is open and carries the exact action in full.
+            packet.ifIdle.investigation = lead;
+            if (["room_read_work", "room_read_result"].includes(lead.nextRead.tool)) packet.nextRead = lead.nextRead;
           }
         }
       }

@@ -1,3 +1,7 @@
+import Ajv from "ajv";
+import servingOutput from "./fixtures/room-next-output-888831fe.json" with { type: "json" };
+import { hostedRoomTools } from "../server/mcp-hosted-tools.mjs";
+import { textVersion } from "../server/text-results.mjs";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,6 +12,16 @@ import { connectionHome, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { mcpOAuthToolAllowed } from "../server/mcp-oauth.mjs";
 import { privateMarkers, privateWorkFixture } from "./helpers/private-work-fixture.mjs";
+
+// Validate actual MCP structuredContent against the deployed cached contract
+// and the catalog emitted by the current checkout.
+const ajv = new Ajv({ extendRefs: true });
+const pickupSchemas = [servingOutput, hostedRoomTools.find(tool => tool.name === "room_next").outputSchema].map(schema => ajv.compile(schema));
+function validatePickup(value) {
+  for (const validate of pickupSchemas) assert.ok(validate(value), JSON.stringify(validate.errors));
+  return value;
+}
+const preferredRead = packet => packet.nextRead ?? packet.ifIdle?.discoveryReview?.nextRead ?? packet.ifIdle?.investigation?.nextRead;
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
   test(`room next selects one eligible invitation and honors the Room pause (${representation})`, async t => {
@@ -21,7 +35,10 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     const invalid = await f.mcp(f.triage, "room_next", { view: "invalid" });
     assert.equal(invalid.ok, false);
     assert.equal(active.value.nextRead, null);
-    assert.deepEqual(active.value.ifIdle, representation === "legacy"
+    validatePickup(active.value);
+    const { investigation, ...invitationState } = ifIdle;
+    assert.equal(preferredRead(active.value), investigation.nextRead);
+    assert.deepEqual(invitationState, representation === "legacy"
       ? { status: "no_invitation" }
       : { status: "unavailable", reason: "current_help_index_unavailable" });
 
@@ -139,6 +156,19 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       }), owner.value[source].items);
     }
     assert.equal(cli.requests.coverage, owner.value.requests.coverage);
+    const dryParent = connectionHome("triage", env);
+    await mkdir(dryParent, { recursive: true, mode: 0o700 });
+    const dryConnection = join(dryParent, "connection");
+    saveAgentConnection(dryConnection, {
+      version: 1, origin: f.origin, roomId: "commons", memberId: f.triage.id, token: f.triage.secret
+    });
+    writePointer("triage", dryConnection, env);
+    writeProject(directory, { connection: "triage" });
+    const dryOutput = [];
+    assert.equal(await main(["next"], { cwd: directory, env, out: value => dryOutput.push(value), err: value => errors.push(value) }), 0);
+    const dry = JSON.parse(dryOutput[0]);
+    assert.deepEqual(dry.nextRead, dry.ifIdle.investigation.nextRead);
+    assert.ok((await f.mcp(f.triage, dry.nextRead.tool, dry.nextRead.arguments)).ok);
     assert.equal(f.stored(), before, "neither adapter writes or acknowledges");
   });
 }
@@ -380,8 +410,9 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     await file("project:a", 1); await file("project:a", 2); await file("project-b", 3);
     const first = await pickup(triage);
     assert.ok(first.ok, first.text);
-    const lead = first.value.discoveryReview;
-    assert.deepEqual(first.value.nextRead, lead.nextRead);
+    const lead = first.value.ifIdle?.discoveryReview;
+    validatePickup(first.value);
+    assert.deepEqual(preferredRead(first.value), lead.nextRead);
     assert.equal(lead.nextRead.arguments.offerId, "project:a");
     assert.equal(lead.path, "/api/rooms/commons/project-offers/project%3Aa/discoveries");
     assert.doesNotMatch(first.text, /reviewer-only-observation|Cite a check|finding-[a-f0-9]{64}/);
@@ -392,14 +423,14 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(secondPage.value.nextCursor, null);
     assert.deepEqual([page, secondPage].map(p => p.value.findings[0].finding.observation).sort(),
       ["reviewer-only-observation-1", "reviewer-only-observation-2"]);
-    assert.equal((await pickup(producer)).value.discoveryReview, undefined, "addressed work retains precedence");
-    assert.equal((await pickup(observer)).value.discoveryReview, undefined);
+    assert.equal((await pickup(producer)).value.ifIdle?.discoveryReview, undefined, "addressed work retains precedence");
+    assert.equal((await pickup(observer)).value.ifIdle?.discoveryReview, undefined);
     assert.equal((await get(observer, lead.nextRead.arguments)).ok, false);
-    const next = (await pickup(triage, lead.consideredDiscovery)).value.discoveryReview;
+    const next = (await pickup(triage, lead.consideredDiscovery)).value.ifIdle?.discoveryReview;
     assert.equal(next.nextRead.arguments.offerId, "project-b");
-    assert.equal((await pickup(triage, next.consideredDiscovery)).value.discoveryReview, undefined);
+    assert.equal((await pickup(triage, next.consideredDiscovery)).value.ifIdle?.discoveryReview, undefined);
     await file("project:a", 4);
-    const latest = (await pickup(triage, next.consideredDiscovery)).value.discoveryReview;
+    const latest = (await pickup(triage, next.consideredDiscovery)).value.ifIdle?.discoveryReview;
     assert.equal(latest.nextRead.arguments.offerId, "project:a");
     assert.equal((await pickup(observer, latest.consideredDiscovery)).ok, false, "checkpoint is bound to the reviewer");
     if (representation === "legacy") {
@@ -408,11 +439,11 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       const withInvitation = await pickup(triage);
       assert.equal(withInvitation.value.ifIdle.status, "invitation");
       assert.equal(withInvitation.value.nextRead.tool, "room_read_work");
-      assert.equal(withInvitation.value.discoveryReview.nextRead.tool, "room_read_project_discoveries");
+      assert.equal(withInvitation.value.ifIdle?.discoveryReview.nextRead.tool, "room_read_project_discoveries");
     }
     store.projectOffers.transition("commons", "owner", "project:a", "withdraw", { requestId:"withdraw-a", expectedRevision:2 });
     assert.equal((await get(triage, lead.nextRead.arguments)).ok, false);
-    assert.equal((await pickup(triage, next.consideredDiscovery)).value.discoveryReview, undefined);
+    assert.equal((await pickup(triage, next.consideredDiscovery)).value.ifIdle?.discoveryReview, undefined);
   });
 }
 
@@ -444,7 +475,7 @@ test("reviewer pickup drains settled work before offering a finding and honors a
     for (let i = 0; i < 2; i++) {
       assert.equal(page.value.work.coverage, "partial");
       assert.deepEqual(page.value.work.items, []);
-      assert.equal(page.value.discoveryReview, undefined);
+      assert.equal(page.value.ifIdle?.discoveryReview, undefined);
       assert.doesNotMatch(page.text, /Private finding text|review-after-settled/);
       assert.equal(page.value.nextRead.tool, "room_next");
       assert.equal(page.value.nextRead.arguments.source, "work");
@@ -456,24 +487,133 @@ test("reviewer pickup drains settled work before offering a finding and honors a
   };
   const initial = await start();
   const wrong = await follow(f.observer, initial.value.nextRead);
-  assert.equal(wrong.value.discoveryReview, undefined);
+  assert.equal(wrong.value.ifIdle?.discoveryReview, undefined);
   const last = await drain();
   assert.equal(last.value.work.coverage, "complete");
   assert.deepEqual(last.value.work.items, []);
-  assert.equal(last.value.nextRead.tool, "room_read_project_discoveries");
-  assert.equal(last.value.nextRead.arguments.offerId, offerId);
-  const finding = await follow(f.triage, last.value.nextRead);
+  validatePickup(last.value);
+  assert.equal(preferredRead(last.value).tool, "room_read_project_discoveries");
+  assert.equal(preferredRead(last.value).arguments.offerId, offerId);
+  const finding = await follow(f.triage, preferredRead(last.value));
   assert.equal(finding.value.findings[0].finding.observation, "Private finding text");
-  const considered = await f.mcp(f.triage, "room_next", { view: "pickup", consideredDiscovery: last.value.discoveryReview.consideredDiscovery });
-  assert.equal(considered.value.nextRead.arguments.view, undefined, "consumed filings do not start another discovery walk");
+  const considered = await f.mcp(f.triage, "room_next", { view: "pickup", consideredDiscovery: last.value.ifIdle?.discoveryReview.consideredDiscovery });
+  let later = considered;
+  while (later.value.nextRead?.tool === "room_next") later = await follow(f.triage, later.value.nextRead);
+  assert.equal(later.value.ifIdle?.discoveryReview, undefined, "consumed filings stay consumed throughout the walk");
+  assert.equal(later.value.ifIdle?.investigation.basis.projectId, offerId);
 
   f.send(f.owner, "work.proposed", { workItemId: "z-addressed", title: "Prioritize this", accountableMemberId: f.triage.id,
     definitionOfDone: "Finish this assignment", mode: "read" });
   const stale = await follow(f.triage, initial.value.nextRead);
   assert.equal(stale.value.work.reason, "cursor_changed");
-  assert.equal(stale.value.discoveryReview, undefined);
+  assert.equal(stale.value.ifIdle?.discoveryReview, undefined);
   const priority = await drain();
   assert.equal(priority.value.nextRead.tool, "room_read_work");
   assert.equal(priority.value.nextRead.arguments.workItemId, "z-addressed");
-  assert.equal(priority.value.discoveryReview, undefined);
+  assert.equal(priority.value.ifIdle?.discoveryReview, undefined);
 });
+
+for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`dry pickup gives an executable check and records the basis once (${representation})`, async t => {
+    const f = await privateWorkFixture(t, representation);
+    const pickup = who => f.mcp(who, "room_next", { view: "pickup" });
+    const criterion = "Produce a reproducible checkout experiment";
+    f.send(f.owner, "room.charter_updated", { expectedRevision: 0, purpose: "Test the project", outputs: criterion,
+      boundaries: null, escalation: null });
+    const first = await pickup(f.triage);
+    assert.ok(first.ok, first.text);
+    const lead = first.value.ifIdle?.investigation;
+    assert.equal(lead.criterion, criterion);
+    assert.equal(lead.basis.charterRevision, 1);
+    const checked = await f.mcp(f.triage, lead.nextRead.tool, lead.nextRead.arguments);
+    assert.ok(checked.ok, checked.text);
+    const write = lead.record;
+    const unrelated = await f.mcp(f.triage, write.tool, { ...write.arguments, body: "Unrelated message" });
+    assert.ok(unrelated.ok, unrelated.text);
+    const retry = (await pickup(f.triage)).value.ifIdle?.investigation.record;
+    assert.notEqual(write.arguments.id, retry.arguments.id);
+    assert.equal(write.bodyPrefix, retry.bodyPrefix);
+    const args = { ...retry.arguments, body: retry.bodyPrefix + "Read the Room-visible results page; no matching result in the sampled page." };
+    const recorded = await f.mcp(f.triage, retry.tool, args);
+    assert.ok(recorded.ok, recorded.text);
+    assert.equal((await f.mcp(f.triage, retry.tool, args)).value.duplicate, true);
+    assert.equal((await pickup(f.broad)).value.ifIdle?.investigation, undefined);
+    assert.equal((await pickup(f.triage)).value.nextRead, null);
+    f.store.projectOffers.create("commons", "owner", { requestId: "create-dry", offerId: "dry-project",
+      reviewerMemberIds: ["owner"], terms: { kind: "project", title: "Public project", summary: "Public terms",
+        acceptanceCriteria: ["Check a public source"], reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" },
+        repositoryUrl: "https://example.com/source" } });
+    f.store.projectOffers.transition("commons", "owner", "dry-project", "publish", { requestId: "publish-dry", expectedRevision: 1 });
+    const published = (await pickup(f.triage)).value.ifIdle?.investigation;
+    assert.equal(published.criterion, "Check a public source");
+    assert.notEqual(published.record.arguments.id, write.arguments.id);
+    assert.equal(published.projectPath, "/api/project-offers/dry-project");
+    f.store.projectOffers.create("commons", "owner", { requestId: "create-task", offerId: "receipt-task",
+      reviewerMemberIds: ["owner"], terms: { kind: "task", title: "Test task", summary: "Check the source",
+        acceptanceCriteria: ["Check a public source"], reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" },
+        repositoryUrl: "https://example.com/source" } });
+    f.store.projectOffers.transition("commons", "owner", "receipt-task", "publish", { requestId: "publish-task", expectedRevision: 1 });
+    f.store.publicWorkClaims.enable("commons", "owner", "receipt-task", { requestId: "enable", expectedRevision: 2,
+      expectedTermsVersion: 1, repositoryRef: "main", files: ["README.md"] });
+    const claimed = f.store.publicWorkClaims.act("receipt-task", f.observer.secret, "claim", { requestId: "claim", expectedTermsVersion: 1 });
+    const finished = f.store.publicWorkClaims.act("receipt-task", f.observer.secret, "finish", { requestId: "finish",
+      expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText: "Public test result", checksReported: [] });
+    const receiptPacket = validatePickup((await pickup(f.triage)).value);
+    const receipt = receiptPacket.ifIdle.investigation;
+    assert.deepEqual(preferredRead(receiptPacket), receipt.nextRead);
+    assert.equal(receipt.basis.receiptId, finished.receipt.receiptId);
+    assert.notEqual(receipt.record.arguments.id, published.record.arguments.id);
+    assert.equal((await fetch(f.origin + receipt.taskPath)).status, 200);
+    assert.equal(await (await fetch(f.origin + receipt.artifactPath)).text(), "Public test result");
+    const exact = await fetch(f.origin + "/mcp", { method: "POST",
+      headers: { Authorization: "Bearer " + f.triage.secret, "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: receipt.nextRead.tool, arguments: receipt.nextRead.arguments } }) });
+    const rpc = await exact.json();
+    assert.equal(rpc.result?.structuredContent?.claim.submittedReceiptId, finished.receipt.receiptId);
+
+    const peerLead = (await pickup(f.broad)).value.ifIdle?.investigation;
+    assert.deepEqual(peerLead.record, receipt.record);
+    const firstPost = await f.mcp(f.triage, receipt.record.tool, {
+      ...receipt.record.arguments, body: receipt.record.bodyPrefix + "Public artifact reproduced."
+    });
+    assert.ok(firstPost.ok, firstPost.text);
+    const secondBody = "The artifact also needs the forwarding citation.";
+    const collision = await f.mcp(f.broad, peerLead.record.tool, {
+      ...peerLead.record.arguments, body: peerLead.record.bodyPrefix + secondBody
+    });
+    assert.equal(collision.value.status, 409);
+    assert.equal(collision.value.message, "Message already exists");
+    const recovery = peerLead.record.onMessageExists;
+    const thread = await fetch(f.origin + recovery.readPath, { headers: { Authorization: "Bearer " + f.broad.secret } });
+    assert.equal(thread.status, 200);
+    assert.match(await thread.text(), /Public artifact reproduced/);
+    const replyArgs = { ...recovery.reply.arguments, id: "second-citation-finding", body: secondBody };
+    const reply = await f.mcp(f.broad, recovery.reply.tool, replyArgs);
+    assert.ok(reply.ok, reply.text);
+    assert.equal(reply.value.replyToId, receipt.record.arguments.messageId);
+    assert.equal((await f.mcp(f.broad, recovery.reply.tool, replyArgs)).value.duplicate, true);
+    assert.equal((await pickup(f.triage)).value.nextRead, null, "both unchanged bases were recorded");
+    f.send(f.owner, "work.proposed", { workItemId: "room-proof", title: "Check experiment", definitionOfDone: "Observed result",
+      accountableMemberId: f.producer.id, mode: "read" });
+    f.send(f.producer.key, "work.accepted", { workItemId: "room-proof", expectedRevision: f.rev("room-proof") });
+    f.send(f.producer.key, "work.started", { workItemId: "room-proof", expectedRevision: f.rev("room-proof") });
+    const resultMessage = f.send(f.producer.key, "message.posted", { messageId: "room-proof-text", body: "Reproduced experiment", workItemId: "room-proof" });
+    f.send(f.producer.key, "work.completed", { workItemId: "room-proof", expectedRevision: f.rev("room-proof"), evidenceKind: "room_text",
+      evidenceMessageId: "room-proof-text", evidenceMessageEventId: resultMessage.event.id,
+      evidenceVersion: textVersion("Reproduced experiment"),
+      previousCompletionEventId: null, producerId: f.producer.id, summary: "Reproduced", nextAction: "None", checksClaimed: ["Experiment"] });
+    const roomPacket = validatePickup((await pickup(f.triage)).value);
+    const newResult = roomPacket.ifIdle.investigation;
+    assert.deepEqual(roomPacket.nextRead, newResult.nextRead);
+    assert.equal(newResult.basis.workItemId, "room-proof");
+    assert.notEqual(newResult.record.arguments.id, retry.arguments.id);
+    assert.ok((await f.mcp(f.triage, newResult.nextRead.tool, newResult.nextRead.arguments)).ok);
+    const savedResult = await f.mcp(f.triage, newResult.record.tool, { ...newResult.record.arguments,
+      body: newResult.record.bodyPrefix + "The separately selected Room result reproduces." });
+    assert.ok(savedResult.ok, savedResult.text);
+    assert.equal((await pickup(f.broad)).value.nextRead, null, "recording the changed Room result consumes only its basis");
+
+    assert.equal((await pickup(f.producer)).value.ifIdle?.investigation, undefined);
+  });
+}
