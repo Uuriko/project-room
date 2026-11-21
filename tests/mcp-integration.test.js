@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import { parse } from "yaml";
 import { join } from "node:path";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -90,12 +91,33 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.equal(f.store.operationReceipt(f.keys.owner, "commons", "batch-two").status, "recorded");
   const absent = (await mcp.call("room_receipt", { operationId: "batch-two" })).result.structuredContent;
   assert.equal(absent.status, "not_recorded", "another actor's operation is not visible");
+  const docs = parse(readFileSync(new URL("../docs/openapi.yaml", import.meta.url), "utf8"));
+  const eventResponses = docs.paths["/api/rooms/{roomId}/events"].get.responses;
+  const variants = eventResponses["200"].content["application/json"].schema.oneOf;
+  assert.ok(variants.some(variant => variant.required.includes("events")));
+  for (const observed of [receipt, absent]) {
+    const variant = variants.find(entry => entry.properties.status?.enum.includes(observed.status));
+    assert.ok(variant, "Document each exact receipt status");
+    assert.equal(variant.additionalProperties, false);
+    assert.deepEqual(Object.keys(observed).sort(), [...variant.required].sort());
+    assert.deepEqual(Object.keys(variant.properties).sort(), [...variant.required].sort());
+    for (const [key, property] of Object.entries(variant.properties)) {
+      if (property.type === "integer") {
+        assert.ok(Number.isSafeInteger(observed[key]));
+        if (property.minimum !== undefined) assert.ok(observed[key] >= property.minimum);
+      } else assert.equal(typeof observed[key], property.type);
+      if (property.enum) assert.ok(property.enum.includes(observed[key]));
+    }
+  }
   const receiptSequence = f.store.headSequence("commons");
   for (const query of ["operationId=one&operationId=two", "operationId=one&after=0", "operationId=one&limit=2"]) {
     const refused = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons/events?${query}`, {
       headers: { Authorization: "Bearer " + token }
     });
     assert.equal(refused.status, 422);
+    const { error } = await refused.json();
+    assert.equal(error.code, "invalid_operation_selection");
+    assert.match(eventResponses["422"].description, new RegExp(error.code));
   }
   assert.equal(f.store.headSequence("commons"), receiptSequence);
   const retry = (await mcp.call("room_post_draft", input)).result.structuredContent;
