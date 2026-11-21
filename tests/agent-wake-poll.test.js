@@ -634,11 +634,13 @@ test("a final prerequisite gate releases each eligible accepted successor to its
   const { store } = f;
   const receiver = store.identities.create("Dependency receiver");
   const other = store.identities.create("Other receiver");
+  const first = store.identities.create("First-time receiver");
   const link = (identity, memberId) => linkWithProof(store, f.keys.owner, "commons", identity, {
     memberId, displayName: memberId, permissions: ["accept_work"]
   });
   link(receiver, "ready-receiver");
   link(other, "unleased-receiver");
+  link(first, "first-receiver");
   const cmd = (key, type, data, id = randomUUID()) => store.command(key, "commons", { id, type, data });
   const row = workItemId => store.room("commons").state.workItems[workItemId];
   async function setupHost(identity, hostId, leased) {
@@ -669,6 +671,7 @@ test("a final prerequisite gate releases each eligible accepted successor to its
   };
   for (const id of ["ready-a", "ready-b"]) makeSuccessor(id, "ready-receiver", receiver);
   makeSuccessor("unleased-successor", "unleased-receiver", other);
+  makeSuccessor("first-successor", "first-receiver", first);
   const poll = async (identity = receiver, hostId = "receiver") => {
     const response = await get(origin, `/api/agent-wakes/poll?hostId=${hostId}&waitMs=0&roomId=commons`, identity.secret);
     assert.equal(response.status, 200);
@@ -712,6 +715,15 @@ test("a final prerequisite gate releases each eligible accepted successor to its
   }
   assert.deepEqual(await poll(receiver, "other-host"), []);
   assert.deepEqual(await poll(other, "unleased"), [], "an offline receiver cannot read the retained signal");
+  const unsupported = await post(origin, "/api/agent-heartbeats", { hostId: "first", mode: "pull-only",
+    listenerLease: { roomId: "commons" } }, first.secret);
+  assert.equal(unsupported.status, 200);
+  assert.deepEqual(await poll(first, "first"), [], "a lease alone cannot receive native work signals");
+  const firstLease = await setupHost(first, "first", true);
+  assert.equal(firstLease.listener.acquired, true);
+  assert.deepEqual((await poll(first, "first")).map(wake => [wake.workItemId, wake.eventId]), [
+    ["first-successor", accepted.event.id],
+  ], "first capable attachment recovers the exact prerequisite acceptance");
   const reconnected = await setupHost(other, "unleased", true);
   assert.equal(reconnected.listener.acquired, true);
   const recovered = await poll(other, "unleased");
