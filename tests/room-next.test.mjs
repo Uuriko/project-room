@@ -415,3 +415,65 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal((await pickup(triage, next.consideredDiscovery)).value.discoveryReview, undefined);
   });
 }
+
+test("reviewer pickup drains settled work before offering a finding and honors a later addressed item", async t => {
+  const f = await privateWorkFixture(t, "normalized-current-v1");
+  for (let i = 0; i < 35; i++) {
+    const workItemId = "a-settled-" + String(i).padStart(2, "0");
+    f.send(f.owner, "work.proposed", { workItemId, title: workItemId, accountableMemberId: f.triage.id,
+      definitionOfDone: "Handled by the replacement", mode: "read" });
+    f.send(f.owner, "work.superseded", { workItemId, expectedRevision: f.rev(workItemId),
+      supersededByWorkItemId: "open", reason: "Consolidated" });
+  }
+  const offerId = "review-after-settled";
+  f.store.projectOffers.create("commons", "owner", { requestId: "create-discovery", offerId,
+    reviewerMemberIds: ["owner", f.triage.id], terms: { kind: "project", title: "Review a finding", summary: "Check one result",
+      acceptanceCriteria: ["Read the source"], reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" },
+      repositoryUrl: "https://example.com/repo" } });
+  f.store.projectOffers.transition("commons", "owner", offerId, "publish", { requestId:"publish-discovery", expectedRevision:1 });
+  const filed = await fetch(f.origin + "/api/project-offers/" + offerId + "/discoveries", {
+    method: "POST", headers: { Authorization: "Bearer " + f.observer.secret, "Content-Type": "application/json" },
+    body: JSON.stringify({ requestId: "finding", expectedTermsVersion: 1, expectedRevision: 2,
+      criterion: "Read the source", sourceUrl: "https://example.com/source", observation: "Private finding text", nextAction: "Review privately" }) });
+  assert.equal(filed.status, 200);
+
+  const follow = (who, pointer) => f.mcp(who, pointer.tool, pointer.arguments);
+  const start = () => f.mcp(f.triage, "room_next", { view: "pickup" });
+  const drain = async () => {
+    let page = await start();
+    for (let i = 0; i < 2; i++) {
+      assert.equal(page.value.work.coverage, "partial");
+      assert.deepEqual(page.value.work.items, []);
+      assert.equal(page.value.discoveryReview, undefined);
+      assert.doesNotMatch(page.text, /Private finding text|review-after-settled/);
+      assert.equal(page.value.nextRead.tool, "room_next");
+      assert.equal(page.value.nextRead.arguments.source, "work");
+      assert.deepEqual(page.value.work.nextRead, page.value.nextRead);
+      page = await follow(f.triage, page.value.nextRead);
+      assert.ok(page.ok, page.text);
+    }
+    return page;
+  };
+  const initial = await start();
+  const wrong = await follow(f.observer, initial.value.nextRead);
+  assert.equal(wrong.value.discoveryReview, undefined);
+  const last = await drain();
+  assert.equal(last.value.work.coverage, "complete");
+  assert.deepEqual(last.value.work.items, []);
+  assert.equal(last.value.nextRead.tool, "room_read_project_discoveries");
+  assert.equal(last.value.nextRead.arguments.offerId, offerId);
+  const finding = await follow(f.triage, last.value.nextRead);
+  assert.equal(finding.value.findings[0].finding.observation, "Private finding text");
+  const considered = await f.mcp(f.triage, "room_next", { view: "pickup", consideredDiscovery: last.value.discoveryReview.consideredDiscovery });
+  assert.equal(considered.value.nextRead.arguments.view, undefined, "consumed filings do not start another discovery walk");
+
+  f.send(f.owner, "work.proposed", { workItemId: "z-addressed", title: "Prioritize this", accountableMemberId: f.triage.id,
+    definitionOfDone: "Finish this assignment", mode: "read" });
+  const stale = await follow(f.triage, initial.value.nextRead);
+  assert.equal(stale.value.work.reason, "cursor_changed");
+  assert.equal(stale.value.discoveryReview, undefined);
+  const priority = await drain();
+  assert.equal(priority.value.nextRead.tool, "room_read_work");
+  assert.equal(priority.value.nextRead.arguments.workItemId, "z-addressed");
+  assert.equal(priority.value.discoveryReview, undefined);
+});

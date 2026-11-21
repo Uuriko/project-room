@@ -64,7 +64,8 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
       const read = value[source]?.nextRead;
       const args = read?.arguments;
       if (read?.tool === "room_next" && args?.source === source && args.roomId === config.roomId
-          && Object.keys(args).every(key => ["roomId", "source", "cursor"].includes(key))
+          && Object.keys(args).every(key => ["roomId", "source", "cursor", "view"].includes(key))
+          && (args.view === undefined || args.view === "pickup")
           && (args.cursor === undefined || /^[A-Za-z0-9_-]{1,4096}$/.test(args.cursor))) {
         read.command = ["room", "next", "--source", source, ...(args.cursor ? ["--cursor", args.cursor] : [])];
       }

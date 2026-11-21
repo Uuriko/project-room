@@ -262,23 +262,39 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
         ?? packet.requests?.items[0]?.nextRead ?? packet.work?.items[0]?.nextRead;
       packet.nextRead = addressed ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
 
+      // A source cursor has already passed its room, viewer and permission checks.
+      // Only a cursor issued while walking a combined pickup can certify the other source.
+      const resume = source && cursor && packet[source]?.coverage !== "unavailable"
+        ? conversationCursorCodec(store).decode(cursor)?.discoveryWalk : null;
+      const roomSequence = () => store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId).sequence;
+      const currentResume = resume && resume.sequence === roomSequence();
+      if (resume && !currentResume && !addressed) {
+        packet.nextRead = { tool: "room_next", arguments: { roomId, view: "pickup",
+          ...(resume.consideredDiscovery && { consideredDiscovery: resume.consideredDiscovery }) } };
+      }
+      const combined = !source || currentResume;
+      const workCoverage = packet.work?.coverage ?? (resume?.pendingWork ? "partial" : "complete");
+      const requestCoverage = packet.requests?.coverage ?? "complete";
+      const addressedComplete = combined && workCoverage === "complete" && requestCoverage === "complete";
+      if (combined && resume?.pendingWork && !packet.nextRead)
+        packet.nextRead = read(roomId, "work", resume.pendingWork);
+
       // Preserve discovery priority until all addressed work is known. An
       // empty partial page can still offer a separate exact public review.
-      if (allowPublicReview && !source && !room.archivedAt && !addressed
-        && packet.work.coverage !== "unavailable" && packet.requests.coverage === "complete"
+      if (allowPublicReview && combined && !room.archivedAt && !addressed
+        && workCoverage !== "unavailable" && requestCoverage === "complete"
         && auth.member.permissions.includes("verify") && !store.wakeQueue.pauseStatus(roomId, auth.member.id)) {
         const receiptId = store.publicWorkReviews.nextPending(roomId, auth.member.id);
         if (receiptId) {
           const nextRead = { tool: "room_read_public_review", arguments: { roomId, receiptId } };
           packet.ifIdle = { status: "public_review", nextRead };
-          if (packet.work.coverage === "complete") packet.nextRead = nextRead;
+          if (addressedComplete) packet.nextRead = nextRead;
         }
       }
 
-      if (!source && !room.archivedAt && auth.member.kind === "agent"
+      if (combined && !room.archivedAt && auth.member.kind === "agent"
         && auth.member.permissions.includes("accept_work") && !addressed && !packet.ifIdle) {
         const paused = store.wakeQueue.pauseStatus(roomId, auth.member.id);
-        const addressedComplete = packet.work.coverage === "complete" && packet.requests.coverage === "complete";
         if (paused) packet.ifIdle = { status: "paused" };
         else if (addressedComplete && readInvitation) {
           const listing = readInvitation();
@@ -295,14 +311,28 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
         }
       }
 
-      if (discoveryOrigin && !source && !room.archivedAt && !addressed
-          && packet.work.coverage === "complete" && packet.requests.coverage === "complete"
+      if (discoveryOrigin && combined && !room.archivedAt && !addressed
+          && workCoverage !== "unavailable" && requestCoverage !== "unavailable"
           && !store.wakeQueue.pauseStatus(roomId, auth.member.id)) {
         const binding = cursorBinding(auth, roomId, "discovery", null);
-        const position = pageCursor(store, binding, consideredDiscovery);
+        const checkpoint = consideredDiscovery ?? resume?.consideredDiscovery;
+        const position = pageCursor(store, binding, checkpoint);
         if (!position) throw new ServiceError(422, "invalid_discovery_checkpoint", "Omit the stale checkpoint to restart finding review");
         const project = nextReviewerProject(store, roomId, auth.member.id, discoveryOrigin, position.after);
-        if (project) {
+        if (project && !addressedComplete && packet.nextRead?.tool === "room_next") {
+          // The selected source continuation remembers any other unfinished
+          // source so the last empty page can finish the combined pickup.
+          const args = packet.nextRead.arguments;
+          const codec = conversationCursorCodec(store);
+          const original = codec.decode(args.cursor);
+          if (original) {
+            const pendingWork = args.source === "requests" ? resume?.pendingWork ?? packet.work?.nextRead?.arguments.cursor : null;
+            const discoveryWalk = { sequence: roomSequence(), pendingWork, consideredDiscovery: checkpoint };
+            packet.nextRead = { tool: "room_next", arguments: { ...args, view: "pickup",
+              cursor: codec.encode({ ...original, discoveryWalk }) } };
+            if (packet[args.source]?.nextRead) packet[args.source].nextRead = packet.nextRead;
+          }
+        } else if (project && addressedComplete) {
           const nextRead = { tool: "room_read_project_discoveries", arguments: { roomId, offerId: project.offerId, limit: 5 } };
           packet.discoveryReview = { nextRead, consideredDiscovery: position.encode(project.after),
             path: '/api/rooms/' + encodeURIComponent(roomId) + '/project-offers/' + encodeURIComponent(project.offerId) + '/discoveries' };
