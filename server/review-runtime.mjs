@@ -102,7 +102,7 @@ export const REVIEW_RUNTIME_ROUTE = Object.freeze({
     if (auth.credentialScope !== "room") ctx.reject(403, "access_denied", "A room bearer is required");
     if (auth.kind === "api-key" && !auth.apiKeyScopes?.some(scope => ["rooms:write","rooms:*"].includes(scope)))
       ctx.reject(403, "insufficient_scope", "Room write scope is required");
-    ctx.rate(`write:${auth.credentialHash}`, 60);
+    ctx.rate(`review-runtime:${auth.credentialHash}`, 60);
     return ctx.json(ctx.res,200,ctx.store.reportReviewRuntime(selected.token,roomId,await ctx.body(ctx.req,{limit:4096}),binding));
   }
 });
