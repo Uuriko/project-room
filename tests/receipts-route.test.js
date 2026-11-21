@@ -111,7 +111,11 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   });
   assert.equal(off.status, 201);
   assert.equal((await raw(origin, `/receipts/${id}`)).status, 404);
-  assert.match((await raw(origin, "/receipts")).text, /Public task/);
+  // F-3: the recorded opt-out now deletes the room's pwr_ row in the
+  // same write too (its origin is this room), so the public-work
+  // receipt leaves the list with the claim receipt instead of
+  // surviving on the separate directory toggle alone.
+  assert.equal((await raw(origin, "/receipts")).text.includes("Public task"), false);
 });
 
 test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner toggle", async t => {
