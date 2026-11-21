@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseFailingTests, formatFailureComment } from "../scripts/failing-tests.mjs";
+import { parseFailingTests, formatFailureComment, receiptFailures } from "../scripts/failing-tests.mjs";
 
 test("parseFailingTests extracts spec-reporter failure lines", () => {
   const out = [
@@ -102,4 +102,19 @@ test("formatFailureComment omits the deliberate fail-probe fixture and keeps rea
   assert.doesNotMatch(body, /probe fails deterministically/);
   const only = formatFailureComment({ shard: 1, total: 3, failures: ["probe fails deterministically"], runUrl: "" });
   assert.match(only, /See the job log/);
+});
+
+test("receiptFailures drops the fail-probe fixture from the receipt path and keeps real failures", () => {
+  // The receipt path: parseFailingTests over a red run's teed stdout (the
+  // nested runner test leaks the fixture's ✖ line into it), then the filter
+  // scripts/unit-ci.mjs applies before writing the receipt.
+  const stdout = [
+    "✖ lane15 real failure example (1.000000ms)",
+    "✖ probe fails deterministically (0.500000ms)",
+  ].join("\n");
+  const parsed = parseFailingTests(stdout);
+  assert.deepEqual(parsed, ["lane15 real failure example", "probe fails deterministically"], "parser keeps the fixture for the runner test");
+  assert.deepEqual(receiptFailures(parsed), ["lane15 real failure example"]);
+  assert.deepEqual(receiptFailures([]), []);
+  assert.equal(receiptFailures(undefined), undefined);
 });

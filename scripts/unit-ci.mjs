@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
-import { parseFailingTests } from "./failing-tests.mjs";
+import { parseFailingTests, receiptFailures } from "./failing-tests.mjs";
 
 const XML_ENTITIES = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
 
@@ -249,7 +249,11 @@ async function main() {
         planHash: selected.planHash ?? plan.planHash,
         status,
         signal,
-        failures,
+        // The receipt is a reporting surface: drop the deliberate fail-probe
+        // fixture name the nested runner test tees into this run's stdout
+        // (runTestFiles keeps returning it unfiltered for that test's own
+        // assertions). Matches the PR comment and the JUnit sidecar.
+        failures: receiptFailures(failures),
         // Per-file measured runtimes from this actual hosted run (junit
         // sidecar). Backward compatible: older receipts omit this field
         // and verifyUnitShards does not require it. The single-job receipt
