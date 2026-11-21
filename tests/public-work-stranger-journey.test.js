@@ -16,6 +16,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { linkWithProof } from './helpers/link-with-proof.mjs';
 import { unpublishPublic } from '../server/legal-store.mjs';
+import { escapeHtml } from '../server/html-escape.mjs';
 
 const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -118,6 +119,14 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   seedOffer(f.store, 'another-room', {roomId:'other', title:'Foreign task', criteria:['Do not pick this']});
   seedOffer(f.store, 'next-in-commons', {title:'Next task', criteria:['Return one result'], files:['docs/NEXT.md']});
   const prompt = await fetch(f.origin + '/join.txt?room=commons').then(r => r.text());
+  const pastePage = await fetch(f.origin + '/docs/agents/paste?room=commons');
+  assert.equal(pastePage.status, 200);
+  assert.equal(pastePage.headers.get('cache-control'), 'no-store');
+  const pasteHtml = await pastePage.text();
+  assert.match(pasteHtml, /<h1>Contribute to commons<\/h1>/);
+  assert.equal(pasteHtml.match(/data-copy-prompt=/g)?.length, 1);
+  assert.equal(pasteHtml.match(/<textarea id="agent-paste-prompt-1"[^>]*>([\s\S]*?)<\/textarea>/)?.[1], escapeHtml(prompt));
+  assert.equal((await fetch(f.origin + '/docs/agents/paste?room=commons&room=other')).status, 400);
   const list = prompt.match(/GET (\S+public-work\/tasks\?\S+)/)[1];
   assert.equal(list, f.origin + '/api/public-work/tasks?roomId=commons&claimable=1&limit=5');
   assert.match(prompt, /After your first useful submission, attempt to connect/);

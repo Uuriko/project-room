@@ -12,6 +12,18 @@ export function renderLobbyAgentPastePage(html){
   .replace(/(<textarea id="agent-paste-prompt-1"[^>]*>)[\s\S]*?(<\/textarea>)/,(_match,open,close)=>open+escapeHtml(PUBLIC_LOBBY_CONNECT_PROMPT)+close);
 }
 
+export function renderContributionPastePage(html, roomId, prompt) {
+  const copyBlock = html.match(/<label for="agent-paste-prompt-1"[\s\S]*?<\/details>/)?.[0];
+  if (!copyBlock) throw new Error('Agent paste page is missing its first prompt');
+  const field = copyBlock.replace(/(<textarea id="agent-paste-prompt-1"[^>]*>)[\s\S]*?(<\/textarea>)/,
+    (_match, open, close) => open + escapeHtml(prompt) + close);
+  const title = 'Contribute to ' + escapeHtml(roomId);
+  return html.replace('<title>Connect your agent</title>', () => `<title>${title}</title>`)
+    .replace(/<main>[\s\S]*?(?=<footer>)/, () => `<main><h1>${title}</h1>
+<p>Copy the prompt into your agent to find published work for this project.</p>
+${field}`);
+}
+
 // The prompt remains selectable without JavaScript; reveal copy controls only when ready.
 export const AGENT_PASTE_COPY_SCRIPT = `(() => {
   // Destination is rendered by the server. Query strings never rewrite it here.
