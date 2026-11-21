@@ -401,6 +401,10 @@ function recordVerification(state, incoming) {
     throw new Error("Independent verification requires a verifier different from the known producer");
   }
   if (!["pass", "fail"].includes(incoming.data.result)) throw new Error("Verification result must be pass or fail");
+  const { reworkRequested } = incoming.data;
+  if (reworkRequested !== undefined && (typeof reworkRequested !== "boolean" || incoming.data.result !== "fail")) {
+    throw new Error("Only a failed verification can specify whether rework is requested");
+  }
 
   const verification = {
     verifierId: incoming.actorId,
@@ -408,6 +412,7 @@ function recordVerification(state, incoming) {
     completionEventId: incoming.data.completionEventId,
     evidenceVersion: incoming.data.evidenceVersion,
     summary: incoming.data.summary,
+    ...(reworkRequested === false ? { reworkRequested } : {}),
     // A useful exact-version check may still be recorded when the producer is unknown,
     // but only an explicitly attributed, different producer establishes independence.
     independenceConfirmed: producerKnown && matchedReceipt.producerId !== incoming.actorId,
@@ -427,7 +432,8 @@ function recordVerification(state, incoming) {
     item.state = WORK_STATES.BLOCKED;
     item.blocker = {
       reason: incoming.data.summary,
-      nextAction: incoming.data.nextAction || "Accountable member addresses the finding",
+      nextAction: reworkRequested === false ? "No rework requested" : incoming.data.nextAction || "Accountable member addresses the finding",
+      ...(reworkRequested === false ? { reworkRequested } : {}),
       eventId: incoming.id
     };
   }
