@@ -575,6 +575,8 @@ export default {
   "review.runtime.unknown": "Review start unconfirmed. Ask the host operator to check the original attempt before retrying.",
   "review.runtime.statusSuffix": " · {status}",
   "review.runtime.unavailable": "Runtime status unavailable",
+  "review.runtime.webhookDelivered": "Review notification delivered. Start unconfirmed.",
+  "review.runtime.webhookQueued": "Review notification queued",
   "result.releaseChecks": "Release checks",
   "result.releaseStage": "{stage} · {status}",
   "result.release.build": "Build",
