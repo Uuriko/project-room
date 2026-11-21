@@ -171,6 +171,7 @@ function acceptedReleaseUpdate(store, room, member, floor, messages, now) {
   const candidates = Object.values(state.workItems ?? {}).filter(item =>
     item?.state === "completed" && workRoleHolder(item, member.id)
     && item.verification?.result === "pass" && item.verification.independenceConfirmed === true
+    && nextWorkStep(item, now, state.room.ownerId).action === "complete"
     && messages.get(item.receipt?.nativeText?.messageId)?.body?.startsWith("Candidate revision: "));
   candidates.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
   // Reuse the selected-result authorization and evidence binding. A broken or

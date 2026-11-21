@@ -275,6 +275,13 @@ test("release evidence binds the exact result, candidate and visible report with
   const browser = f.post(`room-release-receipt/1 browser ${completionEventId} ${candidateRevision} ${evidenceDigest}\nBrowser checks passed`,
     { replyToId: draft.event.data.messageId });
   record({ ...basis, checks: { browser: { ...passed, evidenceMessageId: browser.event.data.messageId } } });
+  assert.equal((await read()).current.next.action, "decide");
+  assert.deepEqual(await releaseUpdates(), [], "a required owner decision must precede the accepted-release row");
+  const acceptance = f.post("I reviewed the three exact release receipts and accept the result.", {}, "owner");
+  f.mutate(T.OWNER_DECISION_RECORDED, {
+    completionEventId, evidenceVersion, decision: "approved", reason: "Accept the exact release evidence",
+    sourceMessageId: acceptance.event.data.messageId,
+  }, "owner");
   const [update] = await releaseUpdates();
   assert.ok(update);
   assert.equal(update.sourceRef.workItemId, f.workItemId);
