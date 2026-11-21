@@ -1,8 +1,48 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { generateKeyPair, publicKeyToJwk, signCardJws } from "../server/agent-card-signing.mjs";
 import { attachReleaseReceipts, confirmedReceipt, packageFixtureEvidence, prepareReleaseReview, prepareReleaseReviewPacket, publishReleaseProofParts, submitReleaseReview } from "../scripts/attach-release-receipts.mjs";
+
+test("the release CLI reads an artifact at its exact same-origin path", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "room-release-artifact-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const binding = join(directory, "binding.json");
+  const connection = join(directory, "connection.json");
+  const candidateRevision = "a".repeat(40);
+  await writeFile(binding, JSON.stringify({ roomId: "test", workItemId: "release", candidateRevision }));
+  await writeFile(connection, JSON.stringify({ roomId: "test", memberId: "producer", identitySecret: "fixture" }));
+  const mock = `globalThis.fetch = async url => {
+    console.log(url.href);
+    if (url.pathname === "/api/version") return Response.json({ sourceRevision: ${JSON.stringify(candidateRevision)} });
+    return new Response(Uint8Array.of(0x1f, 0x8b, 0x00));
+  };`;
+  const script = fileURLToPath(new URL("../scripts/attach-release-receipts.mjs", import.meta.url));
+  const origin = "https://local-room.example";
+  const run = path => spawnSync(process.execPath, [
+    "--import", "data:text/javascript," + encodeURIComponent(mock),
+    script, "--binding", binding, "--work-revision", "2", "--verify-path", path
+  ], { encoding: "utf8", timeout: 5000, env: {
+    ...process.env, ROOM_RELEASE_ORIGIN: origin, ROOM_RELEASE_CONNECTION: connection
+  } });
+  const artifact = run("/room-acp.tgz");
+  assert.equal(artifact.status, 1);
+  assert.match(artifact.stderr, /Missing build evidence/);
+  assert.deepEqual(artifact.stdout.trim().split("\n"),
+    [origin + "/api/version", origin + "/room-acp.tgz", origin + "/api/version"]);
+  for (const path of ["//elsewhere.example/archive.tgz", "/dir/../archive.tgz", "/./archive.tgz",
+    "/%2e/archive.tgz", "/archive.tgz?query=1", "/archive.tgz#section", "/a\\b.tgz"]) {
+    const invalid = run(path);
+    assert.equal(invalid.status, 1, path);
+    assert.equal(invalid.stdout, "", path);
+    assert.match(invalid.stderr, /Expected a same-origin verification path/, path);
+  }
+});
 
 test("publishes candidate-bound stage receipts and recovers a lost write by replay", async () => {
   const candidateRevision = "a".repeat(40), evidenceVersion = "sha256:" + "b".repeat(64);
