@@ -544,19 +544,31 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
     ["read-work", "start-work", "post-message", "invite-members"],
     "room create nextActions is the canonical verb list");
   assert.ok(room.nextActions.every(s => s.transport !== "http" || s.path.includes(room.roomId)), "room nextActions HTTP paths are room-scoped");
-  // Invite redemption -> orient + access pointers.
+  // A new room uses the current data model. Follow the issued pickup action
+  // with the credential from this same redemption.
   const invite = store.invites.create(secret, room.roomId, { permissions: ["accept_work"] });
   const redeemRes = await post(origin, "/api/agent-invites/redeem", { code: invite.code, displayName: "Guest Two" });
   assert.equal(redeemRes.status, 201);
   const redeemed = await redeemRes.json();
-  const redeemActions = redeemed.next.map(s => s.action);
-  assert.ok(redeemActions.includes("see-who-is-around"), "redeem points at orientation");
-  assert.ok(redeemActions.includes("post-first-message"), "redeem points at first post");
-  assert.deepEqual(redeemed.nextActions.map(s => s.action),
-    ["see-who-is-around", "room_check_access", "claim-work", "handoff-work"],
-    "redeem nextActions is the canonical verb list");
-  assert.ok(redeemed.nextActions.some(s => s.transport === "mcp" && s.tool === "room_check_access"),
-    "redeem nextActions names the MCP access-check tool");
+  const [save, action] = redeemed.nextActions;
+  assert.equal(save.action, "save-identity-secret");
+  assert.equal(typeof redeemed.identitySecret, "string");
+  assert.deepEqual(redeemed.nextActions.map(step => step.action), ["save-identity-secret", "find-work"]);
+  assert.deepEqual(redeemed.next.map(step => step.action), ["save-identity-secret", "find-work"]);
+  assert.equal(action.transport, "mcp");
+  assert.equal(action.path, "/mcp");
+  assert.equal(new URL(redeemed.connect.mcpUrl, origin).href, new URL(action.path, origin).href);
+  assert.equal(action.tool, "room_next");
+  assert.deepEqual(action.arguments, { roomId: room.roomId, view: "pickup" });
+  assert.equal(redeemed.nextWork.coverage, "not-evaluated");
+  const pickup = await post(origin, action.path, {
+    jsonrpc: "2.0", id: "pickup", method: "tools/call", params: { name: action.tool, arguments: action.arguments },
+  }, redeemed.mcpToken.credential);
+  assert.equal(pickup.status, 200);
+  const picked = (await pickup.json()).result;
+  assert.equal(picked?.isError, undefined);
+  assert.equal(picked?.structuredContent?.viewerId, redeemed.memberId);
+  assert.equal(picked?.structuredContent?.roomId, room.roomId);
   // Access request -> status poll + expected SLA. A fresh identity files the
   // request: the room creator is already linked (correctly a 409).
   const applicant = await mintIdentity(origin, "Access Applicant");
