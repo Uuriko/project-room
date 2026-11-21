@@ -30,7 +30,7 @@ export async function readReview(room, binding, reviewScope = null) {
     || !Object.entries(binding).every(([key,value]) => args[key] === value)) return null;
   if (reviewScope !== null) {
     const origin = selected.review.origin;
-    if (!origin || origin.proposedById !== reviewScope.requesterId
+    if (!identifier(reviewScope?.requesterId) || !origin || origin.proposedById !== reviewScope.requesterId
       || !(Date.parse(origin.createdAt) >= reviewScope.openedAfter)
       || origin.mode !== 'read' || origin.independentVerificationRequired !== true) return null;
   }

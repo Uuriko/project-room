@@ -141,6 +141,7 @@ test('the scope check refuses ineligible or incomplete origin facts without cont
     ['different requester',{requesterId:'another-member',openedAfter:0}],
     ['earlier proposal',{requesterId:'owner',openedAfter:Date.now()+60_000}],
     ['legacy response',{requesterId:'owner',openedAfter:0},()=>undefined],
+    ['missing requester in both records',{openedAfter:0},origin=>({...origin,proposedById:undefined})],
     ['write mode',{requesterId:'owner',openedAfter:0},origin=>({...origin,mode:'write'})],
     ['no independent verification',{requesterId:'owner',openedAfter:0},origin=>({...origin,independentVerificationRequired:false})],
   ]) {
