@@ -11,7 +11,7 @@ import {readCurrentWorkListing} from './current-work-list.mjs';
 import { isUnfilledIntroBody } from './first-connect-task.mjs';
 import {attentionWaitStatus} from './attention-wait.mjs';
 import { WRITE_GRANT_POLICY_VERSION } from '../src/work-reducers.js';
-import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomRecoveryMembers, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget, currentWorkWithheldFromViewer, readCurrentWorkPrivacy } from './current-room-repository.mjs';
+import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomRecoveryMembers, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget, currentWorkWithheldFromViewer, readCurrentWorkPrivacy, readCurrentRoomForAudit } from './current-room-repository.mjs';
 import {bindReplayAppend} from './replay-cutover.mjs';
 import { savedHistoricalReplayCheckpoint } from './historical-replay-contract.mjs';
 import { bootstrapLegacyWriteProofs, configureWriteIntegrity, beginWriteProofFrame, endWriteProofFrame, publishProjectionWrites, projectionDigest, projectionContentHash, servingContentProof, servingProofDrift, assertProjectionWrite, assertMessageWrite, recordMessageWrite, withVerifiedRoomReconstruction } from './write-integrity.mjs';
@@ -3230,11 +3230,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // An unparseable checkpoint is an optimisation miss, never an audit
         // input: audit from the full event history instead (#4126).
         const checkpoint = checkpointRow?.valid ? checkpointRow : null;
+        const audit = () => {
+          const state = isCurrentRoom(this.db, row.id)
+            ? readCurrentRoomForAudit(this, row.id).state
+            : hydrateWorkItems(this.db, row.id, JSON.parse(row.projection));
+          auditWorkHelp(state, history, checkpoint);
+        };
         if (collect) {
-          try { auditWorkHelp(hydrateWorkItems(this.db, row.id, JSON.parse(row.projection)), history, checkpoint); }
+          try { audit(); }
           catch (error) { collect.push({ roomId: row.id, error }); }
         } else {
-          auditWorkHelp(hydrateWorkItems(this.db, row.id, JSON.parse(row.projection)), history, checkpoint);
+          audit();
         }
       }
       return { checked, auditable: [...new Set([...helpRooms, ...roomHelp, ...checkpointHelp])] };
