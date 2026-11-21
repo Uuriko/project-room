@@ -235,4 +235,34 @@ test("the verdict links exact candidate release checks without claiming missing 
   await page.locator("#result-dialog").waitFor({ state: "hidden" });
   assert.match(page.url(), /#pr-record\/message\/release-checks-build-receipt$/);
   await page.getByText(/Signed archive manifest verified/).first().waitFor();
+
+  const messageId = "release-verification-update";
+  f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", messageId,
+    body: "@owner Installed evidence is ready to inspect" });
+  await page.locator("#topbar-updates").click();
+  await page.getByRole("button", { name: /Open .*Installed evidence is ready to inspect/ }).click();
+  const message = page.locator(`[data-message-record-id="${messageId}"]`);
+  await message.waitFor();
+  assert.equal(new URL(page.url()).hash, "#pr-record/message/" + messageId);
+  await message.getByRole("link", { name: "Revise a short result", exact: true }).click();
+  const build = page.locator("#result-release-stages summary").filter({ hasText: "Build · Passed" });
+  await build.waitFor();
+  assert.equal(new URL(page.url()).hash, "#pr-record/work/revision-journey");
+  assert.equal(await page.locator("#result-work-verification").innerText(), "Archive scope only");
+  await build.click();
+  assert.equal(await page.getByRole("link", { name: "Open Build receipt" }).getAttribute("href"),
+    "#pr-record/message/" + evidenceMessageId);
+  await page.goBack();
+  await message.waitFor();
+  assert.equal(new URL(page.url()).hash, "#pr-record/message/" + messageId);
+
+  f.send("owner", T.WORK_PROPOSED, { workItemId: "pending-update", title: "Pending evidence",
+    definitionOfDone: "Deliver a checked result", mode: "read", accountableMemberId: "producer" });
+  f.send("producer", T.MESSAGE_POSTED, { messageId: "unfinished-update", workItemId: "pending-update",
+    body: "@owner Evidence is still in progress" });
+  await page.locator("#topbar-updates").click();
+  await page.getByRole("button", { name: /Open .*Evidence is still in progress/ }).click();
+  await page.locator('[data-message-record-id="unfinished-update"]').getByRole("link", { name: "Pending evidence" }).click();
+  await page.locator('[data-work-record-id="pending-update"]').waitFor();
+  assert.equal(await page.locator("#result-dialog").isVisible(), false);
 });
