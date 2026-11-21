@@ -78,7 +78,7 @@ optional.push("server/journal.mjs"); // shared per-kind journal (imported by ser
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)
 optional.push("server/door-funnel.mjs", "server/routes/door-funnel.mjs"); // DOOR-FUNNEL-READ: public door funnel aggregates (route module imported by server/routes/table.mjs)
 optional.push("server/verdict-inbox.mjs", "server/verdict-inbox-read.mjs", "server/routes/verdict-inbox.mjs"); // COMP-DEEP #1 verdict inbox (route module imported by server/routes/table.mjs)
-optional.push("offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "server/project-offers.mjs", "src/contribution-brief.js", "src/paid-work-offers.js");
+optional.push("offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "server/project-offers.mjs", "server/project-discoveries.mjs", "src/contribution-brief.js", "src/paid-work-offers.js");
 optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
 optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
 optional.push("server/current-search.mjs", "server/current-work-snapshot.mjs");

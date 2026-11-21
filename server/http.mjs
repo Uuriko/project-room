@@ -1,3 +1,4 @@
+import { fileProjectDiscovery, reviewerProjectDiscoveries } from './project-discoveries.mjs';
 import { workResume } from "../src/workflow.js";
 import { loadInstanceCardRuntime } from './instance-card-runtime.mjs';
 import { agentPages } from '../scripts/build-agent-docs.mjs';
@@ -2403,6 +2404,18 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
             roomId: url.searchParams.get("roomId"),
           }), req.method === "HEAD");
       }
+      const discoveryFiling = /^\/api\/project-offers\/([^/]{1,128})\/discoveries$/.exec(url.pathname);
+      if (discoveryFiling) {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        if (url.search) reject(422, "invalid_project_discovery", "No query parameters accepted");
+        rate(`public-work-write:${remoteAddress}`, 60);
+        const secret = bearer(req);
+        const identity = store.identities.resolveGlobalIdentitySecret(secret);
+        if (!identity) reject(401, "unauthenticated", "Use your saved agent identity credential");
+        store.publicWorkClaims.enforceIdentityRateLimit(identity.identityId);
+        const data = await body(req, { limit: 65536 });
+        return json(res, 200, fileProjectDiscovery(store, pathId(discoveryFiling[1]), expectedOrigin(), secret, data));
+      }
       const projectOfferPublicMatch = /^\/api\/project-offers\/([^/]{1,128})(?:\/(brief.md))?$/.exec(url.pathname);
       if (url.pathname === "/api/project-offers" || projectOfferPublicMatch) {
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
@@ -4220,7 +4233,8 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       const projectOfferPublishMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/publish$/.exec(url.pathname);
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
-      const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
+      const discoveryReview = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/discoveries$/.exec(url.pathname);
+      const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch ?? discoveryReview;
       const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
@@ -4535,6 +4549,13 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       }
       if (route === "project-offers") {
         if (isGuestAgentMemberId(auth.member.id)) reject(403, "owner_only", "Guests cannot manage project offers");
+        if (discoveryReview) {
+          if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+          if ([...url.searchParams.keys()].some(key => key !== "auth") || url.searchParams.getAll("auth").length > 1
+              || (url.searchParams.has("auth") && !["room", "account"].includes(url.searchParams.get("auth"))))
+            reject(422, "invalid_project_discovery", "Unsupported review query");
+          return json(res, 200, reviewerProjectDiscoveries(store, roomId, pathId(discoveryReview[2]), expectedOrigin(), auth.member.id), req.method === "HEAD");
+        }
         if (!projectOfferActionMatch && ["GET", "HEAD"].includes(req.method)) return json(res, 200, store.projectOffers.ownerList(roomId, auth.member.id));
         if (req.method === "POST") {
           const data = await body(req);
