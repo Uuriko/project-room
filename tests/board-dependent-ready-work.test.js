@@ -173,3 +173,35 @@ test("a linked-PR settlement that finishes a prerequisite wakes the dependent's 
   assert.equal(again.length, 1);
   assert.equal(again[0].signalId, wakes[0].signalId);
 });
+
+test("a premise-flagged dependent is not woken when its prerequisite finishes", async t => {
+  const { store, owner, enroll, poll, ack } = await fixture(t);
+  const agent = await enroll("Flagged Agent");
+  await owner.workClaimCreate({ id: "prereq", title: "Prerequisite", reviewPolicy: "self_attested" });
+  await owner.claimWorkItem("prereq");
+  const dependent = await owner.workClaimCreate({
+    id: "flagged-follow", title: "Follow-on with invalid premise", reviewPolicy: "self_attested",
+    dependsOn: ["prereq"], assignee: agent.memberId
+  });
+  assert.equal(dependent.owner, agent.memberId);
+  const assigned = (await poll(agent.secret)).pendingWakes.filter(wake => wake.reason === "assigned");
+  await ack(agent.secret, assigned.map(wake => wake.signalId));
+
+  const flagged = await owner.workClaimPremiseInvalid("flagged-follow", { reason: "dependent premise is invalid" });
+  assert.equal(flagged.premiseInvalid, true, JSON.stringify(flagged));
+  const afterFlag = store.workClaims.get("commons", "flagged-follow");
+  assert.equal(afterFlag.owner, agent.memberId, "flagging the dependent keeps its owner");
+  assert.notEqual(afterFlag.state, "done");
+  assert.notEqual(afterFlag.state, "closed");
+  assert.equal(afterFlag.supersededBy ?? null, null);
+  assert.ok(afterFlag.premiseFlag, "the dependent carries its own premise flag");
+
+  await finish(owner, "prereq");
+  const wakes = (await poll(agent.secret)).pendingWakes.filter(wake => wake.reason === "ready_work");
+  assert.equal(wakes.length, 0, JSON.stringify(wakes));
+  const repeated = wakeReadyDependents(store, "commons", store.workClaims.get("commons", "prereq"), { actorId: "owner" });
+  assert.equal(repeated.length, 0);
+  const current = store.workClaims.get("commons", "flagged-follow");
+  assert.equal(current.owner, agent.memberId);
+  assert.ok(current.premiseFlag);
+});

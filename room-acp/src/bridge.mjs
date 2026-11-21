@@ -485,10 +485,11 @@ export class Bridge {
   // A ready_work wake is current only while, read fresh from the Room right
   // before the prompt: every Board prerequisite of the dependent is satisfied
   // and matches the basis the wake was minted with, AND the dependent itself
-  // is still owned by this member, non-terminal, not superseded, at the wake's
-  // revision, with the same dependsOn set. Prerequisites are read first and the
-  // dependent last, so a reassignment that lands after the final authority
-  // check is seen here. Returns the fresh dependent claim, or null when stale.
+  // is still owned by this member, non-terminal, not superseded, not
+  // premise-flagged, at the wake's revision, with the same dependsOn set.
+  // Prerequisites are read first and the dependent last, so a reassignment
+  // that lands after the final authority check is seen here. Returns the
+  // fresh dependent claim, or null when stale.
   // Missing prerequisites are stale, not errors.
   async readyWorkCurrent(claimId, messageId) {
     const wake = readyWorkWakeOf(messageId, claimId);
@@ -509,7 +510,7 @@ export class Bridge {
     const sameDeps = Array.isArray(claim?.dependsOn) && claim.dependsOn.length === ids.length
       && claim.dependsOn.every((id, index) => id === ids[index]);
     if (!claim || claim.owner !== this.connection.memberId || TERMINAL_CLAIM_STATES.includes(claim.state)
-      || claim.supersededBy || String(claim.revision ?? "none") !== wake.revision || !sameDeps) return null;
+      || claim.supersededBy || claim.premiseFlag || String(claim.revision ?? "none") !== wake.revision || !sameDeps) return null;
     return claim;
   }
 

@@ -220,6 +220,9 @@ export function wakeReadyDependents(store, roomId, prerequisite, { actorId = nul
     if (!(dependent.dependsOn ?? []).includes(prerequisite.id)) continue;
     if (isTerminalClaimState(dependent.state) || dependent.supersededBy) continue;
     if (!dependent.owner) continue;
+    // A flagged premise leaves owner and state intact, but the dependent is
+    // not startable. Skip it here so no ready_work wake is issued.
+    if (dependent.premiseFlag) continue;
     const deps = (dependent.dependsOn ?? []).map(id => byId.get(id));
     if (deps.some(dep => !dep || !boardPrerequisiteState(dep).satisfied)) continue;
     const messageId = readyWorkMessageId(dependent, claimReadyWorkBasis(deps));

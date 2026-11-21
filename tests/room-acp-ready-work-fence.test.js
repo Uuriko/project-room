@@ -131,3 +131,23 @@ test("bridge: a reassignment after the final authority check and before the prom
   assert.equal(bridge.stats.turns, 0, "the old runner must not start a turn for a dependent it no longer owns");
   assert.equal((await echoNotes()).length, 0);
 });
+
+test("bridge: a queued ready_work wake whose dependent is premise-flagged starts zero model turns", async t => {
+  const { asOwner, bridge, echoNotes, start, redeliver } = await queuedReadyWork(t);
+  const flagged = await asOwner("/api/rooms/commons/work-claims/follow-on/premise-invalid", { reason: "dependent premise is invalid" });
+  assert.equal(flagged.status, 200, JSON.stringify(flagged.json));
+  assert.equal(flagged.json.premiseInvalid, true, JSON.stringify(flagged.json));
+  const current = await asOwner("/api/rooms/commons/work-claims/follow-on", undefined, "GET");
+  assert.equal(current.status, 200, JSON.stringify(current.json));
+  assert.ok(current.json.premiseFlag, "flagging the dependent keeps owner and state");
+  assert.ok(current.json.owner, "owner is preserved");
+  assert.notEqual(current.json.state, "done");
+  assert.notEqual(current.json.state, "closed");
+  start();
+  await waitFor(() => bridge.stats.stale >= 1 && bridge.stats.acked >= 1);
+  assert.equal(bridge.stats.turns, 0, "no model turn for a premise-invalid dependent");
+  assert.equal((await echoNotes()).length, 0);
+  await redeliver();
+  assert.equal(bridge.stats.turns, 0);
+  assert.equal((await echoNotes()).length, 0);
+});
