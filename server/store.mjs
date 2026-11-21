@@ -8037,17 +8037,35 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         delivery.push({ memberId, status: "no_receiver" });
         continue;
       }
-      const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, requestId, eventId, actorId: senderMemberId, kind });
-      const { woken, signal } = wakeForAgent(this, {
-        agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
+      const messageId = data.messageId ?? eventId;
+      // Formal requests are obligation wakes (kind "ask"), not chat noise.
+      const formalAsk = data.requestKind === "reply" || typeof requestId === "string";
+      const wakeKind = formalAsk ? "ask" : kind;
+      const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId, requestId, eventId, actorId: senderMemberId, kind: wakeKind });
+      let { woken, signal } = wakeForAgent(this, {
+        agentId: identityId, kind: wakeKind, roomId, messageId });
+      // A connected seat can have an identity link without a heartbeat host
+      // or native room.requested subscription. Ordinary mention/DM wakes stay
+      // suppressed_no_host then. An addressed formal request still queues a
+      // pull signal so needs-me / host poll can discover it, and the asker
+      // sees queued delivery instead of no_receiver.
+      if (!woken && !(nativeQueued > 0) && formalAsk) {
+        const fallback = this.agentHeartbeats.enqueueWake({
+          agentId: identityId, kind: "ask", roomId, messageId
+        });
+        if (fallback?.signal) {
+          woken = true;
+          signal = fallback.signal;
+        }
+      }
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription; the inbox pull carries the body.
-        // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
+        // Targeted DMs (kind "dm") ride dm.posted, @mentions and formal asks ride message.posted.
         this.agentHeartbeats.pushNotify({ identityId: identityId,
-          eventType: kind === "dm" ? "dm.posted" : "message.posted",
-          roomId, id: data.messageId ?? eventId, ts: this.now() });
+          eventType: wakeKind === "dm" || kind === "dm" && !formalAsk ? "dm.posted" : "message.posted",
+          roomId, id: messageId, ts: this.now() });
       }
       delivery.push(this.messageWakeDisposition(roomId, memberId, woken || nativeQueued > 0));
     }

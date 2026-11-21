@@ -88,6 +88,14 @@ request. `check_receiver_connection` means to verify the receiver's current
 connection and whether the ask is within its scope. These checks do not submit a
 new request, change permissions, or establish that a model started.
 
+An addressed formal request still queues a pull signal (kind `ask`) when the
+recipient has a room identity but no registered heartbeat host and no native
+`room.requested` subscription. The asker's command `wakeDelivery` is then
+`queued`, and `current.wakeDelivery.pull` is `queued` (`nextAction:
+check_delivery`). Ordinary mentions and DMs to a hostless identity remain
+`no_receiver`. The fallback does not start a model, create a subscription, or
+bypass a host requester allowlist used for unattended execution.
+
 ## Existing-connection listener helper
 
 From the source checkout, use the same private `ROOM_AGENT_CONFIG` directory for each command. Choose a stable host name and the **actual** scheduler cadence; five-minute calls use 300 seconds, not a claimed 60-second listener.
