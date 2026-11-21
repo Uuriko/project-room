@@ -4,7 +4,7 @@ import { createResultComparison } from "../src/result-comparison.js";
 
 function fixture() {
   const pending = [], state = { messages: [] };
-  const box = { hidden: true, innerHTML: "", textContent: "", replaceChildren() { this.innerHTML = ""; this.textContent = ""; } };
+  const box = { hidden: true, innerHTML: "", textContent: "", insertAdjacentHTML(_position, html) { this.innerHTML = html + this.innerHTML; }, querySelector() { return {remove: () => { this.innerHTML = this.innerHTML.replace(/^<p data-previous-release-checks.*?<\/p>/, ""); }}; }, replaceChildren() { this.innerHTML = ""; this.textContent = ""; } };
   const controller = createResultComparison({ getState: () => state,
     client: { workResult: () => new Promise(resolve => pending.push(resolve)) },
     esc: text => String(text).replaceAll("<", "&lt;").replaceAll(">", "&gt;") });
@@ -40,4 +40,28 @@ test("a mismatched completion cannot display another version as the prior result
   const f = fixture(); f.load();
   f.pending[0]({ result: { receipt: { eventId: "different" }, text: { body: "wrong version" } } });
   await settle(); assert.doesNotMatch(f.box.innerHTML, /wrong version/); assert.match(f.box.innerHTML, /could not be loaded/);
+});
+
+test("prior release links require the pinned evidence and a selected Room message", async () => {
+  const f = fixture();
+  const previous = { result: {receipt:{eventId:"previous", evidenceVersion:"v1"}, text:{body:"old", messageId:"old-message"}},
+    workThread: { releaseChecks: {completionEventId:"previous", evidenceVersion:"v1", candidateRevision:"a".repeat(40),
+      checks:[{stage:"build", evidenceMessageId:"receipt", href:"#pr-record/message/receipt"},
+        {stage:"deploy", evidenceMessageId:"another", href:"https://example.org"}]}} };
+  f.load(); f.pending[0](previous); await settle();
+  assert.match(f.box.innerHTML, /Previous release checks \(aaaaaaaaaaaa\)/);
+  assert.match(f.box.innerHTML, /#pr-record\/message\/receipt/);
+  assert.doesNotMatch(f.box.innerHTML, /example.org|>Deploy</);
+  f.state.messages.push({id:"receipt", editedAt:1}); f.controller.sync();
+  assert.doesNotMatch(f.box.innerHTML, /Previous release checks/);
+  assert.match(f.box.innerHTML, /Resubmitted result/);
+  previous.workThread.releaseChecks.evidenceVersion = "other";
+  f.state.messages.length = 0;
+  f.load(); f.pending[1](previous); await settle();
+  assert.doesNotMatch(f.box.innerHTML, /Previous release checks/);
+  delete previous.result.receipt.evidenceVersion;
+  delete previous.workThread.releaseChecks.evidenceVersion;
+  f.load(); f.pending[2](previous); await settle();
+  assert.doesNotMatch(f.box.innerHTML, /Previous release checks/);
+  assert.match(f.box.innerHTML, /Resubmitted result/);
 });
