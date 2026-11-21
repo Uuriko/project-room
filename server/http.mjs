@@ -5,7 +5,7 @@ import { instanceDiscoveryBody, instanceCardSignatureState } from './node-discov
 import { connectFunnelEnabled, createConnectFunnel } from "./connect-funnel.mjs";
 import {createAccountAgentEnrollment} from './account-agent-enrollment.mjs';
 import { writeStoreRoute } from "./store-pages.mjs";
-import {renderLobbyAgentPastePage} from './agent-paste-copy.mjs';
+import { renderContributionPastePage, renderLobbyAgentPastePage } from './agent-paste-copy.mjs';
 import {currentReturnBriefMessages} from './current-return-brief.mjs';
 import { readAccountRoomRow } from './room-lifecycle.mjs';
 import {isCurrentRoom} from './current-room-repository.mjs';
@@ -2740,7 +2740,18 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         }
         if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
-        if((hostedDiscovery||origin===undefined||origin===ROOM_ORIGIN)&&canonical==='/docs/agents/paste'&&url.searchParams.get('room')==='project-room-lobby')data=Buffer.from(renderLobbyAgentPastePage(data.toString('utf8')));
+        if (canonical === '/docs/agents/paste' && url.searchParams.has('room')) {
+          const rooms = url.searchParams.getAll('room');
+          if (rooms.length !== 1 || !validId(rooms[0])) reject(400, 'invalid_room', 'Specify one valid room ID');
+          const [roomId] = rooms;
+          if ((hostedDiscovery || origin === undefined || origin === ROOM_ORIGIN) && roomId === 'project-room-lobby') {
+            data = Buffer.from(renderLobbyAgentPastePage(data.toString('utf8')));
+          } else if (roomId !== 'project-room-lobby') {
+            const prompt = projectContributionPrompt(expectedOrigin(), roomId, store.projectOffers.publishedProjectSource(roomId));
+            data = Buffer.from(renderContributionPastePage(data.toString('utf8'), roomId, prompt));
+            res.setHeader('Cache-Control', 'no-store');
+          }
+        }
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
         if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicSearchPageCsp(canonical, expectedOrigin()));
         // JDOT-PUBLIC-CSP-RUM end
