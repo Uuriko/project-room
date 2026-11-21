@@ -246,7 +246,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       const actions = document.createElement("div");
       actions.className = "updates-actions";
       for (const [name, label] of Object.entries(ACTION_LABELS)) {
-        if(nativeAttention()&&name!=='open')continue;
+        if ((nativeAttention() || item.kind === "release_accepted") && name !== "open") continue;
         // Owner decisions are below this list; do not offer an Open action
         // unless this row has a supported work or conversation destination.
         if (name === "open" && !item.sourceRef?.workItemId && !messageDestination(item) && operations.get(item.id)?.action !== "open") continue;
@@ -372,6 +372,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     cancelPending();
     const mine = ++interaction, flight = ++operation.flight;
     const origin = capture(item.id, action);
+    if (operation.item.kind === "release_accepted") origin.completionEventId = operation.item.sourceRef.completionEventId;
     const path = action === "open" ? "read" : action;
     const current = () => mine === interaction && owns(owned) && isOpen();
     operation.busy = true; paintOperations(); status.textContent = "";

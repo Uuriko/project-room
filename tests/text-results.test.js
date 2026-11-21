@@ -230,6 +230,13 @@ test("release evidence binds the exact result, candidate and visible report with
   const result = f.mutate(T.WORK_COMPLETED, data);
   const completionEventId = result.event.id, evidenceVersion = data.evidenceVersion;
   const read = () => f.client.workResult(f.workItemId, { completionEventId });
+  const releaseUpdates = async (actor = "producer", state = "all") => {
+    const response = await fetch(f.origin + "/api/rooms/commons/updates?state=" + state, {
+      headers: { authorization: "Bearer " + f.keys[actor] },
+    });
+    assert.equal(response.status, 200);
+    return (await response.json()).items.filter(item => item.kind === "release_accepted");
+  };
   const record = (report, actor, extra) => f.post("room-release-checks/1\n" + JSON.stringify(report),
     { replyToId: draft.event.data.messageId, ...extra }, actor);
   const evidenceDigest = "sha256:" + "1".repeat(64);
@@ -251,6 +258,7 @@ test("release evidence binds the exact result, candidate and visible report with
   assert.deepEqual((await read()).workThread.releaseChecks.checks.map(x => [x.stage, x.status]), [
     ["build", "passed"], ["browser", "pending"], ["deploy", "pending"]
   ]);
+  assert.deepEqual(await releaseUpdates(), []);
   assert.equal((await read()).workThread.releaseChecks.messageId, visible.event.data.messageId);
   assert.equal((await read()).workThread.releaseChecks.checks[0].evidenceMessageId, evidence.event.data.messageId);
   record({ ...basis, completionEventId: "wrong-completion", checks: { build: passed } });
@@ -264,8 +272,37 @@ test("release evidence binds the exact result, candidate and visible report with
   assert.equal(assembled.checks[2].status, "passed");
   assert.equal(assembled.checks[2].reportMessageId, deployed.event.data.messageId);
   assert.equal(assembled.checks[2].evidenceMessageId, deploy.event.data.messageId);
+  const browser = f.post(`room-release-receipt/1 browser ${completionEventId} ${candidateRevision} ${evidenceDigest}\nBrowser checks passed`,
+    { replyToId: draft.event.data.messageId });
+  record({ ...basis, checks: { browser: { ...passed, evidenceMessageId: browser.event.data.messageId } } });
+  assert.equal((await read()).current.next.action, "decide");
+  assert.deepEqual(await releaseUpdates(), [], "a required owner decision must precede the accepted-release row");
+  const acceptance = f.post("I reviewed the three exact release receipts and accept the result.", {}, "owner");
+  f.mutate(T.OWNER_DECISION_RECORDED, {
+    completionEventId, evidenceVersion, decision: "approved", reason: "Accept the exact release evidence",
+    sourceMessageId: acceptance.event.data.messageId,
+  }, "owner");
+  const [update] = await releaseUpdates();
+  assert.ok(update);
+  assert.equal(update.sourceRef.workItemId, f.workItemId);
+  assert.equal(update.sourceRef.completionEventId, completionEventId);
+  assert.equal(update.state, "answered");
+  assert.deepEqual(await releaseUpdates("producer", "actionable"), [], "accepted releases do not add an attention obligation");
+  assert.deepEqual(await releaseUpdates("guest"), [], "non-participants do not get this release pointer");
+  const opened = f.store.workResult(f.keys.producer, "commons", update.sourceRef.workItemId);
+  assert.equal(opened.workThread.verdict.completionEventId, completionEventId);
+  assert.ok(opened.workThread.releaseChecks.checks.every(check => check.status === "passed"));
+  const openUpdate = (expectedBasis, requestId) => fetch(f.origin + `/api/rooms/commons/updates/${update.id}/read`, {
+    method: "POST", headers: { authorization: "Bearer " + f.keys.producer, "content-type": "application/json" },
+    body: JSON.stringify({ requestId, expectedBasis }),
+  });
+  const openedUpdate = await openUpdate(update.basisToken, "open-accepted-release");
+  assert.equal(openedUpdate.status, 200);
+  assert.deepEqual((await openedUpdate.json()).item.sourceRef, update.sourceRef);
   record({ ...basis, checks: { deploy: { ...passed, evidenceMessageId: "missing" } } });
   assert.equal((await read()).workThread.releaseChecks.checks[2].status, "pending");
+  assert.deepEqual(await releaseUpdates(), [], "withdrawn stage evidence removes the pointer");
+  assert.equal((await openUpdate(update.basisToken, "open-withdrawn-release")).status, 404);
   assert.equal(f.item().verification.eventId, verdict.event.id);
 });
 
