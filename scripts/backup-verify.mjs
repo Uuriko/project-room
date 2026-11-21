@@ -290,13 +290,14 @@ async function main() {
   const statePath = values.state || join(resolve(to), "backup-verify-state.json");
   if (values["print-cron"]) {
     const root = fileURLToPath(new URL("..", import.meta.url));
+    const destination = resolve(to);
     // Values are operator-controlled (flags/env); quote them so a path with
     // `"`, `$`, backticks, or whitespace can't break the crontab line or
     // inject into the operator's crontab (L-45).
     process.stdout.write(
       `# project-room F001: automated backup + restore verification\n` +
       `# Runs every minute; the script itself skips until the schedule ("${schedule.spec}") is due.\n` +
-      `* * * * * cd ${shQuote(root)} && node scripts/backup-verify.mjs --db ${shQuote(db)} --to ${shQuote(to)} --schedule ${shQuote(schedule.spec)} >> ${shQuote(join(resolve(to), "backup-verify.log"))} 2>&1\n`);
+      `* * * * * cd ${shQuote(root)} && mkdir -p ${shQuote(destination)} && node scripts/backup-verify.mjs --db ${shQuote(db)} --to ${shQuote(to)} --schedule ${shQuote(schedule.spec)} >> ${shQuote(join(destination, "backup-verify.log"))} 2>&1\n`);
     return;
   }
   const nowMs = Date.now();
