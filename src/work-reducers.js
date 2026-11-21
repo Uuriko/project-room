@@ -522,6 +522,62 @@ function commitMutation(item, incoming) {
   item.updatedAt = incoming.at;
 }
 
+const SOURCE_SHA = /^[0-9a-f]{40}$/;
+const EVIDENCE_DIGEST = /^sha256:[0-9a-f]{64}$/;
+const PUBLISHED_VERDICTS = new Set(["pass", "hold", "fail"]);
+const PUBLISHED_SUMMARY_MAX = 2000;
+const PUBLISHED_REPOSITORY_MAX = 256;
+
+function publishWorkVerdict(state, incoming) {
+  const item = mutableWorkItem(state, incoming, Object.values(WORK_STATES));
+  const actor = requireMember(state, incoming.actorId);
+  const designated = item.verifierMemberId === actor.id;
+  if (!designated && !hasPermission(state, actor.id, "verify")) {
+    throw new Error("Only the designated verifier or a member with verify permission may publish a work verdict");
+  }
+  requireFields(incoming.data, ["repository", "pullNumber", "head", "verdict", "summary"]);
+  const repository = incoming.data.repository.trim();
+  if (repository.length > PUBLISHED_REPOSITORY_MAX || /[\r\n]/.test(repository)) {
+    throw new Error("repository must be a single-line exact source repository");
+  }
+  const pullNumber = incoming.data.pullNumber;
+  if (!Number.isInteger(pullNumber) || pullNumber < 1) {
+    throw new Error("pullNumber must be the exact positive integer PR number");
+  }
+  if (typeof incoming.data.head !== "string" || !SOURCE_SHA.test(incoming.data.head)) {
+    throw new Error("head must be the exact 40-character lowercase source SHA");
+  }
+  const base = incoming.data.base;
+  if (base != null && (typeof base !== "string" || !SOURCE_SHA.test(base))) {
+    throw new Error("base must be the exact 40-character lowercase source SHA when provided");
+  }
+  if (!PUBLISHED_VERDICTS.has(incoming.data.verdict)) {
+    throw new Error("Unsupported work verdict");
+  }
+  const summary = incoming.data.summary.trim();
+  if (summary.length > PUBLISHED_SUMMARY_MAX) {
+    throw new Error("summary must be a short authored verdict note");
+  }
+  const evidenceDigest = incoming.data.evidenceDigest;
+  if (evidenceDigest != null && (typeof evidenceDigest !== "string" || !EVIDENCE_DIGEST.test(evidenceDigest))) {
+    throw new Error("evidenceDigest must be sha256:<64 lowercase hex> when provided");
+  }
+  if (!Array.isArray(item.publishedVerdicts)) item.publishedVerdicts = [];
+  item.publishedVerdicts.push({
+    publisherId: actor.id,
+    repository,
+    pullNumber,
+    head: incoming.data.head,
+    ...(base != null ? { base } : {}),
+    verdict: incoming.data.verdict,
+    summary,
+    ...(evidenceDigest != null ? { evidenceDigest } : {}),
+    eventId: incoming.id,
+    at: incoming.at
+  });
+  commitMutation(item, incoming);
+}
+
 function archiveDecision(item) {
   if (item.decision) item.decisionHistory.push(item.decision);
   item.decision = null;
@@ -533,5 +589,5 @@ function retireApproval(item, incoming, reason) {
   item.decision = null;
 }
 
-return Object.freeze({ proposeWork, acceptWork, startWork, blockWork, recordHandoff, clearHalt, resolveBlocker, completeWork, supersedeWork, acquireClaim, releaseClaim, renewClaim, recordVerification, applySession, recordOwnerDecision });
+return Object.freeze({ proposeWork, acceptWork, startWork, blockWork, recordHandoff, clearHalt, resolveBlocker, completeWork, supersedeWork, acquireClaim, releaseClaim, renewClaim, recordVerification, applySession, recordOwnerDecision, publishWorkVerdict });
 }

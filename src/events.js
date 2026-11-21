@@ -88,6 +88,7 @@ export const EVENT_TYPES = Object.freeze({
   CLAIM_RENEWED: "claim.renewed",
   VERIFICATION_RECORDED: "verification.recorded",
   OWNER_DECISION_RECORDED: "owner.decision_recorded",
+  WORK_VERDICT_PUBLISHED: "work.verdict_published",
   DECISION_RECORDED: "decision.recorded",
   SESSION_STARTED: SESSION_EVENT_TYPES.STARTED,
   SESSION_STATUS_CHANGED: SESSION_EVENT_TYPES.STATUS_CHANGED,
@@ -478,6 +479,7 @@ export const WORK_REVISION_TYPES = Object.freeze([
   EVENT_TYPES.WORK_ACCEPTED, EVENT_TYPES.WORK_STARTED, EVENT_TYPES.WORK_BLOCKED, EVENT_TYPES.WORK_BLOCKER_RESOLVED,
   EVENT_TYPES.WORK_COMPLETED, EVENT_TYPES.WORK_SUPERSEDED, EVENT_TYPES.CLAIM_ACQUIRED, EVENT_TYPES.CLAIM_RELEASED,
   EVENT_TYPES.CLAIM_RENEWED, EVENT_TYPES.VERIFICATION_RECORDED, EVENT_TYPES.OWNER_DECISION_RECORDED,
+  EVENT_TYPES.WORK_VERDICT_PUBLISHED,
   EVENT_TYPES.SESSION_STARTED, EVENT_TYPES.SESSION_STATUS_CHANGED, EVENT_TYPES.SESSION_STOP_REQUESTED,
   EVENT_TYPES.SESSION_STOPPED, EVENT_TYPES.WORK_HANDOFF_RECORDED
 ]);
@@ -758,6 +760,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.CLAIM_RENEWED]: renewClaim,
     [EVENT_TYPES.VERIFICATION_RECORDED]: recordVerification,
     [EVENT_TYPES.OWNER_DECISION_RECORDED]: recordOwnerDecision,
+    [EVENT_TYPES.WORK_VERDICT_PUBLISHED]: publishWorkVerdict,
     [EVENT_TYPES.DECISION_RECORDED]: recordDecision,
     [EVENT_TYPES.SESSION_STARTED]: applySession,
     [EVENT_TYPES.SESSION_STATUS_CHANGED]: applySession,
@@ -1849,7 +1852,7 @@ const { postMessage, editMessage, deleteMessage, redactMessage, recordEvidenceWi
   pinLimit: PIN_LIMIT, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION });
 
 // Compose work transitions once with the same authority guards as other domains.
-const { proposeWork, acceptWork, startWork, blockWork, recordHandoff, clearHalt, resolveBlocker, completeWork, supersedeWork, acquireClaim, releaseClaim, renewClaim, recordVerification, applySession, recordOwnerDecision } = createWorkReducers({ WORK_STATES, requirePermission, requireFields, requireMember, knownMember, receiptHasKnownProducer, requireWorkItem, assertRoomTrust, roomPolicy, claimIsActive, claimOverlaps, hasPermission, matchesReceipt, hasConfirmedIndependentPass, requirePublicDecisionSource });
+const { proposeWork, acceptWork, startWork, blockWork, recordHandoff, clearHalt, resolveBlocker, completeWork, supersedeWork, acquireClaim, releaseClaim, renewClaim, recordVerification, applySession, recordOwnerDecision, publishWorkVerdict } = createWorkReducers({ WORK_STATES, requirePermission, requireFields, requireMember, knownMember, receiptHasKnownProducer, requireWorkItem, assertRoomTrust, roomPolicy, claimIsActive, claimOverlaps, hasPermission, matchesReceipt, hasConfirmedIndependentPass, requirePublicDecisionSource });
 
 function transferMemberSponsor(state,incoming) {
  requireFields(incoming.data,["requestId","requestDigest","memberId","expectedMemberRevision","toMemberId","expectedHumanRevision","previousSponsorId","identityId"]);
