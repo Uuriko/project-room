@@ -542,7 +542,8 @@ export class Bridge {
           this.log(`exact review ${binding.workItemId} needs evidence or manual review; wake remains pending`);
           return;
         }
-        receipt = {...receipt,phase:'result',result:output.result,body:output.summary};
+        receipt = {...receipt,phase:'result',result:output.result,body:output.summary,
+          ...(output.nextAction ? {nextAction:output.nextAction} : {})};
         this.reviewReceipts.save(key,receipt);
         if (this.reviewReceipts.dir) this.stageObserver.mark(signalIds,'durable_result_saved',receipt.requestId);
       }
