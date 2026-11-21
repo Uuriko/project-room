@@ -1,4 +1,6 @@
 import { activationObligations } from "./activation-obligations.mjs";
+import { PICKUP_LEASE_HOURS, rankReadyWorkInRoom } from "./available-work.mjs";
+import { readWantsWork } from "./work-wants.mjs";
 import { conversationCursorCodec } from "./conversation-sync.mjs";
 import { addressedWorkWindow } from "./current-work-list.mjs";
 import {
@@ -277,17 +279,55 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
         const paused = store.wakeQueue.pauseStatus(roomId, auth.member.id);
         const addressedComplete = packet.work.coverage === "complete" && packet.requests.coverage === "complete";
         if (paused) packet.ifIdle = { status: "paused" };
-        else if (addressedComplete && readInvitation) {
-          const listing = readInvitation();
-          const invite = listing.work?.[0];
-          if (invite) {
-            packet.nextRead = { ...invite.nextRead, arguments: { roomId, ...invite.nextRead.arguments } };
-            packet.ifIdle = { status: "invitation", workItemId: invite.id, title: invite.title.slice(0, 160),
-              revision: invite.revision, helpEventId: invite.help.eventId, nextRead: packet.nextRead };
+        else if (addressedComplete) {
+          let wantsWork = null;
+          try { wantsWork = readWantsWork(store.db, roomId, auth.member.id)?.wantsWork ?? null; }
+          catch { wantsWork = null; }
+          let ranked;
+          try {
+            ranked = rankReadyWorkInRoom(store, roomId, {
+              goal: packet.goal, wantsWork, now: store.now?.() ?? Date.now(),
+              viewer: { member: auth.member, ownerId: room.ownerId ?? null }
+            });
+          } catch (error) {
+            console.error("ready work board read failed:", error?.message ?? error);
+            packet.ifIdle = { status: "unavailable", reason: "board_unavailable" };
+            ranked = null;
+          }
+          const top = ranked?.[0];
+          if (ranked === null) {
+            // Board read failed: already recorded as unavailable, never dry.
+          } else if (top) {
+            const nextRead = { tool: "room_read_board", arguments: { roomId } };
+            packet.nextRead = nextRead;
+            packet.ifIdle = {
+              status: "ready_work",
+              claimId: top.item.id,
+              title: String(top.item.title ?? top.item.id).slice(0, 160),
+              reason: top.reason,
+              leaseHours: PICKUP_LEASE_HOURS,
+              readyCount: ranked.length,
+              nextRead,
+              claimAction: {
+                method: "POST",
+                endpoint: `/api/rooms/${roomId}/work-claims/${top.item.id}/claim`,
+                params: { leaseHours: PICKUP_LEASE_HOURS }
+              }
+            };
+          } else if (readInvitation) {
+            const listing = readInvitation();
+            const invite = listing.work?.[0];
+            if (invite) {
+              packet.nextRead = { ...invite.nextRead, arguments: { roomId, ...invite.nextRead.arguments } };
+              packet.ifIdle = { status: "invitation", workItemId: invite.id, title: invite.title.slice(0, 160),
+                revision: invite.revision, helpEventId: invite.help.eventId, nextRead: packet.nextRead };
+            } else {
+              packet.ifIdle = listing.selection?.available === false
+                ? { status: "unavailable", reason: listing.selection.reason }
+                : { status: "dry", reason: "no_ready_work", readyCount: 0, goal: packet.goal };
+            }
           } else {
-            packet.ifIdle = listing.selection?.available === false
-              ? { status: "unavailable", reason: listing.selection.reason }
-              : { status: "no_invitation" };
+            packet.ifIdle = { status: "dry", reason: "no_ready_work", readyCount: 0, goal: packet.goal };
           }
         }
       }
