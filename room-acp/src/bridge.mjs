@@ -41,6 +41,28 @@ export const CLAIM_WAKE_REASONS = Object.freeze(["assigned", "ready_work"]);
 // is already deduped by the persisted TurnReceipt, but a fresh signalId
 // (reassign-after-done, admin re-wake, wake regeneration) has no receipt.
 export const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
+
+// Dependency-triggered (ready_work) wakes carry the Board prerequisite basis
+// the server saw when the last prerequisite became done:
+// work-claim:<dependentId>:ready_work:<revision>:<sha256 basis>. The basis
+// mirrors claimReadyWorkBasis in server/work-claim-events.mjs; keep the two
+// in step. The bridge re-reads the prerequisites from the Room right before a
+// turn and starts nothing unless they are still satisfied and still match.
+export const READY_WORK_REASON = "ready_work";
+export function readyWorkBasisOf(messageId, claimId) {
+  if (typeof messageId !== "string") return null;
+  const prefix = `work-claim:${claimId}:${READY_WORK_REASON}:`;
+  if (!messageId.startsWith(prefix)) return null;
+  const basis = messageId.slice(messageId.lastIndexOf(":") + 1);
+  return /^[0-9a-f]{64}$/.test(basis) ? basis : null;
+}
+export function prerequisiteBasis(deps) {
+  const evidence = [...deps]
+    .map(dep => [dep.id, dep.revision ?? "none", dep.state, dep.premiseFlag ?? null, dep.supersededBy ?? null])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return createHash("sha256").update(JSON.stringify(evidence)).digest("hex");
+}
+const prerequisiteSatisfied = dep => Boolean(dep && dep.state === "done" && !dep.premiseFlag && !dep.supersededBy);
 export const CLAIM_KEY = "work-claim:";
 const REVIEW_KEY = '\0work-review:';
 export const MAX_CLAIM_NOTE = 1500;
@@ -155,7 +177,7 @@ export class Bridge {
     this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
     this.host.onExit?.(info => this.onAgentExit(info));
     this.approverController = new AbortController();
-    this.fencingToken = null; this.seen = new Set(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0 };
+    this.fencingToken = null; this.seen = new Set(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0, stale: 0 };
   }
 
   // Agent process died: restart with backoff; CRASH_LIMIT crashes inside
@@ -451,7 +473,29 @@ export class Bridge {
       this.log(`ignored claim ${signal.workClaim} (${signal.reason})`);
       await this.ack([signal.signalId]); this.stats.skipped++; return;
     }
-    this.queue.push(CLAIM_KEY + claim.id, { signalId: signal.signalId, claim, author: this.members[authorId]?.displayName ?? authorId });
+    this.queue.push(CLAIM_KEY + claim.id, { signalId: signal.signalId, reason: signal.reason, messageId: signal.messageId, claim, author: this.members[authorId]?.displayName ?? authorId });
+  }
+
+  // A ready_work wake is current only while every Board prerequisite of the
+  // dependent, read fresh from the Room, is satisfied and matches the basis
+  // the wake was minted with. A reopened (premise-flagged, superseded) or
+  // changed prerequisite, a changed dependsOn list, or an unreadable basis
+  // makes the wake stale. Missing prerequisites are stale, not errors.
+  async readyWorkCurrent(claimId, messageId) {
+    const basis = readyWorkBasisOf(messageId, claimId);
+    if (!basis) return false;
+    const claim = await this.room.claim(claimId);
+    const ids = Array.isArray(claim?.dependsOn) ? claim.dependsOn : [];
+    if (!ids.length) return false;
+    const deps = [];
+    for (const id of ids) {
+      try { deps.push(await this.room.claim(id)); }
+      catch (error) {
+        if (error instanceof RoomError && error.status === 404) return false;
+        throw error;
+      }
+    }
+    return deps.every(prerequisiteSatisfied) && prerequisiteBasis(deps) === basis;
   }
 
   async claimTurn(threadKey, batch) {
@@ -482,6 +526,15 @@ export class Bridge {
           if (!(await this.authorized({ claimId, requireRunnable: true }))) {
             receipt = { phase: "discarded", requestId: receipt.requestId };
             this.claimReceipts.save(key, receipt);
+            await this.ack(signalIds); return;
+          }
+          // Dependency-triggered wakes are fenced on current prerequisite
+          // truth, not only owner and terminal state. Assigned wakes are not.
+          if (item.reason === READY_WORK_REASON && !(await this.readyWorkCurrent(claimId, item.messageId))) {
+            this.log(`claim ${claimId} ready_work wake is stale: prerequisites changed since the wake; no turn`);
+            receipt = { phase: "discarded", requestId: receipt.requestId, disposition: "ready_work_stale" };
+            this.claimReceipts.save(key, receipt);
+            this.stats.stale++;
             await this.ack(signalIds); return;
           }
           const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author }), { sessionId });
