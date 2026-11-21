@@ -27,8 +27,9 @@
 // board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
-import { claimUpdatedAt, isHardWork } from "./work-claims.mjs";
-import { readWorkItems } from "./work-repository.mjs";
+import { claimUpdatedAt, isHardWork, isLeaseExpired } from "./work-claims.mjs";
+import { outsidePrivateWork } from "./work-context.mjs";
+import { readWorkItem, readWorkItems } from "./work-repository.mjs";
 import { wantsWorkMatches } from "./work-wants.mjs";
 
 export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
@@ -288,15 +289,32 @@ export function rankReadyWork(items, {
     || String(a.item.id).localeCompare(String(b.item.id)));
 }
 
+export function readBoardPickup(store, roomId, options, { resumeClaims }) {
+  if (!mayWriteWorkClaims(options.viewer)) return { ranked: [] };
+  const board = store.workClaims.list(roomId);
+  const viewerId = options.viewer.member.id;
+  const held = resumeClaims && board.find(item => {
+    if (item.owner !== viewerId || !usableClaim(item)
+      || !["claimed", "in_progress"].includes(item.state) || isLeaseExpired(item, options.now)) return false;
+    if (!item.workItemId) return true;
+    const work = readWorkItem(store.db, roomId, item.workItemId);
+    if (!work) return false;
+    const parties = store.privateWorkParties(roomId, { workIds: [work.id] }).get(work.id);
+    return !outsidePrivateWork(parties, work, viewerId);
+  });
+  if (held) return { held };
+  return { ranked: rankReadyWorkInRoom(store, roomId, options, board) };
+}
+
 // Room-scoped ranked read over the one AvailableWork inventory. Does not
 // call store.room(), so Room Next can use it without hydrating a snapshot.
 // A Board list or canonical-work read failure propagates: callers must not
 // treat that as an empty (dry) inventory. Pass `viewer` as the same
 // { member, ownerId } access the claim endpoint uses; a permission miss
 // excludes every item rather than down-ranking it.
-export function rankReadyWorkInRoom(store, roomId, options = {}) {
+export function rankReadyWorkInRoom(store, roomId, options = {}, existingBoard) {
   const { viewer = null, ...rankOptions } = options;
-  const board = store.workClaims?.list?.(roomId) ?? [];
+  const board = existingBoard ?? store.workClaims?.list?.(roomId) ?? [];
   if (viewer && !mayWriteWorkClaims(viewer)) return [];
   return rankReadyWork(availableBoardRowsInRoom(store, roomId, board), { board, ...rankOptions });
 }

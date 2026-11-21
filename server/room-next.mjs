@@ -1,5 +1,5 @@
 import { activationObligations } from "./activation-obligations.mjs";
-import { PICKUP_LEASE_HOURS, rankReadyWorkInRoom } from "./available-work.mjs";
+import { PICKUP_LEASE_HOURS, readBoardPickup } from "./available-work.mjs";
 import { readWantsWork } from "./work-wants.mjs";
 import { conversationCursorCodec } from "./conversation-sync.mjs";
 import { addressedWorkWindow } from "./current-work-list.mjs";
@@ -283,20 +283,26 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
           let wantsWork = null;
           try { wantsWork = readWantsWork(store.db, roomId, auth.member.id)?.wantsWork ?? null; }
           catch { wantsWork = null; }
-          let ranked;
+          let pickup;
           try {
-            ranked = rankReadyWorkInRoom(store, roomId, {
+            pickup = readBoardPickup(store, roomId, {
               goal: packet.goal, wantsWork, now: store.now?.() ?? Date.now(),
               viewer: { member: auth.member, ownerId: room.ownerId ?? null }
-            });
+            }, { resumeClaims: !current });
           } catch (error) {
             console.error("ready work board read failed:", error?.message ?? error);
             packet.ifIdle = { status: "unavailable", reason: "board_unavailable" };
-            ranked = null;
           }
-          const top = ranked?.[0];
-          if (ranked === null) {
+          const top = pickup?.ranked?.[0];
+          if (!pickup) {
             // Board read failed: already recorded as unavailable, never dry.
+          } else if (pickup.held) {
+            const held = pickup.held;
+            const nextRead = held.workItemId
+              ? { tool: "room_read_work", arguments: { roomId, workItemId: held.workItemId } }
+              : { tool: "room_work_claim_thread", arguments: { roomId, claimId: held.id } };
+            packet.nextRead = nextRead;
+            packet.ifIdle = { status: "held_work", claimId: held.id, leaseExpiresAt: held.leaseExpiresAt, nextRead };
           } else if (top) {
             const nextRead = { tool: "room_read_board", arguments: { roomId } };
             packet.nextRead = nextRead;
@@ -308,7 +314,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
               title: String(top.item.title ?? top.item.id).slice(0, 160),
               reason: top.reason,
               leaseHours: PICKUP_LEASE_HOURS,
-              readyCount: ranked.length,
+              readyCount: pickup.ranked.length,
               nextRead,
               claimAction: {
                 method: "POST",
