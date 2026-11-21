@@ -1600,3 +1600,55 @@ test("a formal reply request opens its original private message from Updates", {
   await page.waitForFunction(() => document.activeElement?.dataset.messageRecordId === "formal-open-from-updates");
   await page.locator('[data-message-id="formal-open-from-updates"][data-message-action="request-answered"]').waitFor();
 });
+
+test("Updates keeps the current keyboard target through delayed opening and live repaint", { timeout: 30000 }, async t => {
+  const { store, agent, page, errors } = await setup(t);
+  const post = id => store.command(agent, "commons", command(T.MESSAGE_POSTED, { messageId: id, body: `@owner ${id}` }));
+  const target = id => page.getByRole("button", { name: `Open @owner ${id}`, exact: true });
+  const pattern = /\/api\/rooms\/commons\/updates\?/;
+  const afterPaint = id => page.waitForFunction(expected => document.activeElement?.getAttribute("aria-label") === `Open @owner ${expected}`, id);
+
+  post("open-focus-first");
+  await page.waitForFunction(() => document.querySelector("#updates-count").textContent === "1");
+
+  async function holdNext() {
+    let started, resume, sent, held = false;
+    const entered = new Promise(resolve => { started = resolve; });
+    const mayRespond = new Promise(resolve => { resume = resolve; });
+    const finished = new Promise(resolve => { sent = resolve; });
+    const interceptor = async route => {
+      if (held) return route.continue();
+      held = true;
+      started();
+      await mayRespond;
+      try { await route.fulfill({ response: await route.fetch() }); }
+      finally { sent(); }
+    };
+    await page.route(pattern, interceptor);
+    return { entered, async release() { resume(); await finished; await page.unroute(pattern, interceptor); } };
+  }
+
+  const opening = await holdNext();
+  await page.locator("#topbar-updates").press("Enter");
+  await opening.entered;
+  const first = target("open-focus-first");
+  try {
+    assert.equal(await first.isEnabled(), true, "cached exact actions remain keyboard reachable during an opening refresh");
+    await first.focus();
+    await afterPaint("open-focus-first");
+    post("open-focus-second");
+  } finally { await opening.release(); }
+  await target("open-focus-second").waitFor();
+  await afterPaint("open-focus-first");
+
+  const refreshing = await holdNext();
+  post("open-focus-third");
+  await refreshing.entered;
+  try {
+    await target("open-focus-second").focus();
+    await afterPaint("open-focus-second");
+  } finally { await refreshing.release(); }
+  await target("open-focus-third").waitFor();
+  await afterPaint("open-focus-second");
+  assert.deepEqual(errors, []);
+});
