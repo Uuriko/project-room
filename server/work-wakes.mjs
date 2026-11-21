@@ -114,9 +114,9 @@ export class WorkWakes {
       if (item.state !== "accepted" || !item.dependsOn?.includes(prerequisite.id)) continue;
       const memberId = item.accountableMemberId;
       const agentId = this.store.identities.identityIdForMember(roomId, memberId);
-      // Retain readiness for an opted-in host even when its lease is absent.
-      // Delivery still requires the elected room listener and current evidence.
-      if (!agentId || !this.optedIn(agentId, roomId)) continue;
+      // Readiness belongs to the accountable member and can precede their
+      // first host registration. Delivery still requires a capable listener.
+      if (!agentId) continue;
       const basis = this.successorBasis(roomId, state, item, memberId, at);
       if (basis) this.emitWork(roomId, state, item, incoming, at, basis);
     }
@@ -141,7 +141,7 @@ export class WorkWakes {
     if (!dependencyBasis) this.store.enqueueNativeMcpEvent?.({ roomId, memberId, eventId: incoming.id, actorId: incoming.actorId,
       kind: "work", workItemId: id, workRevision: item.revision, nextRead });
     const agentId = this.store.identities.identityIdForMember(roomId, memberId);
-    if (!agentId || !this.optedIn(agentId, roomId)) {
+    if (!agentId || (!dependencyBasis && !this.optedIn(agentId, roomId))) {
       recordWakeEvent(this.db, { at, roomId, store: "work",
         event: "suppressed_policy", kind: "work", subjectId: agentId ?? memberId });
       return;
