@@ -5713,8 +5713,13 @@ $("#main").addEventListener("click", e => {
     // #3795: a claim record link (marked data-open-claim), and any record id
     // the legacy workItems projection does not hold, resolves to the board
     // claim's record instead of the work timeline.
-    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork]) void navigateClaimRecord(link.dataset.openWork);
-    else navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
+    const origin = currentWorkOrigin();
+    const fromUpdateMessage = origin?.type === "updates" && origin.target === location.hash
+      && origin.target.startsWith("#pr-record/message/") && link.closest(".conversation-work");
+    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork] && !(partialWorkSnapshot && fromUpdateMessage))
+      void navigateClaimRecord(link.dataset.openWork);
+    else if (link.hasAttribute("data-view-drafts")) navigateWorkRecord("work", link.dataset.openWork, { presentation: "drafts" });
+    else navigateWorkRecord("work", link.dataset.openWork, fromUpdateMessage ? { presentation: "thread" } : {});
     // JDOT-COH-NAV end
   } else if (link.dataset.openMember) {
     history.replaceState(null, "", recordHref("member", link.dataset.openMember));
