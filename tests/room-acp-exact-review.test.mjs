@@ -8,7 +8,7 @@ import {createRoomServer} from '../server/http.mjs';
 import {textVersion} from '../server/text-results.mjs';
 import {Bridge} from '../room-acp/src/bridge.mjs';
 import {RoomError} from '../room-acp/src/room.mjs';
-import {reviewOutput, reviewRepairable, explicitVerdict, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
+import {reviewOutput, reviewRepairable, explicitVerdict, unfencedJson, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
 import {linkWithProof} from './helpers/link-with-proof.mjs';
 
 async function setup(t, {respondTo, pending = false, nextAction, replies = []} = {}) {
@@ -314,4 +314,80 @@ test('a reply that states both pass and fail parks without a repair prompt',asyn
   assert.deepEqual(f.counts,{prompt:1,write:0,receipt:0,ack:0});
   assert.equal(f.verdict(),undefined);
   assert.equal(f.receiptPhase(),'needs_review');
+});
+
+// Fresh Claude Haiku reformats of the #6411 reply (2026-11-21, four runs, two
+// prompt orders) each returned exactly one ```json fence around otherwise
+// valid JSON. This fixture has the same shape with a within-limit summary.
+const fence = body => '```json\n' + body + '\n```';
+const fenced6411 = fence(JSON.stringify(JSON.parse(repaired6411),null,2));
+
+test('first pass: exactly one whole-message JSON fence is formatting, anything else stays strict',()=>{
+  assert.equal(reviewOutput({text:fenced6411},'end_turn')?.result,'fail');
+  assert.equal(reviewOutput({text:'\n```\n' + repaired6411 + '\n```\n'},'end_turn')?.result,'fail');
+  assert.equal(reviewOutput({text:'```JSON\r\n' + repaired6411 + '\r\n```'},'end_turn')?.result,'fail');
+  assert.equal(reviewOutput({text:fenced6411},'cancelled'),null);
+  for (const text of [
+    'Verdict:\n' + fenced6411,                      // prose before
+    fenced6411 + '\nThanks.',                       // prose after
+    fenced6411 + '\n' + fenced6411,                 // two blocks
+    fence(repaired6411 + '\n```\n```json\n' + repaired6411), // nested second block
+    fence('{"result":"fail","summary":"x"'),        // malformed JSON
+    fence(JSON.stringify({result:'pending',summary:'No access.'})),
+    fence(JSON.stringify({result:'fail',summary:'x'.repeat(1501)})),
+    fence(JSON.stringify({result:'fail',summary:'x',nextAction:'y'.repeat(1001)})),
+    fence(JSON.stringify({result:'pass',summary:'x',nextAction:'y'})),
+    fence(JSON.stringify({result:'fail',summary:'x',extra:1})),
+    '```js\n' + repaired6411 + '\n```',            // other language tag
+    '```' + repaired6411 + '```',                    // inline fence
+  ]) assert.equal(reviewOutput({text},'end_turn'),null,text);
+  assert.equal(unfencedJson(42),42);
+  // A fenced pending is still explicit pending, so it is not repaired.
+  assert.equal(reviewRepairable({text:fence(JSON.stringify({result:'pending',summary:'No access.'}))},'end_turn'),false);
+  assert.equal(reviewRepairable({text:fenced6411},'end_turn'),false);
+});
+
+test('first pass: a fenced verdict files without any repair prompt',async t=>{
+  const f = await setup(t,{replies:[fenced6411,repaired6411]});
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.verdict()?.result,'fail');
+  assert.deepEqual(f.counts,{prompt:1,write:1,receipt:0,ack:1});
+});
+
+test('first pass: a fenced over-limit summary is still repaired once, not filed',async t=>{
+  const long = fence(JSON.stringify({result:'fail',summary:'x'.repeat(1620)}));
+  const f = await setup(t,{replies:[long,fenced6411]});
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.prompts[1].prompt,REVIEW_REPAIR_PROMPT);
+  assert.equal(f.verdict()?.result,'fail');
+  assert.deepEqual(f.counts,{prompt:2,write:1,receipt:0,ack:1});
+});
+
+test('repair: the #6411 reply then a fenced restated fail files after exactly one repair',async t=>{
+  const f = await setup(t,{replies:[malformed6411,fenced6411]});
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.prompts[1].prompt,REVIEW_REPAIR_PROMPT);
+  assert.equal(f.verdict()?.result,'fail');
+  assert.deepEqual(f.counts,{prompt:2,write:1,receipt:0,ack:1});
+});
+
+test('repair: fenced replies that reverse, add prose, repeat blocks, are malformed, pending or over limit park unfiled',async t=>{
+  for (const reply of [
+    fence(JSON.stringify({result:'pass',summary:'All paths hold.'})),
+    'Here it is:\n' + fenced6411,
+    fenced6411 + '\n' + fenced6411,
+    fence('{"result":"fail",'),
+    fence(JSON.stringify({result:'pending',summary:'Not verified.'})),
+    fence(JSON.stringify({result:'fail',summary:'x'.repeat(1501)})),
+  ]) {
+    const f = await setup(t,{replies:[malformed6411,reply,fenced6411]});
+    await f.bridge.accept(f.wake);
+    await f.bridge.queue.idle();
+    assert.deepEqual(f.counts,{prompt:2,write:0,receipt:0,ack:0},reply);
+    assert.equal(f.verdict(),undefined);
+    assert.equal(f.receiptPhase(),'needs_review');
+  }
 });

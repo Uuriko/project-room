@@ -35,10 +35,19 @@ export async function readReview(room, binding) {
   ].join('\n\n') }];
 }
 
+// A whole reply that is exactly one Markdown code fence (optionally tagged
+// json) is formatting, not content. Prose around it, a second fence, or any
+// other shape is left unchanged for the strict parser to reject.
+export function unfencedJson(text) {
+  if (typeof text !== 'string') return text;
+  const match = /^\s*```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```\s*$/i.exec(text);
+  return match && !match[1].includes('```') ? match[1] : text;
+}
+
 export function reviewOutput(recorder, stopReason) {
   if (stopReason !== 'end_turn') return null;
   let value;
-  try { value = JSON.parse(recorder.finalText ?? recorder.text); } catch { return null; }
+  try { value = JSON.parse(unfencedJson(recorder.finalText ?? recorder.text)); } catch { return null; }
   if (!value || Object.keys(value).some(key => !['result','summary','nextAction'].includes(key)) || !['pass','fail'].includes(value.result)
     || typeof value.summary !== 'string' || !value.summary.trim() || value.summary.length > 1500) return null;
   if (value.nextAction !== undefined && (value.result !== 'fail' || typeof value.nextAction !== 'string'
