@@ -1,3 +1,4 @@
+import { nextReviewerProject } from "./project-discoveries.mjs";
 import { activationObligations } from "./activation-obligations.mjs";
 import { conversationCursorCodec } from "./conversation-sync.mjs";
 import { addressedWorkWindow } from "./current-work-list.mjs";
@@ -28,8 +29,10 @@ const unavailable = (roomId, source, reason, nextRead = read(roomId, source)) =>
   coverage: "unavailable", reason, items: [], nextRead
 });
 
-export function validRoomNextSelection({ source, cursor, view }) {
+export function validRoomNextSelection({ source, cursor, view, consideredDiscovery }) {
   return (view === undefined || view === "pickup")
+    && (consideredDiscovery === undefined || (view === "pickup" && source === undefined
+      && typeof consideredDiscovery === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(consideredDiscovery)))
     && (source === undefined || source === "work" || source === "requests")
     && (cursor === undefined || source !== undefined && typeof cursor === "string"
       && /^[A-Za-z0-9_-]{1,4096}$/.test(cursor));
@@ -213,8 +216,8 @@ function boundedPage(roomId, source, getPage) {
   }
 }
 
-export function readRoomNext(store, secret, roomId, { source, cursor, view } = {}, readInvitation, { allowPublicReview = false } = {}) {
-  if (!validRoomNextSelection({ source, cursor, view }))
+export function readRoomNext(store, secret, roomId, { source, cursor, view, consideredDiscovery } = {}, readInvitation, { allowPublicReview = false, discoveryOrigin } = {}) {
+  if (!validRoomNextSelection({ source, cursor, view, consideredDiscovery }))
     throw new ServiceError(422, "invalid_arguments", "Choose a source and its returned cursor");
   return store.readTransaction(() => {
     const auth = store.authenticate(secret, roomId);
@@ -288,6 +291,24 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
             packet.ifIdle = listing.selection?.available === false
               ? { status: "unavailable", reason: listing.selection.reason }
               : { status: "no_invitation" };
+          }
+        }
+      }
+
+      if (discoveryOrigin && !source && !room.archivedAt && !addressed
+          && packet.work.coverage === "complete" && packet.requests.coverage === "complete"
+          && !store.wakeQueue.pauseStatus(roomId, auth.member.id)) {
+        const binding = cursorBinding(auth, roomId, "discovery", null);
+        const position = pageCursor(store, binding, consideredDiscovery);
+        if (!position) throw new ServiceError(422, "invalid_discovery_checkpoint", "Omit the stale checkpoint to restart finding review");
+        const project = nextReviewerProject(store, roomId, auth.member.id, discoveryOrigin, position.after);
+        if (project) {
+          const nextRead = { tool: "room_read_project_discoveries", arguments: { roomId, offerId: project.offerId, limit: 5 } };
+          packet.discoveryReview = { nextRead, consideredDiscovery: position.encode(project.after),
+            path: '/api/rooms/' + encodeURIComponent(roomId) + '/project-offers/' + encodeURIComponent(project.offerId) + '/discoveries' };
+          if (!packet.nextRead) {
+            packet.nextRead = nextRead;
+            packet.ifIdle = { status: "project_discovery", nextRead };
           }
         }
       }

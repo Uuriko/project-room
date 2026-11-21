@@ -207,7 +207,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 38, 'audit every advertised native tool, including public review actions');
+  assert.equal(tools.length, 39, 'audit every advertised native tool, including designated project finding reads');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -924,4 +924,23 @@ test('OAuth exact result shows a correction without advertising an ungranted res
   const narrowed = await call('room_read_result', {}, tokens.access_token);
   assert.equal(narrowed.workThread.pendingCorrection.verificationEventId, complete.workThread.pendingCorrection.verificationEventId);
   assert.equal(narrowed.workThread.pendingCorrection.action, undefined);
+});
+
+test('native reviewer follows Room Next to private project findings on the same OAuth grant', async t => {
+  const f = await setup(t, { normalized: true });
+  const offerId = 'native:project', criterion = 'Cite one check';
+  const path = '/api/project-offers/native%3Aproject/discoveries';
+  f.store.projectOffers.create('commons','owner',{requestId:'create-project',offerId,reviewerMemberIds:['friend-dot'],
+    terms:{kind:'project',title:'Native review',summary:'Check the result',acceptanceCriteria:[criterion],
+      submissionUrl:origin+path,reward:{kind:'unpaid'},approvalPolicy:{mode:'agent'}}});
+  f.store.projectOffers.transition('commons','owner',offerId,'publish',{requestId:'publish-project',expectedRevision:1});
+  const outsider = f.store.identities.create('Outside filer');
+  const filed = await fetch(f.base+path,{method:'POST',headers:{Authorization:'Bearer '+outsider.secret,'Content-Type':'application/json'},
+    body:JSON.stringify({requestId:'observation',expectedTermsVersion:1,expectedRevision:2,sourceUrl:'https://example.com/source',
+      criterion,observation:'Only the designated reviewer reads this',nextAction:'Check the source'})});
+  assert.equal(filed.status,200);
+  const pickup = (await f.rpc('tools/call',{name:'room_next',arguments:{view:'pickup'}})).body.result.structuredContent;
+  assert.equal(pickup.nextRead.tool,'room_read_project_discoveries');
+  const finding = await f.rpc('tools/call',{name:pickup.nextRead.tool,arguments:pickup.nextRead.arguments});
+  assert.equal(finding.body.result.structuredContent.findings[0].receiptId,(await filed.json()).receiptId);
 });

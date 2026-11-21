@@ -3,16 +3,18 @@ import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { validId } from "../../src/events.js";
 
-const HELP = "room next [--source work|requests] [--cursor TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow each partial source's nextRead.";
+const HELP = "room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow each partial source's nextRead.";
 
 function selectionOf(argv) {
   const args = {};
+  const options = new Map([["--source", "source"], ["--cursor", "cursor"], ["--considered-discovery", "consideredDiscovery"]]);
   for (let i = 0; i < argv.length; i += 2) {
-    const key = argv[i] === "--source" ? "source" : argv[i] === "--cursor" ? "cursor" : null;
+    const key = options.get(argv[i]);
     if (!key || Object.hasOwn(args, key) || argv[i + 1] === undefined) throw new Error(HELP);
     args[key] = argv[i + 1];
   }
   if (args.source !== undefined && !["work", "requests"].includes(args.source)
+    || args.consideredDiscovery !== undefined && (args.source || !/^[A-Za-z0-9_-]{1,4096}$/.test(args.consideredDiscovery))
     || args.cursor !== undefined && (!args.source || !/^[A-Za-z0-9_-]{1,4096}$/.test(args.cursor)))
     throw new Error(HELP);
   return args;

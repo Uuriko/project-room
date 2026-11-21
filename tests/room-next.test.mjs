@@ -354,3 +354,64 @@ test("compare first useful entry with the existing three reads", async t => {
     next: { calls: 1, wireBytes: Buffer.byteLength(compact.text) }
   }));
 });
+
+for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`reviewer pickup returns a private finding read and advances only on explicit consideration (${representation})`, async t => {
+    const f = await privateWorkFixture(t, representation);
+    const { store, triage, producer, observer } = f;
+    function publish(id, submissionUrl) {
+      store.projectOffers.create("commons", "owner", { requestId: "create-" + id, offerId: id,
+        reviewerMemberIds: ["owner", triage.id, producer.id],
+        terms: { kind: "project", title: id, summary: "A scoped project", acceptanceCriteria: ["Cite a check"],
+          reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" },
+          repositoryUrl: "https://example.com/source", ...(submissionUrl && { submissionUrl }) } });
+      store.projectOffers.transition("commons", "owner", id, "publish", { requestId: "publish-" + id, expectedRevision: 1 });
+    }
+    async function file(id, n) {
+      const response = await fetch(f.origin + "/api/project-offers/" + encodeURIComponent(id) + "/discoveries", {
+        method: "POST", headers: { Authorization: "Bearer " + observer.secret, "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId: "file-" + n, expectedTermsVersion: 1, expectedRevision: 2,
+          sourceUrl: "https://example.com/source", criterion: "Cite a check",
+          observation: "reviewer-only-observation-" + n, nextAction: "Repeat the check" }) });
+      assert.equal(response.status, 200);
+    }
+    const pickup = (who, consideredDiscovery) => f.mcp(who, "room_next", { view: "pickup", ...(consideredDiscovery && { consideredDiscovery }) });
+    publish("project:a"); publish("project-b");
+    await file("project:a", 1); await file("project:a", 2); await file("project-b", 3);
+    const first = await pickup(triage);
+    assert.ok(first.ok, first.text);
+    const lead = first.value.discoveryReview;
+    assert.deepEqual(first.value.nextRead, lead.nextRead);
+    assert.equal(lead.nextRead.arguments.offerId, "project:a");
+    assert.equal(lead.path, "/api/rooms/commons/project-offers/project%3Aa/discoveries");
+    assert.doesNotMatch(first.text, /reviewer-only-observation|Cite a check|finding-[a-f0-9]{64}/);
+    const get = (who, args) => f.mcp(who, lead.nextRead.tool, args);
+    const page = await get(triage, { ...lead.nextRead.arguments, limit: 1 });
+    assert.ok(page.ok, page.text);
+    const secondPage = await get(triage, { ...lead.nextRead.arguments, after: page.value.nextCursor, limit: 1 });
+    assert.equal(secondPage.value.nextCursor, null);
+    assert.deepEqual([page, secondPage].map(p => p.value.findings[0].finding.observation).sort(),
+      ["reviewer-only-observation-1", "reviewer-only-observation-2"]);
+    assert.equal((await pickup(producer)).value.discoveryReview, undefined, "addressed work retains precedence");
+    assert.equal((await pickup(observer)).value.discoveryReview, undefined);
+    assert.equal((await get(observer, lead.nextRead.arguments)).ok, false);
+    const next = (await pickup(triage, lead.consideredDiscovery)).value.discoveryReview;
+    assert.equal(next.nextRead.arguments.offerId, "project-b");
+    assert.equal((await pickup(triage, next.consideredDiscovery)).value.discoveryReview, undefined);
+    await file("project:a", 4);
+    const latest = (await pickup(triage, next.consideredDiscovery)).value.discoveryReview;
+    assert.equal(latest.nextRead.arguments.offerId, "project:a");
+    assert.equal((await pickup(observer, latest.consideredDiscovery)).ok, false, "checkpoint is bound to the reviewer");
+    if (representation === "legacy") {
+      f.send(producer.key, "work.help_updated", { workItemId: "open", expectedRevision: f.rev("open"),
+        expectedHelpRevision: 0, status: "open", scope: "Help on new work", expiresAt: new Date(Date.now()+3600000).toISOString() });
+      const withInvitation = await pickup(triage);
+      assert.equal(withInvitation.value.ifIdle.status, "invitation");
+      assert.equal(withInvitation.value.nextRead.tool, "room_read_work");
+      assert.equal(withInvitation.value.discoveryReview.nextRead.tool, "room_read_project_discoveries");
+    }
+    store.projectOffers.transition("commons", "owner", "project:a", "withdraw", { requestId:"withdraw-a", expectedRevision:2 });
+    assert.equal((await get(triage, lead.nextRead.arguments)).ok, false);
+    assert.equal((await pickup(triage, next.consideredDiscovery)).value.discoveryReview, undefined);
+  });
+}
