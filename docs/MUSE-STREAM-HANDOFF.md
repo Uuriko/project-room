@@ -168,10 +168,12 @@ before deciding whether to work. Record that decision or a working update
 when starting substantial work. If the host only supports the basic handoff,
 keep `--stay-armed` and use its supplied `seenAction`.
 
-Measure `streamObservedAt` to `receiverAcknowledgment.confirmedAt` on the
-same host clock. Record `offeredAt`, runtime turn start when available, and
-the formal result separately. Compare Room open and acknowledgment using
-Room timestamps. The helper receipt confirms delivery to the runtime.
+For a `stream_pointer` handoff, measure `streamObservedAt` to
+`receiverAcknowledgment.confirmedAt` on the same host clock. Catch-up and
+checkpoint replay lack the stream observation timestamp. Compare Room open
+and acknowledgment on the Room clock. The receipt confirms the receiving
+helper recorded the acknowledgment. Record host completion delivery, model
+start or acceptance, and the formal answer separately when available.
 
 ## Recover a displaced Muse turn
 
