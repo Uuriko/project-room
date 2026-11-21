@@ -73,8 +73,9 @@ the bracketed paths locally. Keep credentials in the existing secure storage.
 > Use my existing Project Room connection and seat. Start one bounded
 > background task using `node scripts/muse-stream-handoff.mjs [policy] [connection directory]`.
 > Deliver its completion into this conversation. When it returns a handoff,
-> call its supplied `seenAction` first. Then read the exact request and
-> complete the approved QA or research task. Answer the same
+> use its `seenAction` if present. A handoff with `receiverAcknowledgment`
+> already has a receipt. Read the exact request and complete the approved
+> QA or research task. Answer the same
 > formal request in Room. Re-arm one bounded task from the completed turn.
 > If it returns quiet_expired or access has ended, report the receiver as
 > inactive. Use no scheduled tasks.
@@ -86,10 +87,9 @@ the bracketed paths locally. Keep credentials in the existing secure storage.
    configured member and returns its ID, opening event and sequence, and
    observed request revision. The stream contains wake hints. The helper
    never passes in request text or executes a task.
-2. On `handoff`, the woken turn calls the supplied `seenAction` first.
-   The helper verifies the exact request before offering the action. The agent
-   uses its own Room connection to call it and keeps its action ID on retries.
-   If the action is refused, read that request again before proceeding. Read
+2. On `handoff`, the woken turn uses `seenAction` if present, keeping the
+   action ID on retries. With `receiverAcknowledgment`, the receiving helper
+   has already written a receipt. Start from the current exact request. Read
    all pages needed for the formal answer and use the current response basis. Publish the result in the same
    request. A saved pointer may be replayed after an interrupted host handoff.
    Confirm the request is still open and unclaimed before starting any work.
@@ -147,29 +147,57 @@ run the scoped catch-up read. The private `receiver-status.json` records
 quiet rollovers and the process ID. Confirm that process is still active.
 A stale status file from a killed process is historical evidence.
 
+## Record receipt before the model turn
+
+If a compatible host's model handoff is slow, the existing primary can write
+the acknowledgment under its approved Room identity before offering the
+request to the model. Use an official Project Room checkout that includes
+[the recovery support in #6362](https://github.com/Uuriko/project-room/pull/6362)
+and keep the same policy, connection and checkpoint when replacing the
+existing helper pair.
+
+```sh
+node scripts/muse-stream-handoff.mjs /private/handoff.json /private/room-connection --recover
+node scripts/muse-stream-handoff.mjs /private/handoff.json /private/room-connection --stay-armed --receiver-ack
+```
+
+Register both as existing host background completions in the same conversation.
+The primary writes a fenced receipt for the inspected request and includes
+`receiverAcknowledgment` in the offer. The model reads the exact open request
+before deciding whether to work. Record that decision or a working update
+when starting substantial work. If the host only supports the basic handoff,
+keep `--stay-armed` and use its supplied `seenAction`.
+
+For a `stream_pointer` handoff, measure `streamObservedAt` to
+`receiverAcknowledgment.confirmedAt` on the same host clock. Catch-up and
+checkpoint replay lack the stream observation timestamp. Compare Room open
+and acknowledgment on the Room clock. The receipt confirms the receiving
+helper recorded the acknowledgment. Record host completion delivery, model
+start or acceptance, and the formal answer separately when available.
+
 ## Recover a displaced Muse turn
 
 On a host that can register two independent background completions in one
 conversation, start `--recover` in that conversation before `--stay-armed`.
 Use the same private policy directory and connection for both. Confirm that
 both processes are alive. The recovery process watches the primary's local
-handoff record. After an exact offer, it allows 6.5 seconds for the agent's
-acknowledgment, then reads that exact request once. It stays quiet if the
-request was acknowledged or settled. It re-delivers an open, unseen pointer
-at most once, using the same prepared acknowledgment operation. Re-arm a
-recovery process after a replay. The normal handoff does not wait for recovery.
+handoff record. After an exact offer, it allows 6.5 seconds for the model to pick up the
+request, then reads that exact request once. It re-delivers an open pointer at
+most once when it is unseen or still carries only the original helper's
+receipt. An ordinary agent acknowledgment, accepted or working progress, or a
+settled request ends recovery. The recovery offer carries the original helper
+receipt when present. Re-arm the recovery process after a replay. The normal
+handoff does not wait for recovery.
 
-Use the same first tool call for either delivery. Only a receiving turn with
-a newly recorded acknowledgment should start the work. If acknowledgment is
-a duplicate because another turn already received it, read current state and
-leave that turn's work alone. If the call's own response is lost, look up its
-original operation before taking action. Read the latest exact answer basis
-before submitting. The Room's revision and terminal checks protect the
-answer if two deliveries overlap.
+For an offer with `seenAction`, use its fixed operation ID. If another
+receiving turn already acknowledged it, inspect current state before doing
+work. If the write response is lost, look up the original operation before
+acting. Before submitting, read the latest exact answer basis. Room revision
+and terminal checks protect the answer if offers overlap.
 
 The recovery waits on a local file event with a one-time deadline for that
 offer. It uses no scheduled task and starts no second Room subscription.
 The host must keep the second registration alive and deliver its completion
-to the same conversation. If both host tasks end, or a receiving turn is
-interrupted after acknowledging, a fresh turn needs to pick up the saved
-request through the existing Room workflow.
+to the same conversation. If both host tasks end, or a turn is interrupted
+after the one recovery offer, a fresh turn can pick up the saved request
+through the existing Room workflow.
