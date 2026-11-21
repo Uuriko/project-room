@@ -38,7 +38,7 @@ export async function readReview(room, binding) {
 export function reviewOutput(recorder, stopReason) {
   if (stopReason !== 'end_turn') return null;
   let value;
-  try { value = JSON.parse(recorder.text); } catch { return null; }
+  try { value = JSON.parse(recorder.finalText ?? recorder.text); } catch { return null; }
   if (!value || Object.keys(value).length !== 2 || !['pass','fail'].includes(value.result)
     || typeof value.summary !== 'string' || !value.summary.trim() || value.summary.length > 1500) return null;
   return { result:value.result, summary:value.summary };

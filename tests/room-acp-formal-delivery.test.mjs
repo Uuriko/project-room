@@ -13,6 +13,7 @@ import {seedScopedInbox} from './helpers/scoped-inbox-source.mjs';
 import {Bridge} from '../room-acp/src/bridge.mjs';
 import {RoomClient, RoomError} from '../room-acp/src/room.mjs';
 import {readCompleteRequest, prepareFormalDelivery} from '../room-acp/src/formal-delivery.mjs';
+import {TurnRecorder} from '../room-acp/src/render.mjs';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 
@@ -59,6 +60,29 @@ test('ACP answer completes a real normalized reply request, rather than posting 
   assert.equal(current.request.status, 'answered');
   assert.equal(current.page.items.find(item => item.kind === 'answered').message.body, 'Useful verified answer');
   assert.equal(f.counts.prompts, 1);
+});
+
+for (const finished of [true, false]) test(`formal completion uses only text after the last tool start (finished=${finished})`, async t => {
+  const f = await fixture(t), bridge = f.make(), recorder = new TurnRecorder();
+  const chunk = text => recorder.update({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
+  const body = 'Verified the exact candidate';
+  chunk('I found the source and will run the focused checks.');
+  chunk(JSON.stringify({outcome:'answered',body:'An obsolete conclusion'}));
+  recorder.update({sessionUpdate:'tool_call',toolCallId:'check',title:'Run focused checks'});
+  if (finished) {
+    chunk('{"outcome":"answered",');
+    recorder.update({sessionUpdate:'tool_call_update',toolCallId:'check',status:'completed'});
+    chunk(`"body":${JSON.stringify(body)}}`);
+  }
+  const prompt = bridge.host.prompt;
+  bridge.host.prompt = async (...args) => ({...await prompt(...args),recorder});
+  await f.ready(bridge);
+  await bridge.turn('dm',[f.wake]);
+  const current = await f.read(bridge);
+  assert.equal(current.request.status, finished ? 'answered' : 'open');
+  assert.equal(current.page.items.find(item => item.kind === 'answered')?.message.body, finished ? body : undefined);
+  assert.match(recorder.text,/obsolete conclusion/);
+  assert.equal(f.counts.prompts,1);
 });
 
 for (const cancelled of [false, true]) test(`ACP prepares formal context once after session startup (${cancelled ? 'cancelled' : 'corrected'})`, async t => {
