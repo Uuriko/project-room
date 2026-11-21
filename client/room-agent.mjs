@@ -1175,6 +1175,22 @@ export class RoomAgentClient {
     return workPacket({ room: { id: selected.roomId }, workItems: { [workItemId]: selected.work },
       messages: source.status === "included" ? [source.message] : [] }, workItemId, packetOptions);
   }
+  async operationReceipt(operationId, { signal } = {}) {
+    if (!validId(operationId) || !this.#memberId) throw new RoomClientError(0, "invalid_operation_selection", "Choose an operation ID and a configured agent");
+    // A legacy server can ignore operationId. Limit that older response to one event.
+    const query = new URLSearchParams({ operationId, limit: "1" });
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/events?${query}`, undefined, signal);
+    if (value?.contractVersion === undefined && Array.isArray(value?.events) && Number.isSafeInteger(value?.next)) return null;
+    if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.viewerId !== this.#memberId
+      || value.operationId !== operationId || !Number.isSafeInteger(value.checkedThrough) || value.checkedThrough < 0
+      || value.currentStateVerified !== false || !(value.status === "recorded"
+        ? validId(value.eventId) && typeof value.eventType === "string" && value.eventType.length > 0
+          && Number.isSafeInteger(value.sequence) && value.sequence > 0 && value.sequence <= value.checkedThrough
+        : value.status === "not_recorded" && value.eventId === undefined && value.sequence === undefined && value.eventType === undefined)) {
+      throw new RoomClientError(200, "invalid_operation_receipt", "Room returned an unconfirmed operation receipt");
+    }
+    return value;
+  }
   changes(after = 0, limit = 50, { signal } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
     return this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);

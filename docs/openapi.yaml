@@ -1610,8 +1610,18 @@ paths:
         (alone or with `after`) is 422 `invalid_event_cursor`: it is not
         applied as a filter, and it does not mean the caller is caught up.
         Pass the previous response's `next` back as `after`.
+        To recover one uncertain command, send `operationId` instead of an event
+        selection. The receipt is scoped to the current member and proves only
+        whether that operation was recorded through the observed room head.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: operationId
+          in: query
+          description: >
+            Read one exact caller-owned operation. Do not combine this with
+            event selection parameters. An optional limit=1 bounds responses
+            from older servers which ignore operationId.
+          schema: { type: string, minLength: 1, maxLength: 128 }
         - name: after
           in: query
           description: >
@@ -1670,22 +1680,49 @@ paths:
       responses:
         '401': { description: unauthenticated }
         '200':
-          description: Events after the given sequence
+          description: Events after the given sequence, or exact operation metadata for the current member
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  events:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/RoomEvent'
-                  next:
-                    type: integer
-                    description: Sequence of the last event returned (`after` when the page is empty); pass it back as `after`
-                  hasMore:
-                    type: boolean
-                    description: True when the room has events beyond `next`
+                oneOf:
+                  - type: object
+                    required: [events, next, hasMore]
+                    properties:
+                      events:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RoomEvent'
+                      next:
+                        type: integer
+                        description: Sequence of the last event returned (`after` when the page is empty); pass it back as `after`
+                      hasMore:
+                        type: boolean
+                        description: True when the room has events beyond `next`
+                  - type: object
+                    additionalProperties: false
+                    required: [contractVersion, roomId, viewerId, operationId, checkedThrough, status, currentStateVerified, eventId, eventType, sequence]
+                    properties:
+                      contractVersion: { type: integer, enum: [1] }
+                      roomId: { type: string }
+                      viewerId: { type: string }
+                      operationId: { type: string }
+                      checkedThrough: { type: integer, minimum: 0 }
+                      status: { type: string, enum: [recorded] }
+                      currentStateVerified: { type: boolean, enum: [false] }
+                      eventId: { type: string }
+                      eventType: { type: string }
+                      sequence: { type: integer, minimum: 1 }
+                  - type: object
+                    additionalProperties: false
+                    required: [contractVersion, roomId, viewerId, operationId, checkedThrough, status, currentStateVerified]
+                    properties:
+                      contractVersion: { type: integer, enum: [1] }
+                      roomId: { type: string }
+                      viewerId: { type: string }
+                      operationId: { type: string }
+                      checkedThrough: { type: integer, minimum: 0 }
+                      status: { type: string, enum: [not_recorded] }
+                      currentStateVerified: { type: boolean, enum: [false] }
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
         '422':
           description: >
@@ -1696,7 +1733,8 @@ paths:
             message names the parameter. Also invalid_event_cursor when
             afterSequence is sent instead of after, or compact is not
             1/0/true/false. invalid_cursor when actor, type, or mentions is
-            malformed.
+            malformed. invalid_operation_selection when operationId is invalid,
+            repeated, or combined with an event selection.
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream

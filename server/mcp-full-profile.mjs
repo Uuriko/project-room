@@ -28,7 +28,7 @@ import { linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mj
 import { readBoard } from "./board-read.mjs";
 
 import { readWorkSelection, workReadRefusal } from "../client/work-preparation.mjs";
-import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
+import { beginSelectedWork, exactBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
 import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
@@ -43,7 +43,7 @@ import { markIfOther, stampAssistantResult, withContentTrust } from "./content-t
 import { withDefaultRoomId } from "./mcp-request-defaults.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 
-const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work", "room_map"]);
+const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work", "room_map", "room_receipt"]);
 const roomIdField = { type: "string", minLength: 1, maxLength: 128, description: "Room id this identity is linked to." };
 
 const PUBLIC_REVIEW_READ = "room_read_public_review";
@@ -360,7 +360,11 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       expectedRevision: rest.expectedRevision,
       invocation: rest.invocationRequestId ? { requestId: rest.invocationRequestId } : null,
       read: () => store.workContext(secret, roomId, rest.workItemId, {}),
-      receipts: (requestId, item) => findBeginReceipt(after => store.eventsAfter(secret, roomId, after, 100), requestId, item),
+      receipts: (requestId, item) => {
+        const exact = store.operationReceipt(secret, roomId, requestId);
+        if (exact.status === "not_recorded") return null;
+        return exactBeginReceipt(exact, store.eventsAfter(secret, roomId, exact.sequence - 1, 1), item);
+      },
       execute: async stage => {
         try {
           const command = buildWorkCommand(stage.action, stage.args);
