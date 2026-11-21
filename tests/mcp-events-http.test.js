@@ -148,6 +148,9 @@ test('review wake pins the completion and the selected read prepares its native 
     evidenceMessageId: 'wake-evidence', evidenceMessageEventId: posted.event.id,
     evidenceVersion: 'sha256:' + createHash('sha256').update('Actual evidence').digest('hex'),
     previousCompletionEventId: null, producerId: producer, summary: 'Evidence submitted', nextAction: 'Review the evidence' });
+  const scope = { roomId, workItemId, completionEventId: completion.event.id };
+  const queued = f.store.workResult(f.owner, roomId, workItemId, { completionEventId: completion.event.id });
+  assert.deepEqual(queued.reviewRuntime, { status: 'unavailable', webhook: 'queued' });
   await f.server.drainMcpEvents();
   assert.equal(f.deliveries.length, 1);
   const { nextRead } = JSON.parse(f.deliveries[0].body).data;
@@ -156,11 +159,22 @@ test('review wake pins the completion and the selected read prepares its native 
   } });
   const selected = await call(nextRead.tool, nextRead.arguments);
   assert.equal(selected.result.text.body, 'Actual evidence');
+  assert.deepEqual(selected.reviewRuntime, { status: 'unavailable', webhook: 'delivered' });
   assert.equal(selected.review.action.arguments.expectedRevision, 3);
+  const outbox = f.store.db.prepare("SELECT event_id,document FROM mcp_event_outbox").get();
+  const wrong = JSON.parse(outbox.document);
+  wrong.data.nextRead.arguments = { ...scope, completionEventId: 'another-completion' };
+  const setDocument = f.store.db.prepare("UPDATE mcp_event_outbox SET document=? WHERE event_id=?");
+  setDocument.run(JSON.stringify(wrong), outbox.event_id);
+  assert.deepEqual((await call(nextRead.tool, nextRead.arguments)).reviewRuntime, { status: 'unavailable' });
+  setDocument.run(outbox.document, outbox.event_id);
   const verdict = await call(selected.review.action.tool, {
     ...selected.review.action.arguments, result: 'pass', summary: 'Exact evidence checked'
   });
   assert.equal(verdict.status, 'recorded');
+  assert.deepEqual((await call(nextRead.tool, nextRead.arguments)).reviewRuntime, {
+    status: 'verdict_recorded', source: 'room_verdict'
+  });
 });
 
 test('official pinned modern client uses invitation OAuth for attributed Room tools', { skip: !process.env.ROOM_MCP_REFERENCE_CLIENT }, async t => {
