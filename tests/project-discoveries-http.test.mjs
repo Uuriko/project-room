@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { createOperatorPurge } from '../server/operator-purge.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 
 const origin = 'https://room.example.org';
@@ -31,12 +32,12 @@ async function fixture(t, normalized = true) {
   const outside = store.identities.create('External contributor');
   const second = store.identities.create('Second external contributor');
   if (normalized) store.room = () => { throw new Error('Unexpected full room read'); };
-  const publish = (id, overrides = {}, published = true, reviewerMemberIds = ['owner']) => {
-    store.projectOffers.create('commons', 'owner', { requestId: 'create-' + id, offerId: id, reviewerMemberIds,
+  const publish = (id, overrides = {}, published = true, reviewerMemberIds = ['owner'], roomId = 'commons') => {
+    store.projectOffers.create(roomId, 'owner', { requestId: 'create-' + id, offerId: id, reviewerMemberIds,
       terms: { title: id, kind: 'project', acceptanceCriteria: [input.criterion], summary: 'Review public documentation',
         repositoryUrl: 'https://github.com/example/project', submissionUrl: origin + path(id),
         reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' }, ...overrides } });
-    if (published) store.projectOffers.transition('commons', 'owner', id, 'publish', { requestId: 'publish-' + id, expectedRevision: 1 });
+    if (published) store.projectOffers.transition(roomId, 'owner', id, 'publish', { requestId: 'publish-' + id, expectedRevision: 1 });
   };
   const server = createRoomServer({ store, origin });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -92,7 +93,7 @@ for (const normalized of [true, false]) test('scope and replay of discovery fili
   const reopened = new RoomStore(dbPath, { readOnly: true });
   try {
     const row = reopened.db.prepare('SELECT outcome_json FROM public_work_requests WHERE offer_id=? AND actor_id=? AND request_id=?')
-      .get('project-discovery/project-a', outside.identityId, input.requestId);
+      .get('project-discovery/commons/project-a', outside.identityId, input.requestId);
     assert.deepEqual(JSON.parse(row.outcome_json), filed.json);
   } finally { reopened.close(); }
 });
@@ -138,7 +139,7 @@ test('filing capacity is scoped to each contributor and project, exact retries s
   // Fill the remaining slots without sending enough HTTP calls to trip the distinct IP ceiling.
   const insert = store.db.prepare('INSERT INTO public_work_requests VALUES (?,?,?,?,?)');
   const synthetic = JSON.stringify({ recordedAt: new Date(now).toISOString(), receiptId: 'synthetic' });
-  for (let n = 0; n < 94; n++) insert.run('project-discovery/caps', 'fixture-' + n, 'fixture', '{}', synthetic);
+  for (let n = 0; n < 94; n++) insert.run('project-discovery/commons/caps', 'fixture-' + n, 'fixture', '{}', synthetic);
   assert.equal((await call(path('caps'), second.secret, { ...input, requestId: 'next' })).status, 429);
   assert.equal((await call(path('caps'), second.secret, input)).status, 200);
   now += 24 * 60 * 60 * 1000 - 1;
@@ -171,4 +172,28 @@ test('review continuation preserves older findings across concurrent newer filin
   for (const query of ['?after=malformed', '?after=', '?limit=51', '?limit=0', '?limit=1&limit=2']) {
     assert.equal((await call(review('pages') + query, owner)).status, 422);
   }
+});
+
+test('operator room purge erases only scoped discoveries before an offer ID is reused', async t => {
+  const { store, call, publish, outside, owner } = await fixture(t);
+  const oldRoom = 'discovery-room';
+  store.initialize(initialRoom(oldRoom), { representation: 'normalized-current-v1' });
+  publish('reused', {}, true, ['owner'], oldRoom);
+  publish('kept');
+  const removed = await call(path('reused'), outside.secret, input);
+  const kept = await call(path('kept'), outside.secret, input);
+  assert.equal(removed.status, 200); assert.equal(kept.status, 200);
+  const insert = store.db.prepare('INSERT INTO public_work_requests VALUES (?,?,?,?,?)');
+  insert.run('project-discovery/reused', outside.identityId, 'older-format', '{}', JSON.stringify(removed.json));
+  insert.run('unrelated-lease', outside.identityId, 'old-lease', '{}', '{}');
+  const purge = createOperatorPurge(store);
+  const plan = purge.plan({ targets: [{ kind: 'room', id: oldRoom }], reason: 'Clean up synthetic room' }, crypto.randomUUID());
+  assert.equal(plan.counts.find(entry => entry.table === 'public_work_requests').rows, 2);
+  assert.equal(purge.execute({ planId: plan.planId, confirmToken: plan.confirmToken }, crypto.randomUUID()).result, 'executed');
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM public_work_requests').get().n, 2);
+  assert.deepEqual((await call(review('kept'), owner)).json.findings, [kept.json]);
+  publish('reused');
+  assert.deepEqual((await call(review('reused'), owner)).json.findings, []);
+  const fresh = await call(path('reused'), outside.secret, input);
+  assert.equal(fresh.status, 200); assert.notEqual(fresh.json.receiptId, removed.json.receiptId);
 });

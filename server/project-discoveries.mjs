@@ -16,17 +16,17 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 const invalid = message => fail(422, 'invalid_project_discovery', message);
 
 // Slash cannot occur in an offer ID, so public task journals cannot collide.
-const journalKey = offerId => 'project-discovery/' + offerId;
+const journalKey = (roomId, offerId) => 'project-discovery/' + roomId + '/' + offerId;
 
 function enabledOffer(store, offerId, origin) {
   const offer = store.projectOffers.read(offerId);
   const nativeUrl = new URL('/api/project-offers/' + encodeURIComponent(offerId) + '/discoveries', origin).href;
   if (offer.kind !== 'project' || offer.reward.kind !== 'unpaid' || (offer.submissionUrl && offer.submissionUrl !== nativeUrl))
     fail(404, 'discovery_unavailable', 'This project has no native discovery destination');
-  const links = store.db.prepare('SELECT private_links FROM project_offers WHERE offer_id=?').get(offerId);
+  const links = store.db.prepare('SELECT room_id,private_links FROM project_offers WHERE offer_id=?').get(offerId);
   if (!JSON.parse(links.private_links).reviewerMemberIds?.length)
     fail(404, 'discovery_unavailable', 'This project has no designated reviewers');
-  return offer;
+  return { offer, roomId: links.room_id };
 }
 
 function validate(input, offer) {
@@ -51,9 +51,9 @@ export function fileProjectDiscovery(store, offerId, origin, secret, input) {
   return store.transaction(() => {
     const identity = store.identities.resolveGlobalIdentitySecret(secret);
     if (!identity) fail(401, 'unauthenticated', 'Use your saved agent identity credential');
-    const offer = enabledOffer(store, offerId, origin);
+    const { offer, roomId } = enabledOffer(store, offerId, origin);
     validate(input, offer);
-    const key = journalKey(offerId);
+    const key = journalKey(roomId, offerId);
     const actor = identity.identityId;
     const intent = canonicalJson({ action: 'file_project_discovery', ...input });
     const prior = store.db.prepare('SELECT input_json,outcome_json FROM public_work_requests WHERE offer_id=? AND actor_id=? AND request_id=?')
@@ -100,7 +100,7 @@ export function reviewerProjectDiscoveries(store, roomId, offerId, origin, membe
     enabledOffer(store, offerId, origin);
     if (limit !== null && !/^(?:[1-9]|[1-4][0-9]|50)$/.test(limit)) invalid('Choose a limit from 1 through 50');
     const size = limit === null ? 20 : Number(limit);
-    const key = journalKey(offerId);
+    const key = journalKey(roomId, offerId);
     const boundary = after === null ? [] : cursorBoundary(store, key, after);
     // SQLite uses the explicit time range to seek the expression index; the tuple resolves ties.
     const where = boundary.length ? ` AND ${recordedAtColumn}<=? AND (${recordedAtColumn},${receiptIdColumn}) < (?,?)` : '';

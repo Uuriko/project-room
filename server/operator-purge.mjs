@@ -70,6 +70,18 @@ export function protectedRoomIds(env = globalThis.process?.env ?? {}) {
 }
 
 function where(entry, kind) {
+  if (entry.table === "public_work_requests") {
+    // The rest of this journal belongs to task leases/receipts and has its own lifecycle.
+    if (kind === "identity") return { sql: "offer_id GLOB 'project-discovery/*' AND actor_id=?", params: 1 };
+    if (kind === "room") return {
+      // The via phase still has the offer parents for pre-room-scoped filing keys.
+      // Room IDs cannot contain glob metacharacters or slashes.
+      sql: `offer_id GLOB ('project-discovery/' || ? || '/*') OR
+        offer_id IN (SELECT 'project-discovery/' || offer_id FROM project_offers WHERE room_id=?)`,
+      params: 2
+    };
+    return null;
+  }
   const parts = [];
   let params = 0;
   for (const column of entry.match?.[kind] ?? []) {

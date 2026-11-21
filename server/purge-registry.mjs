@@ -1414,6 +1414,9 @@ const ROWS = [
       ]
     }
   },
+  // Only discovery filings in this mixed journal belong to the room/identity purge.
+  { table: "public_work_requests", key: "offer_id", action: "delete", match: { identity: ["actor_id"] },
+    via: { room: { parent: "project_offers", parentKey: "offer_id", childKey: "offer_id", scope: "room_id" } } },
   {
     "table": "public_work_receipts",
     "key": "identity_id",
