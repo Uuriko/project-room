@@ -31,8 +31,8 @@ function canonicalBeginInput(input) {
   return JSON.stringify([scope.repository ?? "", scope.ref ?? "", paths, scope.expiresAt ?? ""]);
 }
 
-// Claim and start ids include the exact scope. Accept and a start with no
-// claim keep the previous work/action/revision id so an unchanged retry matches.
+// Scoped writes bind the stage ID to the reservation. Unscoped stages keep
+// the work/action/revision ID.
 export function beginRequestId(workItemId, action, expectedRevision, input = null) {
   const body = input == null
     ? `${workItemId}\n${action}\n${expectedRevision}`
@@ -72,7 +72,9 @@ function validScope(scope) {
 }
 
 function stage(action, item, expectedRevision, scope) {
-  const input = action === "room_acquire_claim" ? scope : action === "room_start_work" && item.claim ? item.claim : null;
+  let input = null;
+  if (action === "room_start_work") input = item.claim ?? null;
+  if (action === "room_acquire_claim" || action === "room_accept_work" && item.mode === "write" && validScope(scope)) input = scope;
   const requestId = beginRequestId(item.id, action, expectedRevision, input);
   const args = { requestId, workItemId: item.id, expectedRevision };
   if (action === "room_acquire_claim") {
@@ -93,7 +95,7 @@ export function planBegin(item, member, { scope = null, now = Date.now() } = {})
   const ownClaim = activeClaim(item, now) && item.claim.holderId === member.id;
   if (item.state === "proposed") {
     if (!can("accept_work")) return { stage: null, reason: "permission", next: "accept" };
-    return { stage: stage("room_accept_work", item, item.revision), reason: null, next: "accept" };
+    return { stage: stage("room_accept_work", item, item.revision, scope), reason: null, next: "accept" };
   }
   if (item.mode === "write" && !ownClaim && ["accepted", "working"].includes(item.state)) {
     if (!can("write_external") && !(item.externalWriteGrantBy && item.externalWriteGrantFor === member.id)) return { stage: null, reason: "permission", next: "claim" };
@@ -219,12 +221,45 @@ function preservedResume(pending, stage) {
   };
 }
 
+// A retry without a stage ID can advance only across a complete consecutive
+// chain of its own accepted, claimed and started operations. Gaps and other
+// writers remain stale, even if the current state looks workable.
+async function recoverBeginChain({ work, viewer }, scope, requiredRevision, receipts, now) {
+  if (!receipts || viewer.active === false || viewer.id !== work.accountableMemberId
+    || !["accepted", "working"].includes(work.state)) return null;
+  const reserve = work.mode === "write";
+  if (reserve && work.claim && (!activeClaim(work, now) || work.claim.holderId !== viewer.id
+    || requestedScope(scope) && !sameExactScope(work.claim, scope))) return null;
+  const actions = ["room_accept_work"];
+  if (reserve && validScope(scope) && work.claim && sameExactScope(work.claim, scope)) actions.push("room_acquire_claim");
+  if (work.state === "working" && (!reserve || work.claim)) actions.push("room_start_work");
+  if (work.revision - requiredRevision > actions.length) return null;
+  const confirmed = [];
+  let actionIndex = 0;
+  for (let revision = requiredRevision; revision < work.revision; revision++) {
+    const lastChoice = actions.length - (work.revision - revision);
+    let found = null;
+    while (actionIndex <= lastChoice) {
+      const action = actions[actionIndex++];
+      const { requestId } = stage(action, work, revision, scope);
+      const receipt = await receipts(requestId, work);
+      if (receipt?.requestId !== requestId || receipt.action !== action || receipt.workItemId !== work.id
+        || receipt.actorId !== viewer.id || receipt.expectedRevision !== revision || !receipt.eventId) continue;
+      if (action === "room_acquire_claim" && (!sameExactScope(receipt.scope, scope) || receipt.acquiredAt !== work.claim.acquiredAt)) return null;
+      found = { action, requestId, eventId: receipt.eventId };
+      break;
+    }
+    if (!found) return null;
+    confirmed.push(found);
+  }
+  return confirmed;
+}
+
 // Reads current work between stages. An unknown response keeps the same
 // request id. working is Room work state, not an external host start.
 // invocation pins an unknown stage. A different id is not executed unless the
 // exact claim or its recorded operation receipt already landed. A later revision
-// is not proof of that accept. A response that never returned the stage id
-// cannot be recovered unless the caller already held that id.
+// is not proof. A guarded retry can recover a verified chain without a stage ID.
 export async function beginSelectedWork({ connected, read, execute, scope = null, now = Date.now(), invocation = null, receipts = null, expectedRevision } = {}) {
   if (connected !== true) {
     return { working: false, roomState: null, confirmed: [], stopped: "disconnected", invented: false };
@@ -248,8 +283,19 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
       return stoppedResult(context, { confirmed, stopped: "unknown",
         resume: pending ?? { tool: "room_read_work", workItemId: scope?.workItemId ?? null } });
     }
-    if (requiredRevision !== undefined && (context.work.revision < requiredRevision
-        || !pending && context.work.revision !== requiredRevision)) return stale(context);
+    if (requiredRevision !== undefined && context.work.revision < requiredRevision) return stale(context);
+    if (!pending && requiredRevision !== undefined && context.work.revision > requiredRevision) {
+      if (step !== 0) return stale(context);
+      let recovered;
+      try {
+        recovered = await recoverBeginChain(context, scope, requiredRevision, receipts, now);
+      } catch {
+        return stoppedResult(context, { confirmed, stopped: "unknown", resume: refresh });
+      }
+      if (!recovered) return stale(context);
+      confirmed.push(...recovered);
+      requiredRevision = context.work.revision;
+    }
     const plan = planBegin(context.work, context.viewer, { scope, now });
     if (requiredRevision !== undefined && pending && !plan.stage) {
       try {
