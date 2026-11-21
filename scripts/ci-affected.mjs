@@ -2,10 +2,9 @@
 //
 // The full suites stay on main, the merge queue (the landing batch), schedule,
 // and workflow_dispatch. A pull request runs the tests related to its diff,
-// capped by the same CI-time budget verify:affected uses, and always runs the
-// safety net: story tests, the rule-check unit tests, and the page-weight
-// test. Browser journey checks are the story tests on that suite. Timing data
-// places files onto shards; it does not drop a safety-net file.
+// with the existing unit-test budget and safety net. Browser checks narrow
+// only when the diff can be tied to specific test entry points; timings
+// balance the browser shards.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -14,12 +13,12 @@ import { pathToFileURL } from "node:url";
 import { browserPlan } from "./browser-shards.mjs";
 import { canonicalBrowserScript } from "./browser-suites.mjs";
 import { discoverUnitTests } from "./unit-shards.mjs";
-import { buildReverseGraph, changedFiles, parseGitPathList, parseImports, resolveSpecifier, selectTests } from "./verify-affected.mjs";
+import { isDocsPath } from "./ci-changes.mjs";
+import { buildReverseGraph, changedFiles, parseGitPathList, relatedTests, selectTests } from "./verify-affected.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const CODE_EXT = new Set([".js", ".mjs", ".cjs"]);
 const UNIT_BUDGET_SECONDS = 300;
-export const BROWSER_AFFECTED_BUDGET_MS = 10 * 60 * 1000;
 
 const RULE_UNIT_TESTS = [
   "tests/browser-suites.test.js",
@@ -82,7 +81,7 @@ function graph(cwd, changed) {
     return cache.get(file);
   };
   const codeFiles = [...known].filter(file => CODE_EXT.has(extname(file)) && !file.startsWith("node_modules/") && existsSync(join(cwd, file)));
-  return { read, known, codeFiles, reverse: buildReverseGraph(codeFiles, read, known) };
+  return { read, reverse: buildReverseGraph(codeFiles, read, known) };
 }
 
 function repoRelativeTests(cwd) {
@@ -111,50 +110,31 @@ export function affectedUnitFiles(base, cwd = root) {
   return selectAffectedUnit(changedFiles(base, cwd), cwd);
 }
 
-// Browser checks load the client over HTTP, so their Node imports cannot
-// describe the served HTML -> client module relationship. Conservatively
-// connect Playwright consumers (and their importers) to the room entry page.
-export function addServedClientEdges({ reverse, read, known, codeFiles }) {
-  const edge = (dependency, consumer) => {
-    if (!reverse.has(dependency)) reverse.set(dependency, new Set());
-    reverse.get(dependency).add(consumer);
-  };
-  if (!known.has("index.html")) return;
-  for (const match of read("index.html").matchAll(/<(?:script|link)\b[^>]*?\b(?:src|href)=["']([^"']+)["']/g)) {
-    const target = resolveSpecifier("index.html", match[1], known);
-    if (target) edge(target, "index.html");
-  }
-  const roomConsumers = new Set(["server/http.mjs"]);
-  for (const file of roomConsumers) {
-    for (const importer of reverse.get(file) ?? []) roomConsumers.add(importer);
-  }
-  for (const file of codeFiles) {
-    if (roomConsumers.has(file) && [...parseImports(read(file))].some(spec => /^(?:playwright|@playwright\/test)(?:\/|$)/.test(spec))) {
-      edge("index.html", file);
-    }
-  }
-}
-
 export function selectAffectedBrowser(changed, cwd = root) {
-  const script = canonicalBrowserScript();
-  const suite = browserPlan(script).files;
-  const dependencies = graph(cwd, changed);
-  addServedClientEdges(dependencies);
-  const { read, reverse } = dependencies;
+  const script = canonicalBrowserScript(join(cwd, "scripts"));
+  const full = browserPlan(script);
   const timings = loadTimings("browser-ci-durations.json");
-  const picked = selectTests({
-    changed, tests: suite, reverse, read, timings,
-    budgetMs: BROWSER_AFFECTED_BUDGET_MS,
-    smoke: [],
-  });
   const estimate = file => (Number.isFinite(timings[file]) && timings[file] > 0 ? timings[file] : 10000);
-  const selected = withSafety(picked.selected, suite.filter(isSafetyBrowser), estimate);
-  const have = new Set(selected.map(row => row.test));
-  const files = suite.filter(file => have.has(file));
-  if (!files.length) throw new Error("Refusing an empty affected browser suite");
-  const omitted = picked.skipped.filter(row => !have.has(row.test));
-  return { changed, files, selected, omitted, coverage: "affected", budgetMs: BROWSER_AFFECTED_BUDGET_MS,
-    plan: browserPlan(script, { only: files }) };
+  const suiteFiles = new Set(full.files);
+  const isolated = changed.length > 0
+    && (changed.every(file => suiteFiles.has(file)) || changed.every(isDocsPath));
+  if (!isolated) {
+    // Shared input can reach a browser check through HTTP, generated files or
+    // a child process. A static import graph does not prove coverage here.
+    const selected = full.files.map(test => ({
+      test, distance: 0, via: "full suite for shared or unclassified input", ms: estimate(test),
+    }));
+    return { changed, files: full.files, selected, omitted: [], coverage: "full", budgetMs: null, plan: full };
+  }
+
+  const { read, reverse } = graph(cwd, changed);
+  const related = relatedTests({ changed, tests: full.files, reverse, read });
+  const selected = withSafety(
+    [...related].map(([test, info]) => ({ test, ...info, ms: estimate(test) })),
+    full.files.filter(isSafetyBrowser), estimate,
+  );
+  const plan = browserPlan(script, { only: selected.map(row => row.test) });
+  return { changed, files: plan.files, selected, omitted: [], coverage: "affected", budgetMs: null, plan };
 }
 
 export function affectedBrowserFiles(base, cwd = root) {

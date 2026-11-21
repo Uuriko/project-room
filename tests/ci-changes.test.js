@@ -93,6 +93,13 @@ test("docs-only diffs are markdown or docs/, and any other file is not", () => {
   assert.equal(classifyChanges([]).docsOnly, false);
 });
 
+test("browser runs when the workflow, selector, or generated input changes", () => {
+  for (const file of [".github/workflows/test.yml", "scripts/ci-changes.mjs", "scripts/ci-affected.mjs",
+    "scripts/build-agent-docs.mjs", "scripts/runtime-package.mjs", "strings/en.json"]) {
+    assert.equal(classifyChanges([file]).browser, true, file);
+  }
+});
+
 test("browser still skips when the diff cannot affect the checks", () => {
   assert.equal(classifyChanges(["docs/INDEX.md"]).browser, false);
   assert.equal(classifyChanges(["scripts/deploy-recovery.mjs"]).browser, false);

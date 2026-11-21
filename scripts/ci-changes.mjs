@@ -49,6 +49,11 @@ const BROWSER_EXACT = new Set([
   "push-sw.js",
   "package.json",
   "package-lock.json",
+  ".github/workflows/test.yml",
+  "scripts/ci-changes.mjs",
+  "scripts/ci-affected.mjs",
+  "scripts/build-agent-docs.mjs",
+  "scripts/runtime-package.mjs",
   "scripts/browser-ci.mjs",
   "scripts/browser-suites.mjs",
   "scripts/browser-shards.mjs",
@@ -174,6 +179,7 @@ export function classifyChanges(files, suite = browserSuitePaths()) {
       file === "server.mjs" ||
       file.startsWith("server/") ||
       file.startsWith("src/") ||
+      file.startsWith("strings/") ||
       file.startsWith("og/") ||
       file.startsWith("client/") ||
       suite.includes(file)
