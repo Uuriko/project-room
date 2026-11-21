@@ -185,6 +185,11 @@ function beginReceipt(event, requestId, item) {
   };
 }
 
+export function exactBeginReceipt(receipt, page, item) {
+  const row = page.events.find(entry => (entry.event ?? entry).id === receipt.eventId);
+  return row ? beginReceipt(row.event ?? row, receipt.operationId, item) : null;
+}
+
 // Pages are { events, next, hasMore }. A missing receipt is null, not a guessed revision.
 export async function findBeginReceipt(pages, requestId, item) {
   let after = 0;

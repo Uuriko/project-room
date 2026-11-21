@@ -3918,10 +3918,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // probe's change check, three orders of magnitude cheaper than a page read.
   assertRestoreAdmitted() { return assertRestoreAdmitted(this.db); }
   restoreStatus() { verifyRestoreControl(this.db); return {pending:restorePending(this.db)}; }
-  operationReceipt(token, roomId, operationId) {
+  operationReceipt(token, roomId, operationId, expectedSessionBinding = null) {
     if (!validId(operationId)) throw new TypeError("Invalid operation ID");
     return this.readTransaction(() => {
-      const { member } = this.authenticate(token, roomId);
+      const { member } = this.authenticate(token, roomId, expectedSessionBinding);
       const checkedThrough = this.headSequence(roomId);
       const row = this.db.prepare(`
         SELECT c.sequence, e.id, json_extract(e.body, '$.type') AS eventType

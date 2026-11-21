@@ -5779,6 +5779,15 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       }
       if (route === "events" && req.method === "GET") {
         const params = url.searchParams;
+        if (params.has("operationId")) {
+          const operationId = params.get("operationId");
+          if (!validId(operationId) || [...params.keys()].some(key =>
+            !["operationId", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
+            || (params.has("limit") && params.get("limit") !== "1")) {
+            reject(422, "invalid_operation_selection", "Provide one operation ID without an event cursor");
+          }
+          return json(res, 200, store.operationReceipt(selected.token, roomId, operationId, fence));
+        }
         if(params.has('view')){
           if(params.get('view')!=='browser'||[...params.keys()].some(key=>!['view','after','limit','eventId','auth'].includes(key)||params.getAll(key).length!==1)||params.has('eventId')&&(params.has('after')||params.has('limit')))
             reject(422,'invalid_event_selection','Choose one browser event window or addressed event');

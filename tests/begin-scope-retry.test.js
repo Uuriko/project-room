@@ -314,4 +314,19 @@ test("stdio MCP over HTTP does not start a different active scope", { timeout: 2
   const item = f.store.room("commons").state.workItems["scope-repro"];
   assert.equal(item.state, "accepted");
   assert.deepEqual(item.claim.paths, ["src/a.js"]);
+  const workItemId = "lost-accept-stdio";
+  f.store.command(f.keys.owner, "commons", { id: workItemId, type: "work.proposed", data: {
+    workItemId, title: "Recover an exact accept", definitionOfDone: "Read the original operation before beginning",
+    accountableMemberId: "writer", mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
+  const invocationRequestId = beginRequestId(workItemId, "room_accept_work", 0);
+  const accept = f.store.command(token, "commons", { id: invocationRequestId, type: "work.accepted", data: { workItemId, expectedRevision: 0 } });
+  const eventReads = [];
+  server.prependListener("request", request => {
+    if (request.url.startsWith("/api/rooms/commons/events?")) eventReads.push(request.url.split("?")[1]);
+  });
+  const begun = (await mcp.call("room_begin_work", { workItemId, invocationRequestId, expectedRevision: 0 })).result.structuredContent;
+  assert.equal(begun.working, true);
+  assert.deepEqual(begun.confirmed.map(row => row.action), ["room_start_work"]);
+  assert.deepEqual(eventReads, [`operationId=${invocationRequestId}&limit=1`, `after=${accept.sequence - 1}&limit=1`]);
 });

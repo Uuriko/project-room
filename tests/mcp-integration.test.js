@@ -22,7 +22,7 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   t.after(async () => { if (mcp) await mcp.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   mcp = await openMcpTestClient(directory);
   const tools = (await mcp.request("tools/list")).result.tools;
-  assert.equal(tools.length, 49);
+  assert.equal(tools.length, 50);
   assert.ok(tools.some(tool => tool.name === "room_map"));
   assert.deepEqual(tools.filter(tool => tool.name.startsWith("room_assistant_")).map(tool => tool.name), ["room_assistant_context", "room_assistant_action"]);
   const assistant = (await mcp.call("room_assistant_context", {})).result.structuredContent;
@@ -82,6 +82,22 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   const posted = (await mcp.call("room_post_draft", input)).result.structuredContent;
   assert.equal(posted.status, "draft_posted"); assert.equal(posted.duplicate, false);
   assert.equal((await mcp.close()).diagnostics, ""); mcp = await openMcpTestClient(directory);
+  const receipt = (await mcp.call("room_receipt", { operationId: posted.requestId })).result.structuredContent;
+  assert.equal(receipt.status, "recorded");
+  assert.equal(receipt.viewerId, "mcp-agent");
+  assert.equal(receipt.eventId, posted.eventId);
+  assert.equal(receipt.sequence, posted.sequence);
+  assert.equal(f.store.operationReceipt(f.keys.owner, "commons", "batch-two").status, "recorded");
+  const absent = (await mcp.call("room_receipt", { operationId: "batch-two" })).result.structuredContent;
+  assert.equal(absent.status, "not_recorded", "another actor's operation is not visible");
+  const receiptSequence = f.store.headSequence("commons");
+  for (const query of ["operationId=one&operationId=two", "operationId=one&after=0", "operationId=one&limit=2"]) {
+    const refused = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons/events?${query}`, {
+      headers: { Authorization: "Bearer " + token }
+    });
+    assert.equal(refused.status, 422);
+  }
+  assert.equal(f.store.headSequence("commons"), receiptSequence);
   const retry = (await mcp.call("room_post_draft", input)).result.structuredContent;
   assert.equal(retry.duplicate, true); assert.equal(retry.eventId, posted.eventId);
   const after = f.store.snapshot(token, "commons"); assert.equal(after.sequence, before.sequence + 1);
@@ -116,4 +132,5 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   await assert.rejects(callHostedStdioTool(f.store, token, "room_read_work", { roomId: "commons", workItemIds: batchIds }));
 
   assert.equal(JSON.stringify([posted, retry, ended]).includes(token), false);
+
 });
