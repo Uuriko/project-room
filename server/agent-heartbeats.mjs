@@ -281,7 +281,13 @@ const hostView = (row, cadenceSeconds = null) => Object.freeze({
 // readers triage on reason without a second table. Other signals stay
 // the same shape.
 const claimWakeOf = messageId => {
-  if (typeof messageId !== "string" || !messageId.startsWith("work-claim:")) return null;
+  if (typeof messageId !== "string") return null;
+  if (messageId.startsWith("idle_nudge:")) {
+    const parts = messageId.split(":");
+    if (parts.length < 4 || !parts[2]) return null;
+    return { workClaim: parts[2], reason: "idle_nudge" };
+  }
+  if (!messageId.startsWith("work-claim:")) return null;
   const parts = messageId.split(":");
   if (parts.length < 3 || parts[1].length === 0 || parts[2].length === 0) return null;
   return { workClaim: parts[1], reason: parts[2] };
@@ -663,6 +669,8 @@ export class AgentHeartbeats {
         : (effectiveMode === "wakeable" && pushConfigured && !pushSuspended ? "push" : "poller"),
       reachableUntil,
     });
+    try { this.onAfterHeartbeat?.(this, agentId, { activityRoomId, workScopeRoomId, now: at }); }
+    catch (error) { console.error("idle nudge hook failed:", error?.message ?? error); }
     const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId, door });
     this.clearWakeBudgetMarks(agentId, page.signals.map(s => s.signalId));
     const pausedRooms = this.pausedRoomsOf(agentId);

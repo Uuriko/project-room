@@ -352,5 +352,7 @@ export function emitWorkClaimEvent(store, roomId, options) {
   // A failing rule never rolls back the claim write.
   try { runAutomations(store, roomId, incoming, item, { createWork, claimWork, emitWorkClaimEvent, enqueueClaimWake }); }
   catch (error) { console.error("room automations failed:", error?.message ?? error); }
+  try { if (typeof actorId === "string" && actorId) store.noteIdleActivity?.(roomId, actorId, stamp); }
+  catch (error) { console.error("idle activity stamp failed:", error?.message ?? error); }
   return { sequence, event: incoming };
 }

@@ -146,6 +146,7 @@ import { createOAuthProvider } from "./oauth-provider.mjs";
 import { isLoopbackRedirectUri } from "./oauth-client-contract.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
+import { attachIdleNudge } from "./idle-nudge.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -450,6 +451,10 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   // mailer warning below follows the same once-per-process rule). The
   // Worker entry's card is additionally covered at build time by
   // scripts/sign-agent-card.mjs, which fails closed without the key.
+  if (store) {
+    try { attachIdleNudge(store); }
+    catch (error) { console.error("idle nudge attach failed:", error?.message ?? error); }
+  }
   let renderedAgentPages;
   // The Worker adapter serves its build-signed hosted artifacts and bundled
   // pages. Node boot never sets this internal adapter option; it still requires
