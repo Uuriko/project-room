@@ -47,12 +47,51 @@ export function unfencedJson(text) {
 export function reviewOutput(recorder, stopReason) {
   if (stopReason !== 'end_turn') return null;
   let value;
-  try { value = JSON.parse(unfencedJson(recorder.finalText ?? recorder.text)); } catch { return null; }
+  const source = unfencedJson(recorder.finalText ?? recorder.text);
+  try { value = JSON.parse(source); } catch { return null; }
   if (!value || Object.keys(value).some(key => !['result','summary','nextAction'].includes(key)) || !['pass','fail'].includes(value.result)
     || typeof value.summary !== 'string' || !value.summary.trim() || value.summary.length > 1500) return null;
+  // JSON.parse keeps the last of repeated keys, so {"result":"fail",
+  // "\u0072esult":"pass"} would read as pass. A repeated field is ambiguous.
+  if (repeatedTopLevelKey(source)) return null;
   if (value.nextAction !== undefined && (value.result !== 'fail' || typeof value.nextAction !== 'string'
     || !value.nextAction.trim() || value.nextAction.length > 1000)) return null;
   return value;
+}
+
+// For text that already parsed as JSON: true when the top-level object names
+// any key twice after decoding escapes. Whole string tokens are consumed, so
+// key-like text inside a value (a summary quoting "result") never counts.
+export function repeatedTopLevelKey(source) {
+  const seen = new Set();
+  let depth = 0;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < source.length && source[j] !== '"') j += source[j] === '\\' ? 2 : 1;
+      const token = source.slice(i, j + 1);
+      i = j;
+      if (depth !== 1) continue;
+      let k = i + 1;
+      while (/\s/.test(source[k] ?? '')) k++;
+      if (source[k] !== ':') continue;
+      const key = JSON.parse(token);
+      if (seen.has(key)) return true;
+      seen.add(key);
+    } else if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth--;
+  }
+  return false;
+}
+
+// A whole reply (raw or exactly single-fenced) that parses as a JSON object
+// with a repeated top-level field.
+function repeatedFieldRecord(text) {
+  const source = unfencedJson(text);
+  let value;
+  try { value = JSON.parse(source); } catch { return false; }
+  return !!value && typeof value === 'object' && !Array.isArray(value) && repeatedTopLevelKey(source);
 }
 
 // A completed turn whose text is not a supported verdict may be a formatting
@@ -65,6 +104,8 @@ export function reviewRepairable(recorder, stopReason) {
   // Repair only restates a verdict already reached. With no single explicit
   // pass or fail (a prose hold, or both), park: a repair could invent one.
   if (explicitVerdicts(text).size !== 1) return false;
+  // A record that repeats a field has no single verdict to restate: park.
+  if (repeatedFieldRecord(text)) return false;
   return reviewOutput(recorder, stopReason) === null;
 }
 

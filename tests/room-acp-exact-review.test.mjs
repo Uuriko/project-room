@@ -8,7 +8,7 @@ import {createRoomServer} from '../server/http.mjs';
 import {textVersion} from '../server/text-results.mjs';
 import {Bridge} from '../room-acp/src/bridge.mjs';
 import {RoomError} from '../room-acp/src/room.mjs';
-import {reviewOutput, reviewRepairable, explicitVerdict, unfencedJson, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
+import {reviewOutput, reviewRepairable, explicitVerdict, unfencedJson, repeatedTopLevelKey, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
 import {linkWithProof} from './helpers/link-with-proof.mjs';
 
 async function setup(t, {respondTo, pending = false, nextAction, replies = []} = {}) {
@@ -410,4 +410,64 @@ test('no single explicit verdict: a prose hold or a verdict only in words parks 
   }
   // The #6411 reply states exactly one fail, so it remains repairable.
   assert.equal(reviewRepairable({text:malformed6411},'end_turn'),true);
+});
+
+// JSON.parse keeps the last repeated key, so a duplicate field could turn a
+// stated fail into a filed pass. Raw, fenced and escape-spelled duplicates of
+// any top-level field are not verdicts and park before any repair prompt.
+const duplicateRecords = [
+  '{"result":"fail","summary":"Pause path fails.","result":"pass"}',
+  '{"result":"pass","result":"pass","summary":"Same value twice."}',
+  '{"result":"fail","summary":"Pause path fails.","\\u0072esult":"pass"}',
+  '{"resul\\u0074":"fail","summary":"a","summary":"b"}',
+  '{"result":"fail","summary":"a","\\u0073ummary":"b"}',
+  '{"result":"fail","summary":"a","nextAction":"run x","next\\u0041ction":"run y"}',
+  '{ "result" : "fail" , "summary" : "a" ,\n  "result"\n:\n"pass" }',
+];
+
+test('a repeated top-level field, raw, fenced or JSON-escaped, is never a verdict',()=>{
+  for (const record of duplicateRecords) {
+    assert.equal(repeatedTopLevelKey(record),true,record);
+    assert.equal(reviewOutput({text:record},'end_turn'),null,record);
+    assert.equal(reviewOutput({text:fence(record)},'end_turn'),null,record);
+    assert.equal(reviewRepairable({text:record},'end_turn'),false,record);
+    assert.equal(reviewRepairable({text:fence(record)},'end_turn'),false,record);
+  }
+});
+
+test('a valid summary that quotes or escapes field names is still one verdict',()=>{
+  const quoting = [
+    JSON.stringify({result:'fail',summary:'The reply repeated "result":"pass" after "result":"fail" and "summary":"x".'}),
+    '{"result":"pass","summary":"Escaped key \\"\\u0072esult\\": \\"fail\\" and a backslash \\\\\\" stay inside this string."}',
+    JSON.stringify({result:'fail',summary:'Nested-looking text {"result":"pass","result":"fail"} is evidence.',nextAction:'Send {"summary":"a","summary":"b"} and expect a park.'}),
+  ];
+  for (const record of quoting) {
+    assert.equal(repeatedTopLevelKey(record),false,record);
+    assert.ok(reviewOutput({text:record},'end_turn'),record);
+    assert.ok(reviewOutput({text:fence(record)},'end_turn'),record);
+  }
+  // A JSON-escaped key with no repeat is the same field and still files.
+  assert.deepEqual(reviewOutput({text:'{"\\u0072esult":"fail","summary":"a"}'},'end_turn'),{result:'fail',summary:'a'});
+});
+
+test('first pass: a duplicate-field record parks with no repair prompt and no verdict write',async t=>{
+  for (const record of [duplicateRecords[0],fence(duplicateRecords[2]),duplicateRecords[1]]) {
+    const f = await setup(t,{replies:[record,repaired6411]});
+    await f.bridge.accept(f.wake);
+    await f.bridge.queue.idle();
+    assert.deepEqual(f.counts,{prompt:1,write:0,receipt:0,ack:0},record);
+    assert.equal(f.verdict(),undefined);
+    assert.equal(f.receiptPhase(),'needs_review');
+  }
+});
+
+test('repair: a duplicate-field restatement, raw or fenced, is not filed',async t=>{
+  for (const reply of ['{"result":"fail","summary":"a","\\u0072esult":"fail"}',fence('{"result":"fail","summary":"a","summary":"b"}')]) {
+    const f = await setup(t,{replies:[malformed6411,reply,repaired6411]});
+    await f.bridge.accept(f.wake);
+    await f.bridge.queue.idle();
+    assert.deepEqual(f.counts,{prompt:2,write:0,receipt:0,ack:0},reply);
+    assert.equal(f.verdict(),undefined);
+    assert.equal(f.receiptPhase(),'needs_review');
+  }
 });
