@@ -24,6 +24,8 @@ updated.
 | Audit events — high | 2 years | **archive, do not purge** | planner |
 | Audit events — normal | 180 days | archive, then purge only with operator approval | planner |
 | Audit events — low | 30 days | purge eligible | planner |
+| Decision records (verdicts, receipts, settlements, and their underlying events) | **≥4 years (1460 days), legal hold** | **retained, never purged within the class period**; account deletion anonymizes the person (tombstone) and keeps the decision | `RETENTION_POLICY` class `decision_records` (#3614, accountability R-3); `DECISION_RECORD_RETENTION_DAYS` |
+| Audit events — decision-bearing (any severity) | ≥4 years (1460 days) | keep until the decision-record floor, purge only past it | `retentionDecisions` planner (#3614) |
 | Security audit rows (`account_access_events`) | indefinite | **never auto-deleted** (account-security evidence) | excluded from retention job; kept on account deletion |
 | Room events / messages / commands | indefinite | no auto-delete; sole-owned rooms purged on account deletion | excluded from retention job; `server/account-deletion.mjs` |
 | Work-claim / invitation journals | indefinite | expired invites purged 90 days after expiry | excluded from retention job |
