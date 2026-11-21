@@ -567,6 +567,7 @@
   "result.backConversation": "Back to conversation",
   "result.resize": "Resize preview",
   "result.searchCount": "{count} results",
+  "review.runtime.acknowledged": "Receiver acknowledged the review wake. Review start unconfirmed.",
   "review.runtime.waiting": "Waiting for a managed receiver",
   "review.runtime.claimed": "Host claimed the review. Provider start unconfirmed.",
   "review.runtime.started": "Review start confirmed",

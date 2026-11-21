@@ -222,7 +222,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         }) : ""].filter(Boolean).join(" · ");
         copy.append(meta);
       }
-      const runtime = ["waiting_receiver", "claimed", "started", "start_unknown"].includes(item.reviewRuntime?.status)
+      const runtime = ["waiting_receiver", "wake_acknowledged", "claimed", "started", "start_unknown"].includes(item.reviewRuntime?.status)
         ? reviewRuntimeLabel(item.reviewRuntime.status) : "";
       if (runtime || item.kind === "review_requested") {
         const cue = document.createElement("p");
