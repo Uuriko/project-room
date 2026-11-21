@@ -3,6 +3,15 @@
 // Product code is unchanged — these only teach checks how to reach it.
 /* global document -- page.waitForFunction runs in the browser, not here */
 
+// Some room entries land in Updates. Composer checks use the same
+// Conversation action as a member entering from that view.
+export async function openConversation(page) {
+  await page.locator("#updates-close:visible, #message-input:visible").first().waitFor();
+  const conversation = page.locator("#updates-close");
+  if (await conversation.isVisible()) await conversation.click();
+  await page.locator("#message-input").waitFor({ state: "visible" });
+}
+
 // Humans open a contextual work link; full work cards are not the room's
 // default timeline. Use the same navigation before exercising card controls.
 export async function openConversationWork(page, workId) {

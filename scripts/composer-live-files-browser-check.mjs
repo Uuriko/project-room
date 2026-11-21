@@ -12,7 +12,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openConversation } from "./room-chrome.mjs";
 
 test("composer: live file chips for other members, autosize", { timeout: 60000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-live-files-"));
@@ -38,6 +38,7 @@ test("composer: live file chips for other members, autosize", { timeout: 60000 }
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     await signInFixture(page, key);
     await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     return page;
   };
   const ownerPage = await open(owner), mayaPage = await open(maya);
@@ -110,6 +111,7 @@ async function uploadFixture(t) {
   await page.goto(`${origin}/?account=1`);
   await signInFixture(page, key, { returnTo: `${origin}/?room=room-a` });
   await page.locator("#main").waitFor({ state: "visible" });
+  await openConversation(page);
   const requests = [];
   page.on("request", request => {
     if (request.method() === "POST" && /\/files$/.test(new URL(request.url()).pathname)) {
@@ -121,6 +123,7 @@ async function uploadFixture(t) {
     await clickChrome(page, "#choose-room");
     await page.locator('[data-account-room="room-b"]').click();
     await page.waitForFunction(() => document.querySelector("#room-title")?.textContent === "room-b");
+    await openConversation(page);
   };
   return { page, store, origin, account, key, requests, rows, switchRoom, errors };
 }
@@ -281,6 +284,7 @@ for (const departure of ["logout", "revocation"]) {
     await page.evaluate(() => history.replaceState(null, "", "?room=room-c"));
     await page.locator("#refresh-button").evaluate(button => button.click());
     await page.waitForFunction(() => document.querySelector("#room-title")?.textContent === "room-c" && !document.querySelector("#main").hidden);
+    await openConversation(page);
     await page.locator("#message-input").fill("Replacement account draft");
     const status = await page.locator("#composer-status").textContent();
     release.resolve(); await delivered.promise; await settleUpload(page);
