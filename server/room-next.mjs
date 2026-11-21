@@ -259,8 +259,11 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
         ?? packet.requests?.items[0]?.nextRead ?? packet.work?.items[0]?.nextRead;
       packet.nextRead = addressed ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
 
+      // An empty work page can have older, non-actionable rows behind its
+      // cursor. Keep that continuation available while offering the exact,
+      // already addressed public review ahead of another discovery read.
       if (allowPublicReview && !source && !room.archivedAt && !addressed
-        && !packet.nextRead && packet.work.coverage === "complete" && packet.requests.coverage === "complete"
+        && packet.work.coverage !== "unavailable" && packet.requests.coverage === "complete"
         && auth.member.permissions.includes("verify") && !store.wakeQueue.pauseStatus(roomId, auth.member.id)) {
         const receiptId = store.publicWorkReviews.nextPending(roomId, auth.member.id);
         if (receiptId) {

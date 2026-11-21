@@ -213,12 +213,26 @@ test('idle Room Next gives only the designated reviewer the pending exact public
  f.store.publicWorkClaims.enable(roomId,'owner',taskId,{requestId:'enable-reviewable',expectedRevision:2,expectedTermsVersion:1,repositoryRef:'main',files:['proof.md']});
  const next=async identity=>value(await f.call('room_next',{roomId,view:'pickup'},identity.secret));
  assert.equal((await next(reviewer)).nextRead,null);
+ for(let index=0; index<49; index++){
+   const id='awaiting-producer-'+index;
+   f.store.command(owner,roomId,{id,type:'work.proposed',data:{
+     workItemId:id,title:'Awaiting producer',definitionOfDone:'Provide evidence',accountableMemberId:'owner',
+     verifierMemberId:reviewer.identityId,independentVerificationRequired:true,mode:'read'
+   }});
+ }
+ const waiting=await next(reviewer);
+ assert.equal(waiting.work.coverage,'partial');
+ assert.deepEqual(waiting.work.items,[]);
+ assert.equal(waiting.nextRead.tool,'room_next');
  const binding={taskId,expectedTermsVersion:1};
  const claimed=value(await f.call('public_work_claim',{...binding,requestId:'claim-reviewable'},f.first.secret));
  const submitted=value(await f.call('public_work_finish',{...binding,generation:claimed.task.claim.generation,
    requestId:'finish-reviewable',artifactText:'Exact public evidence',checksReported:[]},f.first.secret)).receipt;
  const pending=await next(reviewer);
  assert.deepEqual(pending.nextRead,{tool:'room_read_public_review',arguments:{roomId,receiptId:submitted.receiptId}});
+ const continued=value(await f.call(pending.work.nextRead.tool,pending.work.nextRead.arguments,reviewer.secret));
+ assert.equal(continued.work.coverage,'complete');
+ assert.deepEqual(continued.work.items,[]);
  assert.equal((await next(other)).nextRead,null);
  const exact=value(await f.call(pending.nextRead.tool,pending.nextRead.arguments,reviewer.secret));
  assert.equal(exact.artifact.sha256,submitted.artifact.sha256);
