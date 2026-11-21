@@ -140,7 +140,8 @@ export function nextWorkStep(item, now = Date.now(), ownerId = null) {
   }
   if (item.state === S.ACCEPTED) return accountable("start", "Start the work");
   if (item.state === S.WORKING) return accountable("in_progress", "Work in progress; no new handoff yet", false);
-  if (item.state === S.BLOCKED) return accountable("revise", "Resolve the blocker or revise the result");
+  if (item.state === S.BLOCKED) return item.blocker?.reworkRequested === false
+    ? step("rejected", "Rejected · no rework requested") : accountable("revise", "Resolve the blocker or revise the result");
   if (item.state !== S.COMPLETED) return step("unknown", "Work state needs reconciliation");
   if (!item.receipt?.eventId || !item.receipt?.evidenceVersion) return accountable("provide_evidence", "Provide a completion receipt");
   if (item.independentVerificationRequired && !producerKnown(item)) return accountable("establish_provenance", item.receipt.producerAttribution === "external-reported"
@@ -156,12 +157,12 @@ export function nextWorkStep(item, now = Date.now(), ownerId = null) {
 export function workStatus(item, now = Date.now(), next = nextWorkStep(item, now)) {
   const labels = {
     superseded: "Replaced", triaged_handoff: "Handoff open", accept: "Awaiting acceptance", start: "Accepted", claim: "Scope needed",
-    in_progress: "Working · reported", revise: "Blocked", unknown: "Needs reconciliation",
+    in_progress: "Working · reported", revise: "Blocked", rejected: "Rejected", unknown: "Needs reconciliation",
     provide_evidence: "Evidence missing", establish_provenance: "Producer unknown",
     resolve_independence: "Reviewer conflict", verify: "Awaiting verification",
     decide: "Awaiting decision", complete: "Completed"
   };
-  return { label: next.action === "establish_provenance" && item.receipt?.producerAttribution === "external-reported" ? "Outside credit" : labels[next.action], tone: next.action === "complete" ? "completed" : next.action === "revise" ? "blocked" : "pending", next: item.state === S.BLOCKED
+  return { label: next.action === "establish_provenance" && item.receipt?.producerAttribution === "external-reported" ? "Outside credit" : labels[next.action], tone: next.action === "complete" ? "completed" : ["revise", "rejected"].includes(next.action) ? "blocked" : "pending", next: item.state === S.BLOCKED
     ? item.blocker?.nextAction || next.label : next.label, owner: next.memberId };
 }
 

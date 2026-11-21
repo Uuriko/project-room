@@ -117,9 +117,9 @@ export function currentWorkRecord(item) {
   work.suspended_by = session.suspended_by;
   work.claim = pick(item.claim, "holderId repository ref paths acquiredAt expiresAt status releasedAt");
   work.receipt = pick(item.receipt, "reportedById producerId producerAttribution externalProducer summary evidenceUrl evidenceVersion signedEvidence checksClaimed nextAction eventId nativeText attemptSnapshot");
-  work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId");
+  work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId reworkRequested");
   work.decision = pick(item.decision, "actorId decision completionEventId evidenceVersion reason eventId");
-  work.blocker = pick(item.blocker, "reason nextAction eventId");
+  work.blocker = pick(item.blocker, "reason nextAction eventId reworkRequested");
   // The open handoff rides along so needs-me views built from this record can surface owner triage.
   work.handoff = pick(item.handoff, "open eventId at actorId triageMemberId doneSummary nextAction limitReason evidenceUrl evidenceVersion haltAll");
   if (Object.hasOwn(item, "helpWanted")) work.helpWanted = structuredClone(validateHelp(item.helpWanted));

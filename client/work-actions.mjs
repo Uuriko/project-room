@@ -46,7 +46,8 @@ const definitions = [
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]],
   ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically.", {
-    result: { type: "string", enum: ["pass", "fail"] }, completionEventId: id, evidenceVersion: text, summary: text, nextAction: text
+    result: { type: "string", enum: ["pass", "fail"] }, completionEventId: id, evidenceVersion: text, summary: text, nextAction: text,
+    reworkRequested: { ...bool, description: "For a failed verdict, false records that the rejected result needs no further draft. The result remains rejected and cannot satisfy a prerequisite. Omit for ordinary correction." }
   }, ["result", "completionEventId", "evidenceVersion", "summary"]],
   ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task and record the same claim on the work-claims board. Requires a contribute, review, or collaborate profile (or the room owner). write_external is not granted by the claim; finishing write-mode work requires write_external or the item's one-item grant (an item proposed to you by the room owner or a write_external holder carries that grant for you alone). Optional pullRequests are several GitHub pull links; the board settles only when every link is merged or closed. Optional blocks label a region of a path so two claims on one file can differ; a path with no label stays exclusive for the whole file.", {
     repository: text, ref: text, paths: { type: "array", minItems: 1, maxItems: 64, items: { ...text, maxLength: 512 } },

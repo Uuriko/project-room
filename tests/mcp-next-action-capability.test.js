@@ -140,6 +140,61 @@ for (const normalized of [false, true]) test(`selected work read states whether 
 
 });
 
+for (const normalized of [false, true]) test(`pickup skips a rejected exact result when the verifier requests no rework (${normalized ? 'normalized' : 'legacy'})`, async t => {
+  const f = await setup(t, { normalized });
+  const workItemId = 'a-rejected-report', successor = 'b-useful-follow-up';
+  const memberId = 'friend-dot';
+  const command = (id, type, data, token = f.ownerKey) => f.store.command(token, 'commons', { id, type, data });
+  command('report-propose', 'work.proposed', { workItemId, title: 'Try the benchmark', definitionOfDone: 'Return an exact result',
+    accountableMemberId: memberId, verifierMemberId: 'owner', mode: 'read', independentVerificationRequired: true });
+  command('report-accept', 'work.accepted', { workItemId, expectedRevision: 0 }, f.identity.secret);
+  const body = 'The draft does not support the deployment claim.';
+  const posted = command('report-post', 'message.posted', { messageId: 'report-draft', workItemId, body }, f.identity.secret);
+  const evidenceVersion = 'sha256:' + createHash('sha256').update(body).digest('hex');
+  const completion = command('report-complete', 'work.completed', { workItemId, expectedRevision: 1,
+    evidenceKind: 'room_text', evidenceMessageId: 'report-draft', evidenceMessageEventId: posted.event.id,
+    evidenceVersion, previousCompletionEventId: null, producerId: memberId, summary: 'Draft ready', nextAction: 'Verify evidence' }, f.identity.secret);
+  const verdict = { workItemId, completionEventId: completion.event.id, evidenceVersion, result: 'fail', summary: 'The experiment is complete, and this draft failed.' };
+  command('report-fail', 'verification.recorded', { ...verdict, expectedRevision: 2 });
+  command('next-propose', 'work.proposed', { workItemId: successor, title: 'Inspect another source', definitionOfDone: 'Find the latest exact reference',
+    accountableMemberId: memberId, mode: 'read', independentVerificationRequired: false });
+  const read = async (name, args) => {
+    const reply = await call(f, name, { roomId: 'commons', ...args }, f.identity.secret);
+    assert.equal(refused(reply), false, JSON.stringify(reply.body));
+    return reply.body.result.structuredContent;
+  };
+  const before = await read('room_next', { view: 'pickup' });
+  assert.equal(before.nextRead.arguments.workItemId, workItemId);
+  assert.equal(before.work.items.find(item => item.id === workItemId).reason, 'revise');
+
+  assert.throws(() => command('report-invalid', 'verification.recorded', { ...verdict, expectedRevision: 3, result: 'pass', reworkRequested: false }), /failed verification/);
+  assert.throws(() => command('report-stale', 'verification.recorded', { ...verdict, expectedRevision: 2, reworkRequested: false }), /Stale Work Item revision/);
+  const closed = command('report-rejected', 'verification.recorded', { ...verdict, expectedRevision: 3, reworkRequested: false });
+  assert.equal(command('report-rejected', 'verification.recorded', { ...verdict, expectedRevision: 3, reworkRequested: false }).event.id, closed.event.id);
+  const after = await read('room_next', { view: 'pickup' });
+  assert.equal(after.nextRead.arguments.workItemId, successor);
+  assert.equal(after.work.items.some(item => item.id === workItemId), false);
+  const exact = await read('room_read_work', { workItemId });
+  assert.equal(exact.continuation.action, 'rejected');
+  assert.equal(exact.continuation.tool, null);
+  assert.equal(exact.work.verification.result, 'fail');
+  assert.equal(exact.work.verification.completionEventId, completion.event.id);
+  assert.equal(exact.work.blocker.reworkRequested, false);
+  assert.equal(exact.work.verification.reworkRequested, false);
+  const dependent = 'c-dependent-on-rejected-result';
+  command('dependent-propose', 'work.proposed', { workItemId: dependent, title: 'Wait for a supported result',
+    definitionOfDone: 'Use the approved prerequisite evidence', accountableMemberId: memberId,
+    mode: 'read', dependsOn: [workItemId] });
+  command('dependent-accept', 'work.accepted', { workItemId: dependent, expectedRevision: 0 }, f.identity.secret);
+  assert.equal((await read('room_read_work', { workItemId: dependent })).continuation.action, 'wait_prerequisites');
+  command('report-reversed', 'verification.recorded', { ...verdict, expectedRevision: 4, result: 'pass', summary: 'The exact result passes on recheck.' });
+  const passed = await read('room_read_work', { workItemId });
+  assert.equal(passed.work.blocker, null);
+  assert.equal(passed.work.verification.result, 'pass');
+  assert.equal(passed.continuation.action, 'complete');
+  assert.equal((await read('room_read_work', { workItemId: dependent })).continuation.action, 'start');
+});
+
 test('a designated verifier without Room verify authority is told so instead of being sent to the tool', async t => {
   const f = await setup(t);
   const args = reviewFixture(f, 'cap-no-verify');
