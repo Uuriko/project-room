@@ -128,6 +128,8 @@ test('filing requires published project consent on this exact origin and path, i
 
 test('filing capacity is scoped to each contributor and project, exact retries survive a full journal', async t => {
   const { store, call, publish, outside, second } = await fixture(t);
+  let now = store.now();
+  store.now = () => now;
   publish('caps'); publish('elsewhere');
   for (let n = 0; n < 5; n++) assert.equal((await call(path('caps'), outside.secret, { ...input, requestId: 'check-' + n })).status, 200);
   assert.equal((await call(path('caps'), outside.secret, input)).status, 429);
@@ -135,7 +137,38 @@ test('filing capacity is scoped to each contributor and project, exact retries s
   assert.equal((await call(path('elsewhere'), outside.secret, input)).status, 200);
   // Fill the remaining slots without sending enough HTTP calls to trip the distinct IP ceiling.
   const insert = store.db.prepare('INSERT INTO public_work_requests VALUES (?,?,?,?,?)');
-  for (let n = 0; n < 94; n++) insert.run('project-discovery/caps', 'fixture-' + n, 'fixture', '{}', '{}');
+  const synthetic = JSON.stringify({ recordedAt: new Date(now).toISOString(), receiptId: 'synthetic' });
+  for (let n = 0; n < 94; n++) insert.run('project-discovery/caps', 'fixture-' + n, 'fixture', '{}', synthetic);
   assert.equal((await call(path('caps'), second.secret, { ...input, requestId: 'next' })).status, 429);
   assert.equal((await call(path('caps'), second.secret, input)).status, 200);
+  now += 24 * 60 * 60 * 1000 - 1;
+  assert.equal((await call(path('caps'), outside.secret, input)).status, 429);
+  now++;
+  assert.equal((await call(path('caps'), outside.secret, input)).status, 200);
+  assert.equal((await call(path('caps'), second.secret, { ...input, requestId: 'next' })).status, 200);
+  assert.equal((await call(path('caps'), outside.secret, { ...input, requestId: 'check-0' })).status, 200);
+});
+
+test('review continuation preserves older findings across concurrent newer filings and tied times', async t => {
+  const { store, call, publish, owner, outside } = await fixture(t);
+  let now = store.now();
+  store.now = () => now;
+  publish('pages'); publish('other');
+  const receipts = [];
+  for (const id of ['oldest', 'middle-a', 'middle-b', 'newest']) {
+    if (!id.startsWith('middle-b')) now++;
+    const result = await call(path('pages'), outside.secret, { ...input, requestId: id });
+    assert.equal(result.status, 200); receipts.push(result.json);
+  }
+  const expected = [...receipts].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt) || b.receiptId.localeCompare(a.receiptId));
+  const first = (await call(review('pages') + '?limit=2', owner)).json;
+  assert.deepEqual(first.findings, expected.slice(0, 2)); assert.ok(first.nextCursor);
+  now++;
+  assert.equal((await call(path('pages'), outside.secret, { ...input, requestId: 'later' })).status, 200);
+  const second = (await call(review('pages') + '?limit=2&after=' + first.nextCursor, owner)).json;
+  assert.deepEqual(second.findings, expected.slice(2)); assert.equal(second.nextCursor, null);
+  assert.equal((await call(review('other') + '?after=' + first.nextCursor, owner)).status, 422);
+  for (const query of ['?after=malformed', '?after=', '?limit=51', '?limit=0', '?limit=1&limit=2']) {
+    assert.equal((await call(review('pages') + query, owner)).status, 422);
+  }
 });

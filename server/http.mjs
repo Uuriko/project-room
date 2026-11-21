@@ -4551,10 +4551,11 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         if (isGuestAgentMemberId(auth.member.id)) reject(403, "owner_only", "Guests cannot manage project offers");
         if (discoveryReview) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
-          if ([...url.searchParams.keys()].some(key => key !== "auth") || url.searchParams.getAll("auth").length > 1
+          if ([...url.searchParams.keys()].some(key => !["auth", "limit", "after"].includes(key) || url.searchParams.getAll(key).length !== 1)
               || (url.searchParams.has("auth") && !["room", "account"].includes(url.searchParams.get("auth"))))
             reject(422, "invalid_project_discovery", "Unsupported review query");
-          return json(res, 200, reviewerProjectDiscoveries(store, roomId, pathId(discoveryReview[2]), expectedOrigin(), auth.member.id), req.method === "HEAD");
+          return json(res, 200, reviewerProjectDiscoveries(store, roomId, pathId(discoveryReview[2]), expectedOrigin(), auth.member.id,
+            { limit: url.searchParams.get("limit"), after: url.searchParams.get("after") }), req.method === "HEAD");
         }
         if (!projectOfferActionMatch && ["GET", "HEAD"].includes(req.method)) return json(res, 200, store.projectOffers.ownerList(roomId, auth.member.id));
         if (req.method === "POST") {

@@ -7,6 +7,10 @@ import { ServiceError } from './service-error.mjs';
 
 const projectCapacity = 100;
 const contributorCapacity = 5;
+const filingWindowMs = 24 * 60 * 60 * 1000;
+const discoveryScope = "offer_id=? AND offer_id GLOB 'project-discovery/*'";
+const recordedAtColumn = "json_extract(outcome_json,'$.recordedAt')";
+const receiptIdColumn = "json_extract(outcome_json,'$.receiptId')";
 const fields = ['requestId', 'expectedTermsVersion', 'expectedRevision', 'sourceUrl', 'criterion', 'observation', 'nextAction'];
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const invalid = message => fail(422, 'invalid_project_discovery', message);
@@ -58,27 +62,52 @@ export function fileProjectDiscovery(store, offerId, origin, secret, input) {
       if (prior.input_json !== intent) fail(409, 'request_id_reused', 'Request ID already used with different input');
       return JSON.parse(prior.outcome_json);
     }
-    const counts = store.db.prepare('SELECT COUNT(*) AS total, COUNT(CASE WHEN actor_id=? THEN 1 END) AS mine FROM public_work_requests WHERE offer_id=?').get(actor, key);
+    const now = store.now();
+    const cutoff = new Date(now - filingWindowMs).toISOString();
+    const counts = store.db.prepare(`SELECT COUNT(*) AS total, COUNT(CASE WHEN actor_id=? THEN 1 END) AS mine
+      FROM public_work_requests WHERE ${discoveryScope} AND ${recordedAtColumn}>?`).get(actor, key, cutoff);
     if (counts.total >= projectCapacity || counts.mine >= contributorCapacity)
-      fail(429, 'discovery_capacity', 'This project has reached its discovery filing limit');
+      fail(429, 'discovery_capacity', 'Discovery filing limit reached for the rolling 24-hour window');
     const receiptId = 'finding-' + createHash('sha256').update(canonicalJson([key, actor, intent])).digest('hex');
     const { sourceUrl, criterion, observation, nextAction } = input;
     const receipt = { status: 'recorded', receiptId, offerId, termsVersion: offer.version, revision: offer.revision,
-      finding: { sourceUrl, criterion, observation, nextAction }, recordedAt: new Date(store.now()).toISOString() };
+      finding: { sourceUrl, criterion, observation, nextAction }, recordedAt: new Date(now).toISOString() };
     store.db.prepare('INSERT INTO public_work_requests (offer_id,actor_id,request_id,input_json,outcome_json) VALUES (?,?,?,?,?)')
       .run(key, actor, input.requestId, intent, JSON.stringify(receipt));
     return receipt;
   });
 }
 
-export function reviewerProjectDiscoveries(store, roomId, offerId, origin, memberId) {
+function reviewCursor(receipt) {
+  return Buffer.from(receipt.recordedAt + '/' + receipt.receiptId).toString('base64url');
+}
+
+function cursorBoundary(store, key, cursor) {
+  if (typeof cursor !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(cursor)) invalid('Invalid discovery cursor');
+  const decoded = Buffer.from(cursor, 'base64url');
+  const [at, id, ...extra] = decoded.toString().split('/');
+  if (decoded.toString('base64url') !== cursor || extra.length || !at || !/^finding-[0-9a-f]{64}$/.test(id)
+      || !store.db.prepare(`SELECT 1 FROM public_work_requests WHERE ${discoveryScope}
+        AND ${recordedAtColumn}=? AND ${receiptIdColumn}=?`).get(key, at, id)) invalid('Invalid discovery cursor');
+  return [at, id];
+}
+
+export function reviewerProjectDiscoveries(store, roomId, offerId, origin, memberId, { limit, after }) {
   return store.readTransaction(() => {
     const row = store.db.prepare('SELECT private_links FROM project_offers WHERE room_id=? AND offer_id=?').get(roomId, offerId);
     if (!row || !JSON.parse(row.private_links).reviewerMemberIds.includes(memberId))
       fail(403, 'discovery_review_denied', 'A designated project reviewer is required');
     enabledOffer(store, offerId, origin);
-    const rows = store.db.prepare('SELECT outcome_json FROM public_work_requests WHERE offer_id=? ORDER BY rowid DESC LIMIT ?')
-      .all(journalKey(offerId), projectCapacity);
-    return { offerId, findings: rows.map(row => JSON.parse(row.outcome_json)) };
+    if (limit !== null && !/^(?:[1-9]|[1-4][0-9]|50)$/.test(limit)) invalid('Choose a limit from 1 through 50');
+    const size = limit === null ? 20 : Number(limit);
+    const key = journalKey(offerId);
+    const boundary = after === null ? [] : cursorBoundary(store, key, after);
+    // SQLite uses the explicit time range to seek the expression index; the tuple resolves ties.
+    const where = boundary.length ? ` AND ${recordedAtColumn}<=? AND (${recordedAtColumn},${receiptIdColumn}) < (?,?)` : '';
+    const parameters = boundary.length ? [boundary[0], ...boundary] : [];
+    const rows = store.db.prepare(`SELECT outcome_json FROM public_work_requests WHERE ${discoveryScope}${where}
+      ORDER BY ${recordedAtColumn} DESC, ${receiptIdColumn} DESC LIMIT ?`).all(key, ...parameters, size + 1);
+    const findings = rows.slice(0, size).map(row => JSON.parse(row.outcome_json));
+    return { offerId, findings, nextCursor: rows.length > size ? reviewCursor(findings.at(-1)) : null };
   });
 }
