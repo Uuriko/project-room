@@ -1,3 +1,4 @@
+import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
@@ -223,6 +224,16 @@ export function prepareReleaseReview({ inputs, candidateRevision, origin, verifi
       `Candidate revision: ${candidateRevision}`,
       `Live verification: ${verification.pathname} (HTTP 200, ${verificationDigest})`,
       signed
+    ].join("\n\n");
+  }
+  if (signed && body.length > 4096) {
+    // Encode the entire already-verified object without changing signed bytes or dropping path evidence.
+    const encoded = gzipSync(JSON.stringify(sourceProof)).toString("base64");
+    body = [
+      `Candidate revision: ${candidateRevision}`,
+      `Live verification: ${verification.pathname} (HTTP 200, ${verificationDigest})`,
+      "Signed source-to-package proof (same-origin JWKS; gzip+base64 JSON).",
+      encoded
     ].join("\n\n");
   }
   if (body.length > 4096) throw new Error("The prepared release evidence exceeds the Room text limit.");

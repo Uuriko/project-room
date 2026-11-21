@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { generateKeyPair, publicKeyToJwk, signCardJws } from "../server/agent-card-signing.mjs";
 import { attachReleaseReceipts, confirmedReceipt, packageFixtureEvidence, prepareReleaseReview, submitReleaseReview } from "../scripts/attach-release-receipts.mjs";
 
@@ -152,7 +153,12 @@ test("release review requires complete exact evidence before its single completi
   assert.ok(compactBody.length <= 4096);
   assert.match(compactBody, /Live verification: \/docs\/agents\/paste \(HTTP 200, sha256:/);
   assert.deepEqual(JSON.parse(compactBody.split("\n").at(-1)), largeProvenance);
-  assert.throws(() => bound(signed({ ...proof, scope: "x".repeat(4096) })), /exceeds the Room text limit/);
+  const batchProof = signed({ ...proof, scope: "x".repeat(4096) });
+  const batchBody = bound(batchProof);
+  assert.match(batchBody, /gzip\+base64 JSON/);
+  assert.deepEqual(JSON.parse(gunzipSync(Buffer.from(batchBody.split("\n").at(-1), "base64"))), batchProof);
+  const oversized = Array.from({ length: 128 }, (_, index) => createHash("sha256").update(String(index)).digest("hex")).join("");
+  assert.throws(() => bound(signed({ ...proof, scope: oversized })), /exceeds the Room text limit/);
   assert.throws(() => bound(signed({ ...proof, workItemId: "other-work" })), /does not match/);
   assert.throws(() => bound(signed({ ...proof, qualification: { ...qualification, "browser.json": sha } })), /does not match/);
   assert.throws(() => bound({ ...provenance, proof: { ...proof, publicTip: input.deploy.oldRevision } }), /signature/);
