@@ -258,7 +258,7 @@ export class PublicWorkClaims {
       other.id !== taskId && other.owner && other.files.some(path => files.some(file => overlaps(path, file))));
   }
 
-  latestPublicReceiptLead(roomId) {
+  latestPublicReceiptLead(roomId, repositoryUrl) {
     if (!this.available()) return null;
     const row = this.db.prepare(`SELECT t.offer_id AS taskId, json_extract(o.terms, '$.title') AS title,
         public_receipts.id AS receiptId
@@ -267,8 +267,9 @@ export class PublicWorkClaims {
       JOIN public_work_tasks t ON t.offer_id=r.offer_id AND t.generation=r.generation
       JOIN project_offers o ON o.offer_id=t.offer_id AND o.room_id=t.room_id AND o.version=t.terms_version
       WHERE public_receipts.room_id=?1 AND t.room_id=?1 AND public_receipts.source='public-work'
+        AND (?2 IS NULL OR json_extract(o.terms, '$.repositoryUrl')=?2)
         AND o.status='published' AND ${receiptVisibilitySqlFor(this.db)}
-      ORDER BY public_receipts.at DESC, public_receipts.id LIMIT 1`).get(roomId);
+      ORDER BY public_receipts.at DESC, public_receipts.id LIMIT 1`).get(roomId, repositoryUrl ?? null);
     if (!row) return null;
     return { ...row, taskPath: '/api/public-work/tasks/' + encodeURIComponent(row.taskId),
       receiptPath: '/api/public-work/receipts/' + encodeURIComponent(row.receiptId),
@@ -287,7 +288,7 @@ export class PublicWorkClaims {
       if (page.claimableCount > 0) return { ...page, nextAction: { kind: 'pickup_page_exhausted' } };
       const project = !after && this.store.projectOffers.publishedProject(roomId);
       if (!project) return { ...page, nextAction: { kind: 'no_eligible_public_task' } };
-      const evidenceLead = this.latestPublicReceiptLead(roomId);
+      const evidenceLead = this.latestPublicReceiptLead(roomId, project.repositoryUrl);
       const path = project.path + '/discoveries';
       const nativeReturn = project.rewardKind === 'unpaid' && (!project.submissionUrl || project.submissionUrl === origin + path);
 
@@ -298,6 +299,7 @@ export class PublicWorkClaims {
         ...(nativeReturn && { submitFinding: {
           method: 'POST', path, body: { expectedTermsVersion: project.version, expectedRevision: project.revision },
           inputRequired: ['requestId', 'sourceUrl', 'criterion', 'observation', 'nextAction'], requires: ['saved_identity'],
+          identity: 'Reuse your identity on this origin. Only if you have none, POST /api/agent-identities with {"displayName":"your name"}. Save the returned credentials privately and send the identity secret as a Bearer token to this origin.',
         } }),
         investigation: evidenceLead
           ? 'Compare the linked public task criteria with its receipt and artifact. Report one criterion, the evidence that supports or contradicts it, and a reproducible check.'
