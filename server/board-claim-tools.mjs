@@ -10,6 +10,8 @@
 // caps, leases, review policy, autonomy tiers, events and wakes are unchanged.
 // One tool, two ops (take | finish): a second tool would push the full
 // catalog past its 116-tool budget and the core list past 17 KiB.
+import { MAX_LEASE_HOURS } from "./work-claims.mjs";
+
 export const BOARD_WORK_CLAIM_TOOL = "room_work_claim";
 export const BOARD_CLAIM_TOOLS = Object.freeze([BOARD_WORK_CLAIM_TOOL]);
 const CLAIM_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -21,7 +23,7 @@ export function boardClaimToolsEnabled(env = globalThis.process?.env ?? {}) {
 const text = (max) => ({ type: "string", minLength: 1, maxLength: max });
 export const boardClaimToolDefinitions = () => [
   { name: BOARD_WORK_CLAIM_TOOL,
-    description: "Board task. take: claim. finish: deliver+note. plan: set plan {priority,estimate,dueAt,cycleId,milestone,...}, null clears. list: query = GET work-claims params.",
+    description: "Board task: take, finish with note, update plan, or list by query.",
     inputSchema: { type: "object", additionalProperties: false, required: ["roomId", "op"], properties: {
       roomId: { type: "string", maxLength: 128 },
       claimId: { type: "string", pattern: CLAIM_ID.source },
@@ -29,6 +31,7 @@ export const boardClaimToolDefinitions = () => [
       plan: { type: "object" },
       query: { type: "object" },
       note: { ...text(4000) },
+      leaseHours: { type: "number", exclusiveMinimum: 0, maximum: MAX_LEASE_HOURS },
       files: { type: "array", maxItems: 64, items: text(512) },
       state: { type: "string", enum: ["delivered", "done"] } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }
@@ -48,8 +51,9 @@ export function validBoardClaimArgs(name, args) {
   if (!CLAIM_ID.test(String(args.claimId ?? ""))) return false;
   const str = (v, max) => v === undefined || typeof v === "string" && v.trim().length > 0 && v.length <= max;
   if (args.op === "take") {
-    const allowed = new Set(["claimId", "op", "note", "files"]);
+    const allowed = new Set(["claimId", "op", "note", "files", "leaseHours"]);
     return Object.keys(args).every(k => allowed.has(k)) && str(args.note, 2000)
+      && (args.leaseHours === undefined || Number.isFinite(args.leaseHours) && args.leaseHours > 0 && args.leaseHours <= MAX_LEASE_HOURS)
       && (args.files === undefined || Array.isArray(args.files) && args.files.length <= 64 && args.files.every(f => str(f, 512)));
   }
   if (args.op === "finish") {
@@ -70,7 +74,8 @@ export function validBoardClaimArgs(name, args) {
 // Plan of REST route calls for one tool call. `current` is the claim's state.
 export function boardClaimSteps(_name, args, current) {
   if (args.op === "take") {
-    return [["claim", { ...(args.note ? { note: args.note } : {}), ...(args.files ? { files: args.files } : {}) }]];
+    return [["claim", { ...(args.note ? { note: args.note } : {}), ...(args.files ? { files: args.files } : {}),
+      ...(args.leaseHours === undefined ? {} : { leaseHours: args.leaseHours }) }]];
   }
   if (args.op === "plan") return [["update", { ...args.plan }]];
   const steps = [];

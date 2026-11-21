@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { boardClaimToolsEnabled } from "../server/board-claim-tools.mjs";
+import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import { privateWorkFixture } from "./helpers/private-work-fixture.mjs";
 
 function seedReady(f, id = "solo") {
@@ -33,6 +35,7 @@ test("two eligible readers posting the advertised pickup claim get one 200 and o
   assert.deepEqual(firstOffer.value.ifIdle.claimAction.params, { leaseHours: 2 });
   assert.deepEqual(Object.keys(firstOffer.value.ifIdle.claimAction.params).sort(), ["leaseHours"]);
   assert.deepEqual(firstOffer.value.ifIdle.claimAction, secondOffer.value.ifIdle.claimAction);
+  if (!boardClaimToolsEnabled()) assert.equal(firstOffer.value.ifIdle.claimAction.mcp, undefined);
 
   const first = await advertisedClaim(f.origin, f.observer, firstOffer.value.ifIdle.claimAction);
   const second = await advertisedClaim(f.origin, f.broad, secondOffer.value.ifIdle.claimAction);
@@ -78,4 +81,35 @@ test("a Board read failure is not reported as dry", async t => {
   assert.equal(pickup.value.ifIdle.status, "unavailable");
   assert.equal(pickup.value.ifIdle.reason, "board_unavailable");
   assert.equal(pickup.value.ifIdle.claimAction, undefined);
+});
+
+
+test("MCP pickup advertises the same short claim only for a callable connection", { skip: !boardClaimToolsEnabled() }, async t => {
+  const f = await privateWorkFixture(t, "legacy");
+  seedReady(f);
+  const pick = who => f.mcp(who, "room_next", { view: "pickup" });
+  const readKey = f.store.agentPlugin.issueApiKey({ identityId: f.observer.id, scopes: ["rooms:read", "mcp:room:commons"] });
+  const readOnly = await pick({ secret: API_KEY_PREFIX + readKey.secret });
+  assert.equal(readOnly.value.ifIdle.status, "ready_work");
+  assert.equal(readOnly.value.ifIdle.claimAction.mcp, undefined);
+
+  const candidates = [f.observer, f.broad];
+  const offers = await Promise.all(candidates.map(pick));
+  const expected = { tool: "room_work_claim", arguments: { roomId: "commons", op: "take", claimId: "solo", leaseHours: 2 } };
+  for (const { value } of offers) {
+    assert.deepEqual(value.ifIdle.claimAction.mcp, expected);
+    assert.equal(value.nextRead.tool, "room_read_board", "the read pointer must stay read-only");
+  }
+  const claimed = await Promise.all(candidates.map((who, index) => {
+    const action = offers[index].value.ifIdle.claimAction.mcp;
+    return f.mcp(who, action.tool, action.arguments);
+  }));
+  const winner = claimed.findIndex(result => result.ok);
+  const loser = 1 - winner;
+  assert.equal(claimed.filter(result => result.ok).length, 1);
+  assert.equal(claimed[loser].value.code, "work_claim_conflict");
+  assert.equal((await pick(candidates[loser])).value.ifIdle.status, "dry");
+  const { owner, claimedAt, leaseExpiresAt } = f.store.workClaims.get("commons", "solo");
+  assert.equal(owner, candidates[winner].id);
+  assert.equal(Date.parse(leaseExpiresAt) - Date.parse(claimedAt), 2 * 3_600_000);
 });
