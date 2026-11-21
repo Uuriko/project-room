@@ -45,7 +45,7 @@ const definitions = [
     externalProducer, attempt, segments: resultSegments, signedEvidence: { type: "object", description: "Signed external evidence (room-signed-evidence/1) bound to the signer's room identity key. Required for external completions." },
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]],
-  ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically.", {
+  ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically. This is native independent verification, not an authored work.verdict_published source verdict; do not treat one as the other.", {
     result: { type: "string", enum: ["pass", "fail"] }, completionEventId: id, evidenceVersion: text, summary: text, nextAction: text,
     reworkRequested: { ...bool, description: "For a failed verdict, false records that the rejected result needs no further draft. The result remains rejected and cannot satisfy a prerequisite. Omit for ordinary correction." }
   }, ["result", "completionEventId", "evidenceVersion", "summary"]],
