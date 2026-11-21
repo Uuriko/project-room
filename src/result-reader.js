@@ -227,7 +227,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       showReleaseChecks(null);
     }
     if (!earlier && view.loaded && !view.error && !view.withdrawn && !item?.verification) {
-      const runtime = reviewRuntimeLabel(view.reviewRuntime?.status);
+      const runtime = reviewRuntimeLabel(view.reviewRuntime?.status, view.reviewRuntime?.webhook);
       if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
     }
     const context = resultElement("result-work-context");

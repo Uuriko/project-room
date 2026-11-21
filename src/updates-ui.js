@@ -227,8 +227,9 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         }) : ""].filter(Boolean).join(" · ");
         copy.append(meta);
       }
-      const runtime = ["waiting_receiver", "wake_acknowledged", "claimed", "started", "start_unknown"].includes(item.reviewRuntime?.status)
-        ? reviewRuntimeLabel(item.reviewRuntime.status) : "";
+      const { status, webhook } = item.reviewRuntime ?? {};
+      const runtime = status !== "unavailable" || webhook === "queued" || webhook === "delivered"
+        ? reviewRuntimeLabel(status, webhook) : "";
       if (runtime || item.kind === "review_requested") {
         const cue = document.createElement("p");
         cue.className = "form-hint";
