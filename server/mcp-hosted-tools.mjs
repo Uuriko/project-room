@@ -35,7 +35,7 @@ const roomNextOutput = {
     roomId: idField, viewerId: idField, goal: { type: "string", maxLength: 800 },
     charterRevision: { type: ["integer", "null"] }, contentTrust: { type: "string" },
     nextRead: { anyOf: [nextRead, { type: "null" }] },
-    ifIdle: { type: "object", properties: { status: { enum: ["invitation", "paused", "unavailable", "no_invitation"] }, nextRead }, required: ["status"] },
+    ifIdle: { type: "object", properties: { status: { enum: ["invitation", "paused", "unavailable", "no_invitation", "public_review"] }, nextRead }, required: ["status"] },
     work: nextPage(schema({
       id: idField, title: { type: "string", maxLength: 160 }, revision: { type: "integer", minimum: 0 },
       reason: { type: "string" }, nextRead, nextResultRead: nextRead,
