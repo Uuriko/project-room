@@ -1,16 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {rmSync} from 'node:fs';
+import {rmSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {createAcceptanceFixture} from '../scripts/acceptance-fixture.mjs';
 import {createRoomServer} from '../server/http.mjs';
 import {textVersion} from '../server/text-results.mjs';
 import {Bridge} from '../room-acp/src/bridge.mjs';
 import {RoomError} from '../room-acp/src/room.mjs';
+import {reviewOutput, reviewRepairable, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
 import {linkWithProof} from './helpers/link-with-proof.mjs';
 
-async function setup(t, {respondTo, pending = false, nextAction} = {}) {
+async function setup(t, {respondTo, pending = false, nextAction, replies = []} = {}) {
   const f = createAcceptanceFixture(), roomId = 'commons', workItemId = 'exact-review-work', memberId = 'exact-reviewer';
   const identity = f.store.identities.create('Exact reviewer');
   linkWithProof(f.store,f.keys.owner,roomId,identity,{memberId,permissions:['verify']});
@@ -38,12 +39,14 @@ async function setup(t, {respondTo, pending = false, nextAction} = {}) {
   t.after(async()=>{ server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
     f.store.close();rmSync(f.directory,{recursive:true,force:true}); });
   const connection = {apiBase:`http://127.0.0.1:${server.address().port}`,roomId,memberId,credential:identity.secret,hostId};
-  const counts = {prompt:0,write:0,receipt:0,ack:0};
+  const counts = {prompt:0,write:0,receipt:0,ack:0}, prompts = [];
   function make() {
     const bridge = new Bridge({connection,respondTo,waitMs:0,env:{ROOM_ACP_HOME:join(f.directory,'acp-host')},host:{
-      session:async()=>({sessionId:'fixture-review-session'}),prompt:async(_key,prompt)=>{
+      session:async()=>({sessionId:'fixture-review-session'}),prompt:async(_key,prompt,options)=>{
         counts.prompt++;
-        assert.match(prompt[0].text,/Evidence for the agenda is ready/);
+        prompts.push({prompt,sessionId:options?.sessionId});
+        if (prompt !== REVIEW_REPAIR_PROMPT) assert.match(prompt[0].text,/Evidence for the agenda is ready/);
+        if (replies.length) { const reply = replies.shift(); return typeof reply === 'string' ? {stopReason:'end_turn',recorder:{text:reply}} : reply; }
         const result = pending ? 'pending' : nextAction ? 'fail' : 'pass';
         return {stopReason:'end_turn',recorder:{text:JSON.stringify({result,summary:'Checked the exact agenda owner and assigned reviewer.',
           ...(nextAction ? {nextAction} : {})})}};
@@ -78,7 +81,7 @@ async function setup(t, {respondTo, pending = false, nextAction} = {}) {
     assert.equal(value?.isError ?? false,false);
     return value.structuredContent;
   };
-  return {bridge,wake,counts,make,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer};
+  return {bridge,wake,counts,prompts,make,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer};
 }
 
 test('an ACP failed review hands the exact reproducer to the producer with one protected wake read',async t=>{
@@ -208,4 +211,61 @@ test('an already settled review is checked without allocating a model session',a
   assert.equal(sessions,0);
   assert.equal(f.verdict()?.result,'fail');
   assert.deepEqual(f.counts,{prompt:0,write:0,receipt:0,ack:0});
+});
+
+// The final reply of the live #6411 exact review on 2026-11-21: prose before
+// the JSON and a 1620-character summary. It parked with no attempted write.
+const malformed6411 = readFileSync(new URL('./fixtures/room-acp-malformed-review-6411.txt', import.meta.url),'utf8');
+const repaired6411 = JSON.stringify({result:'fail',summary:'Head a0fccc9 checked from source: lost-response and race paths hold; a paused member can still have an ACP turn started after the lease, and no test covers it.'});
+
+test('a recorded malformed review is unsupported but repairable; explicit pending and stopped turns are not',()=>{
+  assert.equal(reviewOutput({text:malformed6411},'end_turn'),null);
+  assert.equal(reviewRepairable({text:malformed6411},'end_turn'),true);
+  assert.equal(reviewRepairable({text:malformed6411},'cancelled'),false);
+  assert.equal(reviewRepairable({text:JSON.stringify({result:'pending',summary:'No evidence access.'})},'end_turn'),false);
+  assert.equal(reviewRepairable({text:'I could not check it.\n\n{"result": "pending", "summary": "No access."}'},'end_turn'),false);
+  assert.equal(reviewRepairable({text:'  '},'end_turn'),false);
+  assert.equal(reviewRepairable({text:repaired6411},'end_turn'),false);
+});
+
+test('a completed review with malformed verdict text gets one same-session repair before any write',async t=>{
+  const f = await setup(t,{replies:[malformed6411,repaired6411]});
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.verdict()?.result,'fail');
+  assert.deepEqual(f.counts,{prompt:2,write:1,receipt:0,ack:1});
+  assert.equal(f.prompts[1].prompt,REVIEW_REPAIR_PROMPT);
+  assert.equal(f.prompts[1].sessionId,f.prompts[0].sessionId);
+  // A redelivered wake after filing starts no turn.
+  const restarted = f.make();
+  assert.equal(await restarted.lease(),true);
+  await restarted.accept(f.wake);
+  await restarted.queue.idle();
+  assert.equal(f.counts.prompt,2);
+  assert.equal(f.counts.write,1);
+});
+
+test('a second malformed reply parks after exactly one repair, and the bound survives restart',async t=>{
+  const f = await setup(t,{replies:[malformed6411,malformed6411,repaired6411]});
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.deepEqual(f.counts,{prompt:2,write:0,receipt:0,ack:0});
+  assert.equal(f.pendingRows().delivered_at,null);
+  assert.equal(f.verdict(),undefined);
+  const restarted = f.make();
+  assert.equal(await restarted.lease(),true);
+  await restarted.accept(f.wake);
+  await restarted.queue.idle();
+  assert.deepEqual(f.counts,{prompt:2,write:0,receipt:0,ack:0});
+});
+
+test('explicit pending, prose-wrapped pending and a stopped turn park without a repair prompt',async t=>{
+  for (const reply of ['Missing access.\n{"result":"pending","summary":"No evidence access."}',
+    {stopReason:'cancelled',recorder:{text:malformed6411}}]) {
+    const f = await setup(t,{replies:[reply,repaired6411]});
+    await f.bridge.accept(f.wake);
+    await f.bridge.queue.idle();
+    assert.deepEqual(f.counts,{prompt:1,write:0,receipt:0,ack:0});
+    assert.equal(f.verdict(),undefined);
+  }
 });

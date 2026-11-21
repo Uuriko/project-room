@@ -13,7 +13,7 @@ import { AgentHost } from "./agent-host.mjs";
 import { ThreadQueue } from "./queue.mjs";
 import { buildPrompt, buildClaimPrompt, buildFormalPrompt } from "./prompt.mjs";
 import { readCompleteRequest, prepareFormalDelivery, deliverFormal } from './formal-delivery.mjs';
-import { reviewBinding, readReview, reviewOutput, deliverReview, recordedReview } from './review-wake.mjs';
+import { reviewBinding, readReview, reviewOutput, deliverReview, recordedReview, reviewRepairable, REVIEW_REPAIR_PROMPT } from './review-wake.mjs';
 import { renderTurn } from "./render.mjs";
 import { SessionMap } from "./sessions.mjs";
 import { PermissionBroker, decisionOf, DEFAULT_PERMISSION_TIMEOUT_MS } from "./permission.mjs";
@@ -603,11 +603,19 @@ export class Bridge {
         const started = this.reviewReceipts.begin(signalId,{binding,signalId});
         if (!started.fresh) return;
         receipt = started.receipt;
-        const {recorder, stopReason} = await this.host.prompt(threadKey,prompt,{sessionId,
+        let {recorder, stopReason} = await this.host.prompt(threadKey,prompt,{sessionId,
           onDispatched:()=>this.stageObserver.mark(signalIds,'prompt_dispatch_attempt',receipt.requestId),
           onFirstOutput:kind=>this.stageObserver.mark(signalIds,'first_observable_output',receipt.requestId,kind)});
         this.stats.turns++;
-        const output = reviewOutput(recorder,stopReason);
+        let output = reviewOutput(recorder,stopReason);
+        // Nothing has been submitted for this receipt yet. Allow one durable,
+        // same-session format repair; explicit pending still parks.
+        if (!output && !receipt.repaired && reviewRepairable(recorder,stopReason) && !this.controller.signal.aborted) {
+          this.reviewReceipts.save(key,receipt = {...receipt,repaired:true});
+          ({recorder, stopReason} = await this.host.prompt(threadKey,REVIEW_REPAIR_PROMPT,{sessionId}));
+          this.stats.turns++;
+          output = reviewOutput(recorder,stopReason);
+        }
         if (!output) {
           this.reviewReceipts.save(key,{...receipt,phase:'needs_review',body:'No supported final verdict. Use the exact Work Thread action.'});
           this.log(`exact review ${binding.workItemId} needs evidence or manual review; wake remains pending`);

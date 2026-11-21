@@ -46,6 +46,22 @@ export function reviewOutput(recorder, stopReason) {
   return value;
 }
 
+// A completed turn whose text is not a supported verdict may be a formatting
+// miss. Explicit pending, cancellation and limits keep their existing park.
+export function reviewRepairable(recorder, stopReason) {
+  if (stopReason !== 'end_turn') return false;
+  const text = recorder.finalText ?? recorder.text;
+  if (typeof text !== 'string' || !text.trim() || /"result"\s*:\s*"pending"/.test(text)) return false;
+  return reviewOutput(recorder, stopReason) === null;
+}
+
+export const REVIEW_REPAIR_PROMPT = [{ type:'text', text:[
+  'Your previous reply was not a supported verdict, so nothing was filed.',
+  'Restate the verdict you already reached as only raw JSON: {"result":"pass"|"fail","summary":"..."} with no other text.',
+  'The summary must be at most 1500 characters. nextAction is allowed only on fail and must be at most 1000 characters.',
+  'Do not run new checks or change the verdict. If you did not independently verify pass or fail, answer {"result":"pending","summary":"..."}.',
+].join(' ') }];
+
 export async function recordedReview(room, operationId, timeoutMs) {
   const value = await room.request('/mcp', { timeoutMs, body:{ jsonrpc:'2.0', id:1, method:'tools/call',
     params:{ name:'room_receipt', arguments:{ roomId:room.roomId, operationId } } } });
