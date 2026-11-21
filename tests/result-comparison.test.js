@@ -4,7 +4,7 @@ import { createResultComparison } from "../src/result-comparison.js";
 
 function fixture() {
   const pending = [], state = { messages: [] };
-  const box = { hidden: true, innerHTML: "", textContent: "", insertAdjacentHTML(_position, html) { this.innerHTML = html + this.innerHTML; }, replaceChildren() { this.innerHTML = ""; this.textContent = ""; } };
+  const box = { hidden: true, innerHTML: "", textContent: "", insertAdjacentHTML(_position, html) { this.innerHTML = html + this.innerHTML; }, querySelector() { return {remove: () => { this.innerHTML = this.innerHTML.replace(/^<p data-previous-release-checks.*?<\/p>/, ""); }}; }, replaceChildren() { this.innerHTML = ""; this.textContent = ""; } };
   const controller = createResultComparison({ getState: () => state,
     client: { workResult: () => new Promise(resolve => pending.push(resolve)) },
     esc: text => String(text).replaceAll("<", "&lt;").replaceAll(">", "&gt;") });
@@ -52,6 +52,9 @@ test("prior release links require the pinned evidence and a selected Room messag
   assert.match(f.box.innerHTML, /Previous release checks \(aaaaaaaaaaaa\)/);
   assert.match(f.box.innerHTML, /#pr-record\/message\/receipt/);
   assert.doesNotMatch(f.box.innerHTML, /example.org|>Deploy</);
+  f.state.messages.push({id:"receipt", editedAt:1}); f.controller.sync();
+  assert.doesNotMatch(f.box.innerHTML, /Previous release checks/);
+  assert.match(f.box.innerHTML, /Resubmitted result/);
   previous.workThread.releaseChecks.evidenceVersion = "other";
   f.load(); f.pending[1](previous); await settle();
   assert.doesNotMatch(f.box.innerHTML, /Previous release checks/);

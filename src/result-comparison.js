@@ -16,6 +16,10 @@ export function createResultComparison({ client, getState, esc }) {
       if ([comparison.currentId, comparison.previousId].some(id => getState()?.messages.find(message => message.id === id)?.deletedAt)) {
         clearResultComparison(box);
         box.textContent = uiText("result.comparisonWithdrawn"); box.hidden = false;
+      } else if (comparison.evidenceIds && getState()?.messages.some(message =>
+        (message.deletedAt || message.editedAt) && comparison.evidenceIds.has(message.id))) {
+        box.querySelector("[data-previous-release-checks]")?.remove();
+        comparison.evidenceIds = null;
       }
     }
   }
@@ -61,7 +65,11 @@ export function createResultComparison({ client, getState, esc }) {
           const href = "#pr-record/message/" + encodeURIComponent(check.evidenceMessageId);
           if (check.href === href) links.push(`<a href="${esc(href)}" target="_blank" rel="noopener">${esc(uiText("result.release." + check.stage))}</a>`);
         }
-        if (links.length) box.insertAdjacentHTML("afterbegin", `<p class="form-hint"><strong>${esc(uiText("result.previousReleaseChecks", { revision: report.candidateRevision.slice(0, 12) }))}</strong> ${links.join(" · ")}</p>`);
+        if (links.length) {
+          comparison.evidenceIds = new Set([report.messageId, ...report.checks.flatMap(check => [check.reportMessageId, check.evidenceMessageId])].filter(Boolean));
+          box.insertAdjacentHTML("afterbegin", `<p data-previous-release-checks class="form-hint"><strong>${esc(uiText("result.previousReleaseChecks", { revision: report.candidateRevision.slice(0, 12) }))}</strong> ${links.join(" · ")}</p>`);
+          syncResultComparisons();
+        }
       }
       box.hidden = false;
     }).catch(() => {
