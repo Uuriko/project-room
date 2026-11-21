@@ -15,9 +15,15 @@ export const reviewRuntimeSchema = `
     revision INTEGER NOT NULL, member_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
     observed_at INTEGER NOT NULL,
     PRIMARY KEY (room_id,work_item_id,completion_id,revision,member_id)
+  );
+  CREATE TABLE IF NOT EXISTS review_runtime_interruptions (
+    room_id TEXT NOT NULL, work_item_id TEXT NOT NULL, completion_id TEXT NOT NULL,
+    revision INTEGER NOT NULL, member_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+    observed_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id,work_item_id,completion_id,revision,member_id)
   );`;
 
-const phases = ["claimed", "started", "start_unknown"];
+const phases = ["claimed", "started", "start_unknown", "interrupted"];
 const fail = (status, code) => { throw Object.assign(new Error(code), { status, code }); };
 const tableReady = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 
@@ -36,6 +42,17 @@ export function recordReviewRuntime(db, roomId, work, member, input, now) {
   const row = db.prepare("SELECT * FROM review_runtime_reports WHERE room_id=? AND work_item_id=?").get(roomId, work.id);
   const sameReview = row?.completion_id === input.completionEventId && row.revision === input.expectedRevision && row.member_id === member.id;
   if (sameReview && row.attempt_id !== input.attemptId) fail(409, "review_runtime_attempt_conflict");
+  if (input.phase === "interrupted") {
+    db.prepare(`INSERT INTO review_runtime_interruptions VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`)
+      .run(roomId,work.id,input.completionEventId,work.revision,member.id,input.attemptId,now);
+  }
+  const interrupted = db.prepare(`SELECT attempt_id,observed_at FROM review_runtime_interruptions
+    WHERE room_id=? AND work_item_id=? AND completion_id=? AND revision=? AND member_id=?`)
+    .get(roomId,work.id,input.completionEventId,work.revision,member.id);
+  if (interrupted) {
+    if (interrupted.attempt_id !== input.attemptId) fail(409, "review_runtime_attempt_conflict");
+    return { status:"interrupted", observedAt:interrupted.observed_at };
+  }
   if (input.phase === "claimed" || (sameReview && row.phase === "claimed")) {
     // Keep the actual first claim separate from the latest provider phase.
     // Neither the claim nor a retry settles the work wake.
@@ -77,6 +94,13 @@ export function reviewRuntimeFor(store, roomId, work, next, now, { includeClaim 
     return { ...verdict, ...claimObservation(db, roomId, work, basis?.revision, work.verification.verifierId) };
   }
   if (next?.action !== "verify") return null;
+  if (tableReady(db, "review_runtime_interruptions")) {
+    const interrupted = db.prepare(`SELECT observed_at FROM review_runtime_interruptions
+      WHERE room_id=? AND work_item_id=? AND completion_id=? AND revision=? AND member_id=?`)
+      .get(roomId,work.id,work.receipt.eventId,work.revision,next.memberId);
+    if (interrupted) return { status:"interrupted", source:"managed_host", observedAt:interrupted.observed_at,
+      ...(includeClaim ? claimObservation(db, roomId, work, work.revision, next.memberId) : {}) };
+  }
   if (tableReady(db, "review_runtime_reports")) {
     const report = db.prepare(`SELECT phase,observed_at FROM review_runtime_reports
       WHERE room_id=? AND work_item_id=? AND completion_id=? AND revision=? AND member_id=?`)

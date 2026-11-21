@@ -592,3 +592,20 @@ test('repair: a duplicate-field restatement, raw or fenced, is not filed',async 
     assert.equal(f.receiptPhase(),'needs_review');
   }
 });
+
+test('restart surfaces a review interrupted before output and never runs it twice', async t => {
+  const f = await setup(t);
+  f.bridge.host.prompt = async () => { f.counts.prompt++; throw Error('host stopped'); };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.receiptPhase(), 'started');
+  const fresh = f.make();
+  assert.equal(await fresh.lease(), true);
+  await fresh.accept(f.wake);
+  await fresh.queue.idle();
+  assert.equal(f.receipt()?.reason, 'turn_interrupted');
+  assert.deepEqual(f.counts, {prompt:1,write:0,receipt:0,ack:0});
+  assert.equal(f.pendingRows().delivered_at, null);
+  const exact = await f.readAsProducer(f.wake.nextRead);
+  assert.equal(exact.reviewRuntime.status, 'interrupted');
+});
