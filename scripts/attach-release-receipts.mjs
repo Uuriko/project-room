@@ -9,6 +9,7 @@ const digest = /^sha256:[a-f0-9]{64}$/;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const hash = value => createHash("sha256").update(value).digest("hex");
 const stages = ["build", "browser", "deploy"];
+const resultTextLimit = 4000;
 
 const fixtureModes = ["legacy", "normalized"];
 const fixtureChecks = checks => Array.isArray(checks) && checks.length > 0 && checks.length <= 32
@@ -189,7 +190,13 @@ function checkedSourceProof({ sourceProof, jwks, origin, binding, checks }) {
   return `Signed source-to-package proof (same-origin JWKS).\n${JSON.stringify({ proof, signature })}`;
 }
 
-export function prepareReleaseReview({ inputs, candidateRevision, origin, verificationPath, servingRevision, verificationDigest,
+export function prepareReleaseReview(options) {
+  const packet = prepareReleaseReviewPacket(options);
+  if (packet.parts.length) throw new Error("The prepared release evidence requires linked proof attachments.");
+  return packet.body;
+}
+
+export function prepareReleaseReviewPacket({ inputs, candidateRevision, origin, verificationPath, servingRevision, verificationDigest,
   binding, sourceProof, jwks }) {
   if (!revision.test(candidateRevision) || servingRevision !== candidateRevision || !digest.test(verificationDigest)) {
     throw new Error("Verify the exact serving candidate before preparing review.");
@@ -208,17 +215,56 @@ export function prepareReleaseReview({ inputs, candidateRevision, origin, verifi
   const fixtures = checks[0].proof.packageFixtures;
   const digestLabel = fixtures?.every(fixture => fixture.passedCheckCount !== undefined) ? "response-body digest " : "";
   const signed = sourceProof === undefined ? null : checkedSourceProof({ sourceProof, jwks, origin, binding, checks });
-  const body = [
+  const summary = [
     `Candidate revision: ${candidateRevision}`,
     `Serving revision: ${new URL("/api/version", origin).href}`,
     `Live verification: ${verification.href} (HTTP 200, ${digestLabel}${verificationDigest})`,
-    ...(signed ? [
-      `Checks: package verified (${checks[0].proof.files} files), browser ${checks[1].proof.passed}/${checks[1].proof.tests} passed, deploy ready.`,
-      signed
-    ] : checks.map(({ stage, summary, proof, evidenceDigest }) => `${stage}: ${summary} ${evidenceDigest}\n${JSON.stringify(proof)}`))
-  ].join("\n\n");
-  if (body.length > 4096) throw new Error("The prepared release evidence exceeds the Room text limit.");
-  return body;
+  ];
+  if (signed) {
+    summary.push(`Checks: package verified (${checks[0].proof.files} files), browser ${checks[1].proof.passed}/${checks[1].proof.tests} passed, deploy ready.`);
+    const inline = [...summary, signed].join("\n\n");
+    if (inline.length <= resultTextLimit) return { body: inline, parts: [] };
+    const raw = JSON.stringify(sourceProof);
+    const proofHash = hash(raw);
+    const chunks = Buffer.from(raw).toString("base64url").match(/.{1,3600}/g);
+    const parts = chunks.map((chunk, index) => ({
+      id: `release-proof-${proofHash}-${index + 1}`,
+      body: `room-source-proof-part/1 ${index + 1}/${chunks.length} sha256:${proofHash}\n${chunk}`,
+    }));
+    summary.push(`Signed source-to-package proof (same-origin JWKS), SHA-256 ${proofHash}. Join the base64url payload lines of these Work Thread messages in order, decode as UTF-8 JSON, and verify against the serving origin JWKS.\n${parts.map(part => part.id).join("\n")}`);
+    const body = summary.join("\n\n");
+    if (body.length > resultTextLimit) throw new Error("The proof attachment index exceeds the Room text limit.");
+    return { body, parts };
+  }
+  const body = [...summary, ...checks.map(({ stage, summary, proof, evidenceDigest }) =>
+    `${stage}: ${summary} ${evidenceDigest}\n${JSON.stringify(proof)}`)].join("\n\n");
+  if (body.length > resultTextLimit) throw new Error("The prepared release evidence exceeds the Room text limit.");
+  return { body, parts: [] };
+}
+
+export async function publishReleaseProofParts({ parts, binding, producerId, call }) {
+  const { roomId, workItemId } = binding;
+  const saved = [];
+  for (const { id, body } of parts) {
+    const receipt = await call("room_receipt", { operationId: id });
+    if (receipt.roomId !== roomId || receipt.viewerId !== producerId || receipt.operationId !== id) {
+      throw new Error("Receipt did not match this release proof attachment.");
+    }
+    let sequence;
+    if (receipt.status === "recorded" && receipt.eventType === "message.posted" && integer(receipt.sequence) && receipt.sequence > 0) {
+      sequence = receipt.sequence;
+    } else if (receipt.status === "not_recorded") {
+      const posted = await call("room_post_message", { id, body, workItemId, compact: true });
+      sequence = confirmedReceipt(posted, id).sequence;
+    } else {
+      throw new Error("Could not confirm the release proof attachment receipt.");
+    }
+    const selected = await call("room_read_result", { workItemId, draftMessageId: id });
+    if (selected.roomId !== roomId || selected.workItemId !== workItemId || selected.result?.text?.messageId !== id
+      || selected.result.text.body !== body) throw new Error("The saved release proof attachment does not match.");
+    saved.push({ messageId: id, sequence });
+  }
+  return saved;
 }
 
 export async function submitReleaseReview({ binding, expectedRevision, producerId, body, call }) {
@@ -304,7 +350,7 @@ async function main() {
   const prepare = values["work-revision"] !== undefined;
   const sourceProofPath = values["source-proof"];
   if (sourceProofPath !== undefined && !prepare) throw new Error("A source proof belongs in the first exact release result.");
-  let expectedBody;
+  let expectedBody, proofParts;
   if (prepare) {
     if (typeof memberId !== "string" || !memberId) throw new Error("The saved connection needs the assigned release producer's memberId.");
     if (binding.completionEventId !== undefined || !/^\d+$/.test(values["work-revision"])) {
@@ -332,8 +378,9 @@ async function main() {
     }
     const after = await readVersion();
     if (after !== before) throw new Error("Serving revision changed while collecting review evidence.");
-    const body = prepareReleaseReview({ inputs, candidateRevision: binding.candidateRevision, origin, verificationPath: path,
+    const { body, parts } = prepareReleaseReviewPacket({ inputs, candidateRevision: binding.candidateRevision, origin, verificationPath: path,
       servingRevision: after, verificationDigest, binding, sourceProof, jwks });
+    if (parts.length) proofParts = await publishReleaseProofParts({ parts, binding, producerId: memberId, call });
     if (sourceProofPath !== undefined) expectedBody = body;
     binding = await submitReleaseReview({ binding, expectedRevision: Number(values["work-revision"]), producerId: memberId, body, call });
   }
@@ -341,7 +388,7 @@ async function main() {
     readResult: args => call("room_read_result", args),
     lookup: values.recover || prepare ? args => call("room_receipt", args) : undefined,
     post: async args => confirmedReceipt(await call("room_post_message", args), args.id) });
-  console.log(JSON.stringify(prepare ? { ...output, binding } : output));
+  console.log(JSON.stringify(prepare ? { ...output, binding, ...(proofParts ? { proofParts } : {}) } : output));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
