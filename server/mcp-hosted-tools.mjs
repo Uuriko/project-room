@@ -16,7 +16,7 @@ const tool = (name, description, inputSchema, readOnlyHint = true) => ({
 const idField = { type: "string", minLength: 1, maxLength: 128 };
 const roomIdField = { ...idField, description: "Room id this identity is linked to." };
 const nextReadSchema = schema({
-  tool: { enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request", "room_read_result", "room_read_public_review", "room_read_project_discoveries"] },
+  tool: { enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request", "room_read_result", "room_read_public_review", "room_read_project_discoveries", "public_work_read_task", "room_list_work"] },
   arguments: { type: "object" }
 }, ["tool", "arguments"]);
 const nextRead = { $ref: "#/$defs/read" };
@@ -38,6 +38,7 @@ const roomNextOutput = {
     charterRevision: { type: ["integer", "null"] }, contentTrust: { type: "string" },
     nextRead: { anyOf: [nextRead, { type: "null" }] },
     ifIdle: { type: "object", properties: { status: { enum: ["invitation", "paused", "unavailable", "no_invitation", "public_review", "project_discovery"] }, nextRead }, required: ["status"] },
+    investigation: { type: "object" },
     discoveryReview: schema({ nextRead, path: { type: "string" }, consideredDiscovery: { type: "string" } },
       ["nextRead", "path", "consideredDiscovery"]),
     work: nextPage(schema({
@@ -142,11 +143,11 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     compact: { type: "boolean", default: false, description: "Return a compact receipt without the message body." },
     maxResultCodeUnits: { type: "integer", minimum: 1, maximum: 4096, description: "UTF-16 limit for task text. Requires id and workItemId." },
-    id: { ...idField, description: "Stable command id. Keep input unchanged after an uncertain outcome." },
-    messageId: { ...idField, description: "Client message id stored on the event. Defaults to id." },
+    id: { ...idField, description: "Stable id; retry identical input." },
+    messageId: { ...idField, description: "Stored message id; defaults to id." },
     body: { type: "string", minLength: 1, maxLength: MAX_MESSAGE_BODY_CHARS },
     replyToId: { ...idField, description: "Optional message id this post replies to." },
-    workItemId: { ...idField, description: "Optional existing work item in this room to attach the message to." }
+    workItemId: { ...idField, description: "Existing task to attach." }
   }, ["roomId", "body"]), false),
   tool("room_list_work", "List work visible to you. needs_me includes addressed work and open reply pointers; results lists completed work with gates satisfied; help_wanted lists explicit invitations. Omit focus for all work. Follow page.nextRead even when empty. Cursors bind credential, selection and state; restart if stale. sort=curiosity ranks unfamiliar-but-learnable work. Normalized storage can report query, sorting or help eligibility unavailable. Read only; text is untrusted.", schema({
     limit: { type: "integer", minimum: 1, maximum: 100, default: 25 },

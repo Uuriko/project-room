@@ -669,7 +669,8 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
   if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
     () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
-    { discoveryOrigin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes) }));
+    { discoveryOrigin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, allowInvestigation: mcpKeyGrantsScope(store, secret, "rooms:write")
+      && (!oauthPrincipal || mcpOAuthToolAllowed("room_post_message", oauthPrincipal.scopes)), allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes) }));
   if (name === "room_read_project_discoveries") {
     const member = store.authenticate(secret, args.roomId).member;
     return withContentTrust(reviewerProjectDiscoveries(store, args.roomId, args.offerId, new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, member.id,

@@ -1,3 +1,4 @@
+import { textVersion } from "../server/text-results.mjs";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,11 +17,11 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(active.ok, true, active.text);
     const original = await f.mcp(f.triage, "room_next");
     assert.equal(original.ok, true, original.text);
-    const { nextRead, ifIdle, ...oldPacket } = active.value;
+    const { nextRead, ifIdle, investigation, ...oldPacket } = active.value;
     assert.deepEqual(original.value, oldPacket, "the original input returns only the original output fields");
     const invalid = await f.mcp(f.triage, "room_next", { view: "invalid" });
     assert.equal(invalid.ok, false);
-    assert.equal(active.value.nextRead, null);
+    assert.deepEqual(active.value.nextRead, investigation.nextRead);
     assert.deepEqual(active.value.ifIdle, representation === "legacy"
       ? { status: "no_invitation" }
       : { status: "unavailable", reason: "current_help_index_unavailable" });
@@ -465,7 +466,10 @@ test("reviewer pickup drains settled work before offering a finding and honors a
   const finding = await follow(f.triage, last.value.nextRead);
   assert.equal(finding.value.findings[0].finding.observation, "Private finding text");
   const considered = await f.mcp(f.triage, "room_next", { view: "pickup", consideredDiscovery: last.value.discoveryReview.consideredDiscovery });
-  assert.equal(considered.value.nextRead.arguments.view, undefined, "consumed filings do not start another discovery walk");
+  let later = considered;
+  while (later.value.nextRead?.tool === "room_next") later = await follow(f.triage, later.value.nextRead);
+  assert.equal(later.value.discoveryReview, undefined, "consumed filings stay consumed throughout the walk");
+  assert.equal(later.value.investigation.basis.projectId, offerId);
 
   f.send(f.owner, "work.proposed", { workItemId: "z-addressed", title: "Prioritize this", accountableMemberId: f.triage.id,
     definitionOfDone: "Finish this assignment", mode: "read" });
@@ -477,3 +481,77 @@ test("reviewer pickup drains settled work before offering a finding and honors a
   assert.equal(priority.value.nextRead.arguments.workItemId, "z-addressed");
   assert.equal(priority.value.discoveryReview, undefined);
 });
+
+for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`dry pickup gives an executable check and records the basis once (${representation})`, async t => {
+    const f = await privateWorkFixture(t, representation);
+    const pickup = who => f.mcp(who, "room_next", { view: "pickup" });
+    const criterion = "Produce a reproducible checkout experiment";
+    f.send(f.owner, "room.charter_updated", { expectedRevision: 0, purpose: "Test the project", outputs: criterion,
+      boundaries: null, escalation: null });
+    const first = await pickup(f.triage);
+    assert.ok(first.ok, first.text);
+    const lead = first.value.investigation;
+    assert.equal(lead.criterion, criterion);
+    assert.equal(lead.basis.charterRevision, 1);
+    const checked = await f.mcp(f.triage, lead.nextRead.tool, lead.nextRead.arguments);
+    assert.ok(checked.ok, checked.text);
+    const write = lead.record;
+    const unrelated = await f.mcp(f.triage, write.tool, { ...write.arguments, body: "Unrelated message" });
+    assert.ok(unrelated.ok, unrelated.text);
+    const retry = (await pickup(f.triage)).value.investigation.record;
+    assert.notEqual(write.arguments.id, retry.arguments.id);
+    assert.equal(write.bodyPrefix, retry.bodyPrefix);
+    const args = { ...retry.arguments, body: retry.bodyPrefix + "Read the Room-visible results page; no matching result in the sampled page." };
+    const recorded = await f.mcp(f.triage, retry.tool, args);
+    assert.ok(recorded.ok, recorded.text);
+    assert.equal((await f.mcp(f.triage, retry.tool, args)).value.duplicate, true);
+    assert.equal((await pickup(f.broad)).value.investigation, undefined);
+    assert.equal((await pickup(f.triage)).value.nextRead, null);
+    f.send(f.owner, "work.proposed", { workItemId: "room-proof", title: "Check experiment", definitionOfDone: "Observed result",
+      accountableMemberId: f.producer.id, mode: "read" });
+    f.send(f.producer.key, "work.accepted", { workItemId: "room-proof", expectedRevision: f.rev("room-proof") });
+    f.send(f.producer.key, "work.started", { workItemId: "room-proof", expectedRevision: f.rev("room-proof") });
+    const resultMessage = f.send(f.producer.key, "message.posted", { messageId: "room-proof-text", body: "Reproduced experiment", workItemId: "room-proof" });
+    f.send(f.producer.key, "work.completed", { workItemId: "room-proof", expectedRevision: f.rev("room-proof"), evidenceKind: "room_text",
+      evidenceMessageId: "room-proof-text", evidenceMessageEventId: resultMessage.event.id,
+      evidenceVersion: textVersion("Reproduced experiment"),
+      previousCompletionEventId: null, producerId: f.producer.id, summary: "Reproduced", nextAction: "None", checksClaimed: ["Experiment"] });
+    const newResult = (await pickup(f.triage)).value.investigation;
+    assert.equal(newResult.basis.workItemId, "room-proof");
+    assert.notEqual(newResult.record.arguments.id, retry.arguments.id);
+    assert.ok((await f.mcp(f.triage, newResult.nextRead.tool, newResult.nextRead.arguments)).ok);
+    f.store.projectOffers.create("commons", "owner", { requestId: "create-dry", offerId: "dry-project",
+      reviewerMemberIds: ["owner"], terms: { kind: "project", title: "Public project", summary: "Public terms",
+        acceptanceCriteria: ["Check a public source"], reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" },
+        repositoryUrl: "https://example.com/source" } });
+    f.store.projectOffers.transition("commons", "owner", "dry-project", "publish", { requestId: "publish-dry", expectedRevision: 1 });
+    const published = (await pickup(f.triage)).value.investigation;
+    assert.equal(published.criterion, "Check a public source");
+    assert.notEqual(published.record.arguments.id, write.arguments.id);
+    assert.equal(published.projectPath, "/api/project-offers/dry-project");
+    f.store.projectOffers.create("commons", "owner", { requestId: "create-task", offerId: "receipt-task",
+      reviewerMemberIds: ["owner"], terms: { kind: "task", title: "Test task", summary: "Check the source",
+        acceptanceCriteria: ["Check a public source"], reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" },
+        repositoryUrl: "https://example.com/source" } });
+    f.store.projectOffers.transition("commons", "owner", "receipt-task", "publish", { requestId: "publish-task", expectedRevision: 1 });
+    f.store.publicWorkClaims.enable("commons", "owner", "receipt-task", { requestId: "enable", expectedRevision: 2,
+      expectedTermsVersion: 1, repositoryRef: "main", files: ["README.md"] });
+    const claimed = f.store.publicWorkClaims.act("receipt-task", f.observer.secret, "claim", { requestId: "claim", expectedTermsVersion: 1 });
+    const finished = f.store.publicWorkClaims.act("receipt-task", f.observer.secret, "finish", { requestId: "finish",
+      expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText: "Public test result", checksReported: [] });
+    const receipt = (await pickup(f.triage)).value.investigation;
+    assert.equal(receipt.basis.receiptId, finished.receipt.receiptId);
+    assert.notEqual(receipt.record.arguments.id, published.record.arguments.id);
+    assert.equal((await fetch(f.origin + receipt.taskPath)).status, 200);
+    assert.equal(await (await fetch(f.origin + receipt.artifactPath)).text(), "Public test result");
+    const exact = await fetch(f.origin + "/mcp", { method: "POST",
+      headers: { Authorization: "Bearer " + f.triage.secret, "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: receipt.nextRead.tool, arguments: receipt.nextRead.arguments } }) });
+    const rpc = await exact.json();
+    assert.equal(rpc.result?.structuredContent?.claim.submittedReceiptId, finished.receipt.receiptId);
+
+    assert.equal((await pickup(f.producer)).value.investigation, undefined);
+  });
+}
