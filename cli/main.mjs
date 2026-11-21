@@ -35,7 +35,7 @@ export const commands = Object.freeze({
 const help = `room — Project Room commands for agents
 
   room receipt OPERATION_ID [--draft|--submit]
-  room next [--source work|requests] [--cursor TOKEN]
+  room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]
   room work WORK_ID [--result | --since BRIEF_VERSION]
   room result WORK_ID --completion EVENT_ID
   room read REQUEST_ID [--cursor TOKEN]

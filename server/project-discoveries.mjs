@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../src/audit-receipts.mjs';
+import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { validId } from '../src/events.js';
 import { scrubString } from './feedback-scrub.mjs';
 import { validateWebhookUrl } from './outbound-webhooks.mjs';
@@ -92,10 +93,43 @@ function cursorBoundary(store, key, cursor) {
   return [at, id];
 }
 
+// SQLite can reuse rowids after a purge or renumber them during maintenance.
+// Reject an anchor that no longer names the same filing before skipping past it.
+function discoveryCheckpoint(store, roomId, after) {
+  if (!after) return 0;
+  const [position, receiptId] = after.split('/');
+  const row = store.db.prepare(`SELECT 1 FROM public_work_requests WHERE rowid=?
+    AND offer_id GLOB ? AND ${receiptIdColumn}=?`).get(Number(position), 'project-discovery/' + roomId + '/*', receiptId);
+  if (!row) fail(422, 'invalid_discovery_checkpoint', 'Omit the stale checkpoint to restart finding review');
+  return Number(position);
+}
+
+// One index seek per designated offer. Select the oldest pending offer watermark,
+// so considering one offer never skips an older filing on another offer.
+export function nextReviewerProject(store, roomId, memberId, origin, after) {
+  if (isGuestAgentMemberId(memberId)) return null;
+  const consideredThrough = discoveryCheckpoint(store, roomId, after);
+  const row = store.db.prepare(`SELECT o.offer_id AS offerId, (
+      SELECT MAX(j.rowid) FROM public_work_requests j
+      WHERE j.offer_id='project-discovery/' || o.room_id || '/' || o.offer_id AND j.offer_id GLOB 'project-discovery/*'
+    ) AS latest
+    FROM project_offers o JOIN rooms r ON r.id=o.room_id
+    WHERE o.room_id=? AND r.archived_at IS NULL AND o.status='published'
+      AND NOT EXISTS (SELECT 1 FROM public_unpublish u WHERE u.kind='room' AND u.target=o.room_id)
+      AND json_extract(o.terms,'$.kind')='project' AND json_extract(o.terms,'$.reward.kind')='unpaid'
+      AND (json_extract(o.terms,'$.submissionUrl') IS NULL OR json_extract(o.terms,'$.submissionUrl')
+        = ? || '/api/project-offers/' || replace(o.offer_id, ':', '%3A') || '/discoveries')
+      AND EXISTS (SELECT 1 FROM json_each(o.private_links,'$.reviewerMemberIds') WHERE value=?)
+      AND latest>? ORDER BY latest LIMIT 1`).get(roomId, origin, memberId, consideredThrough);
+  if (!row) return null;
+  const { receiptId } = store.db.prepare(`SELECT ${receiptIdColumn} AS receiptId FROM public_work_requests WHERE rowid=?`).get(row.latest);
+  return { offerId: row.offerId, after: row.latest + '/' + receiptId };
+}
+
 export function reviewerProjectDiscoveries(store, roomId, offerId, origin, memberId, { limit, after }) {
   return store.readTransaction(() => {
     const row = store.db.prepare('SELECT private_links FROM project_offers WHERE room_id=? AND offer_id=?').get(roomId, offerId);
-    if (!row || !JSON.parse(row.private_links).reviewerMemberIds.includes(memberId))
+    if (isGuestAgentMemberId(memberId) || !row || !JSON.parse(row.private_links).reviewerMemberIds.includes(memberId))
       fail(403, 'discovery_review_denied', 'A designated project reviewer is required');
     enabledOffer(store, offerId, origin);
     if (limit !== null && !/^(?:[1-9]|[1-4][0-9]|50)$/.test(limit)) invalid('Choose a limit from 1 through 50');
