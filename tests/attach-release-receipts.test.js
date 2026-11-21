@@ -154,7 +154,8 @@ test("release review requires complete exact evidence before its single completi
     Array.from({ length: 21 }, (_, index) => [`server/proof-😀-${index}.mjs`, { publicSha: sha, composedSha: sha, installedSha: sha }])
   ) } });
   const packet = prepareReleaseReviewPacket({ inputs, candidateRevision, origin, verificationPath: "/docs/agents/paste",
-    servingRevision: candidateRevision, verificationDigest: "sha256:" + sha, binding, sourceProof: large, jwks });
+    servingRevision: candidateRevision, verificationDigest: "sha256:" + sha, binding,
+    sourceProof: { ...large, unsignedMetadata: "local-only metadata" }, jwks });
   assert.ok(packet.parts.length > 1);
   assert.ok(packet.body.length <= 4000);
   assert.deepEqual(JSON.parse(Buffer.from(packet.parts.map(part => part.body.split("\n")[1]).join(""), "base64url")), large);

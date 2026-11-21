@@ -187,7 +187,7 @@ function checkedSourceProof({ sourceProof, jwks, origin, binding, checks }) {
       || proof.qualification?.["deployment-result.json"] !== deploy.evidenceDigest.slice(7)) {
     throw new Error("Release source proof does not match the exact work, candidate and stage receipts.");
   }
-  return `Signed source-to-package proof (same-origin JWKS).\n${JSON.stringify({ proof, signature })}`;
+  return JSON.stringify({ proof, signature });
 }
 
 export function prepareReleaseReview(options) {
@@ -214,19 +214,18 @@ export function prepareReleaseReviewPacket({ inputs, candidateRevision, origin, 
   });
   const fixtures = checks[0].proof.packageFixtures;
   const digestLabel = fixtures?.every(fixture => fixture.passedCheckCount !== undefined) ? "response-body digest " : "";
-  const signed = sourceProof === undefined ? null : checkedSourceProof({ sourceProof, jwks, origin, binding, checks });
+  const signedEnvelope = sourceProof === undefined ? null : checkedSourceProof({ sourceProof, jwks, origin, binding, checks });
   const summary = [
     `Candidate revision: ${candidateRevision}`,
     `Serving revision: ${new URL("/api/version", origin).href}`,
     `Live verification: ${verification.href} (HTTP 200, ${digestLabel}${verificationDigest})`,
   ];
-  if (signed) {
+  if (signedEnvelope) {
     summary.push(`Checks: package verified (${checks[0].proof.files} files), browser ${checks[1].proof.passed}/${checks[1].proof.tests} passed, deploy ready.`);
-    const inline = [...summary, signed].join("\n\n");
+    const inline = [...summary, `Signed source-to-package proof (same-origin JWKS).\n${signedEnvelope}`].join("\n\n");
     if (inline.length <= resultTextLimit) return { body: inline, parts: [] };
-    const raw = JSON.stringify(sourceProof);
-    const proofHash = hash(raw);
-    const chunks = Buffer.from(raw).toString("base64url").match(/.{1,3600}/g);
+    const proofHash = hash(signedEnvelope);
+    const chunks = Buffer.from(signedEnvelope).toString("base64url").match(/.{1,3600}/g);
     const parts = chunks.map((chunk, index) => ({
       id: `release-proof-${proofHash}-${index + 1}`,
       body: `room-source-proof-part/1 ${index + 1}/${chunks.length} sha256:${proofHash}\n${chunk}`,
