@@ -12,10 +12,10 @@ import { resolveMentionTargetsInText } from "../server/mention-lifecycle.mjs";
 const COMMONS_CLAUDE_RECEIVER_KINDS = new Set(["direct", "dm", "mention", "reply"]);
 const receiverAccepts = kind => COMMONS_CLAUDE_RECEIVER_KINDS.has(kind);
 
-function fixture(t, extraMembers = []) {
+function fixture(t, extraMembers = [], representation) {
   const store = new RoomStore(":memory:");
   t.after(() => store.close());
-  store.initialize(initialRoom());
+  store.initialize(initialRoom(), representation ? { representation } : undefined);
   const ownerKey = store.issueAccessKey("commons", "owner");
   const link = (memberId, displayName) => {
     const identity = store.identities.create(displayName);
@@ -37,6 +37,24 @@ function beat(store, identity, hostId = "host-1") {
   return store.agentHeartbeats.heartbeat({
     agentId: identity.identityId, hostId, mode: "wakeable",
     wakeUrl: "https://host.example.test/wake"
+  });
+}
+
+for (const representation of [undefined, "normalized-current-v1"]) {
+  test(`pull fallback stays out of push fan-out (${representation ?? "legacy"})`, t => {
+    const { store, receiver, post, signal } = fixture(t, [], representation);
+    const deliveries = [];
+    store.agentPlugin.deliverWakePing = ({ signal: delivered }) => deliveries.push(["webhook", delivered.messageId]);
+    store.agentHeartbeats.pushNotify = ({ id }) => deliveries.push(["push", id]);
+    const ask = messageId => post({ messageId, toMemberId: "receiver", requestKind: "reply", body: "Check the exact release." });
+
+    assert.deepEqual(ask("pull-only").wakeDelivery, [{ memberId: "receiver", status: "queued" }]);
+    assert.equal(signal(receiver.identity, "pull-only")?.kind, "dm");
+    assert.deepEqual(deliveries, []);
+
+    beat(store, receiver.identity);
+    assert.deepEqual(ask("connected").wakeDelivery, [{ memberId: "receiver", status: "queued" }]);
+    assert.deepEqual(deliveries, [["webhook", "connected"], ["push", "connected"]]);
   });
 }
 
