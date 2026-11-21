@@ -206,7 +206,7 @@ test("the verdict links exact candidate release checks without claiming missing 
   f.mutate(T.WORK_BLOCKED, { reason: "Select exact release", nextAction: "Resubmit" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Candidate pinned" });
   f.mutate(T.WORK_STARTED, {});
-  const completed = f.complete(`Result B\nCandidate revision: ${candidateRevision}`);
+  const completed = f.complete(`Candidate revision: ${candidateRevision}\nResult B`);
   const receipt = f.item().receipt;
   f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: "revision-journey",
     expectedRevision: f.item().revision, completionEventId: completed.event.id, evidenceVersion: receipt.evidenceVersion,
@@ -306,4 +306,38 @@ test("the verdict links exact candidate release checks without claiming missing 
   assert.equal(await conversation.locator("#result-dialog").isVisible(), false);
   t.diagnostic(JSON.stringify({ viewport: 390, tapsFromUpdates: 2, candidate, verdict: "Verification · Passed",
     labels, openedReceiptTargets: destinations, ordinaryConversation: "work card with View result" }));
+
+  const acceptance = f.send("owner", T.MESSAGE_POSTED, {
+    workItemId: "revision-journey", messageId: "accept-exact-release", body: "Accepted the three receipts for this exact release.",
+  });
+  f.send("owner", T.OWNER_DECISION_RECORDED, {
+    workItemId: "revision-journey", expectedRevision: f.item().revision, completionEventId: completed.event.id,
+    evidenceVersion: receipt.evidenceVersion, decision: "approved", reason: "All three candidate checks passed",
+    sourceMessageId: acceptance.event.data.messageId,
+  });
+  for (const viewport of [390, 1280]) {
+    const updates = await f.login("owner");
+    await updates.setViewportSize({ width: viewport, height: 900 });
+    await updates.locator("#topbar-updates").click();
+    await updates.locator("[data-update-filter=all]").click();
+    await updates.waitForFunction(() => document.querySelector("[data-update-filter=all]")?.getAttribute("aria-selected") === "true"
+      && document.querySelector("#updates-status")?.textContent === "");
+    const openRelease = updates.getByRole("button", { name: "Open Accepted release: Revise a short result", exact: true });
+    assert.equal(await openRelease.count(), 1, "Updates All must show the accepted release on its first page");
+    const exactRead = updates.waitForResponse(response => {
+      const url = new URL(response.url());
+      return response.ok() && url.pathname.endsWith("/work-result")
+        && url.searchParams.get("workItemId") === "revision-journey"
+        && url.searchParams.get("completionEventId") === completed.event.id;
+    });
+    await openRelease.click();
+    await exactRead;
+    await updates.locator("#result-release-stages summary").first().waitFor();
+    assert.equal(new URL(updates.url()).hash, "#pr-record/work/revision-journey");
+    assert.equal(await updates.locator("#result-verdict").innerText(), "Verification · Passed");
+    assert.equal(await updates.locator("#result-release-candidate").innerText(), candidate);
+    assert.deepEqual(await updates.locator("#result-release-stages summary").allInnerTexts(), labels);
+    t.diagnostic(JSON.stringify({ viewport, route: "Accepted release in Updates All", actionsFromDefaultUpdates: 2,
+      exactCompletion: completed.event.id, candidate: candidateRevision, labels }));
+  }
 });
