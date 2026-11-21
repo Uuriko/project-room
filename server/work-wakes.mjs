@@ -10,7 +10,7 @@ import { mutedEvent } from "./moderation.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { outsidePrivateWork, selectedWorkRead } from "./work-context.mjs";
 import { recordWakeEvent } from "./wake-metrics.mjs";
-import { isCurrentRoom } from "./current-room-repository.mjs";
+import { isCurrentRoom, readCurrentWakePolicyState } from "./current-room-repository.mjs";
 import { boardClaimId } from "./work-item-board.mjs";
 import { boardPrerequisiteState, nativePrerequisiteState } from "./work-item-state.mjs";
 
@@ -181,8 +181,11 @@ export class WorkWakes {
       if (roomId !== null && row.room_id !== roomId) continue;
       if (!policies.has(row.room_id)) policies.set(row.room_id, { optedIn: this.optedIn(agentId, row.room_id, hostId), members: new Map() });
       const policy = policies.get(row.room_id); if (!policy.optedIn) continue;
-      if (!rooms.has(row.room_id)) rooms.set(row.room_id, this.store.room(row.room_id).state);
-      const state = rooms.get(row.room_id), item = state.workItems[row.work_item_id];
+      if (!rooms.has(row.room_id)) rooms.set(row.room_id, isCurrentRoom(this.db, row.room_id)
+        ? null : this.store.room(row.room_id).state);
+      const state = rooms.get(row.room_id) ?? readCurrentWakePolicyState(this.store, row.room_id,
+        [row.actor_id, row.member_id], { workItemId: row.work_item_id });
+      const item = state.workItems[row.work_item_id];
       const key = JSON.stringify([row.room_id, row.member_id]);
       if (!memberships.has(key)) memberships.set(key, this.store.identities.identityIdForMember(row.room_id, row.member_id));
       if (!policy.members.has(row.member_id)) policy.members.set(row.member_id, { paused: this.store.wakeQueue.pauseStatus(row.room_id, row.member_id), prefs: this.store.attention.prefs(row.room_id, row.member_id) });

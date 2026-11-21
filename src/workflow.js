@@ -370,6 +370,7 @@ export function workResume(item, now = Date.now(), ownerId = null, next = nextWo
 
 export function reviewRuntimeLabel(status) {
   const key = {
+    wake_acknowledged: "review.runtime.acknowledged",
     waiting_receiver: "review.runtime.waiting",
     claimed: "review.runtime.claimed",
     started: "review.runtime.started",

@@ -56,13 +56,15 @@ export function reviewRuntimeFor(store, roomId, work, next, now) {
   }
   if (tableReady(db, "agent_work_wakes") && tableReady(db, "agent_wake_listener_leases")) {
     const agentId = store.identities.identityIdForMember(roomId, next.memberId);
-    const waiting = agentId && db.prepare(`SELECT w.created_at FROM agent_work_wakes w
+    const wake = agentId && db.prepare(`SELECT w.created_at, w.delivered_at,
+      NOT EXISTS(SELECT 1 FROM agent_wake_listener_leases l WHERE l.agent_id=w.agent_id
+        AND l.room_key IN ('',w.room_id) AND l.lease_expires_at>?) AS no_listener
+      FROM agent_work_wakes w
       WHERE w.agent_id=? AND w.room_id=? AND w.event_id=? AND w.member_id=? AND w.work_item_id=? AND w.work_revision=?
-      AND w.delivered_at IS NULL AND w.invalidated_at IS NULL
-      AND NOT EXISTS(SELECT 1 FROM agent_wake_listener_leases l WHERE l.agent_id=w.agent_id
-        AND l.room_key IN ('',w.room_id) AND l.lease_expires_at>?) LIMIT 1`)
-      .get(agentId,roomId,work.receipt.eventId,next.memberId,work.id,work.revision,now);
-    if (waiting) return { status:"waiting_receiver", source:"managed_pull_wake", observedAt:waiting.created_at };
+      AND w.invalidated_at IS NULL LIMIT 1`)
+      .get(now,agentId,roomId,work.receipt.eventId,next.memberId,work.id,work.revision);
+    if (wake?.delivered_at != null) return { status:"wake_acknowledged", source:"managed_pull_wake", observedAt:wake.delivered_at };
+    if (wake?.no_listener) return { status:"waiting_receiver", source:"managed_pull_wake", observedAt:wake.created_at };
   }
   return { status:"unavailable" };
 }
