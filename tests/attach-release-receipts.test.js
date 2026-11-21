@@ -147,6 +147,12 @@ test("release review requires complete exact evidence before its single completi
   assert.deepEqual(JSON.parse(signedBody.split("\n").at(-1)), provenance);
   assert.doesNotMatch(signedBody, /"packageFixtures"/, "full stage receipts stay linked separately");
   assert.match(signedBody, /response-body digest sha256:/);
+  const largeProvenance = signed({ ...proof, scope: "x".repeat(4250 - signedBody.length) });
+  const compactBody = bound(largeProvenance);
+  assert.ok(compactBody.length <= 4096);
+  assert.match(compactBody, /Live verification: \/docs\/agents\/paste \(HTTP 200, sha256:/);
+  assert.deepEqual(JSON.parse(compactBody.split("\n").at(-1)), largeProvenance);
+  assert.throws(() => bound(signed({ ...proof, scope: "x".repeat(4096) })), /exceeds the Room text limit/);
   assert.throws(() => bound(signed({ ...proof, workItemId: "other-work" })), /does not match/);
   assert.throws(() => bound(signed({ ...proof, qualification: { ...qualification, "browser.json": sha } })), /does not match/);
   assert.throws(() => bound({ ...provenance, proof: { ...proof, publicTip: input.deploy.oldRevision } }), /signature/);

@@ -208,7 +208,7 @@ export function prepareReleaseReview({ inputs, candidateRevision, origin, verifi
   const fixtures = checks[0].proof.packageFixtures;
   const digestLabel = fixtures?.every(fixture => fixture.passedCheckCount !== undefined) ? "response-body digest " : "";
   const signed = sourceProof === undefined ? null : checkedSourceProof({ sourceProof, jwks, origin, binding, checks });
-  const body = [
+  let body = [
     `Candidate revision: ${candidateRevision}`,
     `Serving revision: ${new URL("/api/version", origin).href}`,
     `Live verification: ${verification.href} (HTTP 200, ${digestLabel}${verificationDigest})`,
@@ -217,6 +217,14 @@ export function prepareReleaseReview({ inputs, candidateRevision, origin, verifi
       signed
     ] : checks.map(({ stage, summary, proof, evidenceDigest }) => `${stage}: ${summary} ${evidenceDigest}\n${JSON.stringify(proof)}`))
   ].join("\n\n");
+  if (signed && body.length > 4096) {
+    // The signed proof already binds the origin, candidate, and stage checks.
+    body = [
+      `Candidate revision: ${candidateRevision}`,
+      `Live verification: ${verification.pathname} (HTTP 200, ${verificationDigest})`,
+      signed
+    ].join("\n\n");
+  }
   if (body.length > 4096) throw new Error("The prepared release evidence exceeds the Room text limit.");
   return body;
 }
