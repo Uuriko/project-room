@@ -247,9 +247,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-work-criteria").textContent = item.definitionOfDone;
       resultElement("result-work-verification").textContent = finding?.summary ?? "";
       resultElement("result-work-verification-row").hidden = Boolean(pending) || !finding?.summary;
+      const nextLabel = pending?.nextAction ?? next.label;
       resultElement("result-work-next").textContent = next.memberId
-        ? uiText("work.thread.nextFor", { name: memberLabel(next.memberId), action: next.label })
-        : next.label;
+        ? uiText("work.thread.nextFor", { name: memberLabel(next.memberId), action: nextLabel })
+        : nextLabel;
     }
     const workAction = resultElement("result-work-action");
     const action = current && selectedWorkAction(view, item);
