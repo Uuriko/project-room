@@ -15,7 +15,7 @@ export const reviewRuntimeSchema = `
     revision INTEGER NOT NULL, member_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
     observed_at INTEGER NOT NULL,
     PRIMARY KEY (room_id,work_item_id,completion_id,revision,member_id)
-  ) WITHOUT ROWID;`;
+  );`;
 
 const phases = ["claimed", "started", "start_unknown"];
 const fail = (status, code) => { throw Object.assign(new Error(code), { status, code }); };

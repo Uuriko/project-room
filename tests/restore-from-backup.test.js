@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { textVersion } from "../server/text-results.mjs";
 import { exportNdjsonStream, exportNdjsonText, exportTrailer, createTableDigests, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
 import {
   operatorRestoreResponse as beginOperatorRestoreResponse, operatorRestoreFromBackupResponse as beginOperatorRestoreFromBackupResponse, RESTORE_MAX_BYTES, createBackupReplaySession,
@@ -74,6 +75,23 @@ async function backupToKv(t, store, { partBytes = 2048 } = {}) {
 
 test("restore-from-backup replays the KV backup into an empty store, verified", async t => {
   const seeded = seedStore(t);
+  const owner = seeded.issueAccessKey("commons", "owner");
+  const send = (type, data) => seeded.command(owner, "commons", { id: randomUUID(), type, data }).event;
+  const reviewer = "restore-reviewer", workItemId = "restore-review-claim";
+  send(T.MEMBER_ADDED, {memberId:reviewer, displayName:"Restore reviewer", kind:"agent", permissions:["verify"]});
+  const reviewerKey = seeded.issueAccessKey("commons", reviewer);
+  send(T.WORK_PROPOSED, {workItemId, title:"Review backed-up evidence", definitionOfDone:"Verify the exact result.",
+    accountableMemberId:"owner", verifierMemberId:reviewer, mode:"read", independentVerificationRequired:true});
+  send(T.WORK_ACCEPTED, {workItemId, expectedRevision:0});
+  send(T.WORK_STARTED, {workItemId, expectedRevision:1});
+  const body = "Evidence for the restored review.";
+  const message = send(T.MESSAGE_POSTED, {workItemId, messageId:randomUUID(), body});
+  const evidenceVersion = textVersion(body);
+  const completion = send(T.WORK_COMPLETED, {workItemId, expectedRevision:2, evidenceKind:"room_text",
+    evidenceMessageId:message.data.messageId, evidenceMessageEventId:message.id, evidenceVersion,
+    previousCompletionEventId:null, producerId:"owner", summary:body, nextAction:"Review the result."});
+  const claim = seeded.reportReviewRuntime(reviewerKey, "commons", {workItemId, completionEventId:completion.id,
+    evidenceVersion, expectedRevision:3, attemptId:"restore-review-attempt", phase:"claimed"});
   const events = seeded.db.prepare("SELECT count(*) AS n FROM events").get().n;
   const { kv } = await backupToKv(t, seeded);
   const target = openStore(t, "restore-kv-target-");
@@ -88,6 +106,8 @@ test("restore-from-backup replays the KV backup into an empty store, verified", 
   const row = target.db.prepare("SELECT body FROM events WHERE body LIKE '%history that must survive the kv restore%'").get();
   assert.ok(row, "restored history is readable");
   assert.ok(target.room("commons").state.members.agent, "restored members are present");
+  const restored = target.workResult(owner, "commons", workItemId, {completionEventId:completion.id});
+  assert.equal(restored.reviewRuntime.claimObservedAt, claim.observedAt);
 });
 
 test("restore-from-backup gates: unconfigured token 404, bad token 401, missing backup 404, bad key 422, non-empty 409", async t => {
