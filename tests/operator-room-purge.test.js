@@ -148,6 +148,12 @@ describe("MF-2 registry coverage for the G-1 guard set", () => {
     assert.ok(scoped.length >= 30, `expected at least 30 scoped registry tables, got ${scoped.length}`);
     for (const entry of scoped) {
       if (entry.table === "public_work_receipts") continue; // identity-only; see header
+      if (entry.table === "public_work_requests" && entry.namespace === "project-discovery/") {
+        assert.equal(entry.match?.room, undefined);
+        assert.deepEqual(entry.via.room, { parent: "project_offers", parentKey: "offer_id", childKey: "offer_id", scope: "room_id" });
+        assert.equal(guard.has(entry.table), false, "private discoveries are eligible for room purge");
+        continue;
+      }
       assert.ok(guard.has(entry.table), `${entry.table} is a room-deleted money/proof table missing from MONEY_PROOF_TABLES`);
     }
   });
@@ -186,6 +192,21 @@ describe("MF-1 G-1 binds every caller", { concurrency: false }, () => {
 
     assert.ok(store.db.prepare("SELECT 1 FROM rooms WHERE id='money-room'").get(), "room survives both refusals");
     assert.equal(store.db.prepare("SELECT count(*) AS n FROM bounty_journal WHERE room_id='money-room'").get().n, 1);
+  });
+
+  test("a public-work task row blocks purge even with private findings in the same room", t => {
+    const { store } = unitStore(t);
+    store.initialize(createdRoom("mixed-room", "Mixed room"));
+    store.db.prepare("INSERT INTO public_work_requests VALUES (?,?,?,?,?)")
+      .run("project-discovery/mixed-room/offer", "contributor", "finding", "{}", "{}");
+    store.db.prepare(`INSERT INTO public_work_tasks
+      (offer_id,namespace_key,room_id,terms_version,repository_url,repository_ref,files_json,created_at)
+      VALUES (?,?,?,?,?,?,?,?)`).run("offer", "public:offer", "mixed-room", 1, "https://example.org/repository", "main", "[]", store.now());
+    const purge = createOperatorPurge(store);
+    assert.throws(() => purge.plan({ targets: [{ kind: "room", id: "mixed-room" }], reason: "Synthetic qualification" }, randomUUID()),
+      error => error.code === "money_bearing_room" && error.message.includes("public_work_tasks"));
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM public_work_requests").get().n, 1);
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM public_work_tasks").get().n, 1);
   });
 
   test("MF-3: a money row arriving after the plan refuses execute in-transaction as money_bearing_room", t => {

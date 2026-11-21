@@ -185,12 +185,15 @@ test('operator room purge erases only scoped discoveries before an offer ID is r
   assert.equal(removed.status, 200); assert.equal(kept.status, 200);
   const insert = store.db.prepare('INSERT INTO public_work_requests VALUES (?,?,?,?,?)');
   insert.run('project-discovery/reused', outside.identityId, 'older-format', '{}', JSON.stringify(removed.json));
-  insert.run('unrelated-lease', outside.identityId, 'old-lease', '{}', '{}');
+  // This ordinary task operation shares the deleted project's offer ID and contributor.
+  insert.run('reused', outside.identityId, 'old-lease', '{"action":"claim"}', '{"generation":1}');
   const purge = createOperatorPurge(store);
   const plan = purge.plan({ targets: [{ kind: 'room', id: oldRoom }], reason: 'Clean up synthetic room' }, crypto.randomUUID());
   assert.equal(plan.counts.find(entry => entry.table === 'public_work_requests').rows, 2);
   assert.equal(purge.execute({ planId: plan.planId, confirmToken: plan.confirmToken }, crypto.randomUUID()).result, 'executed');
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM public_work_requests').get().n, 2);
+  assert.equal(store.db.prepare('SELECT outcome_json FROM public_work_requests WHERE offer_id=? AND actor_id=? AND request_id=?')
+    .get('reused', outside.identityId, 'old-lease').outcome_json, '{"generation":1}');
   assert.deepEqual((await call(review('kept'), owner)).json.findings, [kept.json]);
   publish('reused');
   assert.deepEqual((await call(review('reused'), owner)).json.findings, []);
