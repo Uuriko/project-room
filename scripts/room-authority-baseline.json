@@ -31,7 +31,7 @@
   "routes/door-funnel.mjs": 1,
   "routes/inbound-hooks.mjs": 2,
   "routes/work-claims.mjs": 1,
-  "store.mjs": 11,
+  "store.mjs": 9,
   "updates.mjs": 1,
   "wake-queue.mjs": 2,
   "work-claim-routes.mjs": 8,
