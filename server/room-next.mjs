@@ -215,7 +215,7 @@ function boundedPage(roomId, source, getPage) {
   }
 }
 
-export function readRoomNext(store, secret, roomId, { source, cursor, view } = {}, readInvitation, { allowPublicReview = false } = {}) {
+export function readRoomNext(store, secret, roomId, { source, cursor, view } = {}, readInvitation, { allowPublicReview = false, boardClaimCommand } = {}) {
   if (!validRoomNextSelection({ source, cursor, view }))
     throw new ServiceError(422, "invalid_arguments", "Choose a source and its returned cursor");
   return store.readTransaction(() => {
@@ -300,6 +300,8 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
           } else if (top) {
             const nextRead = { tool: "room_read_board", arguments: { roomId } };
             packet.nextRead = nextRead;
+            const params = { leaseHours: PICKUP_LEASE_HOURS };
+            const mcp = boardClaimCommand?.(top.item.id, params);
             packet.ifIdle = {
               status: "ready_work",
               claimId: top.item.id,
@@ -311,7 +313,8 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
               claimAction: {
                 method: "POST",
                 endpoint: `/api/rooms/${roomId}/work-claims/${top.item.id}/claim`,
-                params: { leaseHours: PICKUP_LEASE_HOURS }
+                params,
+                ...(mcp ? { mcp } : {})
               }
             };
           } else if (readInvitation) {

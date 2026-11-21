@@ -36,7 +36,7 @@ import { BOND_SCOPES } from "./bonds.mjs";
 import { EscrowError, canonicalLane, ACCEPT_ATTESTATION_CONTRACT } from "./bounty-escrow.mjs";
 import { buildActivationPack, briefActivationPack } from "./room-activation-pack.mjs";
 import { readComposedRoomContext } from "./orient.mjs";
-import { BOARD_CLAIM_TOOLS, validBoardClaimArgs, runBoardClaimTool, boardClaimToolsEnabled } from "./board-claim-tools.mjs";
+import { BOARD_CLAIM_TOOLS, BOARD_WORK_CLAIM_TOOL, validBoardClaimArgs, runBoardClaimTool, boardClaimToolsEnabled } from "./board-claim-tools.mjs";
 import { handleWorkClaims } from "./work-claim-routes.mjs";
 import { handoffPacketEnabled, buildHandoffPacket, collectDecisions, DECISION_TYPES, decisionWindowStart } from "./handoff-packet.mjs";
 import { memoizeBoardList } from "./available-work.mjs";
@@ -665,7 +665,14 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
   if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
     () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
-    { allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes) }));
+    { allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes),
+      boardClaimCommand: (claimId, params) => {
+        if (!boardClaimToolsEnabled() || oauthPrincipal && !mcpOAuthToolAllowed(BOARD_WORK_CLAIM_TOOL, oauthPrincipal.scopes)
+          || !mcpKeyGrantsScope(store, secret, "rooms:write")) return null;
+        const definition = HOSTED_TOOLS.find(entry => entry.name === BOARD_WORK_CLAIM_TOOL);
+        if (!definition || catalogCallDenial(resolveCatalogAgent(store, identity), definition)) return null;
+        return { tool: BOARD_WORK_CLAIM_TOOL, arguments: { roomId: args.roomId, claimId, op: "take", ...params } };
+      } }));
   if (BOARD_CLAIM_TOOLS.includes(name)) return boardClaimCall(store, secret, name, args);
   if (name === 'room_wait_for_attention') return waitForAttention(store, secret, args.roomId, {...args, signal});
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId, oauthIdentity: /^(oat|iat)_/.test(secret ?? "") ? identity : null, claimSec: args.claimSec ?? 0 });
