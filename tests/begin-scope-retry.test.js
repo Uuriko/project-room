@@ -282,6 +282,23 @@ test("hosted Begin recovers a full scoped chain and does not reuse a scoped acce
   assert.equal(f.store.room("commons").state.workItems[workItemId].revision, 3);
 });
 
+test("hosted Begin can still resume an uncommitted pre-upgrade accept stage", async t => {
+  const { f } = await httpRoom(t);
+  const key = f.keys.owner;
+  const workItemId = "legacy-scoped-accept";
+  f.store.command(key, "commons", { id: workItemId, type: T.WORK_PROPOSED, data: {
+    workItemId, title: "Recover a pinned legacy stage", definitionOfDone: "Preserve the old operation ID",
+    accountableMemberId: "owner", mode: "write", independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
+  const expectedRevision = 0;
+  const invocationRequestId = beginRequestId(workItemId, "room_accept_work", expectedRevision);
+  const args = { roomId: "commons", workItemId, expectedRevision, invocationRequestId, ...scopeA };
+  const retry = (await callHostedStdioTool(f.store, key, "room_begin_work", args)).value;
+  assert.equal(retry.working, true);
+  assert.equal(retry.confirmed[0].requestId, invocationRequestId);
+  assert.equal(f.store.room("commons").state.workItems[workItemId].revision, 3);
+});
+
 test("a refused start is not restarted at a later revision under a new id", async t => {
   const { f, client, identity } = await httpRoom(t);
   const read = () => client.workContext("scope-repro");

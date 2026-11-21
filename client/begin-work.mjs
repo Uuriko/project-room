@@ -314,6 +314,14 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
       return stale(context);
     }
     if (!plan.stage) return readResult(context, plan, confirmed);
+    // Older clients can already hold the unscoped accept ID. Preserve that
+    // explicitly pinned operation at its original revision across upgrades.
+    if (pending && plan.stage.action === "room_accept_work" && context.work.mode === "write"
+        && (requiredRevision === undefined || requiredRevision === context.work.revision)
+        && pending.requestId === beginRequestId(context.work.id, plan.stage.action, context.work.revision)) {
+      plan.stage.requestId = pending.requestId;
+      plan.stage.args.requestId = pending.requestId;
+    }
     if (pending && plan.stage.requestId !== pending.requestId) {
       let claim = claimLanded(context.work, scope, pending);
       let accept = null;
