@@ -100,7 +100,11 @@ test('authenticated member and listener identity must agree', async t => {
     error => error.status === 403 && error.code === 'listener_identity_mismatch');
 });
 
-test('an acknowledged backlog entry and a delayed receipt leave fresh and unrelated intake usable', async t => {
+for (const correctedDuringAck of [false, true]) test(
+  correctedDuringAck
+    ? 'a correction during early acknowledgment returns one durable receipt for the latest context'
+    : 'an acknowledged backlog entry and a delayed receipt leave fresh and unrelated intake usable',
+  async t => {
   const { fixture, connection, token } = await setup(t);
   const { store } = fixture.f;
   const messageId = 'pre-worker-request';
@@ -131,16 +135,36 @@ test('an acknowledged backlog entry and a delayed receipt leave fresh and unrela
   });
   const observations = [];
   const bridge = new Bridge({ connection, persistSessions: false, minPollIntervalMs: 0, host: {}, observeStage: event => observations.push(event) });
-  const calls = [], selected = [];
+  const calls = [], selected = [], refused = [];
+  let latestContext = correction.event.id;
+  let rewrite = correctedDuringAck;
   const requestContext = bridge.room.requestContext.bind(bridge.room);
   bridge.room.requestContext = (id, ...rest) => { selected.push(id); return requestContext(id, ...rest); };
   let releaseReceipt;
   const delayed = new Promise(resolve => { releaseReceipt = resolve; });
   const request = bridge.room.request.bind(bridge.room);
   bridge.room.request = async (path, options) => {
-    if (options?.body?.type === 'reply_request.progressed') await delayed;
-    const result = await request(path, options);
-    if (options?.body?.type === 'reply_request.progressed') {
+    const isAck = options?.body?.type === 'reply_request.progressed';
+    if (isAck) {
+      await delayed;
+      if (rewrite) {
+        rewrite = false;
+        const newer = store.command(fixture.ownerKey, 'commons', {
+          id: 'correct-during-first-ack', type: 'message.posted',
+          data: { messageId: 'newer-correction', toMemberId: connection.memberId, replyToId: messageId,
+            body: 'Use this newer correction.' }
+        });
+        latestContext = newer.event.id;
+      }
+    }
+    let result;
+    try { result = await request(path, options); }
+    catch (error) {
+      if (isAck && error.code === 'request_context_changed')
+        refused.push({ id: options.body.id, context: options.body.data.ifUnacknowledgedContextEventId });
+      throw error;
+    }
+    if (isAck) {
       calls.push({ id: options.body.id, context: options.body.data.ifUnacknowledgedContextEventId, duplicate: result.duplicate });
       if (calls.length === 1) throw new RoomError(0, 'network', 'Lost first response');
     }
@@ -167,7 +191,13 @@ test('an acknowledged backlog entry and a delayed receipt leave fresh and unrela
   assert.equal(store.replyRequests.selected(connection.identitySecret, 'commons', messageId).request.progressState, 'acknowledged');
   assert.deepEqual(calls.map(call => call.duplicate), [false, true]);
   assert.equal(calls[0].id, calls[1].id);
-  assert.ok(calls.every(call => call.context === correction.event.id));
+  assert.ok(calls.every(call => call.context === latestContext));
+  assert.equal(refused.length, Number(correctedDuringAck));
+  assert.deepEqual(selected, correctedDuringAck ? [messageId, messageId] : [messageId]);
+  if (correctedDuringAck) {
+    assert.equal(refused[0].context, correction.event.id);
+    assert.notEqual(refused[0].id, calls[0].id);
+  }
   const recorded = observations.filter(event => event.stage === 'formal_ack_recorded');
   assert.equal(recorded.length, 1);
   assert.ok(recorded[0].elapsedMs >= 0);
