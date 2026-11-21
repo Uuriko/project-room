@@ -116,6 +116,9 @@ const CLAIM_VALIDATE_BODY = Object.freeze({ required: true, content: { "applicat
 
 const queryParam = (name, schema, extra = {}) => Object.freeze({ name, in: "query", schema, ...extra });
 const ROOM_EVENTS_QUERY = Object.freeze([
+  queryParam("operationId", { type: "string", minLength: 1, maxLength: 128 }, {
+    description: "Read one caller-owned operation receipt. Use alone or with limit=1 for compatibility with older servers."
+  }),
   queryParam("after", { type: "integer", minimum: 0, default: 0 }, { description: "Sequence strictly before the page. Pass the previous response's next." }),
   queryParam("limit", { type: "integer", minimum: 1, maximum: 100, default: 100 }),
   queryParam("actor", { type: "string" }, { description: "Only events by this member." }),
@@ -126,6 +129,35 @@ const ROOM_EVENTS_QUERY = Object.freeze([
   queryParam("compact", { type: "string", enum: ["1", "0", "true", "false"] }, { description: "1 or true drops envelope fields a poller does not act on." }),
   queryParam("tail", { type: "integer", minimum: 1, maximum: 200 }, { description: "Newest N events, sent alone. Combining tail with other event filters is 422." }),
 ]);
+const operationReceiptVariant = status => {
+  const properties = {
+    contractVersion: { type: "integer", enum: [1] },
+    roomId: { type: "string" }, viewerId: { type: "string" }, operationId: { type: "string" },
+    checkedThrough: { type: "integer", minimum: 0 }, status: { type: "string", enum: [status] },
+    currentStateVerified: { type: "boolean", enum: [false] },
+    ...(status === "recorded" ? {
+      eventId: { type: "string" }, eventType: { type: "string" }, sequence: { type: "integer", minimum: 1 }
+    } : {}),
+  };
+  return { type: "object", additionalProperties: false, required: Object.keys(properties), properties };
+};
+const ROOM_EVENTS_RESPONSES = {
+  "200": {
+    description: "An event page, or exact operation metadata for the current member.",
+    content: { "application/json": { schema: { oneOf: [
+      { type: "object", required: ["events", "next", "hasMore"], properties: {
+        events: { type: "array", items: { type: "object" } },
+        next: { type: "integer" }, hasMore: { type: "boolean" },
+      } },
+      operationReceiptVariant("recorded"),
+      operationReceiptVariant("not_recorded"),
+    ] } } },
+  },
+  "422": {
+    description: "invalid_operation_selection for an invalid, repeated or mixed operationId selection. invalid_event_cursor for invalid event-window parameters.",
+    content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } },
+  },
+};
 const NEEDS_ME_QUERY = Object.freeze([
   queryParam("roomId", { type: "string" }, { description: "Optional. Scope the read to one room." }),
 ]);
@@ -326,7 +358,7 @@ route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "De
   // truth is docs/openapi.yaml and the handlers in server/http.mjs.
   route("/api/rooms/{roomId}/events", ["GET"], "room-member",
     "Read the room event log after a sequence. Pass the previous response's next back as after. afterSequence is refused (422 invalid_event_cursor). tail is newest-N and must be sent alone.",
-    "getRoomEvents", { query: ROOM_EVENTS_QUERY }),
+    "getRoomEvents", { query: ROOM_EVENTS_QUERY, responseOverrides: { GET: ROOM_EVENTS_RESPONSES } }),
   route("/api/rooms/{roomId}/commands", ["POST"], "room-member",
     "Append one event command. Body is {id, type, data} plus optional causationId. The same id and input returns the original receipt (200); a different input is 409. First commit is 201.",
     "postRoomCommand",
@@ -440,7 +472,7 @@ function operationResponses(entry, method) {
       : { $ref: `#/components/responses/${name}` };
   }
   if (readsJsonBody(entry, method)) errors["415"] = { $ref: "#/components/responses/UnsupportedMediaType" };
-  return { ...success, ...errors };
+  return { ...success, ...errors, ...entry.responseOverrides?.[method] };
 }
 
 const publicWorkSchemas = {
