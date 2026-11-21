@@ -28,3 +28,11 @@ test('default response-enabled path still loads the same identity and constructs
 test('direct run rejects invalid receiver policy before accessing any saved connection',async()=>{
  await assert.rejects(run({receiverPolicy:'unknown'},{env:{ROOM_ACP_HOME:'/does-not-exist'},print(){}}),/respond.*disabled/);
 });
+test('formal-only is opt-in for a responding run and reaches the bridge',async t=>{
+ const f=fixture(t),options=parseArgs(['run','--formal-only']);
+ assert.equal(options.formalOnly,true);
+ assert.throws(()=>parseArgs(['run','--receiver-policy','disabled','--formal-only']),/only to run/);
+ assert.throws(()=>parseArgs(['doctor','--formal-only']),/only to run/);
+ assert.equal(await run(options,{env:f.env,print(){},candidate:{label:'synthetic adapter'},
+   onBridge:bridge=>{assert.equal(bridge.formalOnly,true);bridge.run=async()=> 'stopped';}}),0);
+});
