@@ -368,7 +368,11 @@ export function workResume(item, now = Date.now(), ownerId = null, next = nextWo
 }
 
 
-export function reviewRuntimeLabel(status) {
+export function reviewRuntimeLabel(status, webhook) {
+  if (status === "unavailable") {
+    if (webhook === "delivered") return uiText("review.runtime.webhookDelivered");
+    if (webhook === "queued") return uiText("review.runtime.webhookQueued");
+  }
   const key = {
     wake_acknowledged: "review.runtime.acknowledged",
     waiting_receiver: "review.runtime.waiting",

@@ -167,6 +167,27 @@ test("native review shows exact text and leaves human approval pending", { timeo
   assert.equal(f.item().verification.result, "pass"); assert.equal(f.item().verification.independenceConfirmed, true); assert.equal(f.item().decision, null);
 });
 
+test("exact result shows review delivery separately from reviewer activity", { timeout: 25000 }, async t => {
+  const f = await setup(t, { review: true, mobile: true });
+  let reviewRuntime = { status: "unavailable", webhook: "queued" };
+  await f.page.route("**/work-result?**", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), reviewRuntime } });
+  });
+  const open = async label => {
+    await selectResultWork(f);
+    await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+    await f.page.waitForFunction(text => document.querySelector("#result-status")?.textContent.includes(text), label);
+    assert.equal(f.item().verification, null);
+    await f.page.locator("#close-result").click();
+  };
+  await open("Review notification queued");
+  reviewRuntime = { status: "unavailable", webhook: "delivered" };
+  await f.page.reload({ waitUntil: "domcontentloaded" });
+  await f.page.locator("#main").waitFor({ state: "visible" });
+  await open("Review notification delivered. Start unconfirmed.");
+});
+
 // NR-B reflow owner: existing 320px composer/layout tests never open the
 // native reader and review form, and this file's prior review ran at 1440px.
 // A dialog min-width, unbroken result token, or lost return target can break
