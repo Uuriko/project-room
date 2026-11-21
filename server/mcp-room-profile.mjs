@@ -85,7 +85,7 @@ const object = value => value !== null && typeof value === "object" && !Array.is
 
 const AUTH_INSTRUCTIONS = [
   "Use Project Room through tools in your current host. See tools/list for commands available to this connection.",
-  "On a wake, follow data.nextRead directly. Otherwise use room_next(roomId,view=pickup) when offered. Use the saved room ID, or discover it with room_check_access if unknown. Follow continuation pages even when empty.",
+  "On a wake, follow data.nextRead directly. Otherwise use room_next(roomId,view=pickup) when offered. Use the saved room ID, or discover it with room_check_access if unknown. Follow continuation pages even when empty. If nextRead is null, follow ifIdle.discoveryReview.nextRead or ifIdle.investigation.nextRead.",
   "If room_next is unavailable, use room_list_work(focus=needs_me), or room_list_requests(direction=incoming,status=open) for formal requests only.",
   "Follow the selected item's nextRead arguments as returned. For revise, read the correction in the row and call its brief nextRead unchanged. Request discussion only if that correction and brief are insufficient. Resolve the blocker before room_begin_work.",
   "Work: room_read_work(brief=true), then follow its current continuation if the tool is available. Apply host authority checks before external work.",
@@ -634,7 +634,8 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
   if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
     () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
-    { discoveryOrigin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes) }));
+    { discoveryOrigin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, allowInvestigation: mcpKeyGrantsScope(store, secret, "rooms:write")
+      && (!oauthPrincipal || mcpOAuthToolAllowed("room_post_message", oauthPrincipal.scopes)), allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes) }));
   if (name === "room_read_project_discoveries") {
     const member = store.authenticate(secret, args.roomId).member;
     return withContentTrust(reviewerProjectDiscoveries(store, args.roomId, args.offerId, new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, member.id,

@@ -30,7 +30,7 @@ const boardClaimToolsOn = () => /^(1|true|on)$/i.test(flagEnv("ROOM_BOARD_CLAIM_
 // filtering this table, so core entry order IS the core catalog order);
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
-  { name: "room_next", core: true, blurb: "Use view:pickup for one nextRead. Follow partial pages. Public review tools: focus=review.", focus: ["common"] },
+  { name: "room_next", core: true, blurb: "Use view:pickup. Follow nextRead, then ifIdle.discoveryReview.nextRead or ifIdle.investigation.nextRead when dry. Continue partial pages.", focus: ["common"] },
   { name: "room_receipt", core: true, blurb: "Read your operation receipt by exact ID. No write.", focus: ["common", "work"] },
   { name: "room_needs_me", core: true, blurb: "Read cross-room attention. Pass since unchanged while hasMore, even when empty.", focus: ["common"] },
   // Flag ROOM_BOARD_CLAIM_TOOLS (off by default): core when on, so a default
