@@ -21,6 +21,7 @@ import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { edgeDoorApiPath } from "../src/service-origin.js";
 import { CONTENT_TRUST, markIfOther, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 import { validRoomDigest } from "./room-digest.mjs";
+import { validReceiverRouteScope } from "../src/reply-requests.js";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -418,10 +419,11 @@ export class RoomAgentClient {
   }
   // Every service request shares one fetch posture: redirects are errors (a
   // redirect could carry the bearer elsewhere), no ambient credentials, and a
-  // 15s deadline that a caller-supplied signal narrows but never removes.
-  #fetchRaw(path, { method = "GET", headers = {}, body, signal } = {}) {
+  // bounded deadline that a caller-supplied signal can narrow. Ordinary
+  // requests use 15s. The stream has a separate bounded wait.
+  #fetchRaw(path, { method = "GET", headers = {}, body, signal, timeoutMs = 15000 } = {}) {
     return this.#fetch(`${this.#origin}${edgeDoorApiPath(this.#origin, path)}`, {
-      method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
       headers: { Authorization: `Bearer ${this.#token}`, ...headers },
       ...(body === undefined ? {} : { body })
     });
@@ -547,23 +549,27 @@ export class RoomAgentClient {
   }
   // A wake-up hint only. Consumers re-read their authorized queue before acting;
   // no streamed message body is used as executable input or saved as history.
-  async waitForChange(after, { signal, timeoutMs = 10000 } = {}) {
-    if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000)
+  async waitForChange(after, { signal, timeoutMs = 10000, requestHints = false, reviewWorkItemId, receiverScope } = {}) {
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000
+      || receiverScope !== undefined && (!requestHints || !validReceiverRouteScope(receiverScope))
+      || reviewWorkItemId !== undefined && (!validId(reviewWorkItemId) || requestHints))
       throw new Error("Choose a valid stream cursor and timeout");
     const deadline = AbortSignal.timeout(timeoutMs), controller = new AbortController();
     const stop = AbortSignal.any([controller.signal, deadline, ...(signal ? [signal] : [])]);
-    let reader;
+    let reader, through = after;
+    const idle = () => requestHints || reviewWorkItemId !== undefined ? { changed: false, through } : { changed: false };
     try {
       await this.checkConnection({ signal: stop });
       const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/stream?after=${after}`,
-        { signal: stop, headers: { Accept: "text/event-stream" } });
+        { signal: stop, timeoutMs: timeoutMs + 1000, headers: { Accept: "text/event-stream",
+          ...(receiverScope ? { "X-Project-Room-Receiver-Scope": JSON.stringify(receiverScope) } : {}) } });
       if (!response.ok) throw this.#requestError(response, null, "Room stream unavailable");
       if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body)
         throw new RoomClientError(200, "invalid_response", "Room returned an invalid event stream");
       reader = response.body.getReader();
       const decoder = new TextDecoder(); let buffer = "";
       while (true) {
-        const chunk = await reader.read(); if (chunk.done) return { changed: false };
+        const chunk = await reader.read(); if (chunk.done) return idle();
         buffer += decoder.decode(chunk.value, { stream: true });
         if (buffer.length > 262144) throw new RoomClientError(200, "invalid_response", "Room stream frame exceeds its limit");
         let boundary;
@@ -574,13 +580,33 @@ export class RoomAgentClient {
           if (kind === "stream_lagging") return { changed: true };
           if (kind !== "room-event") continue;
           const id = /^id: ?([0-9]+)\r?$/m.exec(frame)?.[1], sequence = Number(id);
-          if (!id || !Number.isSafeInteger(sequence) || sequence <= after)
+          if (!id || !Number.isSafeInteger(sequence) || sequence <= through)
             throw new RoomClientError(200, "invalid_response", "Room returned an invalid stream cursor");
-          return { changed: true, sequence };
+          if (!requestHints && reviewWorkItemId === undefined) return { changed: true, sequence };
+          const data = /^data: ?(.+)\r?$/m.exec(frame)?.[1];
+          let row;
+          try { row = JSON.parse(data); } catch { return { changed: true }; }
+          const event = row?.event, message = event?.data;
+          if (row?.sequence !== sequence || event?.roomId !== this.#roomId || !validId(event.id)
+            || !validId(event.actorId) || typeof event.type !== "string") return { changed: true };
+          through = sequence;
+          if (reviewWorkItemId !== undefined) {
+            if (message?.workItemId !== reviewWorkItemId || !["work.completed", "verification.recorded", "work.superseded"].includes(event.type)) continue;
+            return { changed: true, sequence, reviewHint: {
+              eventId: event.id, recordedAt: event.at, observedAt: new Date().toISOString()
+            } };
+          }
+          if (event.type !== "message.posted" || message?.requestKind !== "reply") continue;
+          if (!validId(message.toMemberId) || !validId(message.messageId)
+            || message.workItemId != null && !validId(message.workItemId)) return { changed: true };
+          if (message.toMemberId !== this.#memberId || event.actorId === this.#memberId) continue;
+          return { changed: true, sequence, requestHint: { id: message.messageId, openingEventId: event.id,
+            requesterId: event.actorId, recipientId: message.toMemberId, workItemId: message.workItemId ?? null,
+            observedAt: new Date().toISOString() } };
         }
       }
     } catch (error) {
-      if (deadline.aborted && !signal?.aborted) return { changed: false };
+      if (deadline.aborted && !signal?.aborted) return idle();
       throw error;
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }
@@ -753,10 +779,36 @@ export class RoomAgentClient {
     return value;
   }
   replyRequests(options = {}) { const { signal, ...args } = options; return this.replyRead("room_list_requests", args, { signal }); }
+  async requestRoute(toMemberId, { workItemId, requestMessageId, signal } = {}) {
+    if (!validId(toMemberId) || workItemId !== undefined && !validId(workItemId)
+      || requestMessageId !== undefined && !validId(requestMessageId)) throw new Error("Choose an exact recipient and optional work or request");
+    const query = new URLSearchParams({ toMemberId,
+      ...(workItemId === undefined ? {} : { workItemId }),
+      ...(requestMessageId === undefined ? {} : { requestMessageId }) });
+    const result = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/reply-route?${query}`, undefined, signal);
+    if (result?.contractVersion !== 1 || result.roomId !== this.#roomId || result.requesterId !== this.#memberId
+      || result.recipientId !== toMemberId || result.workItemId !== (workItemId ?? null)
+      || result.requestMessageId !== (requestMessageId ?? null)
+      || !["matches_scope", "outside_scope", "unknown"].includes(result.status) || result.liveness !== "unknown")
+      throw new RoomClientError(200, "invalid_response", "Request route did not match the selected scope");
+    return result;
+  }
   replyContext(requestMessageId, options = {}) {
     const { signal, ...args } = options;
     if (Object.hasOwn(args, "requestMessageId")) throw new Error("Choose the request once");
     return this.replyRead("room_read_request", { ...args, requestMessageId }, { signal });
+  }
+  // A directed stream hint already follows a connection check. The service
+  // authorizes the selected read and the packet must name this exact viewer.
+  // Keep this path read-only and reject any context with a different principal.
+  async replyContextForHint(requestMessageId, { signal } = {}) {
+    const name = "room_read_request", args = { requestMessageId, view: "compact" };
+    if (!this.#memberId || !validReplyArguments(name, args)) throw new Error("Choose an exact request and configured agent");
+    const path = `/api/rooms/${encodeURIComponent(this.#roomId)}${replyRoute(name)}?${new URLSearchParams(args)}`;
+    const packet = validateReplyRead(await this.#fetchPath(path, undefined, signal), { name, args, roomId: this.#roomId });
+    if (packet.viewerId !== this.#memberId || packet.request.recipientId !== this.#memberId)
+      throw new RoomClientError(200, "identity_mismatch", "Request context does not belong to this receiver");
+    return packet;
   }
   replyHistory(options = {}) { const { signal, ...args } = options; return this.replyRead("room_request_history", args, { signal }); }
   replyAction(name, args, options = {}) {

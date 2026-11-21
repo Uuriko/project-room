@@ -6,6 +6,7 @@ import { readDirectConversations } from "../conversation-sync.mjs";
 // the legacy room read: room credential, session fence, bearer room scope,
 // read rate, rooms:read for API keys.
 import { validId } from "../../src/events.js";
+import { checkReceiverRoute } from "../../src/reply-requests.js";
 import { buildRoomBootstrap } from "../room-bootstrap.mjs";
 import { readMessagePage, SNAPSHOT_WINDOW_MESSAGES } from "../snapshot-window.mjs";
 
@@ -24,7 +25,7 @@ function authorizeRoomRead(ctx) {
       scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
     if (!granted) ctx.reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
   }
-  return { selected, fence, roomId };
+  return { selected, fence, roomId, auth };
 }
 
 export function readRoomNeedsMe(ctx){
@@ -37,6 +38,40 @@ export function readRoomNeedsMe(ctx){
 
 function singleQuery(params, allowed) {
   return [...params.keys()].some(key => !allowed.includes(key) || params.getAll(key).length !== 1);
+}
+
+export function readRequestRoute(ctx) {
+  const { selected, fence, roomId, auth } = authorizeRoomRead(ctx);
+  const { url, store, reject, json, res, streams } = ctx;
+  const params = url.searchParams;
+  const recipientId = params.get("toMemberId"), workItemId = params.get("workItemId"), id = params.get("requestMessageId");
+  if (singleQuery(params, ["toMemberId", "workItemId", "requestMessageId", "auth"])
+    || !validId(recipientId) || recipientId === auth.member.id || workItemId !== null && !validId(workItemId)
+    || id !== null && !validId(id))
+    reject(422, "invalid_request_route", "Choose an exact recipient and optional work or request");
+  let routeWorkItemId = workItemId;
+  if (id !== null) {
+    const { request } = store.replyRequests.selected(selected.token, roomId, id, { view: "compact", limit: 1, expectedSessionBinding: fence });
+    if (request.requesterId !== auth.member.id || request.recipientId !== recipientId
+      || workItemId !== null && request.workItemId !== workItemId)
+      reject(422, "invalid_request_route", "Use the original requester, recipient and linked work");
+    routeWorkItemId = request.workItemId;
+  } else if (workItemId !== null) {
+    store.workContext(selected.token, roomId, workItemId, { expectedSessionBinding: fence });
+  }
+  const request = { requesterId: auth.member.id, workItemId: routeWorkItemId, id };
+  let status = "unknown";
+  for (const entry of streams) {
+    if (entry.roomId !== roomId || entry.memberId !== recipientId || !entry.receiverScope
+      || entry.res.destroyed || entry.res.writableEnded) continue;
+    if (checkReceiverRoute(entry.receiverScope, request) === "matches_scope") {
+      status = "matches_scope";
+      break;
+    }
+    status = "outside_scope";
+  }
+  return json(res, 200, { contractVersion: 1, roomId, requesterId: request.requesterId, recipientId,
+    workItemId, requestMessageId: id, status, liveness: "unknown" });
 }
 
 export function readRoomBootstrap(ctx) {
@@ -91,6 +126,12 @@ export function readRoomWorkList(ctx) {
 const roomIdParam = { type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } };
 
 export const ROOM_WINDOW_ROUTES = Object.freeze([
+  Object.freeze({
+    id: "reply-route", method: "GET", path: "/api/rooms/{roomId}/reply-route",
+    parity: "exempt:host stream scope preflight for the SDK and local reply CLI",
+    auth: "room", capability: null, scope: "room", handler: readRequestRoute,
+    schema: { params: roomIdParam, response: { type: "object" } }, events: []
+  }),
   Object.freeze({id:'room-needs-me',method:'GET',path:'/api/rooms/{roomId}/needs-me',parity:'mcp:room_needs_me',auth:'room',capability:null,scope:'room',handler:readRoomNeedsMe,schema:{params:roomIdParam,query:{type:'object',properties:{cursor:{type:'string',minLength:1,maxLength:4096}}},response:{type:'object'}},events:[]}),
   Object.freeze({
     id: "room-work-list", method: "GET", path: "/api/rooms/{roomId}/work-list",
