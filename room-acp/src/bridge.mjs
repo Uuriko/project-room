@@ -13,7 +13,7 @@ import { AgentHost } from "./agent-host.mjs";
 import { ThreadQueue } from "./queue.mjs";
 import { buildPrompt, buildClaimPrompt, buildFormalPrompt } from "./prompt.mjs";
 import { readCompleteRequest, prepareFormalDelivery, deliverFormal } from './formal-delivery.mjs';
-import { reviewBinding, readReview, reviewOutput, deliverReview, recordedReview, reviewRepairable, REVIEW_REPAIR_PROMPT } from './review-wake.mjs';
+import { reviewBinding, readReview, reviewOutput, deliverReview, recordedReview, reviewRepairable, explicitVerdict, REVIEW_REPAIR_PROMPT } from './review-wake.mjs';
 import { renderTurn } from "./render.mjs";
 import { SessionMap } from "./sessions.mjs";
 import { PermissionBroker, decisionOf, DEFAULT_PERMISSION_TIMEOUT_MS } from "./permission.mjs";
@@ -611,10 +611,15 @@ export class Bridge {
         // Nothing has been submitted for this receipt yet. Allow one durable,
         // same-session format repair; explicit pending still parks.
         if (!output && !receipt.repaired && reviewRepairable(recorder,stopReason) && !this.controller.signal.aborted) {
+          const stated = explicitVerdict(recorder);
           this.reviewReceipts.save(key,receipt = {...receipt,repaired:true});
           ({recorder, stopReason} = await this.host.prompt(threadKey,REVIEW_REPAIR_PROMPT,{sessionId}));
           this.stats.turns++;
           output = reviewOutput(recorder,stopReason);
+          if (output && stated && output.result !== stated) {
+            this.log(`exact review ${binding.workItemId} repair reversed an explicit ${stated}; not filed`);
+            output = null;
+          }
         }
         if (!output) {
           this.reviewReceipts.save(key,{...receipt,phase:'needs_review',body:'No supported final verdict. Use the exact Work Thread action.'});

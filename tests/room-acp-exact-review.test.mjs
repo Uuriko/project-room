@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {randomUUID, createHash} from 'node:crypto';
 import {rmSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {createAcceptanceFixture} from '../scripts/acceptance-fixture.mjs';
@@ -8,7 +8,7 @@ import {createRoomServer} from '../server/http.mjs';
 import {textVersion} from '../server/text-results.mjs';
 import {Bridge} from '../room-acp/src/bridge.mjs';
 import {RoomError} from '../room-acp/src/room.mjs';
-import {reviewOutput, reviewRepairable, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
+import {reviewOutput, reviewRepairable, explicitVerdict, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
 import {linkWithProof} from './helpers/link-with-proof.mjs';
 
 async function setup(t, {respondTo, pending = false, nextAction, replies = []} = {}) {
@@ -81,7 +81,7 @@ async function setup(t, {respondTo, pending = false, nextAction, replies = []} =
     assert.equal(value?.isError ?? false,false);
     return value.structuredContent;
   };
-  return {bridge,wake,counts,prompts,make,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer};
+  return {bridge,wake,counts,prompts,make,receiptPhase:()=>bridge.reviewReceipts.read(bridge.reviewReceipts.key(wake.signalId))?.phase,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer};
 }
 
 test('an ACP failed review hands the exact reproducer to the producer with one protected wake read',async t=>{
@@ -218,6 +218,24 @@ test('an already settled review is checked without allocating a model session',a
 const malformed6411 = readFileSync(new URL('./fixtures/room-acp-malformed-review-6411.txt', import.meta.url),'utf8');
 const repaired6411 = JSON.stringify({result:'fail',summary:'Head a0fccc9 checked from source: lost-response and race paths hold; a paused member can still have an ACP turn started after the lease, and no test covers it.'});
 
+test('the recorded #6411 reply is byte-exact and states one explicit fail with an over-limit summary',()=>{
+  // Pinned to the fixture as first published on this branch (6de84bdd3).
+  assert.equal(createHash('sha256').update(malformed6411).digest('hex'),'539d092df623d56806d4c816b184eb6289da7a36dc62d813daa83a420fb72f0e');
+  const json = JSON.parse(malformed6411.slice(malformed6411.indexOf('{')));
+  assert.equal(json.result,'fail');
+  assert.equal(json.summary.length > 1500,true);
+  assert.equal(explicitVerdict({text:malformed6411}),'fail');
+  assert.equal(explicitVerdict({text:'Looks fine to me.'}),null);
+});
+
+test('the initial review prompt states the summary and nextAction limits',async t=>{
+  const f = await setup(t);
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.match(f.prompts[0].prompt[0].text,/summary at most 1500 characters/);
+  assert.match(f.prompts[0].prompt[0].text,/nextAction at most 1000 characters/);
+});
+
 test('a recorded malformed review is unsupported but repairable; explicit pending and stopped turns are not',()=>{
   assert.equal(reviewOutput({text:malformed6411},'end_turn'),null);
   assert.equal(reviewRepairable({text:malformed6411},'end_turn'),true);
@@ -226,6 +244,8 @@ test('a recorded malformed review is unsupported but repairable; explicit pendin
   assert.equal(reviewRepairable({text:'I could not check it.\n\n{"result": "pending", "summary": "No access."}'},'end_turn'),false);
   assert.equal(reviewRepairable({text:'  '},'end_turn'),false);
   assert.equal(reviewRepairable({text:repaired6411},'end_turn'),false);
+  // Both explicit verdicts in one reply is ambiguous: park, do not repair.
+  assert.equal(reviewRepairable({text:'First {"result":"pass","summary":"a"} then {"result":"fail","summary":"b"}'},'end_turn'),false);
 });
 
 test('a completed review with malformed verdict text gets one same-session repair before any write',async t=>{
@@ -268,4 +288,30 @@ test('explicit pending, prose-wrapped pending and a stopped turn park without a 
     assert.deepEqual(f.counts,{prompt:1,write:0,receipt:0,ack:0});
     assert.equal(f.verdict(),undefined);
   }
+});
+
+test('negative control: a repair that says pass after an explicit fail is not filed and parks',async t=>{
+  const flipped = JSON.stringify({result:'pass',summary:'Head a0fccc9 checked from source; all paths hold.'});
+  const f = await setup(t,{replies:[malformed6411,flipped]});
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.deepEqual(f.counts,{prompt:2,write:0,receipt:0,ack:0});
+  assert.equal(f.prompts[1].prompt,REVIEW_REPAIR_PROMPT);
+  assert.equal(f.verdict(),undefined);
+  assert.equal(f.pendingRows().delivered_at,null);
+  assert.equal(f.receiptPhase(),'needs_review');
+  const restarted = f.make();
+  assert.equal(await restarted.lease(),true);
+  await restarted.accept(f.wake);
+  await restarted.queue.idle();
+  assert.deepEqual(f.counts,{prompt:2,write:0,receipt:0,ack:0});
+});
+
+test('a reply that states both pass and fail parks without a repair prompt',async t=>{
+  const f = await setup(t,{replies:['Earlier {"result":"pass","summary":"a"}; now {"result":"fail","summary":"b"}',repaired6411]});
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.deepEqual(f.counts,{prompt:1,write:0,receipt:0,ack:0});
+  assert.equal(f.verdict(),undefined);
+  assert.equal(f.receiptPhase(),'needs_review');
 });
