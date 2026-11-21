@@ -69,7 +69,10 @@ for (const mobile of [false, true]) for (const theme of ["dark", "light"]) {
     const cards = page.locator("#message-list [data-work-record-id]");
     assert.equal(await cards.count(), 0);
     assert.equal(await page.locator('#message-list [data-open-work="test-handoff"]').count(), 1);
-    assert.match(await page.locator("#message-list .conversation-work-summary").textContent(), /Café notes/);
+    const postedResult = page.locator('#message-list [data-message-record-id="native-result-draft"]');
+    assert.match(await postedResult.locator(".message-body").textContent(), /Café notes 🪷/);
+    assert.equal(await postedResult.locator('.work-link[data-open-work="native-result"]').textContent(), "Café notes");
+    assert.equal(await postedResult.locator(".conversation-work-summary").count(), 0);
     assert.doesNotMatch(await page.locator("#message-list").textContent(), /Unrelated QA/);
     await page.locator("#topbar-updates").click();
     await page.getByRole("button", { name: "Open Review tomorrow's plan", exact: true }).click();
