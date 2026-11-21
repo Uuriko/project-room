@@ -12,7 +12,17 @@ import { signInFixture } from "./auth-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'desktop'}: return to outcomes without losing context`, { timeout: 90000 }, async t => {
-  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
+  const deployStatusReads = [];
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50,
+    // Opening linked work also reads deployment status. Keep that background
+    // lookup local so it cannot outlive this fixture's database at teardown.
+    fetchPullRequest: async url => {
+      deployStatusReads.push(String(url));
+      return new Response(JSON.stringify({ sha: "c".repeat(40) }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    },
+  });
   let browser;
   t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections();
     if (server.listening) await new Promise(resolve => server.close(resolve));
@@ -271,4 +281,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(JSON.stringify(f.store.room('commons')), beforeDirect, 'direct and unknown targets do not fabricate records');
   await freshContext.close();
   assert.deepEqual(errors, []);
+  assert.ok(deployStatusReads.length > 0, "the deterministic deployment-status boundary was exercised");
+  assert.ok(deployStatusReads.every(url => /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/commits\/main$/.test(url)),
+    "the fixture must not silently stand in for an unrelated GitHub operation");
 });
