@@ -9,7 +9,8 @@ import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 for (const representation of [undefined, "normalized-current-v1"]) {
   test("runtime evidence stays on its exact review and cannot admit execution " + (representation ?? "legacy"), t => {
-    const store = new RoomStore(":memory:");
+    let now = Date.parse("2026-11-21T17:00:00Z");
+    const store = new RoomStore(":memory:", { now: () => now });
     t.after(() => store.close());
     store.initialize(initialRoom(), { representation });
     const owner = store.issueAccessKey("commons", "owner");
@@ -49,17 +50,23 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.throws(() => report({}, owner), { code:"review_runtime_denied" });
     assert.throws(() => report({evidenceVersion:"changed"}), { code:"review_runtime_stale" });
     const claim = report();
+    now += 10;
     assert.deepEqual(report(), claim);
     assert.equal(read().reviewRuntime.status, "claimed");
+    assert.equal(read().reviewRuntime.claimObservedAt, claim.observedAt);
     assert.throws(() => report({attemptId:"another"}), { code:"review_runtime_attempt_conflict" });
     report({phase:"start_unknown"});
     assert.equal(report().status, "start_unknown");
+    now += 10;
     report({phase:"started"});
     assert.equal(report({phase:"start_unknown"}).status, "started");
+    assert.equal(read().reviewRuntime.claimObservedAt, claim.observedAt);
+    assert.equal(read().reviewRuntime.observedAt, now);
     assert.equal(read().current.next.action, "verify");
     act(reviewerKey, T.VERIFICATION_RECORDED, {completionEventId:baseline.id, evidenceVersion:input.evidenceVersion,
       result:"fail", summary:"Needs a corrected result."});
     assert.equal(read().reviewRuntime.status, "verdict_recorded");
+    assert.equal(read().reviewRuntime.claimObservedAt, claim.observedAt);
     assert.throws(() => report(), { code:"review_runtime_stale" });
     act(owner, T.WORK_BLOCKER_RESOLVED, {resolution:"Attach a correction."}); act(owner, T.WORK_STARTED);
     const corrected = submit("Corrected evidence.", baseline.id);
@@ -67,5 +74,34 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.equal(read().reviewRuntime.status, "waiting_receiver");
     assert.equal(store.workResult(owner, "commons", workItemId, {completionEventId:baseline.id}).reviewRuntime, undefined);
     assert.throws(() => report(), { code:"review_runtime_stale" });
+    assert.equal(read().reviewRuntime.claimObservedAt, undefined);
+    const correctedReport = phase => store.reportReviewRuntime(reviewer.secret, "commons", {
+      ...input, completionEventId:corrected.id, evidenceVersion:textVersion("Corrected evidence."),
+      expectedRevision:read().current.workRevision, attemptId:"review-corrected", phase,
+    });
+    now += 10;
+    const started = correctedReport("started");
+    assert.equal(read().reviewRuntime.claimObservedAt, undefined);
+    now += 10;
+    correctedReport("claimed");
+    assert.equal(read().reviewRuntime.status, "started");
+    assert.equal(read().reviewRuntime.observedAt, started.observedAt);
+    assert.equal(read().reviewRuntime.claimObservedAt, now);
+    const correctedClaimAt = now;
+    const [correctedWake] = store.agentHeartbeats.pendingWakePage(reviewer.identityId, {roomId:"commons", hostId:"review-fixture"}).signals;
+    assert.equal(correctedWake.completionEventId, corrected.id);
+    now += 10;
+    act(reviewerKey, T.VERIFICATION_RECORDED, {completionEventId:corrected.id, evidenceVersion:textVersion("Corrected evidence."),
+      result:"pass", summary:"The corrected result meets the criteria."});
+    assert.equal(read().reviewRuntime.status, "verdict_recorded");
+    assert.equal(read().reviewRuntime.claimObservedAt, correctedClaimAt);
+    assert.deepEqual(store.workWakes.ack(reviewer.identityId, [correctedWake.signalId], "commons"), []);
+    const wakeAfter = store.db.prepare("SELECT delivered_at,invalidated_at FROM agent_work_wakes WHERE signal_id=?").get(correctedWake.signalId);
+    assert.equal(wakeAfter.delivered_at, null);
+    assert.equal(wakeAfter.invalidated_at, now);
+    const receipts = store.db.prepare(`SELECT completion_id,attempt_id,observed_at
+      FROM review_runtime_claim_receipts WHERE room_id='commons' AND work_item_id=? ORDER BY observed_at`).all(workItemId);
+    assert.deepEqual(receipts.map(row=>[row.completion_id,row.attempt_id,row.observed_at]),
+      [[baseline.id,"review-baseline",claim.observedAt],[corrected.id,"review-corrected",correctedClaimAt]]);
   });
 }

@@ -9,7 +9,13 @@ export const reviewRuntimeSchema = `
     phase TEXT NOT NULL CHECK(phase IN ('claimed','started','start_unknown')),
     observed_at INTEGER NOT NULL,
     PRIMARY KEY (room_id,work_item_id)
-  );`;
+  );
+  CREATE TABLE IF NOT EXISTS review_runtime_claim_receipts (
+    room_id TEXT NOT NULL, work_item_id TEXT NOT NULL, completion_id TEXT NOT NULL,
+    revision INTEGER NOT NULL, member_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+    observed_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id,work_item_id,completion_id,revision,member_id)
+  ) WITHOUT ROWID;`;
 
 const phases = ["claimed", "started", "start_unknown"];
 const fail = (status, code) => { throw Object.assign(new Error(code), { status, code }); };
@@ -28,8 +34,16 @@ export function recordReviewRuntime(db, roomId, work, member, input, now) {
     || work.receipt?.eventId !== input.completionEventId || work.receipt.evidenceVersion !== input.evidenceVersion)
     fail(409, "review_runtime_stale");
   const row = db.prepare("SELECT * FROM review_runtime_reports WHERE room_id=? AND work_item_id=?").get(roomId, work.id);
-  if (row?.completion_id === input.completionEventId && row.revision === input.expectedRevision && row.member_id === member.id) {
-    if (row.attempt_id !== input.attemptId) fail(409, "review_runtime_attempt_conflict");
+  const sameReview = row?.completion_id === input.completionEventId && row.revision === input.expectedRevision && row.member_id === member.id;
+  if (sameReview && row.attempt_id !== input.attemptId) fail(409, "review_runtime_attempt_conflict");
+  if (input.phase === "claimed" || (sameReview && row.phase === "claimed")) {
+    // Keep the actual first claim separate from the latest provider phase.
+    // Neither the claim nor a retry settles the work wake.
+    const observedAt = sameReview && row.phase === "claimed" ? row.observed_at : now;
+    db.prepare(`INSERT INTO review_runtime_claim_receipts VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`)
+      .run(roomId, work.id, input.completionEventId, work.revision, member.id, input.attemptId, observedAt);
+  }
+  if (sameReview) {
     // A confirmed start remains confirmed. A report of uncertainty cannot
     // erase that evidence, and a delayed claim cannot rewind either phase.
     if (row.phase === "started" || row.phase === input.phase || input.phase === "claimed")
@@ -42,18 +56,33 @@ export function recordReviewRuntime(db, roomId, work, member, input, now) {
   return { status: input.phase, observedAt: now };
 }
 
+function claimObservation(db, roomId, work, revision, memberId) {
+  if (!Number.isSafeInteger(revision) || !tableReady(db, "review_runtime_claim_receipts")) return {};
+  const claim = db.prepare(`SELECT observed_at FROM review_runtime_claim_receipts
+    WHERE room_id=? AND work_item_id=? AND completion_id=? AND revision=? AND member_id=?`)
+    .get(roomId, work.id, work.receipt.eventId, revision, memberId);
+  return claim ? { claimObservedAt: claim.observed_at } : {};
+}
+
 // Both callers must already have authorized this current exact result.
-export function reviewRuntimeFor(store, roomId, work, next, now) {
+export function reviewRuntimeFor(store, roomId, work, next, now, { includeClaim = false } = {}) {
   const { db } = store;
   if (work.supersededBy || !work.receipt?.eventId) return null;
   if (work.verification?.completionEventId === work.receipt.eventId
-    && work.verification.evidenceVersion === work.receipt.evidenceVersion) return { status:"verdict_recorded", source:"room_verdict" };
+    && work.verification.evidenceVersion === work.receipt.evidenceVersion) {
+    const verdict = { status:"verdict_recorded", source:"room_verdict" };
+    if (!includeClaim) return verdict;
+    const basis = db.prepare(`SELECT json_extract(body,'$.data.expectedRevision') AS revision
+      FROM events WHERE room_id=? AND id=?`).get(roomId, work.verification.eventId);
+    return { ...verdict, ...claimObservation(db, roomId, work, basis?.revision, work.verification.verifierId) };
+  }
   if (next?.action !== "verify") return null;
   if (tableReady(db, "review_runtime_reports")) {
     const report = db.prepare(`SELECT phase,observed_at FROM review_runtime_reports
       WHERE room_id=? AND work_item_id=? AND completion_id=? AND revision=? AND member_id=?`)
       .get(roomId,work.id,work.receipt.eventId,work.revision,next.memberId);
-    if (report) return { status:report.phase, source:"managed_host", observedAt:report.observed_at };
+    if (report) return { status:report.phase, source:"managed_host", observedAt:report.observed_at,
+      ...(includeClaim ? claimObservation(db, roomId, work, work.revision, next.memberId) : {}) };
   }
   if (tableReady(db, "agent_work_wakes") && tableReady(db, "agent_wake_listener_leases")) {
     const agentId = store.identities.identityIdForMember(roomId, next.memberId);
