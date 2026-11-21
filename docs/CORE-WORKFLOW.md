@@ -205,6 +205,15 @@ step, using the saved files including any deploy receipt. Recovery checks each
 original operation ID with `room_receipt` and posts only an absent operation.
 Keep all previously attached stage files so a recovery cannot hide their checks.
 
+For a signed release, run
+`node scripts/verify-release-evidence.mjs WORK_ITEM_ID COMPLETION_EVENT_ID`
+with your existing Room connection to verify the exact signed proof and its
+three stage receipt digests. The command accepts inline and linked proof,
+checks the serving origin's signing key, and returns the selected completion
+and receipt IDs. A historical selection still needs a separate check of the
+current deployment. Record the review verdict through the normal exact result
+action after checking the task's acceptance criteria.
+
 For a release result, name its full 40-hex candidate revision in the native
 text as `Candidate revision: SHA` on its own line. An exact `sourceRevision`
 JSON field also works. The release reporter can attach an ordinary Work Thread
