@@ -1513,6 +1513,14 @@ paths:
         - `verification.recorded`: data {workItemId, expectedRevision,
           result: "pass"|"fail", completionEventId, evidenceVersion,
           summary} from the verifier named at propose time (`verify`).
+        - `work.verdict_published`: data {workItemId, expectedRevision?,
+          repository, pullNumber, head, base?, verdict: "pass"|"hold"|"fail",
+          summary, evidenceDigest?} from the work item's designated verifier
+          or a member with `verify` permission. This is an authored source
+          verdict on the Work Thread, readable by members who can already
+          read that work (`publishedVerdicts` on selected work reads). It is
+          not native independent verification (`verification.recorded`);
+          integrators must not treat one as the other.
         - `owner.decision_recorded`: data {workItemId, expectedRevision,
           decision, completionEventId, evidenceVersion, reason,
           sourceMessageId} from the designated human decision-maker

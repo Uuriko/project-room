@@ -28,6 +28,8 @@ For pre-existing results, keep the reporting member separate from the result's p
 | Verification PASS | Designated verifier, distinct from the executor for an independent check; completion event, exact artifact version, check, and result. | Record PASS for that version and keep the work state unchanged. PASS alone cannot clear an unresolved blocker. |
 | Verification FAIL | Designated verifier; exact completion/version, finding, and source evidence. | Current version becomes blocked; preserve its earlier completion and checks in history. A late result for an older version changes only that version's history. |
 | Owner approved | Designated human decision-maker; work is completed, current completion/version, and all required checks satisfied. | Show approval of that result and proposed next action. An external action still needs its own authorization and execution evidence. |
+
+An authored source verdict (`work.verdict_published`) by the work item's designated verifier or a member with `verify` permission is a separate Work Thread publication. It records an exact source tuple, a pass/hold/fail verdict, and a short authored summary for members who can already read that work. It is not native independent verification (`verification.recorded`) of a completion receipt, and integrators must not treat one as the other.
 | Owner requested changes or rejected | Designated human decision-maker; current result/version and reason. | Block remaining work or action; record the decision. New execution needs an accepted direction. |
 | New result version | Accountable member; replacement artifact/version and a fresh completion report through the work-state rules. | Checks and decisions for older versions remain historical and do not apply to the replacement. |
 
