@@ -121,10 +121,14 @@ export function explicitVerdict(recorder) {
 }
 
 export const REVIEW_REPAIR_PROMPT = [{ type:'text', text:[
-  'Your previous reply was not a supported verdict, so nothing was filed.',
-  'Restate the verdict you already reached as only raw JSON: {"result":"pass"|"fail","summary":"..."} with no other text.',
-  'The summary must be at most 1500 characters. nextAction is allowed only on fail and must be at most 1000 characters.',
-  'Do not run new checks or change the verdict. If you did not independently verify pass or fail, answer {"result":"pending","summary":"..."}.',
+  'Your previous reply was not a supported verdict, so it was not filed.',
+  'Preserve the verdict you already reached and restate it as only raw JSON: {"result":"pass"|"fail","summary":"..."} with no other text.',
+  // Measured on the #6411 replays: a bare restate repeated the oversized
+  // summary, and a generic shortening request once inverted a claim.
+  'Replace the previous summary with only the exact candidate, the smallest decisive evidence supporting that verdict, and any verification limits.',
+  'Aim for 600 characters and keep the summary at most 1500 characters. Omit unrelated checks and use short verbatim excerpts where useful.',
+  'nextAction is allowed only on fail and must be at most 1000 characters.',
+  'Do not run new checks, add claims, or change the verdict. If you did not independently verify pass or fail, answer {"result":"pending","summary":"..."}.',
 ].join(' ') }];
 
 export async function recordedReview(room, operationId, timeoutMs) {

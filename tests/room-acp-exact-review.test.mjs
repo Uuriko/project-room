@@ -236,6 +236,19 @@ test('the initial review prompt states the summary and nextAction limits',async 
   assert.match(f.prompts[0].prompt[0].text,/nextAction at most 1000 characters/);
 });
 
+test('the repair prompt asks for a compact restatement of the same verdict',()=>{
+  const text = REVIEW_REPAIR_PROMPT[0].text;
+  assert.equal(REVIEW_REPAIR_PROMPT.length,1);
+  assert.match(text,/Preserve the verdict you already reached/);
+  assert.match(text,/only raw JSON: \{"result":"pass"\|"fail","summary":"\.\.\."\} with no other text/);
+  assert.match(text,/only the exact candidate, the smallest decisive evidence supporting that verdict, and any verification limits/);
+  assert.match(text,/Aim for 600 characters and keep the summary at most 1500 characters/);
+  assert.match(text,/Omit unrelated checks and use short verbatim excerpts where useful/);
+  assert.match(text,/nextAction is allowed only on fail and must be at most 1000 characters/);
+  assert.match(text,/Do not run new checks, add claims, or change the verdict/);
+  assert.match(text,/answer \{"result":"pending","summary":"\.\.\."\}/);
+});
+
 test('a recorded malformed review is unsupported but repairable; explicit pending and stopped turns are not',()=>{
   assert.equal(reviewOutput({text:malformed6411},'end_turn'),null);
   assert.equal(reviewRepairable({text:malformed6411},'end_turn'),true);
