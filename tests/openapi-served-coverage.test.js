@@ -69,6 +69,20 @@ test("served /openapi.json matches the routes the server actually serves", async
   assert.equal(doc.openapi, "3.1.0", "served document is OpenAPI 3.1");
   assert.ok(doc.paths && typeof doc.paths === "object", "served document has paths");
 
+  const publicTasks = doc.paths["/api/public-work/tasks"];
+  for (const method of ["get", "head"]) {
+    const params = new Map(publicTasks[method].parameters.map(parameter => [parameter.name, parameter]));
+    const view = params.get("view");
+    assert.deepEqual(view.schema.enum, ["pickup"]);
+    assert.equal(params.get("roomId").schema.type, "string");
+    const scoped = await fetch(origin + "/api/public-work/tasks?roomId=commons&view=pickup", { method: method.toUpperCase() });
+    assert.equal(scoped.status, 200);
+    if (method === "get") assert.equal((await scoped.json()).nextAction.kind, "no_eligible_public_task");
+    else assert.equal(await scoped.text(), "");
+  }
+  assert.deepEqual(publicTasks.get.responses["200"].content["application/json"].schema
+    .properties.nextAction.properties.kind.enum, ["claim", "inspect_published_repository", "no_eligible_public_task"]);
+
   // /demo is the declarative public HTML exception to the API inventory.
   // Its served documentation must describe the actual anonymous response.
   for (const method of ["get", "head"]) {
