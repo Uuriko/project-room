@@ -1,0 +1,88 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "board-claim/delivered",
+  "machine": "board-claim",
+  "legacyState": "delivered",
+  "provenance": {
+    "harvestedFrom": [
+      "server/work-claims.mjs item literal + CLAIM_LIFECYCLE",
+      "tests/work-claim-board.test.js",
+      "tests/work-claim-bundle-lifecycle.test.js"
+    ],
+    "census": "prod-census.json: board claims observed live in unclaimed/done/closed"
+  },
+  "legacy": {
+    "id": "wc_u1_delivered",
+    "title": "Unify the work nouns",
+    "state": "delivered",
+    "owner": "ai_worker_u1",
+    "history": [],
+    "claimedAt": "2025-10-18T01:00:00.000Z",
+    "leaseStartAt": "2025-10-18T01:00:00.000Z",
+    "leaseExpiresAt": "2025-10-19T01:00:00.000Z",
+    "deliveryMode": null,
+    "reviewPolicy": null,
+    "reviewedBy": null,
+    "attestations": [],
+    "tags": [],
+    "files": [],
+    "fileBlocks": {},
+    "blobs": [],
+    "dependsOn": [],
+    "parentClaimId": null,
+    "evidenceRefs": [],
+    "premiseFlag": null,
+    "acceptanceCriteria": [
+      "One state machine"
+    ],
+    "delivery": {
+      "summary": "Corpus delivered",
+      "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "deliveredBy": "ai_worker_u1",
+      "deliveredAt": "2025-10-18T03:00:00.000Z"
+    },
+    "verification": null,
+    "pullRequest": null,
+    "pullRequests": [],
+    "repo": null,
+    "branch": null,
+    "chain": [],
+    "supersededBy": null,
+    "workItemId": null,
+    "squadId": null,
+    "kind": "work",
+    "revision": 0,
+    "ci": null,
+    "reviews": []
+  },
+  "doors": {
+    "rest": {
+      "surface": "GET /rooms/{id}/work-claims/{claimId}",
+      "statePath": "state",
+      "state": "delivered",
+      "excerpt": {
+        "state": "delivered"
+      }
+    },
+    "board-v2": {
+      "surface": "board/v2 claims lens (same item)",
+      "statePath": "state",
+      "state": "delivered",
+      "excerpt": {
+        "state": "delivered"
+      }
+    },
+    "commands": {
+      "surface": "work_claim.updated event payload",
+      "statePath": "state",
+      "state": "delivered",
+      "excerpt": {
+        "state": "delivered"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "delivered"
+  }
+}

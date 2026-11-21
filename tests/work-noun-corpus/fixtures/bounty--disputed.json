@@ -1,0 +1,91 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "bounty/disputed",
+  "machine": "bounty",
+  "legacyState": "disputed",
+  "provenance": {
+    "harvestedFrom": [
+      "server/bounty-escrow.mjs _viewBounty/_saveBounty",
+      "tests/bounty-escrow.test.js"
+    ],
+    "census": "prod-census.json: bounties observed live in paid/refunded/accepted/submitted/cancelled",
+    "volatileExcluded": [
+      "timeInStateMs (read-computed from now)"
+    ]
+  },
+  "legacy": {
+    "bountyId": "bty_u1_disputed",
+    "roomId": "room-u1-corpus",
+    "title": "Map the legacy work nouns",
+    "criteria": "Every legacy state has a unified home",
+    "amount": 5,
+    "amountMillis": 5000,
+    "poster": "member-poster",
+    "verifier": "member-verifier",
+    "claimant": "member-claimant",
+    "disputeDecider": "member-decider",
+    "approvalMode": "human",
+    "state": "disputed",
+    "group": "in-review",
+    "deadline": "2025-10-25T00:00:00.000Z",
+    "deadlineMs": 1761350400000,
+    "challengeEnds": "2025-10-21T00:00:00.000Z",
+    "challengeEndsMs": 1761004800000,
+    "snoozedUntil": null,
+    "snoozedUntilMs": null,
+    "declineReason": null,
+    "duplicateOf": null,
+    "label": null,
+    "disputeId": "dsp_u1_opened",
+    "disputeOpenedMs": 1760749200000,
+    "evidence": {
+      "summary": "Delivered the corpus draft",
+      "submittedBy": "member-claimant"
+    },
+    "attestation": null,
+    "resolution": null,
+    "rubric": {
+      "version": 1,
+      "hash": "sha256:u1corpus",
+      "criteria": [
+        "Every legacy state has a unified home"
+      ]
+    },
+    "submissionHash": "sha256:u1delivery",
+    "watchers": [],
+    "createdAt": 1760745600000,
+    "updatedAt": 1760745600000,
+    "stateChangedAt": "2025-10-18T00:00:00.000Z"
+  },
+  "doors": {
+    "rest": {
+      "surface": "GET /rooms/{roomId}/bounties/{bountyId} -> _viewBounty",
+      "statePath": "state",
+      "state": "disputed",
+      "excerpt": {
+        "state": "disputed",
+        "group": "in-review",
+        "claimant": null,
+        "disputeId": null
+      }
+    },
+    "mcp-full": {
+      "surface": "bounty read tool (MCP full profile) -> _viewBounty",
+      "statePath": "state",
+      "state": "disputed",
+      "excerpt": {
+        "state": "disputed",
+        "group": "in-review",
+        "claimant": null,
+        "disputeId": null
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "disputed",
+    "attributes": {
+      "disputeId": "<dispute child id>"
+    }
+  }
+}

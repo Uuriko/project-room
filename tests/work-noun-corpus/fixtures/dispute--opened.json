@@ -1,0 +1,50 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "dispute/opened",
+  "machine": "dispute",
+  "legacyState": "opened",
+  "provenance": {
+    "harvestedFrom": [
+      "server/bounty-disputes.mjs createDisputes (open/challenge/evidence/seat/decide/finalize)",
+      "tests/bounty-disputes.test.js"
+    ],
+    "census": "design §1.2: dispute machine extracted by HUNT-STATE-MACHINE"
+  },
+  "legacy": {
+    "disputeId": "dsp_u1_opened",
+    "bountyId": "bty_u1_disputed",
+    "state": "opened",
+    "tier": 0,
+    "raisedBy": "member-poster",
+    "reason": "criterion-unmet",
+    "bondSnapshot": 1250,
+    "maxDisputeCost": 1250,
+    "evidence": [],
+    "decider": null,
+    "challengedBy": null,
+    "resolution": null
+  },
+  "doors": {
+    "rest": {
+      "surface": "POST /rooms/{id}/bounties/{bid}/dispute[/decide]; dispute object carried on the escrow record",
+      "statePath": "state",
+      "state": "opened",
+      "excerpt": {
+        "state": "opened"
+      }
+    },
+    "mcp-full": {
+      "surface": "bounty dispute tool (MCP full profile)",
+      "statePath": "state",
+      "state": "opened",
+      "excerpt": {
+        "state": "opened"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "carried",
+    "state": null,
+    "home": "dispute child machine (§2.5)"
+  }
+}
