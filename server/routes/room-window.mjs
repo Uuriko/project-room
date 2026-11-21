@@ -10,7 +10,7 @@ import { checkReceiverRoute } from "../../src/reply-requests.js";
 import { buildRoomBootstrap } from "../room-bootstrap.mjs";
 import { readMessagePage, SNAPSHOT_WINDOW_MESSAGES } from "../snapshot-window.mjs";
 
-function authorizeRoomRead(ctx) {
+export function authorizeRoomRead(ctx) {
   const roomId = ctx.params.roomId;
   if (!validId(roomId)) ctx.reject(404, "not_found", "Not found");
   const selected = ctx.roomCredentials(ctx.req, ctx.url);

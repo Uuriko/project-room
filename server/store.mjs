@@ -1287,6 +1287,9 @@ const LOOKUP_INDEXES = `
   CREATE INDEX IF NOT EXISTS agent_connections_sponsor ON agent_connections(sponsor_account_id);
   CREATE INDEX IF NOT EXISTS private_email_connections_id ON private_email_connections(id);
   CREATE INDEX IF NOT EXISTS public_work_receipts_offer ON public_work_receipts(offer_id, generation);
+  CREATE INDEX IF NOT EXISTS project_discovery_time ON public_work_requests
+    (offer_id, json_extract(outcome_json,'$.recordedAt'), json_extract(outcome_json,'$.receiptId'))
+    WHERE offer_id GLOB 'project-discovery/*';
   CREATE INDEX IF NOT EXISTS gmail_pending_account ON gmail_pending(account_id);
   CREATE INDEX IF NOT EXISTS guest_selfserve_idem_member ON guest_selfserve_idem(member_id);
 `;

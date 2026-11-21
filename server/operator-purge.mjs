@@ -32,7 +32,8 @@ const BUILTIN_PROTECTED = Object.freeze(["invite-only-pilot"]);
 // registry and fails if a future registry table in these families is not
 // added here. `public_work_receipts` is deliberately absent: its registry
 // entry matches identity only, so a room count for it is always 0 and it
-// survives a room purge.
+// survives a room purge. Only the project-discovery/ namespace of the mixed
+// public_work_requests journal is in room-purge scope. Those rows hold private findings.
 export const MONEY_PROOF_TABLES = Object.freeze([
   "bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
   "bounty_flakes", "bounty_idempotency", "bounty_reputation_packets",
@@ -70,6 +71,19 @@ export function protectedRoomIds(env = globalThis.process?.env ?? {}) {
 }
 
 function where(entry, kind) {
+  if (entry.table === "public_work_requests") {
+    if (entry.namespace !== "project-discovery/") fail(500, "invalid_purge_registry", "Unknown public-work journal purge scope");
+    // The rest of this journal belongs to task leases/receipts and has its own lifecycle.
+    if (kind === "identity") return { sql: "offer_id GLOB 'project-discovery/*' AND actor_id=?", params: 1 };
+    if (kind === "room") return {
+      // The via phase still has the offer parents for pre-room-scoped filing keys.
+      // Room IDs cannot contain glob metacharacters or slashes.
+      sql: `offer_id GLOB ('project-discovery/' || ? || '/*') OR
+        offer_id IN (SELECT 'project-discovery/' || offer_id FROM project_offers WHERE room_id=?)`,
+      params: 2
+    };
+    return null;
+  }
   const parts = [];
   let params = 0;
   for (const column of entry.match?.[kind] ?? []) {

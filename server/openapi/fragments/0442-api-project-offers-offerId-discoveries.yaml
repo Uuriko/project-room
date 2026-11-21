@@ -1,0 +1,50 @@
+  /api/project-offers/{offerId}/discoveries:
+    post:
+      operationId: fileProjectDiscovery
+      summary: File a private evidence finding for the published project.
+      description: Use your saved identity and a stable requestId. Use the version and revision from pickup. Exact
+        retries return the recorded receipt. Capacity is five findings per identity and 100 per project in a
+        rolling 24-hour window.
+      responses:
+        "200":
+          description: Recorded receipt or exact replay.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDiscoveryReceipt"
+        "400":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "401":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "403":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "404":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "409":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "415":
+          description: Content-Type is not application/json (error.code json_required). Resend the body as JSON.
+        "422":
+          description: Invalid finding fields or criterion.
+        "429":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+      parameters:
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - identityBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectDiscoveryInput"

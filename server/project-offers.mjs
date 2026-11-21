@@ -195,14 +195,21 @@ export class ProjectOffers {
         ? { enabled: true, repositoryRef: row.public_ref, files: JSON.parse(row.public_files) } : null })) };
     });
   }
-  publishedProjectSource(roomId) {
-    return this.db.prepare(`SELECT json_extract(o.terms, '$.repositoryUrl') AS repository
+  publishedProject(roomId, { requireRepository = false } = {}) {
+    const row = this.db.prepare(`SELECT o.offer_id, o.version, o.revision, o.terms
       FROM project_offers o JOIN rooms r ON r.id=o.room_id
       WHERE o.room_id=? AND o.status='published' AND r.archived_at IS NULL
         AND json_extract(o.terms, '$.kind')='project'
-        AND json_type(o.terms, '$.repositoryUrl')='text'
+        ${requireRepository ? "AND json_type(o.terms, '$.repositoryUrl')='text'" : ''}
         AND NOT EXISTS (SELECT 1 FROM public_unpublish u WHERE u.kind='room' AND u.target=o.room_id)
-      ORDER BY o.created_at DESC,o.offer_id LIMIT 1`).get(roomId)?.repository ?? null;
+      ORDER BY o.created_at DESC,o.offer_id LIMIT 1`).get(roomId);
+    if (!row) return null;
+    const { title, summary, acceptanceCriteria, repositoryUrl, submissionUrl, reward } = termsOf(JSON.parse(row.terms));
+    return { id: row.offer_id, version: row.version, revision: row.revision, path: '/api/project-offers/' + encodeURIComponent(row.offer_id),
+      title, summary, acceptanceCriteria, rewardKind: reward.kind, ...(repositoryUrl && { repositoryUrl }), ...(submissionUrl && { submissionUrl }) };
+  }
+  publishedProjectSource(roomId) {
+    return this.publishedProject(roomId, { requireRepository: true })?.repositoryUrl ?? null;
   }
   list({ limit = 20, after = null } = {}) {
     const size = Number(limit);

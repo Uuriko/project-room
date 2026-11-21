@@ -2392,7 +2392,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           const roomId = searchParams.get("roomId");
           if (searchParams.get("view") !== "pickup" || !validId(roomId) || searchParams.has("limit") || searchParams.has("claimable"))
             reject(422, "invalid_public_work", "Pickup needs one room and an optional after cursor");
-          return json(res, 200, store.publicWorkClaims.pickup(roomId, searchParams.get("after") ?? ""), req.method === "HEAD");
+          return json(res, 200, store.publicWorkClaims.pickup(roomId, searchParams.get("after") ?? "", expectedOrigin()), req.method === "HEAD");
         }
         return json(res, 200, publicWorkTaskMatch
           ? store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1]))
