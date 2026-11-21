@@ -160,6 +160,18 @@ export class RoomClient {
         || included.some(id => !Object.hasOwn(members, id) && !unresolved.has(id))) unavailable();
     return value;
   }
+  async pickup() {
+    const value = await this.request("/mcp", { body: { jsonrpc: "2.0", id: 1, method: "tools/call",
+      params: { name: "room_next", arguments: { roomId: this.roomId, view: "pickup" } } } });
+    const result = value?.result?.structuredContent;
+    if (value?.result?.isError || result?.roomId !== this.roomId || result?.viewerId !== this.memberId)
+      throw new RoomError(409, "pickup_unavailable", "Room did not confirm pickup for this member");
+    return result.ifIdle;
+  }
+  takePickup(claimId, leaseHours, listenerToken) {
+    const endpoint = `/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}/claim`;
+    return this.request(endpoint, { body: { leaseHours }, listenerToken });
+  }
   claim(claimId) { return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}`); }
   // A claim note lands in the claim's history and its work_claim.updated
   // event, so it shows in the claim thread (GET work-claims/{id}/thread).

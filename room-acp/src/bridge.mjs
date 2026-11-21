@@ -42,6 +42,11 @@ export const CLAIM_WAKE_REASONS = Object.freeze(["assigned"]);
 // (reassign-after-done, admin re-wake, wake regeneration) has no receipt.
 export const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
 export const CLAIM_KEY = "work-claim:";
+const IDLE_CLAIM = /^[A-Za-z0-9_-]{1,128}$/;
+const pickupLease = claim => typeof claim?.claimedAt === "string" && Number.isFinite(Date.parse(claim.claimedAt))
+  && typeof claim.leaseExpiresAt === "string" && Date.parse(claim.leaseExpiresAt) > Date.now()
+  && ["claimed", "in_progress"].includes(claim.state) && !claim.premiseFlag && !claim.supersededBy
+  ? claim.claimedAt : null;
 const REVIEW_KEY = '\0work-review:';
 export const MAX_CLAIM_NOTE = 1500;
 export const ORDINARY_REPLY_WINDOW_MS = 60000;
@@ -139,6 +144,7 @@ export class Bridge {
     this.controller = new AbortController();
     this.room = new RoomClient({ signal:this.controller.signal, apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
     this.claimReceipts = new TurnReceipts(connection, env, persistSessions);
+    this.pickupReceipts = new TurnReceipts(connection, env, persistSessions, "idle-pickups");
     this.chatReceipts = new TurnReceipts(connection, env, persistSessions, "chat-turns");
     this.reviewReceipts = new TurnReceipts(connection, env, persistSessions, 'work-review-turns');
     this.reviewRecoveries = new Set();
@@ -246,7 +252,7 @@ export class Bridge {
             ownerId:authority.ownerId,respondTo:this.respondTo}) ? 'allowed' : 'denied']));
   }
 
-  async authorized({ messageIds, claimId, requireRunnable = false, signal } = {}) {
+  async authorized({ messageIds, claimId, requireRunnable = false, lease = null, signal } = {}) {
     if (this.controller.signal.aborted) throw new Error("bridge stopped");
     if (!claimId) {
       // Old receipts lack original source IDs; they cannot authorize disclosure.
@@ -265,6 +271,7 @@ export class Bridge {
       throw new RoomError(409, 'authority_member_unresolved', 'Claim requester changed or is unresolved; retry with fresh authority');
     return Boolean(authority.members[this.connection.memberId] && authority.me.active !== false
       && claim?.owner === authority.me.id && (!requireRunnable || !TERMINAL_CLAIM_STATES.includes(claim.state))
+      && (lease === null || pickupLease(claim) === lease)
       && mayTalk({authorId:requester,members:authority.members,
         me:authority.me,ownerId:authority.ownerId,respondTo:this.respondTo}));
   }
@@ -343,6 +350,7 @@ export class Bridge {
         }
         return;
       }
+      if (signal.reason === "idle_nudge") { await this.acceptIdleNudge(signal); return; }
       if (signal.workClaim) { await this.acceptClaim(signal); return; }
       if (!signal.messageId || !["mention", "dm", "reply", "direct"].includes(signal.kind)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
       const selected = await this.readThread(signal.messageId, {selected:true});
@@ -423,6 +431,53 @@ export class Bridge {
     }
   }
 
+  // An idle nudge names an unclaimed Board item, never an assignment.
+  async acceptIdleNudge(signal) {
+    const { signalId, workClaim: claimId, messageId } = signal;
+    const { roomId, memberId } = this.connection;
+    if (signal.roomId !== roomId) throw new RoomError(409, "wake_scope_unavailable", "Nudge belongs to another room");
+    const skip = async () => { await this.ack([signalId]); this.stats.skipped++; };
+    const prefix = `idle_nudge:${memberId}:${claimId}:`;
+    if (signal.kind !== "mention" || !IDLE_CLAIM.test(claimId ?? "") || typeof messageId !== "string"
+      || !messageId.startsWith(prefix) || !/^\d{1,16}$/.test(messageId.slice(prefix.length))) return skip();
+    const offer = await this.room.pickup();
+    if (offer?.status === "paused") { this.seen.delete(signalId); return; }
+    if (offer?.status === "unavailable" && offer.reason === "board_unavailable")
+      throw new RoomError(503, "pickup_unavailable", "Board pickup is temporarily unavailable");
+    if (offer?.claimId !== claimId || !["ready_work", "held_work"].includes(offer.status)) return skip();
+    const recovering = offer.status === "held_work";
+    const attempt = this.pickupReceipts.find(this.pickupReceipts.key(signalId));
+    if (recovering && attempt?.claimId !== claimId) return skip();
+    const expectedPath = `/api/rooms/${roomId}/work-claims/${claimId}/claim`;
+    const action = offer.claimAction;
+    if (!recovering && (action?.method !== "POST" || action.endpoint !== expectedPath
+      || Object.keys(action.params ?? {}).join(",") !== "leaseHours"
+      || action.params.leaseHours !== 2 || offer.leaseHours !== 2)) return skip();
+    let claim = await this.room.claim(claimId);
+    const authorId = claimRequester(claim);
+    const authority = await this.refreshRoom({ memberIds: [authorId].filter(Boolean) });
+    await this.assertListener();
+    if (!authority.members[memberId] || authority.me.active === false
+      || !mayTalk({ authorId, members: authority.members, me: authority.me, ownerId: authority.ownerId, respondTo: this.respondTo })) return skip();
+    if (!recovering) {
+      if (claim?.id !== claimId || claim.state !== "unclaimed") return skip();
+      // A fresh receiver can distinguish this attempt after an ambiguous write.
+      this.pickupReceipts.begin(signalId, { phase: "queued", claimId });
+      try { claim = await this.room.takePickup(claimId, action.params.leaseHours, this.fencingToken); }
+      catch (error) {
+        if (error.status === 423 && error.code === "member_paused") { this.seen.delete(signalId); return; }
+        if (error.status === 409 && ["work_claim_conflict", "work_claim_dependencies_unmet", "file_lease_conflict"].includes(error.code)) return skip();
+        throw error;
+      }
+    }
+    const lease = pickupLease(claim);
+    if (claim?.id !== claimId || claim.owner !== memberId || !lease
+      || recovering && offer.leaseExpiresAt !== claim.leaseExpiresAt) return skip();
+    // One execution receipt per acquired lease, even if wake IDs differ.
+    const receiptId = JSON.stringify(["idle_nudge", claimId, lease]);
+    this.queue.push(CLAIM_KEY + claimId, { signalId, receiptId, lease, claim, author: authority.members[authorId].displayName ?? authorId });
+  }
+
   async acceptClaim(signal) {
     if (!CLAIM_WAKE_REASONS.includes(signal.reason)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
     let claim;
@@ -464,8 +519,9 @@ export class Bridge {
     const claimId = threadKey.slice(CLAIM_KEY.length);
     try {
       if (this.controller.signal.aborted) return;
-      if (!(await this.authorized({ claimId }))) { await this.ack(signalIds); this.stats.skipped++; return; }
-      const { key, receipt: saved, fresh } = this.claimReceipts.begin(item.signalId);
+      if (item.lease && (await this.room.pickup())?.status === "paused") { this.seen.delete(item.signalId); return; }
+      if (!(await this.authorized({ claimId, lease: item.lease }))) { await this.ack(signalIds); this.stats.skipped++; return; }
+      const { key, receipt: saved, fresh } = this.claimReceipts.begin(item.receiptId ?? item.signalId);
       let receipt = saved;
       if (!fresh && receipt.phase === "started") {
         this.log(`claim ${claimId} has an interrupted execution; inspect its work before assigning a new turn`);
@@ -479,12 +535,12 @@ export class Bridge {
           const { sessionId } = await this.host.session(threadKey);
           // Queueing and session startup can outlive the assignment. Check
           // runnable state here without blocking results already in progress.
-          if (!(await this.authorized({ claimId, requireRunnable: true }))) {
+          if (!(await this.authorized({ claimId, requireRunnable: true, lease: item.lease }))) {
             receipt = { phase: "discarded", requestId: receipt.requestId };
             this.claimReceipts.save(key, receipt);
             await this.ack(signalIds); return;
           }
-          const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author }), { sessionId });
+          const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author, pickup: Boolean(item.lease) }), { sessionId });
           body = renderTurn(recorder, { stopReason });
           this.stats.turns++;
         } catch (error) {
@@ -496,7 +552,7 @@ export class Bridge {
         receipt = { ...receipt, phase: "result", body: body.length > MAX_CLAIM_NOTE ? body.slice(0, MAX_CLAIM_NOTE - 1) + "…" : body };
         this.claimReceipts.save(key, receipt);
       }
-      if (receipt.phase === "result" && !(await this.authorized({ claimId }))) {
+      if (receipt.phase === "result" && !(await this.authorized({ claimId, lease: item.lease }))) {
         receipt = { phase: "discarded", requestId: receipt.requestId };
         this.claimReceipts.save(key, receipt);
       }
