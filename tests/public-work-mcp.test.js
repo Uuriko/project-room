@@ -205,12 +205,26 @@ test('idle Room Next gives only the designated reviewer the pending exact public
  const reviewer=f.store.identities.create('Independent reviewer');
  const other=f.store.identities.create('Unassigned reviewer');
  for(const identity of [reviewer,other]) linkWithProof(f.store,owner,roomId,identity,{permissions:['verify']});
- f.store.projectOffers.create(roomId,'owner',{requestId:'create-reviewable',offerId:taskId,reviewerMemberIds:[reviewer.identityId],terms:{
-   kind:'task',title:'Check exact proof',summary:'Read-only public contribution',acceptanceCriteria:['Exact evidence'],
-   repositoryUrl:'https://github.com/example/project',reward:{kind:'unpaid'},approvalPolicy:{mode:'agent'}
- }});
- f.store.projectOffers.transition(roomId,'owner',taskId,'publish',{requestId:'publish-reviewable',expectedRevision:1});
- f.store.publicWorkClaims.enable(roomId,'owner',taskId,{requestId:'enable-reviewable',expectedRevision:2,expectedTermsVersion:1,repositoryRef:'main',files:['proof.md']});
+ const publish=id=>{
+   f.store.projectOffers.create(roomId,'owner',{requestId:'create-'+id,offerId:id,reviewerMemberIds:[reviewer.identityId],terms:{
+     kind:'task',title:'Check exact proof',summary:'Read-only public contribution',acceptanceCriteria:['Exact evidence'],
+     repositoryUrl:'https://github.com/example/project',reward:{kind:'unpaid'},approvalPolicy:{mode:'agent'}
+   }});
+   f.store.projectOffers.transition(roomId,'owner',id,'publish',{requestId:'publish-'+id,expectedRevision:1});
+   f.store.publicWorkClaims.enable(roomId,'owner',id,{requestId:'enable-'+id,expectedRevision:2,expectedTermsVersion:1,repositoryRef:'main',files:[id+'.md']});
+ };
+ const submit=async (id,actor)=>{
+   const binding={taskId:id,expectedTermsVersion:1};
+   const claimed=value(await f.call('public_work_claim',{...binding,requestId:'claim-'+id},actor.secret));
+   return value(await f.call('public_work_finish',{...binding,generation:claimed.task.claim.generation,
+     requestId:'finish-'+id,artifactText:'Exact public evidence',checksReported:[]},actor.secret)).receipt;
+ };
+ for(let index=0; index<8; index++){
+   const id='self-review-'+index;
+   publish(id);
+   await submit(id,reviewer);
+ }
+ publish(taskId);
  const next=async identity=>value(await f.call('room_next',{roomId,view:'pickup'},identity.secret));
  assert.equal((await next(reviewer)).nextRead,null);
  for(let index=0; index<49; index++){
@@ -224,17 +238,20 @@ test('idle Room Next gives only the designated reviewer the pending exact public
  assert.equal(waiting.work.coverage,'partial');
  assert.deepEqual(waiting.work.items,[]);
  assert.equal(waiting.nextRead.tool,'room_next');
- const binding={taskId,expectedTermsVersion:1};
- const claimed=value(await f.call('public_work_claim',{...binding,requestId:'claim-reviewable'},f.first.secret));
- const submitted=value(await f.call('public_work_finish',{...binding,generation:claimed.task.claim.generation,
-   requestId:'finish-reviewable',artifactText:'Exact public evidence',checksReported:[]},f.first.secret)).receipt;
+ const submitted=await submit(taskId,f.first);
+ f.store.command(owner,roomId,{id:'zz-late-assignment',type:'work.proposed',data:{
+   workItemId:'zz-late-assignment',title:'Late addressed assignment',definitionOfDone:'Inspect later item',
+   accountableMemberId:reviewer.identityId,mode:'read'
+ }});
  const pending=await next(reviewer);
- assert.deepEqual(pending.nextRead,{tool:'room_read_public_review',arguments:{roomId,receiptId:submitted.receiptId}});
- const continued=value(await f.call(pending.work.nextRead.tool,pending.work.nextRead.arguments,reviewer.secret));
+ assert.equal(pending.nextRead.tool,'room_next');
+ assert.deepEqual(pending.ifIdle,{status:'public_review',nextRead:{tool:'room_read_public_review',arguments:{roomId,receiptId:submitted.receiptId}}});
+ const continued=value(await f.call(pending.nextRead.tool,pending.nextRead.arguments,reviewer.secret));
  assert.equal(continued.work.coverage,'complete');
- assert.deepEqual(continued.work.items,[]);
+ assert.deepEqual(continued.work.items.map(item=>item.id),['zz-late-assignment']);
  assert.equal((await next(other)).nextRead,null);
- const exact=value(await f.call(pending.nextRead.tool,pending.nextRead.arguments,reviewer.secret));
+ const reviewRead=pending.ifIdle.nextRead;
+ const exact=value(await f.call(reviewRead.tool,reviewRead.arguments,reviewer.secret));
  assert.equal(exact.artifact.sha256,submitted.artifact.sha256);
  assert.ok(exact.actions.length>0);
  assert.equal(value(await f.call('room_next',{roomId},reviewer.secret)).nextRead,undefined);

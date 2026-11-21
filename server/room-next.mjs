@@ -259,20 +259,21 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
         ?? packet.requests?.items[0]?.nextRead ?? packet.work?.items[0]?.nextRead;
       packet.nextRead = addressed ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
 
-      // An empty work page can have older, non-actionable rows behind its
-      // cursor. Keep that continuation available while offering the exact,
-      // already addressed public review ahead of another discovery read.
+      // Preserve discovery priority until all addressed work is known. An
+      // empty partial page can still offer a separate exact public review.
       if (allowPublicReview && !source && !room.archivedAt && !addressed
         && packet.work.coverage !== "unavailable" && packet.requests.coverage === "complete"
         && auth.member.permissions.includes("verify") && !store.wakeQueue.pauseStatus(roomId, auth.member.id)) {
         const receiptId = store.publicWorkReviews.nextPending(roomId, auth.member.id);
         if (receiptId) {
-          packet.nextRead = { tool: "room_read_public_review", arguments: { roomId, receiptId } };
+          const nextRead = { tool: "room_read_public_review", arguments: { roomId, receiptId } };
+          packet.ifIdle = { status: "public_review", nextRead };
+          if (packet.work.coverage === "complete") packet.nextRead = nextRead;
         }
       }
 
       if (!source && !room.archivedAt && auth.member.kind === "agent"
-        && auth.member.permissions.includes("accept_work") && !addressed && packet.nextRead?.tool !== "room_read_public_review") {
+        && auth.member.permissions.includes("accept_work") && !addressed && !packet.ifIdle) {
         const paused = store.wakeQueue.pauseStatus(roomId, auth.member.id);
         const addressedComplete = packet.work.coverage === "complete" && packet.requests.coverage === "complete";
         if (paused) packet.ifIdle = { status: "paused" };

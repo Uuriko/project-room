@@ -166,16 +166,21 @@ export class PublicWorkReviews {
   }
   nextPending(roomId, actorId) {
     if (!this.hasTable('public_work_receipts') || !this.hasTable('public_work_reviews')) return null;
+    // Each room can have at most 100 offers and each public task one delivery.
+    // Cover the room inventory so ineligible older receipts cannot hide work.
+    const member = this.memberState(roomId, [actorId]).members[actorId];
+    if (!member || member.active === false || isGuestAgentMemberId(actorId)) return null;
     const rows = this.db.prepare(`SELECT receipt.receipt_id AS receiptId
       FROM project_offers offer JOIN public_work_receipts receipt ON receipt.offer_id=offer.offer_id
       LEFT JOIN public_work_reviews review ON review.receipt_id=receipt.receipt_id AND review.room_id=offer.room_id
       WHERE offer.room_id=? AND offer.status='published'
         AND json_extract(offer.terms, '$.reward.kind')='unpaid'
+        AND (?<>'agent' OR json_extract(offer.terms, '$.approvalPolicy.mode')<>'human')
         AND coalesce(json_extract(review.state_json, '$.state'), 'pending')='pending'
         AND EXISTS (SELECT 1 FROM json_each(offer.private_links, '$.reviewerMemberIds') WHERE value=?)
         AND NOT EXISTS (SELECT 1 FROM public_unpublish WHERE kind='room' AND target=offer.room_id)
         AND NOT EXISTS (SELECT 1 FROM public_unpublish WHERE kind='receipt' AND target=receipt.receipt_id)
-      ORDER BY receipt.created_at, receipt.receipt_id LIMIT 8`).all(roomId, actorId);
+      ORDER BY receipt.created_at, receipt.receipt_id LIMIT 100`).all(roomId, member.kind, actorId);
     for (const { receiptId } of rows) {
       let scope;
       try { scope = this.scope(roomId, actorId, receiptId); }
