@@ -29,8 +29,9 @@ export function buildPrompt({ roomTitle, thread, wakes, firstTurn }) {
 }
 
 // A Board claim assigned to the agent. The reply is posted as a claim note.
-export function buildClaimPrompt({ roomTitle, claim, author }) {
-  const lines = [`You are connected to the Project Room "${roomTitle}" through room-acp. ${author ?? "Someone"} assigned you a Board claim. Do the work, then reply with a short result; it is posted as a note on the claim. Link any PR you open.`, "", `Claim ${claim.id}: ${claim.title ?? claim.id}`];
+export function buildClaimPrompt({ roomTitle, claim, author, pickup = false }) {
+  const subject = pickup ? "You picked up this available Board claim." : `${author ?? "Someone"} assigned you a Board claim.`;
+  const lines = [`You are connected to the Project Room "${roomTitle}" through room-acp. ${subject} Do the work, then reply with a short result; it is posted as a note on the claim. Link any PR you open.`, "", `Claim ${claim.id}: ${claim.title ?? claim.id}`];
   const created = (claim.history ?? []).find(entry => entry?.action === "created");
   if (created?.note) lines.push("", created.note);
   for (const item of claim.acceptanceCriteria ?? []) lines.push(`- ${typeof item === "string" ? item : item?.text ?? ""}`);

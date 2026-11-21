@@ -1356,6 +1356,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, withProjectMapOverlap(store, roomId, withContentTrust(stampClaim(withPullSettlement(seen([load(claimIdOf(reject, workClaimId))])[0]), caller)), caller));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
+    if (req.headers?.[LISTENER_TOKEN_HEADER] !== undefined && store.wakeQueue.pauseStatus(roomId, caller))
+      reject(423, "member_paused", "Pickup is paused for this member");
     const data = body(req);
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
