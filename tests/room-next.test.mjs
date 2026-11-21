@@ -143,9 +143,9 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
   });
 }
 
-test("Room Next finds legacy addressed work beyond two non-actionable windows", async t => {
+test("Room Next skips a long legacy history and preserves the addressed work continuation", async t => {
   const f = await privateWorkFixture(t, "legacy");
-  for (let i = 0; i < 36; i++) {
+  for (let i = 0; i < 54; i++) {
     const id = `a-${String(i).padStart(2, "0")}`;
     f.send(f.owner, "work.proposed", {
       workItemId: id, title: id, definitionOfDone: "Save a result", accountableMemberId: f.observer.id,
