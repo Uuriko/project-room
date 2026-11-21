@@ -892,3 +892,36 @@ test('bounded result preparation does not widen a chat-only write grant', async 
   } }, token);
   assert.equal(ordinary.body.result?.structuredContent?.status, 'posted');
 });
+
+test('OAuth exact result shows a correction without advertising an ungranted resolve action', async t => {
+  const f = await setup(t);
+  const workItemId = 'oauth-pending-correction';
+  const command = (id, type, data) => f.store.command(f.ownerKey, 'commons', { id, type, data });
+  const call = async (name, args, token) => {
+    const { body } = await f.rpc('tools/call', { name, arguments: { workItemId, ...args } }, token);
+    assert.equal(body.error, undefined, JSON.stringify(body));
+    assert.notEqual(body.result.isError, true, JSON.stringify(body));
+    return body.result.structuredContent;
+  };
+  command('correct-propose', 'work.proposed', { workItemId, title: 'Check a release', definitionOfDone: 'Pin the correct commit',
+    accountableMemberId: 'friend-dot', verifierMemberId: 'owner', mode: 'read', independentVerificationRequired: true });
+  await call('room_accept_work');
+  const body = 'Candidate evidence';
+  const posted = await call('room_post_message', { id: 'correct-evidence', body });
+  const evidenceVersion = 'sha256:' + createHash('sha256').update(body).digest('hex');
+  const completed = await call('room_submit_text_result', { summary: body, nextAction: 'Review', producerId: 'friend-dot',
+    evidenceMessageId: 'correct-evidence', evidenceMessageEventId: posted.event.id, evidenceVersion, previousCompletionEventId: null });
+  command('correct-verdict', 'verification.recorded', { workItemId, expectedRevision: completed.appliedRevision,
+    completionEventId: completed.eventId, evidenceVersion, result: 'fail', summary: 'Pin the correct commit' });
+  const complete = await call('room_read_result');
+  assert.equal(complete.workThread.pendingCorrection.action.tool, 'room_resolve_blocker');
+
+  const readonly = await f.consent({ scope: 'rooms:read work:read' });
+  const code = new URL(readonly.headers.get('location')).searchParams.get('code');
+  const response = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const tokens = await response.json();
+  const narrowed = await call('room_read_result', {}, tokens.access_token);
+  assert.equal(narrowed.workThread.pendingCorrection.verificationEventId, complete.workThread.pendingCorrection.verificationEventId);
+  assert.equal(narrowed.workThread.pendingCorrection.action, undefined);
+});
