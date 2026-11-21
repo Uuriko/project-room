@@ -62,7 +62,7 @@ export async function handleInboxMount(ctx) {
   if (webhook) {
     // Provider callbacks carry a per-connection secret, never an account session.
     // Verified updates only wait for the owner's import; nothing is stored here.
-    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
     // Telegram delivers every bot's updates from a few shared egress addresses,
     // so the per-address key is only a high guard against unverified floods;
     // the budget that matters is counted per verified connection, after the
@@ -82,7 +82,7 @@ export async function handleInboxMount(ctx) {
     const token = cookie(req, accountCookieName), binding = accountBinding(req);
     const auth = store.authenticateAccountSession(token, null, binding);
     if (url.pathname === "/api/inbox/setup") {
-      if (!['GET', 'POST'].includes(req.method)) reject(405, 'method_not_allowed', 'Method not allowed');
+      if (!['GET', 'POST'].includes(req.method)) reject(405, 'method_not_allowed', 'Method not allowed', { Allow: "GET, POST" });
       if (req.method === 'POST') {
         protectWrite(req, auth, false); rate(`setup:${auth.account.id}`, 30);
         const data = await body(req);
@@ -112,7 +112,7 @@ export async function handleInboxMount(ctx) {
       if (url.pathname === "/api/inbox/gmail" && req.method === 'GET')
         return json(res, 200, projection(gmail ? gmail.status(auth) : { state: 'unavailable', address: null, syncedAt: null }));
       if (!gmail || !gmail.allowed(auth)) reject(503, 'gmail_not_configured', 'Gmail is not available on this service yet.');
-      if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed');
+      if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed', { Allow: url.pathname === "/api/inbox/gmail" ? "GET, POST" : "POST" });
       protectWrite(req, auth, false); rate(`gmail:${auth.account.id}`, 60);
       if (url.pathname === "/api/inbox/gmail/mailbox") return json(res, 200, projection(await new GmailActions(gmail).run(token, binding, await body(req, { limit: 16 * 1024 * 1024 }))));
       if (url.pathname === "/api/inbox/gmail/connect") {
