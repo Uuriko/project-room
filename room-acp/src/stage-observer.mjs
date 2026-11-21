@@ -1,7 +1,8 @@
 // Transport-neutral, optional metadata observations. Never an execution receipt.
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-const stages = new Set(['signal_received', 'formal_ack_recorded', 'durable_queued', 'session_preparing', 'session_ready', 'prompt_dispatch_attempt', 'first_observable_output', 'durable_result_saved', 'reply_posted']);
+const stages = new Set(['signal_received', 'formal_ack_recorded', 'durable_queued', 'session_preparing', 'session_ready', 'prompt_dispatch_attempt', 'first_observable_output',
+  'review_prompt_returned', 'review_repair_returned', 'review_parked', 'durable_result_saved', 'reply_posted']);
 export function safelyObserve(observer, value) {
   try { const result = observer?.(value); if (result?.then) Promise.resolve(result).catch(() => {}); } catch { /* Telemetry cannot change work. */ }
 }

@@ -59,6 +59,20 @@ export function reviewOutput(recorder, stopReason) {
   return value;
 }
 
+// Only categorical evidence is retained. Never persist unsupported provider
+// output or make a pending response count as a verdict.
+export function reviewParkReason(recorder, stopReason) {
+  if (stopReason !== 'end_turn') return 'turn_not_completed';
+  const text = unfencedJson(recorder.finalText ?? recorder.text);
+  if (typeof text !== 'string' || !text.trim()) return 'no_output';
+  let result;
+  try { result = JSON.parse(text); } catch { return 'unsupported_output'; }
+  if (result?.result === 'pending' && !repeatedTopLevelKey(text)
+    && Object.keys(result).every(key => ['result', 'summary'].includes(key))
+    && typeof result.summary === 'string' && result.summary.trim() && result.summary.length <= 1500) return 'explicit_pending';
+  return 'unsupported_output';
+}
+
 // For text that already parsed as JSON: true when the top-level object names
 // any key twice after decoding escapes. Whole string tokens are consumed, so
 // key-like text inside a value (a summary quoting "result") never counts.
