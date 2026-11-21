@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -302,5 +303,49 @@ for (const representation of REPRESENTATIONS) {
     const serialized = JSON.stringify(context);
     assert.equal(serialized.includes('"verdict":"pass"'), false);
     assert.equal(serialized.includes("SOURCE PASS"), false);
+  });
+}
+
+for (const representation of REPRESENTATIONS) {
+  test(`public authored source verdict uses the integrator's exact agent read (${representation})`, async t => {
+    const f = fixture(t, representation);
+    inviteLander(f.send);
+    const ask = f.send("owner", { id: "private-qualify", type: "message.posted", data: {
+      messageId: "private-qualify", body: "Private question marker", toMemberId: "reviewer",
+      workItemId: "qualify-work", requestKind: "reply"
+    } });
+    f.send("reviewer", { id: "private-qualify-answer", type: "message.posted", data: {
+      messageId: "private-qualify-answer", body: "Private answer marker", responseToRequestId: "private-qualify",
+      expectedRequestRevision: 0, responseOutcome: "answered", contextEventId: ask.event.id,
+      contextSequence: ask.sequence, replyToId: "private-qualify", toMemberId: "owner", workItemId: "qualify-work"
+    } });
+    const read = (actor, brief, knownBriefVersion) => callHostedStdioTool(f.store, f.keys[actor], "room_read_work", {
+      roomId: "commons", workItemId: "qualify-work", brief, ...(knownBriefVersion ? { knownBriefVersion } : {})
+    });
+    const before = await read("lander", false);
+    assert.equal(before.isError, false);
+    assert.deepEqual(before.value.publishedVerdicts, []);
+    const beforeBrief = await read("lander", true);
+    const seq = f.store.headSequence("commons");
+    const committed = publishVerdict(f.send);
+    assert.equal(publishVerdict(f.send).event.id, committed.event.id);
+    assert.equal(f.store.headSequence("commons"), seq + 1);
+    const full = await read("lander", false);
+    assert.equal(full.isError, false);
+    assert.deepEqual(full.value.publishedVerdicts, [expectedPublication(committed)]);
+    assert.equal(full.value.work.verification, null);
+    assert.doesNotMatch(JSON.stringify(full.value), /Private (question|answer) marker/);
+    await assert.rejects(read("guest", false), { status: 403, code: "work_private" });
+    const brief = await read("lander", true, beforeBrief.value.briefVersion);
+    assert.equal(brief.isError, false);
+    assert.doesNotMatch(JSON.stringify(brief.value), /Private (question|answer) marker/);
+    const expected = expectedPublication(committed);
+    delete expected.summary;
+    assert.deepEqual(brief.value.publishedVerdicts, [expected]);
+    assert.notEqual(brief.value.briefVersion, beforeBrief.value.briefVersion);
+    assert.equal((await read("lander", true, brief.value.briefVersion)).value.briefUnchanged, true);
+    for (let i = 0; i < 4; i++) publishVerdict(f.send, {id: "additional-" + i, data: {head: String(i + 1).repeat(40)}});
+    const bounded = await read("lander", true);
+    assert.deepEqual(bounded.value.publishedVerdicts.map(item => item.head), ["2", "3", "4"].map(i => i.repeat(40)));
   });
 }
