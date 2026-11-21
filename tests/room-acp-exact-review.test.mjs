@@ -132,6 +132,54 @@ test('exact work wake runs native review and records one verdict, recovering a l
   assert.deepEqual(f.counts,{prompt:1,write:1,receipt:1,ack:2});
 });
 
+test('a durable exact review claim and first provider output appear before the verdict', async t => {
+  const f = await setup(t);
+  const reports = new Map();
+  const request = f.bridge.reviewRuntimeRoom.request.bind(f.bridge.reviewRuntimeRoom);
+  f.bridge.reviewRuntimeRoom.request = (path, options) => {
+    const result = request(path, options);
+    reports.set(options.body.phase, { input: options.body, result });
+    return result;
+  };
+  const prompt = f.bridge.host.prompt;
+  f.bridge.host.prompt = async (key, payload, options) => {
+    assert.equal(f.receiptPhase(), 'started');
+    assert.equal((await reports.get('claimed').result).status, 'claimed');
+    options.onDispatched();
+    assert.equal(reports.has('started'), false, 'Dispatch alone does not confirm provider output');
+    options.onFirstOutput('text');
+    assert.equal((await reports.get('started').result).status, 'started');
+    assert.equal(reports.get('claimed').input.attemptId, reports.get('started').input.attemptId);
+    assert.equal(reports.get('started').input.completionEventId, f.wake.completionEventId);
+    assert.equal(f.verdict(), undefined);
+    assert.equal(f.pendingRows().delivered_at, null);
+    return prompt(key, payload, options);
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.verdict()?.result, 'pass');
+  assert.deepEqual(f.counts, {prompt:1, write:1, receipt:0, ack:1});
+});
+
+test('a rate-limited progress report does not pause or repeat the verdict', async t => {
+  const f = await setup(t);
+  const got = [];
+  f.bridge.reviewRuntimeRoom.request = async (path, options) => {
+    got.push(options.body.phase);
+    throw new RoomError(429, 'rate_limited', 'Progress write rate limited', 120);
+  };
+  const prompt = f.bridge.host.prompt;
+  f.bridge.host.prompt = (key, payload, options) => {
+    options.onFirstOutput('text');
+    return prompt(key, payload, options);
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.deepEqual(got, ['claimed', 'started']);
+  assert.equal(f.verdict()?.result, 'pass');
+  assert.deepEqual(f.counts, {prompt:1, write:1, receipt:0, ack:1});
+});
+
 test('a work wake a host cannot act on stays pending without a turn or transport acknowledgment',async t=>{
   const f = await setup(t,{respondTo:'owner'});
   await f.bridge.accept(f.wake);
