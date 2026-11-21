@@ -283,11 +283,21 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
           let wantsWork = null;
           try { wantsWork = readWantsWork(store.db, roomId, auth.member.id)?.wantsWork ?? null; }
           catch { wantsWork = null; }
-          const ranked = rankReadyWorkInRoom(store, roomId, {
-            goal: packet.goal, wantsWork, now: store.now?.() ?? Date.now()
-          });
-          const top = ranked[0];
-          if (top) {
+          let ranked;
+          try {
+            ranked = rankReadyWorkInRoom(store, roomId, {
+              goal: packet.goal, wantsWork, now: store.now?.() ?? Date.now(),
+              viewer: { member: auth.member, ownerId: room.ownerId ?? null }
+            });
+          } catch (error) {
+            console.error("ready work board read failed:", error?.message ?? error);
+            packet.ifIdle = { status: "unavailable", reason: "board_unavailable" };
+            ranked = null;
+          }
+          const top = ranked?.[0];
+          if (ranked === null) {
+            // Board read failed: already recorded as unavailable, never dry.
+          } else if (top) {
             const nextRead = { tool: "room_read_board", arguments: { roomId } };
             packet.nextRead = nextRead;
             packet.ifIdle = {
@@ -301,7 +311,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
               claimAction: {
                 method: "POST",
                 endpoint: `/api/rooms/${roomId}/work-claims/${top.item.id}/claim`,
-                params: { requestId: "<uuid>", leaseHours: PICKUP_LEASE_HOURS }
+                params: { leaseHours: PICKUP_LEASE_HOURS }
               }
             };
           } else if (readInvitation) {
