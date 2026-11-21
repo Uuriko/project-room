@@ -290,8 +290,13 @@ export function rankReadyWork(items, {
 
 // Room-scoped ranked read over the one AvailableWork inventory. Does not
 // call store.room(), so Room Next can use it without hydrating a snapshot.
+// A Board list or canonical-work read failure propagates: callers must not
+// treat that as an empty (dry) inventory. Pass `viewer` as the same
+// { member, ownerId } access the claim endpoint uses; a permission miss
+// excludes every item rather than down-ranking it.
 export function rankReadyWorkInRoom(store, roomId, options = {}) {
-  let board = [];
-  try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return []; }
-  return rankReadyWork(availableBoardRowsInRoom(store, roomId, board), { board, ...options });
+  const { viewer = null, ...rankOptions } = options;
+  const board = store.workClaims?.list?.(roomId) ?? [];
+  if (viewer && !mayWriteWorkClaims(viewer)) return [];
+  return rankReadyWork(availableBoardRowsInRoom(store, roomId, board), { board, ...rankOptions });
 }

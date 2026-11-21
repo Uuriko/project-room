@@ -387,7 +387,7 @@ test("room next pickup offers ranked ready work, keeps addressed work first, and
     title: "Ship after unblock", dependsOn: ["prereq"]
   }));
 
-  const pickup = await f.mcp(f.triage, "room_next", { view: "pickup" });
+  const pickup = await f.mcp(f.observer, "room_next", { view: "pickup" });
   assert.equal(pickup.ok, true, pickup.text);
   assert.equal(pickup.value.ifIdle.status, "ready_work");
   assert.equal(pickup.value.ifIdle.claimId, "prereq");
@@ -396,16 +396,18 @@ test("room next pickup offers ranked ready work, keeps addressed work first, and
   assert.match(pickup.value.ifIdle.reason, /unblocks 1/);
   assert.deepEqual(pickup.value.nextRead, pickup.value.ifIdle.nextRead);
   assert.deepEqual(pickup.value.nextRead, { tool: "room_read_board", arguments: { roomId: "commons" } });
+  assert.equal(pickup.value.ifIdle.claimAction.method, "POST");
   assert.equal(pickup.value.ifIdle.claimAction.endpoint, "/api/rooms/commons/work-claims/prereq/claim");
-  assert.equal(pickup.value.ifIdle.claimAction.params.leaseHours, 2);
+  assert.deepEqual(pickup.value.ifIdle.claimAction.params, { leaseHours: 2 });
+  assert.ok(!Object.hasOwn(pickup.value.ifIdle.claimAction.params, "requestId"));
 
   const addressed = await f.mcp(f.producer, "room_next", { view: "pickup" });
   assert.equal(addressed.value.ifIdle, undefined);
   assert.ok(addressed.value.work.items.find(item => item.reason === "revise"));
 
   f.store.wakeQueue.pause(f.owner, "commons", { requestId: "pause-ranked-ready", reason: null },
-    null, { memberId: f.triage.id });
-  const paused = await f.mcp(f.triage, "room_next", { view: "pickup" });
+    null, { memberId: f.observer.id });
+  const paused = await f.mcp(f.observer, "room_next", { view: "pickup" });
   assert.deepEqual(paused.value.ifIdle, { status: "paused" });
   assert.equal(paused.value.nextRead, null);
 });

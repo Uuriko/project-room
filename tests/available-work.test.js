@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { availableBoardRows, availableClaimsInRoom, availablePublicTasks, availableWorkInRoom,
-  DEFAULT_READY_WORK_WEIGHTS, PICKUP_LEASE_HOURS, rankReadyWork } from "../server/available-work.mjs";
+  DEFAULT_READY_WORK_WEIGHTS, PICKUP_LEASE_HOURS, rankReadyWork, rankReadyWorkInRoom } from "../server/available-work.mjs";
 import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
 
 const ROOM = "available-demo";
@@ -163,4 +163,17 @@ test("rankReadyWork: unblocks, hard, age, fit, and mismatch still visible", () =
   assert.equal(PICKUP_LEASE_HOURS, 2);
   const weightSum = Object.values(DEFAULT_READY_WORK_WEIGHTS).reduce((a, b) => a + b, 0);
   assert.ok(Math.abs(weightSum - 1) < 1e-9);
+});
+
+test("rankReadyWorkInRoom: permission failure excludes the item; a Board read failure is not empty-success", t => {
+  const { store } = fixture(t);
+  store.workClaims.set(ROOM, claim("open-1"));
+  const writer = { member: { id: "worker", kind: "agent", permissions: ["accept_work", "complete_work"] }, ownerId: "owner" };
+  const ineligible = { member: { id: "triage", kind: "agent", permissions: ["accept_work"] }, ownerId: "owner" };
+  assert.equal(rankReadyWorkInRoom(store, ROOM, { viewer: writer }).length, 1);
+  assert.deepEqual(rankReadyWorkInRoom(store, ROOM, { viewer: ineligible }), []);
+  const list = store.workClaims.list.bind(store.workClaims);
+  store.workClaims.list = () => { throw new Error("injected board failure"); };
+  t.after(() => { store.workClaims.list = list; });
+  assert.throws(() => rankReadyWorkInRoom(store, ROOM, { viewer: writer }), /injected board failure/);
 });
