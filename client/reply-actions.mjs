@@ -16,6 +16,7 @@ const revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER
 const token = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+$" };
 const limit = { type: "integer", minimum: 1, maximum: 50 };
 const direction = { type: "string", enum: ["incoming", "outgoing", "both"] };
+const requestKey = { ...id, description: "Omit to derive an ID. Keep the same ID and input on retry." };
 const retry = " Keep this requestId and all input unchanged on an unknown result, cancellation or reconnect. A receipt confirms only the original operation. It is not current state, work completion or approval.";
 const definitions = [
   ["room_list_requests", "/reply-requests", "Read current incoming/outgoing reply requests. REST callers can follow nextReads[].http.method/path on the same authenticated origin. Follow each MCP pointer in nextReads (or nextRead on client rows) to room_read_request and finish its conversation pages before using current.answerBasis with room_respond_to_request. Respond to an existing request; room_request_reply opens a new question. Read overdueActions for participant-specific next steps when an open request has gone stale. No message bodies or read acknowledgement. Status is current, not a history filter. Older services omit nextReads; read the request by its id.",
@@ -25,16 +26,16 @@ const definitions = [
   ["room_request_history", "/reply-history", "Read an anchored incoming/outgoing request history, including requests answered between polls. Follow nextCursor; retain completedCheckpoint only after draining the window. Never mix cursor/checkpoint or silently reset on changed history/identity. Reading does not acknowledge anything.",
     { direction, cursor: token, checkpoint: token, limit }, []],
   ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. Does not start a model or grant permission." + retry,
-    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["toMemberId", "body"]],
+    { requestId: requestKey, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["toMemberId", "body"]],
   ["room_reply", null, "Post an ordinary clarification under a message. This does not answer or close a reply request, even when addressed to someone." + retry,
-    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["replyToId", "body"]],
+    { requestId: requestKey, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
-    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, responseToRequestId: id, expectedRequestRevision: revision, responseOutcome: { type: "string", enum: ["answered", "declined"] },
+    { requestId: requestKey, responseToRequestId: id, expectedRequestRevision: revision, responseOutcome: { type: "string", enum: ["answered", "declined"] },
       contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: responseBody }, ["responseToRequestId", "expectedRequestRevision", "responseOutcome", "toMemberId"]],
   ["room_cancel_request", null, "Cancel your open request with a reason. The actual human room owner may also cancel. Does not stop another process." + retry,
-    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision, reason: text }, ["requestMessageId", "expectedRequestRevision", "reason"]],
+    { requestId: requestKey, requestMessageId: id, expectedRequestRevision: revision, reason: text }, ["requestMessageId", "expectedRequestRevision", "reason"]],
   ["room_progress_request", null, "Tell the asker where a request addressed to you stands: acknowledged (you saw it), accepted (you commit to do it), working (it is underway), needs_input (you need something from them; say what in note) or error. Acknowledged alone proves neither acceptance nor progress. The request stays open and this receipt does not advance its revision. Use the response action from room_read_request to answer." + retry,
-    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision,
+    { requestId: requestKey, requestMessageId: id, expectedRequestRevision: revision,
       progress: { type: "string", enum: ["acknowledged", "accepted", "working", "needs_input", "error"] }, note: { ...text, maxLength: 1000 } }, ["requestMessageId", "expectedRequestRevision", "progress"]]
 ];
 const actions = new Map(definitions.map(([name, route, description, properties, required = Object.keys(properties)]) =>

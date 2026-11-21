@@ -12,15 +12,15 @@ const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:cons
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" };
 const bool = { type: "boolean" }, revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
 const object = (properties, required = Object.keys(properties)) => ({ type: "object", properties, required, additionalProperties: false });
-const common = { requestId: { ...id, description: "Optional stable business operation ID. Omit on the first call and the service derives one from the tool, room, actor and input; keep the returned ID and ALL input unchanged after an uncertain result, cancellation or reconnect." },
-  workItemId: id, expectedRevision: { ...revision, description: "Optional exact work revision you inspected. Omit to use the current revision; a conflict means the work changed before this attempt was recorded." } };
+const common = { requestId: { ...id, description: "Omit to derive an ID. On uncertain outcome, retry with the same ID and input." },
+  workItemId: id, expectedRevision: { ...revision, description: "Inspected work revision. Omit for current. A conflict means work changed." } };
 const retry = " Preserve the exact input across retries. A saved receipt confirms this operation, not current ownership or approval; read the task again for its current next step.";
-const attempt = { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: "Optional exact finished successful session attempt of this work. Must belong to you and match producerId. Its declared metadata is snapshotted, not independently verified; omission means unknown." };
-const externalProducer = { ...text, maxLength: 160, description: "Optional reported outside person, team or AI credit. Use only with producerId=null (or omitted for external evidence). Does not create membership, verify identity or establish reviewer independence." };
+const attempt = { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: "Your successful finished attempt for this task and producer. Records reported metadata." };
+const externalProducer = { ...text, maxLength: 160, description: "Reported outside producer. Use with null producerId or omit producerId for external evidence. Credit grants no authority and proves no identity or independence." };
 // RC-2026-09-19-063: fact / inference / proposal marks on a result. A
 // passage of the result is labeled as observed fact, derived inference, or
 // suggested action. Optional; unmarked results stay unmarked, never guessed.
-const resultSegments = { type: "array", maxItems: 20, description: "Optional 1–20 marked passages: kind is fact (observed), inference (derived), or proposal (suggested, non-authoritative). The room stores the marks as written; it never guesses them.",
+const resultSegments = { type: "array", maxItems: 20, description: "Label up to 20 passages as observed fact, inference or proposal. Unmarked text stays unmarked.",
   items: object({ kind: { type: "string", enum: ["fact", "inference", "proposal"] },
     text: { ...text, maxLength: 2000 } }, ["kind", "text"]) };
 const definitions = [
@@ -47,7 +47,7 @@ const definitions = [
   }, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]],
   ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically. This is native independent verification, not an authored work.verdict_published source verdict; do not treat one as the other.", {
     result: { type: "string", enum: ["pass", "fail"] }, completionEventId: id, evidenceVersion: text, summary: text, nextAction: text,
-    reworkRequested: { ...bool, description: "For a failed verdict, false records that the rejected result needs no further draft. The result remains rejected and cannot satisfy a prerequisite. Omit for ordinary correction." }
+    reworkRequested: { ...bool, description: "On failure, false ends rework. Rejection satisfies no prerequisite." }
   }, ["result", "completionEventId", "evidenceVersion", "summary"]],
   ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task and record the same claim on the work-claims board. Requires a contribute, review, or collaborate profile (or the room owner). write_external is not granted by the claim; finishing write-mode work requires write_external or the item's one-item grant (an item proposed to you by the room owner or a write_external holder carries that grant for you alone). Optional pullRequests are several GitHub pull links; the board settles only when every link is merged or closed. Optional blocks label a region of a path so two claims on one file can differ; a path with no label stays exclusive for the whole file.", {
     repository: text, ref: text, paths: { type: "array", minItems: 1, maxItems: 64, items: { ...text, maxLength: 512 } },
@@ -62,13 +62,13 @@ const definitions = [
   }, ["expiresAt"]],
   ["supersede_work", "Replace work", T.WORK_SUPERSEDED, "Replace work with an already-existing work item. Requires steer, not granted by enrollment presets. Retires the original work's active reservation/approval; does not transfer them to its replacement. Also links the two cards on the work-claims board.", { supersededByWorkItemId: id, reason: text }],
   ["record_handoff", "Record handoff receipt", T.WORK_HANDOFF_RECORDED, "Record a handoff receipt when you cannot continue your assigned task: what is actually done against the done criteria, an optional partial-evidence reference, the exact next action, and why you are stopping. This never closes, completes or reassigns the work; the state and review gates stay with the room. The work-claims board gains a successor card that depends on this claim. haltAll=true also stops all your further work mutations until a steer/decide member clears the exact halt.", {
-    doneSummary: { ...text, description: "What is actually done against the definition of done; partial is expected, state it exactly." },
-    evidenceUrl: { ...text, description: "Optional HTTPS reference without embedded credentials; not fetched. Requires evidenceVersion when present." },
-    evidenceVersion: { ...text, description: "Version of the partial evidence; required with evidenceUrl." },
-    nextAction: { ...text, description: "The exact next action for whoever picks this up." },
-    limitReason: { ...text, description: "Why you cannot continue (limit hit, missing permission, context exhausted)." },
-    haltAll: { ...bool, description: "true halts all your further work mutations project-wide until the exact halt is cleared." },
-    toMemberId: { ...id, description: "Optional. The member who should pick this up; triage goes to them instead of the Room owner." }
+    doneSummary: { ...text, description: "What is done against the task criteria, including partial work." },
+    evidenceUrl: { ...text, description: "HTTPS reference without credentials. Requires evidenceVersion. Room does not fetch it." },
+    evidenceVersion: { ...text, description: "Version of evidenceUrl." },
+    nextAction: { ...text, description: "Exact next action." },
+    limitReason: { ...text, description: "Why you cannot continue." },
+    haltAll: { ...bool, description: "Pauses your project-wide work writes until this halt is cleared." },
+    toMemberId: { ...id, description: "Send triage to this member. Defaults to the room owner." }
   }, ["doneSummary", "nextAction", "limitReason"]],
   ["clear_halt", "Clear a member halt", T.WORK_HALT_CLEARED, "Clear one exact recorded halt-all after triage. Requires steer or decide. Names the exact halt event inspected.", {
     memberId: id, haltEventId: id, note: { ...text, maxLength: 512, description: "Optional triage note." }
