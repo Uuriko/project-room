@@ -21,6 +21,7 @@ import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { edgeDoorApiPath } from "../src/service-origin.js";
 import { CONTENT_TRUST, markIfOther, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 import { validRoomDigest } from "./room-digest.mjs";
+import { validReceiverRouteScope } from "../src/reply-requests.js";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -551,8 +552,9 @@ export class RoomAgentClient {
   }
   // A wake-up hint only. Consumers re-read their authorized queue before acting;
   // no streamed message body is used as executable input or saved as history.
-  async waitForChange(after, { signal, timeoutMs = 10000, requestHints = false, reviewWorkItemId } = {}) {
+  async waitForChange(after, { signal, timeoutMs = 10000, requestHints = false, reviewWorkItemId, receiverScope } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000
+      || receiverScope !== undefined && (!requestHints || !validReceiverRouteScope(receiverScope))
       || reviewWorkItemId !== undefined && (!validId(reviewWorkItemId) || requestHints))
       throw new Error("Choose a valid stream cursor and timeout");
     const deadline = AbortSignal.timeout(timeoutMs), controller = new AbortController();
@@ -562,7 +564,8 @@ export class RoomAgentClient {
     try {
       await this.checkConnection({ signal: stop });
       const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/stream?after=${after}`,
-        { signal: stop, timeoutMs: timeoutMs + 1000, headers: { Accept: "text/event-stream" } });
+        { signal: stop, timeoutMs: timeoutMs + 1000, headers: { Accept: "text/event-stream",
+          ...(receiverScope ? { "X-Project-Room-Receiver-Scope": JSON.stringify(receiverScope) } : {}) } });
       if (!response.ok) throw this.#requestError(response, null, "Room stream unavailable");
       if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body)
         throw new RoomClientError(200, "invalid_response", "Room returned an invalid event stream");
@@ -779,6 +782,20 @@ export class RoomAgentClient {
     return value;
   }
   replyRequests(options = {}) { const { signal, ...args } = options; return this.replyRead("room_list_requests", args, { signal }); }
+  async requestRoute(toMemberId, { workItemId, requestMessageId, signal } = {}) {
+    if (!validId(toMemberId) || workItemId !== undefined && !validId(workItemId)
+      || requestMessageId !== undefined && !validId(requestMessageId)) throw new Error("Choose an exact recipient and optional work or request");
+    const query = new URLSearchParams({ toMemberId,
+      ...(workItemId === undefined ? {} : { workItemId }),
+      ...(requestMessageId === undefined ? {} : { requestMessageId }) });
+    const result = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/reply-route?${query}`, undefined, signal);
+    if (result?.contractVersion !== 1 || result.roomId !== this.#roomId || result.requesterId !== this.#memberId
+      || result.recipientId !== toMemberId || result.workItemId !== (workItemId ?? null)
+      || result.requestMessageId !== (requestMessageId ?? null)
+      || !["matches_scope", "outside_scope", "unknown"].includes(result.status) || result.liveness !== "unknown")
+      throw new RoomClientError(200, "invalid_response", "Request route did not match the selected scope");
+    return result;
+  }
   replyContext(requestMessageId, options = {}) {
     const { signal, ...args } = options;
     if (Object.hasOwn(args, "requestMessageId")) throw new Error("Choose the request once");

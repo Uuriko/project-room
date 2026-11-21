@@ -19436,6 +19436,29 @@ paths:
           description: Invalid pairing fields.
         '429':
           description: Per-address reconnect rate limit reached.
+  /api/rooms/{roomId}/reply-route:
+    get:
+      summary: Check your request against active advertised receiver scope
+      description: Member read. Only the authenticated sender's route is checked. A result reports scope, and liveness stays unknown. No write, acknowledgment, or receiver configuration is returned.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: toMemberId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: workItemId
+          in: query
+          schema: { type: string }
+        - name: requestMessageId
+          in: query
+          schema: { type: string }
+          description: An existing request opened by this sender to this recipient. Room uses the existing request's linked work.
+      responses:
+        '200': { description: Scope result (matches_scope, outside_scope, or unknown) and exact selector }
+        '401': { description: unauthenticated }
+        '403': { description: Linked work is private }
+        '404': { description: Work or request not found }
+        '422': { description: Invalid request route }
 components:
   securitySchemes:
     operatorToken:
