@@ -10,24 +10,29 @@ import {Bridge} from '../room-acp/src/bridge.mjs';
 import {RoomError} from '../room-acp/src/room.mjs';
 import {linkWithProof} from './helpers/link-with-proof.mjs';
 
-async function setup(t, {respondTo, pending = false} = {}) {
+async function setup(t, {respondTo, pending = false, nextAction} = {}) {
   const f = createAcceptanceFixture(), roomId = 'commons', workItemId = 'exact-review-work', memberId = 'exact-reviewer';
   const identity = f.store.identities.create('Exact reviewer');
   linkWithProof(f.store,f.keys.owner,roomId,identity,{memberId,permissions:['verify']});
+  const producerId = 'correction-producer', producerHost = 'fixture-correction-producer';
+  const producer = f.store.identities.create('Correction producer');
+  linkWithProof(f.store,f.keys.owner,roomId,producer,{memberId:producerId,permissions:['accept_work','complete_work']});
+  f.store.workWakes.setHost(producer.identityId,producerHost,true,roomId);
   const hostId = 'fixture-exact-review';
   f.store.workWakes.setHost(identity.identityId,hostId,true,roomId);
   const send = (member,type,data) => f.store.command(f.keys[member],roomId,{id:randomUUID(),type,data});
   send('owner','work.proposed',{workItemId,title:'Exact agenda review',definitionOfDone:'Verify the named agenda owner.',
-    accountableMemberId:'producer',verifierMemberId:memberId,independentVerificationRequired:true,mode:'read'});
+    accountableMemberId:producerId,verifierMemberId:memberId,independentVerificationRequired:true,mode:'read'});
   const current = () => f.store.room(roomId).state.workItems[workItemId];
-  const transition = (type,data={}) => send('producer',type,{workItemId,expectedRevision:current().revision,...data});
+  const transition = (type,data={}) => f.store.command(producer.secret,roomId,{id:randomUUID(),type,
+    data:{workItemId,expectedRevision:current().revision,...data}});
   transition('work.accepted');
   transition('work.started');
   const messageId = randomUUID(), body = 'Evidence for the agenda is ready.';
-  const post = send('producer','message.posted',{workItemId,messageId,body});
+  const post = f.store.command(producer.secret,roomId,{id:randomUUID(),type:'message.posted',data:{workItemId,messageId,body}});
   const completion = transition('work.completed',{evidenceKind:'room_text',evidenceMessageId:messageId,
     evidenceMessageEventId:post.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null,
-    producerId:'producer',summary:'Exact evidence',nextAction:'Review the stored text'});
+    producerId,summary:'Exact evidence',nextAction:'Review the stored text'});
   const server = createRoomServer({store:f.store});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(async()=>{ server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
@@ -39,7 +44,9 @@ async function setup(t, {respondTo, pending = false} = {}) {
       session:async()=>({sessionId:'fixture-review-session'}),prompt:async(_key,prompt)=>{
         counts.prompt++;
         assert.match(prompt[0].text,/Evidence for the agenda is ready/);
-        return {stopReason:'end_turn',recorder:{text:JSON.stringify({result:pending?'pending':'pass',summary:'Checked the exact agenda owner and assigned reviewer.'})}};
+        const result = pending ? 'pending' : nextAction ? 'fail' : 'pass';
+        return {stopReason:'end_turn',recorder:{text:JSON.stringify({result,summary:'Checked the exact agenda owner and assigned reviewer.',
+          ...(nextAction ? {nextAction} : {})})}};
       },
     }});
     const request = bridge.room.request.bind(bridge.room);
@@ -61,8 +68,47 @@ async function setup(t, {respondTo, pending = false} = {}) {
   const recordCompetingVerdict = () => f.store.command(identity.secret,roomId,{id:randomUUID(),type:'verification.recorded',data:{
     workItemId,expectedRevision:current().revision,completionEventId:completion.event.id,evidenceVersion:textVersion(body),
     result:'fail',summary:'The agenda owner is missing from the result.'}});
-  return {bridge,wake,counts,make,verdict,pendingRows,recordCompetingVerdict};
+  const correctionSignals = () => f.store.workWakes.pending(producer.identityId,{roomId,hostId:producerHost});
+  const readAsProducer = async ({tool,arguments:args}) => {
+    const response = await fetch(connection.apiBase+'/mcp', {method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+producer.secret},
+      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:tool,arguments:args}})});
+    assert.equal(response.status,200);
+    const value = (await response.json()).result;
+    assert.equal(value?.isError ?? false,false);
+    return value.structuredContent;
+  };
+  return {bridge,wake,counts,make,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer};
 }
+
+test('an ACP failed review hands the exact reproducer to the producer with one protected wake read',async t=>{
+  const nextAction = 'Run node --test --test-name-pattern="request journey at 390px" scripts/reply-request-browser-check.mjs in the reviewed worktree. Expect the hidden composer timeout.';
+  const f = await setup(t,{nextAction});
+  const request = f.bridge.room.request;
+  f.bridge.room.request = async(path,options)=>{
+    const value = await request(path,options);
+    if (options?.body?.type==='verification.recorded') throw new RoomError(0,'network','Committed response lost');
+    return value;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.verdict().result,'fail');
+  assert.deepEqual(f.counts,{prompt:1,write:1,receipt:1,ack:1});
+  const corrections = f.correctionSignals();
+  assert.equal(corrections.length,1);
+  const [correction] = corrections;
+  assert.equal(correction.action,'revise');
+  assert.equal(correction.completionEventId,f.wake.completionEventId);
+  assert.equal(correction.evidenceVersion,f.wake.evidenceVersion);
+  assert.equal(correction.workRevision,f.wake.workRevision+1);
+  assert.equal(JSON.stringify(correction).includes(nextAction),false);
+  const brief = await f.readAsProducer(correction.nextRead);
+  assert.ok(brief.brief.includes(nextAction));
+  assert.equal(brief.revision,correction.workRevision);
+  assert.equal(brief.continuation.tool,'room_resolve_blocker');
+  assert.equal(brief.continuation.arguments.expectedRevision,correction.workRevision);
+  assert.notEqual(correction.nextRead.arguments.includeDiscussion,true);
+});
 
 test('exact work wake runs native review and records one verdict, recovering a lost write through its original receipt',async t=>{
   const f = await setup(t);
