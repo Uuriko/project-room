@@ -223,7 +223,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "ed6e8cb3bd5b4b8f",
+      "inputSchema": "71f0d506107a7c29",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1175,7 +1175,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "ed6e8cb3bd5b4b8f",
+      "inputSchema": "71f0d506107a7c29",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1292,6 +1292,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Read Messages"
+      }
+    },
+    "room_read_project_discoveries": {
+      "inputSchema": "156cec23d6083661",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Read Project Discoveries"
       }
     },
     "room_read_public_review": {
@@ -1947,7 +1957,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "ed6e8cb3bd5b4b8f",
+      "inputSchema": "71f0d506107a7c29",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2359,7 +2369,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "ed6e8cb3bd5b4b8f",
+      "inputSchema": "71f0d506107a7c29",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2651,7 +2661,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "ed6e8cb3bd5b4b8f",
+      "inputSchema": "71f0d506107a7c29",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2688,6 +2698,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Project State"
+      }
+    },
+    "room_read_project_discoveries": {
+      "inputSchema": "156cec23d6083661",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Read Project Discoveries"
       }
     },
     "room_read_public_review": {
@@ -2953,7 +2973,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "ed6e8cb3bd5b4b8f",
+      "inputSchema": "71f0d506107a7c29",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -3397,7 +3417,7 @@
       }
     },
     "room_next": {
-      "inputSchema": "ed6e8cb3bd5b4b8f",
+      "inputSchema": "71f0d506107a7c29",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

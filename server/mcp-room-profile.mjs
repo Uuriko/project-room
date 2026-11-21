@@ -1,3 +1,4 @@
+import { reviewerProjectDiscoveries } from './project-discoveries.mjs';
 import { readRoomNext, validRoomNextSelection } from "./room-next.mjs";
 import { withInviteShare } from "./invite-share.mjs";
 import { readProjectState } from "./project-state.mjs";
@@ -48,7 +49,7 @@ import { nextWorkStep, workActions } from "../src/workflow.js";
 import { completedResults, currentResult, searchWorkMatches as searchWork } from "../src/work-selectors.js";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { workHelpContext } from "../src/work-help.js";
-import { HOSTED_ROOM_MCP_TOOLS, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName, PUBLIC_WORK_MCP_TOOLS } from "../src/room-mcp-join.js";
+import { HOSTED_ROOM_MCP_TOOLS, ROOM_MCP_PUBLIC_URL, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName, PUBLIC_WORK_MCP_TOOLS } from "../src/room-mcp-join.js";
 import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.mjs";
 import { mcpInvalidRequest } from "./mcp-arg-errors.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
@@ -195,6 +196,9 @@ function validRoomArgs(name, args) {
     && (args.cursor === undefined || typeof args.cursor === "string" && args.cursor.length >= 1 && args.cursor.length <= 12288);
   if (name === "room_receipt") return validId(args.operationId);
   if (name === "room_next") return validRoomNextSelection(args);
+  if (name === "room_read_project_discoveries") return validId(args.offerId)
+    && (args.after === undefined || typeof args.after === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(args.after))
+    && (args.limit === undefined || Number.isInteger(args.limit) && args.limit >= 1 && args.limit <= 50);
   if (name === "room_check_access" || name === "room_activation_pack" || name === "room_project_state" || name === "room_response_latency") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
@@ -587,14 +591,14 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
-function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal) {
+function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl) {
   if (typeof spendCredential === "function") {
     spendCredential(secret, mcpRoomToolScope(name) === "rooms:write" ? "write" : "read");
   }
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
   return withSpendCharge(store, secret, name, args,
-    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal));
+    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl));
 }
 
 // A work-item tool given a Board claim id answered a bare work_not_found
@@ -626,11 +630,16 @@ async function boardClaimCall(store, secret, name, args) {
   throw error;
 }
 
-function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal) {
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl) {
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
   if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
     () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
-    { allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes) }));
+    { discoveryOrigin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes) }));
+  if (name === "room_read_project_discoveries") {
+    const member = store.authenticate(secret, args.roomId).member;
+    return withContentTrust(reviewerProjectDiscoveries(store, args.roomId, args.offerId, new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, member.id,
+      { limit: String(args.limit ?? 5), after: args.after ?? null }));
+  }
   if (BOARD_CLAIM_TOOLS.includes(name)) return boardClaimCall(store, secret, name, args);
   if (name === 'room_wait_for_attention') return waitForAttention(store, secret, args.roomId, {...args, signal});
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId, oauthIdentity: /^(oat|iat)_/.test(secret ?? "") ? identity : null, claimSec: args.claimSec ?? 0 });
@@ -1357,7 +1366,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         const value = await callWakeTool(store, secret, identity, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
       }
-      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal);
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl);
       if (name === "room_check_access" && value.scope === "room") {
         value.nativeMonitoring = oauthPrincipal && typeof nativeStatus === "function"
           ? await nativeStatus(mcpOAuthPrincipalDescriptor(oauthPrincipal))

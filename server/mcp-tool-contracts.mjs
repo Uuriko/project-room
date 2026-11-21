@@ -23,6 +23,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_work_claim_thread: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims/{claimId}/thread" },
   room_digest: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/digest" },
   room_receipt: { access: `read, ${MEMBER}; caller’s own operations`, cost: READ, rest: "none; use hosted MCP for exact operation receipt lookup" },
+  room_read_project_discoveries: { access: "read, designated project reviewer", cost: READ, rest: "GET /api/rooms/{roomId}/project-offers/{offerId}/discoveries" },
   room_next: { access: `read, ${MEMBER}`, cost: READ, rest: "none; call room_next through hosted MCP" },
   room_activation_pack: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/activation-pack" },
   room_read_result: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-result" },
