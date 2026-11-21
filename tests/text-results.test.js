@@ -169,11 +169,14 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   assert.equal(packet.workThread.correction.verificationEventId, finding.event.id);
   assert.equal(packet.workThread.correction.nextRead.arguments.completionEventId, original.event.id);
   const historical = await reviewer.workResult(f.workItemId, { completionEventId: original.event.id });
+  assert.equal(packet.selection.status, "current");
   assert.equal(historical.workThread.href, packet.workThread.href);
   assert.equal(historical.workThread.start?.eventId, originalStart.event.id);
   assert.equal(historical.workThread.verdict?.eventId, finding.event.id);
   assert.equal(historical.workThread.verdict?.result, "fail");
   assert.equal(historical.workThread.correction, undefined);
+  assert.equal(historical.selection.status, "historical");
+  assert.notEqual(historical.result.receipt.eventId, historical.current.completionEventId);
   assert.equal(historical.review, undefined);
   const verdict = { ...basisOf(packet), result: "pass", summary: "Checked the corrected SHA." };
   assert.throws(() => f.send(T.VERIFICATION_RECORDED, { ...oldBasis, result: "pass", summary: "Stale" }, "reviewer"), /Stale Work Item revision/);
@@ -264,6 +267,7 @@ test("native text preserves exact stored UTF-8 and old post/proposal provenance 
   f.send(T.MEMBER_ACCESS_CHANGED, { memberId: "guest", permissions: [], expectedMemberRevision: 0, active: false }, "owner");
   const before = auditRecovery(f.store).dataSha256;
   const preview = await f.client.workResult(f.workItemId, { draftMessageId: posted.event.data.messageId });
+  assert.equal(preview.selection.status, "draft");
   assert.equal(preview.result.kind, "draft"); assert.equal(preview.result.text.body, body);
   assert.deepEqual(preview.result.text.proposal, { packetId: "original-packet", basisRevision: 1, submittedAtRevision: 1, attribution: "manual-unverified" });
   assert.equal(auditRecovery(f.store).dataSha256, before);
