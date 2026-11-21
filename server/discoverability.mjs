@@ -564,6 +564,8 @@ function publicWorkOperation(entry, method) {
   if (kind === "list") op.queryParameters = [
     { name: "view", in: "query", schema: { type: "string", enum: ["pickup"] },
       description: "Return one eligible unpaid task and its current claim action or a public fallback. Requires roomId, accepts after, and replaces limit and claimable." },
+    { name: "roomId", in: "query", schema: { type: "string" },
+      description: "Select only published tasks for this room. Required when view is pickup." },
     { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
     { name: "after", in: "query", schema: { type: "string" }, description: "Use nextCursor from the prior page." },
   ];
