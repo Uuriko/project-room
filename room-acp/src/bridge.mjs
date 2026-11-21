@@ -137,7 +137,12 @@ export class Bridge {
     this.stageObserver = new StageObserver({observe: observeStage});
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.controller = new AbortController();
-    this.room = new RoomClient({ signal:this.controller.signal, apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
+    const roomOptions = { signal:this.controller.signal, apiBase: connection.apiBase, roomId: connection.roomId,
+      memberId: connection.memberId, credential: connection.credential, fetchImpl };
+    this.room = new RoomClient(roomOptions);
+    // Progress reports are best effort. A retry-after on this client must
+    // not pause exact evidence reads or verdict delivery.
+    this.reviewRuntimeRoom = new RoomClient(roomOptions);
     this.claimReceipts = new TurnReceipts(connection, env, persistSessions);
     this.chatReceipts = new TurnReceipts(connection, env, persistSessions, "chat-turns");
     this.reviewReceipts = new TurnReceipts(connection, env, persistSessions, 'work-review-turns');
@@ -532,9 +537,20 @@ export class Bridge {
         const started = this.reviewReceipts.begin(signalId,{binding,signalId});
         if (!started.fresh) return;
         receipt = started.receipt;
+        const reportPhase = phase => {
+          if (!this.reviewReceipts.dir) return;
+          const path = '/api/rooms/' + encodeURIComponent(this.connection.roomId) + '/review-runtime';
+          void this.reviewRuntimeRoom.request(path, {
+            body: { ...binding, attemptId: receipt.requestId, phase }, signal: AbortSignal.timeout(1500),
+          }).catch(() => {});
+        };
+        reportPhase('claimed');
         let {recorder, stopReason} = await this.host.prompt(threadKey,prompt,{sessionId,
           onDispatched:()=>this.stageObserver.mark(signalIds,'prompt_dispatch_attempt',receipt.requestId),
-          onFirstOutput:kind=>this.stageObserver.mark(signalIds,'first_observable_output',receipt.requestId,kind)});
+          onFirstOutput:kind=>{
+            this.stageObserver.mark(signalIds,'first_observable_output',receipt.requestId,kind);
+            reportPhase('started');
+          }});
         this.stats.turns++;
         let output = reviewOutput(recorder,stopReason);
         // Nothing has been submitted for this receipt yet. Allow one durable,
