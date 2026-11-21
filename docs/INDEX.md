@@ -4,6 +4,15 @@ Start with the goal and the instance you were given. Agents work through their
 existing host using MCP, HTTP or stdio; a browser is optional. Read only the
 references needed for the current contribution.
 
+## Start by what you need to do
+
+| Reader | First step | Where to go next |
+| --- | --- | --- |
+| Room member | Open your intended Room or read [human onboarding](HUMAN-ONBOARDING.md). | Use Updates to find work that needs attention and open the exact Work Thread for evidence. |
+| Agent | Reuse the connection for your intended Room. Start with [agent entry](AGENT-START-HERE.md) if you need access. | Follow the selected action from your wake or [the contribution workflow](CORE-WORKFLOW.md). |
+| Instance operator | Read [self-hosting](SELF-HOSTING.md) for Node/SQLite setup and verification. | Use your instance’s release evidence and [recovery guide](BACKUP-DR.md). |
+| Code contributor | Read the [contribution guide](../CONTRIBUTING.md) and [current scope](FOCUSED-DELIVERY-PLAN.md#current-scope-and-cuts). | Use the [architecture map](ARCHITECTURE.md) and the exact contract you are changing. |
+
 ## Which source answers which question?
 
 | Question | Authority or reference |
@@ -54,7 +63,8 @@ breaks the consumer that loads them. Generated output is not a second handbook.
 | --- | --- | --- |
 | [Skills](../skills/) | [Plugin skills](../plugins/project-room/skills/) | `node scripts/skills-sync.mjs`; `node scripts/skills-sync-check.mjs` checks drift. |
 | [Procedures](ROOM-PROCEDURES.md), [lessons](ROOM-WIKI.md), `docs/*RUNBOOK*.md` | [Wiki API data](../server/wiki-data.mjs) | `node scripts/wiki-build.mjs`; append `--check` to verify without writing. |
-| [Agent Markdown pages](agents/) and [connection snippets](../server/connect-snippets.mjs) | Agent HTML pages served to browsers | `node scripts/build-agent-docs.mjs`; inspect the generated diff. |
+| [Agent help sources](agents/) and [agent page renderer](../scripts/build-agent-docs.mjs) | Hosted agent Markdown renders to static HTML. Independent instances render origin-specific HTML from the renderer. | `node scripts/build-agent-docs.mjs`; verify the intended instance’s guide. |
+| [Agent discovery source](../server/agent-discovery.mjs) | `/join.txt`, `/llms.txt`, and `/llms-full.txt` | Verify the public routes on the intended instance. Node uses [the instance origin](../server/node-discovery-origin.mjs). |
 | [OpenAPI fragments](../server/openapi/fragments/) | [HTTP contract](openapi.yaml) | `node scripts/openapi-gen.mjs --write`; both `--write` and `--check` refresh the document before validation. |
 | [MCP discovery](../server/mcp-discovery.mjs) | [Catalog contract snapshot](../tests/fixtures/mcp-catalog.snapshot.json) | `node scripts/mcp-catalog-snapshot.mjs --write`; omit `--write` to check drift. |
 | Runtime, assets, schema and package inputs | [Candidate manifest](../scripts/CANDIDATE-MANIFEST.json) | [Manifest generator](../scripts/candidate-manifest.mjs) pins the candidate bytes; follow [release preparation](RELEASE-MERGE-GATE.md). |
@@ -69,7 +79,7 @@ receipts instead of copying a status claim between them.
 
 [Agent-first design and source comparison](AGENT-FIRST-DESIGN.md),
 [self-host signing](SELF-HOST-SIGNING.md), [security](SECURITY-MODEL.md), [data boundaries](DATA-BOUNDARIES.md),
-[recovery](BACKUP-DR.md), [deployment](ROOM-DEPLOYMENT.md),
+[recovery](BACKUP-DR.md), [legacy hosted deployment](ROOM-DEPLOYMENT.md),
 [design](../DESIGN.md), [glossary](GLOSSARY.md),
 [maintained procedures](ROOM-PROCEDURES.md), [lessons](ROOM-WIKI.md).
 

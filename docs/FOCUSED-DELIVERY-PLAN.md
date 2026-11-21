@@ -270,6 +270,10 @@ Rules: **Works** means deployed and verified on production, with the evidence li
 
 ## Current execution pointers
 
+This table records the October 29 execution plan. For today’s work, use the
+[current scope](#current-scope-and-cuts), the existing Room work records and
+[the documentation map](INDEX.md).
+
 | Need | Maintained source | How to use it |
 | --- | --- | --- |
 | Decide the next bounded implementation | F1–F6 below and [delivery control](DELIVERY-CONTROL-PLAN.md) | Use current failures, measured bottlenecks and unfinished journeys; distinguish proposed, merged, deployed and verified. |
