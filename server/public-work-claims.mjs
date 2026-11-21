@@ -7,7 +7,7 @@ import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
-import { recordedReceiptsOptOut } from './public-visibility.mjs'; // the authoritative recorded opt-out hides the room's receipts from non-members too
+import { receiptVisibilitySqlFor, recordedReceiptsOptOut } from './public-visibility.mjs'; // the authoritative recorded opt-out hides the room's receipts from non-members too
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -258,6 +258,22 @@ export class PublicWorkClaims {
       other.id !== taskId && other.owner && other.files.some(path => files.some(file => overlaps(path, file))));
   }
 
+  latestPublicReceiptLead(roomId) {
+    if (!this.available()) return null;
+    const row = this.db.prepare(`SELECT t.offer_id AS taskId, json_extract(o.terms, '$.title') AS title,
+        public_receipts.id AS receiptId
+      FROM public_receipts
+      JOIN public_work_receipts r ON r.receipt_id=public_receipts.id
+      JOIN public_work_tasks t ON t.offer_id=r.offer_id AND t.generation=r.generation
+      JOIN project_offers o ON o.offer_id=t.offer_id AND o.room_id=t.room_id AND o.version=t.terms_version
+      WHERE public_receipts.room_id=?1 AND t.room_id=?1 AND public_receipts.source='public-work'
+        AND o.status='published' AND ${receiptVisibilitySqlFor(this.db)}
+      ORDER BY public_receipts.at DESC, public_receipts.id LIMIT 1`).get(roomId);
+    if (!row) return null;
+    return { ...row, taskPath: '/api/public-work/tasks/' + encodeURIComponent(row.taskId),
+      receiptPath: '/api/public-work/receipts/' + encodeURIComponent(row.receiptId) };
+  }
+
   pickup(roomId, after) {
     return this.store.readTransaction(() => {
       const page = this.list({ roomId, after, limit: 1, claimable: true, pickup: true });
@@ -267,10 +283,18 @@ export class PublicWorkClaims {
           path: '/api/public-work/tasks/' + encodeURIComponent(task.taskId) + '/claim',
           body: { expectedTermsVersion: task.termsVersion }, requires: ['saved_identity', 'stable_request_id'] },
       };
-      const repositoryUrl = this.store.projectOffers.publishedProjectSource(roomId);
-      return { ...page, nextAction: repositoryUrl
-        ? { kind: 'inspect_published_repository', repositoryUrl }
-        : { kind: 'no_eligible_public_task' } };
+      if (page.claimableCount > 0) return { ...page, nextAction: { kind: 'pickup_page_exhausted' } };
+      const project = !after && this.store.projectOffers.publishedProject(roomId);
+      if (!project) return { ...page, nextAction: { kind: 'no_eligible_public_task' } };
+      const evidenceLead = this.latestPublicReceiptLead(roomId);
+      return { ...page, nextAction: {
+        kind: project.repositoryUrl ? 'inspect_published_repository' : 'inspect_published_project',
+        ...(project.repositoryUrl && { repositoryUrl: project.repositoryUrl }), project,
+        ...(evidenceLead && { evidenceLead }),
+        investigation: evidenceLead
+          ? 'Compare the linked public task criteria with its receipt and artifact. Report one criterion, the evidence that supports or contradicts it, and a reproducible check.'
+          : 'Check one published project criterion against a cited public source. Report the criterion, source revision or URL, check performed, and observed result.',
+      } };
     });
   }
   read(offerId) {

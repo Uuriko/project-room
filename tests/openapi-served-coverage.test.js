@@ -81,7 +81,7 @@ test("served /openapi.json matches the routes the server actually serves", async
     else assert.equal(await scoped.text(), "");
   }
   assert.deepEqual(publicTasks.get.responses["200"].content["application/json"].schema
-    .properties.nextAction.properties.kind.enum, ["claim", "inspect_published_repository", "no_eligible_public_task"]);
+    .properties.nextAction.properties.kind.enum, ["claim", "inspect_published_repository", "inspect_published_project", "pickup_page_exhausted", "no_eligible_public_task"]);
 
   // /demo is the declarative public HTML exception to the API inventory.
   // Its served documentation must describe the actual anonymous response.

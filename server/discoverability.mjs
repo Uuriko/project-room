@@ -544,11 +544,21 @@ function publicWorkOperation(entry, method) {
     tasks: { type: "array", items: ref("PublicWorkTask") }, nextCursor: { type: ["string", "null"] },
     claimableCount: { type: "integer", minimum: 0 },
     nextAction: { type: "object", required: ["kind"], description: "Present in pickup view.", properties: {
-      kind: { enum: ["claim", "inspect_published_repository", "no_eligible_public_task"] },
+      kind: { enum: ["claim", "inspect_published_repository", "inspect_published_project", "pickup_page_exhausted", "no_eligible_public_task"] },
       method: { const: "POST" }, path: { type: "string" },
       body: { type: "object", required: ["expectedTermsVersion"], properties: { expectedTermsVersion: { type: "integer", minimum: 1 } } },
       requires: { type: "array", items: { enum: ["saved_identity", "stable_request_id"] } },
       repositoryUrl: { type: "string", format: "uri" },
+      project: { type: "object", required: ["id", "version", "path", "title", "summary", "acceptanceCriteria"], properties: {
+        id: { type: "string" }, version: { type: "integer", minimum: 1 }, path: { type: "string" },
+        title: { type: "string" }, summary: { type: "string" }, acceptanceCriteria: strings,
+        repositoryUrl: { type: "string", format: "uri" }, submissionUrl: { type: "string", format: "uri" },
+      } },
+      evidenceLead: { type: "object", required: ["taskId", "title", "receiptId", "taskPath", "receiptPath"], properties: {
+        taskId: { type: "string" }, title: { type: "string" }, receiptId: { type: "string" },
+        taskPath: { type: "string" }, receiptPath: { type: "string" },
+      } },
+      investigation: { type: "string" },
     } },
   } };
   else if (kind === "match") schema = { type: "object", required: ["recommendations", "claim", "inspected", "hasMore", "nextCursor", "supportedRewards"], properties: {

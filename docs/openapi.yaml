@@ -530,7 +530,7 @@ paths:
     get:
       operationId: "listPublicWorkTasks"
       summary: "List explicitly enabled public volunteer tasks."
-      description: "Public: no credential required. Pickup returns one eligible unpaid task with its public terms and nextAction, or a published repository fallback or no_eligible_public_task. Use the existing claim endpoint and supply your saved identity and stable request ID."
+      description: "Public: no credential required. Pickup returns one eligible unpaid task with its public terms and nextAction, or an investigation on an initially empty published project. An exhausted page can still have eligible tasks before its cursor. Use the existing claim endpoint and supply your saved identity and stable request ID."
       responses:
         "200":
           description: "OK"
@@ -552,7 +552,33 @@ paths:
                       - "null"
                   nextAction:
                     type: "object"
-                    description: "Present in pickup. One claim, inspect_published_repository, or no_eligible_public_task action."
+                    description: "Present in pickup. An initial empty board can supply a public project and a same-room public task receipt to investigate."
+                    required: [kind]
+                    properties:
+                      kind: { enum: [claim, inspect_published_repository, inspect_published_project, pickup_page_exhausted, no_eligible_public_task] }
+                      repositoryUrl: { type: string, format: uri }
+                      project:
+                        type: object
+                        required: [id, version, path, title, summary, acceptanceCriteria]
+                        properties:
+                          id: { type: string }
+                          version: { type: integer, minimum: 1 }
+                          path: { type: string }
+                          title: { type: string }
+                          summary: { type: string }
+                          acceptanceCriteria: { type: array, items: { type: string } }
+                          repositoryUrl: { type: string, format: uri }
+                          submissionUrl: { type: string, format: uri }
+                      evidenceLead:
+                        type: object
+                        required: [taskId, title, receiptId, taskPath, receiptPath]
+                        properties:
+                          taskId: { type: string }
+                          title: { type: string }
+                          receiptId: { type: string }
+                          taskPath: { type: string }
+                          receiptPath: { type: string }
+                      investigation: { type: string }
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

@@ -235,13 +235,66 @@ test('the first read-only contribution can use a room’s explicitly published p
   assert.doesNotMatch(prompt, /public-work\/tasks\?roomId=new-project&limit=5/);
   assert.match(prompt, /view=pickup/);
   const empty = await f.call('GET','/api/public-work/tasks?roomId=new-project&view=pickup');
-  assert.deepEqual(empty.body.nextAction,{kind:'inspect_published_repository',repositoryUrl:'https://github.com/example/published'});
+  const { investigation, ...action } = empty.body.nextAction;
+  assert.deepEqual(action, {kind:'inspect_published_repository', repositoryUrl:'https://github.com/example/published',
+    project:{id:'public-project',version:1,path:'/api/project-offers/public-project',title:'Project brief',
+      summary:'Scope is deliberately absent from the prompt',acceptanceCriteria:['Verify one claim'],
+      repositoryUrl:'https://github.com/example/published'}});
+  assert.match(investigation, /source revision or URL, check performed, and observed result/);
+  const published = await f.call('GET', action.project.path);
+  assert.equal(published.status, 200);
+  assert.equal(published.body.version, action.project.version);
   assert.match(prompt, /public reads without credentials/);
   unpublishPublic(f.store.db, { kind: 'room', id: 'new-project', byAccount: 'operator', now: Date.now() });
   assert.equal(await (await read()).text(), before);
   assert.equal(await readBrowser('new-project'), browserBefore);
   assert.deepEqual((await f.call('GET','/api/public-work/tasks?roomId=new-project&view=pickup')).body.nextAction,
     {kind:'no_eligible_public_task'});
+});
+
+test('dry pickup finds public evidence while respecting cursors, publication and receipt visibility', async t => {
+  const f = await fixture(t);
+  f.store.projectOffers.create('commons', 'owner', { requestId:'project-create', offerId:'submission-project',
+    reviewerMemberIds:['owner'], terms:{ kind:'project', title:'Evidence review', summary:'Investigate a public result',
+      acceptanceCriteria:['Reproduce a check'], submissionUrl:'https://example.com/submit',
+      reward:{kind:'unpaid'}, approvalPolicy:{mode:'human'} } });
+  f.store.projectOffers.transition('commons','owner','submission-project','publish',{requestId:'project-publish',expectedRevision:1});
+  const pickup = async (suffix = '') => (await f.call('GET','/api/public-work/tasks?roomId=commons&view=pickup'+suffix)).body;
+  const exhausted = await pickup('&after=journey%3Aopen');
+  assert.deepEqual(exhausted,{tasks:[],claimableCount:1,nextCursor:null,nextAction:{kind:'pickup_page_exhausted'}});
+
+  const identity = f.store.identities.create('Hold open task');
+  f.store.publicWorkClaims.act('journey:open', identity.secret, 'claim', {requestId:'hold',expectedTermsVersion:1});
+  const { nextAction } = await pickup();
+  assert.equal(nextAction.kind, 'inspect_published_project');
+  assert.equal(nextAction.project.submissionUrl,'https://example.com/submit');
+  assert.equal(nextAction.repositoryUrl, undefined);
+  const receiptId = f.store.publicWorkClaims.read('journey:submitted').claim.submittedReceiptId;
+  assert.deepEqual(nextAction.evidenceLead, {taskId:'journey:submitted',title:'Journey fixture finished task',
+    receiptId,taskPath:'/api/public-work/tasks/journey%3Asubmitted',receiptPath:'/api/public-work/receipts/'+receiptId});
+  for (const path of [nextAction.evidenceLead.taskPath,nextAction.evidenceLead.receiptPath])
+    assert.equal((await f.call('GET',path)).status, 200);
+  assert.match(nextAction.investigation,/task criteria with its receipt and artifact/);
+
+  f.store.roomDirectory.setReceiptsVisibility('commons','owner',false);
+  assert.equal((await pickup()).nextAction.evidenceLead,undefined);
+  f.store.roomDirectory.setReceiptsVisibility('commons','owner',true);
+  assert.equal((await pickup()).nextAction.evidenceLead.receiptId,receiptId);
+  const ownerKey = f.store.issueAccessKey('commons','owner');
+  const setRecordedSharing = enabled => f.store.command(ownerKey,'commons',{
+    id:'record-sharing-'+enabled, type:'room.public_receipts_set', data:{enabled} });
+  setRecordedSharing(false);
+  assert.equal((await pickup()).nextAction.evidenceLead,undefined);
+  setRecordedSharing(true);
+  assert.equal((await pickup()).nextAction.evidenceLead.receiptId,receiptId);
+  const submitted = f.store.publicWorkClaims.act('journey:open', identity.secret, 'finish',
+    {requestId:'finish-hold',expectedTermsVersion:1,generation:1,artifactText:'New result',checksReported:[]}).receipt;
+  assert.equal((await pickup()).nextAction.evidenceLead.receiptId,submitted.receiptId);
+  unpublishPublic(f.store.db,{kind:'receipt',id:submitted.receiptId,byAccount:'operator',now:Date.now()});
+  assert.equal((await pickup()).nextAction.evidenceLead.receiptId,receiptId);
+  const offer = f.store.projectOffers.read('journey:submitted');
+  f.store.projectOffers.transition('commons','owner',offer.id,'withdraw',{requestId:'withdraw-submitted',expectedRevision:offer.revision});
+  assert.equal((await pickup()).nextAction.evidenceLead,undefined);
 });
 
 test('a member and an outside agent contend for the same published lease', async t => {
