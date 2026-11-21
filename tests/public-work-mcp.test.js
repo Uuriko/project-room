@@ -8,6 +8,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { PUBLIC_WORK_MCP_TOOLS } from '../src/room-mcp-join.js';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
 
 async function fixture(t) {
  const store = new RoomStore(':memory:'); store.initialize(initialRoom());
@@ -195,4 +196,41 @@ test('#1551: anonymous auth_required errors never name hosted tools in next[]',a
  const gated=await f.call('public_work_claim',claim);
  assert.equal(gated.body.error.data.reason,'auth_required');
  assert.ok(!JSON.stringify(gated.body.error.data.next).includes('room_check_access'));
+});
+
+
+test('idle Room Next gives only the designated reviewer the pending exact public receipt', async t => {
+ const f=await fixture(t), roomId='commons', taskId='reviewable';
+ const owner=f.store.issueAccessKey(roomId,'owner');
+ const reviewer=f.store.identities.create('Independent reviewer');
+ const other=f.store.identities.create('Unassigned reviewer');
+ for(const identity of [reviewer,other]) linkWithProof(f.store,owner,roomId,identity,{permissions:['verify']});
+ f.store.projectOffers.create(roomId,'owner',{requestId:'create-reviewable',offerId:taskId,reviewerMemberIds:[reviewer.identityId],terms:{
+   kind:'task',title:'Check exact proof',summary:'Read-only public contribution',acceptanceCriteria:['Exact evidence'],
+   repositoryUrl:'https://github.com/example/project',reward:{kind:'unpaid'},approvalPolicy:{mode:'agent'}
+ }});
+ f.store.projectOffers.transition(roomId,'owner',taskId,'publish',{requestId:'publish-reviewable',expectedRevision:1});
+ f.store.publicWorkClaims.enable(roomId,'owner',taskId,{requestId:'enable-reviewable',expectedRevision:2,expectedTermsVersion:1,repositoryRef:'main',files:['proof.md']});
+ const next=async identity=>value(await f.call('room_next',{roomId,view:'pickup'},identity.secret));
+ assert.equal((await next(reviewer)).nextRead,null);
+ const binding={taskId,expectedTermsVersion:1};
+ const claimed=value(await f.call('public_work_claim',{...binding,requestId:'claim-reviewable'},f.first.secret));
+ const submitted=value(await f.call('public_work_finish',{...binding,generation:claimed.task.claim.generation,
+   requestId:'finish-reviewable',artifactText:'Exact public evidence',checksReported:[]},f.first.secret)).receipt;
+ const pending=await next(reviewer);
+ assert.deepEqual(pending.nextRead,{tool:'room_read_public_review',arguments:{roomId,receiptId:submitted.receiptId}});
+ assert.equal((await next(other)).nextRead,null);
+ const exact=value(await f.call(pending.nextRead.tool,pending.nextRead.arguments,reviewer.secret));
+ assert.equal(exact.artifact.sha256,submitted.artifact.sha256);
+ assert.ok(exact.actions.length>0);
+ assert.equal(value(await f.call('room_next',{roomId},reviewer.secret)).nextRead,undefined);
+ f.store.command(owner,roomId,{id:'addressed-incoming',type:'message.posted',
+   data:{messageId:'addressed-incoming',toMemberId:reviewer.identityId,requestKind:'reply',body:'Check the current exact request'}});
+ assert.equal((await next(reviewer)).nextRead.tool,'room_read_request');
+
+ f.store.publicWorkReviews.decide(roomId,reviewer.identityId,submitted.receiptId,{
+   requestId:'request-public-revision',expectedReviewRevision:0,taskId, expectedTermsVersion:1,
+   generation:submitted.generation,artifactSha256:submitted.artifact.sha256,decision:'revision_requested',reason:'Supply exact steps'
+ });
+ assert.equal(f.store.publicWorkReviews.nextPending(roomId,reviewer.identityId),null);
 });
