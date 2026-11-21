@@ -10,7 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
-import { openSearch } from "./room-chrome.mjs";
+import { openConversation, openSearch } from "./room-chrome.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["narrow", { width: 320, height: 780 }]]) {
   test(`composer ${label}: keyboard recovery, discussion errors, composition, and access cleanup`, { timeout: 60000 }, async t => {
@@ -45,6 +45,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
       await page.locator("#auth-panel").waitFor({ state: "visible" });
       await signInFixture(page, key);
       await page.locator("#main").waitFor({ state: "visible" });
+      await openConversation(page);
     };
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
@@ -111,6 +112,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.unroute("**/api/rooms/commons/stream**", failRead);
     await page.locator("#refresh-button").click();
     await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     // The boot cache can paint the last held window first; the fresh read then adds the saved message.
     await page.locator('[data-message-record-id="' + savedMessage.id + '"]').waitFor({ state: "attached", timeout: 10000 });
     assert.equal(await page.locator('[data-message-record-id="' + savedMessage.id + '"]').count(), 1);
@@ -129,6 +131,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await input.press("Enter");
     assert.equal(store.room("commons").sequence, beforeOverflow);
     await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     assert.ok(await input.inputValue() === overflow, "reload retains the complete overflow draft");
     assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), true);
     await input.fill("😀".repeat(32768) + "x");
@@ -147,6 +150,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.waitForFunction(() => document.querySelector("#composer-status").classList.contains("error") && !document.querySelector("#message-input").disabled);
     await page.unroute("**/api/rooms/commons/commands");
     await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     assert.equal(await input.inputValue(), longValid, "failed long send survives reload");
     await input.press("Enter");
     await page.waitForFunction(() => document.querySelector("#message-input").value === "");
@@ -216,6 +220,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(new Set(boundFiles.map(file => file.commitMessageId)).size, 1);
     await page.unroute('**/api/rooms/commons/files/*/commit');
     await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
+    await openConversation(page);
     await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Retry retry-note.txt', exact: true }).click();
     await page.getByRole('button', { name: 'Retry second-note.txt', exact: true }).click();
@@ -323,15 +328,18 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.match(await input.getAttribute("placeholder"), /Reply in thread/);
     assert.equal(await input.inputValue(), "");
     await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     assert.match(await input.getAttribute("placeholder"), /Reply in thread/, "an empty composer still restores the active task thread");
     await input.fill("A finished thread reply survives return");
     await page.locator('#message-form button[type="submit"]').click();
     await page.waitForFunction(() => !document.querySelector('#message-input').disabled && document.querySelector('#message-input').value === '');
     await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     assert.match(await input.getAttribute("placeholder"), /Reply in thread/, "sending a result does not lose the active thread on reload");
     assert.equal(store.room('commons').state.messages.filter(m => m.body === 'A finished thread reply survives return').length, 1);
     await page.locator("#thread-back").click();
     await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     assert.match(await input.getAttribute("placeholder"), /Message #/);
     assert.equal(await page.locator("#composer-options").count(), 1);
     assert.equal(await page.locator("#remember-drafts").count(), 0);
@@ -396,6 +404,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     page.once("dialog", dialog => dialog.accept());
     await page.reload();
     await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     assert.equal(await input.inputValue(), "Keep this thread reply");
     await input.focus();
     await page.keyboard.press("Control+Enter");
@@ -412,6 +421,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     page.once("dialog", dialog => dialog.accept());
     await page.reload();
     await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     assert.equal(await input.inputValue(), "Recover this thread after reload");
     await page.locator("#thread-back").click();
     assert.equal(await input.inputValue(), "A separate room draft");
@@ -508,12 +518,14 @@ for (const [label, size] of OWN_SEND_SIZES) {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     await signInFixture(page, maya);
     await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     await page.locator("#message-list").getByText("Welcome, Maya").waitFor();
     await page.waitForTimeout(1500); // Maya has read the room; her read cursor is saved.
     // While Maya is away the room moves on: she comes back to unread history.
     for (let i = 0; i < 24; i++) send(T.MESSAGE_POSTED, { messageId: `m${i}`, body: `While you were away ${i}` });
     await page.reload();
     await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     await page.locator("#message-list").getByText("While you were away 23").waitFor({ state: "attached" });
     await page.waitForTimeout(500);
     // Maya reads a little above the newest message (on a phone the Room card and
