@@ -8045,6 +8045,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, requestId, eventId, actorId: senderMemberId, kind });
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
+      // Formal-request no-host fallback, addressee only. Existing connected
+      // delivery keeps its original kind (wakeForAgent / native emit / push
+      // doorbell are unchanged). The fallback also uses a kind current
+      // receivers already accept (dm or mention), never a new "ask" kind:
+      // bin/commons-claude/receiver.mjs only accepts direct/dm/mention/reply
+      // and would silently skip ask. Mentioned non-addressees are not queued.
+      // Retaining a pull pointer does not authorize an outbound delivery.
+      let pullQueued = false;
+      if (!woken && !(nativeQueued > 0)
+          && data.requestKind === "reply" && data.toMemberId === memberId) {
+        const fallbackKind = kind === "mention" ? "mention" : "dm";
+        const fallback = this.agentHeartbeats.enqueueWake({
+          agentId: identityId, kind: fallbackKind, roomId, messageId: data.messageId ?? eventId
+        });
+        pullQueued = Boolean(fallback?.signal);
+      }
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
@@ -8054,7 +8070,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           eventType: kind === "dm" ? "dm.posted" : "message.posted",
           roomId, id: data.messageId ?? eventId, ts: this.now() });
       }
-      delivery.push(this.messageWakeDisposition(roomId, memberId, woken || nativeQueued > 0));
+      delivery.push(this.messageWakeDisposition(roomId, memberId, woken || nativeQueued > 0 || pullQueued));
     }
     return delivery;
   }
