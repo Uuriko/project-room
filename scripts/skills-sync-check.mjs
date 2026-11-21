@@ -1,11 +1,13 @@
-// Fails when plugins/project-room/skills/ is not an exact copy of skills/.
+// Fails when plugins/project-room/skills/ is not an exact copy of skills/,
+// or when the .agents/skills/ repo-development home (W-39 ruling, see
+// scripts/skills-sync.mjs) violates its structural governance.
 // Repair with: node scripts/skills-sync.mjs
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { skillDrift } from "./skills-sync.mjs";
+import { agentsSkillDrift, skillDrift } from "./skills-sync.mjs";
 
 export function reportSkillDrift() {
-  const failures = skillDrift();
+  const failures = [...skillDrift(), ...agentsSkillDrift()];
   if (failures.length === 0) {
     console.log("skills-sync-check: OK");
     return 0;
