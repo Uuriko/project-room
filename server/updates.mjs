@@ -3,6 +3,8 @@ import {isCurrentRoom} from './current-room-repository.mjs';
 import {combineCurrentEventPages} from './current-room-events.mjs';
 import { messageRepository } from "./message-repository.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
+import { selectedWorkResult } from "./text-results.mjs";
+import { workRoleHolder } from "./work-context.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
 // There is no second queue and no handled flag on those records. Read, done,
 // and clear are private marks keyed to the source revision; a new revision
@@ -21,6 +23,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 const ACTIONABLE = new Set(["unread", "read"]);
 export const UPDATE_KINDS = Object.freeze([
   "request", "mention", "dm", "review_requested", "work_assigned", "handoff",
+  "release_accepted",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
   "invite_pending", "access_request", "agent_joined", "pair_request"
 ]);
@@ -162,7 +165,44 @@ function ackedWakes(store, roomId, memberId, flags) {
   return wakes;
 }
 
-function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false } = {}) {
+function acceptedReleaseUpdate(store, room, member, floor, messages, now) {
+  const { state, sequence } = room;
+  const roomId = state.room.id;
+  const candidates = Object.values(state.workItems ?? {}).filter(item =>
+    item?.state === "completed" && workRoleHolder(item, member.id)
+    && item.verification?.result === "pass" && item.verification.independenceConfirmed === true
+    && messages.get(item.receipt?.nativeText?.messageId)?.body?.startsWith("Candidate revision: "));
+  candidates.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
+  // Reuse the selected-result authorization and evidence binding. A broken or
+  // withdrawn receipt cannot become a new pointer, even for a named participant.
+  for (const work of candidates.slice(0, 8)) {
+    let selection;
+    try {
+      selection = selectedWorkResult({
+        db: store.db, state, workItemId: work.id, sequence, now,
+        completionEventId: work.receipt.eventId, draftMessageId: null,
+        viewerId: member.id, reviewer: member, floor, messageRecords: messages,
+      });
+    } catch {
+      continue;
+    }
+    const { verdict, releaseChecks } = selection?.workThread ?? {};
+    if (verdict?.result !== "pass" || !verdict.independenceConfirmed
+      || releaseChecks?.checks.length !== 3 || releaseChecks.checks.some(check => check.status !== "passed")) continue;
+    return draft({
+      kind: "release_accepted", key: work.id, roomId, title: clip(`Accepted release: ${work.title || work.id}`),
+      actor: verdict.verifierId, createdAt: iso(work.createdAt),
+      updatedAt: iso(Math.max(Date.parse(work.updatedAt), Date.parse(releaseChecks.recordedAt))),
+      terminal: "answered",
+      basis: `${work.revision}|${verdict.eventId}|${releaseChecks.messageId}`,
+      sourceRef: { workItemId: work.id, completionEventId: verdict.completionEventId },
+      next: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(work.id)}` },
+    });
+  }
+  return null;
+}
+
+function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false, includeAcceptedRelease = false } = {}) {
   if(isCurrentRoom(store.db,roomId))throw new ServiceError(409,'current_updates_aggregate_unavailable',`Use GET /api/rooms/${encodeURIComponent(roomId)}/needs-me for bounded native attention; reading does not resolve work`,{Link:`</api/rooms/${encodeURIComponent(roomId)}/needs-me>; rel="alternate"`});
   const flags = { mentions: false, peerDms: false, claims: false, invites: false, accessRequests: false, wakes: false };
   const room = store.room(roomId);
@@ -176,6 +216,10 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   const requests = state.replyRequests ?? {};
   const floor = store.historyFloor(roomId, memberId, room.sequence);
   const byId = messageRepository(store, roomId, state);
+  if (includeAcceptedRelease) {
+    const release = acceptedReleaseUpdate(store, room, member, floor, byId, now);
+    if (release) items.push(release);
+  }
 
   for (const request of Object.values(requests)) {
     if (!request || request.recipientId !== memberId || !messageInHistory(request, floor)) continue;
@@ -431,7 +475,8 @@ function page(items, query, viewer) {
     const allowed = new Set(parsed.kindList);
     selected = selected.filter(item => allowed.has(item.kind));
   }
-  selected.sort((a, b) => a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  selected.sort((a, b) => Number(b.kind === "release_accepted") - Number(a.kind === "release_accepted")
+    || (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   let start = 0;
   if (parsed.cursor) {
     const index = selected.findIndex(item => item.id === parsed.cursor.id && item.updatedAt === parsed.cursor.updatedAt);
@@ -460,7 +505,8 @@ export function projectRoomUpdates(store, roomId, memberId, identityId = null) {
 export function listRoomUpdates(store, token, roomId, query = {}, binding = null) {
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, binding);
-    const projected = projectRoom(store, roomId, auth.member.id, auth.identityId ?? store.bonds?.identityForMember?.(roomId, auth.member.id) ?? null);
+    const projected = projectRoom(store, roomId, auth.member.id, auth.identityId ?? store.bonds?.identityForMember?.(roomId, auth.member.id) ?? null,
+      { includeAcceptedRelease: query.state === "all" && (!query.kinds || String(query.kinds).split(",").some(kind => kind.trim() === "release_accepted")) });
     const viewer = `member:${roomId}:${auth.member.id}`;
     return {
       ...viewerEcho(auth, roomId), untrusted: true,
@@ -630,7 +676,7 @@ export function markUpdate(store, token, roomId, itemId, action, requestId, bind
     // New unbound operations must never acknowledge a revision the caller did
     // not see. Old committed receipts above remain retryable under current auth.
     if (expectedBasis === undefined) fail(422, "update_basis_required", "Read the update and supply its basisToken as expectedBasis");
-    const projected = projectRoom(store, roomId, auth.member.id, auth.identityId ?? null);
+    const projected = projectRoom(store, roomId, auth.member.id, auth.identityId ?? null, { includeAcceptedRelease: true });
     const raw = projected.items.find(item => item.id === itemId);
     if (!raw) fail(404, "update_not_found", "That update is not in your list");
     if (expectedBasis !== basisTokenOf(raw)) fail(409, "update_changed", "This update changed; read it again before acting");

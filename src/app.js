@@ -3545,7 +3545,7 @@ function sameWorkOrigin(a, b) {
   if (a.type !== b.type || a.channelId !== b.channelId || a.threadId !== b.threadId
     || JSON.stringify(a.mode ?? null) !== JSON.stringify(b.mode ?? null)) return false;
   // JDOT-COH-UPDATES-PAGE begin
-  if (a.type === "updates") return ["itemId", "filter", "pageBudget", "scrollTop", "listScrollTop"]
+  if (a.type === "updates") return ["itemId", "filter", "pageBudget", "scrollTop", "listScrollTop", "completionEventId"]
     .every(key => a.updates?.[key] === b.updates?.[key]);
   // JDOT-COH-UPDATES-PAGE end
   if (a.type === "board") return a.claimId === b.claimId && a.focusKey === b.focusKey;
@@ -3560,8 +3560,13 @@ function showWorkDestination(kind, id, presentation = "focus") {
     const selected = revealWork(id, presentation === "details");
     if (presentation === "thread") {
       const epoch = workNavigationEpoch, identity = session;
+      const completion = currentWorkOrigin()?.updates?.completionEventId;
       void Promise.resolve(selected).then(card => {
         if (!card || workNavigationEpoch !== epoch || session !== identity || activeWorkNavigationId !== id) return;
+        if (completion && state.workItems[id]?.receipt?.eventId !== completion) {
+          notice("This release changed. Return to Updates to open the accepted result.", true);
+          return;
+        }
         const button = card.querySelector("[data-read-result]");
         if (button) readResult({ target: button }, { focused: true });
         syncWorkReturnControl();
