@@ -27,7 +27,7 @@ function enabledOffer(store, offerId, origin) {
   const links = store.db.prepare('SELECT room_id,private_links FROM project_offers WHERE offer_id=?').get(offerId);
   if (!JSON.parse(links.private_links).reviewerMemberIds?.length)
     fail(404, 'discovery_unavailable', 'This project has no designated reviewers');
-  return { offer, roomId: links.room_id };
+  return { offer, roomId: links.room_id, reviewers: JSON.parse(links.private_links).reviewerMemberIds };
 }
 
 function validate(input, offer) {
@@ -52,7 +52,7 @@ export function fileProjectDiscovery(store, offerId, origin, secret, input) {
   return store.transaction(() => {
     const identity = store.identities.resolveGlobalIdentitySecret(secret);
     if (!identity) fail(401, 'unauthenticated', 'Use your saved agent identity credential');
-    const { offer, roomId } = enabledOffer(store, offerId, origin);
+    const { offer, roomId, reviewers } = enabledOffer(store, offerId, origin);
     validate(input, offer);
     const key = journalKey(roomId, offerId);
     const actor = identity.identityId;
@@ -75,6 +75,11 @@ export function fileProjectDiscovery(store, offerId, origin, secret, input) {
       finding: { sourceUrl, criterion, observation, nextAction }, recordedAt: new Date(now).toISOString() };
     store.db.prepare('INSERT INTO public_work_requests (offer_id,actor_id,request_id,input_json,outcome_json) VALUES (?,?,?,?,?)')
       .run(key, actor, input.requestId, intent, JSON.stringify(receipt));
+    for (const memberId of reviewers) {
+      if (memberId === actor || isGuestAgentMemberId(memberId)) continue;
+      if (store.enqueueNativeMcpEvent?.({ kind: 'discovery', roomId, memberId, eventId: receiptId,
+        nextRead: { tool: 'room_read_project_discoveries', arguments: { roomId, offerId, at: reviewCursor(receipt) } } })) break;
+    }
     return receipt;
   });
 }
@@ -126,15 +131,26 @@ export function nextReviewerProject(store, roomId, memberId, origin, after) {
   return { offerId: row.offerId, after: row.latest + '/' + receiptId };
 }
 
-export function reviewerProjectDiscoveries(store, roomId, offerId, origin, memberId, { limit, after }) {
+export function requireDiscoveryReviewer(store, roomId, offerId, origin, memberId) {
+  const row = store.db.prepare('SELECT private_links FROM project_offers WHERE room_id=? AND offer_id=?').get(roomId, offerId);
+  if (isGuestAgentMemberId(memberId) || !row || !JSON.parse(row.private_links).reviewerMemberIds.includes(memberId))
+    fail(403, 'discovery_review_denied', 'A designated project reviewer is required');
+  enabledOffer(store, offerId, origin);
+}
+
+export function reviewerProjectDiscoveries(store, roomId, offerId, origin, memberId, { limit, after, at = null }) {
   return store.readTransaction(() => {
-    const row = store.db.prepare('SELECT private_links FROM project_offers WHERE room_id=? AND offer_id=?').get(roomId, offerId);
-    if (isGuestAgentMemberId(memberId) || !row || !JSON.parse(row.private_links).reviewerMemberIds.includes(memberId))
-      fail(403, 'discovery_review_denied', 'A designated project reviewer is required');
-    enabledOffer(store, offerId, origin);
+    requireDiscoveryReviewer(store, roomId, offerId, origin, memberId);
     if (limit !== null && !/^(?:[1-9]|[1-4][0-9]|50)$/.test(limit)) invalid('Choose a limit from 1 through 50');
     const size = limit === null ? 20 : Number(limit);
     const key = journalKey(roomId, offerId);
+    if (at !== null) {
+      if (after !== null) invalid('Choose either one finding or a page');
+      const boundary = cursorBoundary(store, key, at);
+      const row = store.db.prepare(`SELECT outcome_json FROM public_work_requests WHERE ${discoveryScope}
+        AND ${recordedAtColumn}=? AND ${receiptIdColumn}=?`).get(key, ...boundary);
+      return { offerId, findings: [JSON.parse(row.outcome_json)], nextCursor: null };
+    }
     const boundary = after === null ? [] : cursorBoundary(store, key, after);
     // SQLite uses the explicit time range to seek the expression index; the tuple resolves ties.
     const where = boundary.length ? ` AND ${recordedAtColumn}<=? AND (${recordedAtColumn},${receiptIdColumn}) < (?,?)` : '';

@@ -232,6 +232,7 @@ function validRoomArgs(name, args) {
   if (name === "room_receipt") return validId(args.operationId);
   if (name === "room_next") return validRoomNextSelection(args);
   if (name === "room_read_project_discoveries") return validId(args.offerId)
+    && (args.at === undefined || args.after === undefined && typeof args.at === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(args.at))
     && (args.after === undefined || typeof args.after === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(args.after))
     && (args.limit === undefined || Number.isInteger(args.limit) && args.limit >= 1 && args.limit <= 50);
   if (name === "room_check_access" || name === "room_activation_pack" || name === "room_project_state" || name === "room_response_latency") return true;
@@ -674,7 +675,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   if (name === "room_read_project_discoveries") {
     const member = store.authenticate(secret, args.roomId).member;
     return withContentTrust(reviewerProjectDiscoveries(store, args.roomId, args.offerId, new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, member.id,
-      { limit: String(args.limit ?? 5), after: args.after ?? null }));
+      { limit: String(args.limit ?? 5), after: args.after ?? null, at: args.at ?? null }));
   }
   if (BOARD_CLAIM_TOOLS.includes(name)) return boardClaimCall(store, secret, name, args);
   if (name === 'room_wait_for_attention') return waitForAttention(store, secret, args.roomId, {...args, signal});
