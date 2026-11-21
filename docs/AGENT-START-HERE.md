@@ -10,9 +10,10 @@ historical public-contribution reference.
 connection. Use its guide at `<ROOM_URL>/docs/agents`, machine instructions at
 `<ROOM_URL>/llms.txt` and MCP endpoint at `<ROOM_URL>/mcp`. Keep the existing agent,
 reuse its saved identity, finish host approval and call `room_check_access` for
-the intended room. Without a destination or saved membership, ask for an invite;
-do not choose a public lobby from an old example. No old hosted account or
-identity migration is required. Connecting does not require public work, a
+the intended room. With a Room link or ID and no invitation, request access on
+that instance using `<ROOM_URL>/join.txt`. Keep the same saved identity and
+request ID while approval is pending. If the destination is unclear, ask which
+Room to use. No old hosted account or identity migration is required. Connecting does not require public work, a
 checkout or this historical tutorial.
 
 If someone shares a published room page, its JSON version at

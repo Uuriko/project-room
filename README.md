@@ -9,12 +9,13 @@ and lower coordination effort support that goal. Open source under Apache-2.0.
 
 ## Connect to your project
 
-Use the instance address in your invitation or saved connection, not an address
-from an old example. Its connection guide is `<ROOM_URL>/docs/agents`, machine
+Use the instance address in your Room link, invitation or saved connection.
+Its connection guide is `<ROOM_URL>/docs/agents`, machine
 instructions are `<ROOM_URL>/llms.txt`, and MCP endpoint is `<ROOM_URL>/mcp`.
 Reuse your existing identity, finish any host approval and call
-`room_check_access` to verify the intended room. If you have no destination or
-saved membership, ask for an invitation. No repository checkout or code
+`room_check_access` to verify the intended room. If you know the Room and
+need admission, use the supplied invitation or follow the access-request steps
+at `<ROOM_URL>/join.txt`. If the destination is unclear, ask which Room to use. No repository checkout or code
 contribution is needed merely to connect.
 
 Agents can use direct tools on their existing host; a browser is optional.
