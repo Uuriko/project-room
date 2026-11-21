@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { TurnRecorder, renderTurn, TRAILER_LINES } from "../room-acp/src/render.mjs";
 import { AgentHost } from "../room-acp/src/agent-host.mjs";
 import { ThreadQueue } from "../room-acp/src/queue.mjs";
-import { mayTalk, Bridge } from "../room-acp/src/bridge.mjs";
+import { mayTalk, Bridge, CLAIM_WAKE_REASONS } from "../room-acp/src/bridge.mjs";
 import { join } from "../room-acp/src/join.mjs";
 import { startRoom, FAKE_AGENT } from "./room-acp-fixture.mjs";
 
@@ -150,4 +150,76 @@ test("bridge: a Board claim assigned to the agent runs one turn and replies as a
   const thread = await call("/api/rooms/commons/work-claims/fix-login/thread");
   assert.equal(thread.status, 200);
   assert.ok(JSON.stringify(thread.json).includes("echo: "), "the reply shows in the claim thread");
+});
+
+test("CLAIM_WAKE_REASONS includes ready_work", () => {
+  assert.deepEqual([...CLAIM_WAKE_REASONS], ["assigned", "ready_work"]);
+});
+
+test("bridge: a ready_work wake after a prerequisite is done starts the assigned dependent", async t => {
+  const room = await startRoom(t);
+  const connection = await join({ link: room.invite().link, displayName: "Coder", env: room.env });
+  const identityHeaders = { authorization: `Bearer ${connection.identitySecret}`, "content-type": "application/json" };
+  const beat = await fetch(`${room.origin}/api/agent-heartbeats`, {
+    method: "POST", headers: identityHeaders,
+    body: JSON.stringify({ hostId: connection.hostId, mode: "pull-only" })
+  });
+  assert.equal(beat.status, 200, await beat.text());
+  const asOwner = (path, body, method = "POST") => fetch(room.origin + path, {
+    method, headers: { authorization: `Bearer ${room.ownerKey}`, "content-type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined
+  }).then(async res => ({ status: res.status, json: await res.json() }));
+  const prereq = await asOwner("/api/rooms/commons/work-claims", { id: "prereq", title: "Prerequisite", reviewPolicy: "self_attested" });
+  assert.equal(prereq.status, 201, JSON.stringify(prereq.json));
+  const claimed = await asOwner("/api/rooms/commons/work-claims/prereq/claim", {});
+  assert.equal(claimed.status, 200, JSON.stringify(claimed.json));
+  const started = await asOwner("/api/rooms/commons/work-claims/prereq/update", { state: "in_progress" });
+  assert.equal(started.status, 200, JSON.stringify(started.json));
+  const dependent = await asOwner("/api/rooms/commons/work-claims", {
+    id: "follow-on", title: "Follow-on work", reviewPolicy: "self_attested",
+    dependsOn: ["prereq"], assignee: connection.memberId
+  });
+  assert.equal(dependent.status, 201, JSON.stringify(dependent.json));
+  const pending = await fetch(`${room.origin}/api/agent-wakes/poll?hostId=${encodeURIComponent(connection.hostId)}&waitMs=0`, {
+    headers: { authorization: `Bearer ${connection.identitySecret}` }
+  }).then(async res => ({ status: res.status, json: await res.json() }));
+  assert.equal(pending.status, 200);
+  const assigned = (pending.json.pendingWakes ?? []).filter(wake => wake.reason === "assigned");
+  assert.ok(assigned.length >= 1, JSON.stringify(pending.json));
+  const acked = await fetch(`${room.origin}/api/agent-heartbeats/ack`, {
+    method: "POST", headers: identityHeaders, body: JSON.stringify({ signalIds: assigned.map(wake => wake.signalId) })
+  });
+  assert.equal(acked.status, 200, await acked.text());
+  const done = await asOwner("/api/rooms/commons/work-claims/prereq/update", { state: "done", note: "prerequisite complete" });
+  assert.equal(done.status, 200, JSON.stringify(done.json));
+  assert.equal(done.json.state, "done");
+  const ready = await fetch(`${room.origin}/api/agent-wakes/poll?hostId=${encodeURIComponent(connection.hostId)}&waitMs=0`, {
+    headers: { authorization: `Bearer ${connection.identitySecret}` }
+  }).then(res => res.json());
+  const readyWakes = (ready.pendingWakes ?? []).filter(wake => wake.reason === "ready_work");
+  assert.equal(readyWakes.length, 1, JSON.stringify(ready));
+  assert.equal(readyWakes[0].workClaim, "follow-on");
+
+  const env = { ...room.env, FAKE_ACP_MODE: "echo", FAKE_ACP_DELAY_MS: "4000" };
+  const bridge = new Bridge({
+    connection,
+    candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] },
+    env, respondTo: "owner", waitMs: 3000, cadenceSeconds: 30,
+    log: process.env.RA_DEBUG ? (...a) => console.error("[bridge]", ...a) : () => {}
+  });
+  const running = bridge.run();
+  t.after(async () => { bridge.stop(); await running; });
+  const claim = await (async () => {
+    const end = Date.now() + 20000;
+    while (Date.now() < end) {
+      const read = await asOwner("/api/rooms/commons/work-claims/follow-on", undefined, "GET");
+      const hit = (read.json.history ?? []).find(entry => entry.agentId === connection.memberId && /^echo: /.test(entry.note ?? ""));
+      if (hit) return { read: read.json, hit };
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error("no claim note from ready_work wake");
+  })();
+  assert.match(claim.hit.note, /Follow-on work/);
+  await waitFor(() => bridge.stats.acked >= 1);
+  assert.ok(bridge.host.sessions.has("work-claim:follow-on"));
 });

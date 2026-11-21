@@ -51,10 +51,11 @@ import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
-import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers, wakeReadyDependents } from "./work-claim-events.mjs";
 import { alertLeaseRefusal, notifyClaimCollisions, notifyLeaseExpired } from "./agent-collisions.mjs";
 import { noteProjectMapOverlap, publishProjectMapOverlap, withProjectMapOverlap } from "./project-map-store.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
+import { boardPrerequisiteState } from "./work-item-state.mjs";
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { notifyContractChanges } from "./contract-notices.mjs"; // contract-change notices (flag)
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -1021,7 +1022,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // A release clears files on the item. Read the held paths first so the
     // receipt names the lane that opened, then write the claim and the event
     // in this same transaction. A pull request that closes does the same.
-    const prior = action === "released" || action === "pr_closed" ? registry.get(roomId, item.id) : null;
+    const prior = registry.get(roomId, item.id);
     registry.set(roomId, item);
     const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: extra.actorId ?? caller,
@@ -1048,6 +1049,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // BOARD-WAKE-2: an unassigned create or a release is new ready work for
     // agents that opted in (server/work-wants.mjs). Default off; never throws.
     if (action === "created" || action === "released") noteReadyWork(store, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
+    if (boardPrerequisiteState(item).satisfied && !boardPrerequisiteState(prior).satisfied) {
+      try { wakeReadyDependents(store, roomId, item, { actorId: extra.actorId ?? caller }); }
+      catch (error) { console.error("dependent ready_work wake failed:", error?.message ?? error); }
+    }
     if (action === "state_changed" || action === "claimed") wakeNamedReviewers(store, roomId, item, { actorId: extra.actorId ?? caller });
     try { notifyClaimCollisions(store, roomId, item); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
     notifyContractChanges(store, roomId, item);

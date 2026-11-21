@@ -23,7 +23,8 @@
 //     letting the poll starve behind a green-looking budgetExceeded (#3698)
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
-import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers, wakeReadyDependents } from "./work-claim-events.mjs";
+import { boardPrerequisiteState } from "./work-item-state.mjs";
 import { notifyConcurrentMerge } from "./agent-collisions.mjs";
 import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, ClaimError, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
@@ -491,6 +492,13 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       paths: settled.paths,
       pullRequest: { url: fresh.pullRequest.url, outcome: result.kind }
     });
+    // A linked-PR settlement can finish a Board prerequisite without the HTTP
+    // persistClaim hook. Apply the same first-satisfied dependency wake here;
+    // the stable ready_work message id keeps a retry or redelivery to one.
+    if (boardPrerequisiteState(settled.item).satisfied && !boardPrerequisiteState(fresh).satisfied) {
+      try { wakeReadyDependents(store, roomId, settled.item, { actorId: settled.previousOwnerId ?? settled.item.owner ?? fresh.owner ?? null }); }
+      catch (error) { console.error("dependent ready_work wake failed:", error?.message ?? error); }
+    }
     if (result.kind === "merged") {
       try { notifyConcurrentMerge(store, roomId, fresh, { url: result.url, mergedSha: result.mergedSha }); }
       catch (error) { console.error("concurrent merge notice failed:", error?.message ?? error); }
