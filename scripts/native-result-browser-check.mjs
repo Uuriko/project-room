@@ -715,3 +715,24 @@ for (const mobile of [false, true]) test(`result feedback preserves another repl
   assert.equal(await f.page.locator("#reply-context").textContent(), originalReply);
   finished = true;
 });
+
+test("focused failed result shows the current correction and its authorized action", { timeout: 25000 }, async t => {
+  const f = await setup(t, { body: previewBody });
+  f.complete();
+  const receipt = f.item().receipt;
+  f.mutate(T.VERIFICATION_RECORDED, { result: "fail", summary: "The candidate SHA is stale.",
+    nextAction: "Check the current candidate.", completionEventId: receipt.eventId,
+    evidenceVersion: receipt.evidenceVersion }, "human-checker");
+  await f.page.locator('[data-work-record-id="' + f.workItemId + '"]').getByText("The candidate SHA is stale.", { exact: true }).waitFor({ state: "attached" });
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  const correction = f.page.locator("#result-correction");
+  await correction.waitFor({ state: "visible" });
+  assert.equal(await correction.locator("h3").textContent(), "Correction needed");
+  assert.equal(await f.page.locator("#result-correction-summary").textContent(), "The candidate SHA is stale.");
+  await f.page.locator("#result-work-action").click();
+  await f.page.locator("#action-fields [name=resolution]").fill("Checked the current candidate.");
+  await f.save.click();
+  await correction.waitFor({ state: "hidden" });
+  assert.equal(f.item().blocker, null);
+  assert.equal(await f.page.locator("#result-work-action").isVisible(), false);
+});

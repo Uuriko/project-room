@@ -159,6 +159,17 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   const oldBasis = basisOf(await reviewer.workResult(f.workItemId));
   const finding = f.send(T.VERIFICATION_RECORDED,
     { ...oldBasis, result: "fail", summary: "The old SHA is wrong." }, "reviewer");
+  const pending = await f.client.workResult(f.workItemId, { completionEventId: original.event.id });
+  assert.deepEqual(pending.workThread.pendingCorrection, {
+    verificationEventId: finding.event.id, completionEventId: original.event.id, evidenceVersion: oldBasis.evidenceVersion,
+    summary: "The old SHA is wrong.", nextAction: "Accountable member addresses the finding", untrusted: true,
+    action: { tool: "room_resolve_blocker", arguments: {
+      roomId: "commons", workItemId: f.workItemId, expectedRevision: pending.current.workRevision
+    }, inputRequired: ["resolution"] },
+  });
+  const pendingForReviewer = await reviewer.workResult(f.workItemId, { completionEventId: original.event.id });
+  assert.equal(pendingForReviewer.workThread.pendingCorrection.summary, pending.workThread.pendingCorrection.summary);
+  assert.equal(pendingForReviewer.workThread.pendingCorrection.action, undefined);
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Corrected the SHA" });
   const corrected = f.mutate(T.WORK_COMPLETED, f.input(f.post("Corrected PR evidence")));
   const packet = await reviewer.workResult(f.workItemId, { completionEventId: corrected.event.id });
@@ -175,6 +186,8 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   assert.equal(historical.workThread.verdict?.eventId, finding.event.id);
   assert.equal(historical.workThread.verdict?.result, "fail");
   assert.equal(historical.workThread.correction, undefined);
+  assert.equal(historical.workThread.pendingCorrection, undefined);
+  assert.equal(packet.workThread.pendingCorrection, undefined);
   assert.equal(historical.selection.status, "historical");
   assert.notEqual(historical.result.receipt.eventId, historical.current.completionEventId);
   assert.equal(historical.review, undefined);

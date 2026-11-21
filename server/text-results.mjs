@@ -247,9 +247,20 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const visibleReceipt = result.text?.body === null ? null : result.receipt;
   const start = visibleReceipt ? selectedStart(db, state.room.id, workItemId, visibleReceipt.eventId, floor) : null;
   const verdict = visibleReceipt ? selectedVerdict(db, state.room.id, work, visibleReceipt, floor) : null;
+  const pendingCorrection = selectionStatus === "current" && next.action === "revise"
+    && verdict?.result === "fail" && work.blocker?.eventId === verdict.eventId
+    ? { verificationEventId: verdict.eventId, completionEventId: verdict.completionEventId,
+        evidenceVersion: verdict.evidenceVersion, summary: work.blocker.reason,
+        nextAction: work.blocker.nextAction, untrusted: true,
+        ...(workActions(work, reviewer, now).some(([action]) => action === "resolve")
+          ? { action: { tool: "room_resolve_blocker", arguments: {
+              roomId: state.room.id, workItemId, expectedRevision: work.revision
+            }, inputRequired: ["resolution"] } } : {}) }
+    : null;
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
-      ...(correction ? { correction } : {}), ...(releaseChecks ? { releaseChecks } : {}) },
+      ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
+      ...(releaseChecks ? { releaseChecks } : {}) },
     selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
