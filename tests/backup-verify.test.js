@@ -3,9 +3,9 @@
 // full backup-cycle against a real RoomStore fixture.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -170,13 +170,27 @@ test("reconcileRestoredAuthority: a restored room deleted from the current store
   ], "every active member of the deleted room is named stale");
 });
 
-test("cli: --print-cron emits a usable crontab line", async (t) => {
-  const dest = backupDest(t);
+test("cli: generated backup command works on first use with a missing destination", async (t) => {
+  const db = liveDb(t);
+  const dest = join(backupDest(t), "fresh backup's directory", "nested");
   const { stdout } = await execFileAsync(process.execPath,
-    [script, "--print-cron", "--db", "room.sqlite", "--to", dest, "--schedule", "hourly"]);
+    [script, "--print-cron", "--db", db, "--to", dest, "--schedule", "hourly"]);
   assert.match(stdout, /\* \* \* \* \*/);
   assert.match(stdout, /--schedule 'hourly'/);
-  assert.match(stdout, /scripts\/backup-verify\.mjs/);
+  const line = stdout.split("\n").find((entry) => entry.startsWith("* "));
+  assert.ok(line);
+  assert.equal(existsSync(dest), false);
+  const path = [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter);
+  await execFileAsync("/bin/sh", ["-c", "umask 022 && " + line.slice("* * * * * ".length)], {
+    env: { ...process.env, PATH: path },
+    timeout: 10_000,
+  });
+  assert.equal(statSync(dirname(dest)).mode & 0o777, 0o700);
+  assert.equal(statSync(dest).mode & 0o777, 0o700);
+  assert.equal(statSync(join(dest, "backup-verify.log")).mode & 0o777, 0o600);
+  const state = JSON.parse(readFileSync(join(dest, "backup-verify-state.json"), "utf8"));
+  assert.equal(state.lastResult.ok, true);
+  assert.ok(existsSync(state.lastResult.backup));
 });
 
 test("cli: missing --db/--to is a usage error", async () => {
