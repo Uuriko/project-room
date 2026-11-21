@@ -113,3 +113,49 @@ test("MCP pickup advertises the same short claim only for a callable connection"
   assert.equal(owner, candidates[winner].id);
   assert.equal(Date.parse(leaseExpiresAt) - Date.parse(claimedAt), 2 * 3_600_000);
 });
+
+test("fresh pickup resumes the winner after a lost Board claim response", async t => {
+  const f = await privateWorkFixture(t, "legacy");
+  seedReady(f);
+  const pick = who => f.mcp(who, "room_next", { view: "pickup" });
+  const offer = (await pick(f.observer)).value.ifIdle;
+  const sent = await fetch(f.origin + offer.claimAction.endpoint, {
+    method: offer.claimAction.method,
+    headers: { authorization: "Bearer " + f.observer.secret, "content-type": "application/json" },
+    body: JSON.stringify(offer.claimAction.params)
+  });
+  await sent.body.cancel(); // No receipt body reaches the returning client.
+  const lease = f.store.workClaims.get("commons", "solo");
+  assert.equal((await advertisedClaim(f.origin, f.broad, offer.claimAction)).status, 409);
+  assert.equal((await pick(f.broad)).value.ifIdle.status, "dry");
+  seedReady(f, "other");
+  const { value } = await pick(f.observer);
+  assert.equal(value.ifIdle.status, "held_work");
+  assert.equal(value.ifIdle.leaseExpiresAt, lease.leaseExpiresAt);
+  assert.equal(value.ifIdle.claimAction, undefined);
+  assert.deepEqual(value.nextRead, { tool:"room_work_claim_thread", arguments:{roomId:"commons",claimId:"solo"} });
+  const resumed = await f.mcp(f.observer, value.nextRead.tool, value.nextRead.arguments, "?profile=core");
+  assert.equal(resumed.value.owner, f.observer.id);
+  assert.deepEqual(f.store.workClaims.get("commons", "solo"), lease);
+  f.store.workClaims.set("commons", {...lease, leaseExpiresAt:"2000-01-01T00:00:00.000Z"});
+  assert.equal((await pick(f.observer)).value.ifIdle.claimId, "other");
+});
+
+test("rooms that require native work retain that pickup path", async t => {
+  const f = await privateWorkFixture(t, "normalized-current-v1");
+  assert.throws(() => seedReady(f), { code: "legacy_work_retired" });
+  const {value} = await f.mcp(f.producer, "room_next", {view:"pickup"});
+  assert.equal(value.nextRead.tool, "room_read_work");
+  assert.notEqual(value.ifIdle?.status, "held_work");
+});
+
+
+test("a linked private task cannot become an unrelated Board holder's next action", async t => {
+  const f = await privateWorkFixture(t, "legacy");
+  seedReady(f);
+  const raw = f.store.workClaims.get("commons", "solo");
+  f.store.workClaims.set("commons", { ...raw, state: "claimed", owner: f.observer.id, workItemId: "secret" });
+  const {value} = await f.mcp(f.observer, "room_next", {view: "pickup"});
+  assert.equal(value.ifIdle.status, "dry");
+  assert.equal(value.nextRead, null);
+});
