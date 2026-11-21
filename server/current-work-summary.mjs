@@ -4,7 +4,7 @@ const pick=(value,keys)=>value==null?value:Object.fromEntries(keys.split(' ').fi
 export function thinWorkForContext(item) {
   const out=pick(item,'id title state revision mode createdAt updatedAt accountableMemberId verifierMemberId humanDecisionMakerId proposedById externalWriteGrantBy externalWriteGrantFor independentVerificationRequired ownerDecisionRequired supersededBy status stop_requested_at heartbeat_at worker_member_id started_at attempt_count spend_cents round_count tool_calls suspended_by');
   for(const [key,fields] of Object.entries({
-    blocker:'reason',
+    blocker:'reason reworkRequested',
     claim:'holderId repository ref paths expiresAt status',
     receipt:'eventId evidenceVersion evidenceUrl producerId producerAttribution reportedById',
     verification:'eventId actorId verifierId result completionEventId evidenceVersion independenceConfirmed',
