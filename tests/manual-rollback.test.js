@@ -165,6 +165,9 @@ for (const [label, mutate] of [
   ['wrong source pair', f => { f.evidence.targets.prod.sourceRevision = f.currentSha; }],
   ['wrong allocation pair', f => { f.evidence.current.entry.versionId = another; }],
   ['mutable evidence reference', f => { f.evidence.checks.oldCodeNewData.evidence = 'https://github.com/Uuriko/project-room/blob/main/report.md'; }],
+  ['foreign-repo run evidence', f => { f.evidence.checks.oldCodeNewData.evidence = 'https://github.com/someone/else/actions/runs/123'; }],
+  ['foreign-repo blob evidence', f => { f.evidence.checks.retainedRuntime.evidence = `https://github.com/someone/else/blob/${'a'.repeat(40)}/report.md`; }],
+  ['lookalike repo path evidence', f => { f.evidence.checks.workerBindings.evidence = 'https://github.com/Uuriko/project-room.evil.example/actions/runs/123'; }],
 ]) test(`equal schemas still refuse ${label} before any mutation`, async t => {
   const f = await fixture(t); mutate(f); await f.commitEvidence();
   const result = await f.attempt();
