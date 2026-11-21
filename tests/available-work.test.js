@@ -9,7 +9,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { availableBoardRows, availableClaimsInRoom, availablePublicTasks, availableWorkInRoom } from "../server/available-work.mjs";
+import { availableBoardRows, availableClaimsInRoom, availablePublicTasks, availableWorkInRoom,
+  DEFAULT_READY_WORK_WEIGHTS, PICKUP_LEASE_HOURS, rankReadyWork } from "../server/available-work.mjs";
 import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
 
 const ROOM = "available-demo";
@@ -127,4 +128,39 @@ test("public tasks: deadline-passed packets are not offered, and total counts th
   const { items, total } = availablePublicTasks(store, { limit: 2 });
   assert.deepEqual(items.map(item => item.id), ["open-1", "open-2"]);
   assert.equal(total, 3);
+});
+
+
+test("rankReadyWork: unblocks, hard, age, fit, and mismatch still visible", () => {
+  const now = Date.parse("2026-11-20T18:00:00-08:00");
+  const ago = minutes => new Date(now - minutes * 60 * 1000).toISOString();
+  const board = [
+    claim("plain", { updatedAt: ago(30), title: "Tidy comments" }),
+    claim("prereq", { tags: ["hard"], updatedAt: ago(40), title: "Unblock the release path" }),
+    claim("successor", { dependsOn: ["prereq"], updatedAt: ago(10), title: "Ship after unblock", state: "unclaimed" }),
+    claim("old", { updatedAt: ago(3 * 24 * 60), title: "Stale docs pass", history: [{ action: "claimed", at: ago(3 * 24 * 60) }] }),
+    claim("docs-fit", { tags: ["docs"], updatedAt: ago(20), title: "Docs typo pass" }),
+    claim("done-dep", { state: "done", owner: "worker", title: "Already done" })
+  ];
+  const ready = availableBoardRows(board);
+  assert.deepEqual(ready.map(row => row.id).sort(), ["docs-fit", "old", "plain", "prereq"]);
+
+  const ranked = rankReadyWork(ready, {
+    board, now, goal: "Unblock the release path and ship",
+    wantsWork: { labels: ["docs"], capabilities: [] }
+  });
+  assert.equal(ranked.length, 4);
+  assert.equal(ranked[0].item.id, "prereq");
+  assert.match(ranked[0].reason, /unblocks 1/);
+  assert.match(ranked[0].reason, /hard/);
+  assert.ok(ranked[0].score > ranked[1].score);
+
+  const byId = Object.fromEntries(ranked.map(row => [row.item.id, row]));
+  assert.equal(byId["docs-fit"].factors.fit, 1);
+  assert.equal(byId["plain"].factors.fit, 0.4);
+  assert.ok(ranked.some(row => row.item.id === "plain"), "mismatch down-ranks, does not hide");
+  assert.ok(byId["old"].factors.age > byId["plain"].factors.age);
+  assert.equal(PICKUP_LEASE_HOURS, 2);
+  const weightSum = Object.values(DEFAULT_READY_WORK_WEIGHTS).reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(weightSum - 1) < 1e-9);
 });

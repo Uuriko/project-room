@@ -27,7 +27,9 @@
 // board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { claimUpdatedAt, isHardWork } from "./work-claims.mjs";
 import { readWorkItems } from "./work-repository.mjs";
+import { wantsWorkMatches } from "./work-wants.mjs";
 
 export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
 
@@ -192,4 +194,104 @@ export function availablePublicTasks(store, { limit = 50 } = {}) {
     after = page.nextCursor;
   }
   return { items, total };
+}
+
+// Ranked ready work (docs/AGENT-IDLE-WORK-DESIGN.md). Weights are tunable
+// guidance for Room Next pickup, not a gate or a second inventory. A poor
+// fit down-ranks an item for one agent; it never hides it from the list.
+export const DEFAULT_READY_WORK_WEIGHTS = Object.freeze({
+  unblocks: 0.25, urgency: 0.20, age: 0.20, impact: 0.20, fit: 0.15
+});
+export const PICKUP_LEASE_HOURS = 2;
+const AGE_HORIZON_MINUTES = 24 * 60;
+const STOP = new Set("a an the and or of to for in on at by with from as is it this that be its into than then".split(" "));
+
+function tokens(text) {
+  return new Set(String(text ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(tok => tok.length > 2 && !STOP.has(tok)));
+}
+
+function wasClaimed(item) {
+  return (item.history ?? []).some(entry => entry?.action === "claimed");
+}
+
+function lastUnsatisfiedDependents(item, board, done) {
+  let count = 0;
+  for (const other of board) {
+    if (!usableClaim(other) || other.state === "done" || other.id === item.id) continue;
+    const deps = other.dependsOn ?? [];
+    if (!deps.includes(item.id)) continue;
+    if (deps.every(dep => dep === item.id || done.has(dep))) count += 1;
+  }
+  return count;
+}
+
+function factorScores(item, { board, done, goal, wantsWork, now }) {
+  const unblocks = lastUnsatisfiedDependents(item, board, done);
+  const unblocksScore = 1 - 1 / (1 + unblocks);
+  let urgency = 0;
+  if (isHardWork(item)) urgency = 1;
+  if (item.ci?.state === "failure") urgency = Math.max(urgency, 0.85);
+  if (item.kind === "land" || item.kind === "deploy") urgency = Math.max(urgency, 0.7);
+  const at = Date.parse(claimUpdatedAt(item));
+  const idleMinutes = Number.isFinite(at) ? Math.max(0, Math.round((now - at) / 60000)) : null;
+  const age = Math.min(1, (idleMinutes ?? 0) / AGE_HORIZON_MINUTES + (wasClaimed(item) ? 0 : 0.25));
+  const goalTokens = tokens(goal);
+  const itemTokens = tokens([item.title, ...(item.tags ?? [])].join(" "));
+  let overlap = 0;
+  if (goalTokens.size) for (const tok of itemTokens) if (goalTokens.has(tok)) overlap += 1;
+  let impact = goalTokens.size ? Math.min(1, overlap / Math.min(goalTokens.size, 6)) : 0;
+  if (item.kind === "land" || item.kind === "deploy") impact = Math.min(1, impact + 0.4);
+  const pref = wantsWork && (wantsWork.labels?.length || wantsWork.capabilities?.length) ? wantsWork : null;
+  const fit = !pref || wantsWorkMatches(pref, item) ? 1 : 0.4;
+  return { unblocks, unblocksScore, urgency, age, impact, fit, idleMinutes };
+}
+
+function reasonFor(item, factors) {
+  const parts = [];
+  if (factors.unblocks) parts.push(`unblocks ${factors.unblocks}`);
+  if (isHardWork(item)) parts.push("hard");
+  if (item.ci?.state === "failure") parts.push("CI failed");
+  if (item.kind === "land" || item.kind === "deploy") parts.push(item.kind);
+  if (!wasClaimed(item)) parts.push("never claimed");
+  else if (factors.idleMinutes) parts.push(`idle ${factors.idleMinutes}m`);
+  if (factors.impact >= 0.34) parts.push("matches goal");
+  if (factors.fit < 1) parts.push("skills mismatch");
+  return parts.join("; ") || "ready";
+}
+
+// Rank already-available board rows. `board` should be the full claim list
+// so "unblocks" can see dependents that are not yet startable.
+export function rankReadyWork(items, {
+  board = items, weights = DEFAULT_READY_WORK_WEIGHTS, goal = "", wantsWork = null, now = Date.now()
+} = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const full = Array.isArray(board) ? board : list;
+  const done = new Set(full.filter(item => usableClaim(item) && item.state === "done").map(item => item.id));
+  const w = { ...DEFAULT_READY_WORK_WEIGHTS, ...(weights ?? {}) };
+  return list.map(item => {
+    const factors = factorScores(item, { board: full, done, goal, wantsWork, now });
+    const score = Math.round((
+      w.unblocks * factors.unblocksScore + w.urgency * factors.urgency
+      + w.age * factors.age + w.impact * factors.impact + w.fit * factors.fit
+    ) * 1000) / 1000;
+    const hard = isHardWork(item);
+    const released = wasClaimed(item);
+    return {
+      item, score, hard, released, unblocks: factors.unblocks, idleMinutes: factors.idleMinutes,
+      factors: { unblocks: factors.unblocksScore, urgency: factors.urgency, age: factors.age,
+        impact: factors.impact, fit: factors.fit },
+      reason: reasonFor(item, factors)
+    };
+  }).sort((a, b) => b.score - a.score || Number(b.hard) - Number(a.hard)
+    || Number(a.released) - Number(b.released)
+    || (b.idleMinutes ?? -1) - (a.idleMinutes ?? -1)
+    || String(a.item.id).localeCompare(String(b.item.id)));
+}
+
+// Room-scoped ranked read over the one AvailableWork inventory. Does not
+// call store.room(), so Room Next can use it without hydrating a snapshot.
+export function rankReadyWorkInRoom(store, roomId, options = {}) {
+  let board = [];
+  try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return []; }
+  return rankReadyWork(availableBoardRowsInRoom(store, roomId, board), { board, ...options });
 }
