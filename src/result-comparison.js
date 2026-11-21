@@ -51,6 +51,18 @@ export function createResultComparison({ client, getState, esc }) {
             return `<p class="form-hint"><strong>Resubmitted result.</strong> ${esc(uiText("result.comparisonSummary", { removed: summary.removedLines, added: summary.addedLines }))}</p>` +
               (summary.changedBytes ? `<pre class="result-diff">${body.map(row => `<span class="diff-${row.type}">${esc(row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  ")}${esc(row.text)}</span>`).join("\n")}${rows.length > 200 ? `<span class="form-hint">… ${rows.length - 200} more rows</span>` : ""}</pre>` : `<p class="form-hint">No text changes from the previous version.</p>`);
           })();
+      const report = previous.workThread?.releaseChecks;
+      if (report?.completionEventId === previousId && typeof report.evidenceVersion === "string" && report.evidenceVersion.length > 0
+        && report.evidenceVersion === previous.result.receipt.evidenceVersion
+        && /^[0-9a-f]{40}$/.test(report.candidateRevision) && Array.isArray(report.checks)) {
+        const links = [];
+        for (const check of report.checks) {
+          if (!["build", "browser", "deploy"].includes(check.stage) || !check.evidenceMessageId) continue;
+          const href = "#pr-record/message/" + encodeURIComponent(check.evidenceMessageId);
+          if (check.href === href) links.push(`<a href="${esc(href)}" target="_blank" rel="noopener">${esc(uiText("result.release." + check.stage))}</a>`);
+        }
+        if (links.length) box.insertAdjacentHTML("afterbegin", `<p class="form-hint"><strong>${esc(uiText("result.previousReleaseChecks", { revision: report.candidateRevision.slice(0, 12) }))}</strong> ${links.join(" · ")}</p>`);
+      }
       box.hidden = false;
     }).catch(() => {
       if (!current()) return;

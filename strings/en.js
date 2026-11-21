@@ -583,6 +583,7 @@ export default {
   "result.release.passed": "Passed",
   "result.release.failed": "Failed",
   "result.release.pending": "Pending",
+  "result.previousReleaseChecks": "Previous release checks ({revision})",
   "result.releaseCandidate": "Candidate {revision}",
   "result.releaseReporter": "Latest report by {name}.",
   "result.releaseStageEvidence": "Open {stage} receipt",
