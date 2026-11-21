@@ -586,6 +586,7 @@ export default {
   "result.releaseReporter": "Latest report by {name}.",
   "result.releaseStageEvidence": "Open {stage} receipt",
   "result.releaseRecord": "Open recorded evidence",
+  "result.pendingCorrection": "Correction needed",
   "result.previousReview": "What the previous review flagged",
   "result.previewActions": "Preview actions",
   "connection.outageTitle": "Room temporarily unavailable",

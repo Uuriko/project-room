@@ -77,8 +77,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
   }
   $("#result-options > summary").setAttribute("aria-label", uiText("result.previewActions"));
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
-  resultElement("result-correction-title").textContent = uiText("result.previousReview");
-  function showCorrection(correction) {
+  function showCorrection(correction, pending = false) {
+    resultElement("result-correction-title").textContent = uiText(pending ? "result.pendingCorrection" : "result.previousReview");
     const text = typeof correction?.summary === "string" ? correction.summary : "";
     resultElement("result-correction-summary").textContent = text;
     resultElement("result-correction").hidden = !text;
@@ -129,8 +129,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function selectedWorkAction(view, item) {
     if (!usableText(view) || !item || !matchesReceipt(view.receipt, item.receipt) || item.supersededBy) return null;
     const state = getState(), next = nextWorkStep(item, Date.now(), state.room.ownerId);
-    if (next.action !== "verify" && next.action !== "decide") return null;
-    return workActions(item, state.members[getSession().member.id]).find(([action]) => action === next.action) ?? null;
+    const expected = next.action === "revise" && view.pendingCorrection?.action?.arguments.expectedRevision === item.revision
+      ? "resolve" : next.action;
+    if (!["verify", "decide", "resolve"].includes(expected)) return null;
+    return workActions(item, state.members[getSession().member.id]).find(([action]) => action === expected) ?? null;
   }
   resultElement("result-work-action")?.addEventListener("click", () => {
     const view = resultView, item = view && getState()?.workItems[view.workItemId];
@@ -212,7 +214,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
       clearResultComparison(resultElement("result-diff"));
     }
     const item = getState().workItems[view.workItemId];
-    const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
+    const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
+      && view.pendingCorrection.verificationEventId === item?.blocker?.eventId ? view.pendingCorrection : null;
+    showCorrection(view.withdrawn ? null : pending ?? view.previousCorrection, Boolean(pending));
+    const earlier = !matchesReceipt(view.receipt, item?.receipt) || (!pending && item?.state !== S.COMPLETED) || Boolean(item?.supersededBy);
     resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
@@ -241,7 +246,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const next = nextWorkStep(item, Date.now(), getState().room.ownerId);
       resultElement("result-work-criteria").textContent = item.definitionOfDone;
       resultElement("result-work-verification").textContent = finding?.summary ?? "";
-      resultElement("result-work-verification-row").hidden = !finding?.summary;
+      resultElement("result-work-verification-row").hidden = Boolean(pending) || !finding?.summary;
       resultElement("result-work-next").textContent = next.memberId
         ? uiText("work.thread.nextFor", { name: memberLabel(next.memberId), action: next.label })
         : next.label;
@@ -395,7 +400,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
       // than showing an empty box: the result was still reported and verified,
       // and the receipt still names what it was verified against.
       view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
-      showCorrection(view.withdrawn ? null : value.workThread?.correction);
+      view.previousCorrection = value.workThread?.correction;
+      view.pendingCorrection = value.workThread?.pendingCorrection
+        ? { ...value.workThread.pendingCorrection, revision: value.current.workRevision }
+        : null;
       view.releaseChecks = value.workThread?.releaseChecks;
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
       resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
