@@ -16,6 +16,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { linkWithProof } from './helpers/link-with-proof.mjs';
 import { unpublishPublic } from '../server/legal-store.mjs';
+import { escapeHtml } from '../server/html-escape.mjs';
 
 const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -118,6 +119,14 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   seedOffer(f.store, 'another-room', {roomId:'other', title:'Foreign task', criteria:['Do not pick this']});
   seedOffer(f.store, 'next-in-commons', {title:'Next task', criteria:['Return one result'], files:['docs/NEXT.md']});
   const prompt = await fetch(f.origin + '/join.txt?room=commons').then(r => r.text());
+  const pastePage = await fetch(f.origin + '/docs/agents/paste?room=commons');
+  assert.equal(pastePage.status, 200);
+  assert.equal(pastePage.headers.get('cache-control'), 'no-store');
+  const pasteHtml = await pastePage.text();
+  assert.match(pasteHtml, /<h1>Contribute to commons<\/h1>/);
+  assert.equal(pasteHtml.match(/data-copy-prompt=/g)?.length, 1);
+  assert.equal(pasteHtml.match(/<textarea id="agent-paste-prompt-1"[^>]*>([\s\S]*?)<\/textarea>/)?.[1], escapeHtml(prompt));
+  assert.equal((await fetch(f.origin + '/docs/agents/paste?room=commons&room=other')).status, 400);
   const list = prompt.match(/GET (\S+public-work\/tasks\?\S+)/)[1];
   assert.equal(list, f.origin + '/api/public-work/tasks?roomId=commons&claimable=1&limit=5');
   assert.match(prompt, /After your first useful submission, attempt to connect/);
@@ -187,7 +196,17 @@ test('the first read-only contribution can use a room’s explicitly published p
   create('other-project', 'foreign-project', 'https://github.com/example/foreign');
   publish('other-project', 'foreign-project');
   const read = () => fetch(f.origin+'/join.txt?room=new-project');
+  const readBrowser = async room => {
+    const response = await fetch(f.origin + '/docs/agents/paste?room=' + room);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    return (await response.text()).match(/<textarea id="agent-paste-prompt-1"[^>]*>([\s\S]*?)<\/textarea>/)?.[1];
+  };
   const before = await (await read()).text();
+  const browserBefore = await readBrowser('new-project');
+  assert.equal(browserBefore, escapeHtml(before));
+  const unknown = await readBrowser('unknown-room');
+  assert.equal(unknown.replaceAll('unknown-room', 'new-project'), browserBefore);
   assert.doesNotMatch(before, /github\.com|Published project repository/);
   assert.match(before, /public-work\/tasks\?roomId=new-project&limit=5/);
   create('new-project', 'public-project', 'https://github.com/example/published');
@@ -196,6 +215,7 @@ test('the first read-only contribution can use a room’s explicitly published p
   const response = await read();
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const prompt = await response.text();
+  assert.equal(await readBrowser('new-project'), escapeHtml(prompt));
   assert.match(prompt, /Published project repository for read-only discovery: https:\/\/github\.com\/example\/published/);
   assert.doesNotMatch(prompt, /example\/(draft|foreign|task)|deliberately absent/);
   assert.doesNotMatch(prompt, /public-work\/tasks\?roomId=new-project&limit=5/);
@@ -203,6 +223,7 @@ test('the first read-only contribution can use a room’s explicitly published p
   assert.match(prompt, /public reads without credentials/);
   unpublishPublic(f.store.db, { kind: 'room', id: 'new-project', byAccount: 'operator', now: Date.now() });
   assert.equal(await (await read()).text(), before);
+  assert.equal(await readBrowser('new-project'), browserBefore);
 });
 
 test('a member and an outside agent contend for the same published lease', async t => {
