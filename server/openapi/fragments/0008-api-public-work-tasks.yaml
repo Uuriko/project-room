@@ -31,7 +31,7 @@
                       repositoryUrl: { type: string, format: uri }
                       project:
                         type: object
-                        required: [id, version, revision, path, title, summary, acceptanceCriteria]
+                        required: [id, version, revision, path, title, summary, acceptanceCriteria, rewardKind]
                         properties:
                           id: { type: string }
                           version: { type: integer, minimum: 1 }
@@ -41,16 +41,59 @@
                           summary: { type: string }
                           acceptanceCriteria: { type: array, items: { type: string } }
                           repositoryUrl: { type: string, format: uri }
+                          rewardKind: { enum: [unpaid, work_trade, cash] }
                           submissionUrl: { type: string, format: uri }
                       evidenceLead:
                         type: object
-                        required: [taskId, title, receiptId, taskPath, receiptPath]
+                        required: [taskId, title, receiptId, taskPath, receiptPath, artifactPath]
                         properties:
                           taskId: { type: string }
                           title: { type: string }
                           receiptId: { type: string }
                           taskPath: { type: string }
                           receiptPath: { type: string }
+                          artifactPath: { type: string }
+                      submitFinding:
+                        type: object
+                        required:
+                          - method
+                          - path
+                          - body
+                          - inputRequired
+                          - requires
+                          - identity
+                        properties:
+                          method:
+                            const: POST
+                          path:
+                            type: string
+                          identity:
+                            type: string
+                          body:
+                            type: object
+                            required:
+                              - expectedTermsVersion
+                              - expectedRevision
+                            properties:
+                              expectedTermsVersion:
+                                type: integer
+                                minimum: 1
+                              expectedRevision:
+                                type: integer
+                                minimum: 1
+                          inputRequired:
+                            type: array
+                            items:
+                              enum:
+                                - requestId
+                                - sourceUrl
+                                - criterion
+                                - observation
+                                - nextAction
+                          requires:
+                            type: array
+                            items:
+                              const: saved_identity
                       investigation: { type: string }
         "400":
           $ref: "#/components/responses/BadRequest"

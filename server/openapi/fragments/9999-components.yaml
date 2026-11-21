@@ -62,6 +62,88 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    ProjectDiscoveryInput:
+      type: object
+      additionalProperties: false
+      required:
+        - requestId
+        - expectedTermsVersion
+        - expectedRevision
+        - sourceUrl
+        - criterion
+        - observation
+        - nextAction
+      properties:
+        requestId:
+          type: string
+        expectedTermsVersion:
+          type: integer
+          minimum: 1
+        expectedRevision:
+          type: integer
+          minimum: 1
+        sourceUrl:
+          type: string
+          format: uri
+          maxLength: 2000
+          description: Public HTTPS source for this observation.
+        criterion:
+          type: string
+          maxLength: 1000
+          description: Exact published project acceptance criterion.
+        observation:
+          type: string
+          maxLength: 2000
+        nextAction:
+          type: string
+          maxLength: 1000
+    ProjectDiscoveryReceipt:
+      type: object
+      required:
+        - status
+        - receiptId
+        - offerId
+        - termsVersion
+        - revision
+        - finding
+        - recordedAt
+      properties:
+        status:
+          const: recorded
+        receiptId:
+          type: string
+        offerId:
+          type: string
+        termsVersion:
+          type: integer
+        revision:
+          type: integer
+        recordedAt:
+          type: string
+          format: date-time
+        finding:
+          type: object
+          required:
+            - sourceUrl
+            - criterion
+            - observation
+            - nextAction
+          properties:
+            sourceUrl:
+              type: string
+              format: uri
+              maxLength: 2000
+              description: Public HTTPS source for this observation.
+            criterion:
+              type: string
+              maxLength: 1000
+              description: Exact published project acceptance criterion.
+            observation:
+              type: string
+              maxLength: 2000
+            nextAction:
+              type: string
+              maxLength: 1000
     # JDOT-MEMBER-PERMS begin: public request schemas, not storage envelopes.
     RequestedRoomPermission:
       type: string

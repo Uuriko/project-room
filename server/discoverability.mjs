@@ -269,6 +269,11 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe",
     { query: NEEDS_ME_QUERY }),
   route("/api/verdict-inbox", ["GET"], "identity-secret", "Sectioned verdict inbox for this identity: needs your verdict, returned to you, waiting on a worker, and recently decided. An account session reads the same set with non-human rows omitted.", "getVerdictInbox"),
+  route("/api/project-offers/{offerId}/discoveries", ["POST"], "identity-secret",
+    "File a private evidence finding for the published project.", "fileProjectDiscovery", { projectDiscovery: "file" }),
+  route("/api/rooms/{roomId}/project-offers/{offerId}/discoveries", ["GET", "HEAD"], "room-member",
+    "Page through recorded findings as a designated project reviewer.", "listProjectDiscoveries",
+    { projectDiscovery: "review", operationIds: { HEAD: "headProjectDiscoveries" } }),
   // Public contribution work: owner consent, outside claims and immutable evidence.
   route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",
     { operationIds: { HEAD: "headPublicWorkTasks" }, publicWork: "list" }),
@@ -514,6 +519,48 @@ const publicWorkSchemas = {
     action: { enum: ["claimed", "renewed", "released", "submitted"] }, task: { $ref: "#/components/schemas/PublicWorkTask" }, receipt: { $ref: "#/components/schemas/PublicWorkReceipt" },
   } },
 };
+const findingFields = {
+  sourceUrl: { type: "string", format: "uri", maxLength: 2000, description: "Public HTTPS source for this observation." },
+  criterion: { type: "string", maxLength: 1000, description: "Exact published project acceptance criterion." },
+  observation: { type: "string", maxLength: 2000 },
+  nextAction: { type: "string", maxLength: 1000 },
+};
+const findingVersionFields = {
+  expectedTermsVersion: { type: "integer", minimum: 1 }, expectedRevision: { type: "integer", minimum: 1 },
+};
+const discoverySchemas = {
+  ProjectDiscoveryInput: { type: "object", additionalProperties: false,
+    required: ["requestId", ...Object.keys(findingVersionFields), ...Object.keys(findingFields)],
+    properties: { requestId: { type: "string" }, ...findingVersionFields, ...findingFields } },
+  ProjectDiscoveryReceipt: { type: "object",
+    required: ["status", "receiptId", "offerId", "termsVersion", "revision", "finding", "recordedAt"],
+    properties: { status: { const: "recorded" }, receiptId: { type: "string" }, offerId: { type: "string" },
+      termsVersion: { type: "integer" }, revision: { type: "integer" }, recordedAt: { type: "string", format: "date-time" },
+      finding: { type: "object", required: Object.keys(findingFields), properties: findingFields } } },
+};
+
+function projectDiscoveryOperation(entry, method) {
+  if (!entry.projectDiscovery) return {};
+  const filing = entry.projectDiscovery === "file";
+  const receipt = { $ref: "#/components/schemas/ProjectDiscoveryReceipt" };
+  const schema = filing ? receipt : { type: "object", required: ["offerId", "findings", "nextCursor"], properties: {
+    offerId: { type: "string" }, findings: { type: "array", items: receipt }, nextCursor: { type: ["string", "null"] },
+  } };
+  const responses = operationResponses({ ...entry, successStatuses: ["200"] }, method);
+  responses["200"] = { description: filing ? "Recorded receipt or exact replay." : "Page of findings, newest first.",
+    ...(method === "HEAD" ? {} : { content: { "application/json": { schema } } }) };
+  responses["422"] = { description: filing ? "Invalid finding fields or criterion." : "Invalid query or stale, foreign, or malformed cursor." };
+  if (filing) return { description: "Use your saved identity and a stable requestId. Use the version and revision from pickup. Exact retries return the recorded receipt. Capacity is five findings per identity and 100 per project in a rolling 24-hour window.",
+    security: [{ identityBearer: [] }], responses,
+    requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ProjectDiscoveryInput" } } } } };
+  return { description: "Only designated project reviewers can read findings. Use a room credential or bound browser session. Scoped API keys require rooms:read. Continue with the returned nextCursor as after until it is null.",
+    security: [{ roomBearer: [] }, { roomBrowserSession: [] }, { accountBrowserSession: [] }], responses, queryParameters: [
+      { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 50, default: 20 } },
+      { name: "after", in: "query", schema: { type: "string" }, description: "Opaque continuation cursor from this project's preceding page." },
+      { name: "auth", in: "query", schema: { enum: ["room", "account"] }, description: "Select browser session. Account mode requires the current X-Session-Binding header." },
+    ] };
+}
+
 function publicWorkOperation(entry, method) {
   const kind = entry.publicWork;
   if (!kind) return {};
@@ -549,14 +596,20 @@ function publicWorkOperation(entry, method) {
       body: { type: "object", required: ["expectedTermsVersion"], properties: { expectedTermsVersion: { type: "integer", minimum: 1 } } },
       requires: { type: "array", items: { enum: ["saved_identity", "stable_request_id"] } },
       repositoryUrl: { type: "string", format: "uri" },
-      project: { type: "object", required: ["id", "version", "revision", "path", "title", "summary", "acceptanceCriteria"], properties: {
+      project: { type: "object", required: ["id", "version", "revision", "path", "title", "summary", "acceptanceCriteria", "rewardKind"], properties: {
         id: { type: "string" }, version: { type: "integer", minimum: 1 }, revision: { type: "integer", minimum: 1 }, path: { type: "string" },
-        title: { type: "string" }, summary: { type: "string" }, acceptanceCriteria: strings,
+        title: { type: "string" }, summary: { type: "string" }, acceptanceCriteria: strings, rewardKind: { enum: ["unpaid", "work_trade", "cash"] },
         repositoryUrl: { type: "string", format: "uri" }, submissionUrl: { type: "string", format: "uri" },
       } },
-      evidenceLead: { type: "object", required: ["taskId", "title", "receiptId", "taskPath", "receiptPath"], properties: {
+      evidenceLead: { type: "object", required: ["taskId", "title", "receiptId", "taskPath", "receiptPath", "artifactPath"], properties: {
         taskId: { type: "string" }, title: { type: "string" }, receiptId: { type: "string" },
-        taskPath: { type: "string" }, receiptPath: { type: "string" },
+        taskPath: { type: "string" }, receiptPath: { type: "string" }, artifactPath: { type: "string" },
+      } },
+      submitFinding: { type: "object", required: ["method", "path", "body", "inputRequired", "requires", "identity"], properties: {
+        method: { const: "POST" }, path: { type: "string" }, identity: { type: "string" },
+        body: { type: "object", required: Object.keys(findingVersionFields), properties: findingVersionFields },
+        inputRequired: { type: "array", items: { enum: ["requestId", ...Object.keys(findingFields)] } },
+        requires: { type: "array", items: { const: "saved_identity" } },
       } },
       investigation: { type: "string" },
     } },
@@ -681,7 +734,7 @@ export function buildOpenApiJson({ origin }) {
           name: m[1], in: "path", required: true, schema: { type: "string" },
         }));
       }
-      const publicSpec = { ...publicWorkOperation(entry, method), ...publicWorkReviewOperation(entry, method) };
+      const publicSpec = { ...projectDiscoveryOperation(entry, method), ...publicWorkOperation(entry, method), ...publicWorkReviewOperation(entry, method) };
       const queryParameters = publicSpec.queryParameters; delete publicSpec.queryParameters;
       Object.assign(op, publicSpec);
       if (queryParameters) op.parameters = [...(op.parameters ?? []), ...queryParameters];
@@ -723,6 +776,7 @@ export function buildOpenApiJson({ origin }) {
       securitySchemes: { identityBearer: { type: "http", scheme: "bearer", description: "Saved global agent identity secret." }, roomBearer: { type: "http", scheme: "bearer", description: "Room credential, linked identity or scoped API key." }, roomBrowserSession: { type: "apiKey", in: "cookie", name: "room_session" }, accountBrowserSession: { type: "apiKey", in: "cookie", name: "account_session", description: "Select account auth and supply current X-Session-Binding." } },
       responses: errorComponents(),
       schemas: {
+        ...discoverySchemas,
         ...publicWorkSchemas,
         ...publicWorkReviewSchemas,
         NextStep: {
