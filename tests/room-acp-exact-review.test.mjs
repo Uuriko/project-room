@@ -11,7 +11,7 @@ import {RoomError} from '../room-acp/src/room.mjs';
 import {reviewOutput, reviewRepairable, explicitVerdict, unfencedJson, repeatedTopLevelKey, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
 import {linkWithProof} from './helpers/link-with-proof.mjs';
 
-async function setup(t, {respondTo, pending = false, nextAction, replies = []} = {}) {
+async function setup(t, {respondTo, pending = false, nextAction, replies = [], observeStage} = {}) {
   const f = createAcceptanceFixture(), roomId = 'commons', workItemId = 'exact-review-work', memberId = 'exact-reviewer';
   const identity = f.store.identities.create('Exact reviewer');
   linkWithProof(f.store,f.keys.owner,roomId,identity,{memberId,permissions:['verify']});
@@ -41,7 +41,7 @@ async function setup(t, {respondTo, pending = false, nextAction, replies = []} =
   const connection = {apiBase:`http://127.0.0.1:${server.address().port}`,roomId,memberId,credential:identity.secret,hostId};
   const counts = {prompt:0,write:0,receipt:0,ack:0}, prompts = [];
   function make() {
-    const bridge = new Bridge({connection,respondTo,waitMs:0,env:{ROOM_ACP_HOME:join(f.directory,'acp-host')},host:{
+    const bridge = new Bridge({connection,respondTo,observeStage,waitMs:0,env:{ROOM_ACP_HOME:join(f.directory,'acp-host')},host:{
       session:async()=>({sessionId:'fixture-review-session'}),prompt:async(_key,prompt,options)=>{
         counts.prompt++;
         prompts.push({prompt,sessionId:options?.sessionId});
@@ -81,7 +81,8 @@ async function setup(t, {respondTo, pending = false, nextAction, replies = []} =
     assert.equal(value?.isError ?? false,false);
     return value.structuredContent;
   };
-  return {bridge,wake,counts,prompts,make,receiptPhase:()=>bridge.reviewReceipts.read(bridge.reviewReceipts.key(wake.signalId))?.phase,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer};
+  const receipt = () => bridge.reviewReceipts.read(bridge.reviewReceipts.key(wake.signalId));
+  return {bridge,wake,counts,prompts,make,receipt,receiptPhase:()=>receipt()?.phase,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer};
 }
 
 test('an ACP failed review hands the exact reproducer to the producer with one protected wake read',async t=>{
@@ -223,6 +224,28 @@ test('inconclusive exact review remains available after the model stops',async t
   assert.deepEqual(f.counts,{prompt:1,write:0,receipt:0,ack:0});
   assert.equal(f.pendingRows().delivered_at,null);
   assert.equal(f.verdict(),undefined);
+});
+
+test('a parked review keeps a coarse disposition and local timing without filing a verdict', async t => {
+  for (const [reply, reason] of [
+    ['{"result":"pending","summary":"Private text is not telemetry."}', 'explicit_pending'],
+    ['The evidence is incomplete.', 'unsupported_output'],
+    ['', 'no_output'],
+    [{stopReason:'cancelled',recorder:{text:'Late data is not a verdict.'}}, 'turn_not_completed'],
+  ]) {
+    const phases = [];
+    const f = await setup(t, { replies: [reply], observeStage: event => phases.push(event) });
+    await f.bridge.accept(f.wake);
+    await f.bridge.queue.idle();
+    assert.equal(f.receipt().phase, 'needs_review');
+    assert.equal(f.receipt().reason, reason);
+    assert.deepEqual(phases.filter(row => row.stage.startsWith('review_')).map(row => row.stage),
+      ['review_prompt_returned', 'review_parked']);
+    assert.doesNotMatch(JSON.stringify(f.receipt()) + JSON.stringify(phases), /Private text|evidence is incomplete|Late data/);
+    assert.equal(f.verdict(), undefined);
+    assert.equal(f.pendingRows().delivered_at, null);
+    assert.deepEqual(f.counts, {prompt:1, write:0, receipt:0, ack:0});
+  }
 });
 
 test('a review that lands while the agent works wins over its stale verdict',async t=>{
