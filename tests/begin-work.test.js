@@ -92,7 +92,8 @@ test("room_begin_work is a hosted tool and rejects a guessed extra field", async
   assert.doesNotMatch(tool.description, /Checks this host/);
   assert.match(tool.description, /Room work state/);
   assert.match(tool.description, /operation receipt/);
-  assert.match(tool.description, /never returns the stage id/);
+  assert.match(tool.description, /retry with the same work item, expectedRevision and scope/);
+  assert.match(tool.description, /only if Begin returned a stage ID/);
   assert.match(tool.description, /does not invoke Begin/);
   assert.equal(validRoomToolArguments("room_begin_work", { workItemId: "together-begin-20260925", invocationRequestId: "begin-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }), true);
   assert.equal(HOSTED_ROOM_MCP_TOOLS.includes("room_begin_work"), true);

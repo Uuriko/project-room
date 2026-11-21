@@ -221,6 +221,84 @@ test("an unknown claim id is not reused to acquire a different scope", async t =
   assert.equal(f.store.room("commons").state.workItems["scope-repro"].state, "accepted");
 });
 
+test("hosted Begin can retry its original guarded input when the entire response was lost", async t => {
+  const { f } = await httpRoom(t);
+  const workItemId = "lost-hosted-begin";
+  const args = { roomId: "commons", workItemId, expectedRevision: 0 };
+  const key = f.keys.owner;
+  const call = args => callHostedStdioTool(f.store, key, "room_begin_work", args);
+  f.store.command(key, "commons", { id: workItemId, type: T.WORK_PROPOSED, data: {
+    workItemId, title: "Check Begin recovery", definitionOfDone: "Recover both operations",
+    accountableMemberId: "owner", mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
+  // The server completed both writes, but the first caller never saw the reply.
+  await call(args);
+  const retry = (await call(args)).value;
+  assert.equal(retry.working, true);
+  assert.deepEqual(retry.confirmed.map(row => row.action), ["room_accept_work", "room_start_work"]);
+  assert.equal(f.store.room("commons").state.workItems[workItemId].revision, 2);
+  const unrelated = await call({ ...args, workItemId: "scope-repro" });
+  assert.equal(unrelated.value.stopped, "stale_revision");
+});
+
+test("hosted Begin only recovers a lost scoped reservation for the original scope", async t => {
+  const { f } = await httpRoom(t);
+  const key = f.keys.owner;
+  const workItemId = "scope-repro";
+  const args = { roomId: "commons", workItemId, expectedRevision: 1, ...scopeA };
+  const call = args => callHostedStdioTool(f.store, key, "room_begin_work", args);
+  const id = beginRequestId(workItemId, "room_acquire_claim", 1, scopeA);
+  f.store.command(key, "commons", { id, type: T.CLAIM_ACQUIRED, data: {
+    workItemId, expectedRevision: 1, ...scopeA
+  } });
+  const wrongScope = (await call({ ...args, ...scopeB })).value;
+  assert.equal(wrongScope.stopped, "stale_revision");
+  const retry = (await call(args)).value;
+  assert.equal(retry.working, true);
+  assert.deepEqual(retry.confirmed.map(row => row.action), ["room_acquire_claim", "room_start_work"]);
+  assert.equal(f.store.room("commons").state.workItems[workItemId].revision, 3);
+});
+
+test("hosted Begin recovers a full scoped chain and does not reuse a scoped accept for different paths", async t => {
+  const { f } = await httpRoom(t);
+  const key = f.keys.owner;
+  const workItemId = "scoped-proposal";
+  const args = { roomId: "commons", workItemId, expectedRevision: 0, ...scopeA };
+  const call = args => callHostedStdioTool(f.store, key, "room_begin_work", args);
+  f.store.command(key, "commons", { id: workItemId, type: T.WORK_PROPOSED, data: {
+    workItemId, title: "Check scoped Begin recovery", definitionOfDone: "Recover separate stage receipts",
+    accountableMemberId: "owner", mode: "write", independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
+  const acceptId = beginRequestId(workItemId, "room_accept_work", 0, scopeA);
+  f.store.command(key, "commons", { id: acceptId, type: T.WORK_ACCEPTED, data: { workItemId, expectedRevision: 0 } });
+  assert.equal((await call({ ...args, ...scopeB })).value.stopped, "stale_revision");
+  assert.equal(f.store.room("commons").state.workItems[workItemId].revision, 1);
+  const first = (await call(args)).value;
+  assert.equal(first.working, true);
+  assert.deepEqual(first.confirmed.map(row => row.action), ["room_accept_work", "room_acquire_claim", "room_start_work"]);
+  const repeat = (await call(args)).value;
+  assert.equal(repeat.working, true);
+  assert.deepEqual(repeat.confirmed, first.confirmed);
+  assert.equal(f.store.room("commons").state.workItems[workItemId].revision, 3);
+});
+
+test("hosted Begin can still resume an uncommitted pre-upgrade accept stage", async t => {
+  const { f } = await httpRoom(t);
+  const key = f.keys.owner;
+  const workItemId = "legacy-scoped-accept";
+  f.store.command(key, "commons", { id: workItemId, type: T.WORK_PROPOSED, data: {
+    workItemId, title: "Recover a pinned legacy stage", definitionOfDone: "Preserve the old operation ID",
+    accountableMemberId: "owner", mode: "write", independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
+  const expectedRevision = 0;
+  const invocationRequestId = beginRequestId(workItemId, "room_accept_work", expectedRevision);
+  const args = { roomId: "commons", workItemId, expectedRevision, invocationRequestId, ...scopeA };
+  const retry = (await callHostedStdioTool(f.store, key, "room_begin_work", args)).value;
+  assert.equal(retry.working, true);
+  assert.equal(retry.confirmed[0].requestId, invocationRequestId);
+  assert.equal(f.store.room("commons").state.workItems[workItemId].revision, 3);
+});
+
 test("a refused start is not restarted at a later revision under a new id", async t => {
   const { f, client, identity } = await httpRoom(t);
   const read = () => client.workContext("scope-repro");
@@ -329,4 +407,8 @@ test("stdio MCP over HTTP does not start a different active scope", { timeout: 2
   assert.equal(begun.working, true);
   assert.deepEqual(begun.confirmed.map(row => row.action), ["room_start_work"]);
   assert.deepEqual(eventReads, [`operationId=${invocationRequestId}&limit=1`, `after=${accept.sequence - 1}&limit=1`]);
+  const freshRetry = (await mcp.call("room_begin_work", { workItemId, expectedRevision: 0 })).result.structuredContent;
+  assert.equal(freshRetry.working, true);
+  assert.deepEqual(freshRetry.confirmed.map(row => row.action), ["room_accept_work", "room_start_work"]);
+  assert.equal(f.store.room("commons").state.workItems[workItemId].revision, 2);
 });
