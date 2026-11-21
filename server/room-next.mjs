@@ -11,7 +11,7 @@ import { workRoleHolder } from "./work-context.mjs";
 
 const PAGE_SIZE = 4;
 const WORK_SEARCH_WINDOWS = 4;
-const LEGACY_WORK_SEARCH_LIMIT = 48;
+const LEGACY_WORK_SEARCH_LIMIT = 64;
 const CORRECTION_CHARS = 400;
 const CORRECTION_FIELD_BYTES = 650;
 const MAX_BYTES = 16 * 1024;
