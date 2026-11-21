@@ -11,7 +11,7 @@ import {RoomError} from '../room-acp/src/room.mjs';
 import {reviewOutput, reviewRepairable, explicitVerdict, unfencedJson, repeatedTopLevelKey, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
 import {linkWithProof} from './helpers/link-with-proof.mjs';
 
-async function setup(t, {respondTo, pending = false, nextAction, replies = [], observeStage} = {}) {
+async function setup(t, {respondTo, reviewScope, pending = false, nextAction, replies = [], observeStage} = {}) {
   const f = createAcceptanceFixture(), roomId = 'commons', workItemId = 'exact-review-work', memberId = 'exact-reviewer';
   const identity = f.store.identities.create('Exact reviewer');
   linkWithProof(f.store,f.keys.owner,roomId,identity,{memberId,permissions:['verify']});
@@ -41,7 +41,7 @@ async function setup(t, {respondTo, pending = false, nextAction, replies = [], o
   const connection = {apiBase:`http://127.0.0.1:${server.address().port}`,roomId,memberId,credential:identity.secret,hostId};
   const counts = {prompt:0,write:0,receipt:0,ack:0}, prompts = [];
   function make() {
-    const bridge = new Bridge({connection,respondTo,observeStage,waitMs:0,env:{ROOM_ACP_HOME:join(f.directory,'acp-host')},host:{
+    const bridge = new Bridge({connection,respondTo,reviewScope,observeStage,waitMs:0,env:{ROOM_ACP_HOME:join(f.directory,'acp-host')},host:{
       session:async()=>({sessionId:'fixture-review-session'}),prompt:async(_key,prompt,options)=>{
         counts.prompt++;
         prompts.push({prompt,sessionId:options?.sessionId});
@@ -115,9 +115,11 @@ test('an ACP failed review hands the exact reproducer to the producer with one p
 });
 
 test('exact work wake runs native review and records one verdict, recovering a lost write through its original receipt',async t=>{
-  const f = await setup(t);
+  const f = await setup(t,{reviewScope:{requesterId:'owner',openedAfter:0}});
   const request = f.bridge.room.request;
+  const reads = [];
   f.bridge.room.request = async(path,options)=>{
+    if (path.includes('/work-context') || path.includes('/work-result')) reads.push(path.split('?')[0]);
     const response = await request(path,options);
     if (options?.body?.type==='verification.recorded') throw new RoomError(0,'network','Committed response lost');
     return response;
@@ -125,12 +127,46 @@ test('exact work wake runs native review and records one verdict, recovering a l
   await f.bridge.accept(f.wake);
   await f.bridge.queue.idle();
   assert.equal(f.verdict()?.result,'pass');
+  assert.deepEqual(reads,['/api/rooms/commons/work-result']);
   assert.deepEqual(f.counts,{prompt:1,write:1,receipt:1,ack:1});
   const restarted = f.make();
   assert.equal(await restarted.lease(),true);
   await restarted.accept(f.wake);
   await restarted.queue.idle();
   assert.deepEqual(f.counts,{prompt:1,write:1,receipt:1,ack:2});
+});
+
+test('the scope check refuses ineligible or incomplete origin facts without contacting the model',async t=>{
+  for (const [label,reviewScope,changeOrigin] of [
+    ['different requester',{requesterId:'another-member',openedAfter:0}],
+    ['earlier proposal',{requesterId:'owner',openedAfter:Date.now()+60_000}],
+    ['legacy response',{requesterId:'owner',openedAfter:0},()=>undefined],
+    ['write mode',{requesterId:'owner',openedAfter:0},origin=>({...origin,mode:'write'})],
+    ['no independent verification',{requesterId:'owner',openedAfter:0},origin=>({...origin,independentVerificationRequired:false})],
+  ]) {
+    await t.test(label,async t=>{
+      const f = await setup(t,{reviewScope});
+      const exact = await f.bridge.room.request('/api/rooms/commons/work-result?'+new URLSearchParams({
+        workItemId:f.wake.workItemId,completionEventId:f.wake.completionEventId,
+      }));
+      assert.equal(exact.review.origin.proposedById,'owner');
+      assert.equal(exact.review.action.tool,'room_record_verification');
+      const producer = await f.readAsProducer(f.wake.nextRead);
+      assert.equal(producer.review,undefined);
+      if (changeOrigin) {
+        const request = f.bridge.room.request;
+        f.bridge.room.request = async(path,options)=>{
+          const value = await request(path,options);
+          if (path.includes('/work-result')) value.review.origin = changeOrigin(value.review.origin);
+          return value;
+        };
+      }
+      await f.bridge.accept(f.wake);
+      await f.bridge.queue.idle();
+      assert.equal(f.verdict(),undefined);
+      assert.deepEqual(f.counts,{prompt:0,write:0,receipt:0,ack:0});
+    });
+  }
 });
 
 test('a durable exact review claim and first provider output appear before the verdict', async t => {

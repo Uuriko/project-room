@@ -236,6 +236,8 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const review = selectionStatus === "current" && next.action === "verify"
     && result.text?.body !== null && workActions(work, reviewer, now).some(([action]) => action === "verify")
     ? { criteria: work.definitionOfDone,
+        origin: { proposedById: work.proposedById, createdAt: work.createdAt, mode: work.mode,
+          independentVerificationRequired: work.independentVerificationRequired === true },
         action: { tool: "room_record_verification", arguments: { roomId: state.room.id, workItemId,
           expectedRevision: work.revision, completionEventId: result.receipt.eventId,
           evidenceVersion: result.receipt.evidenceVersion }, inputRequired: ["result", "summary"] },
