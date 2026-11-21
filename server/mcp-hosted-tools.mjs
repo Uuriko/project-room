@@ -16,7 +16,7 @@ const tool = (name, description, inputSchema, readOnlyHint = true) => ({
 const idField = { type: "string", minLength: 1, maxLength: 128 };
 const roomIdField = { ...idField, description: "Room id this identity is linked to." };
 const nextReadSchema = schema({
-  tool: { type: "string", enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request", "room_read_result"] },
+  tool: { type: "string", enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request", "room_read_result", "room_read_public_review"] },
   arguments: { type: "object" }
 }, ["tool", "arguments"]);
 const nextRead = { $ref: "#/$defs/nextRead" };

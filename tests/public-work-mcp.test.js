@@ -148,7 +148,7 @@ test('catalog selection uses live usable membership, preserves Room core size an
  const f=await fixture(t),room=structuredClone(f.store.room('commons').state),member='outside-member';
  room.members[member]={id:member,displayName:'Outside member',kind:'agent',active:true,permissions:['read']};f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');f.store.db.prepare('INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('commons',f.first.identityId,member,Date.now());
  const list=params=>f.rpc({jsonrpc:'2.0',id:1,method:'tools/list',...(params?{params}:{})},f.first.secret);
- const normal=(await list()).body;assert.ok(normal.result.tools.some(tool=>tool.name==='room_needs_me'));assert.ok(!normal.result.tools.some(tool=>tool.name==='public_work_claim'));assert.ok(Buffer.byteLength(JSON.stringify(normal))<34*1024); // Same core catalog budget as mcp-core-profile, including the room_next output schema.
+ const normal=(await list()).body;assert.ok(normal.result.tools.some(tool=>tool.name==='room_needs_me'));assert.ok(!normal.result.tools.some(tool=>tool.name==='public_work_claim'));const normalBytes=Buffer.byteLength(JSON.stringify(normal));assert.ok(normalBytes<34*1024, `core catalog is ${normalBytes} bytes`); // Same core catalog budget as mcp-core-profile, including the room_next output schema.
  const publicFocus=(await list({focus:'public_work'})).body;assert.deepEqual(publicFocus.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet','room_check_access','room_join',...PUBLIC_WORK_MCP_TOOLS]);assert.ok(Buffer.byteLength(JSON.stringify(publicFocus))<16384);
  assert.deepEqual((await list()).body.result.tools,normal.result.tools);
  room.members[member].active=false;f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');
@@ -227,7 +227,7 @@ test('idle Room Next gives only the designated reviewer the pending exact public
  publish(taskId);
  const next=async identity=>value(await f.call('room_next',{roomId,view:'pickup'},identity.secret));
  assert.equal((await next(reviewer)).nextRead,null);
- for(let index=0; index<49; index++){
+ for(let index=0; index<65; index++){
    const id='awaiting-producer-'+index;
    f.store.command(owner,roomId,{id,type:'work.proposed',data:{
      workItemId:id,title:'Awaiting producer',definitionOfDone:'Provide evidence',accountableMemberId:'owner',
@@ -251,6 +251,11 @@ test('idle Room Next gives only the designated reviewer the pending exact public
  assert.deepEqual(continued.work.items.map(item=>item.id),['zz-late-assignment']);
  assert.equal((await next(other)).nextRead,null);
  const reviewRead=pending.ifIdle.nextRead;
+ const catalog=(await f.rpc({jsonrpc:'2.0',id:1,method:'tools/list'},reviewer.secret)).body.result.tools;
+ const schema=catalog.find(tool=>tool.name==='room_next').outputSchema;
+ assert.ok(schema.$defs.nextRead.properties.tool.enum.includes(reviewRead.tool),'exact public review handoff must be allowed by the advertised output schema');
+ const reviewTools=(await f.rpc({jsonrpc:'2.0',id:1,method:'tools/list',params:{focus:'review'}},reviewer.secret)).body.result.tools;
+ assert.ok(reviewTools.some(tool=>tool.name===reviewRead.tool));
  const exact=value(await f.call(reviewRead.tool,reviewRead.arguments,reviewer.secret));
  assert.equal(exact.artifact.sha256,submitted.artifact.sha256);
  assert.ok(exact.actions.length>0);

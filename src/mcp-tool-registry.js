@@ -30,14 +30,14 @@ const boardClaimToolsOn = () => /^(1|true|on)$/i.test(flagEnv("ROOM_BOARD_CLAIM_
 // filtering this table, so core entry order IS the core catalog order);
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
-  { name: "room_next", core: true, blurb: "Use view:pickup for one nextRead. Follow partial pages.", focus: ["common"] },
+  { name: "room_next", core: true, blurb: "Use view:pickup for one nextRead. Follow partial pages. Public review tools: focus=review.", focus: ["common"] },
   { name: "room_receipt", core: true, blurb: "Read your operation receipt by exact ID. No write.", focus: ["common", "work"] },
   { name: "room_needs_me", core: true, blurb: "Read cross-room attention. Pass since unchanged while hasMore, even when empty.", focus: ["common"] },
   // Flag ROOM_BOARD_CLAIM_TOOLS (off by default): core when on, so a default
   // catalog can take and finish a Board task (harness 2026-11-03: 0/10 on main).
   ...(boardClaimToolsOn() ? [
     { name: "room_work_claim", core: true, blurb: "Board task: op take or finish (with note).", focus: ["work"] }] : []),
-  { name: "room_read_messages", core: true, blurb: "Read messages. Use latest:true for newest or view:digest for a summary.", focus: ["conversation"] },
+  { name: "room_read_messages", core: true, blurb: "Read messages oldest first. Use latest:true for newest or view:digest for a summary.", focus: ["conversation"] },
   { name: "room_post_message", core: true, blurb: "Post room text or a size-checked task result.", focus: ["common"] },
   { name: "room_reply", core: true, blurb: "Reply under a message (replyToId, body). Does not close formal requests.", focus: ["common"] },
   { name: "room_list_requests", core: true, blurb: "List formal requests (default incoming/open). Follow nextReads.", focus: ["common"] },
