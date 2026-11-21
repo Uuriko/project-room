@@ -391,3 +391,23 @@ test('repair: fenced replies that reverse, add prose, repeat blocks, are malform
     assert.equal(f.receiptPhase(),'needs_review');
   }
 });
+
+test('no single explicit verdict: a prose hold or a verdict only in words parks with no repair prompt',async t=>{
+  const holds = [
+    'HOLD: insufficient evidence. I could not run the tests and reached no verdict.',
+    'Looks like a pass to me, but I did not check everything.',
+    fence('{"result":"PASS","summary":"x"}'),
+    '{"summary":"No verdict."}',
+  ];
+  for (const reply of holds) {
+    assert.equal(reviewRepairable({text:reply},'end_turn'),false,reply);
+    const f = await setup(t,{replies:[reply,JSON.stringify({result:'pass',summary:'Repaired into a pass.'})]});
+    await f.bridge.accept(f.wake);
+    await f.bridge.queue.idle();
+    assert.deepEqual(f.counts,{prompt:1,write:0,receipt:0,ack:0},reply);
+    assert.equal(f.verdict(),undefined);
+    assert.equal(f.receiptPhase(),'needs_review');
+  }
+  // The #6411 reply states exactly one fail, so it remains repairable.
+  assert.equal(reviewRepairable({text:malformed6411},'end_turn'),true);
+});

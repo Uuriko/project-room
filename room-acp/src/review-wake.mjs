@@ -56,12 +56,15 @@ export function reviewOutput(recorder, stopReason) {
 }
 
 // A completed turn whose text is not a supported verdict may be a formatting
-// miss. Explicit pending, cancellation and limits keep their existing park.
+// miss when it states exactly one "result":"pass"|"fail". Explicit pending,
+// no or conflicting verdicts, cancellation and limits keep their existing park.
 export function reviewRepairable(recorder, stopReason) {
   if (stopReason !== 'end_turn') return false;
   const text = recorder.finalText ?? recorder.text;
   if (typeof text !== 'string' || !text.trim() || /"result"\s*:\s*"pending"/.test(text)) return false;
-  if (explicitVerdicts(text).size > 1) return false;
+  // Repair only restates a verdict already reached. With no single explicit
+  // pass or fail (a prose hold, or both), park: a repair could invent one.
+  if (explicitVerdicts(text).size !== 1) return false;
   return reviewOutput(recorder, stopReason) === null;
 }
 
