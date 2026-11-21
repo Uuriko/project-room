@@ -56,6 +56,12 @@ test("prior release links require the pinned evidence and a selected Room messag
   assert.doesNotMatch(f.box.innerHTML, /Previous release checks/);
   assert.match(f.box.innerHTML, /Resubmitted result/);
   previous.workThread.releaseChecks.evidenceVersion = "other";
+  f.state.messages.length = 0;
   f.load(); f.pending[1](previous); await settle();
   assert.doesNotMatch(f.box.innerHTML, /Previous release checks/);
+  delete previous.result.receipt.evidenceVersion;
+  delete previous.workThread.releaseChecks.evidenceVersion;
+  f.load(); f.pending[2](previous); await settle();
+  assert.doesNotMatch(f.box.innerHTML, /Previous release checks/);
+  assert.match(f.box.innerHTML, /Resubmitted result/);
 });
