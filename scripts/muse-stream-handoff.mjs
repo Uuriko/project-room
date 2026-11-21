@@ -28,10 +28,16 @@ export function museHandoffPolicy(policy, connection) {
   return policy;
 }
 
+export function checkMuseRoute(policy, { requesterId, workItemId, id }) {
+  if (!policy.requesters.includes(requesterId)) return "requester_outside_scope";
+  if (policy.requests.includes(id) || policy.workItems.includes(workItemId)
+    || policy.allowStandaloneRequests === true && workItemId === null) return "matches_scope";
+  return "work_outside_scope";
+}
+
 function matches(request, policy) {
-  return request?.status === "open" && request.recipientId === policy.memberId && policy.requesters.includes(request.requesterId)
-    && (policy.requests.includes(request.id) || policy.workItems.includes(request.workItemId)
-      || policy.allowStandaloneRequests === true && request.workItemId === null);
+  return request?.status === "open" && request.recipientId === policy.memberId
+    && checkMuseRoute(policy, request) === "matches_scope";
 }
 
 export function museSeenAction(handoff, roomId) {
@@ -252,14 +258,24 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
 }
 
 async function main([configFile, connectionDirectory, mode, ...extra]) {
+  const routeCheck = mode === "--check-route";
   const receiverAck = extra.length === 1 && extra[0] === "--receiver-ack" && mode === "--stay-armed";
-  if (extra.length && !receiverAck || mode !== undefined && !["--once", "--stay-armed", "--recover"].includes(mode) || !isAbsolute(configFile ?? "")
+  if (extra.length && !receiverAck && !routeCheck || mode !== undefined && !["--once", "--stay-armed", "--recover", "--check-route"].includes(mode) || !isAbsolute(configFile ?? "")
     || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack] | --recover]");
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack] | --recover | --check-route REQUESTER WORK_ITEM_OR_DASH [REQUEST_ID]]");
   const directory = dirname(realpathSync(configFile));
   const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
   assertPrivatePath(directory, true);
   const policy = museHandoffPolicy(readPrivateJson(configFile, 8192), connection);
+  if (routeCheck) {
+    const [requesterId, workItem, id] = extra;
+    if (extra.length < 2 || extra.length > 3 || !validId(requesterId)
+      || workItem !== "-" && !validId(workItem) || id !== undefined && !validId(id))
+      throw Error("Route check requires a requester, a work item or -, and optionally an exact request id");
+    const status = checkMuseRoute(policy, { requesterId, workItemId: workItem === "-" ? null : workItem, id });
+    console.log(JSON.stringify({ status, liveness: "unknown" }));
+    return;
+  }
   const owner = new WatchJournal(join(directory, mode === "--recover" ? "recovery-watch" : "watch"));
   const stop = new AbortController();
   const interrupt = () => stop.abort();

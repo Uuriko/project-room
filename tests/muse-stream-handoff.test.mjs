@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
+import { fileURLToPath } from "node:url";
+import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
 
 const connection = { origin: "https://room.example.org", roomId: "build", memberId: "muse" };
 const policy = museHandoffPolicy({ ...connection, version: 1, requesters: ["codex"], workItems: ["ready"],
@@ -9,6 +14,28 @@ const request = (id, patch = {}) => ({ id, status: "open", requesterId: "codex",
   workItemId: "ready", openingEventId: "open-" + id, revision: 0, ...patch });
 const context = (row, sequence) => ({ roomId: "build", viewerId: "muse", roomCreatedEventId: "room-birth",
   request: row, page: { items: [{ kind: "opened", eventId: row.openingEventId, sequence, message: { body: "private QA details" } }] } });
+
+test("route check distinguishes requester, work and exact request scope without exposing configuration", t => {
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), "muse-route-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const config = join(directory, "handoff.json");
+  const exact = { ...policy, requests: ["approved"] };
+  writeFileSync(config, JSON.stringify(exact), { mode: 0o600 });
+  const script = fileURLToPath(new URL("../scripts/muse-stream-handoff.mjs", import.meta.url));
+  const check = (...args) => {
+    const result = spawnSync(process.execPath, [script, config, "-", "--check-route", ...args], {
+      encoding: "utf8", input: JSON.stringify({ ...connection, version: 1, token: "T".repeat(43) }), timeout: 5000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  assert.deepEqual(check("grok", "ready"), { status: "requester_outside_scope", liveness: "unknown" });
+  assert.deepEqual(check("codex", "unrelated"), { status: "work_outside_scope", liveness: "unknown" });
+  assert.deepEqual(check("codex", "ready"), { status: "matches_scope", liveness: "unknown" });
+  assert.deepEqual(check("codex", "-", "approved"), { status: "matches_scope", liveness: "unknown" });
+  assert.equal(checkMuseRoute({ ...policy, allowStandaloneRequests: true }, { requesterId: "codex", workItemId: null }), "matches_scope");
+  assert.deepEqual(readdirSync(directory), ["handoff.json"]);
+});
 
 test("one handoff skips unrelated, acknowledged, closed and old requests and preserves the next ready request", async () => {
   const old = request("old"), closed = request("closed"), seen = request("seen");
