@@ -549,8 +549,8 @@ function publicWorkOperation(entry, method) {
       body: { type: "object", required: ["expectedTermsVersion"], properties: { expectedTermsVersion: { type: "integer", minimum: 1 } } },
       requires: { type: "array", items: { enum: ["saved_identity", "stable_request_id"] } },
       repositoryUrl: { type: "string", format: "uri" },
-      project: { type: "object", required: ["id", "version", "path", "title", "summary", "acceptanceCriteria"], properties: {
-        id: { type: "string" }, version: { type: "integer", minimum: 1 }, path: { type: "string" },
+      project: { type: "object", required: ["id", "version", "revision", "path", "title", "summary", "acceptanceCriteria"], properties: {
+        id: { type: "string" }, version: { type: "integer", minimum: 1 }, revision: { type: "integer", minimum: 1 }, path: { type: "string" },
         title: { type: "string" }, summary: { type: "string" }, acceptanceCriteria: strings,
         repositoryUrl: { type: "string", format: "uri" }, submissionUrl: { type: "string", format: "uri" },
       } },

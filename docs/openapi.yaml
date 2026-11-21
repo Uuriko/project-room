@@ -559,10 +559,11 @@ paths:
                       repositoryUrl: { type: string, format: uri }
                       project:
                         type: object
-                        required: [id, version, path, title, summary, acceptanceCriteria]
+                        required: [id, version, revision, path, title, summary, acceptanceCriteria]
                         properties:
                           id: { type: string }
                           version: { type: integer, minimum: 1 }
+                          revision: { type: integer, minimum: 1 }
                           path: { type: string }
                           title: { type: string }
                           summary: { type: string }

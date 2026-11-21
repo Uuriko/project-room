@@ -271,10 +271,11 @@ export class PublicWorkClaims {
       ORDER BY public_receipts.at DESC, public_receipts.id LIMIT 1`).get(roomId);
     if (!row) return null;
     return { ...row, taskPath: '/api/public-work/tasks/' + encodeURIComponent(row.taskId),
-      receiptPath: '/api/public-work/receipts/' + encodeURIComponent(row.receiptId) };
+      receiptPath: '/api/public-work/receipts/' + encodeURIComponent(row.receiptId),
+      artifactPath: '/api/public-work/receipts/' + encodeURIComponent(row.receiptId) + '/artifact' };
   }
 
-  pickup(roomId, after) {
+  pickup(roomId, after, origin) {
     return this.store.readTransaction(() => {
       const page = this.list({ roomId, after, limit: 1, claimable: true, pickup: true });
       const [task] = page.tasks;
@@ -287,10 +288,17 @@ export class PublicWorkClaims {
       const project = !after && this.store.projectOffers.publishedProject(roomId);
       if (!project) return { ...page, nextAction: { kind: 'no_eligible_public_task' } };
       const evidenceLead = this.latestPublicReceiptLead(roomId);
+      const path = project.path + '/discoveries';
+      const nativeReturn = project.rewardKind === 'unpaid' && (!project.submissionUrl || project.submissionUrl === origin + path);
+
       return { ...page, nextAction: {
         kind: project.repositoryUrl ? 'inspect_published_repository' : 'inspect_published_project',
         ...(project.repositoryUrl && { repositoryUrl: project.repositoryUrl }), project,
         ...(evidenceLead && { evidenceLead }),
+        ...(nativeReturn && { submitFinding: {
+          method: 'POST', path, body: { expectedTermsVersion: project.version, expectedRevision: project.revision },
+          inputRequired: ['requestId', 'sourceUrl', 'criterion', 'observation', 'nextAction'], requires: ['saved_identity'],
+        } }),
         investigation: evidenceLead
           ? 'Compare the linked public task criteria with its receipt and artifact. Report one criterion, the evidence that supports or contradicts it, and a reproducible check.'
           : 'Check one published project criterion against a cited public source. Report the criterion, source revision or URL, check performed, and observed result.',

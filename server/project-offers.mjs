@@ -196,7 +196,7 @@ export class ProjectOffers {
     });
   }
   publishedProject(roomId, { requireRepository = false } = {}) {
-    const row = this.db.prepare(`SELECT o.offer_id, o.version, o.terms
+    const row = this.db.prepare(`SELECT o.offer_id, o.version, o.revision, o.terms
       FROM project_offers o JOIN rooms r ON r.id=o.room_id
       WHERE o.room_id=? AND o.status='published' AND r.archived_at IS NULL
         AND json_extract(o.terms, '$.kind')='project'
@@ -204,9 +204,9 @@ export class ProjectOffers {
         AND NOT EXISTS (SELECT 1 FROM public_unpublish u WHERE u.kind='room' AND u.target=o.room_id)
       ORDER BY o.created_at DESC,o.offer_id LIMIT 1`).get(roomId);
     if (!row) return null;
-    const { title, summary, acceptanceCriteria, repositoryUrl, submissionUrl } = termsOf(JSON.parse(row.terms));
-    return { id: row.offer_id, version: row.version, path: '/api/project-offers/' + encodeURIComponent(row.offer_id),
-      title, summary, acceptanceCriteria, ...(repositoryUrl && { repositoryUrl }), ...(submissionUrl && { submissionUrl }) };
+    const { title, summary, acceptanceCriteria, repositoryUrl, submissionUrl, reward } = termsOf(JSON.parse(row.terms));
+    return { id: row.offer_id, version: row.version, revision: row.revision, path: '/api/project-offers/' + encodeURIComponent(row.offer_id),
+      title, summary, acceptanceCriteria, rewardKind: reward.kind, ...(repositoryUrl && { repositoryUrl }), ...(submissionUrl && { submissionUrl }) };
   }
   publishedProjectSource(roomId) {
     return this.publishedProject(roomId, { requireRepository: true })?.repositoryUrl ?? null;

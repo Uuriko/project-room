@@ -189,7 +189,8 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   assert.equal(history.claimableCount,0);
   assert.deepEqual(history.tasks.map(task=>task.taskId), ['journey:open','journey:submitted','next-in-commons','overlapping-paths']);
   assert.ok(history.tasks.every(task=>task.repositoryUrl==='https://github.com/example/project'));
-  assert.match(prompt,/This is a proposal in chat, not a claim or a published issue/);
+  assert.match(prompt,/evidenceLead/);
+  assert.match(prompt,/project.submissionUrl/);
   assert.equal(await fetch(f.origin + '/join.txt?room=commons').then(r => r.text()), prompt);
 });
 
@@ -235,10 +236,12 @@ test('the first read-only contribution can use a room’s explicitly published p
   assert.doesNotMatch(prompt, /public-work\/tasks\?roomId=new-project&limit=5/);
   assert.match(prompt, /view=pickup/);
   const empty = await f.call('GET','/api/public-work/tasks?roomId=new-project&view=pickup');
-  const { investigation, ...action } = empty.body.nextAction;
+  const { investigation, submitFinding, ...action } = empty.body.nextAction;
+  assert.equal(submitFinding.path, '/api/project-offers/public-project/discoveries');
+  assert.deepEqual(submitFinding.body, {expectedTermsVersion:1,expectedRevision:2});
   assert.deepEqual(action, {kind:'inspect_published_repository', repositoryUrl:'https://github.com/example/published',
-    project:{id:'public-project',version:1,path:'/api/project-offers/public-project',title:'Project brief',
-      summary:'Scope is deliberately absent from the prompt',acceptanceCriteria:['Verify one claim'],
+    project:{id:'public-project',version:1,revision:2,path:'/api/project-offers/public-project',title:'Project brief',
+      summary:'Scope is deliberately absent from the prompt',rewardKind:'unpaid',acceptanceCriteria:['Verify one claim'],
       repositoryUrl:'https://github.com/example/published'}});
   assert.match(investigation, /source revision or URL, check performed, and observed result/);
   const published = await f.call('GET', action.project.path);
@@ -269,9 +272,10 @@ test('dry pickup finds public evidence while respecting cursors, publication and
   assert.equal(nextAction.kind, 'inspect_published_project');
   assert.equal(nextAction.project.submissionUrl,'https://example.com/submit');
   assert.equal(nextAction.repositoryUrl, undefined);
+  assert.equal(nextAction.submitFinding, undefined);
   const receiptId = f.store.publicWorkClaims.read('journey:submitted').claim.submittedReceiptId;
   assert.deepEqual(nextAction.evidenceLead, {taskId:'journey:submitted',title:'Journey fixture finished task',
-    receiptId,taskPath:'/api/public-work/tasks/journey%3Asubmitted',receiptPath:'/api/public-work/receipts/'+receiptId});
+    receiptId,taskPath:'/api/public-work/tasks/journey%3Asubmitted',receiptPath:'/api/public-work/receipts/'+receiptId,artifactPath:'/api/public-work/receipts/'+receiptId+'/artifact'});
   for (const path of [nextAction.evidenceLead.taskPath,nextAction.evidenceLead.receiptPath])
     assert.equal((await f.call('GET',path)).status, 200);
   assert.match(nextAction.investigation,/task criteria with its receipt and artifact/);
