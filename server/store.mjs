@@ -11,7 +11,7 @@ import {readCurrentWorkListing} from './current-work-list.mjs';
 import { isUnfilledIntroBody } from './first-connect-task.mjs';
 import {attentionWaitStatus} from './attention-wait.mjs';
 import { WRITE_GRANT_POLICY_VERSION } from '../src/work-reducers.js';
-import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomRecoveryMembers, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget } from './current-room-repository.mjs';
+import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomRecoveryMembers, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget, currentWorkWithheldFromViewer, readCurrentWorkPrivacy } from './current-room-repository.mjs';
 import {bindReplayAppend} from './replay-cutover.mjs';
 import { savedHistoricalReplayCheckpoint } from './historical-replay-contract.mjs';
 import { bootstrapLegacyWriteProofs, configureWriteIntegrity, beginWriteProofFrame, endWriteProofFrame, publishProjectionWrites, projectionDigest, projectionContentHash, servingContentProof, servingProofDrift, assertProjectionWrite, assertMessageWrite, recordMessageWrite, withVerifiedRoomReconstruction } from './write-integrity.mjs';
@@ -5497,7 +5497,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // item onto the Board, so a row that mirrors private work is withheld from a
   // member outside it. Read-only: never pass the result to a registry write.
   workClaimsForViewer(roomId, viewerId, rows = this.workClaims.list(roomId)) {
-    if (!Array.isArray(rows) || !rows.some(row => row?.workItemId) || isCurrentRoom(this.db, roomId)) return rows;
+    if (!Array.isArray(rows) || !rows.some(row => row?.workItemId)) return rows;
+    if (isCurrentRoom(this.db, roomId)) {
+      return this.readTransaction(() => rows.map(row => {
+        if (!row?.workItemId) return row;
+        return withCurrentReadContext(this.db, roomId, () => {
+          const reference = readCurrentRecord(this.db, roomId, 'workItems', row.workItemId);
+          if (reference) {
+            return currentWorkWithheldFromViewer(this.db, roomId, row.workItemId, viewerId)
+              ? withheldBoardRow(row) : row;
+          }
+          // A historical Board link may outlive its canonical item. Retain
+          // the request-party boundary if there is one, as in legacy rooms.
+          const privacy = readCurrentRecord(this.db, roomId, 'workPrivacy', row.workItemId);
+          if (!privacy) return row;
+          const { requests, parties } = readCurrentWorkPrivacy(this.db, roomId, row.workItemId);
+          return requests && !Object.hasOwn(parties, viewerId) ? withheldBoardRow(row) : row;
+        });
+      }));
+    }
     const parties = this.privateWorkParties(roomId);
     if (!parties.size) return rows;
     const workItems = this.workProjection(roomId).state.workItems ?? {};
