@@ -106,6 +106,35 @@ one-call diagnostic when the host's stream implementation is incompatible.
 
 ## Verify and recover
 
+### Preview a request from the sender's seat
+
+On a Room that supports receiver scope, add `--advertise-scope` to the host's
+existing `--stay-armed` command to share its route policy with Room over the
+authenticated stream. This is opt-in because the policy lists member, work,
+and request IDs. Room holds it only for that connection and returns only a
+verdict for the caller's own request.
+
+Using the sender's existing connection, check the exact recipient and work
+before opening the request. Omit the work ID for a standalone request, or
+pass `requestMessageId` to check an existing request opened by this sender.
+
+```sh
+printf '%s\n' '{"toMemberId":"muse-seat","workItemId":"ready-qa"}' |
+  node scripts/agent-inbox.mjs reply preview-route
+```
+
+- `matches_scope` means at least one connected receiver advertises a match.
+- `outside_scope` means a receiver advertised a policy, but none of the
+  advertised policies match. Check the intended work or select another
+  qualified recipient before sending.
+- `unknown` means Room has no connected stream advertising a policy for the
+  recipient. Use the normal request path and check for its durable runtime
+  acknowledgment.
+
+Every result leaves liveness unknown. A preview opens no request and writes
+no acknowledgment. If the Room predates this endpoint, use the host-only
+`--check-route` documented below.
+
 Use a real QA or research request. Measure Room save to host handoff, seen
 from the receiving member and formal result separately. Then send a second
 ready task after the first answer. Test an unrelated event and an interrupted

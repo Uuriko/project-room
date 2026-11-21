@@ -41,6 +41,7 @@ import { peerEventVisible } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { isWorkersRuntime } from "./ip-blocklist.mjs";
 import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
+import { validReceiverRouteScope } from "../src/reply-requests.js";
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
@@ -1141,6 +1142,17 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   function stream(req, res, token, roomId, after, auth, operationId) {
     const binding = auth.sessionBinding;
     store.eventsAfter(token, roomId, after, 100, binding);
+    let receiverScope;
+    const advertised = req.headers["x-project-room-receiver-scope"];
+    if (advertised !== undefined) {
+      if (auth.member.kind !== "agent" || typeof advertised !== "string" || advertised.length > 8192)
+        reject(422, "invalid_receiver_scope", "Supply a bounded scope from the connected agent");
+      try { receiverScope = JSON.parse(advertised); } catch {
+        reject(422, "invalid_receiver_scope", "Invalid receiver scope");
+      }
+      if (!validReceiverRouteScope(receiverScope) || receiverScope.requesters.includes(auth.member.id))
+        reject(422, "invalid_receiver_scope", "Invalid receiver scope");
+    }
     let sameCredential = 0, sameRoom = 0;
     for (const item of streams) {
       if (item.credentialHash === auth.credentialHash) sameCredential++;
@@ -1149,7 +1161,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
     if (streams.size >= STREAM_POOL_LIMIT || sameRoom >= STREAM_PER_ROOM_LIMIT || sameCredential >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
-    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res };
+    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res, receiverScope };
     streams.add(entry);
     let cursor = after;
     let timer;
