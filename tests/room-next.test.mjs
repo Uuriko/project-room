@@ -21,9 +21,14 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     const invalid = await f.mcp(f.triage, "room_next", { view: "invalid" });
     assert.equal(invalid.ok, false);
     assert.equal(active.value.nextRead, null);
-    assert.deepEqual(active.value.ifIdle, representation === "legacy"
-      ? { status: "no_invitation" }
-      : { status: "unavailable", reason: "current_help_index_unavailable" });
+    if (representation === "legacy") {
+      assert.equal(active.value.ifIdle.status, "dry");
+      assert.equal(active.value.ifIdle.readyCount, 0);
+      assert.equal(active.value.ifIdle.reason, "no_ready_work");
+      assert.equal(active.value.ifIdle.goal, active.value.goal);
+    } else {
+      assert.deepEqual(active.value.ifIdle, { status: "unavailable", reason: "current_help_index_unavailable" });
+    }
 
     if (representation === "legacy") {
       for (const workItemId of ["secret", "open"]) {
@@ -55,7 +60,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
         expectedHelpRevision: 1, status: "withdrawn" });
       const stale = await f.mcp(f.triage, selected.value.nextRead.tool, selected.value.nextRead.arguments);
       assert.equal(stale.value.help.canOffer, false);
-      assert.equal((await f.mcp(f.triage, "room_next", { view: "pickup" })).value.ifIdle.status, "no_invitation");
+      assert.equal((await f.mcp(f.triage, "room_next", { view: "pickup" })).value.ifIdle.status, "dry");
     }
 
     f.store.wakeQueue.pause(f.owner, "commons", { requestId: "pause-triage-invitations", reason: null },
@@ -353,4 +358,54 @@ test("compare first useful entry with the existing three reads", async t => {
     control: { calls: calls.length, wireBytes: calls.reduce((sum, row) => sum + Buffer.byteLength(row.text), 0) },
     next: { calls: 1, wireBytes: Buffer.byteLength(compact.text) }
   }));
+});
+
+
+test("room next pickup offers ranked ready work, keeps addressed work first, and stays dry when empty", async t => {
+  const f = await privateWorkFixture(t, "legacy");
+  const empty = await f.mcp(f.triage, "room_next", { view: "pickup" });
+  assert.equal(empty.ok, true, empty.text);
+  assert.equal(empty.value.ifIdle.status, "dry");
+  assert.equal(empty.value.ifIdle.readyCount, 0);
+  assert.equal(empty.value.nextRead, null);
+  assert.ok(empty.value.goal);
+
+  const now = typeof f.store.now === "function" ? f.store.now() : Date.now();
+  const claim = (id, extra = {}) => ({
+    id, title: extra.title ?? id, state: "unclaimed", kind: "work", owner: null,
+    history: [], dependsOn: extra.dependsOn ?? [], tags: extra.tags ?? [],
+    updatedAt: extra.updatedAt ?? new Date(now).toISOString(), ...extra
+  });
+  f.store.workClaims.set("commons", claim("plain", {
+    title: "Tidy comments", updatedAt: new Date(now - 30 * 60 * 1000).toISOString()
+  }));
+  f.store.workClaims.set("commons", claim("prereq", {
+    title: "Unblock the release path", tags: ["hard"],
+    updatedAt: new Date(now - 40 * 60 * 1000).toISOString()
+  }));
+  f.store.workClaims.set("commons", claim("successor", {
+    title: "Ship after unblock", dependsOn: ["prereq"]
+  }));
+
+  const pickup = await f.mcp(f.triage, "room_next", { view: "pickup" });
+  assert.equal(pickup.ok, true, pickup.text);
+  assert.equal(pickup.value.ifIdle.status, "ready_work");
+  assert.equal(pickup.value.ifIdle.claimId, "prereq");
+  assert.equal(pickup.value.ifIdle.leaseHours, 2);
+  assert.equal(pickup.value.ifIdle.readyCount, 2);
+  assert.match(pickup.value.ifIdle.reason, /unblocks 1/);
+  assert.deepEqual(pickup.value.nextRead, pickup.value.ifIdle.nextRead);
+  assert.deepEqual(pickup.value.nextRead, { tool: "room_read_board", arguments: { roomId: "commons" } });
+  assert.equal(pickup.value.ifIdle.claimAction.endpoint, "/api/rooms/commons/work-claims/prereq/claim");
+  assert.equal(pickup.value.ifIdle.claimAction.params.leaseHours, 2);
+
+  const addressed = await f.mcp(f.producer, "room_next", { view: "pickup" });
+  assert.equal(addressed.value.ifIdle, undefined);
+  assert.ok(addressed.value.work.items.find(item => item.reason === "revise"));
+
+  f.store.wakeQueue.pause(f.owner, "commons", { requestId: "pause-ranked-ready", reason: null },
+    null, { memberId: f.triage.id });
+  const paused = await f.mcp(f.triage, "room_next", { view: "pickup" });
+  assert.deepEqual(paused.value.ifIdle, { status: "paused" });
+  assert.equal(paused.value.nextRead, null);
 });

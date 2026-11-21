@@ -16,7 +16,7 @@ const tool = (name, description, inputSchema, readOnlyHint = true) => ({
 const idField = { type: "string", minLength: 1, maxLength: 128 };
 const roomIdField = { ...idField, description: "Room id this identity is linked to." };
 const nextReadSchema = schema({
-  tool: { type: "string", enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request", "room_read_result"] },
+  tool: { type: "string", enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request", "room_read_result", "room_read_board"] },
   arguments: { type: "object" }
 }, ["tool", "arguments"]);
 const nextRead = { $ref: "#/$defs/nextRead" };
@@ -35,7 +35,10 @@ const roomNextOutput = {
     roomId: idField, viewerId: idField, goal: { type: "string", maxLength: 800 },
     charterRevision: { type: ["integer", "null"] }, contentTrust: { type: "string" },
     nextRead: { anyOf: [nextRead, { type: "null" }] },
-    ifIdle: { type: "object", properties: { status: { enum: ["invitation", "paused", "unavailable", "no_invitation", "public_review"] }, nextRead }, required: ["status"] },
+    ifIdle: { type: "object", properties: { status: { enum: ["invitation", "paused", "unavailable", "no_invitation", "public_review", "ready_work", "dry"] }, nextRead,
+      claimId: idField, title: { type: "string", maxLength: 160 }, reason: { type: "string" },
+      leaseHours: { type: "number" }, readyCount: { type: "integer", minimum: 0 }, goal: { type: "string", maxLength: 800 },
+      claimAction: { type: "object" } }, required: ["status"] },
     work: nextPage(schema({
       id: idField, title: { type: "string", maxLength: 160 }, revision: { type: "integer", minimum: 0 },
       reason: { type: "string" }, nextRead, nextResultRead: nextRead,
