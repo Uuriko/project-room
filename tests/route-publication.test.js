@@ -23,6 +23,7 @@ test("the public set is enumerated live from the table, not a pinned list", () =
     "agent-invite-availability", "agent-invite-redeem",
     "demo-get", "demo-head", "download-get", "download-head",
     "pair-page-get", "pair-phone", "pair-poll", "pair-start-get", "pair-start-post",
+    "project-discovery-file",
     "public-agent-ask", "public-agent-card", "public-agent-page", "public-agent-poll",
     "public-front-door-get", "public-front-door-head", "public-lobby", "public.door-funnel", "public.git-remote", "showcase-get", "showcase-head", "work-receipt-extension-get", "work-receipt-extension-head",
   ]);

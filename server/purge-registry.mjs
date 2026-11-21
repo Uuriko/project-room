@@ -1414,6 +1414,9 @@ const ROWS = [
       ]
     }
   },
+  // Only discovery filings in this mixed journal belong to the room/identity purge.
+  { table: "public_work_requests", key: "offer_id", namespace: "project-discovery/", action: "delete", match: { identity: ["actor_id"] },
+    via: { room: { parent: "project_offers", parentKey: "offer_id", childKey: "offer_id", scope: "room_id" } } },
   {
     "table": "public_work_receipts",
     "key": "identity_id",
@@ -1940,6 +1943,7 @@ export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({
   action: row.action,
   match: freezeMatch(row.match),
   ...(row.optional ? { optional: true } : {}),
+  ...(row.namespace ? { namespace: row.namespace } : {}),
   ...(row.reason ? { reason: row.reason } : {}),
   ...(row.via ? { via: freezeVia(row.via) } : {})
 })));
