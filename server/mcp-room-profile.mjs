@@ -622,14 +622,14 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
-function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal) {
+function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal) {
   if (typeof spendCredential === "function") {
     spendCredential(secret, mcpRoomToolScope(name) === "rooms:write" ? "write" : "read");
   }
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
   return withSpendCharge(store, secret, name, args,
-    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal));
+    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal));
 }
 
 // A work-item tool given a Board claim id answered a bare work_not_found
@@ -661,10 +661,11 @@ async function boardClaimCall(store, secret, name, args) {
   throw error;
 }
 
-function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal) {
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal) {
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
   if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
-    () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 })));
+    () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
+    { allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes) }));
   if (BOARD_CLAIM_TOOLS.includes(name)) return boardClaimCall(store, secret, name, args);
   if (name === 'room_wait_for_attention') return waitForAttention(store, secret, args.roomId, {...args, signal});
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId, oauthIdentity: /^(oat|iat)_/.test(secret ?? "") ? identity : null, claimSec: args.claimSec ?? 0 });
@@ -1379,7 +1380,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         const value = await callWakeTool(store, secret, identity, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
       }
-      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal);
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal);
       if (name === "room_check_access" && value.scope === "room") {
         value.nativeMonitoring = oauthPrincipal && typeof nativeStatus === "function"
           ? await nativeStatus(mcpOAuthPrincipalDescriptor(oauthPrincipal))

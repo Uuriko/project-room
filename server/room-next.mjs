@@ -213,7 +213,7 @@ function boundedPage(roomId, source, getPage) {
   }
 }
 
-export function readRoomNext(store, secret, roomId, { source, cursor, view } = {}, readInvitation) {
+export function readRoomNext(store, secret, roomId, { source, cursor, view } = {}, readInvitation, { allowPublicReview = false } = {}) {
   if (!validRoomNextSelection({ source, cursor, view }))
     throw new ServiceError(422, "invalid_arguments", "Choose a source and its returned cursor");
   return store.readTransaction(() => {
@@ -259,8 +259,21 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view } = {
         ?? packet.requests?.items[0]?.nextRead ?? packet.work?.items[0]?.nextRead;
       packet.nextRead = addressed ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
 
+      // Preserve discovery priority until all addressed work is known. An
+      // empty partial page can still offer a separate exact public review.
+      if (allowPublicReview && !source && !room.archivedAt && !addressed
+        && packet.work.coverage !== "unavailable" && packet.requests.coverage === "complete"
+        && auth.member.permissions.includes("verify") && !store.wakeQueue.pauseStatus(roomId, auth.member.id)) {
+        const receiptId = store.publicWorkReviews.nextPending(roomId, auth.member.id);
+        if (receiptId) {
+          const nextRead = { tool: "room_read_public_review", arguments: { roomId, receiptId } };
+          packet.ifIdle = { status: "public_review", nextRead };
+          if (packet.work.coverage === "complete") packet.nextRead = nextRead;
+        }
+      }
+
       if (!source && !room.archivedAt && auth.member.kind === "agent"
-        && auth.member.permissions.includes("accept_work") && !addressed) {
+        && auth.member.permissions.includes("accept_work") && !addressed && !packet.ifIdle) {
         const paused = store.wakeQueue.pauseStatus(roomId, auth.member.id);
         const addressedComplete = packet.work.coverage === "complete" && packet.requests.coverage === "complete";
         if (paused) packet.ifIdle = { status: "paused" };
