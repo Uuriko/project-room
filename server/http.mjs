@@ -2324,7 +2324,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
       if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {
-        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable", "roomId"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
+        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable", "roomId", "view"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
         if (url.pathname === "/api/public-work/tasks" && url.searchParams.has("claimable") && !["1", "true"].includes(url.searchParams.get("claimable"))) reject(422, "invalid_public_work", "Unsupported query parameters");
         const action = publicWorkTaskMatch?.[2];
         if (action) {
@@ -2374,6 +2374,13 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
             return res.end(req.method === "HEAD" ? undefined : artifact.artifactText);
           }
           return json(res, 200, store.publicWorkClaims.receipt(receiptId, viewer), req.method === "HEAD");
+        }
+        if (url.searchParams.has("view")) {
+          const { searchParams } = url;
+          const roomId = searchParams.get("roomId");
+          if (searchParams.get("view") !== "pickup" || !validId(roomId) || searchParams.has("limit") || searchParams.has("claimable"))
+            reject(422, "invalid_public_work", "Pickup needs one room and an optional after cursor");
+          return json(res, 200, store.publicWorkClaims.pickup(roomId, searchParams.get("after") ?? ""), req.method === "HEAD");
         }
         return json(res, 200, publicWorkTaskMatch
           ? store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1]))
