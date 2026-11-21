@@ -27,7 +27,7 @@ test("served openapi.json documents room events, commands, and search", async t 
   const commands = doc.paths["/api/rooms/{roomId}/commands"]?.post;
   const search = doc.paths["/api/rooms/{roomId}/search"]?.get;
   assert.equal(events?.operationId, "getRoomEvents");
-  assert.deepEqual(names(events?.parameters), ["after", "limit", "actor", "since", "until", "type", "mentions", "compact", "tail"]);
+  assert.deepEqual(names(events?.parameters), ["operationId", "after", "limit", "actor", "since", "until", "type", "mentions", "compact", "tail"]);
   assert.equal(commands?.operationId, "postRoomCommand");
   assert.deepEqual(commands?.requestBody?.content?.["application/json"]?.schema?.required, ["id", "type", "data"]);
   assert.equal(typeof commands?.responses?.["201"]?.description, "string");
