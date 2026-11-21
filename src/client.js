@@ -125,9 +125,10 @@ const FRESH_OPEN_MS = 2000;
 const MAX_REFRESH_COOLDOWN_MS = 300000;
 
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onBondChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, compactRequests = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onBondChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
     if (!["full", "activity"].includes(auditView)) throw new RangeError(uiText("record.invalidView"));
     this.auditView = auditView;
+    this.compactRequests = compactRequests;
     Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange, onBondChange, onOptimistic, onSendSettled });
     this.getFlights = new Map();
     this.paging = false;
@@ -169,7 +170,7 @@ export class RoomClient {
     // A write makes every read already in flight stale: later reads must not join them.
     if (method !== "GET") this.getFlights.clear();
     if (method !== "GET" || options.fresh === true) return this.performRequest(path, options);
-    const key = [path, options.authMode ?? this.session?.authMode ?? "", options.offerContext ? "1" : "", options.auditView ?? "", options.authSession?.sessionBinding ?? this.session?.sessionBinding ?? ""].join("\n");
+    const key = [path, options.authMode ?? this.session?.authMode ?? "", options.offerContext ? "1" : "", options.auditView ?? "", options.compactRequests ? "browser-v1" : "", options.authSession?.sessionBinding ?? this.session?.sessionBinding ?? ""].join("\n");
     const pending = this.getFlights.get(key);
     if (pending) return pending;
     const run = this.performRequest(path, options);
@@ -186,7 +187,7 @@ export class RoomClient {
     error.status = status;
     return error;
   }
-  async performRequest(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full" } = {}) {
+  async performRequest(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full", compactRequests = false } = {}) {
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
@@ -195,6 +196,7 @@ export class RoomClient {
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
           ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
           ...(auditView === "activity" ? { "X-Project-Room-Audit-View": "activity-v1" } : {}),
+          ...(compactRequests ? { "X-Project-Room-Reply-View": "browser-v1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       const type = response.headers?.get?.("content-type") ?? "";
@@ -399,7 +401,7 @@ export class RoomClient {
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
           const auditView = this.auditView;
           const attempt = this.readAttempts = (this.readAttempts ?? 0) + 1;
-          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView, fresh: true });
+          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView, compactRequests: this.compactRequests, fresh: true });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
           this.lastReadAt = Date.now(); this.provedAttempt = attempt;
