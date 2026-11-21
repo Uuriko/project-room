@@ -17,6 +17,7 @@ Options:
   --mode <id>                           ACP session mode to set (default: agent's own)
   --receiver-policy <respond|disabled|notify-cloud>  explicit receiver role (default respond)
   --observe-stages                     print metadata-only timing events for run/respond (default off)
+  --formal-only                        run/respond only for directed formal requests and their corrections
   --notify-config <file>                private existing-cloud config; required for notify-cloud
   --no-listen                           join and save the connection only; do not start an agent
   --mcp <claude|codex>                  after joining, set up this MCP host (implies --no-listen)
@@ -45,6 +46,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--observe-stages") { options.observeStages = true; continue; }
+    if (arg === "--formal-only") { options.formalOnly = true; continue; }
     if (arg === "--no-listen") { options.noListen = true; continue; }
     if (arg === "--connection") { options.connection = true; continue; }
     if (arg === "-h" || arg === "--help") { options.help = true; continue; }
@@ -84,5 +86,7 @@ export function parseArgs(argv) {
     throw Error("--notify-config is required only with --receiver-policy notify-cloud");
   if (options.observeStages && !options.help && (options.command !== "run" || options.receiverPolicy !== "respond"))
     throw Error("--observe-stages applies only to run with --receiver-policy respond");
+  if (options.formalOnly && !options.help && (options.command !== "run" || options.receiverPolicy !== "respond"))
+    throw Error("--formal-only applies only to run with --receiver-policy respond");
   return options;
 }

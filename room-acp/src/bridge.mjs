@@ -133,10 +133,11 @@ function ordinaryTurn(recorder, stopReason) {
 }
 
 export class Bridge {
-  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", reviewScope = null, maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null, observeStage = null }) {
+  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", formalOnly = false, reviewScope = null, maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null, observeStage = null }) {
     this.stageObserver = new StageObserver({observe: observeStage});
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.reviewScope = reviewScope;
+    this.formalOnly = formalOnly;
     this.controller = new AbortController();
     const roomOptions = { signal:this.controller.signal, apiBase: connection.apiBase, roomId: connection.roomId,
       memberId: connection.memberId, credential: connection.credential, fetchImpl };
@@ -340,6 +341,7 @@ export class Bridge {
     this.seen.add(signal.signalId);
     try {
       if (signal.kind === 'work') {
+        if (this.formalOnly) return;
         const binding = reviewBinding(signal, this.connection.roomId);
         // The wake does not identify an author. Hosts that restrict senders
         // must keep it available through the normal exact Work Thread read.
@@ -349,8 +351,14 @@ export class Bridge {
         }
         return;
       }
-      if (signal.workClaim) { await this.acceptClaim(signal); return; }
-      if (!signal.messageId || !["mention", "dm", "reply", "direct"].includes(signal.kind)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
+      if (signal.workClaim) {
+        if (!this.formalOnly) await this.acceptClaim(signal);
+        return;
+      }
+      if (!signal.messageId || !["mention", "dm", "reply", "direct"].includes(signal.kind)) {
+        if (!this.formalOnly) { await this.ack([signal.signalId]); this.stats.skipped++; }
+        return;
+      }
       const selected = await this.readThread(signal.messageId, {selected:true});
       const message = selected.thread;
       // Routing does not authorize execution. The queued turn checks all
@@ -359,6 +367,9 @@ export class Bridge {
       // listener fencing and complete formal request context independently.
       const rootSelection = message.replyToId ? await this.#rootFromSelection(selected) : selected;
       const root = rootSelection.thread;
+      // Include terminal requests so a committed answer can reconcile its saved
+      // receipt after a lost response. Out-of-scope wakes remain available.
+      if (this.formalOnly && rootSelection.replyRequest?.recipientId !== this.connection.memberId) return;
       // An "@agent allow" answer to a pending permission ask is not a new turn.
       if (this.permissions?.isPending(root.id) && decisionOf(message.body)) { await this.ack([signal.signalId]); return; }
       if (this.formalAckAvailable && !this.formalAckInFlight && rootSelection.replyRequest?.firstAckPending === true
@@ -1008,7 +1019,7 @@ export class Bridge {
 
   async pollOnce() {
     if (!(await this.lease())) { await sleep(5000, this.controller.signal); return; }
-    await this.recoverReviewReceipts();
+    if (!this.formalOnly) await this.recoverReviewReceipts();
     this.formalAckAvailable = this.firstFormalAck;
     // Drain every queued page in this cycle: signals on later pages are
     // just as queued as the first page's, and a first-page signal that

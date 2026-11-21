@@ -38,7 +38,7 @@ async function fixture(t, options = {}) {
   const counts = {prompts:0, sent:[]}, logs = [];
   const connection = {apiBase, roomId:'commons', memberId:'worker', identityId:seeded.identityId,
     credential:seeded.token, hostId:'formal-fixture'};
-  const make = (fetchImpl = fetch) => new Bridge({connection, env:{ROOM_ACP_HOME:home}, fetchImpl,
+  const make = (fetchImpl = fetch) => new Bridge({connection, env:{ROOM_ACP_HOME:home}, fetchImpl, formalOnly:options.formalOnly,
     log:line => logs.push(line), host:{
       session:async () => ({sessionId:'synthetic', created:true}),
       prompt:async (_key, prompt) => {
@@ -60,6 +60,28 @@ test('ACP answer completes a real normalized reply request, rather than posting 
   assert.equal(current.request.status, 'answered');
   assert.equal(current.page.items.find(item => item.kind === 'answered').message.body, 'Useful verified answer');
   assert.equal(f.counts.prompts, 1);
+});
+
+test('formal-only receiving leaves other wakes untouched and picks up an addressed correction', async t => {
+  const f = await fixture(t, {formalOnly:true}), bridge = f.make();
+  f.store.command(f.seeded.owner, 'commons', {id:'formal-correction',type:'message.posted',
+    data:{messageId:'formal-correction',replyToId:'dm',toMemberId:'worker',body:'Use the replacement candidate.'}});
+  await f.ready(bridge);
+  let acks = 0;
+  const ack = bridge.ack.bind(bridge);
+  bridge.ack = async (...args) => { acks++; return ack(...args); };
+  await bridge.accept({signalId:'ordinary',kind:'mention',messageId:'mention'});
+  await bridge.accept({signalId:'ordinary-reply',kind:'reply',messageId:'reply'});
+  await bridge.accept({signalId:'work',kind:'work'});
+  await bridge.accept({signalId:'claim',kind:'mention',workClaim:'assigned'});
+  await bridge.queue.idle();
+  assert.equal(f.counts.prompts,0);
+  assert.equal(acks,0);
+  await bridge.accept({signalId:'correction',kind:'reply',messageId:'formal-correction'});
+  await bridge.queue.idle();
+  assert.equal(f.counts.prompts,1);
+  assert.match(f.counts.prompt[0].text,/Use the replacement candidate/);
+  assert.equal((await f.read(bridge)).request.status,'answered');
 });
 
 for (const finished of [true, false]) test(`formal completion uses only text after the last tool start (finished=${finished})`, async t => {

@@ -20,6 +20,7 @@ export async function selectAgent(options, { env = process.env, onFailure = () =
 export async function run(options, { print, env = process.env, fetchImpl = fetch, onBridge = null, candidate: preparedCandidate = null, observeStage = null, writeStage = line => process.stderr.write(line + "\n") } = {}) {
   const receiverPolicy = options.receiverPolicy === undefined ? 'respond' : options.receiverPolicy;
   if (!['respond', 'disabled', 'notify-cloud'].includes(receiverPolicy)) throw Error('Receiver policy must be respond, disabled or notify-cloud');
+  if (options.formalOnly && receiverPolicy !== 'respond') throw Error('--formal-only requires a responding receiver');
   if (receiverPolicy === 'disabled') {
     print('Room receiver disabled. No host or receiver was started; no wakes or formal requests were accepted, answered or acknowledged. Existing Room work and local retry state are unchanged.');
     return 0;
@@ -40,14 +41,15 @@ export async function run(options, { print, env = process.env, fetchImpl = fetch
   if (!candidate) { print("No working ACP agent found. Run `room-acp doctor`, or pass --agent / --agent-cmd."); return 1; }
   const log = logger(line => print(line));
   const stageSink = observeStage ?? (options.observeStages ? event => writeStage(JSON.stringify({event: 'agent_stage', ...event})) : null);
-  const bridge = new Bridge({ connection, candidate, cwd: options.cwd ?? process.cwd(), env, mode: options.mode, respondTo: options.respondTo, maxSessions: options.maxSessions, fetchImpl, log, observeStage: stageSink });
+  const bridge = new Bridge({ connection, candidate, cwd: options.cwd ?? process.cwd(), env, mode: options.mode, respondTo: options.respondTo, formalOnly: options.formalOnly, maxSessions: options.maxSessions, fetchImpl, log, observeStage: stageSink });
   onBridge?.(bridge);
   const stop = () => bridge.stop();
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   print(connection.permissionApproverId
     ? `Host tool approvals: locally authorized Room human ${connection.permissionApproverId}. Use --permission-approver none to disable.`
     : "Host tool approvals: Room approvals disabled; permission requests are cancelled. Use --permission-approver <member-id> only for a human you trust with this laptop.");
-  print(`room-acp: ${candidate.label} is listening in room ${connection.roomId} as ${connection.displayName}. Mention it in the Room. Ctrl-C to stop.`);
+  const invitation = options.formalOnly ? 'Send it a directed formal request.' : 'Mention it in the Room.';
+  print(`room-acp: ${candidate.label} is listening in room ${connection.roomId} as ${connection.displayName}. ${invitation} Ctrl-C to stop.`);
   try { const reason = await bridge.run(); return reason === "access_ended" ? 3 : reason === "context_unavailable" ? 4 : 0; }
   finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); }
 }
