@@ -69,6 +69,48 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.ok(addressed.value.requests.items.length);
   });
 
+  test(`permission-blocked work remains visible when pickup checks for available work (${representation})`, async t => {
+    const f = await privateWorkFixture(t, representation);
+    const blocked = "needs-write-claim";
+    f.send(f.owner, "work.proposed", { workItemId: blocked, title: "Edit a file", definitionOfDone: "Make a scoped change",
+      accountableMemberId: f.triage.id, mode: "write" });
+    f.send(f.triage.key, "work.accepted", { workItemId: blocked, expectedRevision: f.rev(blocked) });
+    const original = await f.mcp(f.triage, "room_next", { view: "pickup" });
+    assert.equal(original.ok, true, original.text);
+    const blockedRow = original.value.work.items.find(row => row.id === blocked);
+    assert.equal(blockedRow?.reason, "permission_required");
+    assert.deepEqual(original.value.nextRead, blockedRow.nextRead, "preserve the recovery pointer when no help is available");
+    if (representation !== "legacy") {
+      assert.deepEqual(original.value.ifIdle, { status: "unavailable", reason: "current_help_index_unavailable" });
+      return;
+    }
+
+    f.send(f.producer.key, "work.help_updated", { workItemId: "open", expectedRevision: f.rev("open"), expectedHelpRevision: 0,
+      status: "open", scope: "Independently check the current evidence", expiresAt: new Date(Date.now() + 3600000).toISOString() });
+    const state = f.stored();
+    const pickup = await f.mcp(f.triage, "room_next", { view: "pickup" });
+    assert.equal(pickup.ok, true, pickup.text);
+    assert.equal(pickup.value.ifIdle?.status, "invitation");
+    assert.equal(pickup.value.nextRead.arguments.workItemId, "open");
+    assert.deepEqual(pickup.value.work.items.find(row => row.id === blocked), blockedRow);
+    const exact = await f.mcp(f.triage, pickup.value.nextRead.tool, pickup.value.nextRead.arguments);
+    assert.equal(exact.ok, true, exact.text);
+    assert.equal(exact.value.help.canOffer, true);
+    assert.equal(f.stored(), state, "discovery never applies a grant, claim, or offer");
+
+    f.store.wakeQueue.pause(f.owner, "commons", { requestId: "pause-blocked-pickup", reason: null }, null, { memberId: f.triage.id });
+    const paused = await f.mcp(f.triage, "room_next", { view: "pickup" });
+    assert.deepEqual(paused.value.ifIdle, { status: "paused" });
+    assert.deepEqual(paused.value.nextRead, blockedRow.nextRead);
+
+    f.store.wakeQueue.resume(f.owner, "commons", { requestId: "resume-blocked-pickup", reason: null }, null, { memberId: f.triage.id });
+    f.send(f.owner, "work.proposed", { workItemId: "read-assignment", title: "Review a change", definitionOfDone: "Read the available source",
+      accountableMemberId: f.triage.id, mode: "read" });
+    const addressed = await f.mcp(f.triage, "room_next", { view: "pickup" });
+    assert.equal(addressed.value.nextRead.arguments.workItemId, "read-assignment");
+    assert.equal(addressed.value.ifIdle, undefined);
+  });
+
   test(`room next uses the same private-view boundary through MCP and CLI (${representation})`, async t => {
     const f = await privateWorkFixture(t, representation);
     for (let n = 0; n < 4; n++) {
