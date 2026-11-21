@@ -230,7 +230,10 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
     }
   }
   const next = nextWorkStep(work, now);
-  const review = result.receipt && result.receipt.eventId === work.receipt.eventId && next.action === "verify"
+  const selectionStatus = result.receipt
+    ? (result.receipt.eventId === work.receipt?.eventId ? "current" : "historical")
+    : result.kind;
+  const review = selectionStatus === "current" && next.action === "verify"
     && result.text?.body !== null && workActions(work, reviewer, now).some(([action]) => action === "verify")
     ? { criteria: work.definitionOfDone,
         action: { tool: "room_record_verification", arguments: { roomId: state.room.id, workItemId,
@@ -247,7 +250,7 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
       ...(correction ? { correction } : {}), ...(releaseChecks ? { releaseChecks } : {}) },
-    selection: { completionEventId, draftMessageId }, result,
+    selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
       completionEventId: work.receipt?.eventId ?? null, next },
