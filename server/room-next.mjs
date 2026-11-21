@@ -416,19 +416,18 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
           }
         } else if (project && addressedComplete) {
           const nextRead = { tool: "room_read_project_discoveries", arguments: { roomId, offerId: project.offerId, limit: 5 } };
-          packet.discoveryReview = { nextRead, consideredDiscovery: position.encode(project.after),
+          packet.ifIdle ??= { status: "unavailable", reason: "invitation_not_selected" };
+          packet.ifIdle.discoveryReview = { nextRead, consideredDiscovery: position.encode(project.after),
             path: '/api/rooms/' + encodeURIComponent(roomId) + '/project-offers/' + encodeURIComponent(project.offerId) + '/discoveries' };
-          if (!packet.nextRead) {
-            packet.nextRead = nextRead;
-            packet.ifIdle = { status: "project_discovery", nextRead };
-          }
         }
-        if (canInvestigate && addressedComplete && !packet.nextRead &&
+        if (canInvestigate && addressedComplete && !packet.nextRead && !packet.ifIdle?.discoveryReview &&
           (packet.ifIdle?.status === "no_invitation" || packet.ifIdle?.reason === "current_help_index_unavailable")) {
           const lead = investigationLead(store, roomId, charter, packet.goal);
           if (lead) {
-            packet.nextRead = lead.nextRead;
-            packet.investigation = lead;
+            // Older clients validate top-level read names against a closed enum.
+            // Its ifIdle extension is open and carries the exact action in full.
+            packet.ifIdle.investigation = lead;
+            if (["room_read_work", "room_read_result"].includes(lead.nextRead.tool)) packet.nextRead = lead.nextRead;
           }
         }
       }
