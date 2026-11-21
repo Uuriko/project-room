@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { generateKeyPair, publicKeyToJwk, signCardJws } from "../server/agent-card-signing.mjs";
-import { attachReleaseReceipts, confirmedReceipt, packageFixtureEvidence, prepareReleaseReview, submitReleaseReview } from "../scripts/attach-release-receipts.mjs";
+import { attachReleaseReceipts, confirmedReceipt, packageFixtureEvidence, prepareReleaseReview, prepareReleaseReviewPacket, publishReleaseProofParts, submitReleaseReview } from "../scripts/attach-release-receipts.mjs";
 
 test("publishes candidate-bound stage receipts and recovers a lost write by replay", async () => {
   const candidateRevision = "a".repeat(40), evidenceVersion = "sha256:" + "b".repeat(64);
@@ -150,6 +150,39 @@ test("release review requires complete exact evidence before its single completi
   assert.throws(() => bound(signed({ ...proof, workItemId: "other-work" })), /does not match/);
   assert.throws(() => bound(signed({ ...proof, qualification: { ...qualification, "browser.json": sha } })), /does not match/);
   assert.throws(() => bound({ ...provenance, proof: { ...proof, publicTip: input.deploy.oldRevision } }), /signature/);
+  const large = signed({ ...proof, package: { ...proof.package, pathSha256: Object.fromEntries(
+    Array.from({ length: 21 }, (_, index) => [`server/proof-😀-${index}.mjs`, { publicSha: sha, composedSha: sha, installedSha: sha }])
+  ) } });
+  const packet = prepareReleaseReviewPacket({ inputs, candidateRevision, origin, verificationPath: "/docs/agents/paste",
+    servingRevision: candidateRevision, verificationDigest: "sha256:" + sha, binding,
+    sourceProof: { ...large, unsignedMetadata: "local-only metadata" }, jwks });
+  assert.ok(packet.parts.length > 1);
+  assert.ok(packet.body.length <= 4000);
+  assert.deepEqual(JSON.parse(Buffer.from(packet.parts.map(part => part.body.split("\n")[1]).join(""), "base64url")), large);
+  assert.ok(packet.parts.every(part => part.body.length <= 4000 && packet.body.includes(part.id)));
+  const savedParts = new Map();
+  let writes = 0;
+  const publish = () => publishReleaseProofParts({ parts: packet.parts, binding, producerId: "producer", call: async (name, args) => {
+    const id = args.operationId ?? args.id ?? args.draftMessageId;
+    const prior = savedParts.get(id);
+    if (name === "room_receipt") return { roomId: binding.roomId, viewerId: "producer", operationId: id,
+      status: prior ? "recorded" : "not_recorded", ...(prior ? { eventType: "message.posted", sequence: prior.sequence } : {}) };
+    if (name === "room_post_message") {
+      assert.equal(args.workItemId, binding.workItemId);
+      assert.equal(prior, undefined, "The first write is recovered from its receipt");
+      savedParts.set(id, { body: args.body, sequence: ++writes });
+      if (writes === 1) throw new Error("proof response lost");
+      return { messageId: id, sequence: writes, status: "posted", duplicate: false };
+    }
+    assert.equal(name, "room_read_result");
+    return { roomId: binding.roomId, workItemId: binding.workItemId, result: { text: { messageId: id, body: prior.body } } };
+  } });
+  await assert.rejects(publish(), /proof response lost/);
+  assert.equal((await publish()).length, packet.parts.length);
+  assert.equal(writes, packet.parts.length);
+  savedParts.get(packet.parts[0].id).body += "changed";
+  await assert.rejects(publish(), /attachment does not match/);
+
   const operations = new Map();
   const next = { action: "in_progress", memberId: "producer" };
   let currentRevision = 4, posts = 0, submissions = 0, draftArgs;

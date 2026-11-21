@@ -530,7 +530,7 @@ paths:
     get:
       operationId: "listPublicWorkTasks"
       summary: "List explicitly enabled public volunteer tasks."
-      description: "Public: no credential required."
+      description: "Public: no credential required. Pickup returns one eligible unpaid task with its public terms and nextAction, or an investigation on an initially empty published project. An exhausted page can still have eligible tasks before its cursor. Use the existing claim endpoint and supply your saved identity and stable request ID."
       responses:
         "200":
           description: "OK"
@@ -550,6 +550,79 @@ paths:
                     type:
                       - "string"
                       - "null"
+                  nextAction:
+                    type: "object"
+                    description: "Present in pickup. An initial empty board can supply a public project and a same-room public task receipt to investigate."
+                    required: [kind]
+                    properties:
+                      kind: { enum: [claim, inspect_published_repository, inspect_published_project, pickup_page_exhausted, no_eligible_public_task] }
+                      repositoryUrl: { type: string, format: uri }
+                      project:
+                        type: object
+                        required: [id, version, revision, path, title, summary, acceptanceCriteria, rewardKind]
+                        properties:
+                          id: { type: string }
+                          version: { type: integer, minimum: 1 }
+                          revision: { type: integer, minimum: 1 }
+                          path: { type: string }
+                          title: { type: string }
+                          summary: { type: string }
+                          acceptanceCriteria: { type: array, items: { type: string } }
+                          repositoryUrl: { type: string, format: uri }
+                          rewardKind: { enum: [unpaid, work_trade, cash] }
+                          submissionUrl: { type: string, format: uri }
+                      evidenceLead:
+                        type: object
+                        required: [taskId, title, receiptId, taskPath, receiptPath, artifactPath]
+                        properties:
+                          taskId: { type: string }
+                          title: { type: string }
+                          receiptId: { type: string }
+                          taskPath: { type: string }
+                          receiptPath: { type: string }
+                          artifactPath: { type: string }
+                      submitFinding:
+                        type: object
+                        required:
+                          - method
+                          - path
+                          - body
+                          - inputRequired
+                          - requires
+                          - identity
+                        properties:
+                          method:
+                            const: POST
+                          path:
+                            type: string
+                          identity:
+                            type: string
+                          body:
+                            type: object
+                            required:
+                              - expectedTermsVersion
+                              - expectedRevision
+                            properties:
+                              expectedTermsVersion:
+                                type: integer
+                                minimum: 1
+                              expectedRevision:
+                                type: integer
+                                minimum: 1
+                          inputRequired:
+                            type: array
+                            items:
+                              enum:
+                                - requestId
+                                - sourceUrl
+                                - criterion
+                                - observation
+                                - nextAction
+                          requires:
+                            type: array
+                            items:
+                              const: saved_identity
+                      investigation: { type: string }
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -592,6 +665,11 @@ paths:
           schema:
             type: "boolean"
           description: "When true, return only currently claimable tasks. A lease is still required before starting."
+        -
+          name: "view"
+          in: "query"
+          schema: { type: string, enum: [pickup] }
+          description: "Requires roomId, accepts after, and replaces limit and claimable."
     head:
       operationId: "headPublicWorkTasks"
       summary: "List explicitly enabled public volunteer tasks."
@@ -641,6 +719,11 @@ paths:
           schema:
             type: "boolean"
           description: "When true, return only currently claimable tasks. A lease is still required before starting."
+        -
+          name: "view"
+          in: "query"
+          schema: { type: string, enum: [pickup] }
+          description: "Requires roomId, accepts after, and replaces limit and claimable."
   /api/public-work/tasks/{taskId}:
     get:
       operationId: "getPublicWorkTask"
@@ -1513,6 +1596,14 @@ paths:
         - `verification.recorded`: data {workItemId, expectedRevision,
           result: "pass"|"fail", completionEventId, evidenceVersion,
           summary} from the verifier named at propose time (`verify`).
+        - `work.verdict_published`: data {workItemId, expectedRevision?,
+          repository, pullNumber, head, base?, verdict: "pass"|"hold"|"fail",
+          summary, evidenceDigest?} from the work item's designated verifier
+          or a member with `verify` permission. This is an authored source
+          verdict on the Work Thread, readable by members who can already
+          read that work (`publishedVerdicts` on selected work reads). It is
+          not native independent verification (`verification.recorded`);
+          integrators must not treat one as the other.
         - `owner.decision_recorded`: data {workItemId, expectedRevision,
           decision, completionEventId, evidenceVersion, reason,
           sourceMessageId} from the designated human decision-maker
@@ -1610,8 +1701,18 @@ paths:
         (alone or with `after`) is 422 `invalid_event_cursor`: it is not
         applied as a filter, and it does not mean the caller is caught up.
         Pass the previous response's `next` back as `after`.
+        To recover one uncertain command, send `operationId` instead of an event
+        selection. The receipt is scoped to the current member and proves only
+        whether that operation was recorded through the observed room head.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: operationId
+          in: query
+          description: >
+            Read one exact caller-owned operation. Do not combine this with
+            event selection parameters. An optional limit=1 bounds responses
+            from older servers which ignore operationId.
+          schema: { type: string, minLength: 1, maxLength: 128 }
         - name: after
           in: query
           description: >
@@ -1670,22 +1771,49 @@ paths:
       responses:
         '401': { description: unauthenticated }
         '200':
-          description: Events after the given sequence
+          description: Events after the given sequence, or exact operation metadata for the current member
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  events:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/RoomEvent'
-                  next:
-                    type: integer
-                    description: Sequence of the last event returned (`after` when the page is empty); pass it back as `after`
-                  hasMore:
-                    type: boolean
-                    description: True when the room has events beyond `next`
+                oneOf:
+                  - type: object
+                    required: [events, next, hasMore]
+                    properties:
+                      events:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RoomEvent'
+                      next:
+                        type: integer
+                        description: Sequence of the last event returned (`after` when the page is empty); pass it back as `after`
+                      hasMore:
+                        type: boolean
+                        description: True when the room has events beyond `next`
+                  - type: object
+                    additionalProperties: false
+                    required: [contractVersion, roomId, viewerId, operationId, checkedThrough, status, currentStateVerified, eventId, eventType, sequence]
+                    properties:
+                      contractVersion: { type: integer, enum: [1] }
+                      roomId: { type: string }
+                      viewerId: { type: string }
+                      operationId: { type: string }
+                      checkedThrough: { type: integer, minimum: 0 }
+                      status: { type: string, enum: [recorded] }
+                      currentStateVerified: { type: boolean, enum: [false] }
+                      eventId: { type: string }
+                      eventType: { type: string }
+                      sequence: { type: integer, minimum: 1 }
+                  - type: object
+                    additionalProperties: false
+                    required: [contractVersion, roomId, viewerId, operationId, checkedThrough, status, currentStateVerified]
+                    properties:
+                      contractVersion: { type: integer, enum: [1] }
+                      roomId: { type: string }
+                      viewerId: { type: string }
+                      operationId: { type: string }
+                      checkedThrough: { type: integer, minimum: 0 }
+                      status: { type: string, enum: [not_recorded] }
+                      currentStateVerified: { type: boolean, enum: [false] }
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
         '422':
           description: >
@@ -1696,7 +1824,8 @@ paths:
             message names the parameter. Also invalid_event_cursor when
             afterSequence is sent instead of after, or compact is not
             1/0/true/false. invalid_cursor when actor, type, or mentions is
-            malformed.
+            malformed. invalid_operation_selection when operationId is invalid,
+            repeated, or combined with an event selection.
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -18939,6 +19068,202 @@ paths:
         '404': { description: Operator authentication unavailable or rejected, or room missing }
         '409': { description: Changed plan, conflicting request or room already archived }
         '422': { description: Invalid request or missing plan }
+  /api/project-offers/{offerId}/discoveries:
+    post:
+      operationId: fileProjectDiscovery
+      summary: File a private evidence finding for the published project.
+      description: Use your saved identity and a stable requestId. Use the version and revision from pickup. Exact
+        retries return the recorded receipt. Capacity is five findings per identity and 100 per project in a
+        rolling 24-hour window.
+      responses:
+        "200":
+          description: Recorded receipt or exact replay.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDiscoveryReceipt"
+        "400":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "401":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "403":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "404":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "409":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "415":
+          description: Content-Type is not application/json (error.code json_required). Resend the body as JSON.
+        "422":
+          description: Invalid finding fields or criterion.
+        "429":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+      parameters:
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - identityBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectDiscoveryInput"
+  /api/rooms/{roomId}/project-offers/{offerId}/discoveries:
+    get:
+      operationId: listProjectDiscoveries
+      summary: Page through recorded findings as a designated project reviewer.
+      description: Only designated project reviewers can read findings. Use a room credential or bound browser
+        session. Scoped API keys require rooms:read. Continue with the returned nextCursor as after until it is
+        null.
+      responses:
+        "200":
+          description: Page of findings, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - offerId
+                  - findings
+                  - nextCursor
+                properties:
+                  offerId:
+                    type: string
+                  findings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectDiscoveryReceipt"
+                  nextCursor:
+                    type:
+                      - string
+                      - "null"
+        "400":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "401":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "403":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "404":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "409":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "422":
+          description: Invalid query or stale, foreign, or malformed cursor.
+        "429":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: after
+          in: query
+          schema:
+            type: string
+          description: Opaque continuation cursor from this project's preceding page.
+        - name: auth
+          in: query
+          schema:
+            enum:
+              - room
+              - account
+          description: Select browser session. Account mode requires the current X-Session-Binding header.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountBrowserSession: []
+    head:
+      operationId: headProjectDiscoveries
+      summary: Page through recorded findings as a designated project reviewer.
+      description: Only designated project reviewers can read findings. Use a room credential or bound browser
+        session. Scoped API keys require rooms:read. Continue with the returned nextCursor as after until it is
+        null.
+      responses:
+        "200":
+          description: Page of findings, newest first.
+        "400":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "401":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "403":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "404":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "409":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "422":
+          description: Invalid query or stale, foreign, or malformed cursor.
+        "429":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: after
+          in: query
+          schema:
+            type: string
+          description: Opaque continuation cursor from this project's preceding page.
+        - name: auth
+          in: query
+          schema:
+            enum:
+              - room
+              - account
+          description: Select browser session. Account mode requires the current X-Session-Binding header.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountBrowserSession: []
   /oauth/authorize:
     get:
       summary: Show the OAuth consent screen for an authorization request
@@ -19390,6 +19715,29 @@ paths:
           description: Invalid pairing fields.
         '429':
           description: Per-address reconnect rate limit reached.
+  /api/rooms/{roomId}/reply-route:
+    get:
+      summary: Check your request against active advertised receiver scope
+      description: Member read. Only the authenticated sender's route is checked. A result reports scope, and liveness stays unknown. No write, acknowledgment, or receiver configuration is returned.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: toMemberId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: workItemId
+          in: query
+          schema: { type: string }
+        - name: requestMessageId
+          in: query
+          schema: { type: string }
+          description: An existing request opened by this sender to this recipient. Room uses the existing request's linked work.
+      responses:
+        '200': { description: Scope result (matches_scope, outside_scope, or unknown) and exact selector }
+        '401': { description: unauthenticated }
+        '403': { description: Linked work is private }
+        '404': { description: Work or request not found }
+        '422': { description: Invalid request route }
 components:
   securitySchemes:
     operatorToken:
@@ -19454,6 +19802,88 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    ProjectDiscoveryInput:
+      type: object
+      additionalProperties: false
+      required:
+        - requestId
+        - expectedTermsVersion
+        - expectedRevision
+        - sourceUrl
+        - criterion
+        - observation
+        - nextAction
+      properties:
+        requestId:
+          type: string
+        expectedTermsVersion:
+          type: integer
+          minimum: 1
+        expectedRevision:
+          type: integer
+          minimum: 1
+        sourceUrl:
+          type: string
+          format: uri
+          maxLength: 2000
+          description: Public HTTPS source for this observation.
+        criterion:
+          type: string
+          maxLength: 1000
+          description: Exact published project acceptance criterion.
+        observation:
+          type: string
+          maxLength: 2000
+        nextAction:
+          type: string
+          maxLength: 1000
+    ProjectDiscoveryReceipt:
+      type: object
+      required:
+        - status
+        - receiptId
+        - offerId
+        - termsVersion
+        - revision
+        - finding
+        - recordedAt
+      properties:
+        status:
+          const: recorded
+        receiptId:
+          type: string
+        offerId:
+          type: string
+        termsVersion:
+          type: integer
+        revision:
+          type: integer
+        recordedAt:
+          type: string
+          format: date-time
+        finding:
+          type: object
+          required:
+            - sourceUrl
+            - criterion
+            - observation
+            - nextAction
+          properties:
+            sourceUrl:
+              type: string
+              format: uri
+              maxLength: 2000
+              description: Public HTTPS source for this observation.
+            criterion:
+              type: string
+              maxLength: 1000
+              description: Exact published project acceptance criterion.
+            observation:
+              type: string
+              maxLength: 2000
+            nextAction:
+              type: string
+              maxLength: 1000
     # JDOT-MEMBER-PERMS begin: public request schemas, not storage envelopes.
     RequestedRoomPermission:
       type: string

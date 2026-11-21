@@ -7,7 +7,7 @@ import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
-import { recordedReceiptsOptOut } from './public-visibility.mjs'; // the authoritative recorded opt-out hides the room's receipts from non-members too
+import { receiptVisibilitySqlFor, recordedReceiptsOptOut } from './public-visibility.mjs'; // the authoritative recorded opt-out hides the room's receipts from non-members too
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -227,7 +227,7 @@ export class PublicWorkClaims {
     this.db.prepare('INSERT INTO public_work_requests VALUES (?,?,?,?,?)').run(row.offer_id, actorId, input.requestId, encoded, JSON.stringify(outcome));
     return outcome;
   }
-  packet(row, item, offer) {
+  packet(row, item, offer, { includeTerms = false } = {}) {
     const live = releaseExpired([item], this.store.now())[0];
     const receipt = this.db.prepare('SELECT receipt_id,identity_id,receipt_json FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
     // #3546: submitted is the delivered state, not the end of the story —
@@ -244,6 +244,7 @@ export class PublicWorkClaims {
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
       title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
+      ...(includeTerms ? { summary: offer.summary, exclusions: offer.exclusions, deadline: offer.deadline ?? null } : {}),
       reward: offer.reward, ...(settlement ? { settlement } : {}),
       claimable: state === 'unclaimed' && !deadlinePassed,
       claim: { state, generation: row.generation,
@@ -251,6 +252,60 @@ export class PublicWorkClaims {
         verification: receipt ? (receiptBody?.verification ?? 'hash_only') : null,
         deliveryDigest: receiptBody?.deliveryDigest ?? null,
         criteriaAttestation: receiptBody?.criteriaAttestation ?? null } };
+  }
+  pathConflict(namespace, taskId, files) {
+    return releaseExpired(this.store.workClaims.list(namespace), this.store.now()).some(other =>
+      other.id !== taskId && other.owner && other.files.some(path => files.some(file => overlaps(path, file))));
+  }
+
+  latestPublicReceiptLead(roomId, repositoryUrl) {
+    if (!this.available()) return null;
+    const row = this.db.prepare(`SELECT t.offer_id AS taskId, json_extract(o.terms, '$.title') AS title,
+        public_receipts.id AS receiptId
+      FROM public_receipts
+      JOIN public_work_receipts r ON r.receipt_id=public_receipts.id
+      JOIN public_work_tasks t ON t.offer_id=r.offer_id AND t.generation=r.generation
+      JOIN project_offers o ON o.offer_id=t.offer_id AND o.room_id=t.room_id AND o.version=t.terms_version
+      WHERE public_receipts.room_id=?1 AND t.room_id=?1 AND public_receipts.source='public-work'
+        AND (?2 IS NULL OR json_extract(o.terms, '$.repositoryUrl')=?2)
+        AND o.status='published' AND ${receiptVisibilitySqlFor(this.db)}
+      ORDER BY public_receipts.at DESC, public_receipts.id LIMIT 1`).get(roomId, repositoryUrl ?? null);
+    if (!row) return null;
+    return { ...row, taskPath: '/api/public-work/tasks/' + encodeURIComponent(row.taskId),
+      receiptPath: '/api/public-work/receipts/' + encodeURIComponent(row.receiptId),
+      artifactPath: '/api/public-work/receipts/' + encodeURIComponent(row.receiptId) + '/artifact' };
+  }
+
+  pickup(roomId, after, origin) {
+    return this.store.readTransaction(() => {
+      const page = this.list({ roomId, after, limit: 1, claimable: true, pickup: true });
+      const [task] = page.tasks;
+      if (task) return {
+        ...page, nextAction: { kind: 'claim', method: 'POST',
+          path: '/api/public-work/tasks/' + encodeURIComponent(task.taskId) + '/claim',
+          body: { expectedTermsVersion: task.termsVersion }, requires: ['saved_identity', 'stable_request_id'] },
+      };
+      if (page.claimableCount > 0) return { ...page, nextAction: { kind: 'pickup_page_exhausted' } };
+      const project = !after && this.store.projectOffers.publishedProject(roomId);
+      if (!project) return { ...page, nextAction: { kind: 'no_eligible_public_task' } };
+      const evidenceLead = this.latestPublicReceiptLead(roomId, project.repositoryUrl);
+      const path = project.path + '/discoveries';
+      const nativeReturn = project.rewardKind === 'unpaid' && (!project.submissionUrl || project.submissionUrl === origin + path);
+
+      return { ...page, nextAction: {
+        kind: project.repositoryUrl ? 'inspect_published_repository' : 'inspect_published_project',
+        ...(project.repositoryUrl && { repositoryUrl: project.repositoryUrl }), project,
+        ...(evidenceLead && { evidenceLead }),
+        ...(nativeReturn && { submitFinding: {
+          method: 'POST', path, body: { expectedTermsVersion: project.version, expectedRevision: project.revision },
+          inputRequired: ['requestId', 'sourceUrl', 'criterion', 'observation', 'nextAction'], requires: ['saved_identity'],
+          identity: 'Reuse your identity on this origin. Only if you have none, POST /api/agent-identities with {"displayName":"your name"}. Save the returned credentials privately and send the identity secret as a Bearer token to this origin.',
+        } }),
+        investigation: evidenceLead
+          ? 'Compare the linked public task criteria with its receipt and artifact. Report one criterion, the evidence that supports or contradicts it, and a reproducible check.'
+          : 'Check one published project criterion against a cited public source. Report the criterion, source revision or URL, check performed, and observed result.',
+      } };
+    });
   }
   read(offerId) {
     return this.store.readTransaction(() => {
@@ -267,7 +322,7 @@ export class PublicWorkClaims {
   // claimableFirst: false and keeps scanning in offer_id order.
   // Optional roomId keeps first-connect (and other room-scoped callers) on
   // work from the room the agent just joined, not the global board.
-  list({ limit = 20, after = '', claimable = false, claimableFirst = true, roomId = null } = {}) {
+  list({ limit = 20, after = '', claimable = false, claimableFirst = true, roomId = null, pickup = false } = {}) {
     check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
     check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
     check(roomId == null || identifier(roomId), 'Invalid page');
@@ -283,7 +338,9 @@ export class PublicWorkClaims {
       // packets (including submittedReceiptId) must never be built or served.
       // roomId, when set, is applied in SQL above (joined-room-first).
       let tasks = rows.filter(row => !isUnpublished(this.db, 'room', row.room_id))
-        .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
+        .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row), { includeTerms: pickup }));
+      if (pickup) tasks = tasks.filter(task => task.claimable && task.reward.kind === 'unpaid'
+        && !this.pathConflict(task.namespaceId, task.taskId, task.files));
       const claimableCount = tasks.filter(task => task.claimable).length;
       if (claimable) tasks = tasks.filter(task => task.claimable);
       if (claimableFirst) {
@@ -477,10 +534,8 @@ export class PublicWorkClaims {
             fail(409, 'public_work_claim_conflict', `Task already claimed by ${holder} (lease expires ${item.leaseExpiresAt ?? 'unknown'})`);
           }
           const files = JSON.parse(row.files_json);
-          for (const other of this.store.workClaims.list(row.namespace_key)) {
-            if (other.id !== offerId && other.owner && other.files.some(path => files.some(file => overlaps(path, file))))
-              fail(409, 'public_work_path_conflict', 'Another live claim holds these repository paths');
-          }
+          if (this.pathConflict(row.namespace_key, offerId, files))
+            fail(409, 'public_work_path_conflict', 'Another live claim holds these repository paths');
           // #3707: the per-identity live-claim ceiling. Counted here, inside
           // the writer fence on the shared claim path, so every door —
           // direct act() and match() auto-claim alike — is bound by it, and
@@ -646,8 +701,7 @@ export class PublicWorkClaims {
           // claimable (not just unclaimed): a task past its submission
           // deadline must not be recommended as claimable (#3707).
           if (task.reward?.kind !== 'unpaid' || task.claim.state !== 'unclaimed' || !task.claimable) return false;
-          return !releaseExpired(this.store.workClaims.list(task.namespaceId), this.store.now()).some(other =>
-            other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
+          return !this.pathConflict(task.namespaceId, task.taskId, task.files);
         }).map(task => {
           const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();
           const matched = [...new Set(preferences.filter(value => matchesPreference(text, value)))];

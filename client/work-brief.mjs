@@ -11,6 +11,8 @@ export async function createWorkBrief(context) {
     || !Number.isSafeInteger(context.work.revision) || !Number.isSafeInteger(context.evaluatedThrough)
     || !context.accessSummary || !context.context) throw new Error('Work brief requires current selected-work context');
   const work = context.work;
+  const publishedVerdicts = (context.publishedVerdicts ?? []).slice(-3).map(record =>
+    pick(record, 'eventId publisherId repository pullNumber head base verdict evidenceDigest at'));
   const scope = { roomId: context.roomId, workItemId: work.id, viewerId: context.viewer.id,
     ...Object.fromEntries(['viewerAccountId', 'viewerAuthEpoch', 'viewerSessionBinding', 'viewerSessionRevision']
       .map(key => [key, context[key] ?? null])) };
@@ -31,6 +33,7 @@ export async function createWorkBrief(context) {
       budget: structuredClone(context.accessSummary.budget) },
     evidence: { receipt: pick(work.receipt, 'eventId reportedById producerId summary evidenceUrl evidenceVersion nextAction'),
       verification: pick(work.verification, 'eventId verifierId result completionEventId evidenceVersion summary independenceConfirmed'),
+      ...(publishedVerdicts.length ? { publishedVerdicts } : {}),
       decision: pick(work.decision, 'eventId actorId decision completionEventId evidenceVersion reason'),
       references: structuredClone(context.accessSummary.evidence.records), retrieved: false },
     source: { ...structuredClone(context.accessSummary.conversation), contentObserved: ["included", "not_modified"].includes(context.context.source?.status),

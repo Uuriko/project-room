@@ -159,6 +159,17 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   const oldBasis = basisOf(await reviewer.workResult(f.workItemId));
   const finding = f.send(T.VERIFICATION_RECORDED,
     { ...oldBasis, result: "fail", summary: "The old SHA is wrong." }, "reviewer");
+  const pending = await f.client.workResult(f.workItemId, { completionEventId: original.event.id });
+  assert.deepEqual(pending.workThread.pendingCorrection, {
+    verificationEventId: finding.event.id, completionEventId: original.event.id, evidenceVersion: oldBasis.evidenceVersion,
+    summary: "The old SHA is wrong.", nextAction: "Accountable member addresses the finding", untrusted: true,
+    action: { tool: "room_resolve_blocker", arguments: {
+      roomId: "commons", workItemId: f.workItemId, expectedRevision: pending.current.workRevision
+    }, inputRequired: ["resolution"] },
+  });
+  const pendingForReviewer = await reviewer.workResult(f.workItemId, { completionEventId: original.event.id });
+  assert.equal(pendingForReviewer.workThread.pendingCorrection.summary, pending.workThread.pendingCorrection.summary);
+  assert.equal(pendingForReviewer.workThread.pendingCorrection.action, undefined);
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Corrected the SHA" });
   const corrected = f.mutate(T.WORK_COMPLETED, f.input(f.post("Corrected PR evidence")));
   const packet = await reviewer.workResult(f.workItemId, { completionEventId: corrected.event.id });
@@ -169,11 +180,16 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   assert.equal(packet.workThread.correction.verificationEventId, finding.event.id);
   assert.equal(packet.workThread.correction.nextRead.arguments.completionEventId, original.event.id);
   const historical = await reviewer.workResult(f.workItemId, { completionEventId: original.event.id });
+  assert.equal(packet.selection.status, "current");
   assert.equal(historical.workThread.href, packet.workThread.href);
   assert.equal(historical.workThread.start?.eventId, originalStart.event.id);
   assert.equal(historical.workThread.verdict?.eventId, finding.event.id);
   assert.equal(historical.workThread.verdict?.result, "fail");
   assert.equal(historical.workThread.correction, undefined);
+  assert.equal(historical.workThread.pendingCorrection, undefined);
+  assert.equal(packet.workThread.pendingCorrection, undefined);
+  assert.equal(historical.selection.status, "historical");
+  assert.notEqual(historical.result.receipt.eventId, historical.current.completionEventId);
   assert.equal(historical.review, undefined);
   const verdict = { ...basisOf(packet), result: "pass", summary: "Checked the corrected SHA." };
   assert.throws(() => f.send(T.VERIFICATION_RECORDED, { ...oldBasis, result: "pass", summary: "Stale" }, "reviewer"), /Stale Work Item revision/);
@@ -264,6 +280,7 @@ test("native text preserves exact stored UTF-8 and old post/proposal provenance 
   f.send(T.MEMBER_ACCESS_CHANGED, { memberId: "guest", permissions: [], expectedMemberRevision: 0, active: false }, "owner");
   const before = auditRecovery(f.store).dataSha256;
   const preview = await f.client.workResult(f.workItemId, { draftMessageId: posted.event.data.messageId });
+  assert.equal(preview.selection.status, "draft");
   assert.equal(preview.result.kind, "draft"); assert.equal(preview.result.text.body, body);
   assert.deepEqual(preview.result.text.proposal, { packetId: "original-packet", basisRevision: 1, submittedAtRevision: 1, attribution: "manual-unverified" });
   assert.equal(auditRecovery(f.store).dataSha256, before);

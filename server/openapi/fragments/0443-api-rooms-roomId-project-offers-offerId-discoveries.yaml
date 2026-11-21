@@ -1,0 +1,146 @@
+  /api/rooms/{roomId}/project-offers/{offerId}/discoveries:
+    get:
+      operationId: listProjectDiscoveries
+      summary: Page through recorded findings as a designated project reviewer.
+      description: Only designated project reviewers can read findings. Use a room credential or bound browser
+        session. Scoped API keys require rooms:read. Continue with the returned nextCursor as after until it is
+        null.
+      responses:
+        "200":
+          description: Page of findings, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - offerId
+                  - findings
+                  - nextCursor
+                properties:
+                  offerId:
+                    type: string
+                  findings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectDiscoveryReceipt"
+                  nextCursor:
+                    type:
+                      - string
+                      - "null"
+        "400":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "401":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "403":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "404":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "409":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "422":
+          description: Invalid query or stale, foreign, or malformed cursor.
+        "429":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: after
+          in: query
+          schema:
+            type: string
+          description: Opaque continuation cursor from this project's preceding page.
+        - name: auth
+          in: query
+          schema:
+            enum:
+              - room
+              - account
+          description: Select browser session. Account mode requires the current X-Session-Binding header.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountBrowserSession: []
+    head:
+      operationId: headProjectDiscoveries
+      summary: Page through recorded findings as a designated project reviewer.
+      description: Only designated project reviewers can read findings. Use a room credential or bound browser
+        session. Scoped API keys require rooms:read. Continue with the returned nextCursor as after until it is
+        null.
+      responses:
+        "200":
+          description: Page of findings, newest first.
+        "400":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "401":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "403":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "404":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "409":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+        "422":
+          description: Invalid query or stale, foreign, or malformed cursor.
+        "429":
+          description: Canonical error envelope (error.code/message, status, reason, hint, non-empty next[],
+            operationId, category).
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: after
+          in: query
+          schema:
+            type: string
+          description: Opaque continuation cursor from this project's preceding page.
+        - name: auth
+          in: query
+          schema:
+            enum:
+              - room
+              - account
+          description: Select browser session. Account mode requires the current X-Session-Binding header.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountBrowserSession: []

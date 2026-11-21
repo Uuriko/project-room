@@ -230,7 +230,10 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
     }
   }
   const next = nextWorkStep(work, now);
-  const review = result.receipt && result.receipt.eventId === work.receipt.eventId && next.action === "verify"
+  const selectionStatus = result.receipt
+    ? (result.receipt.eventId === work.receipt?.eventId ? "current" : "historical")
+    : result.kind;
+  const review = selectionStatus === "current" && next.action === "verify"
     && result.text?.body !== null && workActions(work, reviewer, now).some(([action]) => action === "verify")
     ? { criteria: work.definitionOfDone,
         action: { tool: "room_record_verification", arguments: { roomId: state.room.id, workItemId,
@@ -244,10 +247,21 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const visibleReceipt = result.text?.body === null ? null : result.receipt;
   const start = visibleReceipt ? selectedStart(db, state.room.id, workItemId, visibleReceipt.eventId, floor) : null;
   const verdict = visibleReceipt ? selectedVerdict(db, state.room.id, work, visibleReceipt, floor) : null;
+  const pendingCorrection = selectionStatus === "current" && next.action === "revise"
+    && verdict?.result === "fail" && work.blocker?.eventId === verdict.eventId
+    ? { verificationEventId: verdict.eventId, completionEventId: verdict.completionEventId,
+        evidenceVersion: verdict.evidenceVersion, summary: work.blocker.reason,
+        nextAction: work.blocker.nextAction, untrusted: true,
+        ...(workActions(work, reviewer, now).some(([action]) => action === "resolve")
+          ? { action: { tool: "room_resolve_blocker", arguments: {
+              roomId: state.room.id, workItemId, expectedRevision: work.revision
+            }, inputRequired: ["resolution"] } } : {}) }
+    : null;
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
-      ...(correction ? { correction } : {}), ...(releaseChecks ? { releaseChecks } : {}) },
-    selection: { completionEventId, draftMessageId }, result,
+      ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
+      ...(releaseChecks ? { releaseChecks } : {}) },
+    selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
       completionEventId: work.receipt?.eventId ?? null, next },

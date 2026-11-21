@@ -706,7 +706,7 @@ test("front-door packets scope the query-parameter rule and name the no-credenti
   }
   const full = llmsFullTxt();
   assert.ok(full.includes("- query params - there is no single global rule"), "llms-full.txt: query-param bullet must state the per-family rule");
-  assert.ok(full.includes("GET /api/public-work/tasks accepts exactly limit, after, and claimable"), "llms-full.txt: the strict public-work list rule must be stated");
+  assert.ok(full.includes("GET /api/public-work/tasks accepts exactly limit, after, claimable, roomId, and view"), "llms-full.txt: the strict public-work list rule must be stated");
   assert.ok(full.includes("On endpoints without strict query validation, unknown query parameters are silently ignored"), "llms-full.txt: the lenient family must be stated as the scoped case");
   assert.ok(full.includes("no-credential catalog") || full.includes("no-credential catalog is seven"), "llms-full.txt: the anonymous catalog must be named distinctly");
 });

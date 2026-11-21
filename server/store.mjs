@@ -768,6 +768,7 @@ const shapes = {
   [T.CLAIM_RENEWED]: `${work} progressMessageId expiresAt`,
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction reworkRequested`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason sourceMessageId`,
+  [T.WORK_VERDICT_PUBLISHED]: `${work} repository pullNumber head base verdict summary evidenceDigest`,
   [T.DECISION_RECORDED]: "sourceMessageId statement note",
   [T.SESSION_STARTED]: `${work} budget environment model provider client`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents rounds toolCalls suspendReason resumeApproved`,
@@ -830,7 +831,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedHumanRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option", "attempt"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", "quiet", "reworkRequested", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "dependsOn", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedHumanRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option", "attempt", "pullNumber"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", "quiet", "reworkRequested", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "dependsOn", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -1286,6 +1287,11 @@ const LOOKUP_INDEXES = `
   CREATE INDEX IF NOT EXISTS agent_connections_sponsor ON agent_connections(sponsor_account_id);
   CREATE INDEX IF NOT EXISTS private_email_connections_id ON private_email_connections(id);
   CREATE INDEX IF NOT EXISTS public_work_receipts_offer ON public_work_receipts(offer_id, generation);
+  CREATE INDEX IF NOT EXISTS project_discovery_offer ON public_work_requests(offer_id)
+    WHERE offer_id GLOB 'project-discovery/*';
+  CREATE INDEX IF NOT EXISTS project_discovery_time ON public_work_requests
+    (offer_id, json_extract(outcome_json,'$.recordedAt'), json_extract(outcome_json,'$.receiptId'))
+    WHERE offer_id GLOB 'project-discovery/*';
   CREATE INDEX IF NOT EXISTS gmail_pending_account ON gmail_pending(account_id);
   CREATE INDEX IF NOT EXISTS guest_selfserve_idem_member ON guest_selfserve_idem(member_id);
 `;
@@ -3918,10 +3924,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // probe's change check, three orders of magnitude cheaper than a page read.
   assertRestoreAdmitted() { return assertRestoreAdmitted(this.db); }
   restoreStatus() { verifyRestoreControl(this.db); return {pending:restorePending(this.db)}; }
-  operationReceipt(token, roomId, operationId) {
+  operationReceipt(token, roomId, operationId, expectedSessionBinding = null) {
     if (!validId(operationId)) throw new TypeError("Invalid operation ID");
     return this.readTransaction(() => {
-      const { member } = this.authenticate(token, roomId);
+      const { member } = this.authenticate(token, roomId, expectedSessionBinding);
       const checkedThrough = this.headSequence(roomId);
       const row = this.db.prepare(`
         SELECT c.sequence, e.id, json_extract(e.body, '$.type') AS eventType
@@ -7365,7 +7371,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
       const HALT_GATED = [T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
-        T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED];
+        T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_VERDICT_PUBLISHED];
       if (HALT_GATED.includes(command.type) && room.state.agentHalts?.[auth.member.id])
         fail(409, "halt_active", "This member recorded halt-all; a steer/decide member must clear the exact halt before further work mutations");
       const workItem = room.state.workItems[command.data.workItemId];

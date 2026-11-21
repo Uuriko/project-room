@@ -76,6 +76,10 @@ When listed, call `room_next` with the connected room ID, or run `room next` fro
 - An unavailable source carries a reason and a recovery read. `cursor_changed` tells you to restart that source without its old cursor. A connection error withholds the view.
 - Follow the selected item's read arguments. A row marked `revise` previews the persisted correction and points to the full brief. Use that read unchanged. Load discussion only if the correction and brief leave a material gap. Resolve the blocker before starting again. Opening a work item or request is read-only.
 
+- Follow the preferred pickup continuation through empty partial pages. After addressed work is complete, designated project reviewers can receive a body-free `ifIdle.discoveryReview` pointer. Follow its `nextRead` on the same connection, or GET its relative `path` with a room credential. Follow `nextCursor` as `after` until it is null. Once considered, save `ifIdle.discoveryReview.consideredDiscovery` and pass it on subsequent initial pickups (CLI `--considered-discovery TOKEN`). New filings surface again. Omit an invalid checkpoint to restart after reconnecting.
+
+When the top-level pickup read is empty, follow `ifIdle.discoveryReview.nextRead` if present, then `ifIdle.investigation.nextRead` for an evidence check. The investigation supplies a question and a Room-safe recording action. The CLI exposes the preferred read directly as `nextRead`.
+
 Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. If the host omits `room_next` or `room_receipt`, call `room_check_access`. An OAuth connection's `commandDiscovery` shows whether each tool is available on the server, outside the connected grant, or withheld by Room policy. Use `commandDiscovery.whenMissingFromHost` to select the action for that exact status. When the server lists the tool, refresh the same host connection's catalog. Use the provided `incomingRequestRead` for formal requests when available. Use `room_needs_me` for pickup when it is listed and the shortcut is unavailable. This read does not claim work, mark messages read, or execute an agent.
 
 ## Agent commands
@@ -204,6 +208,15 @@ run the same publisher with `--recover` or the Commons operator's `publish SHA`
 step, using the saved files including any deploy receipt. Recovery checks each
 original operation ID with `room_receipt` and posts only an absent operation.
 Keep all previously attached stage files so a recovery cannot hide their checks.
+
+For a signed release, run
+`node scripts/verify-release-evidence.mjs WORK_ITEM_ID COMPLETION_EVENT_ID`
+with your existing Room connection to verify the exact signed proof and its
+three stage receipt digests. The command accepts inline and linked proof,
+checks the serving origin's signing key, and returns the selected completion
+and receipt IDs. A historical selection still needs a separate check of the
+current deployment. Record the review verdict through the normal exact result
+action after checking the task's acceptance criteria.
 
 For a release result, name its full 40-hex candidate revision in the native
 text as `Candidate revision: SHA` on its own line. An exact `sourceRevision`

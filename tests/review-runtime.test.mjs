@@ -34,6 +34,14 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     store.workWakes.setHost(reviewer.identityId, "review-fixture", true, "commons");
     const baseline = submit("Initial evidence.");
     assert.equal(read().reviewRuntime.status, "waiting_receiver");
+    const [wake] = store.agentHeartbeats.pendingWakePage(reviewer.identityId, {roomId:"commons", hostId:"review-fixture"}).signals;
+    assert.equal(wake.completionEventId, baseline.id);
+    assert.deepEqual(store.workWakes.ack(reviewer.identityId, [wake.signalId], "commons"), [wake.signalId]);
+    const observation = read().reviewRuntime;
+    assert.equal(observation.status, "wake_acknowledged");
+    assert.equal(observation.source, "managed_pull_wake");
+    assert.ok(Number.isFinite(observation.observedAt));
+    assert.equal(read().current.next.action, "verify");
     const { current, result } = read();
     const input = { workItemId, completionEventId:baseline.id, evidenceVersion:result.receipt.evidenceVersion,
       expectedRevision:current.workRevision, attemptId:"review-baseline", phase:"claimed" };

@@ -69,6 +69,37 @@ test("served /openapi.json matches the routes the server actually serves", async
   assert.equal(doc.openapi, "3.1.0", "served document is OpenAPI 3.1");
   assert.ok(doc.paths && typeof doc.paths === "object", "served document has paths");
 
+  const publicTasks = doc.paths["/api/public-work/tasks"];
+  for (const method of ["get", "head"]) {
+    const params = new Map(publicTasks[method].parameters.map(parameter => [parameter.name, parameter]));
+    const view = params.get("view");
+    assert.deepEqual(view.schema.enum, ["pickup"]);
+    assert.equal(params.get("roomId").schema.type, "string");
+    const scoped = await fetch(origin + "/api/public-work/tasks?roomId=commons&view=pickup", { method: method.toUpperCase() });
+    assert.equal(scoped.status, 200);
+    if (method === "get") assert.equal((await scoped.json()).nextAction.kind, "no_eligible_public_task");
+    else assert.equal(await scoped.text(), "");
+  }
+  assert.deepEqual(publicTasks.get.responses["200"].content["application/json"].schema
+    .properties.nextAction.properties.kind.enum, ["claim", "inspect_published_repository", "inspect_published_project", "pickup_page_exhausted", "no_eligible_public_task"]);
+
+  const action = publicTasks.get.responses["200"].content["application/json"].schema.properties.nextAction.properties;
+  assert.ok(action.evidenceLead.required.includes("artifactPath"));
+  assert.ok(action.submitFinding.required.includes("identity"));
+  const fileFinding = doc.paths["/api/project-offers/{offerId}/discoveries"].post;
+  assert.deepEqual(fileFinding.security, [{ identityBearer: [] }]);
+  assert.equal(fileFinding.requestBody.content["application/json"].schema.$ref, "#/components/schemas/ProjectDiscoveryInput");
+  const review = doc.paths["/api/rooms/{roomId}/project-offers/{offerId}/discoveries"];
+  for (const operation of [review.get, review.head]) {
+    const parameters = new Map(operation.parameters.map(p => [p.name, p.schema]));
+    assert.deepEqual(parameters.get("limit"), { type: "integer", minimum: 1, maximum: 50, default: 20 });
+    assert.equal(parameters.get("after").type, "string");
+  }
+  const page = review.get.responses["200"].content["application/json"].schema;
+  assert.ok(page.required.includes("nextCursor"));
+  assert.equal(page.properties.findings.items.$ref, fileFinding.responses["200"].content["application/json"].schema.$ref);
+  assert.equal(review.head.responses["200"].content, undefined);
+
   // /demo is the declarative public HTML exception to the API inventory.
   // Its served documentation must describe the actual anonymous response.
   for (const method of ["get", "head"]) {

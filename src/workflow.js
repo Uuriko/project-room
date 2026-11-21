@@ -73,7 +73,7 @@ export function workCollaboration(item, member, participants) {
 export async function confirmsWorkAction(receipt, command, roomId, memberId) {
   const entry = receipt?.event;
   const actions = [T.MESSAGE_POSTED, T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
-    T.WORK_COMPLETED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_HELP_UPDATED,
+    T.WORK_COMPLETED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_VERDICT_PUBLISHED, T.WORK_HELP_UPDATED,
     T.HELP_OFFER_OPENED, T.HELP_OFFER_UPDATED];
   const same = (a, b) => a === b || (a && b && typeof a === "object" && typeof b === "object"
     && Array.isArray(a) === Array.isArray(b) && Object.keys(a).length === Object.keys(b).length
@@ -274,7 +274,7 @@ export function doneChip(item) {
 const WORK_REVISION_TYPES_FOR_CHANGES = [
   T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
   T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED,
-  T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.DECISION_RECORDED,
+  T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_VERDICT_PUBLISHED, T.DECISION_RECORDED,
   T.SESSION_STARTED, T.SESSION_STATUS_CHANGED, T.SESSION_STOP_REQUESTED, T.SESSION_STOPPED,
   T.WORK_HANDOFF_RECORDED
 ];
@@ -297,6 +297,7 @@ export function workItemChanges(events) {
       ...(typeof data.decision === "string" && data.decision ? { decision: data.decision } : {}),
       ...(typeof data.status === "string" && data.status ? { status: data.status } : {}),
       ...(typeof data.result === "string" && data.result ? { result: data.result } : {}),
+      ...(typeof data.verdict === "string" && data.verdict ? { verdict: data.verdict } : {}),
       ...(typeof data.supersededBy === "string" && data.supersededBy ? { supersededBy: data.supersededBy } : {}),
       ...(data.claim && typeof data.claim === "object" ? { claim: { repository: data.claim.repository ?? "", ref: data.claim.ref ?? "" } } : {}),
       ...(typeof data.repository === "string" && data.repository ? { claim: { repository: data.repository, ref: typeof data.ref === "string" ? data.ref : "" } } : {})
@@ -317,6 +318,7 @@ export function changeDescription(entry) {
     case T.CLAIM_RELEASED: return "Scope released";
     case T.CLAIM_RENEWED: return "Scope renewed";
     case T.VERIFICATION_RECORDED: return entry.result ? `Verification: ${entry.result}` : "Verification recorded";
+    case T.WORK_VERDICT_PUBLISHED: return entry.verdict ? `Published source verdict: ${entry.verdict}` : "Source verdict published";
     case T.OWNER_DECISION_RECORDED:
     case T.DECISION_RECORDED: return entry.decision ? `Decision: ${entry.decision}` : "Decision recorded";
     case T.SESSION_STARTED: return "Native session started";
@@ -368,6 +370,7 @@ export function workResume(item, now = Date.now(), ownerId = null, next = nextWo
 
 export function reviewRuntimeLabel(status) {
   const key = {
+    wake_acknowledged: "review.runtime.acknowledged",
     waiting_receiver: "review.runtime.waiting",
     claimed: "review.runtime.claimed",
     started: "review.runtime.started",

@@ -41,6 +41,7 @@ import { peerEventVisible } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { isWorkersRuntime } from "./ip-blocklist.mjs";
 import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
+import { validReceiverRouteScope } from "../src/reply-requests.js";
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
@@ -1141,6 +1142,17 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   function stream(req, res, token, roomId, after, auth, operationId) {
     const binding = auth.sessionBinding;
     store.eventsAfter(token, roomId, after, 100, binding);
+    let receiverScope;
+    const advertised = req.headers["x-project-room-receiver-scope"];
+    if (advertised !== undefined) {
+      if (auth.member.kind !== "agent" || typeof advertised !== "string" || advertised.length > 8192)
+        reject(422, "invalid_receiver_scope", "Supply a bounded scope from the connected agent");
+      try { receiverScope = JSON.parse(advertised); } catch {
+        reject(422, "invalid_receiver_scope", "Invalid receiver scope");
+      }
+      if (!validReceiverRouteScope(receiverScope) || receiverScope.requesters.includes(auth.member.id))
+        reject(422, "invalid_receiver_scope", "Invalid receiver scope");
+    }
     let sameCredential = 0, sameRoom = 0;
     for (const item of streams) {
       if (item.credentialHash === auth.credentialHash) sameCredential++;
@@ -1149,7 +1161,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
     if (streams.size >= STREAM_POOL_LIMIT || sameRoom >= STREAM_PER_ROOM_LIMIT || sameCredential >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
-    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res };
+    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res, receiverScope };
     streams.add(entry);
     let cursor = after;
     let timer;
@@ -2324,7 +2336,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
       if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {
-        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable", "roomId"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
+        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable", "roomId", "view"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
         if (url.pathname === "/api/public-work/tasks" && url.searchParams.has("claimable") && !["1", "true"].includes(url.searchParams.get("claimable"))) reject(422, "invalid_public_work", "Unsupported query parameters");
         const action = publicWorkTaskMatch?.[2];
         if (action) {
@@ -2374,6 +2386,13 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
             return res.end(req.method === "HEAD" ? undefined : artifact.artifactText);
           }
           return json(res, 200, store.publicWorkClaims.receipt(receiptId, viewer), req.method === "HEAD");
+        }
+        if (url.searchParams.has("view")) {
+          const { searchParams } = url;
+          const roomId = searchParams.get("roomId");
+          if (searchParams.get("view") !== "pickup" || !validId(roomId) || searchParams.has("limit") || searchParams.has("claimable"))
+            reject(422, "invalid_public_work", "Pickup needs one room and an optional after cursor");
+          return json(res, 200, store.publicWorkClaims.pickup(roomId, searchParams.get("after") ?? "", expectedOrigin()), req.method === "HEAD");
         }
         return json(res, 200, publicWorkTaskMatch
           ? store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1]))
@@ -4850,6 +4869,9 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         const snapshotView = params.get("view") ?? "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        const replyView = req.headers["x-project-room-reply-view"];
+        if (replyView !== undefined && (replyView !== "browser-v1" || fullRead || snapshotView !== "full"))
+          reject(422, "invalid_snapshot_view", "Choose the browser reply view only on a windowed room read");
         if (fullRead) {
           res.setHeader("Deprecation", "true");
           res.setHeader("Link", `</api/rooms/${encodeURIComponent(roomId)}>; rel="successor-version"`);
@@ -4861,6 +4883,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           offerContext: offerContext === "1",
           auditView: auditHeader ? "activity" : "full",
           windowed: snapshotView === "full" && !fullRead,
+          compactRequests: replyView === "browser-v1",
           visibility: { dmMessageVisible, roomEventVisible, peerContext }
         }));
       }
@@ -5775,6 +5798,15 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       }
       if (route === "events" && req.method === "GET") {
         const params = url.searchParams;
+        if (params.has("operationId")) {
+          const operationId = params.get("operationId");
+          if (!validId(operationId) || [...params.keys()].some(key =>
+            !["operationId", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
+            || (params.has("limit") && params.get("limit") !== "1")) {
+            reject(422, "invalid_operation_selection", "Provide one operation ID without an event cursor");
+          }
+          return json(res, 200, store.operationReceipt(selected.token, roomId, operationId, fence));
+        }
         if(params.has('view')){
           if(params.get('view')!=='browser'||[...params.keys()].some(key=>!['view','after','limit','eventId','auth'].includes(key)||params.getAll(key).length!==1)||params.has('eventId')&&(params.has('after')||params.has('limit')))
             reject(422,'invalid_event_selection','Choose one browser event window or addressed event');

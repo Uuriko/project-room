@@ -106,7 +106,7 @@ test('includeWork wakes on a task proposed to the caller; the default wait stays
   const result = accepted(await waiting.result);
   assert.equal(result.status, 'ready');
   assert.deepEqual(result.items.map(item => [item.kind, item.workItemId]), [['work', 'my-new-task']]);
-  assert.deepEqual(result.items[0].nextRead, {tool: 'room_read_work', arguments: {roomId: 'commons', workItemId: 'my-new-task'}});
+  assert.deepEqual(result.items[0].nextRead, {tool: 'room_read_work', arguments: {roomId: 'commons', workItemId: 'my-new-task', brief: true}});
   assert.ok(result.items[0].sequence <= result.after);
   // Without the flag the same history yields no work pointer.
   const plain = accepted(await f.call({timeoutSec: 0}).result);

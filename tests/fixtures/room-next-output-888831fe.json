@@ -1,0 +1,296 @@
+{
+  "$defs": {
+    "nextRead": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "room_next",
+            "room_activation_pack",
+            "room_list_requests",
+            "room_read_work",
+            "room_read_request",
+            "room_read_result",
+            "room_read_public_review"
+          ]
+        },
+        "arguments": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "tool",
+        "arguments"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "properties": {
+    "contractVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "roomId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "viewerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "goal": {
+      "type": "string",
+      "maxLength": 800
+    },
+    "charterRevision": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "contentTrust": {
+      "type": "string"
+    },
+    "nextRead": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/nextRead"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ifIdle": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "invitation",
+            "paused",
+            "unavailable",
+            "no_invitation",
+            "public_review"
+          ]
+        },
+        "nextRead": {
+          "$ref": "#/$defs/nextRead"
+        }
+      },
+      "required": [
+        "status"
+      ]
+    },
+    "work": {
+      "type": "object",
+      "properties": {
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "evaluatedThrough": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evaluationScope": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reason": {
+                "type": "string"
+              },
+              "nextRead": {
+                "$ref": "#/$defs/nextRead"
+              },
+              "nextResultRead": {
+                "$ref": "#/$defs/nextRead"
+              },
+              "correction": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "nextAction": {
+                    "type": "string"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "reason",
+                  "nextAction",
+                  "truncated"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "revision",
+              "reason",
+              "nextRead"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 4
+        },
+        "nextRead": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nextRead"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "coverage",
+        "items",
+        "nextRead"
+      ],
+      "additionalProperties": false
+    },
+    "requests": {
+      "type": "object",
+      "properties": {
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "evaluatedThrough": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evaluationScope": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "nextRead": {
+                "$ref": "#/$defs/nextRead"
+              },
+              "savedAt": {
+                "type": "string"
+              },
+              "latestRecipientProgress": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "state",
+                  "at"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "revision",
+              "nextRead"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 4
+        },
+        "nextRead": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nextRead"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "coverage",
+        "items",
+        "nextRead"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contractVersion",
+    "roomId",
+    "viewerId",
+    "goal",
+    "charterRevision",
+    "contentTrust"
+  ],
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "required": [
+        "work"
+      ]
+    },
+    {
+      "required": [
+        "requests"
+      ]
+    }
+  ]
+}

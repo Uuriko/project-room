@@ -16,33 +16,36 @@ const tool = (name, description, inputSchema, readOnlyHint = true) => ({
 const idField = { type: "string", minLength: 1, maxLength: 128 };
 const roomIdField = { ...idField, description: "Room id this identity is linked to." };
 const nextReadSchema = schema({
-  tool: { type: "string", enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request", "room_read_result"] },
+  tool: { enum: ["room_next", "room_activation_pack", "room_list_requests", "room_read_work", "room_read_request", "room_read_result", "room_read_public_review"] },
   arguments: { type: "object" }
 }, ["tool", "arguments"]);
-const nextRead = { $ref: "#/$defs/nextRead" };
-const nextPage = items => schema({
-  coverage: { type: "string", enum: ["complete", "partial", "unavailable"] },
+const nextRead = { $ref: "#/$defs/read" };
+const nextPageSchema = schema({
+  coverage: { enum: ["complete", "partial", "unavailable"] },
   evaluatedThrough: { type: "integer", minimum: 0 },
   evaluationScope: { type: "string" },
   reason: { type: "string" },
-  items: { type: "array", items, maxItems: 4 },
+  items: { type: "array", maxItems: 4 },
   nextRead: { anyOf: [nextRead, { type: "null" }] }
 }, ["coverage", "items", "nextRead"]);
+const nextPage = items => ({ $ref: "#/$defs/page", properties: { items: { items } } });
+const nextId = { $ref: "#/$defs/id" };
 const roomNextOutput = {
-  $defs: { nextRead: nextReadSchema },
+  $defs: { read: nextReadSchema, page: nextPageSchema, id: idField },
   ...schema({
-    contractVersion: { type: "integer", const: 1 },
-    roomId: idField, viewerId: idField, goal: { type: "string", maxLength: 800 },
+    contractVersion: { const: 1 },
+    roomId: nextId, viewerId: nextId, goal: { type: "string", maxLength: 800 },
     charterRevision: { type: ["integer", "null"] }, contentTrust: { type: "string" },
     nextRead: { anyOf: [nextRead, { type: "null" }] },
-    ifIdle: { type: "object", properties: { status: { enum: ["invitation", "paused", "unavailable", "no_invitation", "public_review"] }, nextRead }, required: ["status"] },
+    ifIdle: { type: "object", properties: { status: { enum: ["invitation", "paused", "unavailable", "no_invitation", "public_review"] }, nextRead,
+      investigation: { type: "object" }, discoveryReview: { type: "object" } }, required: ["status"] },
     work: nextPage(schema({
-      id: idField, title: { type: "string", maxLength: 160 }, revision: { type: "integer", minimum: 0 },
+      id: nextId, title: { type: "string", maxLength: 160 }, revision: { type: "integer", minimum: 0 },
       reason: { type: "string" }, nextRead, nextResultRead: nextRead,
       correction: schema({ reason: { type: "string" }, nextAction: { type: "string" }, truncated: { type: "boolean" } },
         ["reason", "nextAction", "truncated"])
     }, ["id", "title", "revision", "reason", "nextRead"])),
-    requests: nextPage(schema({ id: idField, revision: { type: "integer", minimum: 0 }, nextRead,
+    requests: nextPage(schema({ id: nextId, revision: { type: "integer", minimum: 0 }, nextRead,
       savedAt: { type: "string" },
       latestRecipientProgress: schema({ state: { type: "string" }, at: { type: ["string", "null"] } }, ["state", "at"])
     }, ["id", "revision", "nextRead"]))
@@ -58,10 +61,15 @@ import { handoffPacketEnabled } from "./handoff-packet.mjs";
 
 export const hostedRoomTools = [
   tool("room_wait_for_attention", "Wait for new caller-addressed mentions, replies, DMs or formal requests after a saved inbox cursor. Normalized rooms only. Returns pointers or an explicit catch-up continuation; never acknowledges messages or starts an AI. timeoutSec defaults to 25, maximum 120; your host may cancel earlier. includeWork=true also returns kind=work pointers for tasks that now wait on you. Older obligations require separate inbox/work reads.", schema({roomId: roomIdField, after: {type: "integer", minimum: 0}, timeoutSec: {type: "integer", minimum: 0, maximum: 120}, includeWork: {type: "boolean"}}, ["roomId", "after"])),
-  { ...tool("room_next", "Use view:pickup for one preferred nextRead. Follow partial pages even when empty.", schema({
+  { ...tool("room_next", "Use view:pickup. Follow nextRead, then ifIdle.discoveryReview.nextRead or ifIdle.investigation.nextRead when dry. Continue partial pages.", schema({
     roomId: roomIdField, source: { type: "string", enum: ["work", "requests"] },
+    consideredDiscovery: { type: "string", maxLength: 4096, description: "Reuse after considering the offered findings." },
     cursor: { type: "string", minLength: 1, maxLength: 4096 }, view: { enum: ["pickup"] }
   }, ["roomId"])), outputSchema: roomNextOutput },
+  tool("room_read_project_discoveries", "Read private outside findings as a designated project reviewer. Pass nextCursor as after until null. After consideration, reuse the ifIdle.discoveryReview checkpoint on initial pickups.", schema({
+    roomId: roomIdField, offerId: idField, limit: { type: "integer", minimum: 1, maximum: 50, default: 5 },
+    after: { type: "string", maxLength: 160 }
+  }, ["roomId", "offerId"])),
   tool("room_receipt", "Check your exact Room operation ID. Returns committed event metadata only. Not recorded means absent at the observed head. Read only.", schema({
     roomId: idField, operationId: idField
   }, ["roomId", "operationId"])),

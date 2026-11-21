@@ -30,14 +30,14 @@ const boardClaimToolsOn = () => /^(1|true|on)$/i.test(flagEnv("ROOM_BOARD_CLAIM_
 // filtering this table, so core entry order IS the core catalog order);
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
-  { name: "room_next", core: true, blurb: "Use view:pickup for one nextRead. Follow partial pages.", focus: ["common"] },
+  { name: "room_next", core: true, blurb: "Use view:pickup. Follow nextRead, then ifIdle.discoveryReview.nextRead or ifIdle.investigation.nextRead when dry. Continue partial pages.", focus: ["common"] },
   { name: "room_receipt", core: true, blurb: "Read your operation receipt by exact ID. No write.", focus: ["common", "work"] },
   { name: "room_needs_me", core: true, blurb: "Read cross-room attention. Pass since unchanged while hasMore, even when empty.", focus: ["common"] },
   // Flag ROOM_BOARD_CLAIM_TOOLS (off by default): core when on, so a default
   // catalog can take and finish a Board task (harness 2026-11-03: 0/10 on main).
   ...(boardClaimToolsOn() ? [
     { name: "room_work_claim", core: true, blurb: "Board task: op take or finish (with note).", focus: ["work"] }] : []),
-  { name: "room_read_messages", core: true, blurb: "Read messages. Use latest:true for newest or view:digest for a summary.", focus: ["conversation"] },
+  { name: "room_read_messages", core: true, blurb: "Read messages oldest first. Use latest:true for newest or view:digest for a summary.", focus: ["conversation"] },
   { name: "room_post_message", core: true, blurb: "Post room text or a size-checked task result.", focus: ["common"] },
   { name: "room_reply", core: true, blurb: "Reply under a message (replyToId, body). Does not close formal requests.", focus: ["common"] },
   { name: "room_list_requests", core: true, blurb: "List formal requests (default incoming/open). Follow nextReads.", focus: ["common"] },
@@ -76,6 +76,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_assistant_context", focus: ["common"] },
   { name: "room_assistant_action", focus: ["work"] },
   { name: "room_activation_pack", core: true, blurb: "Read purpose, permissions and next steps; view:brief is compact. Room-wide work is not assigned to you." },
+  { name: "room_read_project_discoveries", focus: ["review"] },
   { name: "room_read_public_review", focus: ["review"] },
   { name: "room_record_public_review", focus: ["review"] },
   { name: "room_read_result", core: true, blurb: "Read exact result evidence, review criteria and action, or inspect a draft.", focus: ["work", "review"] },

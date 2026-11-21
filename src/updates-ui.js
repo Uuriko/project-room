@@ -74,7 +74,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   let actionable = 0;
   let cursor = null, hasMore = false, loadedPages = 0, incomplete = false;
   let visitedCursors = new Set();
-  let badgeMore = false, badgeIncomplete = false, loading = false;
+  let badgeMore = false, badgeIncomplete = false, loading = false, blockingRead = false;
   let refreshTimer = null, observed = null, painted = null;
   let ticket = 0;
   let interaction = 0;
@@ -107,8 +107,10 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     if (!currentContext()) return false;
     const mine = ++interaction, owned = owner;
     if (!isOpen()) showPage();
-    const restored = await load(saved.filter, { budget: Math.max(1, saved.pageBudget || 1) });
+    const focusAtStart = document.activeElement;
+    const restored = await load(saved.filter, { budget: Math.max(1, saved.pageBudget || 1), background: saved.filter === filter });
     if (!restored || mine !== interaction || !owns(owned) || !isOpen()) return false;
+    if (document.activeElement !== focusAtStart && document.activeElement !== document.body) return true;
     dialog.scrollTop = saved.scrollTop; list.scrollTop = saved.listScrollTop;
     const row = [...list.children].find(node => node.dataset.updateId === saved.itemId);
     const target = row?.querySelector(`[data-update-action="${saved.action}"]`)
@@ -159,7 +161,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         const label = `${operation?.action === action ? (operation.busy ? "Checking " : "Retry ") : ""}${ACTION_LABELS[action]}`;
         button.textContent = label;
         button.setAttribute("aria-label", `${label} ${items.find(item => item.id === row.dataset.updateId)?.title || "update"}`);
-        button.disabled = loading || (!!operation && (operation.action !== action || (operation.busy && action !== "open")));
+        button.disabled = (loading && blockingRead) || (!!operation && (operation.action !== action || (operation.busy && action !== "open")));
       }
     }
   }
@@ -176,7 +178,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     decisions.hidden = filter === "mentions" || Boolean(onlyDuplicates);
   }
   if (attention) new MutationObserver(syncDecisionRows).observe(attention, { childList: true, subtree: true });
-  function paint() {
+  function paint({ keepPosition = false } = {}) {
     syncDecisionRows();
     for (const button of tabs.querySelectorAll("[role=tab]")) {
       const on = button.dataset.updateFilter === filter;
@@ -186,6 +188,10 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     const signature = JSON.stringify([filter, items, [...operations.keys()]]);
     if (signature === painted) { paintOperations(); paintPaging(); return; }
     painted = signature;
+    // Capture the control in use at repaint time, including focus moved while the read was pending.
+    const focused = isOpen() && list.contains(document.activeElement) ? document.activeElement : null;
+    const focusedRow = focused?.closest("[data-update-id]");
+    const scroll = keepPosition || focused ? [dialog.scrollTop, list.scrollTop] : null;
     list.replaceChildren();
     const rows = items.filter(item => !attention || item.kind !== "access_request");
     // A committed-but-lost Done may have left this filter. Keep only a neutral
@@ -199,8 +205,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       empty.textContent = nativeAttention()?(hasMore?'No conversation or work items in the loaded pages yet. Continue to check this window.':'No conversation or work items found in the checked sources.'):incomplete ? "No matching updates are loaded yet. Some sources are unavailable."
         : hasMore ? "No matching updates in the loaded pages yet."
           : filter === "needs" ? "Nothing needs you." : "Nothing in this filter.";
-      list.append(empty); paintPaging();
-      return;
+      list.append(empty);
     }
     for (const item of rows) {
       const row = document.createElement("li");
@@ -222,7 +227,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         }) : ""].filter(Boolean).join(" · ");
         copy.append(meta);
       }
-      const runtime = ["waiting_receiver", "claimed", "started", "start_unknown"].includes(item.reviewRuntime?.status)
+      const runtime = ["waiting_receiver", "wake_acknowledged", "claimed", "started", "start_unknown"].includes(item.reviewRuntime?.status)
         ? reviewRuntimeLabel(item.reviewRuntime.status) : "";
       if (runtime || item.kind === "review_requested") {
         const cue = document.createElement("p");
@@ -256,9 +261,16 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       list.append(row);
     }
     paintOperations(); paintPaging();
+    if (scroll) [dialog.scrollTop, list.scrollTop] = scroll;
+    if (focusedRow && document.activeElement === document.body) {
+      const row = [...list.children].find(node => node.dataset.updateId === focusedRow.dataset.updateId);
+      const replacement = row?.querySelector(`[data-update-action="${focused.dataset.updateAction}"]:enabled`);
+      const fallback = nativeAttention() ? dialog.querySelector("#updates-title") : tabs.querySelector('[aria-selected="true"]');
+      (replacement ?? fallback)?.focus({ preventScroll: true });
+    }
   }
   async function loadNative({append=false,budget=1,notice="",background=false}={}){
-    const owned=currentContext();if(!owned||append&&(loading||!hasMore||!cursor))return false;const mine=++ticket,current=()=>mine===ticket&&owns(owned);loading=true;if(!background)paintOperations();paintPaging();status.textContent='Loading attention…';
+    const owned=currentContext();if(!owned||append&&(loading||!hasMore||!cursor))return false;const mine=++ticket,current=()=>mine===ticket&&owns(owned);loading=true;blockingRead=!background;paintOperations();paintPaging();status.textContent='Loading attention…';
     try{const merged=new Map((append?items:[]).map(item=>[item.id,item])),seen=append?new Set(visitedCursors):new Set();let after=append?cursor:null,more=false,pages=append?loadedPages:0;
       for(let step=0;step<(append?1:Math.max(1,budget));step++){
         const page=await client.roomRead('/needs-me'+(after?'?cursor='+encodeURIComponent(after):''));if(!page||!current())return false;
@@ -266,8 +278,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         for(const source of page.items){if(!source||typeof source.id!=='string'||typeof source.kind!=='string'||typeof source.summary!=='string')throw Error('Could not verify this attention item.');const item={id:source.kind+':'+source.id,roomId:source.roomId,kind:source.kind,title:source.summary,state:'open',reviewRuntime:source.reviewRuntime,sourceRef:source.kind==='work'?{workItemId:source.id}:{messageId:source.id}};merged.set(item.id,item);}
         pages++;more=!page.complete;const following=page.cursor;if(more&&(typeof following!=='string'||!following||seen.has(following)))throw Error('Attention page did not advance. Refresh to continue.');after=following;if(!more)break;seen.add(after);
       }
-      items=[...merged.values()];cursor=after;hasMore=more;loadedPages=pages;visitedCursors=seen;incomplete=true;filter='needs';actionable=items.length;badgeMore=hasMore;badgeIncomplete=false;loading=false;paintBadge();paint();status.textContent=notice;return true;
-    }catch(error){if(!current())return false;if(error?.code==='stale_needs_me_cursor'&&(append||budget>1))return loadNative({notice:'Attention changed. Showing a fresh window; continue from here.'});status.textContent=error?.message||'Could not load attention. Retry when connected.';return false;}finally{if(current()){loading=false;paintOperations();paintPaging();}}
+      items=[...merged.values()];cursor=after;hasMore=more;loadedPages=pages;visitedCursors=seen;incomplete=true;filter='needs';actionable=items.length;badgeMore=hasMore;badgeIncomplete=false;loading=false;paintBadge();paint({keepPosition:background});status.textContent=notice;return true;
+    }catch(error){if(!current())return false;if(error?.code==='stale_needs_me_cursor'&&(append||budget>1))return loadNative({background,notice:'Attention changed. Showing a fresh window; continue from here.'});status.textContent=error?.message||'Could not load attention. Retry when connected.';return false;}finally{if(current()){loading=false;paintOperations();paintPaging();}}
   }
   async function load(next = filter, { append = false, budget = next === filter ? Math.max(1, loadedPages) : 1, notice = "", background = false } = {}) {
     if(nativeAttention())return loadNative({append,budget,notice,background});
@@ -279,7 +291,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     const pageBudget = Number.isSafeInteger(budget) && budget > 0 ? budget : 1;
     const startCursor = append ? cursor : null;
     const priorItems = append ? items : [];
-    loading = true; if (!background) paintOperations(); paintPaging(); status.textContent = "Loading updates…";
+    loading = true; blockingRead = !background; paintOperations(); paintPaging(); status.textContent = "Loading updates…";
     const partialSources = page => Object.values(page?.incompleteSources ?? {}).some(Boolean);
     const readWindow = async () => {
       const merged = new Map(priorItems.map(item => [item.id, item]));
@@ -320,14 +332,14 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       actionable = (counted.items ?? []).filter(item => item.state === "unread" || item.state === "read").length;
       badgeMore = counted.hasMore === true;
       badgeIncomplete = next === "needs" ? incomplete : partialSources(counted);
-      loading = false; paintBadge(); paint();
+      loading = false; paintBadge(); paint({ keepPosition: background });
       status.textContent = window.stalled ? "Loading stopped because the page did not advance. Refresh updates to continue." : notice;
       return true;
     } catch (error) {
       if (!current()) return false;
       if (error?.code === "cursor_stale" && (append || pageBudget > 1)) {
         // One fresh first-page restart, not an unbounded replay of changed pages.
-        return load(next, { budget: 1, notice: "The list changed. Showing the newest updates; load more to continue." });
+        return load(next, { budget: 1, background, notice: "The list changed. Showing the newest updates; load more to continue." });
       }
       status.textContent = error?.message || "Could not load updates. Try again.";
       return false;
@@ -394,10 +406,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     operations.delete(item.id);
     const latest = items.find(entry => entry.id === item.id);
     if (latest?.basisToken !== operation.expectedBasis) {
-      if (!latest) {
-        paint();
-        tabs.querySelector(`[data-update-filter="${filter}"]`)?.focus();
-      } else paintOperations();
+      if (!latest) paint();
+      else paintOperations();
       status.textContent = latest ? "Earlier action confirmed. This update changed; review it before acting again."
         : "Earlier action confirmed. That update is no longer in this list.";
       return;
@@ -426,7 +436,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     if (!isOpen()) showPage();
     const tab = tabs.querySelector(`[data-update-filter="${next}"]`);
     if (focus) (nativeAttention() ? dialog.querySelector("#updates-title") : tab)?.focus();
-    void load(next);
+    // Keep exact cached actions reachable while refreshing the current filter.
+    void load(next, { background: next === filter });
   }
   loadMore.addEventListener("click", async event => {
     if (loading) return;
@@ -501,26 +512,11 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     if (!force && signature === observed) return;
     observed = signature;
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(async () => {
+    refreshTimer = setTimeout(() => {
       refreshTimer = null;
       if (document.hidden || !owns(value) || operations.size) { observed = null; return; }
       if (loading) { sync(true); return; }
-      const before = document.activeElement;
-      const row = before?.closest?.("[data-update-id]");
-      const saved = row ? capture(row.dataset.updateId, before.dataset.updateAction) : null;
-      const scroll = dialog.scrollTop, mine = interaction;
-      let moved = false;
-      const moving = event => { if (event.target !== before && event.target !== document.body) moved = true; };
-      document.addEventListener("focusin", moving);
-      try {
-        await load(filter, { background: true });
-        if (!owns(value) || mine !== interaction || !isOpen() || moved) return;
-        dialog.scrollTop = scroll;
-        if (saved) {
-          const replacement = [...list.children].find(node => node.dataset.updateId === saved.itemId);
-          (replacement?.querySelector(`[data-update-action="${saved.action}"]`) ?? (nativeAttention()?dialog.querySelector('#updates-title'):tabs.querySelector('[aria-selected="true"]')))?.focus({ preventScroll: true });
-        }
-      } finally { document.removeEventListener("focusin", moving); }
+      void load(filter, { background: true });
     }, 200);
   }
   document.addEventListener("attention-changed", () => sync(true));

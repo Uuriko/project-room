@@ -5,14 +5,26 @@ export const MAX_BODY_CHARS = 6000;
 export const TRAILER_LINES = 10;
 
 export class TurnRecorder {
+  #lastToolTextOffset = 0;
+
   constructor() { this.text = ""; this.tools = new Map(); this.plan = []; }
+
+  // A tool start separates progress narration from the subsequent answer.
+  // Tool status updates may arrive late and do not start a new segment.
+  get finalText() { return this.text.slice(this.#lastToolTextOffset); }
+
   update(update) {
     switch (update?.sessionUpdate) {
       // Structured adapter notices can contain private local configuration paths.
       // They are diagnostics, never Room replies or saved reply receipts.
       case "notice": break;
       case "agent_message_chunk": if (update.content?.type === "text") this.text += update.content.text; break;
-      case "tool_call": this.tools.set(update.toolCallId, { title: update.title ?? update.kind ?? "tool", status: update.status ?? "pending" }); break;
+      case "tool_call":
+        if (typeof update.toolCallId === "string" && update.toolCallId && !this.tools.has(update.toolCallId)) {
+          this.#lastToolTextOffset = this.text.length;
+        }
+        this.tools.set(update.toolCallId, { title: update.title ?? update.kind ?? "tool", status: update.status ?? "pending" });
+        break;
       case "tool_call_update": {
         const tool = this.tools.get(update.toolCallId) ?? { title: update.title ?? "tool", status: "pending" };
         this.tools.set(update.toolCallId, { title: update.title ?? tool.title, status: update.status ?? tool.status });

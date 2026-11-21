@@ -1,4 +1,4 @@
-import { openSearch } from "./room-chrome.mjs";
+import { openConversation, openSearch } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickWorkAction } from "./room-chrome.mjs";
 // Disposable local participants only; no external runtime or evidence is fetched.
@@ -39,7 +39,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const login = async (page, key) => {
       await page.goto(origin);
       await signInFixture(page, key);
-      await page.locator("#main").waitFor({ state: "visible" });
+      await openConversation(page);
     };
     await login(page, fixture.keys.owner);
     const form = page.locator("#new-work-form"), review = page.locator("#require-verification"), decision = page.locator("#require-decision");

@@ -5,7 +5,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { messageAction, openComposerOptions } from "./room-chrome.mjs";
+import { messageAction, openComposerOptions, openConversation } from "./room-chrome.mjs";
 
 async function setup(t, mobile = false, thread = false) {
   const f = createAcceptanceFixture();
@@ -23,7 +23,7 @@ async function setup(t, mobile = false, thread = false) {
   t.after(() => assert.deepEqual(errors, []));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await signInFixture(page, f.keys.owner);
-  await page.locator("#main").waitFor({ state: "visible" });
+  await openConversation(page);
   await page.locator("#message-input").fill("Keep my room draft");
   if (thread) {
     await messageAction(page, "test-welcome", "reply");

@@ -24,6 +24,23 @@ const text = (value, maximum = 4096) => typeof value === "string" && value.lengt
 const revision = value => Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER;
 const requireValid = (valid, message) => { if (!valid) throw new Error(message); };
 
+export function validReceiverRouteScope(scope) {
+  if (!scope || typeof scope !== "object" || Array.isArray(scope)
+    || Object.keys(scope).some(key => !["requesters", "workItems", "requests", "allowStandaloneRequests"].includes(key))
+    || scope.allowStandaloneRequests !== undefined && typeof scope.allowStandaloneRequests !== "boolean") return false;
+  return [scope.requesters, scope.workItems, scope.requests].every(items =>
+    Array.isArray(items) && items.length <= 20 && new Set(items).size === items.length && items.every(id))
+    && scope.requesters.length > 0
+    && Boolean(scope.workItems.length || scope.requests.length || scope.allowStandaloneRequests);
+}
+
+export function checkReceiverRoute(scope, { requesterId, workItemId, id: requestMessageId }) {
+  if (!scope.requesters.includes(requesterId)) return "requester_outside_scope";
+  if (scope.requests.includes(requestMessageId) || scope.workItems.includes(workItemId)
+    || scope.allowStandaloneRequests === true && workItemId === null) return "matches_scope";
+  return "work_outside_scope";
+}
+
 // Browser drafts have a separate identity for each explicit mode, even inside
 // one conversation. Keys cannot collide with a canonical message ID.
 export function replyDraftKey(mode, threadId = null) {

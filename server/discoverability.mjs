@@ -116,6 +116,9 @@ const CLAIM_VALIDATE_BODY = Object.freeze({ required: true, content: { "applicat
 
 const queryParam = (name, schema, extra = {}) => Object.freeze({ name, in: "query", schema, ...extra });
 const ROOM_EVENTS_QUERY = Object.freeze([
+  queryParam("operationId", { type: "string", minLength: 1, maxLength: 128 }, {
+    description: "Read one caller-owned operation receipt. Use alone or with limit=1 for compatibility with older servers."
+  }),
   queryParam("after", { type: "integer", minimum: 0, default: 0 }, { description: "Sequence strictly before the page. Pass the previous response's next." }),
   queryParam("limit", { type: "integer", minimum: 1, maximum: 100, default: 100 }),
   queryParam("actor", { type: "string" }, { description: "Only events by this member." }),
@@ -126,6 +129,35 @@ const ROOM_EVENTS_QUERY = Object.freeze([
   queryParam("compact", { type: "string", enum: ["1", "0", "true", "false"] }, { description: "1 or true drops envelope fields a poller does not act on." }),
   queryParam("tail", { type: "integer", minimum: 1, maximum: 200 }, { description: "Newest N events, sent alone. Combining tail with other event filters is 422." }),
 ]);
+const operationReceiptVariant = status => {
+  const properties = {
+    contractVersion: { type: "integer", enum: [1] },
+    roomId: { type: "string" }, viewerId: { type: "string" }, operationId: { type: "string" },
+    checkedThrough: { type: "integer", minimum: 0 }, status: { type: "string", enum: [status] },
+    currentStateVerified: { type: "boolean", enum: [false] },
+    ...(status === "recorded" ? {
+      eventId: { type: "string" }, eventType: { type: "string" }, sequence: { type: "integer", minimum: 1 }
+    } : {}),
+  };
+  return { type: "object", additionalProperties: false, required: Object.keys(properties), properties };
+};
+const ROOM_EVENTS_RESPONSES = {
+  "200": {
+    description: "An event page, or exact operation metadata for the current member.",
+    content: { "application/json": { schema: { oneOf: [
+      { type: "object", required: ["events", "next", "hasMore"], properties: {
+        events: { type: "array", items: { type: "object" } },
+        next: { type: "integer" }, hasMore: { type: "boolean" },
+      } },
+      operationReceiptVariant("recorded"),
+      operationReceiptVariant("not_recorded"),
+    ] } } },
+  },
+  "422": {
+    description: "invalid_operation_selection for an invalid, repeated or mixed operationId selection. invalid_event_cursor for invalid event-window parameters.",
+    content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } },
+  },
+};
 const NEEDS_ME_QUERY = Object.freeze([
   queryParam("roomId", { type: "string" }, { description: "Optional. Scope the read to one room." }),
 ]);
@@ -237,6 +269,11 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe",
     { query: NEEDS_ME_QUERY }),
   route("/api/verdict-inbox", ["GET"], "identity-secret", "Sectioned verdict inbox for this identity: needs your verdict, returned to you, waiting on a worker, and recently decided. An account session reads the same set with non-human rows omitted.", "getVerdictInbox"),
+  route("/api/project-offers/{offerId}/discoveries", ["POST"], "identity-secret",
+    "File a private evidence finding for the published project.", "fileProjectDiscovery", { projectDiscovery: "file" }),
+  route("/api/rooms/{roomId}/project-offers/{offerId}/discoveries", ["GET", "HEAD"], "room-member",
+    "Page through recorded findings as a designated project reviewer.", "listProjectDiscoveries",
+    { projectDiscovery: "review", operationIds: { HEAD: "headProjectDiscoveries" } }),
   // Public contribution work: owner consent, outside claims and immutable evidence.
   route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",
     { operationIds: { HEAD: "headPublicWorkTasks" }, publicWork: "list" }),
@@ -326,7 +363,7 @@ route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "De
   // truth is docs/openapi.yaml and the handlers in server/http.mjs.
   route("/api/rooms/{roomId}/events", ["GET"], "room-member",
     "Read the room event log after a sequence. Pass the previous response's next back as after. afterSequence is refused (422 invalid_event_cursor). tail is newest-N and must be sent alone.",
-    "getRoomEvents", { query: ROOM_EVENTS_QUERY }),
+    "getRoomEvents", { query: ROOM_EVENTS_QUERY, responseOverrides: { GET: ROOM_EVENTS_RESPONSES } }),
   route("/api/rooms/{roomId}/commands", ["POST"], "room-member",
     "Append one event command. Body is {id, type, data} plus optional causationId. The same id and input returns the original receipt (200); a different input is 409. First commit is 201.",
     "postRoomCommand",
@@ -440,7 +477,7 @@ function operationResponses(entry, method) {
       : { $ref: `#/components/responses/${name}` };
   }
   if (readsJsonBody(entry, method)) errors["415"] = { $ref: "#/components/responses/UnsupportedMediaType" };
-  return { ...success, ...errors };
+  return { ...success, ...errors, ...entry.responseOverrides?.[method] };
 }
 
 const publicWorkSchemas = {
@@ -450,6 +487,8 @@ const publicWorkSchemas = {
       schema: { const: "public-work-task/1" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
       namespaceId: { type: "string" }, repositoryUrl: { type: "string", format: "uri" }, repositoryRef: { type: "string" },
       title: { type: "string" }, acceptanceCriteria: { type: "array", items: { type: "string" } }, files: { type: "array", items: { type: "string" } },
+      summary: { type: "string" }, exclusions: { type: "array", items: { type: "string" } },
+      deadline: { type: ["string", "null"], format: "date-time" },
       reward: { type: "object" }, settlement: { type: "object" },
       claim: { type: "object", required: ["state", "generation", "identityId", "leaseExpiresAt", "submittedReceiptId"], properties: {
         state: { enum: ["unclaimed", "claimed", "submitted", "verified"] }, generation: { type: "integer", minimum: 0 },
@@ -480,6 +519,48 @@ const publicWorkSchemas = {
     action: { enum: ["claimed", "renewed", "released", "submitted"] }, task: { $ref: "#/components/schemas/PublicWorkTask" }, receipt: { $ref: "#/components/schemas/PublicWorkReceipt" },
   } },
 };
+const findingFields = {
+  sourceUrl: { type: "string", format: "uri", maxLength: 2000, description: "Public HTTPS source for this observation." },
+  criterion: { type: "string", maxLength: 1000, description: "Exact published project acceptance criterion." },
+  observation: { type: "string", maxLength: 2000 },
+  nextAction: { type: "string", maxLength: 1000 },
+};
+const findingVersionFields = {
+  expectedTermsVersion: { type: "integer", minimum: 1 }, expectedRevision: { type: "integer", minimum: 1 },
+};
+const discoverySchemas = {
+  ProjectDiscoveryInput: { type: "object", additionalProperties: false,
+    required: ["requestId", ...Object.keys(findingVersionFields), ...Object.keys(findingFields)],
+    properties: { requestId: { type: "string" }, ...findingVersionFields, ...findingFields } },
+  ProjectDiscoveryReceipt: { type: "object",
+    required: ["status", "receiptId", "offerId", "termsVersion", "revision", "finding", "recordedAt"],
+    properties: { status: { const: "recorded" }, receiptId: { type: "string" }, offerId: { type: "string" },
+      termsVersion: { type: "integer" }, revision: { type: "integer" }, recordedAt: { type: "string", format: "date-time" },
+      finding: { type: "object", required: Object.keys(findingFields), properties: findingFields } } },
+};
+
+function projectDiscoveryOperation(entry, method) {
+  if (!entry.projectDiscovery) return {};
+  const filing = entry.projectDiscovery === "file";
+  const receipt = { $ref: "#/components/schemas/ProjectDiscoveryReceipt" };
+  const schema = filing ? receipt : { type: "object", required: ["offerId", "findings", "nextCursor"], properties: {
+    offerId: { type: "string" }, findings: { type: "array", items: receipt }, nextCursor: { type: ["string", "null"] },
+  } };
+  const responses = operationResponses({ ...entry, successStatuses: ["200"] }, method);
+  responses["200"] = { description: filing ? "Recorded receipt or exact replay." : "Page of findings, newest first.",
+    ...(method === "HEAD" ? {} : { content: { "application/json": { schema } } }) };
+  responses["422"] = { description: filing ? "Invalid finding fields or criterion." : "Invalid query or stale, foreign, or malformed cursor." };
+  if (filing) return { description: "Use your saved identity and a stable requestId. Use the version and revision from pickup. Exact retries return the recorded receipt. Capacity is five findings per identity and 100 per project in a rolling 24-hour window.",
+    security: [{ identityBearer: [] }], responses,
+    requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ProjectDiscoveryInput" } } } } };
+  return { description: "Only designated project reviewers can read findings. Use a room credential or bound browser session. Scoped API keys require rooms:read. Continue with the returned nextCursor as after until it is null.",
+    security: [{ roomBearer: [] }, { roomBrowserSession: [] }, { accountBrowserSession: [] }], responses, queryParameters: [
+      { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 50, default: 20 } },
+      { name: "after", in: "query", schema: { type: "string" }, description: "Opaque continuation cursor from this project's preceding page." },
+      { name: "auth", in: "query", schema: { enum: ["room", "account"] }, description: "Select browser session. Account mode requires the current X-Session-Binding header." },
+    ] };
+}
+
 function publicWorkOperation(entry, method) {
   const kind = entry.publicWork;
   if (!kind) return {};
@@ -506,7 +587,33 @@ function publicWorkOperation(entry, method) {
   }
   if (kind === "task" || kind === "enable") schema = ref("PublicWorkTask");
   else if (kind === "receipt") schema = ref("PublicWorkReceipt");
-  else if (kind === "list") schema = { type: "object", required: ["tasks", "nextCursor"], properties: { tasks: { type: "array", items: ref("PublicWorkTask") }, nextCursor: { type: ["string", "null"] } } };
+  else if (kind === "list") schema = { type: "object", required: ["tasks", "nextCursor"], properties: {
+    tasks: { type: "array", items: ref("PublicWorkTask") }, nextCursor: { type: ["string", "null"] },
+    claimableCount: { type: "integer", minimum: 0 },
+    nextAction: { type: "object", required: ["kind"], description: "Present in pickup view.", properties: {
+      kind: { enum: ["claim", "inspect_published_repository", "inspect_published_project", "pickup_page_exhausted", "no_eligible_public_task"] },
+      method: { const: "POST" }, path: { type: "string" },
+      body: { type: "object", required: ["expectedTermsVersion"], properties: { expectedTermsVersion: { type: "integer", minimum: 1 } } },
+      requires: { type: "array", items: { enum: ["saved_identity", "stable_request_id"] } },
+      repositoryUrl: { type: "string", format: "uri" },
+      project: { type: "object", required: ["id", "version", "revision", "path", "title", "summary", "acceptanceCriteria", "rewardKind"], properties: {
+        id: { type: "string" }, version: { type: "integer", minimum: 1 }, revision: { type: "integer", minimum: 1 }, path: { type: "string" },
+        title: { type: "string" }, summary: { type: "string" }, acceptanceCriteria: strings, rewardKind: { enum: ["unpaid", "work_trade", "cash"] },
+        repositoryUrl: { type: "string", format: "uri" }, submissionUrl: { type: "string", format: "uri" },
+      } },
+      evidenceLead: { type: "object", required: ["taskId", "title", "receiptId", "taskPath", "receiptPath", "artifactPath"], properties: {
+        taskId: { type: "string" }, title: { type: "string" }, receiptId: { type: "string" },
+        taskPath: { type: "string" }, receiptPath: { type: "string" }, artifactPath: { type: "string" },
+      } },
+      submitFinding: { type: "object", required: ["method", "path", "body", "inputRequired", "requires", "identity"], properties: {
+        method: { const: "POST" }, path: { type: "string" }, identity: { type: "string" },
+        body: { type: "object", required: Object.keys(findingVersionFields), properties: findingVersionFields },
+        inputRequired: { type: "array", items: { enum: ["requestId", ...Object.keys(findingFields)] } },
+        requires: { type: "array", items: { const: "saved_identity" } },
+      } },
+      investigation: { type: "string" },
+    } },
+  } };
   else if (kind === "match") schema = { type: "object", required: ["recommendations", "claim", "inspected", "hasMore", "nextCursor", "supportedRewards"], properties: {
     recommendations: { type: "array", maxItems: 5, items: { type: "object", required: ["task", "reasons"], properties: { task: ref("PublicWorkTask"), reasons: { ...strings, maxItems: 40 } } } },
     claim: { anyOf: [ref("PublicWorkOutcome"), { type: "null" }] }, inspected: { type: "integer", minimum: 0 }, hasMore: { type: "boolean" }, nextCursor: { type: ["string", "null"] }, supportedRewards: { type: "array", items: { const: "volunteer" } },
@@ -518,6 +625,10 @@ function publicWorkOperation(entry, method) {
   const op = { responses, security: entry.auth === "none" ? [] : [{ identityBearer: [] }] };
   if (method === "POST") op.requestBody = { required: true, content: { "application/json": { schema: { type: "object", additionalProperties: false, required, properties: props, ...(kind === "match" ? { if: { required: ["autoClaim"], properties: { autoClaim: { const: true } } }, then: { required: ["requestId"] } } : {}) } } } };
   if (kind === "list") op.queryParameters = [
+    { name: "view", in: "query", schema: { type: "string", enum: ["pickup"] },
+      description: "Return one eligible unpaid task and its current claim action or a public fallback. Requires roomId, accepts after, and replaces limit and claimable." },
+    { name: "roomId", in: "query", schema: { type: "string" },
+      description: "Select only published tasks for this room. Required when view is pickup." },
     { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
     { name: "after", in: "query", schema: { type: "string" }, description: "Use nextCursor from the prior page." },
   ];
@@ -623,7 +734,7 @@ export function buildOpenApiJson({ origin }) {
           name: m[1], in: "path", required: true, schema: { type: "string" },
         }));
       }
-      const publicSpec = { ...publicWorkOperation(entry, method), ...publicWorkReviewOperation(entry, method) };
+      const publicSpec = { ...projectDiscoveryOperation(entry, method), ...publicWorkOperation(entry, method), ...publicWorkReviewOperation(entry, method) };
       const queryParameters = publicSpec.queryParameters; delete publicSpec.queryParameters;
       Object.assign(op, publicSpec);
       if (queryParameters) op.parameters = [...(op.parameters ?? []), ...queryParameters];
@@ -665,6 +776,7 @@ export function buildOpenApiJson({ origin }) {
       securitySchemes: { identityBearer: { type: "http", scheme: "bearer", description: "Saved global agent identity secret." }, roomBearer: { type: "http", scheme: "bearer", description: "Room credential, linked identity or scoped API key." }, roomBrowserSession: { type: "apiKey", in: "cookie", name: "room_session" }, accountBrowserSession: { type: "apiKey", in: "cookie", name: "account_session", description: "Select account auth and supply current X-Session-Binding." } },
       responses: errorComponents(),
       schemas: {
+        ...discoverySchemas,
         ...publicWorkSchemas,
         ...publicWorkReviewSchemas,
         NextStep: {

@@ -3,16 +3,18 @@ import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { validId } from "../../src/events.js";
 
-const HELP = "room next [--source work|requests] [--cursor TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow each partial source's nextRead.";
+const HELP = "room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow each partial source's nextRead.";
 
 function selectionOf(argv) {
   const args = {};
+  const options = new Map([["--source", "source"], ["--cursor", "cursor"], ["--considered-discovery", "consideredDiscovery"]]);
   for (let i = 0; i < argv.length; i += 2) {
-    const key = argv[i] === "--source" ? "source" : argv[i] === "--cursor" ? "cursor" : null;
+    const key = options.get(argv[i]);
     if (!key || Object.hasOwn(args, key) || argv[i + 1] === undefined) throw new Error(HELP);
     args[key] = argv[i + 1];
   }
   if (args.source !== undefined && !["work", "requests"].includes(args.source)
+    || args.consideredDiscovery !== undefined && (args.source || !/^[A-Za-z0-9_-]{1,4096}$/.test(args.consideredDiscovery))
     || args.cursor !== undefined && (!args.source || !/^[A-Za-z0-9_-]{1,4096}$/.test(args.cursor)))
     throw new Error(HELP);
   return args;
@@ -62,7 +64,8 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
       const read = value[source]?.nextRead;
       const args = read?.arguments;
       if (read?.tool === "room_next" && args?.source === source && args.roomId === config.roomId
-          && Object.keys(args).every(key => ["roomId", "source", "cursor"].includes(key))
+          && Object.keys(args).every(key => ["roomId", "source", "cursor", "view"].includes(key))
+          && (args.view === undefined || args.view === "pickup")
           && (args.cursor === undefined || /^[A-Za-z0-9_-]{1,4096}$/.test(args.cursor))) {
         read.command = ["room", "next", "--source", source, ...(args.cursor ? ["--cursor", args.cursor] : [])];
       }
@@ -90,6 +93,10 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
         row.nextRead.command = ["room", "read", args.requestMessageId];
       }
     }
+    // The wire schema keeps newer exact reads in the open ifIdle extension.
+    // Shell consumers have always followed the preferred action at nextRead.
+    if (value.nextRead === null)
+      value.nextRead = value.ifIdle?.discoveryReview?.nextRead ?? value.ifIdle?.investigation?.nextRead ?? null;
     const output = JSON.stringify(value);
     if (output.includes(secret) || output.includes(config.token)) {
       err("Room returned invalid credential content.");

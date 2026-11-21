@@ -9,6 +9,9 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
 import { assertPrivatePath, atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
 import { validId } from "../src/events.js";
+import { checkReceiverRoute as checkMuseRoute } from "../src/reply-requests.js";
+
+export { checkMuseRoute };
 
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const ids = value => Array.isArray(value) && value.length <= 20 && new Set(value).size === value.length && value.every(validId);
@@ -29,9 +32,8 @@ export function museHandoffPolicy(policy, connection) {
 }
 
 function matches(request, policy) {
-  return request?.status === "open" && request.recipientId === policy.memberId && policy.requesters.includes(request.requesterId)
-    && (policy.requests.includes(request.id) || policy.workItems.includes(request.workItemId)
-      || policy.allowStandaloneRequests === true && request.workItemId === null);
+  return request?.status === "open" && request.recipientId === policy.memberId
+    && checkMuseRoute(policy, request) === "matches_scope";
 }
 
 export function museSeenAction(handoff, roomId) {
@@ -73,7 +75,7 @@ async function inspect(client, policy, after, signal, receiverAck = false) {
   return { next, through };
 }
 
-export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, setWaiting = () => {} }) {
+export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, setWaiting = () => {} }) {
   let state = checkpoint;
   const remember = (after, inFlight = null) => { state = { after, inFlight }; save(state); };
   const offer = async handoff => {
@@ -128,7 +130,11 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
     for (;;) {
       signal.throwIfAborted();
       let change;
-      try { change = await client.waitForChange(state.after, { timeoutMs: 12000, requestHints: true, signal }); }
+      try {
+        const { requesters, workItems, requests, allowStandaloneRequests } = policy;
+        change = await client.waitForChange(state.after, { timeoutMs: 12000, requestHints: true, signal,
+          ...(advertiseScope ? { receiverScope: { requesters, workItems, requests, allowStandaloneRequests } } : {}) });
+      }
       catch (error) { throw Object.assign(error, { handoffStage: "room_stream" }); }
       if (!change.changed) {
         if (integer(change.through) && change.through > state.after) remember(change.through);
@@ -263,14 +269,26 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
 }
 
 async function main([configFile, connectionDirectory, mode, ...extra]) {
-  const receiverAck = extra.length === 1 && extra[0] === "--receiver-ack" && mode === "--stay-armed";
-  if (extra.length && !receiverAck || mode !== undefined && !["--once", "--stay-armed", "--recover"].includes(mode) || !isAbsolute(configFile ?? "")
+  const routeCheck = mode === "--check-route";
+  const receiverAck = extra.includes("--receiver-ack"), advertiseScope = extra.includes("--advertise-scope");
+  const armedFlags = mode === "--stay-armed" && new Set(extra).size === extra.length
+    && extra.every(flag => flag === "--receiver-ack" || flag === "--advertise-scope");
+  if (extra.length && !armedFlags && !routeCheck || mode !== undefined && !["--once", "--stay-armed", "--recover", "--check-route"].includes(mode) || !isAbsolute(configFile ?? "")
     || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack] | --recover]");
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack] [--advertise-scope] | --recover | --check-route REQUESTER WORK_ITEM_OR_DASH [REQUEST_ID]]");
   const directory = dirname(realpathSync(configFile));
   const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
   assertPrivatePath(directory, true);
   const policy = museHandoffPolicy(readPrivateJson(configFile, 8192), connection);
+  if (routeCheck) {
+    const [requesterId, workItem, id] = extra;
+    if (extra.length < 2 || extra.length > 3 || !validId(requesterId)
+      || workItem !== "-" && !validId(workItem) || id !== undefined && !validId(id))
+      throw Error("Route check requires a requester, a work item or -, and optionally an exact request id");
+    const status = checkMuseRoute(policy, { requesterId, workItemId: workItem === "-" ? null : workItem, id });
+    console.log(JSON.stringify({ status, liveness: "unknown" }));
+    return;
+  }
   const owner = new WatchJournal(join(directory, mode === "--recover" ? "recovery-watch" : "watch"));
   const stop = new AbortController();
   const interrupt = () => stop.abort();
@@ -283,7 +301,7 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
       : await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
         onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
         run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
-          signal, receiverAck, wait: mode !== "--once" }) });
+          signal, receiverAck, advertiseScope, wait: mode !== "--once" }) });
     if (mode === "--stay-armed") {
       if (result.status === "handoff") result.offeredAt = new Date().toISOString();
       atomicPrivateJson(statusFile, { pid: process.pid, ...result });

@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { replyFollowUp } from "../src/reply-requests.js";
 
 const WINDOW = 100;
 
@@ -180,4 +181,32 @@ test("recent and full snapshots preserve visible history, counts and older pins 
  assert.ok(after.state.pins.some(pin=>pin.messageId===pinned));
  assert.deepEqual(all.state.messages,full.state.messages);
  assert.equal(JSON.stringify(after).includes('Hidden private message.'),false);
+});
+
+test("browser snapshot compacts settled requests without losing history linkage, open state or privacy", async t => {
+  const f = await fixture(t);
+  const opened = f.post(f.keys.producer, "Check the old result.", { toMemberId: "reviewer", requestKind: "reply" });
+  const id = opened.event.data.messageId;
+  f.store.command(f.keys.reviewer, "commons", { id: randomUUID(), type: "reply_request.progressed",
+    data: { requestMessageId: id, expectedRequestRevision: 0, progress: "working", note: "Inspecting the old evidence. ".repeat(20) } });
+  const answer = f.post(f.keys.reviewer, "It passed.", {
+    toMemberId: "producer", replyToId: id, responseToRequestId: id, responseOutcome: "answered",
+    expectedRequestRevision: 0, workItemId: null, contextEventId: opened.event.id, contextSequence: opened.sequence
+  });
+  const openId = f.post(f.keys.producer, "Current question.", { toMemberId: "reviewer", requestKind: "reply" }).event.data.messageId;
+  const privateId = f.post(f.keys.owner, "A different private request.", { toMemberId: "reviewer", requestKind: "reply" }).event.data.messageId;
+  const [plain, browser] = await Promise.all([
+    f.get("?messages=recent").then(r => r.json()),
+    f.get("?messages=recent", f.keys.producer, { "X-Project-Room-Reply-View": "browser-v1" }).then(r => r.json())
+  ]);
+  assert.equal(browser.state.replyRequests[privateId], undefined);
+  assert.equal(plain.state.replyRequests[id].progressState, "working");
+  assert.equal(browser.state.replyRequests[id].progressState, undefined);
+  assert.equal(browser.state.replyRequests[id].responseMessageId, answer.event.data.messageId);
+  assert.ok(replyFollowUp(plain.state, id, "producer"));
+  assert.deepEqual(replyFollowUp(browser.state, id, "producer"), replyFollowUp(plain.state, id, "producer"));
+  assert.deepEqual(browser.state.replyRequests[openId], plain.state.replyRequests[openId]);
+  assert.deepEqual(browser.state.workItems, plain.state.workItems);
+  assert.deepEqual(browser.messagesPage, plain.messagesPage);
+  assert.ok(Buffer.byteLength(JSON.stringify(browser)) < Buffer.byteLength(JSON.stringify(plain)));
 });

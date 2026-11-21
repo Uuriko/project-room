@@ -134,6 +134,21 @@ export async function verifyWorkResult(value, { roomId, workItemId, completionEv
         && native.withdrawnAt === text.withdrawnAt && native.withdrawnBy === text.withdrawnBy);
     }
   }
+  if (value.workThread?.pendingCorrection !== undefined) {
+    const correction = value.workThread.pendingCorrection;
+    const verdict = value.workThread.verdict;
+    check(selection.status === "current" && current.next.action === "revise" && correction?.untrusted === true
+      && result.text?.body !== null && result.receipt?.eventId === current.completionEventId
+      && correction.completionEventId === result.receipt.eventId && correction.evidenceVersion === result.receipt.evidenceVersion
+      && verdict?.result === "fail" && id(correction.verificationEventId) && correction.verificationEventId === verdict.eventId
+      && [correction.summary, correction.nextAction].every(text => typeof text === "string" && text.trim()));
+    if (correction.action !== undefined) {
+      const { tool, arguments: basis, inputRequired } = correction.action ?? {};
+      check(tool === "room_resolve_blocker" && current.next.memberId === value.viewerId
+        && basis?.roomId === roomId && basis.workItemId === workItemId && basis.expectedRevision === current.workRevision
+        && inputRequired?.length === 1 && inputRequired[0] === "resolution");
+    }
+  }
   if (value.review !== undefined) {
     const { criteria, action } = value.review ?? {};
     const basis = action?.arguments;
