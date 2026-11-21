@@ -22,8 +22,13 @@ async function fixture(t, representation = "legacy") {
   }
   const root = mkdtempSync(join(tmpdir(), "room-acp-idle-"));
   t.after(() => rmSync(root, {recursive:true, force:true}));
+  const keys = new Map();
   const connect = async (member, {fetchImpl = fetch, persist = false, hostId = member.id, counts = { prompts: 0, acks: [] }} = {}) => {
-    const bridge = new Bridge({ connection:{apiBase:f.origin, roomId, memberId:member.id, hostId, credential:member.secret},
+    if (!keys.has(member.id)) {
+      const {credential} = f.store.agentPlugin.issueOnboardingMcpToken({identityId:member.id, roomId, label:"ACP fixture"});
+      keys.set(member.id, credential);
+    }
+    const bridge = new Bridge({ connection:{apiBase:f.origin, roomId, memberId:member.id, hostId, credential:keys.get(member.id)},
       env:{ ROOM_ACP_HOME:join(root, member.id) }, maxSessions:1, fetchImpl, persistSessions:persist,
       host:{ session:async()=>({sessionId:"test"}), prompt:async(_key, prompt)=>{
         assert.match(JSON.stringify(prompt), /You picked up this available Board claim.*Inspect the release notes/);
