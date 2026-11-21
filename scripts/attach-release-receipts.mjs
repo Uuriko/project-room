@@ -356,7 +356,11 @@ async function main() {
       throw new Error("Supply a release binding without a completion event, and its exact work revision.");
     }
     const path = values["verify-path"];
-    if (!/^\/(?!\/)[a-zA-Z0-9/_-]+$/.test(path)) throw new Error("Expected a same-origin verification path.");
+    if (!/^\/(?!\/)[a-zA-Z0-9/_.-]+$/.test(path)) {
+      throw new Error("Expected a same-origin verification path.");
+    }
+    const verification = new URL(path, origin);
+    if (verification.pathname !== path) throw new Error("Expected a same-origin verification path.");
     const options = { redirect: "error", signal: AbortSignal.timeout(10_000) };
     const readVersion = async () => {
       const response = await fetch(new URL("/api/version", origin), options);
@@ -365,7 +369,7 @@ async function main() {
     };
     const before = await readVersion();
     if (before !== binding.candidateRevision) throw new Error("Verify the exact serving candidate before preparing review.");
-    const proof = await fetch(new URL(path, origin), options);
+    const proof = await fetch(verification, options);
     if (!proof.ok) throw new Error("Live verification URL was unavailable.");
     const verificationDigest = "sha256:" + hash(Buffer.from(await proof.arrayBuffer()));
     let sourceProof, jwks;
