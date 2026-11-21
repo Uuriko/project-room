@@ -14,8 +14,8 @@ import { signInFixture } from "./auth-signin.mjs";
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
 
-async function setup(t, width, { retained = false } = {}) {
-  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60 });
+async function setup(t, width, { retained = false, credentialReadBurst } = {}) {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60, credentialReadBurst });
   let browser;
   t.after(async () => {
     await browser?.close(); server.closeStreams(); server.closeAllConnections();
@@ -200,7 +200,8 @@ test("late previous-result read cannot repopulate a different review after cance
 });
 
 test("the verdict links exact candidate release checks without claiming missing stages passed", { timeout: 30000 }, async t => {
-  const f = await setup(t, 390);
+  // Three receipt popups each bootstrap a fresh Room view on the same credential.
+  const f = await setup(t, 390, { credentialReadBurst: 600 });
   const candidateRevision = "a".repeat(40);
   f.mutate(T.WORK_BLOCKED, { reason: "Select exact release", nextAction: "Resubmit" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Candidate pinned" });
@@ -235,4 +236,74 @@ test("the verdict links exact candidate release checks without claiming missing 
   await page.locator("#result-dialog").waitFor({ state: "hidden" });
   assert.match(page.url(), /#pr-record\/message\/release-checks-build-receipt$/);
   await page.getByText(/Signed archive manifest verified/).first().waitFor();
+
+  // The initial missing-stage assertions above hold until two real receipts arrive.
+  const additionalChecks = {};
+  for (const [stage, digit] of [["browser", "2"], ["deploy", "3"]]) {
+    const evidenceDigest = "sha256:" + digit.repeat(64), evidenceMessageId = `release-checks-${stage}-receipt`;
+    const summary = `${stage} evidence checked`;
+    f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
+      messageId: evidenceMessageId, body: `room-release-receipt/1 ${stage} ${completed.event.id} ${candidateRevision} ${evidenceDigest}\n${summary}` });
+    additionalChecks[stage] = { candidateRevision, status: "passed", summary, evidenceDigest, evidenceMessageId };
+  }
+  f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
+    messageId: "release-checks-complete", body: "room-release-checks/1\n" + JSON.stringify({ ...report, checks: additionalChecks }) });
+  const messageId = "release-verification-update";
+  f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", messageId,
+    body: "@owner Installed evidence is ready to inspect" });
+  await page.locator("#topbar-updates").click();
+  await page.getByRole("button", { name: /Open .*Installed evidence is ready to inspect/ }).click();
+  const message = page.locator(`[data-message-record-id="${messageId}"]`);
+  await message.waitFor();
+  assert.equal(new URL(page.url()).hash, "#pr-record/message/" + messageId);
+  await message.getByRole("link", { name: "Revise a short result", exact: true }).click();
+  const stages = page.locator("#result-release-stages summary");
+  await stages.first().waitFor();
+  assert.equal(page.viewportSize().width, 390);
+  assert.equal(new URL(page.url()).hash, "#pr-record/work/revision-journey");
+  assert.equal(await page.locator("#result-verdict").innerText(), "Verification · Passed");
+  assert.equal(await page.locator("#result-work-verification").innerText(), "Archive scope only");
+  const candidate = await page.locator("#result-release-candidate").innerText();
+  assert.equal(candidate, "Candidate " + candidateRevision);
+  const labels = await stages.allInnerTexts();
+  assert.deepEqual(labels, ["Build · Passed", "Browser · Passed", "Deploy · Passed"]);
+  const destinations = [];
+  for (const stage of ["Build", "Browser", "Deploy"]) {
+    await stages.filter({ hasText: stage + " · Passed" }).click();
+    const link = page.getByRole("link", { name: `Open ${stage} receipt`, exact: true });
+    const targetId = `release-checks-${stage.toLowerCase()}-receipt`;
+    assert.equal(await link.getAttribute("href"), "#pr-record/message/" + targetId);
+    const [opened] = await Promise.all([page.context().waitForEvent("page"), link.click()]);
+    try {
+      const target = opened.locator(`[data-message-record-id="${targetId}"]`);
+      await target.waitFor();
+      const currentHref = new URL(opened.url()).hash;
+      assert.equal(currentHref, "#pr-record/message/" + targetId);
+      assert.ok((await target.innerText()).includes(`room-release-receipt/1 ${stage.toLowerCase()} ${completed.event.id} ${candidateRevision}`));
+      destinations.push(currentHref);
+    } finally { await opened.close(); }
+  }
+  await page.goBack();
+  await message.waitFor();
+  assert.equal(new URL(page.url()).hash, "#pr-record/message/" + messageId);
+
+  f.send("owner", T.WORK_PROPOSED, { workItemId: "pending-update", title: "Pending evidence",
+    definitionOfDone: "Deliver a checked result", mode: "read", accountableMemberId: "producer" });
+  f.send("producer", T.MESSAGE_POSTED, { messageId: "unfinished-update", workItemId: "pending-update",
+    body: "@owner Evidence is still in progress" });
+  await page.locator("#topbar-updates").click();
+  await page.getByRole("button", { name: /Open .*Evidence is still in progress/ }).click();
+  await page.locator('[data-message-record-id="unfinished-update"]').getByRole("link", { name: "Pending evidence" }).click();
+  await page.locator('[data-work-record-id="pending-update"]').waitFor();
+  assert.equal(await page.locator("#result-dialog").isVisible(), false);
+
+  // A fresh conversation permalink points to the identical message, without an Updates origin.
+  const conversation = await page.context().newPage();
+  await conversation.goto(new URL(page.url()).origin + "/?room=commons#pr-record/message/" + messageId);
+  await conversation.locator(`[data-message-record-id="${messageId}"]`).getByRole("link", { name: "Revise a short result", exact: true }).click();
+  await card(conversation).waitFor();
+  assert.equal(await card(conversation).locator("[data-read-result]").isVisible(), true);
+  assert.equal(await conversation.locator("#result-dialog").isVisible(), false);
+  t.diagnostic(JSON.stringify({ viewport: 390, tapsFromUpdates: 2, candidate, verdict: "Verification · Passed",
+    labels, openedReceiptTargets: destinations, ordinaryConversation: "work card with View result" }));
 });
