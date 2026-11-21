@@ -7,8 +7,18 @@
         (alone or with `after`) is 422 `invalid_event_cursor`: it is not
         applied as a filter, and it does not mean the caller is caught up.
         Pass the previous response's `next` back as `after`.
+        To recover one uncertain command, send `operationId` instead of an event
+        selection. The receipt is scoped to the current member and proves only
+        whether that operation was recorded through the observed room head.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: operationId
+          in: query
+          description: >
+            Read one exact caller-owned operation. Do not combine this with
+            event selection parameters. An optional limit=1 bounds responses
+            from older servers which ignore operationId.
+          schema: { type: string, minLength: 1, maxLength: 128 }
         - name: after
           in: query
           description: >
@@ -67,7 +77,7 @@
       responses:
         '401': { description: unauthenticated }
         '200':
-          description: Events after the given sequence
+          description: Events after the given sequence, or exact operation metadata for the current member
           content:
             application/json:
               schema:
