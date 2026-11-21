@@ -379,6 +379,7 @@ export function reviewRuntimeLabel(status, webhook) {
     claimed: "review.runtime.claimed",
     started: "review.runtime.started",
     start_unknown: "review.runtime.unknown",
+    interrupted: "review.runtime.interrupted",
     unavailable: "review.runtime.unavailable"
   }[status];
   return typeof key === "string" ? uiText(key) : "";
