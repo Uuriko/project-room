@@ -425,6 +425,8 @@ function recordVerification(state, incoming) {
     return;
   }
 
+  const reversesFinalRejection = verification.result === "pass" && item.state === WORK_STATES.BLOCKED
+    && item.blocker?.reworkRequested === false && item.blocker.eventId === item.verification?.eventId;
   if (item.verification) item.verificationHistory.push(item.verification);
   item.verification = verification;
   if (incoming.data.result === "fail") {
@@ -436,6 +438,9 @@ function recordVerification(state, incoming) {
       ...(reworkRequested === false ? { reworkRequested } : {}),
       eventId: incoming.id
     };
+  } else if (reversesFinalRejection) {
+    item.state = WORK_STATES.COMPLETED;
+    item.blocker = null;
   }
   commitMutation(item, incoming);
 }
