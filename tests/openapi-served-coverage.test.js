@@ -69,6 +69,14 @@ test("served /openapi.json matches the routes the server actually serves", async
   assert.equal(doc.openapi, "3.1.0", "served document is OpenAPI 3.1");
   assert.ok(doc.paths && typeof doc.paths === "object", "served document has paths");
 
+  const publicTasks = doc.paths["/api/public-work/tasks"];
+  for (const method of ["get", "head"]) {
+    const view = publicTasks[method].parameters.find(parameter => parameter.name === "view");
+    assert.deepEqual(view.schema.enum, ["pickup"]);
+  }
+  assert.deepEqual(publicTasks.get.responses["200"].content["application/json"].schema
+    .properties.nextAction.properties.kind.enum, ["claim", "inspect_published_repository", "no_eligible_public_task"]);
+
   // /demo is the declarative public HTML exception to the API inventory.
   // Its served documentation must describe the actual anonymous response.
   for (const method of ["get", "head"]) {
