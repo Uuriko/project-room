@@ -19,7 +19,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { parse } from "yaml";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
@@ -280,6 +281,18 @@ test("GET /openapi.json validates as OpenAPI 3.1 and matches the route table", {
   // The /room alias serves the same bytes.
   const aliased = await (await get(origin, "/room/openapi.json")).json();
   assert.deepEqual(aliased.paths, doc.paths);
+
+  const checkedIn = parse(readFileSync(new URL("../docs/openapi.yaml", import.meta.url), "utf8"));
+  const eventPath = "/api/rooms/{roomId}/events";
+  const served = doc.paths[eventPath].get;
+  const specified = checkedIn.paths[eventPath].get;
+  assert.deepEqual(served.parameters.find(param => param.name === "operationId")?.schema,
+    specified.parameters.find(param => param.name === "operationId").schema);
+  const variants = responses => responses["200"].content["application/json"].schema.oneOf;
+  assert.deepEqual(variants(served.responses).filter(variant => variant.properties.status),
+    variants(specified.responses).filter(variant => variant.properties.status));
+  assert.ok(variants(served.responses).some(variant => variant.required.includes("events")));
+  assert.match(served.responses["422"].description, /invalid_operation_selection/);
 });
 
 test("invalid JSON on MCP and A2A matches JsonRpcError, not ErrorEnvelope", async t => {
