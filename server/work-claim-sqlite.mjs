@@ -106,6 +106,10 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
   });
   const selectOne = statement("SELECT item_json FROM work_claims WHERE room_id=? AND claim_id=?");
   const selectRoom = statement("SELECT item_json FROM work_claims WHERE room_id=? ORDER BY rowid ASC");
+  // Claims in one room whose dependsOn names a given claim id. Lets a
+  // settlement path find dependents without listing (decoding) the room.
+  const selectDependents = statement(`SELECT DISTINCT work_claims.claim_id AS claim_id FROM work_claims, json_each(${inboxData}, '$.dependsOn') AS dep
+    WHERE work_claims.room_id=? AND dep.value=? ORDER BY work_claims.rowid ASC`);
   const upsert = statement(`INSERT INTO work_claims (room_id, claim_id, item_json, updated_at) VALUES (?, ?, ?, ?)
     ON CONFLICT(room_id, claim_id) DO UPDATE SET item_json=excluded.item_json, updated_at=excluded.updated_at`);
   const selectConfig = statement("SELECT config_json FROM work_claim_config WHERE room_id=?");
@@ -237,6 +241,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       return item;
     },
     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
+    dependentIds(roomId, id) { return selectDependents.all(roomId, id).map(row => row.claim_id); },
     // The caller applies semantic filters before its result limit. Keyset
     // batches bound JS memory without hiding reviews after unrelated rows.
     *inboxCandidates(roomId, ownerId, { review = false } = {}) {

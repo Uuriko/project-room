@@ -197,13 +197,26 @@ export function readyWorkMessageId(dependent, basis) {
 
 export function wakeReadyDependents(store, roomId, prerequisite, { actorId = null } = {}) {
   if (!boardPrerequisiteState(prerequisite).satisfied) return [];
-  let claims;
-  try { claims = store.workClaims.list(roomId); } catch { return []; }
-  const byId = new Map(claims.map(item => [item.id, item]));
+  const registry = store.workClaims;
+  const byId = new Map();
+  try {
+    if (typeof registry.dependentIds === "function") {
+      // Indexed path: decode only the dependents and their prerequisites, never
+      // the whole room (settlement paths must not list a room's claims).
+      const read = id => { if (!byId.has(id)) byId.set(id, registry.get(roomId, id) ?? null); return byId.get(id); };
+      byId.set(prerequisite.id, prerequisite);
+      for (const id of registry.dependentIds(roomId, prerequisite.id)) {
+        const dependent = read(id);
+        for (const dep of dependent?.dependsOn ?? []) read(dep);
+      }
+    } else {
+      for (const item of registry.list(roomId)) byId.set(item.id, item);
+    }
+  } catch { return []; }
   byId.set(prerequisite.id, prerequisite);
   const woken = [];
   for (const dependent of byId.values()) {
-    if (dependent.id === prerequisite.id) continue;
+    if (!dependent || dependent.id === prerequisite.id) continue;
     if (!(dependent.dependsOn ?? []).includes(prerequisite.id)) continue;
     if (isTerminalClaimState(dependent.state) || dependent.supersededBy) continue;
     if (!dependent.owner) continue;

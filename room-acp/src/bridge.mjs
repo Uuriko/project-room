@@ -49,12 +49,18 @@ export const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
 // in step. The bridge re-reads the prerequisites from the Room right before a
 // turn and starts nothing unless they are still satisfied and still match.
 export const READY_WORK_REASON = "ready_work";
-export function readyWorkBasisOf(messageId, claimId) {
+export function readyWorkWakeOf(messageId, claimId) {
   if (typeof messageId !== "string") return null;
   const prefix = `work-claim:${claimId}:${READY_WORK_REASON}:`;
   if (!messageId.startsWith(prefix)) return null;
-  const basis = messageId.slice(messageId.lastIndexOf(":") + 1);
-  return /^[0-9a-f]{64}$/.test(basis) ? basis : null;
+  const split = messageId.lastIndexOf(":");
+  const basis = messageId.slice(split + 1);
+  const revision = messageId.slice(prefix.length, split);
+  if (!/^[0-9a-f]{64}$/.test(basis) || split < prefix.length || !revision) return null;
+  return { revision, basis };
+}
+export function readyWorkBasisOf(messageId, claimId) {
+  return readyWorkWakeOf(messageId, claimId)?.basis ?? null;
 }
 export function prerequisiteBasis(deps) {
   const evidence = [...deps]
@@ -476,26 +482,35 @@ export class Bridge {
     this.queue.push(CLAIM_KEY + claim.id, { signalId: signal.signalId, reason: signal.reason, messageId: signal.messageId, claim, author: this.members[authorId]?.displayName ?? authorId });
   }
 
-  // A ready_work wake is current only while every Board prerequisite of the
-  // dependent, read fresh from the Room, is satisfied and matches the basis
-  // the wake was minted with. A reopened (premise-flagged, superseded) or
-  // changed prerequisite, a changed dependsOn list, or an unreadable basis
-  // makes the wake stale. Missing prerequisites are stale, not errors.
+  // A ready_work wake is current only while, read fresh from the Room right
+  // before the prompt: every Board prerequisite of the dependent is satisfied
+  // and matches the basis the wake was minted with, AND the dependent itself
+  // is still owned by this member, non-terminal, not superseded, at the wake's
+  // revision, with the same dependsOn set. Prerequisites are read first and the
+  // dependent last, so a reassignment that lands after the final authority
+  // check is seen here. Returns the fresh dependent claim, or null when stale.
+  // Missing prerequisites are stale, not errors.
   async readyWorkCurrent(claimId, messageId) {
-    const basis = readyWorkBasisOf(messageId, claimId);
-    if (!basis) return false;
-    const claim = await this.room.claim(claimId);
-    const ids = Array.isArray(claim?.dependsOn) ? claim.dependsOn : [];
-    if (!ids.length) return false;
+    const wake = readyWorkWakeOf(messageId, claimId);
+    if (!wake) return null;
+    const first = await this.room.claim(claimId);
+    const ids = Array.isArray(first?.dependsOn) ? first.dependsOn : [];
+    if (!ids.length) return null;
     const deps = [];
     for (const id of ids) {
       try { deps.push(await this.room.claim(id)); }
       catch (error) {
-        if (error instanceof RoomError && error.status === 404) return false;
+        if (error instanceof RoomError && error.status === 404) return null;
         throw error;
       }
     }
-    return deps.every(prerequisiteSatisfied) && prerequisiteBasis(deps) === basis;
+    if (!deps.every(prerequisiteSatisfied) || prerequisiteBasis(deps) !== wake.basis) return null;
+    const claim = await this.room.claim(claimId);
+    const sameDeps = Array.isArray(claim?.dependsOn) && claim.dependsOn.length === ids.length
+      && claim.dependsOn.every((id, index) => id === ids[index]);
+    if (!claim || claim.owner !== this.connection.memberId || TERMINAL_CLAIM_STATES.includes(claim.state)
+      || claim.supersededBy || String(claim.revision ?? "none") !== wake.revision || !sameDeps) return null;
+    return claim;
   }
 
   async claimTurn(threadKey, batch) {
@@ -530,14 +545,16 @@ export class Bridge {
           }
           // Dependency-triggered wakes are fenced on current prerequisite
           // truth, not only owner and terminal state. Assigned wakes are not.
-          if (item.reason === READY_WORK_REASON && !(await this.readyWorkCurrent(claimId, item.messageId))) {
-            this.log(`claim ${claimId} ready_work wake is stale: prerequisites changed since the wake; no turn`);
+          let promptClaim = item.claim;
+          if (item.reason === READY_WORK_REASON) promptClaim = await this.readyWorkCurrent(claimId, item.messageId);
+          if (!promptClaim) {
+            this.log(`claim ${claimId} ready_work wake is stale: dependent or prerequisites changed since the wake; no turn`);
             receipt = { phase: "discarded", requestId: receipt.requestId, disposition: "ready_work_stale" };
             this.claimReceipts.save(key, receipt);
             this.stats.stale++;
             await this.ack(signalIds); return;
           }
-          const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author }), { sessionId });
+          const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: promptClaim, author: item.author }), { sessionId });
           body = renderTurn(recorder, { stopReason });
           this.stats.turns++;
         } catch (error) {

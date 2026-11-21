@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { Bridge, CLAIM_KEY, readyWorkBasisOf, prerequisiteBasis } from "../room-acp/src/bridge.mjs";
+import { Bridge, CLAIM_KEY, readyWorkBasisOf, readyWorkWakeOf, prerequisiteBasis } from "../room-acp/src/bridge.mjs";
 import { claimReadyWorkBasis } from "../server/work-claim-events.mjs";
 import { join } from "../room-acp/src/join.mjs";
 import { startRoom, FAKE_AGENT } from "./room-acp-fixture.mjs";
@@ -77,6 +77,8 @@ test("ready_work basis: the bridge mirrors the server basis and parses only well
   assert.equal(readyWorkBasisOf(`work-claim:dep:ready_work:none:${basis}`, "other"), null);
   assert.equal(readyWorkBasisOf(`work-claim:dep:assigned:none:${basis}`, "dep"), null);
   assert.equal(readyWorkBasisOf("work-claim:dep:ready_work:none:not-a-basis", "dep"), null);
+  assert.deepEqual(readyWorkWakeOf(`work-claim:dep:ready_work:r:1:${basis}`, "dep"), { revision: "r:1", basis });
+  assert.equal(readyWorkWakeOf(`work-claim:dep:ready_work:${basis}`, "dep"), null, "a wake id without a revision is stale");
 });
 
 test("bridge: a queued ready_work wake whose prerequisite reopened starts zero model turns", async t => {
@@ -105,4 +107,27 @@ test("bridge: a ready_work wake whose prerequisite is still done runs one turn a
   assert.equal(bridge.stats.turns, 1, "redelivery replays the posted receipt, no second turn");
   assert.equal((await echoNotes()).length, 1, "exactly one claim note");
   assert.equal(((await poll()).pendingWakes ?? []).filter(wake => wake.reason === "ready_work").length, 0);
+});
+
+test("bridge: a reassignment after the final authority check and before the prompt starts zero model turns", async t => {
+  const { asOwner, bridge, echoNotes, start } = await queuedReadyWork(t);
+  // Land the reassignment in the race window: right after the last
+  // authorized({requireRunnable}) check passes and before readyWorkCurrent.
+  const authorized = bridge.authorized.bind(bridge);
+  let reassigned = null;
+  bridge.authorized = async options => {
+    const allowed = await authorized(options);
+    if (options?.requireRunnable && !reassigned) {
+      const current = (await asOwner("/api/rooms/commons/work-claims/follow-on", undefined, "GET")).json;
+      reassigned = await asOwner("/api/rooms/commons/work-claims/follow-on/reassign", {
+        newOwner: "owner", expectedClaimedAt: current.claimedAt, expectedHistoryLength: current.history.length,
+        note: "reassigned inside the pre-prompt window" });
+    }
+    return allowed;
+  };
+  start();
+  await waitFor(() => bridge.stats.stale >= 1 && bridge.stats.acked >= 1);
+  assert.equal(reassigned?.status, 200, JSON.stringify(reassigned?.json));
+  assert.equal(bridge.stats.turns, 0, "the old runner must not start a turn for a dependent it no longer owns");
+  assert.equal((await echoNotes()).length, 0);
 });

@@ -9,6 +9,8 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { claimReadyWorkBasis, readyWorkMessageId, wakeReadyDependents } from "../server/work-claim-events.mjs";
+import { commitPullRequestLookup } from "../server/claim-pr-sync.mjs";
+import { appendWorkPullRequest, claimHistoryLength } from "../server/work-claims.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(":memory:");
@@ -126,4 +128,48 @@ test("a later actionable dependent still wakes when an older one is still blocke
   const wakes = (await poll(agent.secret)).pendingWakes.filter(wake => wake.reason === "ready_work");
   assert.equal(wakes.length, 1, JSON.stringify(wakes));
   assert.equal(wakes[0].workClaim, "ready-follow");
+});
+
+test("a linked-PR settlement that finishes a prerequisite wakes the dependent's owner exactly once", async t => {
+  const { store, owner, enroll, poll, ack } = await fixture(t);
+  const agent = await enroll("Settled Agent");
+  await owner.workClaimCreate({ id: "pr-prereq", title: "Prerequisite landed by PR", reviewPolicy: "self_attested" });
+  await owner.claimWorkItem("pr-prereq");
+  const dependent = await owner.workClaimCreate({
+    id: "pr-follow", title: "Follow-on after merge", reviewPolicy: "self_attested",
+    dependsOn: ["pr-prereq"], assignee: agent.memberId
+  });
+  assert.equal(dependent.owner, agent.memberId);
+  const assigned = (await poll(agent.secret)).pendingWakes.filter(wake => wake.reason === "assigned");
+  await ack(agent.secret, assigned.map(wake => wake.signalId));
+
+  const url = "https://github.com/Uuriko/project-room/pull/6384";
+  const claimed = store.workClaims.get("commons", "pr-prereq");
+  const linked = appendWorkPullRequest(claimed, claimed.owner, {
+    pullRequest: url, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimHistoryLength(claimed), now: store.now()
+  });
+  store.workClaims.set("commons", linked);
+  assert.equal((await poll(agent.secret)).pendingWakes.filter(wake => wake.reason === "ready_work").length, 0,
+    "no ready_work before the prerequisite settles");
+
+  // The poller/webhook settlement path, not the HTTP persistClaim hook.
+  const result = { claimId: "pr-prereq", url, kind: "merged" };
+  const listed = [];
+  const list = store.workClaims.list.bind(store.workClaims);
+  store.workClaims.list = (roomId, ...rest) => { listed.push(roomId); return list(roomId, ...rest); };
+  assert.equal(commitPullRequestLookup(store, store.workClaims, "commons", linked, result, store.now()), true);
+  store.workClaims.list = list;
+  assert.deepEqual(listed, [], "settlement finds dependents through the index, never by listing the room");
+  assert.equal(store.workClaims.get("commons", "pr-prereq").state, "done");
+  const wakes = (await poll(agent.secret)).pendingWakes.filter(wake => wake.reason === "ready_work");
+  assert.equal(wakes.length, 1, JSON.stringify(wakes));
+  assert.equal(wakes[0].workClaim, "pr-follow");
+  assert.equal(wakes[0].messageId, readyWorkMessageId(store.workClaims.get("commons", "pr-follow"),
+    claimReadyWorkBasis([store.workClaims.get("commons", "pr-prereq")])));
+
+  // A stale-item retry of the same lookup settles nothing and wakes nothing new.
+  assert.equal(commitPullRequestLookup(store, store.workClaims, "commons", linked, result, store.now() + 1000), false);
+  const again = (await poll(agent.secret)).pendingWakes.filter(wake => wake.reason === "ready_work");
+  assert.equal(again.length, 1);
+  assert.equal(again[0].signalId, wakes[0].signalId);
 });
