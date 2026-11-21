@@ -570,6 +570,7 @@
   "review.runtime.acknowledged": "Receiver acknowledged the review wake. Review start unconfirmed.",
   "review.runtime.waiting": "Waiting for a managed receiver",
   "review.runtime.claimed": "Host claimed the review. Provider start unconfirmed.",
+  "review.runtime.interrupted": "Review interrupted before a verdict. Open the work thread to recover it.",
   "review.runtime.started": "Review start confirmed",
   "review.runtime.unknown": "Review start unconfirmed. Ask the host operator to check the original attempt before retrying.",
   "review.runtime.statusSuffix": " · {status}",

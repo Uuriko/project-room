@@ -593,6 +593,20 @@ export class Bridge {
         if (this.reviewReceipts.dir) this.stageObserver.mark(signalIds,'durable_result_saved',receipt.requestId);
       }
       if (receipt.signalId !== signalId || !Object.entries(binding).every(([field,value])=>receipt.binding?.[field]===value)) return;
+      if (receipt.phase === 'started' || receipt.reason === 'turn_interrupted') {
+        if (receipt.phase === 'started') {
+          receipt = {...receipt,phase:'needs_review',reason:'turn_interrupted',
+            body:'The host stopped before saving a verdict. Use the exact Work Thread to recover this review.'};
+          this.reviewReceipts.save(key,receipt);
+          this.stageObserver.mark(signalIds,'review_parked',receipt.requestId);
+          this.log(`exact review ${binding.workItemId} interrupted before verdict; wake remains pending`);
+        }
+        await this.assertListener();
+        const path = '/api/rooms/' + encodeURIComponent(this.connection.roomId) + '/review-runtime';
+        await this.reviewRuntimeRoom.request(path,{body:{...binding,attemptId:receipt.requestId,phase:'interrupted'},
+          signal:AbortSignal.timeout(1500)});
+        return;
+      }
       if (receipt.phase === 'result') {
         await this.assertListener();
         if (!receipt.attempted) this.reviewReceipts.save(key,{...receipt,attempted:true});
