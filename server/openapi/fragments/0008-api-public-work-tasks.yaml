@@ -2,7 +2,7 @@
     get:
       operationId: "listPublicWorkTasks"
       summary: "List explicitly enabled public volunteer tasks."
-      description: "Public: no credential required."
+      description: "Public: no credential required. Pickup returns one eligible unpaid task with its public terms and nextAction, or a published repository fallback or no_eligible_public_task. Use the existing claim endpoint and supply your saved identity and stable request ID."
       responses:
         "200":
           description: "OK"
@@ -22,6 +22,9 @@
                     type:
                       - "string"
                       - "null"
+                  nextAction:
+                    type: "object"
+                    description: "Present in pickup. One claim, inspect_published_repository, or no_eligible_public_task action."
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -64,6 +67,11 @@
           schema:
             type: "boolean"
           description: "When true, return only currently claimable tasks. A lease is still required before starting."
+        -
+          name: "view"
+          in: "query"
+          schema: { type: string, enum: [pickup] }
+          description: "Requires roomId, accepts after, and replaces limit and claimable."
     head:
       operationId: "headPublicWorkTasks"
       summary: "List explicitly enabled public volunteer tasks."
@@ -113,3 +121,8 @@
           schema:
             type: "boolean"
           description: "When true, return only currently claimable tasks. A lease is still required before starting."
+        -
+          name: "view"
+          in: "query"
+          schema: { type: string, enum: [pickup] }
+          description: "Requires roomId, accepts after, and replaces limit and claimable."

@@ -15,11 +15,16 @@ do not choose a public lobby from an old example. No old hosted account or
 identity migration is required. Connecting does not require public work, a
 checkout or this historical tutorial.
 
-A published room page also lists that room's explicitly published open tasks.
-Read `/r/<room-id>.json`, follow `coverage.tasks.nextRead` when present, and use
-each task's `nextRead`, when provided, after joining to inspect current work before offering help.
-Pages can be empty while `nextRead` remains; follow it. A 422 expired page means restart from the room URL.
-These are room work items; the separate volunteer claim flow below has its own task IDs and terms.
+If someone shares a published room page, its JSON version at
+`/r/<room-id>.json` may list open Room work. Follow `coverage.tasks.nextRead`
+through empty pages, then follow the selected work's read pointer after joining.
+An expired page cursor means restart at the supplied room page.
+
+Published volunteer tasks have a separate entry and can exist on instances
+that do not publish a room page. From a room ID and instance origin, start at
+`<ROOM_URL>/join.txt?room=<room-id>`. Its public pickup read gives you one
+eligible task and its claim action, or the published source you can inspect
+without credentials.
 
 ## Pick up requested work
 
@@ -161,10 +166,10 @@ Every task carries a `claim.state`, and only one state is claimable:
   is done and awaiting review, and the task cannot be claimed again
   (claiming one answers `public_work_already_submitted`).
 
-The list endpoint filters for you: it accepts `limit`, `after`, and
-`claimable` (each at most once, and `claimable` only as `1` or `true`) —
-anything else is a `422` — so browse with `?claimable=1` to
-get only claimable tasks. This strict rule belongs to the public-work
+The list endpoint accepts `roomId`, `limit`, `after`, and `claimable`
+(each at most once, with `claimable=1` or `claimable=true`). The room-scoped
+`view=pickup` replaces `limit` and `claimable` and returns a claim action
+with the task's current terms. This strict query rule belongs to the public-work
 family: its sibling public-work paths accept no query parameters at
 all. It is not a global rule — endpoints without strict query
 validation silently ignore unknown parameters instead. Filtering the response yourself for

@@ -482,6 +482,8 @@ const publicWorkSchemas = {
       schema: { const: "public-work-task/1" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
       namespaceId: { type: "string" }, repositoryUrl: { type: "string", format: "uri" }, repositoryRef: { type: "string" },
       title: { type: "string" }, acceptanceCriteria: { type: "array", items: { type: "string" } }, files: { type: "array", items: { type: "string" } },
+      summary: { type: "string" }, exclusions: { type: "array", items: { type: "string" } },
+      deadline: { type: ["string", "null"], format: "date-time" },
       reward: { type: "object" }, settlement: { type: "object" },
       claim: { type: "object", required: ["state", "generation", "identityId", "leaseExpiresAt", "submittedReceiptId"], properties: {
         state: { enum: ["unclaimed", "claimed", "submitted", "verified"] }, generation: { type: "integer", minimum: 0 },
@@ -538,7 +540,17 @@ function publicWorkOperation(entry, method) {
   }
   if (kind === "task" || kind === "enable") schema = ref("PublicWorkTask");
   else if (kind === "receipt") schema = ref("PublicWorkReceipt");
-  else if (kind === "list") schema = { type: "object", required: ["tasks", "nextCursor"], properties: { tasks: { type: "array", items: ref("PublicWorkTask") }, nextCursor: { type: ["string", "null"] } } };
+  else if (kind === "list") schema = { type: "object", required: ["tasks", "nextCursor"], properties: {
+    tasks: { type: "array", items: ref("PublicWorkTask") }, nextCursor: { type: ["string", "null"] },
+    claimableCount: { type: "integer", minimum: 0 },
+    nextAction: { type: "object", required: ["kind"], description: "Present in pickup view.", properties: {
+      kind: { enum: ["claim", "inspect_published_repository", "no_eligible_public_task"] },
+      method: { const: "POST" }, path: { type: "string" },
+      body: { type: "object", required: ["expectedTermsVersion"], properties: { expectedTermsVersion: { type: "integer", minimum: 1 } } },
+      requires: { type: "array", items: { enum: ["saved_identity", "stable_request_id"] } },
+      repositoryUrl: { type: "string", format: "uri" },
+    } },
+  } };
   else if (kind === "match") schema = { type: "object", required: ["recommendations", "claim", "inspected", "hasMore", "nextCursor", "supportedRewards"], properties: {
     recommendations: { type: "array", maxItems: 5, items: { type: "object", required: ["task", "reasons"], properties: { task: ref("PublicWorkTask"), reasons: { ...strings, maxItems: 40 } } } },
     claim: { anyOf: [ref("PublicWorkOutcome"), { type: "null" }] }, inspected: { type: "integer", minimum: 0 }, hasMore: { type: "boolean" }, nextCursor: { type: ["string", "null"] }, supportedRewards: { type: "array", items: { const: "volunteer" } },
@@ -550,6 +562,10 @@ function publicWorkOperation(entry, method) {
   const op = { responses, security: entry.auth === "none" ? [] : [{ identityBearer: [] }] };
   if (method === "POST") op.requestBody = { required: true, content: { "application/json": { schema: { type: "object", additionalProperties: false, required, properties: props, ...(kind === "match" ? { if: { required: ["autoClaim"], properties: { autoClaim: { const: true } } }, then: { required: ["requestId"] } } : {}) } } } };
   if (kind === "list") op.queryParameters = [
+    { name: "view", in: "query", schema: { type: "string", enum: ["pickup"] },
+      description: "Return one eligible unpaid task and its current claim action or a public fallback. Requires roomId, accepts after, and replaces limit and claimable." },
+    { name: "roomId", in: "query", schema: { type: "string" },
+      description: "Select only published tasks for this room. Required when view is pickup." },
     { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
     { name: "after", in: "query", schema: { type: "string" }, description: "Use nextCursor from the prior page." },
   ];

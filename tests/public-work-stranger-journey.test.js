@@ -128,52 +128,66 @@ test('the same project prompt routes outsiders to fresh work and the lease admit
   assert.equal(pasteHtml.match(/<textarea id="agent-paste-prompt-1"[^>]*>([\s\S]*?)<\/textarea>/)?.[1], escapeHtml(prompt));
   assert.equal((await fetch(f.origin + '/docs/agents/paste?room=commons&room=other')).status, 400);
   const list = prompt.match(/GET (\S+public-work\/tasks\?\S+)/)[1];
-  assert.equal(list, f.origin + '/api/public-work/tasks?roomId=commons&claimable=1&limit=5');
+  assert.equal(list, f.origin + '/api/public-work/tasks?roomId=commons&view=pickup');
   assert.match(prompt, /After your first useful submission, attempt to connect/);
   assert.match(prompt, /public_work_my_review with that receipt ID or GET \/api\/public-work\/receipts\/RECEIPT_ID\/review with the same saved identity/);
   assert.match(prompt, /Repeat the claim and submit loop one task at a time/);
   assert.equal((await fetch(f.origin + '/join.txt?room=commons&room=other')).status, 400);
-  const browse = async () => {
+  const pickup = async () => {
     const response = await fetch(list);
     const body = await response.json();
     assert.equal(response.status, 200, JSON.stringify(body.error));
-    return body.tasks.map(task => task.taskId);
+    return body;
   };
-  assert.deepEqual(await browse(), ['journey:open', 'next-in-commons']);
+  const first = await pickup(), [basis] = first.tasks;
+  assert.equal(basis.taskId, 'journey:open');
+  assert.equal(basis.summary, 'Volunteer stranger-journey fixture');
+  assert.deepEqual(basis.acceptanceCriteria, ['Return exact artifact bytes']);
+  assert.equal(first.nextCursor, basis.taskId);
   for (const room of ['private-without-public-work','missing']) {
     const result = await f.call('GET', `/api/public-work/tasks?roomId=${room}`);
     assert.deepEqual(result.body, {tasks:[],claimableCount:0,nextCursor:null});
+    const pickup = await f.call('GET', `/api/public-work/tasks?roomId=${room}&view=pickup`);
+    assert.deepEqual(pickup.body, {...result.body, nextAction:{kind:'no_eligible_public_task'}});
   }
   const [a,b] = await Promise.all(['Outside one','Outside two'].map(displayName =>
     f.call('POST','/api/agent-identities',{body:{displayName}}).then(r => r.body.secret)));
   const path = '/api/public-work/tasks/journey%3Aopen';
-  const basis = (await f.call('GET',path)).body;
-  const input = {requestId:'race-claim',expectedTermsVersion:basis.termsVersion};
-  const claims = await Promise.all([a,b].map(secret => f.call('POST',path+'/claim',{secret,body:input})));
+  assert.deepEqual(first.nextAction, {kind:'claim',method:'POST',path:path+'/claim',
+    body:{expectedTermsVersion:basis.termsVersion},requires:['saved_identity','stable_request_id']});
+  const input = {requestId:'race-claim',...first.nextAction.body};
+  const claims = await Promise.all([a,b].map(secret => f.call(first.nextAction.method,first.nextAction.path,{secret,body:input})));
   assert.deepEqual(claims.map(r => r.status).sort(), [200,409]);
-  const winner = claims.findIndex(r => r.status === 200), secret = [a,b][winner];
+  const winner = claims.findIndex(r => r.status === 200), secret = [a,b][winner], otherSecret = [a,b][1-winner];
   assert.equal(claims[1-winner].body.error.code, 'public_work_claim_conflict');
+  seedOffer(f.store, 'overlapping-paths', {title:'Overlapping task', criteria:['Same path, do not collide']});
+  const alternative = await pickup();
+  assert.equal(alternative.tasks[0].taskId, 'next-in-commons');
+  assert.equal(alternative.claimableCount, 1);
   const body = {requestId:'race-finish',expectedTermsVersion:basis.termsVersion,generation:claims[winner].body.task.claim.generation,
     artifactText:'One admitted contribution',checksReported:[]};
   const finish = await f.call('POST',path+'/finish',{secret,body});
   assert.equal(finish.status,200);
   const recovered = await f.call('POST',path+'/finish',{secret,body});
   assert.equal(recovered.body.receipt.receiptId,finish.body.receipt.receiptId);
-  assert.deepEqual(await browse(), ['next-in-commons']);
-  const nextPath = '/api/public-work/tasks/next-in-commons';
-  const nextBasis = (await f.call('GET',nextPath)).body;
-  const nextClaim = await f.call('POST',nextPath+'/claim',{secret,body:{requestId:'next-claim',expectedTermsVersion:nextBasis.termsVersion}});
+  const nextPath = '/api/public-work/tasks/next-in-commons', nextBasis = alternative.tasks[0];
+  const nextClaim = await f.call(alternative.nextAction.method,alternative.nextAction.path,{secret:otherSecret,
+    body:{requestId:'next-claim',...alternative.nextAction.body}});
   assert.equal(nextClaim.status,200);
-  const nextFinish = await f.call('POST',nextPath+'/finish',{secret,body:{requestId:'next-finish',
+  const nextFinish = await f.call('POST',nextPath+'/finish',{secret:otherSecret,body:{requestId:'next-finish',
     expectedTermsVersion:nextBasis.termsVersion,generation:nextClaim.body.task.claim.generation,
-    artifactText:'The same outside agent finished the next task',checksReported:[]}});
+    artifactText:'The other outside agent finished the separate task',checksReported:[]}});
   assert.equal(nextFinish.status,200);
   assert.notEqual(nextFinish.body.receipt.receiptId,finish.body.receipt.receiptId);
-  assert.deepEqual(await browse(), []);
+  const overlap = await pickup();
+  assert.equal(overlap.tasks[0].taskId,'overlapping-paths');
+  const overlapClaim = await f.call('POST',overlap.nextAction.path,{secret,body:{requestId:'overlap-claim',...overlap.nextAction.body}});
+  assert.equal(overlapClaim.status,200);
+  assert.deepEqual((await pickup()).tasks, []);
   const fallback = prompt.match(/GET (\S+public-work\/tasks\?roomId=commons&limit=5)/)[1];
   const history = await fetch(fallback).then(r => r.json());
   assert.equal(history.claimableCount,0);
-  assert.deepEqual(history.tasks.map(task=>task.taskId), ['journey:open','journey:submitted','next-in-commons']);
+  assert.deepEqual(history.tasks.map(task=>task.taskId), ['journey:open','journey:submitted','next-in-commons','overlapping-paths']);
   assert.ok(history.tasks.every(task=>task.repositoryUrl==='https://github.com/example/project'));
   assert.match(prompt,/This is a proposal in chat, not a claim or a published issue/);
   assert.equal(await fetch(f.origin + '/join.txt?room=commons').then(r => r.text()), prompt);
@@ -219,11 +233,15 @@ test('the first read-only contribution can use a room’s explicitly published p
   assert.match(prompt, /Published project repository for read-only discovery: https:\/\/github\.com\/example\/published/);
   assert.doesNotMatch(prompt, /example\/(draft|foreign|task)|deliberately absent/);
   assert.doesNotMatch(prompt, /public-work\/tasks\?roomId=new-project&limit=5/);
-  assert.match(prompt, /claimable=1.*limit=5/);
+  assert.match(prompt, /view=pickup/);
+  const empty = await f.call('GET','/api/public-work/tasks?roomId=new-project&view=pickup');
+  assert.deepEqual(empty.body.nextAction,{kind:'inspect_published_repository',repositoryUrl:'https://github.com/example/published'});
   assert.match(prompt, /public reads without credentials/);
   unpublishPublic(f.store.db, { kind: 'room', id: 'new-project', byAccount: 'operator', now: Date.now() });
   assert.equal(await (await read()).text(), before);
   assert.equal(await readBrowser('new-project'), browserBefore);
+  assert.deepEqual((await f.call('GET','/api/public-work/tasks?roomId=new-project&view=pickup')).body.nextAction,
+    {kind:'no_eligible_public_task'});
 });
 
 test('a member and an outside agent contend for the same published lease', async t => {
