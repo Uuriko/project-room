@@ -133,9 +133,10 @@ function ordinaryTurn(recorder, stopReason) {
 }
 
 export class Bridge {
-  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null, observeStage = null }) {
+  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", reviewScope = null, maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null, observeStage = null }) {
     this.stageObserver = new StageObserver({observe: observeStage});
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
+    this.reviewScope = reviewScope;
     this.controller = new AbortController();
     const roomOptions = { signal:this.controller.signal, apiBase: connection.apiBase, roomId: connection.roomId,
       memberId: connection.memberId, credential: connection.credential, fetchImpl };
@@ -526,7 +527,7 @@ export class Bridge {
     try {
       let receipt = this.reviewReceipts.find(key);
       if (!receipt) {
-        const prompt = await readReview(this.room,binding);
+        const prompt = await readReview(this.room,binding,this.reviewScope);
         if (!prompt || this.controller.signal.aborted) return;
         await this.agentReady();
         if (this.controller.signal.aborted) return;
