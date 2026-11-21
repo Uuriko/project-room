@@ -3,7 +3,8 @@ import { mayWake } from './agent-talk-policy.mjs';
 import { firstBlockedWakeTarget } from '../src/events.js';
 import { nextWorkStep } from '../src/workflow.js';
 import { mutedEvent } from './moderation.mjs';
-import { createMcpEventSubscriptions } from './mcp-event-subscriptions.mjs';
+import { requireDiscoveryReviewer } from './project-discoveries.mjs';
+import { createMcpEventSubscriptions, discoveryEvent } from './mcp-event-subscriptions.mjs';
 import { nativeOutboxEventId } from './mcp-outbox-event-id.mjs';
 import { authorizeMcpOAuthDescriptor } from './mcp-oauth.mjs';
 import { isWorkersRuntime } from './ip-blocklist.mjs';
@@ -14,6 +15,24 @@ import { isCurrentRoom, readCurrentWakePolicyState } from './current-room-reposi
 // the legacy and normalized room paths.
 export function authorizeNativeEvent(store, descriptor, { event, context }) {
   return store.transaction(() => {
+    if (context?.kind === 'discovery') {
+      if (!descriptor.scopes.includes('work:read') || !descriptor.scopes.includes('rooms:read')
+        || store.wakeQueue?.pauseStatus(descriptor.roomId, descriptor.memberId)
+        || store.agentHeartbeats?.pausedRoomsOf(descriptor.identityId).some(row => row.roomId === descriptor.roomId)) return false;
+      const state = isCurrentRoom(store.db, descriptor.roomId)
+        ? readCurrentWakePolicyState(store, descriptor.roomId, [descriptor.memberId])
+        : store.room(descriptor.roomId).state;
+      const reviewer = state?.members[descriptor.memberId];
+      if (reviewer?.kind !== 'agent' || reviewer.active === false || reviewer.notificationPreferences?.work_updates === 'none') return false;
+      const { offerId } = event.data.nextRead.arguments;
+      try {
+        requireDiscoveryReviewer(store, descriptor.roomId, offerId, new URL(descriptor.resource).origin, descriptor.memberId);
+        return true;
+      } catch (error) {
+        if ([403, 404, 422].includes(error.status)) return false;
+        throw error;
+      }
+    }
     if (!context || typeof context.actorId !== 'string' || !['mention', 'squad-mention', 'dm', 'work', 'board'].includes(context.kind)) return false;
     if (store.wakeQueue?.pauseStatus(descriptor.roomId, descriptor.memberId)
       || store.agentHeartbeats?.pausedRoomsOf(descriptor.identityId).some(row => row.roomId === descriptor.roomId)) return false;
@@ -67,14 +86,28 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
     try {
       if (message.method === 'events/list') {
         if (args.cursor !== undefined && args.cursor !== null) throw Object.assign(new Error('No event catalog pagination'), { code: -32602 });
-        return result({ events: [{ name: 'room.requested', delivery: ['webhook'],
+        const events = [{ name: 'room.requested', delivery: ['webhook'],
           payloadSchema: { type: 'object', properties: { roomId: { type: 'string' }, memberId: { type: 'string' }, messageId: { type: 'string' }, requestId: { type: 'string' },
             nextRead: { type: 'object', properties: { tool: { enum: ['room_read_request', 'room_read_work', 'room_read_result'] },
               arguments: { type: 'object', properties: { roomId: { type: 'string' }, requestMessageId: { type: 'string' },
                 workItemId: { type: 'string' }, completionEventId: { type: 'string' }, view: { const: 'compact' },
                 brief: { const: true } }, required: ['roomId'], additionalProperties: false } },
               required: ['tool', 'arguments'], additionalProperties: false } }, required: ['roomId', 'memberId'], additionalProperties: false }, description: 'A permitted mention, direct request, or work transition needs this agent. When data.nextRead is present, use its read tool and arguments directly. Review only with the exact action returned by that read. Older hosts can still use data.requestId with room_read_request. Subscriptions cover future events, not earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room and follow every nextRead. Finish each selected room_read_request before responding with its current answerBasis; do not resend saved requests.' + (transport?.configurationPending ? ' Callback delivery is pending operator verification: subscriptions currently return callback_origin_not_allowed; provide only the returned origin to the operator, never the callback path or signing secret.' : ''),
-          inputSchema: { type: 'object', properties: { roomId: { type: 'string', const: descriptor.roomId }, memberId: { type: 'string', const: descriptor.memberId } }, required: ['roomId', 'memberId'], additionalProperties: false } }], ttlMs: 0, cacheScope: 'private' });
+          inputSchema: { type: 'object', properties: { roomId: { type: 'string', const: descriptor.roomId }, memberId: { type: 'string', const: descriptor.memberId } }, required: ['roomId', 'memberId'], additionalProperties: false } }];
+        if (descriptor.scopes.includes('work:read') && descriptor.scopes.includes('rooms:read')) events.push({
+          name: discoveryEvent, delivery: ['webhook'], inputSchema: events[0].inputSchema,
+          description: 'Opt in to private project finding pointers for projects designating you as a reviewer. Follow the supplied exact read.',
+          payloadSchema: { type: 'object', additionalProperties: false, required: ['roomId', 'memberId', 'nextRead'],
+            properties: {
+              roomId: { type: 'string' }, memberId: { type: 'string' },
+              nextRead: { type: 'object', additionalProperties: false, required: ['tool', 'arguments'], properties: {
+                tool: { const: 'room_read_project_discoveries' },
+                arguments: { type: 'object', additionalProperties: false, required: ['roomId', 'offerId', 'at'],
+                  properties: { roomId: { type: 'string' }, offerId: { type: 'string' }, at: { type: 'string' } } }
+              } }
+            } }
+        });
+        return result({ events, ttlMs: 0, cacheScope: 'private' });
       }
       if (message.method === 'events/subscribe') return result(await manager.subscribe({ ...args, principal: descriptor }));
       if (message.method === 'events/unsubscribe') {

@@ -20,13 +20,13 @@ function listFindings(ctx) {
   const { auth, roomId } = authorizeRoomRead(ctx);
   if (isGuestAgentMemberId(auth.member.id)) ctx.reject(403, 'owner_only', 'Guests cannot manage project offers');
   const query = ctx.url.searchParams;
-  if ([...query.keys()].some(key => !['auth', 'limit', 'after'].includes(key) || query.getAll(key).length !== 1)
+  if ([...query.keys()].some(key => !['auth', 'limit', 'after', 'at'].includes(key) || query.getAll(key).length !== 1)
       || (query.has('auth') && !['room', 'account'].includes(query.get('auth'))))
     ctx.reject(422, 'invalid_project_discovery', 'Unsupported review query');
   const { offerId } = ctx.params;
   if (!validId(offerId)) ctx.reject(404, 'not_found', 'Not found');
   const page = reviewerProjectDiscoveries(ctx.store, roomId, offerId, ctx.expectedOrigin(), auth.member.id,
-    { limit: query.get('limit'), after: query.get('after') });
+    { limit: query.get('limit'), after: query.get('after'), at: query.get('at') });
   return ctx.json(ctx.res, 200, page, ctx.req.method === 'HEAD');
 }
 

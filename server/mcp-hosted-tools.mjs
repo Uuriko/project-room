@@ -68,6 +68,7 @@ export const hostedRoomTools = [
   }, ["roomId"])), outputSchema: roomNextOutput },
   tool("room_read_project_discoveries", "Read private outside findings as a designated project reviewer. Pass nextCursor as after until null. After consideration, reuse the ifIdle.discoveryReview checkpoint on initial pickups.", schema({
     roomId: roomIdField, offerId: idField, limit: { type: "integer", minimum: 1, maximum: 50, default: 5 },
+    at: { type: "string", maxLength: 160, description: "Read the single finding named by a private notification." },
     after: { type: "string", maxLength: 160 }
   }, ["roomId", "offerId"])),
   tool("room_receipt", "Check your exact Room operation ID. Returns committed event metadata only. Not recorded means absent at the observed head. Read only.", schema({
