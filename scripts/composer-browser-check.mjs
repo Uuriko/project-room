@@ -443,6 +443,38 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.unroute("**/api/rooms/commons/commands");
     await page.unroute(receiptUrl);
 
+    // An edit cannot replace a committed but still unconfirmed operation.
+    const uncertainPosts = [];
+    await page.route(receiptUrl, loseReceipt);
+    await page.route("**/api/rooms/commons/commands", async route => {
+      uncertainPosts.push(route.request().postDataJSON());
+      const response = await route.fetch();
+      assert.equal(response.ok(), true);
+      if (uncertainPosts.length === 1) await route.abort("failed");
+      else await route.fulfill({ response });
+    });
+    await input.fill("Keep this unconfirmed send");
+    await input.press("Control+Enter");
+    await status.waitFor({ state: "visible" });
+    assert.equal(await input.evaluate(element => element.readOnly), true);
+    assert.equal(await page.locator("#message-form button[type=submit]").getAttribute("aria-label"), "Retry original");
+    await input.press("End");
+    await input.press("Backspace");
+    assert.equal(await input.inputValue(), "Keep this unconfirmed send");
+    page.once("dialog", dialog => dialog.accept());
+    await page.reload();
+    await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
+    assert.equal(await input.inputValue(), "Keep this unconfirmed send");
+    assert.equal(await input.evaluate(element => element.readOnly), true);
+    await input.press("Control+Enter");
+    await waitForSaved();
+    assert.equal(uncertainPosts.length, 2);
+    assert.deepEqual(uncertainPosts[0], uncertainPosts[1]);
+    assert.equal(store.room("commons").state.messages.filter(message => message.body === "Keep this unconfirmed send").length, 1);
+    await page.unroute("**/api/rooms/commons/commands");
+    await page.unroute(receiptUrl, loseReceipt);
+
     // Explicit opt-in survives reload only after authenticating the same room.
     await input.fill("Recover this thread after reload");
     page.once("dialog", dialog => dialog.accept());

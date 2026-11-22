@@ -3236,14 +3236,14 @@ function syncRequestComposer() {
   $("#request-exit").disabled = busy;
   const input = $("#message-input"), select = $("#message-to-select"), send = $("#message-form button[type=submit]");
   const archived = Boolean(state) && isRoomArchived(state); // Issue #6 A2: an archived room is read only.
-  input.readOnly = Boolean(mode && pendingMessage);
+  input.readOnly = Boolean(pendingMessage);
   input.disabled = busy || requestReading || archived;
-  select.disabled = busy || requestReading || Boolean(assistantDraft) || Boolean(mode && (mode.kind !== "request" || mode.followUpRequestId || pendingMessage));
+  select.disabled = busy || requestReading || Boolean(assistantDraft || pendingMessage) || Boolean(mode && (mode.kind !== "request" || mode.followUpRequestId));
   select.required = mode?.kind === "request";
   select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
   renderComposerLength();
   send.disabled = busy || requestReading || archived || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
-  const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : mode.kind === "answered" ? "Send answer" : label : "Send";
+  const action = pendingMessage ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : mode.kind === "answered" ? "Send answer" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
   input.placeholder = archived ? "This room is archived." : (!mode && composerPrivateLabel()) || composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
@@ -4684,8 +4684,8 @@ $("#message-form").addEventListener("submit", e => {
     submitRequest(e.currentTarget); return;
   }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
-  const askRoom = humanExperience.intent(content);
-  if (!content.body) return;
+  const hadPending = Boolean(pendingMessage);
+  if (!hadPending && !content.body) return;
   if (composerFiles.some(file => file.status === "uploading")) { setComposerError("Wait for the file to finish attaching."); return; }
   if (composerFiles.some(file => file.status === "error" || file.commitMessageId)) { setComposerError(uiText("composer.file.unresolved")); return; }
   // "Also send to channel": a public thread reply also lands as a top-level
@@ -4694,12 +4694,11 @@ $("#message-form").addEventListener("submit", e => {
   if (currentThreadId && !content.toMemberId && content.replyToId && $("#also-send-to-channel").checked) {
     content.alsoSendToChannel = true;
   }
-  const previous = pendingMessage?.command?.data;
-  const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId && (previous.channelId ?? DEFAULT_CHANNEL_ID) === content.channelId && Boolean(previous.alsoSendToChannel) === Boolean(content.alsoSendToChannel);
-  // Preserve the exact legacy payload, including an omitted default channel.
-  const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
-  pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
-  const sendingCommand = pendingMessage.command;
+  if (!pendingMessage) {
+    pendingMessage = draftCommand(null, T.MESSAGE_POSTED, { messageId: crypto.randomUUID(), ...content });
+  }
+  const sendingCommand = pendingMessage.command, data = sendingCommand.data;
+  const askRoom = humanExperience.intent(data);
   const sharedRequest = Boolean(askRoom || humanExperience.hasSubmission(sendingCommand));
   const stagedFileIds = composerFiles.filter(file => file.status === "staged").map(file => file.id);
   saveComposer();
@@ -4721,6 +4720,10 @@ $("#message-form").addEventListener("submit", e => {
       receipt = await client.send(sendingCommand, { confirmAfterUnknown: true });
     } catch (error) {
       if (generation !== client.generation || !state) return;
+      if (!sharedRequest && ownsSendingDraft() && draftRefused(error, hadPending)) {
+        pendingMessage = null;
+        saveComposer();
+      }
       throw mapDmConsentRefusal(sendingCommand, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
@@ -5078,7 +5081,9 @@ function syncAlsoSend() {
   const label = $("#also-send-label"), box = $("#also-send-to-channel");
   const visible = Boolean(currentThreadId && !requestMode && state && !$("#message-to-select")?.value);
   label.hidden = !visible;
+  box.disabled = Boolean(pendingMessage);
   if (!visible) box.checked = false;
+  else if (pendingMessage) box.checked = Boolean(pendingMessage.command.data.alsoSendToChannel);
 }
 function rememberComposerSelection({ clearCollapsed = false } = {}) {
   const input = $("#message-input");
