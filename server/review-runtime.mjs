@@ -1,5 +1,6 @@
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
+import { LISTENER_TOKEN_HEADER } from "./listener-fence.mjs";
 import { nativeOutboxEventId } from "./mcp-outbox-event-id.mjs";
 
 export const reviewRuntimeSchema = `
@@ -30,7 +31,8 @@ const tableReady = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE
 // Call inside the same write transaction that validated the exact action.
 export function recordReviewRuntime(db, roomId, work, member, input, now) {
   if (!input || Array.isArray(input)
-    || Object.keys(input).some(k => !["workItemId","completionEventId","evidenceVersion","expectedRevision","attemptId","phase"].includes(k))
+    || Object.keys(input).some(k => !["workItemId","completionEventId","evidenceVersion","expectedRevision","attemptId","phase","reserveDispatch"].includes(k))
+    || input.reserveDispatch !== undefined && (input.reserveDispatch !== true || input.phase !== "start_unknown")
     || ![input.workItemId,input.completionEventId,input.attemptId].every(validId)
     || !Number.isSafeInteger(input.expectedRevision) || !phases.includes(input.phase)) fail(422, "invalid_review_runtime");
   const next = nextWorkStep(work, now);
@@ -53,6 +55,11 @@ export function recordReviewRuntime(db, roomId, work, member, input, now) {
     if (interrupted.attempt_id !== input.attemptId) fail(409, "review_runtime_attempt_conflict");
     return { status:"interrupted", observedAt:interrupted.observed_at };
   }
+  // A lost response or missing local disk cannot authorize a second prompt.
+  // Only the transition into uncertain dispatch returns a grant.
+  if (input.reserveDispatch === true && sameReview && row.phase !== "claimed") {
+    return { status:row.phase, observedAt:row.observed_at };
+  }
   if (input.phase === "claimed" || (sameReview && row.phase === "claimed")) {
     // Keep the actual first claim separate from the latest provider phase.
     // Neither the claim nor a retry settles the work wake.
@@ -70,7 +77,7 @@ export function recordReviewRuntime(db, roomId, work, member, input, now) {
     ON CONFLICT(room_id,work_item_id) DO UPDATE SET completion_id=excluded.completion_id, member_id=excluded.member_id,
     revision=excluded.revision, attempt_id=excluded.attempt_id,phase=excluded.phase,observed_at=excluded.observed_at`)
     .run(roomId,work.id,input.completionEventId,member.id,work.revision,input.attemptId,input.phase,now);
-  return { status: input.phase, observedAt: now };
+  return { status: input.phase, observedAt: now, ...(input.reserveDispatch === true ? { dispatchGranted:true } : {}) };
 }
 
 function claimObservation(db, roomId, work, revision, memberId) {
@@ -143,7 +150,7 @@ export function reviewRuntimeFor(store, roomId, work, next, now, { includeClaim 
 export const REVIEW_RUNTIME_ROUTE = Object.freeze({
   id: "review-runtime-observe", method: "POST", path: "/api/rooms/{roomId}/review-runtime",
   auth: "room", capability: null, scope: "room",
-  parity: "exempt:host-only runtime observations carry no execution authority",
+  parity: "exempt:host-only observations and dispatch fencing do not authorize Room actions",
   schema: { params:{ type:"object", required:["roomId"], properties:{ roomId:{type:"string"} } },
     body:{ type:"object" }, response:{type:"object"} }, events: [],
   async handler(ctx) {
@@ -155,7 +162,10 @@ export const REVIEW_RUNTIME_ROUTE = Object.freeze({
     if (auth.credentialScope !== "room") ctx.reject(403, "access_denied", "A room bearer is required");
     if (auth.kind === "api-key" && !auth.apiKeyScopes?.some(scope => ["rooms:write","rooms:*"].includes(scope)))
       ctx.reject(403, "insufficient_scope", "Room write scope is required");
-    ctx.rate(`review-runtime:${auth.credentialHash}`, 60);
-    return ctx.json(ctx.res,200,ctx.store.reportReviewRuntime(selected.token,roomId,await ctx.body(ctx.req,{limit:4096}),binding));
+    const body = await ctx.body(ctx.req,{limit:4096});
+    const bucket = body?.reserveDispatch === true ? "review-dispatch" : "review-runtime";
+    ctx.rate(`${bucket}:${auth.credentialHash}`, 60);
+    return ctx.json(ctx.res,200,ctx.store.reportReviewRuntime(selected.token,roomId,body,
+      binding,ctx.req.headers[LISTENER_TOKEN_HEADER]));
   }
 });

@@ -2,7 +2,7 @@
     post:
       operationId: "reportExactReviewRuntime"
       summary: Report a managed review runtime observation
-      description: Report claimed, started, start_unknown, or interrupted for the current exact review basis. Only its designated agent reviewer may report. This does not grant execution authority.
+      description: Report the exact reviewer runtime phase. The active Room listener can reserve a single provider dispatch in the start_unknown phase. The reservation grants no Room action permissions.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -20,6 +20,7 @@
                 expectedRevision: { type: integer }
                 attemptId: { type: string }
                 phase: { type: string, enum: [claimed, started, start_unknown, interrupted] }
+                reserveDispatch: { type: boolean, enum: [true], description: Requires the current Room listener token and phase start_unknown. }
       responses:
         '200': { description: Review runtime observation }
         '401': { description: Unauthenticated }

@@ -49,13 +49,21 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     const report = (change = {}, token = reviewer.secret) => store.reportReviewRuntime(token, "commons", { ...input, ...change });
     assert.throws(() => report({}, owner), { code:"review_runtime_denied" });
     assert.throws(() => report({evidenceVersion:"changed"}), { code:"review_runtime_stale" });
+    assert.throws(() => report({phase:"start_unknown",reserveDispatch:true}), { code:"review_dispatch_requires_listener" });
     const claim = report();
     now += 10;
     assert.deepEqual(report(), claim);
     assert.equal(read().reviewRuntime.status, "claimed");
     assert.equal(read().reviewRuntime.claimObservedAt, claim.observedAt);
     assert.throws(() => report({attemptId:"another"}), { code:"review_runtime_attempt_conflict" });
-    report({phase:"start_unknown"});
+    const lease = store.agentHeartbeats.acquireListenerLease({agentId:reviewer.identityId, roomId:"commons", listenerId:"review-fixture"});
+    const reserve = token => store.reportReviewRuntime(reviewer.secret, "commons", {
+      ...input, phase:"start_unknown", reserveDispatch:true,
+    }, null, token);
+    assert.throws(() => reserve("wrong-token"), { code:"stale_listener" });
+    const reservation = reserve(lease.fencingToken);
+    assert.equal(reservation.dispatchGranted, true);
+    assert.deepEqual(reserve(lease.fencingToken), { status:"start_unknown", observedAt:reservation.observedAt });
     assert.equal(report().status, "start_unknown");
     now += 10;
     report({phase:"started"});
@@ -68,6 +76,7 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.equal(read().reviewRuntime.status, "verdict_recorded");
     assert.equal(read().reviewRuntime.claimObservedAt, claim.observedAt);
     assert.throws(() => report(), { code:"review_runtime_stale" });
+    store.agentHeartbeats.releaseListenerLease({agentId:reviewer.identityId, roomId:"commons", fencingToken:lease.fencingToken});
     act(owner, T.WORK_BLOCKER_RESOLVED, {resolution:"Attach a correction."}); act(owner, T.WORK_STARTED);
     const corrected = submit("Corrected evidence.", baseline.id);
     assert.equal(read().current.completionEventId, corrected.id);
