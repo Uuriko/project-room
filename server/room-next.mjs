@@ -122,7 +122,7 @@ function workPage(store, roomId, auth, room, cursor) {
 
     const evaluatedThrough = currentVisibleHorizon(store, roomId, auth.member.id, head.sequence);
     const page = scanWorkPage(roomId, position,
-      after => addressedWorkWindow(store, roomId, auth.member.id, room.ownerId, after, PAGE_SIZE, budget),
+      after => addressedWorkWindow(store, roomId, auth.member.id, room.ownerId, after, PAGE_SIZE, budget, { actionableAt: position.at }),
       // The canonical viewer summary already masks unauthorized work rows.
       items => workRows(items.filter(item => item.title !== null),
         auth, room, roomId, position.at, item => readCurrentWorkItem(db, roomId, item.id, budget).blocker));
