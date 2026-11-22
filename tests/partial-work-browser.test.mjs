@@ -107,3 +107,24 @@ for (const firstReadFails of [false, true]) {
    assert.equal(h.pendingWorkThreadEpoch, null);
   });
 }
+
+for (const stale of [false, true]) {
+  test(`a bounded Work Thread retry ${stale ? "withholds evidence from before" : "opens evidence at"} the displayed sequence`, async () => {
+    const h = harness(), reads = [];
+    h.pendingWorkThreadEpoch = h.workNavigationEpoch;
+    h.client.sequence = 10;
+    h.client.workContext = () => new Promise((resolve, reject) => reads.push({ resolve, reject }));
+    const pending = h.reveal("late");
+    h.state = { ...h.state };
+    reads[0].reject(new Error("Selected work response was lost"));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(reads.length, 2);
+    h.state = { ...h.state };
+    reads[1].resolve({ roomId:"commons", viewerId:"owner", evaluatedThrough:stale ? 9 : 10,
+      work: { id:"late", title:"Selected work", definitionOfDone:"Exact evidence", revision:2 } });
+    const result = await pending;
+    assert.equal(Boolean(result), !stale);
+    assert.equal(h.calls.some(([kind]) => kind === "mount"), !stale);
+    assert.equal(reads.length, 2);
+  });
+}
