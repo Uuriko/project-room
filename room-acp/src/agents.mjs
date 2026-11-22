@@ -1,9 +1,10 @@
 // Known ACP agents, in detection order. Commands verified Oct 29, 2026 against
 // each agent's docs and the ACP registry. `--agent-cmd` overrides when they drift.
 // Codex downloads use the 2.5.0 adapter qualified with a no-prompt session.
-import { spawn } from "node:child_process";
+import { fork, spawn } from "node:child_process";
 import { delimiter, join } from "node:path";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createPeer } from "./jsonrpc.mjs";
 
 export const KNOWN_AGENTS = Object.freeze([
@@ -97,12 +98,16 @@ export function childEnvFor(env = process.env) {
 // Spawn an agent process and wrap its stdio as a JSON-RPC peer. The Room
 // credential variables are excluded from the child's environment.
 export function spawnAgent(candidate, { cwd = process.cwd(), env = process.env, onRequest, onNotification, log = () => {} } = {}) {
-  // A POSIX process group belongs to this launch, including adapter helpers.
+  // The POSIX supervisor owns the group and observes receiver death over IPC.
   const ownsProcessGroup = process.platform !== "win32";
-  const child = spawn(candidate.command, candidate.args, {
-    cwd, env: childEnvFor(env), stdio: ["pipe", "pipe", "pipe"],
-    detached: ownsProcessGroup, shell: process.platform === "win32" && candidate.command === "npx",
-  });
+  const stdio = ["pipe", "pipe", "pipe"];
+  const launch = { cwd, env: childEnvFor(env), stdio };
+  const child = ownsProcessGroup
+    ? fork(fileURLToPath(new URL("./agent-supervisor.mjs", import.meta.url)), [candidate.command, ...(candidate.args ?? [])],
+      { ...launch, stdio: [...stdio, "ipc"], detached: true, execArgv: [] })
+    : spawn(candidate.command, candidate.args, { ...launch, shell: candidate.command === "npx" });
+  let adapterExit = null;
+  if (ownsProcessGroup) child.on("message", info => { adapterExit = info; });
   child.stderr.on("data", () => {});
   const peer = createPeer({ input: child.stdout, output: child.stdin, onRequest, onNotification, log });
   let stopping = false, exited = false, forceStop;
@@ -117,9 +122,9 @@ export function spawnAgent(candidate, { cwd = process.cwd(), env = process.env, 
     exited = true;
     clearTimeout(forceStop);
     // A failed or exited adapter can leave helpers holding its stdio open.
-    if (ownsProcessGroup) signalGroup("SIGKILL");
+    if (ownsProcessGroup && !adapterExit) signalGroup("SIGKILL");
   });
-  return { child, peer, stop() {
+  return { child, peer, exitInfo: (code, signal) => adapterExit ?? { code, signal }, stop() {
     if (stopping) return;
     stopping = true;
     peer.close();
@@ -160,7 +165,10 @@ export async function probe(candidate, options = {}) {
       return { ...candidate, ok: true, executionReady: true, capabilities };
     }
     spawned = spawnAgent(candidate, options);
-    const exited = new Promise(resolve => spawned.child.once("error", error => resolve({ error })).once("exit", code => resolve({ error: new Error(`exited with code ${code}`) })));
+    const exited = new Promise(resolve => spawned.child.once("error", error => resolve({ error })).once("exit", (code, signal) => {
+      const info = spawned.exitInfo(code, signal);
+      resolve({ error: new Error(`agent exited (${info.error ?? info.code ?? info.signal})`) });
+    }));
     const capabilities = await Promise.race([initialize(spawned.peer, options), exited.then(({ error }) => { throw error; })]);
     return { ...candidate, ok: true, capabilities };
   } catch (error) {
