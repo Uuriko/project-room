@@ -22,7 +22,6 @@ import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/
 import { growthCollector } from "../src/growth-emit.js";
 import { backupFailureDetail, verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
 import { reliefLineBytes, relieveProjectionsIncrementally } from "./store-relief.mjs";
-import { localRecoveryEnabled, localRecoveryPoint } from "./node-recovery-point.mjs";
 import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
 import { healBackfillQuarantines } from "./messages-store.mjs";
 
@@ -999,7 +998,8 @@ export const JOBS = Object.freeze([
     async run(store, ctx = {}) {
       let gauges = measureStoreGrowth(store);
       let relief = null;
-      const limitBytes = reliefLineBytes(store, STORE_GROWTH_LIMITS.maxProjectionBytes);
+      const { maxProjectionBytes: escalationBytes } = STORE_GROWTH_LIMITS;
+      const limitBytes = reliefLineBytes(store, escalationBytes);
       if (limitBytes !== null && gauges.maxProjectionBytes > limitBytes) {
         const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
         relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery,
@@ -1159,7 +1159,7 @@ export function failureDetailOf(source) {
 // that was just committed; this timer is the retry backstop.
 export function startNodeScheduler({
   store, env = process.env, channelWebhooks = null, gmailAuth = null,
-  tickMs = 1000, fetchImpl, dnsResolvers, now = () => Date.now()
+  tickMs = 1000, fetchImpl, dnsResolvers, now = () => Date.now(), recoveryPoint = null
 } = {}) {
   if (!store) throw new TypeError("node scheduler needs a store");
   const overrides = new Map();
@@ -1233,10 +1233,12 @@ export function startNodeScheduler({
   // the rotated retentionIndex and every tick pruned table index 0 again.
   const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, growthTick, retentionIndex: 0,
     // Automatic projection relief on Node: a verified local copy is the
-    // recovery point (no R2/KV backup binding here), refused rooms back off
+    // recovery point (no R2/KV backup binding here); refused rooms back off
     // across ticks, and a Node tick may replay more history than the
     // Worker's CPU-bounded catch-up (it still yields every chunk).
-    ...(localRecoveryEnabled(env) ? { recoveryPoint: () => localRecoveryPoint(store, { env, now }) } : {}),
+    // server.mjs passes recoveryPoint (server/node-recovery-point.mjs); the
+    // Worker graph never imports it.
+    ...(typeof recoveryPoint === "function" ? { recoveryPoint } : {}),
     reliefBackoff: new Map(), reliefCatchUpEvents: NODE_RELIEF_CATCH_UP_EVENTS };
   let timer = null;
   let running = false;

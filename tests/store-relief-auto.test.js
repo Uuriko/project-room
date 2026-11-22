@@ -142,6 +142,17 @@ test("the store-growth job backs off a room it could not relieve", async t => {
   assert.equal(second.reliefDeferred, 1);
 });
 
+test("the Node scheduler hands its recovery point to the store-growth job", async t => {
+  const f = fixture(t);
+  f.store.db.prepare("UPDATE rooms SET projection = ?").run("x".repeat(STORE_GROWTH_LIMITS.maxProjectionBytes + 100_000));
+  let asked = 0;
+  const scheduler = startNodeScheduler({ store: f.store, env: { GROWTH_WATCH_INTERVAL_MS: "0" }, tickMs: 0, now: () => f.clock(), recoveryPoint: () => { asked += 1; return null; } });
+  t.after(() => scheduler.stop());
+  const outcome = (await scheduler.runOnce()).find(o => o.job === "store-growth");
+  assert.equal(asked, 1);
+  assert.equal(outcome?.result?.reliefBackupMissing, 1, "no recovery point: nothing archived, and the summary says why");
+});
+
 test("a write refused by a full projection asks the Node scheduler for one early store-growth tick", async t => {
   const f = fixture(t);
   let clock = f.clock();
