@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
+import { PassThrough } from "node:stream";
+import { AgentHost } from "../room-acp/src/agent-host.mjs";
+import { createPeer } from "../room-acp/src/jsonrpc.mjs";
 import { Bridge } from "../room-acp/src/bridge.mjs";
 import { RoomClient } from "../room-acp/src/room.mjs";
 import { join } from "../room-acp/src/join.mjs";
@@ -16,7 +19,7 @@ function setup(t) {
   const make = (overrides = {}) => {
     const bridge = new Bridge({ connection: { apiBase: "http://localhost", roomId: "r", memberId: "agent", hostId: "h", ...overrides }, env: { ROOM_ACP_HOME: home }, host: {
       session: async () => ({ sessionId: "s" }),
-      prompt: async () => { counts.prompts++; return { recorder: { text: "completed", tools: new Map() }, stopReason: "end_turn" }; },
+      prompt: async (_key, _prompt, { beforeDispatch }) => { beforeDispatch(); counts.prompts++; return { recorder: { text: "completed", tools: new Map() }, stopReason: "end_turn" }; },
     } });
     bridge.me = { id: bridge.connection.memberId }; bridge.ownerId = "owner"; bridge.members = { owner: { kind: "human", active: true } };
     bridge.fencingToken = "test-listener";
@@ -72,6 +75,27 @@ test("restart during session preparation retries the wake without duplicating a 
   assert.equal(counts.acks, 1);
 });
 
+test("a closed ACP peer leaves a claim wake retryable without a result or acknowledgement", async t => {
+  const { make, counts, home } = setup(t);
+  const first = make();
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const peer = createPeer({ input, output });
+  t.after(() => { input.destroy(); output.destroy(); });
+  const host = new AgentHost({ candidate: {} });
+  host.process = { peer };
+  first.host.prompt = host.prompt.bind(host);
+  peer.close();
+
+  await deliver(first);
+  assert.deepEqual(counts, { prompts: 0, notes: [], acks: 0 });
+  assert.equal(existsSync(pathJoin(home, "claim-turns")), false);
+  await deliver(make());
+  assert.equal(counts.prompts, 1);
+  assert.equal(counts.notes.length, 1);
+  assert.equal(counts.acks, 1);
+});
+
 test("hosts racing to finish preparation cannot both prompt for one wake", async t => {
   const { make, counts } = setup(t);
   const first = make(), second = make();
@@ -94,7 +118,7 @@ test("hosts racing to finish preparation cannot both prompt for one wake", async
 test("interruption during execution never reruns or acknowledges uncertain work", async t => {
   const { make, counts } = setup(t);
   const first = make();
-  first.host.prompt = async () => { counts.prompts++; first.stop(); throw new Error("interrupted after side effect"); };
+  first.host.prompt = async (_key, _prompt, { beforeDispatch }) => { beforeDispatch(); counts.prompts++; first.stop(); throw new Error("interrupted after side effect"); };
   await deliver(first);
   await deliver(make());
   assert.equal(counts.prompts, 1);
@@ -154,7 +178,8 @@ for (const state of ["done", "closed"]) test(`claim becoming ${state} while queu
   const started = Promise.withResolvers();
   const finish = Promise.withResolvers();
   t.after(() => finish.resolve());
-  bridge.host.prompt = async () => {
+  bridge.host.prompt = async (_key, _prompt, { beforeDispatch }) => {
+    beforeDispatch();
     counts.prompts++;
     started.resolve();
     await finish.promise;

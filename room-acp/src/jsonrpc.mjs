@@ -9,10 +9,13 @@ export class JsonRpcError extends Error {
 export function createPeer({ input, output, onRequest = async () => { throw new JsonRpcError(-32601, "Method not found"); }, onNotification = () => {}, onTransportError = () => {}, log = () => {} }) {
   let nextId = 1, closed = false;
   const pending = new Map();
-  const write = message => {
+  const write = (message, beforeWrite) => {
     if (closed) return false;
     let frame;
     try { frame = JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n"; } catch { return false; }
+    // A local guard may commit an execution receipt or refuse the frame.
+    // Run it only after serialization and before touching the transport.
+    beforeWrite?.();
     try { output.write(frame); return true; } catch { transportFailed(); return false; }
   };
   const failAll = reason => {
@@ -57,14 +60,19 @@ export function createPeer({ input, output, onRequest = async () => { throw new 
   });
   lines.on("close", () => transportFailed("connection closed"));
   return {
-    request(method, params = {}, { timeoutMs = 0 } = {}) {
+    request(method, params = {}, { timeoutMs = 0, beforeWrite } = {}) {
       const id = nextId++;
       return new Promise((resolve, reject) => {
         let timer = null;
         const settle = fn => value => { if (timer) clearTimeout(timer); fn(value); };
         pending.set(id, { resolve: settle(resolve), reject: settle(reject) });
         if (timeoutMs > 0) timer = setTimeout(() => { pending.delete(id); reject(new JsonRpcError(-32001, `${method} timed out`)); }, timeoutMs);
-        if (!write({ id, method, params })) { pending.delete(id); if (timer) clearTimeout(timer); reject(new JsonRpcError(-32000, "connection closed")); }
+        try {
+          if (!write({ id, method, params }, beforeWrite)) throw new JsonRpcError(-32000, "connection closed");
+        } catch (error) {
+          pending.delete(id);
+          settle(reject)(error);
+        }
       });
     },
     notify(method, params = {}) { return write({ method, params }); },

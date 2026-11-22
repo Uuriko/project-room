@@ -75,7 +75,7 @@ export class AgentHost {
   }
 
   // Run one prompt turn on the thread's session. Returns the recorder and stopReason.
-  async prompt(threadKey, prompt, { sessionId, onDispatched = null, onFirstOutput = null } = {}) {
+  async prompt(threadKey, prompt, { sessionId, beforeDispatch, onDispatched = null, onFirstOutput = null } = {}) {
     if (!this.process) throw new Error("agent is not running");
     const id = sessionId ?? (await this.session(threadKey)).sessionId;
     const recorder = new TurnRecorder();
@@ -89,7 +89,7 @@ export class AgentHost {
     } });
     const peer = this.process.peer;
     try {
-      const pending = peer.request("session/prompt", { sessionId: id, prompt });
+      const pending = peer.request("session/prompt", { sessionId: id, prompt }, beforeDispatch ? { beforeWrite: beforeDispatch } : undefined);
       safelyObserve(onDispatched);
       const result = await pending;
       return { recorder, stopReason: result?.stopReason ?? "end_turn" };
