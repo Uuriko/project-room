@@ -37,6 +37,9 @@ const roomNextOutput = {
     roomId: nextId, viewerId: nextId, goal: { type: "string", maxLength: 800 },
     charterRevision: { type: ["integer", "null"] }, contentTrust: { type: "string" },
     nextRead: { anyOf: [nextRead, { type: "null" }] },
+    availablePeer: schema({ memberId:nextId, scope:{ const:"room_queue" }, status:{ const:"idle" },
+      observedAt:{ type:"integer" }, expiresAt:{ type:"integer" }, nextRead },
+    ["memberId", "scope", "status", "observedAt", "expiresAt", "nextRead"]),
     ifIdle: { type: "object", properties: { status: { enum: ["invitation", "paused", "unavailable", "no_invitation", "public_review"] }, nextRead,
       investigation: { type: "object" }, discoveryReview: { type: "object" } }, required: ["status"] },
     work: nextPage(schema({
@@ -61,7 +64,7 @@ import { handoffPacketEnabled } from "./handoff-packet.mjs";
 
 export const hostedRoomTools = [
   tool("room_wait_for_attention", "Wait for new caller-addressed mentions, replies, DMs or formal requests after a saved inbox cursor. Normalized rooms only. Returns pointers or an explicit catch-up continuation; never acknowledges messages or starts an AI. timeoutSec defaults to 25, maximum 120; your host may cancel earlier. includeWork=true also returns kind=work pointers for tasks that now wait on you. Older obligations require separate inbox/work reads.", schema({roomId: roomIdField, after: {type: "integer", minimum: 0}, timeoutSec: {type: "integer", minimum: 0, maximum: 120}, includeWork: {type: "boolean"}}, ["roomId", "after"])),
-  { ...tool("room_next", "Use view:pickup. Follow nextRead, then ifIdle.discoveryReview.nextRead or ifIdle.investigation.nextRead when dry. Continue partial pages.", schema({
+  { ...tool("room_next", "Use view:pickup. Follow nextRead, then ifIdle.discoveryReview.nextRead or ifIdle.investigation.nextRead when dry. Continue partial pages. When availablePeer appears, the named peer recently reported an empty Room queue. Its nextRead gives the configured scope for a useful parallel handoff. This does not assign work.", schema({
     roomId: roomIdField, source: { type: "string", enum: ["work", "requests"] },
     consideredDiscovery: { type: "string", maxLength: 4096, description: "Reuse after considering the offered findings." },
     cursor: { type: "string", minLength: 1, maxLength: 4096 }, view: { enum: ["pickup"] }

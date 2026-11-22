@@ -1474,7 +1474,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
 const MCP_INBOX_SCOPE = "mcp:inbox";
 const MCP_WAKE_SCOPE = "mcp:wake";
 const MCP_WEBHOOKS_SCOPE = "webhooks:manage";
-function mcpKeyGrantsScope(store, secret, requiredScope) {
+export function mcpKeyGrantsScope(store, secret, requiredScope) {
   if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return true;
   const record = store.agentPlugin.verifyPresentedApiKey(secret);
   if (!record) return false;

@@ -5463,9 +5463,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // done; a private request on the item must not lock them out of it.
   privateWorkParties(roomId,{workIds=null}={}) {
     if(isCurrentRoom(this.db,roomId))return readCurrentPrivateWorkParties(this,roomId,workIds);
-    const requestSlice = this.db.prepare("SELECT json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId)?.requests;
+    const rows = workIds === null
+      ? Object.values(JSON.parse(this.db.prepare("SELECT json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId)?.requests ?? "{}"))
+      : this.db.prepare(`SELECT json_extract(item.value,'$.workItemId') AS workItemId,
+          json_extract(item.value,'$.requesterId') AS requesterId, json_extract(item.value,'$.recipientId') AS recipientId
+        FROM rooms, json_each(rooms.projection,'$.replyRequests') AS item
+        WHERE rooms.id=? AND json_extract(item.value,'$.workItemId') IN (SELECT value FROM json_each(?))`)
+        .all(roomId, JSON.stringify([...workIds]));
     const privatePartiesByWork = new Map();
-    for (const request of Object.values(requestSlice ? JSON.parse(requestSlice) : {})) {
+    for (const request of rows) {
       if (!request?.workItemId) continue;
       if (!privatePartiesByWork.has(request.workItemId)) privatePartiesByWork.set(request.workItemId, new Set());
       privatePartiesByWork.get(request.workItemId).add(request.requesterId).add(request.recipientId);

@@ -2,9 +2,11 @@ import { createHash } from "node:crypto";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
 import { validId } from "../src/events.js";
-import { listRoomWork } from "./mcp-room-profile.mjs";
+import { listRoomWork, mcpKeyGrantsScope } from "./mcp-room-profile.mjs";
+import { readRoomNext } from "./room-next.mjs";
 
 const investigation = "Room investigation pass.";
+const CAPACITY_TTL_MS = 60000;
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
   JSON.stringify([roomId, requesterId, recipientId, workItemId]);
 
@@ -45,6 +47,60 @@ export function dispatchCompletionPickup(store, route, secret, event, sequence) 
   return store.command(secret, roomId, command).duplicate ? "replayed" : "posted";
 }
 
+// Read through the idle agent's own authorization. The configured sender
+// carries no selected task details across the two credential scopes.
+function dispatchIdlePickup(store, route, senderSecret, receiverSecret, identityId, hostId, origin) {
+  const { roomId, requesterId, recipientId, workItemId, after } = route;
+  if (store.wakeQueue.pauseStatus(roomId, recipientId)) return "paused";
+  const wake = store.agentHeartbeats.pendingWakePage(identityId, { roomId, hostId, limit: 1, observe: false });
+  if (wake.signals.length || wake.more) return "wake_pending";
+  const pickup = readRoomNext(store, receiverSecret, roomId, { view: "pickup" },
+    () => listRoomWork(store, receiverSecret, { roomId, focus: "help_wanted", limit: 1 }),
+    { discoveryOrigin: origin, allowPublicReview: true, allowInvestigation: mcpKeyGrantsScope(store, receiverSecret, "rooms:write") });
+  if (pickup.requests?.items.length || pickup.nextRead?.tool === "room_read_request") return "request_pending";
+  if (pickup.requests?.coverage !== "complete" || pickup.work?.coverage !== "complete") return "unknown";
+  const addressed = pickup.work.items.find(item => item.reason === "revise") ?? pickup.work.items[0];
+  const ready = addressed ? [addressed.id, addressed.revision, addressed.reason]
+    : ["invitation", "public_review"].includes(pickup.ifIdle?.status) || pickup.ifIdle?.discoveryReview
+      ? [pickup.ifIdle.status, pickup.ifIdle.nextRead ?? pickup.ifIdle.discoveryReview.nextRead] : null;
+  if (ready) return postIdleRequest(store, route, senderSecret, [roomId, recipientId, ...ready], "ready",
+    "Room found a next step for you. Read room_next and take the current authorized step. If it changed, use the current action or report the blocker.");
+
+  const lead = pickup.ifIdle?.investigation;
+  if (lead) return postIdleRequest(store, route, senderSecret, [roomId, lead.basis], "investigation", [
+    investigation, "Use the current investigation in room_next. Check existing work first and follow the selected exact evidence.",
+    "Record an observation and the smallest useful next step, or a scoped clean check. Keep restricted evidence within its original audience."
+  ].join("\n"));
+  if (!["no_invitation", "unavailable"].includes(pickup.ifIdle?.status)) return "unknown";
+
+  const latest = store.db.prepare(`
+    SELECT sequence,body FROM events WHERE room_id=? AND sequence>? AND
+      json_extract(body,'$.type')='message.posted' AND json_extract(body,'$.actorId')=? AND
+      json_extract(body,'$.data.toMemberId')=? AND json_extract(body,'$.data.workItemId')=? AND
+      json_extract(body,'$.data.responseOutcome')='answered'
+    ORDER BY sequence DESC LIMIT 1`).get(roomId, after, recipientId, requesterId, workItemId);
+  if (latest) {
+    const result = dispatchCompletionPickup(store, route, senderSecret, JSON.parse(latest.body), latest.sequence);
+    return result === "posted" ? "investigation_posted" : result;
+  }
+  return postIdleRequest(store, route, senderSecret, [roomId, workItemId, after], "investigation", [
+    investigation, "Read room_next first. If there is ready work, take that current action.",
+    "Otherwise inspect one piece of current evidence in this QA Work Thread. Look for a concrete gap, mismatch or unverified result.",
+    "Return the exact evidence, what you checked, and one actionable next step if you found a problem. A clean check is useful. Read-only QA."
+  ].join("\n"));
+}
+
+function postIdleRequest(store, route, secret, basis, kind, body) {
+  const { roomId, requesterId, recipientId, workItemId } = route;
+  const requestId = "idle-" + createHash("sha256").update(JSON.stringify([kind, ...basis])).digest("hex").slice(0, 32);
+  if (store.operationReceipt(secret, roomId, requestId).status === "recorded") return "replayed";
+  if (store.authenticate(secret, roomId).member.id !== requesterId) throw Error("Pickup requester identity changed");
+  const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
+    requestId, workItemId, toMemberId: recipientId, body: `@(${recipientId}) ${body}`
+  });
+  return store.command(secret, roomId, command).duplicate ? "replayed" : kind + "_posted";
+}
+
 // The Node app owns this subscriber. The only trigger is a committed event
 // (including catch-up on restart); the SQLite operation receipt owns deduplication.
 export function startCompletionPickup(store, configPath, log = console.warn) {
@@ -52,16 +108,23 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
   const { routes, checkpointPath } = readPrivateJson(configPath);
   if (!Array.isArray(routes) || !routes.length || routes.length > 50 || typeof checkpointPath !== "string")
     throw Error("Invalid completion pickup configuration");
-  const bindings = new Map();
+  const bindings = new Map(), idleBindings = new Map();
   for (const route of routes) {
     const { roomId, requesterId, recipientId, workItemId, credentialPath, after } = route;
     if (![roomId, requesterId, recipientId, workItemId].every(validId) || requesterId === recipientId
         || typeof credentialPath !== "string" || !Number.isSafeInteger(after) || after < 0
+        || (route.onIdle !== undefined && typeof route.onIdle !== "boolean")
         || bindings.has(routeKey(route))) throw Error("Invalid completion pickup route");
     const credential = readPrivateJson(credentialPath);
     const secret = credential.identitySecret ?? credential.token;
     if (store.authenticate(secret, roomId).member.id !== requesterId) throw Error("Invalid completion pickup requester");
-    bindings.set(routeKey(route), { route, secret });
+    const binding = { route, secret };
+    bindings.set(routeKey(route), binding);
+    if (route.onIdle) {
+      const key = JSON.stringify([roomId, recipientId]);
+      if (idleBindings.has(key)) throw Error("An idle agent needs one scoped pickup route per room");
+      idleBindings.set(key, binding);
+    }
   }
   let checkpoints;
   try { checkpoints = readPrivateJson(checkpointPath); }
@@ -88,7 +151,7 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
           const { toMemberId, workItemId, responseOutcome } = event.data ?? {};
           if (event.type !== "message.posted" || responseOutcome !== "answered") continue;
           const binding = bindings.get(routeKey({ roomId, requesterId: toMemberId, recipientId: event.actorId, workItemId }));
-          if (binding && row.sequence > binding.route.after) {
+          if (binding && !binding.route.onIdle && row.sequence > binding.route.after) {
             const status = dispatchCompletionPickup(store, binding.route, binding.secret, event, row.sequence);
             if (status === "posted") log(JSON.stringify({ event: "completion_pickup.posted", roomId, settlement: row.sequence }));
           }
@@ -108,5 +171,57 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
   }
   const unsubscribe = store.onEventAppended(wake);
   for (const roomId of rooms.keys()) wake(roomId);
-  return () => { stopped = true; unsubscribe(); };
+  const idleBinding = (roomId, identityId) => {
+    const link = store.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
+    return idleBindings.get(JSON.stringify([roomId, link?.member_id]));
+  };
+  const observations = new Map();
+  const idle = {
+    supports: (roomId, identityId) => idleBindings.size > 0 && Boolean(idleBinding(roomId, identityId)),
+    dispatch(roomId, identityId, receiverSecret, hostId, origin) {
+      const binding = idleBinding(roomId, identityId);
+      if (!binding) return "disabled";
+      const { route, secret } = binding;
+      return dispatchIdlePickup(store, route, secret, receiverSecret, identityId, hostId, origin);
+    },
+    observe(roomId, identityId, leaseToken, hostId, status, through) {
+      const route = idleBinding(roomId, identityId)?.route;
+      if (!route) return;
+      const key = routeKey(route);
+      observations.delete(key);
+      if (["replayed", "no_successor"].includes(status)) {
+        observations.set(key, { route, identityId, leaseToken, hostId, through, at:store.agentHeartbeats.now() });
+      }
+      return status === "paused" ? undefined : CAPACITY_TTL_MS / 2;
+    },
+    clearObservation(roomId, identityId) {
+      const route = idleBinding(roomId, identityId)?.route;
+      if (route) observations.delete(routeKey(route));
+    },
+    availablePeer(roomId, requesterId) {
+      const now = store.agentHeartbeats.now();
+      const through = store.headSequence(roomId);
+      for (const sample of observations.values()) {
+        const { route, identityId, leaseToken, hostId, at } = sample;
+        if (route.roomId !== roomId || route.requesterId !== requesterId || sample.through !== through
+          || now >= at + CAPACITY_TTL_MS || !idleBinding(roomId, identityId)
+          || store.wakeQueue.pauseStatus(roomId, route.recipientId)) continue;
+        const lease = store.db.prepare("SELECT fencing_token AS token, lease_expires_at AS expires FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?")
+          .get(identityId, roomId);
+        if (lease?.token !== leaseToken || lease.expires <= now) continue;
+        const pending = store.agentHeartbeats.pendingWakePage(identityId, { roomId, hostId, limit:1, observe:false });
+        if (pending.signals.length || pending.more) continue;
+        return { memberId:route.recipientId, scope:"room_queue", status:"idle", observedAt:at,
+          expiresAt:Math.min(lease.expires, at + CAPACITY_TTL_MS),
+          nextRead:{ tool:"room_read_work", arguments:{ roomId, workItemId:route.workItemId } } };
+      }
+      return null;
+    }
+  };
+  if (idleBindings.size) store.idlePickup = idle;
+  return () => {
+    stopped = true;
+    unsubscribe();
+    if (store.idlePickup === idle) delete store.idlePickup;
+  };
 }
