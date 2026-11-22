@@ -66,12 +66,26 @@ export function renderMcpServerCardJson({
     protocol: "mcp",
     transport: "streamable-http",
     url,
-    oauth: false,
+    // A-02 single story (wave-2900 D5b): remote MCP OAuth EXISTS on the
+    // hosted deployment — an OAuth2 authorization server (authorization
+    // code + PKCE, public clients, token auth "none") serves configured
+    // clients (server/oauth-provider.mjs; production clients are set in
+    // cloudflare/wrangler.jsonc ROOM_MCP_OAUTH_CLIENTS; an empty client
+    // list disables it, server/http.mjs). This card describes that hosted
+    // deployment, so it must not claim oauth: false beside its own
+    // "optional OAuth sign-in" description.
+    oauth: true,
     auth: {
       type: "bearer",
       header: "Authorization",
       scheme: "Bearer",
-      mint
+      mint,
+      oauth: {
+        authorizationServerMetadata: `${websiteUrl}/.well-known/oauth-authorization-server`,
+        protectedResourceMetadata: `${websiteUrl}/.well-known/oauth-protected-resource`,
+        // Mirrors OAUTH_SCOPES in server/oauth-client-contract.mjs.
+        scopesSupported: ["rooms:read", "chat:read", "chat:write", "work:read", "work:write", "members:invite"]
+      }
     },
     cacheScope: MCP_DISCOVERY_CACHE_SCOPE,
     ttlMs: MCP_DISCOVERY_TTL_MS,

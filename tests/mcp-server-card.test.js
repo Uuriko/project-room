@@ -69,7 +69,14 @@ test("server card and /.well-known/mcp.json are one document from the live tool 
   assert.equal(card.url, "https://room.trydemigod.com/mcp");
   assert.equal(card.remotes[0].url, card.url);
   assert.equal(card.remotes[0].type, "streamable-http");
-  assert.equal(card.oauth, false);
+  // A-02 single story (wave-2900 D5b): the hosted deployment runs a real
+  // MCP OAuth authorization server (live /.well-known/oauth-authorization-server
+  // and oauth-protected-resource documents), so the card must not say
+  // oauth: false beside its own "optional OAuth sign-in" description.
+  assert.equal(card.oauth, true);
+  assert.equal(card.auth.oauth.authorizationServerMetadata, "https://room.trydemigod.com/.well-known/oauth-authorization-server");
+  assert.equal(card.auth.oauth.protectedResourceMetadata, "https://room.trydemigod.com/.well-known/oauth-protected-resource");
+  assert.deepEqual(card.auth.oauth.scopesSupported, ["rooms:read", "chat:read", "chat:write", "work:read", "work:write", "members:invite"]);
   assert.equal(card.auth.mint, "https://room.trydemigod.com/api/agent-identities");
   assert.equal(card.cacheScope, MCP_DISCOVERY_CACHE_SCOPE);
   assert.equal(card.ttlMs, MCP_DISCOVERY_TTL_MS);
