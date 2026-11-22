@@ -8,9 +8,12 @@
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { agentFirstRunSeen } from "./agent-first-run.js";
 import { withBoardDeepLink } from "./board-deeplink.js";
+import { agentSigninRecord } from "./record-link.js";
 
 const mountPrefix = location.pathname.startsWith("/room/") ? "/room" : "";
 let roomTarget = `${mountPrefix}/`;
+const recordParams = new URLSearchParams(location.search).getAll("record");
+const intendedRecord = recordParams.length === 1 ? agentSigninRecord({ search:location.search, hash:recordParams[0] }) : null;
 
 const enterBox = document.getElementById("agent-signin-enter");
 const enterLink = document.getElementById("agent-signin-enter-link");
@@ -19,7 +22,7 @@ const ui = createAgentSigninUI({
   onSignedIn: (session) => {
     const roomId = session?.roomId;
     const roomQuery = roomId ? `?room=${encodeURIComponent(roomId)}` : "";
-    roomTarget = [mountPrefix, roomQuery].join("/");
+    roomTarget = [mountPrefix, roomQuery].join("/") + (intendedRecord && intendedRecord.roomId === roomId ? intendedRecord.hash : "");
     if (enterLink) enterLink.href = roomTarget;
     if (enterBox) enterBox.hidden = false;
     if (agentFirstRunSeen()) location.assign(roomTarget);

@@ -7,7 +7,7 @@ import { conversationCursorCodec } from "./conversation-sync.mjs";
 import { addressedWorkWindow } from "./current-work-list.mjs";
 import {
   CurrentReadBudgetExceeded, currentVisibleHorizon, isCurrentRoom, readCurrentHead,
-  readCurrentRecord, readCurrentWorkItem, readCurrentWorkPrivacy, withCurrentReadContext
+  readCurrentRecord, readCurrentWorkItem, withCurrentReadContext
 } from "./current-room-repository.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { currentResult } from "../src/work-selectors.js";
@@ -96,10 +96,17 @@ function workRows(items, auth, room, roomId, now, blockerFor) {
 function scanWorkPage(roomId, position, loadWindow, rowsFor) {
   let after = position.after, hasMore = false, items = [];
   for (let n = 0; n < WORK_SEARCH_WINDOWS; n++) {
-    const window = loadWindow(after);
-    after = window.after;
-    hasMore = window.hasMore;
-    items = rowsFor(window.items);
+    try {
+      const window = loadWindow(after);
+      items = rowsFor(window.items);
+      after = window.after;
+      hasMore = window.hasMore;
+    } catch (error) {
+      // Keep the last completed window as the continuation boundary. An
+      // incomplete window is retried under the next request's read budget.
+      if (!(error instanceof CurrentReadBudgetExceeded) || after === position.after) throw error;
+      break;
+    }
     if (items.length || !hasMore) break;
   }
   return { coverage: hasMore ? "partial" : "complete", items,
@@ -113,13 +120,13 @@ function workPage(store, roomId, auth, room, cursor) {
     const position = pageCursor(store, cursorBinding(auth, roomId, "work", head.head_sha256), cursor);
     if (!position) return unavailable(roomId, "work", "cursor_changed");
 
+    const evaluatedThrough = currentVisibleHorizon(store, roomId, auth.member.id, head.sequence);
     const page = scanWorkPage(roomId, position,
       after => addressedWorkWindow(store, roomId, auth.member.id, room.ownerId, after, PAGE_SIZE, budget),
-      items => workRows(items.filter(item => {
-        const privacy = readCurrentWorkPrivacy(db, roomId, item.id, budget);
-        return !privacy.requests || Object.hasOwn(privacy.parties, auth.member.id) || workRoleHolder(item, auth.member.id);
-      }), auth, room, roomId, position.at, item => readCurrentWorkItem(db, roomId, item.id, budget).blocker));
-    return { ...page, evaluatedThrough: currentVisibleHorizon(store, roomId, auth.member.id, head.sequence) };
+      // The canonical viewer summary already masks unauthorized work rows.
+      items => workRows(items.filter(item => item.title !== null),
+        auth, room, roomId, position.at, item => readCurrentWorkItem(db, roomId, item.id, budget).blocker));
+    return { ...page, evaluatedThrough };
   }, { maxRecords: 512 });
 }
 

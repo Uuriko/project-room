@@ -61,17 +61,22 @@ export function readRequestRoute(ctx) {
   }
   const request = { requesterId: auth.member.id, workItemId: routeWorkItemId, id };
   let status = "unknown";
+  let receiver;
   for (const entry of streams) {
     if (entry.roomId !== roomId || entry.memberId !== recipientId || !entry.receiverScope
       || entry.res.destroyed || entry.res.writableEnded) continue;
     if (checkReceiverRoute(entry.receiverScope, request) === "matches_scope") {
       status = "matches_scope";
-      break;
+      if (entry.receiverWaitingSince) {
+        receiver = { state: "waiting_for_work", since: entry.receiverWaitingSince };
+        break;
+      }
+      continue;
     }
-    status = "outside_scope";
+    if (status === "unknown") status = "outside_scope";
   }
   return json(res, 200, { contractVersion: 1, roomId, requesterId: request.requesterId, recipientId,
-    workItemId, requestMessageId: id, status, liveness: "unknown" });
+    workItemId, requestMessageId: id, status, liveness: "unknown", ...(receiver ? { receiver } : {}) });
 }
 
 export function readRoomBootstrap(ctx) {

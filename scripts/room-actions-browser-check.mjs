@@ -430,7 +430,7 @@ test("phone 390: tapping a person in People shows the composer with their mentio
   if (!(await panel.evaluate(node => node.open))) await page.locator("#people-panel > summary").click();
   const row = page.locator('#people-panel [data-member-record-id="guest"] .member-handle');
   await row.tap();
-  await assert.doesNotReject(page.waitForFunction(() => document.querySelector("#message-input").value.includes("@Test guest")));
+  await assert.doesNotReject(page.waitForFunction(() => document.querySelector("#message-input").value.includes("@(guest)")));
   assert.match(await page.locator("#message-input").inputValue(), /Keep this draft\./);
   assert.equal(await page.locator("#message-to-select").inputValue(), recipient);
   assert.equal(await page.locator("#message-input").evaluate(node => node === document.activeElement), true);

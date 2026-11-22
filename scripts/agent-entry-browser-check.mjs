@@ -21,22 +21,24 @@ test('selfhost generated prompt copies accessibly and bridges to the existing me
   let prompt;
   for(const viewport of [{width:319,height:772},{width:1280,height:800}]){
     await page.setViewportSize(viewport);await page.goto(origin+'/docs/agents/paste?room=project-room-lobby');
-    const button=page.locator('[data-copy-prompt]').first();await button.waitFor({state:'visible'});
-    prompt=await page.locator('textarea').first().inputValue();assert.ok(prompt.includes(origin+'/mcp'));assert.ok(!prompt.includes('room.trydemigod.com'));
+    // The first paste block is the shareable-task prompt and correctly has no MCP URL.
+    // The connect prompt is the one that must name this origin's /mcp path.
+    const button=page.locator('[data-copy-prompt="agent-paste-prompt-2"]');await button.waitFor({state:'visible'});
+    prompt=await page.locator('#agent-paste-prompt-2').inputValue();assert.ok(prompt.includes(origin+'/mcp'));assert.ok(!prompt.includes('room.trydemigod.com'));
     await page.keyboard.press('Tab');await page.keyboard.press('Tab');
     // Keyboard-focus the visible native button, then activate without a mouse.
-    await button.focus();assert.equal(await button.evaluate(el=>getComputedStyle(el).outlineStyle),'solid');await page.keyboard.press('Enter');await page.waitForFunction(()=>document.querySelector('[role=status]').textContent.startsWith('Copied'));
+    await button.focus();assert.equal(await button.evaluate(el=>getComputedStyle(el).outlineStyle),'solid');await page.keyboard.press('Enter');await page.waitForFunction(()=>document.querySelector('#agent-paste-prompt-2-status').textContent.startsWith('Copied'));
     assert.equal(await page.evaluate(()=>window.copied.at(-1)),prompt);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     if(process.env.ENTRY_SCREENSHOT_DIR)await page.screenshot({path:process.env.ENTRY_SCREENSHOT_DIR+'/paste-'+viewport.width+'.png',fullPage:true});
   }
   await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw Error('denied');}}}));
-  await page.locator('[data-copy-prompt]').first().click();await page.waitForFunction(()=>document.querySelector('[role=status]').textContent.startsWith('Copy the selected'));
-  assert.equal(await page.locator('textarea').first().evaluate(el=>el.selectionEnd-el.selectionStart),prompt.length);
-  assert.equal(await page.locator('textarea').first().evaluate(el=>document.activeElement===el),true);
+  await page.locator('[data-copy-prompt="agent-paste-prompt-2"]').click();await page.waitForFunction(()=>document.querySelector('#agent-paste-prompt-2-status').textContent.startsWith('Copy the selected'));
+  assert.equal(await page.locator('#agent-paste-prompt-2').evaluate(el=>el.selectionEnd-el.selectionStart),prompt.length);
+  assert.equal(await page.locator('#agent-paste-prompt-2').evaluate(el=>document.activeElement===el),true);
   const nojs=await browser.newContext({javaScriptEnabled:false,viewport:{width:319,height:772}}),plain=await nojs.newPage();
   await plain.goto(origin+'/docs/agents/paste');assert.equal(await plain.locator('[data-copy-prompt]').first().isVisible(),false);
-  await plain.locator('summary').first().click();assert.equal(await plain.locator('textarea').first().isVisible(),true);assert.equal(await plain.locator('textarea').first().inputValue(),prompt);await nojs.close();
+  await plain.locator('details').filter({has:plain.locator('#agent-paste-prompt-2')}).locator('summary').click();assert.equal(await plain.locator('#agent-paste-prompt-2').isVisible(),true);assert.equal(await plain.locator('#agent-paste-prompt-2').inputValue(),prompt);await nojs.close();
   await page.setViewportSize({width:319,height:772});
   await page.goto(origin+'/');assert.match(await page.locator('#agent-signin-description').innerText(),/existing agent identity/);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.goto(origin+'/agent-signin');assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.equal(await page.locator('a[href="/about"]').count(),1);assert.match(await page.locator('[data-agent-paste-hint]').innerText(),/owner approval/);assert.doesNotMatch(await page.locator('[data-agent-paste-hint]').innerText(),/sets itself up/);

@@ -1153,6 +1153,9 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       if (!validReceiverRouteScope(receiverScope) || receiverScope.requesters.includes(auth.member.id))
         reject(422, "invalid_receiver_scope", "Invalid receiver scope");
     }
+    const receiverState = req.headers["x-project-room-receiver-state"];
+    if (receiverState !== undefined && (!receiverScope || receiverState !== "waiting_for_work"))
+      reject(422, "invalid_receiver_state", "A waiting report requires a valid receiver scope");
     let sameCredential = 0, sameRoom = 0;
     for (const item of streams) {
       if (item.credentialHash === auth.credentialHash) sameCredential++;
@@ -1161,7 +1164,8 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
     if (streams.size >= STREAM_POOL_LIMIT || sameRoom >= STREAM_PER_ROOM_LIMIT || sameCredential >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
-    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res, receiverScope };
+    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res, receiverScope,
+      ...(receiverState ? { receiverWaitingSince: new Date().toISOString() } : {}) };
     streams.add(entry);
     let cursor = after;
     let timer;

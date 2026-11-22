@@ -66,7 +66,7 @@ async function setup(t, storeOptions = {}) {
   };
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await signInFixture(page, owner);
+  await signInFixture(page, owner, { landing: "default" });
   await page.locator("#main").waitFor({ state: "visible" });
   // These journeys begin from Conversation before explicitly opening Updates.
   await page.locator("#updates-close").click();

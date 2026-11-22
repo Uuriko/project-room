@@ -94,13 +94,39 @@ above, not JSON-RPC.
 
 ## Full code index
 
-1096 rows (1055 distinct codes).
+1153 rows (1112 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | What it means | Retry | Recovery |
 | --- | --- | --- | --- | --- |
+| `invalid_receiver_scope` | 422 | Receiver scope is missing, malformed, or exceeds its bounds | fix+resend | Use the connected receiver's configured requester and work identifiers on the existing scoped stream. |
+| `invalid_receiver_state` | 422 | A waiting report requires a valid receiver scope | fix+resend | Advertise waiting only with the valid scope of the receiving stream. |
+| `invalid_operation_selection` | 422 | Provide one operation ID without an event cursor | fix+resend | Check the receipt using the original operation ID alone. Preserve the original write input if its outcome is unknown. |
+| `invalid_reconnect` | 422 | Choose the precise existing seat and pending connector request | fix+resend | Read the pending pairing and select the saved room seat with its exact client and scopes. |
+| `reconnect_requires_owner` | 403 | Use the existing Room owner credential | no | Ask the current owner to pair the intended seat. |
+| `reconnect_unavailable` | 409 | Restart the connector to obtain a pending pairing | re-read | Restart the intended connector and read its new pending pairing before trying again. |
+| `reconnect_scope_mismatch` | 409 | The selected client or scopes changed | re-read | Compare the current pairing’s client and scopes with the intended connector before proceeding. |
+| `reconnect_seat_unavailable` | 409 | No active owner-sponsored invitation grant for this seat | no | Ask the owner to verify the existing grant and seat before attempting a reconnect. |
+| `reconnect_already_paired` | 409 | This pending connector is paired to a different seat | no | Read the active pairing and have the owner reconcile the seat choice before any further change. |
+| `invalid_project_discovery` | 422 | Discovery input or query is invalid | fix+resend | Use the published offer's exact discovery action and fields, or the supported reviewer query. |
+| `discovery_unavailable` | 404 | The project has no native discovery destination or designated reviewers | no | Read the published project again for an available contribution path. |
+| `stale_project_offer` | 409 | Read the current published offer before filing | re-read | Recheck the finding against the current offer and use its exact submission template. |
+| `discovery_capacity` | 429 | Discovery filing limit reached for the rolling 24-hour window | backoff | Wait for the filing budget to reopen. Preserve the original submission ID if a prior response was lost. |
+| `invalid_discovery_checkpoint` | 422 | Omit the stale checkpoint to restart finding review | fix+resend | Start the authorized review read again without the stale checkpoint. |
+| `discovery_review_denied` | 403 | A designated project reviewer is required | no | Ask a designated reviewer to inspect or act on the finding. |
+| `invalid_review_runtime` | 422 | The work item or exact review attempt fields are invalid | fix+resend | Read the selected result and use its authorized runtime action with the current revision, completion and attempt. |
+| `review_runtime_denied` | 403 | The caller is outside the assigned verifier runtime scope | no | Use the assigned verifier with the required permission. |
+| `review_runtime_stale` | 409 | The room or exact review target is no longer current | re-read | Open the current Work Thread and follow its current action. Leave the old completion and verdict intact. |
+| `review_runtime_attempt_conflict` | 409 | This selected review already has another attempt | re-read | Read the existing attempt and recover its status before considering another dispatch. |
+| `invalid_request_route` | 422 | Use the exact recipient, linked work and request binding | fix+resend | Read the current request and supply the original requester context, recipient and optional work or request. |
+| `review_dispatch_requires_listener` | 403 | Only the active Room listener may reserve a provider dispatch | no | Use the active authorized listener for the existing review. Check its receipt before another dispatch. |
+| `invalid_first_ack` | 422 | First acknowledgment requires the exact context event and live lease when present | fix+resend | Read the exact addressed request and use its context event. A live listener must make the fenced write. |
+| `invalid_progress_context` | 422 | Progress needs one exact context event | fix+resend | Read the current addressed request and use one current-context precondition. |
+| `request_not_found` | 404 | No reply request addressed to this recipient | no | Confirm the exact request and recipient through the current room access. |
+| `request_context_changed` | 409 | Read the current addressed request before acknowledging or reporting progress | re-read | Use the updated request context. For an uncertain prior write, look up its operation receipt first. |
+| `request_already_acknowledged` | 409 | The request already has recipient progress | re-read | Read current progress or look up the original operation receipt. Do not send another first acknowledgment. |
 | `work_approver_unknown_member` | 422 | Approver must be an active member of this room | fix+resend | Fix the refused input and resend. |
 | `work_approval_pending` | 422 | Work is on hold until the named approver approves the step | no | Wait for the approver to approve; do not retry the gated move until then. |
 | `work_delegate_unknown_member` | 422 | Delegate is not an active member of this room | fix+resend | Fix the refused input and resend. |

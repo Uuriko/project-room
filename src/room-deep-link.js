@@ -1,3 +1,5 @@
+export { exactResultDestination, exactResultHref, agentSigninRecord } from "./record-link.js";
+
 // Public Room deep-link: #room/{roomId}
 // Open and People honor this fragment. Query ?room= stays the account-home twin.
 

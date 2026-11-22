@@ -2,6 +2,7 @@
 // project-room-lobby message codex2-formal-delivery-prototype-1103.
 // Credentials stay in RoomClient; only its service-issued command is persisted.
 import {RoomError} from './room.mjs';
+import {repeatedTopLevelKey, unfencedJson} from './review-wake.mjs';
 
 // Match src/reply-requests.js; room-acp is independently distributable.
 export const MAX_FORMAL_RESPONSE_CHARS = 8192;
@@ -48,8 +49,10 @@ export function prepareFormalDelivery(context, output, stopReason) {
   if (!context.allPagesRead || context.page?.hasMore !== false || context.request?.status !== 'open'
     || context.viewerId !== context.request.recipientId) invalid('Complete open recipient context is required');
   let value;
-  try {value = JSON.parse(output);} catch {return {kind:'pending', body:'The agent did not return an explicit answer or decline. This request remains open.'};}
-  if (!value || Array.isArray(value) || Object.keys(value).some(key => !['outcome','body'].includes(key))
+  const source = unfencedJson(output);
+  try {value = JSON.parse(source);} catch {return {kind:'pending', body:'The agent did not return an explicit answer or decline. This request remains open.'};}
+  if (!value || typeof value !== 'object' || Array.isArray(value) || repeatedTopLevelKey(source)
+    || Object.keys(value).some(key => !['outcome','body'].includes(key))
     || !['answered','declined','pending'].includes(value.outcome) || typeof value.body !== 'string'
     || !value.body.trim() || stopReason !== 'end_turn')
     return {kind:'pending', body:'The agent did not finish a valid response. This request remains open.'};
