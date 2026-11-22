@@ -444,7 +444,7 @@ function assertSelectedWorkVisible(store, roomId, workItemId, item, viewerId, ob
 // ruling — land ONLY on the trigger (a room at 3.8 MB before SPILL-1's first
 // live run; largest room 3,554,944 B growing ~169 KB/day at the 2026-10-22
 // gauge). Buys ~8.5–10 days; a bridge to SPILL, not a fix.
-export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 5 * 1024 * 1024 });
+export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 5 * 1024 * 1024, legacyProjectionCeilingBytes: 6 * 1024 * 1024 });
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -1379,9 +1379,12 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
+    projectionByteLimit = PILOT_LIMITS.projectionBytes, workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
     verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
     const initializationStarted = performance.now();
+    if (!Number.isSafeInteger(projectionByteLimit) || projectionByteLimit < PILOT_LIMITS.projectionBytes
+        || projectionByteLimit > PILOT_LIMITS.legacyProjectionCeilingBytes) throw new Error("Invalid legacy projection ceiling");
+    this.projectionByteLimit = projectionByteLimit;
     this._restoreOpening = true;
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
@@ -4098,7 +4101,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if(room.sequence>=PILOT_LIMITS.eventsPerRoom)fail(409,'pilot_limit','Bounded pilot capacity reached; no data was changed');
         let state;try{state=compact(event.type===T.REFERRAL_COMPLETED ? applyEventWithGrowth(room.state,event,growthCollector).state : applyEvent(room.state,event));}catch(error){fail(422,'invalid_side_table_event',error.message);}
         const sequence=room.sequence+1,write=prepareCurrentWrite(this,{roomId,previous:room,state,event,sequence,current:context.current});
-        if(Buffer.byteLength(write.projection)>PILOT_LIMITS.projectionBytes)fail(409,'pilot_limit','Room projection limit reached; no data was changed. Ask the room owner to review storage capacity before retrying.');
+        if(this.projectionExceedsWriteLimit(write.projection))fail(409,'pilot_limit','Room projection limit reached; no data was changed. Ask the room owner to review storage capacity before retrying.');
         this.db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(roomId,sequence,event.id,JSON.stringify(event));
         this.db.prepare('UPDATE rooms SET sequence=?,projection=? WHERE id=?').run(sequence,write.projection,roomId);
         write.persistEntities();return sequence;
@@ -4111,7 +4114,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { state = compact(applyEvent(room.state, event)); }
     catch (error) { fail(422, "invalid_side_table_event", error.message); }
     const projection = this.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+    if (this.projectionExceedsWriteLimit(projection)) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -4176,6 +4179,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return canonicalMessagePostContext(this.db, roomId, command, { actorId, humanPushEnabled: Boolean(this.humanPush?.vapid), workLimits: PILOT_LIMITS });
   }
   // Phase 1a: the one serializer for rooms.projection. Every writer uses it.
+  projectionExceedsWriteLimit(value) {
+    return Buffer.byteLength(value) > this.projectionByteLimit;
+  }
+
   storedProjection(roomId, state) {
     return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest });
   }
@@ -5149,7 +5156,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const sequence = room.sequence + 1;
       const write = context ? prepareCurrentWrite(this,{roomId:row.room_id,previous:room,state,event:incoming,sequence,current:context.current}) : null;
       const projection = write?.projection ?? this.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+      if (this.projectionExceedsWriteLimit(projection)) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       withCurrentServingWriter(this.db,row.room_id,()=>{
         this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
         this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -6306,7 +6313,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RES-0126 (L05-C2): the projection byte cap, measured on the exact
       // stored projection like command() and appendSideTableEvent() do.
       // Throwing here rolls back the whole import transaction above.
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+      if (this.projectionExceedsWriteLimit(projection)) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, projection, archivedAtOf(state), roomId);
       // L05-C1: the imported projection is rebuilt from the replayed log
       // above, so it is verified against its history by construction.
@@ -6733,17 +6740,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
-  reportReviewRuntime(token, roomId, input, binding = null) {
+  reportReviewRuntime(token, roomId, input, binding = null, listenerToken) {
     if (!validId(input?.workItemId)) fail(422, "invalid_review_runtime", "Choose a work item");
     return this.transaction(() => {
-      const { member } = this.authenticate(token, roomId, binding);
+      const auth = this.authenticate(token, roomId, binding);
+      const { member } = auth;
+      if (input.reserveDispatch === true) {
+        if (listenerToken === undefined) fail(403, "review_dispatch_requires_listener", "Only the active Room listener may reserve a provider dispatch");
+        assertListenerFence(this, auth, roomId, listenerToken);
+      }
       const work = readWorkItem(this.db, roomId, input.workItemId);
       if (!work) fail(404, "work_not_found", "Work item not found in this Room");
       assertSelectedWorkVisible(this, roomId, work.id, work, member.id);
       const room = isCurrentRoom(this.db, roomId) ? readCurrentRecord(this.db,roomId,'metadata','room')
         : JSON.parse(this.db.prepare("SELECT json_extract(projection,'$.room') AS room FROM rooms WHERE id=?").get(roomId).room);
       if (room?.archivedAt) fail(409, "review_runtime_stale", "Room is archived");
-      return recordReviewRuntime(this.db, roomId, work, member, input, this.now());
+      return recordReviewRuntime(this.db, roomId, work, member, input, this.now(), listenerToken);
     });
   }
   workResult(token, roomId, workItemId, { completionEventId = null, draftMessageId = null, expectedSessionBinding = null } = {}) {
@@ -7667,7 +7679,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         : prepareMessageWrite(this, {roomId,previous:room,state,event:incoming,sequence,messageAuthorityCount:messageContext?.count});
       currentRedaction?.admit(messageWrite.receiptBytesUpperBound);
       const { projection } = messageWrite;
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+      if (this.projectionExceedsWriteLimit(projection) && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module
       // scope) so tests can reset the singleton; when telemetry is off the
@@ -7929,7 +7941,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       });
       const applied = compact(applyEventWithGrowth(next, stripEvent, growthCollector).state);
       const projection = this.storedProjection(roomId, applied);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) break;
+      if (this.projectionExceedsWriteLimit(projection)) break;
       seq += 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, stripEvent.id, JSON.stringify(stripEvent));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?")
@@ -8005,7 +8017,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { resumed = compact(applyEvent(next, incoming)); }
       catch { continue; }
       const projection = this.storedProjection(roomId, resumed);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) continue;
+      if (this.projectionExceedsWriteLimit(projection)) continue;
       seq += 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, incoming.id, JSON.stringify(incoming));
       next = resumed;

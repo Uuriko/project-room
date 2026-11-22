@@ -60,11 +60,36 @@ test("exact webhook review uses one native request across redelivery, and stale 
 test("authoritative GitHub reads pause before checking stale candidates and recheck the exact head before posting", async () => {
   const recipe = { repository: repo.toLowerCase() };
   const row = sha => ({ base: { repo: { full_name: repo } }, number: 6319, head: { sha }, state: "open", draft: false, merged: false });
-  const queue = [row(head), row(head), { check_runs: [] }, row(newHead)];
+  const queue = [row(head), row(head), { total_count: 0, check_runs: [] }, row(newHead)];
   const urls = [];
   const fetchImpl = async url => { urls.push(url); return Response.json(queue.shift()); };
   assert.deepEqual(await observeWebhookPull(recipe, { number: 6319, head: oldHead }, { fetchImpl }), { reason: "stale_head" });
   assert.equal(urls.length, 1);
   assert.deepEqual(await observeWebhookPull(recipe, { number: 6319, head }, { fetchImpl }), { reason: "pull_changed" });
   assert.equal(urls.length, 4);
+});
+
+test("webhook review refuses truncated or shifting check evidence", async () => {
+  const recipe = { repository: repo.toLowerCase() };
+  const pull = { base: { repo: { full_name: repo } }, number: 6319, head: { sha: head }, state: "open", draft: false, merged: false };
+  const passed = { id: 1, head_sha: head, name: "safety-net", app: { slug: "github-actions" }, status: "completed", conclusion: "success" };
+  const newer = { ...passed, id: 2, conclusion: "failure" };
+  const fetchPages = pages => {
+    const queue = pages.map(({ count, rows, more }) => Response.json({ total_count: count, check_runs: rows }, {
+      headers: more ? { link: '<https://api.github.com/check-runs?page=2>; rel="next"' } : {},
+    }));
+    return async url => url.includes("check-runs?") ? queue.shift() : Response.json(pull);
+  };
+  for (const pages of [
+    [{ count: 2, rows: [passed] }],
+    [{ count: 2, rows: [passed], more: true }, { count: 2, rows: [passed] }],
+    [{ count: 2, rows: [passed], more: true }, { count: 3, rows: [newer] }],
+    [{ count: 1, rows: [{ ...passed, head_sha: oldHead }] }],
+  ]) {
+    assert.deepEqual(await observeWebhookPull(recipe, { number: 6319, head }, { fetchImpl: fetchPages(pages) }), { reason: "incomplete_checks" });
+  }
+  const complete = await observeWebhookPull(recipe, { number: 6319, head }, { fetchImpl: fetchPages([
+    { count: 2, rows: [passed], more: true }, { count: 2, rows: [newer] },
+  ]) });
+  assert.deepEqual(complete.snapshot.checks.map(check => check.conclusion), ["success", "failure"]);
 });
