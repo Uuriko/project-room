@@ -9,6 +9,8 @@ import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -16,17 +18,18 @@ import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { uiText } from "../src/strings.js";
+import { hashPassword } from "../src/password-auth.mjs";
 
 // The secret-scan allowlist already covers this synthetic fixture password.
 const PASSWORD = "synthetic-email-password";
 const DESK = { viewport: { width: 1280, height: 860 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
-async function setup(t, { mailConfigured = true } = {}) {
+async function setup(t, { mailConfigured = true, gzipAsset } = {}) {
   const f = createAcceptanceFixture();
   const sent = [];
   let mailer = null;
-  const server = createRoomServer({ store: f.store, streamInterval: 40,
+  const server = createRoomServer({ store: f.store, streamInterval: 40, gzipAsset,
     magicLinkMailer: { isConfigured: () => mailConfigured, sendMagicLink: p => mailer.sendMagicLink(p), sendPasswordResetNotice: p => mailer.sendPasswordResetNotice(p) } });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -288,6 +291,59 @@ for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`f
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(requests.includes("/src/app.js"), false, "account and agent controls do not import workspace code");
   await page.screenshot({ path: `test-results/signin-entry-${theme}-${kind.viewport.width}.png` });
+});
+
+test("shared result sign-in defers workspace while preserving the exact selector", async t => {
+  const f = await setup(t, { gzipAsset: promisify(gzip) });
+  const page = await f.open(PHONE), requested = [];
+  const { member } = f.store.authenticate(f.keys.owner, "commons");
+  const account = f.store.accountForMember("commons", member.id)
+    ?? f.store.bindHumanAccount("commons", member.id, "exact-signin-browser-fixture");
+  const email = "exact-signin@example.invalid";
+  f.store.completeOnboarding(account.id);
+  f.store.accountLogins.linkPasswordMethod(account.id, { email, verifier: hashPassword(PASSWORD) });
+  page.on("request", request => requested.push(new URL(request.url()).pathname));
+  const link = new URL("/?room=commons#pr-record/result/shared-work/shared-result", f.origin);
+  const roomProbe = page.waitForResponse(response => new URL(response.url()).pathname === "/api/session");
+  const accountProbe = page.waitForResponse(response => new URL(response.url()).pathname === "/api/account-session");
+  await page.goto(link.href);
+  const form = page.locator('[data-signin-form="password"]');
+  await form.waitFor({ state: "visible" });
+  const [room, accountResponse] = await Promise.all([roomProbe, accountProbe]);
+  assert.equal(room.status(), 401);
+  assert.equal((await accountResponse.json()).authenticated, false);
+  const password = form.locator('[name="password"]');
+  const submit = async value => {
+    await password.fill(value);
+    const reply = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");
+    await form.locator('button[type="submit"]').click();
+    return (await reply).status();
+  };
+  await form.locator('[name="email"]').fill(email);
+  assert.equal(await submit("synthetic-incorrect-password"), 401);
+  await page.waitForFunction(() => document.querySelector('#auth-signin-ui')?.getAttribute('aria-busy') === 'false');
+  assert.equal(new URL(page.url()).hash, link.hash);
+  assert.equal(requested.includes("/src/app.js"), false);
+  assert.equal(requested.includes("/src/events.js"), false);
+  assert.equal(requested.some(path => path.endsWith("/work-result")), false);
+  const agentLink = new URL(await page.locator("#agent-signin-button").getAttribute("href"), f.origin);
+  assert.equal(agentLink.searchParams.get("room"), "commons");
+  assert.equal(agentLink.searchParams.get("record"), link.hash);
+  assert.equal(await submit(PASSWORD), 200);
+  await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(new URL(page.url()).hash, link.hash);
+  assert.ok(requested.includes("/src/app.js"));
+});
+
+test("a shared result restores a room cookie even with no browser hints", async t => {
+  const f = await setup(t), page = await f.open();
+  const roomSession = f.store.createSession(f.keys.owner);
+  await page.context().addCookies([{ name: "room_session", value: roomSession.token, url: f.origin }]);
+  const link = new URL("/?room=commons#pr-record/result/shared-work/shared-result", f.origin);
+  await page.goto(link.href);
+  await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(new URL(page.url()).hash, link.hash);
+  await page.locator("#auth-panel").waitFor({ state: "hidden" });
 });
 
 // Regression (Codex review of the #3068 integration, 2026-10-14): the lazy

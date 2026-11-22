@@ -1,4 +1,5 @@
 import { hasSessionHint } from "./browser-session.js";
+import { agentSigninRecord } from "./room-deep-link.js";
 import { uiText } from "./strings.js";
 // Static imports must finish before the readable fallback yields to startup.
 import "./entry-started.js";
@@ -57,8 +58,13 @@ function showLoadFailure() {
   }
 }
 
-function needsWorkspace() {
-  if (location.search || location.hash || hasSessionHint()) return true;
+function selectedSigninRecord() {
+  const params = new URLSearchParams(location.search);
+  return params.size === 1 ? agentSigninRecord(location) : null;
+}
+
+function needsWorkspace(record = selectedSigninRecord()) {
+  if (hasSessionHint() || (!record && (location.search || location.hash))) return true;
   try {
     return ["pr-pending-invite", "pr-pending-join", "project-room:oauth-return:v1", resumeKey]
       .some(key => sessionStorage.getItem(key));
@@ -91,7 +97,8 @@ if (needsWorkspace()) {
   try {
     const { mountSigninEntry } = await import("./signin-entry.js");
     // A same-document invitation can arrive while the entry module downloads.
-    if (needsWorkspace()) void openWorkspace().catch(() => {});
-    else dispose = mountSigninEntry({ openWorkspace });
+    const record = selectedSigninRecord();
+    if (needsWorkspace(record)) void openWorkspace().catch(() => {});
+    else dispose = mountSigninEntry({ openWorkspace, record });
   } catch { showLoadFailure(); }
 }
