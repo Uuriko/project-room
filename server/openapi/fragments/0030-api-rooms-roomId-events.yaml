@@ -17,8 +17,14 @@
           description: >
             Read one exact caller-owned operation. Do not combine this with
             event selection parameters. An optional limit=1 bounds responses
-            from older servers which ignore operationId.
+            from older servers which ignore operationId. A browser with a
+            Room session may add view=browser to get the same receipt inside
+            a response bound to its authenticated browser session.
           schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: view
+          in: query
+          description: Use browser with operationId to read the session-bound receipt with a browser cookie.
+          schema: { type: string, enum: [browser] }
         - name: after
           in: query
           description: >
@@ -120,6 +126,19 @@
                       checkedThrough: { type: integer, minimum: 0 }
                       status: { type: string, enum: [not_recorded] }
                       currentStateVerified: { type: boolean, enum: [false] }
+                  - type: object
+                    required: [readKind, receipt, roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision]
+                    properties:
+                      readKind: { type: string, enum: [operation-receipt] }
+                      receipt:
+                        type: object
+                        description: Same recorded or not_recorded metadata as the exact operation read.
+                      roomId: { type: string }
+                      viewerId: { type: string }
+                      viewerAccountId: { type: [string, 'null'] }
+                      viewerAuthEpoch: { type: [integer, 'null'] }
+                      viewerSessionBinding: { type: string }
+                      viewerSessionRevision: { type: [integer, 'null'] }
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
         '422':
           description: >

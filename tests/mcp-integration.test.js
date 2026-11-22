@@ -110,7 +110,7 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
     }
   }
   const receiptSequence = f.store.headSequence("commons");
-  for (const query of ["operationId=one&operationId=two", "operationId=one&after=0", "operationId=one&limit=2"]) {
+  for (const query of ["operationId=one&operationId=two", "operationId=one&after=0", "operationId=one&limit=2", "operationId=one&view=browser"]) {
     const refused = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons/events?${query}`, {
       headers: { Authorization: "Bearer " + token }
     });
