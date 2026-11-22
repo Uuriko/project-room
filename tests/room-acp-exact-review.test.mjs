@@ -136,6 +136,28 @@ test('exact work wake runs native review and records one verdict, recovering a l
   assert.deepEqual(f.counts,{prompt:1,write:1,receipt:1,ack:2});
 });
 
+test('exact review prompt separates earlier correction from current evidence',async t=>{
+  const f = await setup(t);
+  const correction = { completionEventId:'prior-result', summary:'The prior result is stale.' };
+  const releaseChecks = { status:'passed', checks:[{ name:'build' }] };
+  const read = f.bridge.room.request;
+  f.bridge.room.request = async (path,options) => {
+    const value = await read(path,options);
+    if (path.includes('/work-result')) {
+      Object.assign(value.workThread, { correction, releaseChecks });
+    }
+    return value;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  const [{ text }] = f.prompts[0].prompt;
+  const context = JSON.parse(text.split('\n\n').at(-1));
+  assert.equal(context.currentResult.receipt.eventId, f.wake.completionEventId);
+  assert.deepEqual(context.correctionToPriorResult, correction);
+  assert.deepEqual(context.releaseChecks, releaseChecks);
+  assert.equal(context.workThread, undefined);
+});
+
 test('the scope check refuses ineligible or incomplete origin facts without contacting the model',async t=>{
   for (const [label,reviewScope,changeOrigin] of [
     ['different requester',{requesterId:'another-member',openedAfter:0}],
