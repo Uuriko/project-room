@@ -13,7 +13,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { createMcpInviteOAuth } from '../server/mcp-invite-oauth.mjs';
 const version = '2026-07-28', origin = 'https://room.example', resource = origin + '/mcp';
 const client = { clientId: 'events-test', name: 'Events test', redirectUris: ['https://client.example/callback'] };
-async function fixture(t, { callbackError, normalized = false } = {}) {
+async function fixture(t, { callbackError, normalized = false, externalScheduler = false } = {}) {
   const store = new RoomStore(':memory:');
   store.initialize(initialRoom(), normalized ? { representation: 'normalized-current-v1' } : {});
   const owner = store.issueAccessKey('commons', 'owner');
@@ -25,7 +25,7 @@ async function fixture(t, { callbackError, normalized = false } = {}) {
   const tokens = native.provider.exchangeCode({ code, clientId: client.clientId, redirectUri: client.redirectUris[0], codeVerifier: verifier, resource });
   const grant = store.db.prepare('SELECT * FROM oauth_invite_grants').get();
   const deliveries = [];
-  const server = createRoomServer({ store, origin, mcpOAuthClients: [client],
+  const server = createRoomServer({ store, origin, mcpOAuthClients: [client], mcpEventExternalScheduler: externalScheduler,
     mcpEventDnsResolvers: { lookup: async () => [{ address: '8.8.8.8', family: 4 }] },
     mcpEventTransport: async (url, addresses, req) => {
       const body = JSON.parse(req.body);
@@ -435,4 +435,67 @@ test('bearer tool access does not imply OAuth monitoring or inspect other connec
   assert.match(access.nativeMonitoring.next, /room_list_requests.*direction=incoming.*status=open/);
   assert.match(access.nativeMonitoring.next, /do not replay earlier requests/);
   assert.match(access.nativeMonitoring.next, /do not resend saved requests/);
+});
+
+for (const normalized of [false, true]) test('opted-in native project reviewer gets one private exact filing pointer, normalized=' + normalized, async t => {
+  const f = await fixture(t, { normalized, externalScheduler: true });
+  const name = 'room.project_discovery_ready.v1', offerId = 'private-review', criterion = 'Read the source';
+  const invite = f.store.invites.create(f.owner, 'commons', { profile: 'member' });
+  const verifier = 'b'.repeat(43);
+  const { nonce } = f.native.begin(new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0],
+    scope: 'rooms:read chat:read work:read', code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+    code_challenge_method: 'S256', resource }));
+  const code = new URL(f.native.approve(nonce, invite.code, 'Unselected member')).searchParams.get('code');
+  const other = f.native.provider.exchangeCode({ code, clientId: client.clientId, redirectUri: client.redirectUris[0], codeVerifier: verifier, resource });
+  const otherMember = f.store.db.prepare('SELECT member_id FROM oauth_invite_grants WHERE member_id<>?').get(f.grant.member_id).member_id;
+  const delivery = url => ({ mode: 'webhook', url, secret: 'whsec_' + Buffer.alloc(32, 9).toString('base64') });
+  const subscribe = (memberId, token, url) => f.rpc('events/subscribe', { name, arguments: { roomId: 'commons', memberId }, delivery: delivery(url) }, token);
+  const catalog = await f.rpc('events/list');
+  assert.deepEqual(catalog.result.events[0].payloadSchema.properties.nextRead.properties.tool.enum, ['room_read_request', 'room_read_work', 'room_read_result']);
+  assert.equal(catalog.result.events[1].name, name);
+  assert.ok((await f.subscribe()).result.id);
+  assert.ok((await subscribe(otherMember, other.accessToken, 'https://callback.example/non-reviewer')).result.id);
+  assert.ok((await subscribe(f.grant.member_id, f.tokens.accessToken, 'https://callback.example/reviewer-a')).result.id);
+  assert.ok((await subscribe(f.grant.member_id, f.tokens.accessToken, 'https://callback.example/reviewer-b')).result.id);
+  f.store.projectOffers.create('commons', 'owner', { requestId: 'create', offerId, reviewerMemberIds: ['owner', f.grant.member_id],
+    terms: { kind: 'project', title: 'Review public sources', summary: 'Report a check', acceptanceCriteria: [criterion],
+      reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' }, repositoryUrl: 'https://example.com/source' } });
+  f.store.projectOffers.transition('commons', 'owner', offerId, 'publish', { requestId: 'publish', expectedRevision: 1 });
+  const actor = f.store.identities.create('Unjoined contributor');
+  const file = requestId => new Promise((resolve, reject) => {
+    const req = request(f.base + '/api/project-offers/' + offerId + '/discoveries', { method: 'POST',
+      headers: { Host: 'room.example', Origin: origin, Authorization: 'Bearer ' + actor.secret, 'Content-Type': 'application/json' } }, res => {
+      let text = ''; res.on('data', chunk => text += chunk); res.on('end', () => resolve({ status: res.statusCode, receipt: JSON.parse(text) }));
+    });
+    req.on('error', reject); req.end(JSON.stringify({ requestId, expectedTermsVersion: 1, expectedRevision: 2, criterion,
+      sourceUrl: 'https://example.com/source', observation: 'Private reviewer text ' + requestId, nextAction: 'Check privately' }));
+  });
+  const head = f.store.headSequence('commons');
+  const first = await file('first');
+  assert.equal(first.status, 200);
+  assert.deepEqual(await file('first'), first);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox').get().n, 1);
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 1);
+  const event = JSON.parse(f.deliveries[0].body);
+  assert.equal(event.name, name);
+  assert.equal(event.data.memberId, f.grant.member_id);
+  assert.ok(f.deliveries[0].headers['webhook-signature']);
+  assert.doesNotMatch(f.deliveries[0].body, /Private reviewer text|Check privately|example.com\/source/);
+  const next = event.data.nextRead;
+  const second = await file('later');
+  assert.equal(second.status, 200);
+  const exact = await f.rpc('tools/call', { name: next.tool, arguments: next.arguments });
+  assert.deepEqual(exact.result.structuredContent.findings.map(x => x.receiptId), [first.receipt.receiptId]);
+  const denied = await f.rpc('tools/call', { name: next.tool, arguments: next.arguments }, other.accessToken);
+  assert.equal(denied.result.isError, true);
+  assert.doesNotMatch(JSON.stringify(denied), /Private reviewer text/);
+  assert.equal(f.store.headSequence('commons'), head);
+  f.store.projectOffers.transition('commons', 'owner', offerId, 'withdraw', { requestId: 'withdraw', expectedRevision: 2 });
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 1, 'withdrawal suppresses the later pending notification');
+  f.mention('ordinary-room-request');
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 2);
+  assert.equal(JSON.parse(f.deliveries[1].body).name, 'room.requested');
 });

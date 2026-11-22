@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
  generation TEXT NOT NULL, state TEXT NOT NULL, expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mcp_event_subscriptions_principal ON mcp_event_subscriptions(principal,state,expires_at);
+CREATE INDEX IF NOT EXISTS mcp_event_subscriptions_target ON mcp_event_subscriptions
+ (json_extract(principal,'$.roomId'),json_extract(principal,'$.memberId'),json_extract(document,'$.name'),state,expires_at);
 CREATE TABLE IF NOT EXISTS mcp_event_outbox (
  subscription_id TEXT NOT NULL, event_id TEXT NOT NULL, document TEXT NOT NULL,
  state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
@@ -19,6 +21,7 @@ CREATE TABLE IF NOT EXISTS mcp_event_outbox (
 CREATE INDEX IF NOT EXISTS mcp_event_outbox_ready ON mcp_event_outbox(state,next_at);
 CREATE INDEX IF NOT EXISTS mcp_event_outbox_event ON mcp_event_outbox(event_id);
 `;
+export const discoveryEvent = "room.project_discovery_ready.v1";
 const HOUR = 3600000;
 const hash = value => createHash("sha256").update(value).digest("hex");
 const fail = message => { throw Object.assign(new Error(message), { code: -32602 }); };
@@ -41,7 +44,7 @@ function thinId(value) {
 
 function subscriptionIdentity(principal, name, args, delivery) {
   const key = principalKey(principal);
-  if (name !== "room.requested" || !args || Object.keys(args).sort().join(",") !== "memberId,roomId" || args.roomId !== principal.roomId || args.memberId !== principal.memberId) fail("Event scope must match the authenticated agent");
+  if (!["room.requested", discoveryEvent].includes(name) || !args || Object.keys(args).sort().join(",") !== "memberId,roomId" || args.roomId !== principal.roomId || args.memberId !== principal.memberId) fail("Event scope must match the authenticated agent");
   if (delivery?.mode !== "webhook") fail("Only webhook delivery is supported");
   let url;
   try { url = new URL(delivery.url); } catch { fail("Invalid callback URL"); }
@@ -82,6 +85,7 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
     const key = principalKey(principal);
     if (cursor !== null) fail("Event replay is not supported");
     const { id, url, canonicalArgs } = subscriptionIdentity(principal, name, args, delivery);
+    if (name === discoveryEvent && !mcpOAuthToolAllowed("room_read_project_discoveries", principal.scopes)) fail("Project review requires room and work read scopes");
     eventSigningKey(delivery.secret);
     if (!await authorize(JSON.parse(key))) throw Object.assign(new Error("Event grant denied"), { code: -32001 });
     if (!get(id) && db.prepare("SELECT count(*) AS n FROM mcp_event_subscriptions WHERE principal=?").get(key).n >= 20) fail("Event subscription limit exceeded");
@@ -145,12 +149,21 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
     const data = { roomId: thinId(roomId), memberId: thinId(memberId) };
     if (requestId !== undefined) data.requestId = thinId(requestId);
     if (messageId !== undefined) data.messageId = thinId(messageId);
-    const event = { eventId: thinId(eventId), name: "room.requested", timestamp, data, cursor: null, ...(context ? { _roomPolicy: context } : {}) };
+    const name = context?.kind === "discovery" ? discoveryEvent : "room.requested";
+    const event = { eventId: thinId(eventId), name, timestamp, data, cursor: null, ...(context ? { _roomPolicy: context } : {}) };
     if (!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp) || !Number.isFinite(Date.parse(timestamp))) fail("Invalid event time");
     let queued = 0;
-    for (const row of db.prepare("SELECT * FROM mcp_event_subscriptions WHERE state='active' AND expires_at>?").all(now())) {
-      const sub = JSON.parse(row.document);
-      if (sub.arguments.roomId !== roomId || sub.arguments.memberId !== memberId) continue;
+    const subscriptions = db.prepare(`SELECT id,principal FROM mcp_event_subscriptions
+      WHERE state='active' AND expires_at>? AND json_extract(document,'$.name')=?
+        AND json_extract(principal,'$.roomId')=? AND json_extract(principal,'$.memberId')=? ORDER BY id`)
+      .all(now(), name, roomId, memberId);
+    for (const row of subscriptions) {
+      const descriptor = JSON.parse(row.principal);
+      if (name === discoveryEvent) {
+        // The runtime's binding and policy checks are synchronous inside the filing transaction.
+        // A revoked first candidate must not consume another reviewer's opportunity.
+        if (!authorize(descriptor) || !authorizeEvent(descriptor, { event: { ...event, data: { ...data, nextRead } }, context })) continue;
+      }
       if (db.prepare("SELECT 1 FROM mcp_event_outbox WHERE subscription_id=? AND event_id=?").get(row.id, eventId)) continue;
       if (db.prepare("SELECT count(*) AS n FROM mcp_event_outbox WHERE subscription_id=? AND state IN ('pending','leased')").get(row.id).n >= 1000) {
         // Callback availability must not roll back the task/message transaction.
@@ -160,9 +173,10 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
           door: "native-mcp", kind: "native-mcp", subjectId: memberId, reason: "native_callback_capacity" });
         continue;
       }
-      const visibleEvent = nextRead && mcpOAuthToolAllowed(nextRead.tool, JSON.parse(row.principal).scopes)
+      const visibleEvent = nextRead && mcpOAuthToolAllowed(nextRead.tool, descriptor.scopes)
         ? { ...event, data: { ...data, nextRead } } : event;
       queued += Number(db.prepare("INSERT OR IGNORE INTO mcp_event_outbox(subscription_id,event_id,document,next_at) VALUES(?,?,?,?)").run(row.id, eventId, JSON.stringify(visibleEvent), now()).changes);
+      if (name === discoveryEvent && queued) break;
     }
     return queued;
   }
