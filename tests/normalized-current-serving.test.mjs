@@ -4,6 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { CurrentReadBudgetExceeded } from '../server/current-room-repository.mjs';
+import { readCurrentEventWindow } from '../server/current-room-events.mjs';
+import { readRoomSnapshot } from '../server/snapshot-window.mjs';
 
 const raw = store => JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
 
@@ -171,4 +174,29 @@ for(const count of [1000,5000])test(`excluded history${count} keeps an honest bo
   assert.equal(second.messages.length,0);assert.ok(second.sourceWindow.examined>0&&second.sourceWindow.examined<=64);
   assert.throws(()=>readConversation(store,token,'commons',{messageId:'not-present'}),error=>error.code==='message_not_found');
   assert.throws(()=>readConversation(store,token,'commons',{messageId:'hidden-0'}),error=>error.code==='message_not_found');
+});
+
+test('oversized normalized startup keeps audit history available by cursor', t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  store.initialize(initialRoom(), { representation: 'normalized-current-v1' });
+  const token = store.issueAccessKey('commons', 'owner');
+  const post = store.command(token, 'commons', { id: 'recent-evidence', type: 'message.posted',
+    data: { messageId: 'recent-evidence', body: 'Recent evidence should remain reachable.' } });
+  const base = store.currentOverview.bind(store);
+  store.currentOverview = (roomId, viewerId, options) => {
+    if (options.limit === 8) throw new CurrentReadBudgetExceeded();
+    return base(roomId, viewerId, options);
+  };
+  const snapshot = readRoomSnapshot(store, token, 'commons', null, { windowed: true });
+  assert.equal(snapshot.sequence, post.sequence);
+  assert.equal(snapshot.state.messages.at(-1).id, 'recent-evidence');
+  assert.deepEqual(snapshot.state.eventLog, []);
+  assert.equal(snapshot.eventsWindow.complete, false);
+  assert.equal(snapshot.eventsWindow.after, post.sequence);
+  assert.equal(snapshot.eventsWindow.hasOlder, true);
+  const page = store.readTransaction(() => readCurrentEventWindow(store, 'commons', 'owner',
+    { after: snapshot.eventsWindow.olderAfter, limit: 16 }));
+  assert.equal(page.next, post.sequence);
+  assert.ok(page.events.some(row => row.event.id === post.event.id));
 });

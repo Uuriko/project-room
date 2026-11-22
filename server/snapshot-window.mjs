@@ -150,7 +150,9 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
       if(channelKeys.length>50)fail(409,'current_channel_catalog_unavailable','Channel catalog exceeds the supported room limit');
       chargeCurrentReadBudget(b,channelKeys.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),channelKeys.length);
       const channels=Object.create(null);for(const {record_key:id}of channelKeys){const channel=readCurrentRecord(store.db,roomId,'channels',id,b);if(!channel||channel.id!==id)throw Error('Current channel membership differs');Object.defineProperty(channels,id,{value:channel,enumerable:true});}
-      const sourceAfter=Math.max(0,overview.sequence-eventLimit),eventPage=readCurrentEventWindow(store,roomId,auth.member.id,{after:sourceAfter,limit:eventLimit});
+      const sourceAfter=Math.max(0,overview.sequence-eventLimit);
+      const eventPage=eventLimit===0 ? {events:[],next:sourceAfter}
+        : readCurrentEventWindow(store,roomId,auth.member.id,{after:sourceAfter,limit:eventLimit});
       const events=eventPage.events.map(row=>row.event),eventLog=auditView==='activity'?events.filter(e=>e.type==='decision.recorded'||/^(work\.|work_claim\.|verification\.|owner_decision\.)/.test(e.type)||e.data?.workItemId!==undefined):events;
       const cursor=store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get(roomId,auth.member.id)?.sequence??0;
       const floor=readCurrentHistoryFloor(store.db,roomId,auth.member.id,b),catchUpCursor=Math.max(cursor,floor?floor.sequence-1:0);
@@ -170,7 +172,7 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
           pins:(overview.state.pins??[]).filter(pin=>conversation.messages.some(message=>message.id===pin.messageId&&!message.deletedAt&&message.body!=null)) },
         pinsWindow:{complete:false,coverage:'visible-conversation-records',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/pins`}},
         channelsWindow:{complete:true,shown:channelKeys.length},
-        eventsWindow:{complete:sourceAfter===0,after:sourceAfter,examinedThrough:eventPage.next,hasOlder:sourceAfter>0,olderAfter:sourceAfter>0?Math.max(0,sourceAfter-eventLimit):null,sourceLimit:eventLimit},
+        eventsWindow:{complete:sourceAfter===0,after:sourceAfter,examinedThrough:eventPage.next,hasOlder:sourceAfter>0,olderAfter:sourceAfter>0?Math.max(0,sourceAfter-16):null,sourceLimit:eventLimit},
         messagesWindow: { mode: "recent", omitted: null, complete: conversation.nextCursor === null },
         messagesPage: { cursor: conversation.nextCursor, hasMore: conversation.nextCursor !== null, contractVersion: 2, limit: messageLimit },
         workWindow: overview.workWindow,
@@ -182,9 +184,9 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
       return readWindow({ workLimit:8, messageLimit:8, eventLimit:16 });
     } catch (error) {
       if (!(error instanceof CurrentReadBudgetExceeded)) throw error;
-      // Retry once with smaller independently paged sections. Each attempt
-      // retains the same viewer authorization and bounded input budget.
-      return readWindow({ workLimit:2, messageLimit:2, eventLimit:4 });
+      // Keep startup within its shared input budget. Audit history remains
+      // available through its existing browser record page and exact links.
+      return readWindow({ workLimit:2, messageLimit:2, eventLimit:0 });
     }
   }
   // #4265: the non-windowed form is the explicit full-history contract (the
