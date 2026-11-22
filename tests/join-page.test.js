@@ -331,6 +331,31 @@ test("join page carries the consolidated request-access door", async t => {
   }
 });
 
+test("join page states the door's rules up front: retitled entry card, lobby pointer, request prerequisites (T-01b)", async t => {
+  const { origin } = await serve(t);
+  for (const path of ["/join", "/room/join"]) {
+    const html = await (await fetch(`${origin}${path}`)).text();
+    const enter = html.match(/<section id="join-enter"[\s\S]*?<\/section>/)?.[0];
+    assert.ok(enter, `${path} has the entry card`);
+    // The entry card must not presuppose the visitor already has a link.
+    assert.match(enter, /<h2>Use your invitation<\/h2>/, `${path} retitles the entry card`);
+    assert.ok(!enter.includes("Open your room link"), `${path} drops the link-presupposing title`);
+    assert.match(enter, /If you were sent a room link, paste it below/, `${path} makes the link conditional`);
+    // Bare /join points at the public lobby's real route.
+    assert.match(enter, /href="https:\/\/room\.trydemigod\.com\/r\/project-room-lobby"/, `${path} points at the public lobby`);
+    const request = html.match(/<details id="join-request"[\s\S]*?<\/details>/)?.[0];
+    assert.ok(request, `${path} has the request-access card`);
+    // Both prerequisites are stated inside the form, before the fields and
+    // the submit button — not first revealed by the submit error
+    // (account_session_required, src/join.js requireHuman: true).
+    const signinAt = request.indexOf("Sign in to your account before requesting room access.");
+    assert.ok(signinAt !== -1, `${path} states the sign-in prerequisite in the form`);
+    assert.match(request, /You also need the room&rsquo;s link or ID, from its owner\./, `${path} states the room link/ID prerequisite in the form`);
+    assert.ok(signinAt < request.indexOf('id="join-request-room"'), `${path} states the prerequisites before the room field`);
+    assert.ok(signinAt < request.indexOf('id="join-request-submit"'), `${path} states the prerequisites before submit`);
+  }
+});
+
 test("room address serves the join page to browsers, JSON 404 to API clients (H-S1)", async t => {
   const { origin } = await serve(t);
   // A browser opening /rooms/<id> gets the join page (room mode), on both doors.
