@@ -72,6 +72,16 @@ function prune(directory, keepName) {
   }
 }
 
+function fileBytes(path) {
+  try { return statSync(path).size; } catch { return 0; }
+}
+
+// Free disk a copy may need: twice the store, counting pages still in the
+// WAL (the copy holds every committed page), plus a margin.
+export function recoveryDiskNeed(source) {
+  return (fileBytes(source) + fileBytes(`${source}-wal`)) * 2 + FREE_SPACE_MARGIN_BYTES;
+}
+
 function freeBytes(directory) {
   try { const fs = statfsSync(directory); return Number(fs.bavail) * Number(fs.bsize); }
   catch { return null; }
@@ -91,7 +101,7 @@ export async function localRecoveryPoint(store, { env = {}, now = () => Date.now
       if (fresh) return { key: name, target: "local", ageDays: Math.floor((at - fresh.at) / 86_400_000) };
     }
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const need = statSync(source).size * 2 + FREE_SPACE_MARGIN_BYTES;
+    const need = recoveryDiskNeed(source);
     const free = freeBytes(dir);
     if (free === null || free < need) {
       console.warn("[store-growth] local recovery point skipped: not enough free disk");
@@ -103,6 +113,9 @@ export async function localRecoveryPoint(store, { env = {}, now = () => Date.now
     rmSync(partial, { force: true });
     let complete = false, verified = null;
     try {
+      // Owner-only from the first byte: the copy holds what the store holds,
+      // and copying a large store takes a while.
+      writeFileSync(partial, "", { mode: 0o600, flag: "wx" });
       await copy(store.db, partial);
       chmodSync(partial, 0o600);
       // Reopen the copy on its own: a rollback journal keeps it one file
