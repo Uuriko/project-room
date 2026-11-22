@@ -136,7 +136,7 @@ import CoreGraphics
         toggle.title = enabled ? "Pause all local tools" : "Enable local tools"
         permissions.stringValue = LocalToolReadiness.summary(snapshot["capabilities"] as? [[String: Any]] ?? [])
             + "\n\nFiles and apps may require additional access. These local checks do not verify your agent connection or model access."
-        let readiness = LocalHostReadiness.notice(host: agent, local: snapshot, connection: connection.connectionURL.path)
+        let readiness = LocalHostReadiness.notice(host: agent, local: snapshot, connection: connection.connectionURL.path, inMyMac: true)
         if hostIssue == nil, let readiness { hostState.stringValue = readiness }
         // My Mac retains tool diagnostics; Conversation shows only blockers to
         // the agent itself, without asking for unrelated computer permissions.
