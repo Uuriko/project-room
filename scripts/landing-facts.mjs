@@ -1,5 +1,6 @@
 // One read for the landing path. Prints four identities and, when
-// ROOM_AGENT_CONFIG is set, lease holder and expiry for touched paths.
+// ROOM_AGENT_CONFIG is set, lease holder and expiry for touched paths and the
+// MERGE-SLOT holder. With --pr N it also summarizes hosted checks at that PR head.
 // Does not post, claim, merge, deploy, or release a lease. A chat line is not one of these facts.
 import { spawnSync } from "node:child_process";
 
@@ -181,6 +182,73 @@ export function pathLeases(claims, paths, nowMs = Date.now()) {
   };
 }
 
+export const MERGE_SLOT_ID = "MERGE-SLOT";
+
+// Who holds the merge slot, as one read. A missing slot on a truncated read
+// is unknown, not free.
+export function mergeSlot(claims, nowMs = Date.now()) {
+  if (!claims || !Array.isArray(claims.claims)) return { unavailable: "claims_unreadable" };
+  const row = claims.claims.find(item => item?.id === MERGE_SLOT_ID);
+  if (!row) return claims.truncated === true ? { unavailable: "claims_truncated" } : { unavailable: false, held: false };
+  const expiresAt = typeof row.leaseExpiresAt === "string" ? row.leaseExpiresAt : null;
+  const expired = expiresAt && Number.isFinite(Date.parse(expiresAt)) ? Date.parse(expiresAt) <= nowMs : null;
+  return {
+    unavailable: false,
+    held: LIVE_LEASE.has(row.state) && expired !== true,
+    owner: typeof row.owner === "string" ? row.owner : null,
+    state: typeof row.state === "string" ? row.state : null,
+    leaseExpiresAt: expiresAt,
+    expired,
+  };
+}
+
+// Hosted checks at one exact head: counts plus the names still pending or failed.
+// Commit statuses (for example room/release-lease) are not check runs, so a
+// summary without them is never green.
+export const REQUIRED_CONTEXTS = Object.freeze(["room/release-lease"]);
+
+export function checkSummary(head, runs, statuses = null, requiredContexts = REQUIRED_CONTEXTS) {
+  if (!runs || !Array.isArray(runs.check_runs)) return { head, unavailable: "checks_unreadable" };
+  const pending = [];
+  const failed = [];
+  const unknown = [];
+  const counts = { success: 0, failure: 0, pending: 0, skipped: 0, neutral: 0, other: 0 };
+  for (const run of runs.check_runs) {
+    const name = typeof run?.name === "string" ? run.name : "unnamed";
+    if (run?.status !== "completed") { counts.pending++; pending.push(name); continue; }
+    const c = run.conclusion;
+    if (c === "success") counts.success++;
+    else if (c === "skipped") counts.skipped++;
+    else if (c === "neutral") counts.neutral++;
+    else if (c === "failure" || c === "timed_out" || c === "cancelled" || c === "action_required" || c === "startup_failure") { counts.failure++; failed.push(name); }
+    else { counts.other++; unknown.push(name); }
+  }
+  // A status read counts only when it is bound to this head and complete
+  // (review 17513); otherwise it is treated as missing, never as green.
+  const statusRows = Array.isArray(statuses?.statuses) && statuses.sha === head
+    && Number.isSafeInteger(statuses.total_count) && statuses.total_count === statuses.statuses.length
+    ? statuses.statuses : null;
+  for (const row of statusRows ?? []) {
+    const name = typeof row?.context === "string" ? row.context : "unnamed";
+    if (row?.state === "success") counts.success++;
+    else if (row?.state === "pending") { counts.pending++; pending.push(name); }
+    else if (row?.state === "failure" || row?.state === "error") { counts.failure++; failed.push(name); }
+    else { counts.other++; unknown.push(name); }
+  }
+  const includesCommitStatuses = statusRows !== null;
+  const seen = new Set((statusRows ?? []).filter(row => row?.state === "success").map(row => row.context));
+  const missingRequired = requiredContexts.filter(context => !seen.has(context)).sort();
+  const total = Number.isSafeInteger(runs.total_count) ? runs.total_count : runs.check_runs.length;
+  const truncated = total > runs.check_runs.length;
+  let status = "green";
+  // A stale, null or unrecognized conclusion is never read as green.
+  if (truncated || counts.other > 0 || !includesCommitStatuses || missingRequired.length > 0) status = "incomplete";
+  if (counts.failure > 0) status = "failing";
+  else if (counts.pending > 0) status = "pending";
+  else if (runs.check_runs.length === 0 && (statusRows ?? []).length === 0) status = "none";
+  return { head, status, total, truncated, includesCommitStatuses, missingRequired, counts, pending: pending.sort(), failed: failed.sort(), unknown: unknown.sort() };
+}
+
 export async function landingFacts({
   fetchImpl = fetch,
   execImpl = defaultExec,
@@ -188,6 +256,7 @@ export async function landingFacts({
   pr = null,
   ghImpl = null,
   claimsImpl = null,
+  checksImpl = null,
   nowMs = Date.now(),
 } = {}) {
   const localHead = textOf(execImpl, ["rev-parse", "HEAD"]);
@@ -237,14 +306,25 @@ export async function landingFacts({
   if (pr != null) {
     if (!ghImpl) facts.pullRequest = { unavailable: true };
     else facts.pullRequest = reviewBind(await ghImpl(pr), localHead, patchId, execImpl, mainSha);
+    if (checksImpl && SHA.test(facts.pullRequest?.head ?? "")) {
+      try {
+        const read = await checksImpl(facts.pullRequest.head);
+        facts.checks = checkSummary(facts.pullRequest.head, read?.runs, read?.statuses ?? null);
+      } catch {
+        facts.checks = { head: facts.pullRequest.head, unavailable: "checks_unreadable" };
+      }
+    }
   }
   if (claimsImpl) {
     const names = touchedPathsFromNameOnly(textOf(execImpl, ["diff", "--name-only", `${mainSha}...${localHead}`]));
     facts.touchedPaths = names;
     try {
-      facts.pathLeases = pathLeases(await claimsImpl(), names, nowMs);
+      const claims = await claimsImpl();
+      facts.pathLeases = pathLeases(claims, names, nowMs);
+      facts.mergeSlot = mergeSlot(claims, nowMs);
     } catch {
       facts.pathLeases = { unavailable: "claims_unreadable", paths: [] };
+      facts.mergeSlot = { unavailable: "claims_unreadable" };
     }
   }
   if (JSON.stringify(facts).includes("pri_")) {
@@ -308,6 +388,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     landingFacts({
       pr: parsed.pr,
       claimsImpl: process.env.ROOM_AGENT_CONFIG ? roomClaims : null,
+      checksImpl: parsed.pr == null ? null : async (sha) => {
+        const result = spawnSync("gh", ["api", `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`], { encoding: "utf8" });
+        if (result.status !== 0) throw new Error("checks_unreadable");
+        const status = spawnSync("gh", ["api", `repos/{owner}/{repo}/commits/${sha}/status?per_page=100`], { encoding: "utf8" });
+        return { runs: JSON.parse(result.stdout), statuses: status.status === 0 ? JSON.parse(status.stdout) : null };
+      },
       ghImpl: parsed.pr == null ? null : async (number) => {
         const result = spawnSync("gh", ["pr", "view", String(number), "--json", "number,headRefOid,reviewDecision,author,reviews"], { encoding: "utf8" });
         if (result.status !== 0) {
