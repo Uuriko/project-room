@@ -568,13 +568,13 @@ const client = new RoomClient({
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
     if (presenceBoundary) startPresencePoll();
-    if(partialWorkSnapshot&&!firstSnapshot)void refreshRoomFiles();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       const accountId = accountClient.session?.account?.id ?? session?.account?.id;
       if (accountId) rememberMemberRoom(accountId, roomId, undefined, state.room?.title);
       if (session?.member?.id) rememberMemberRoom(session.member.id, roomId, undefined, state.room?.title);
-      void refreshRoomFiles();
+      // Partial snapshots load attachments for the visible selection in renderMessages.
+      if (!partialWorkSnapshot) void refreshRoomFiles();
       void refreshDmConsents();
       void refreshFriendBonds();
       void refreshSavedIds();
