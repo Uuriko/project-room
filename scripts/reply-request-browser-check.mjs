@@ -201,9 +201,17 @@ test("confirmed request offers one link to its original record", { timeout: 3000
   assert.ok(id);
   const savedRequest = owner.locator("#message-delivery").getByRole("link", { name: "View request" });
   assert.equal(await savedRequest.getAttribute("href", { timeout: 2000 }), `#pr-record/message/${id}`);
+  const requestBeforeClick = structuredClone(f.state().replyRequests[id]);
+  const writes = [];
+  owner.on("request", request => {
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method()))
+      writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+  });
   await savedRequest.click();
   await owner.locator(`[data-message-record-id="${id}"]`).getByText("Inspect this exact result.", { exact: true }).waitFor();
   assert.equal(new URL(owner.url()).hash, `#pr-record/message/${id}`);
+  assert.deepEqual(writes, []);
+  assert.deepEqual(f.state().replyRequests[id], requestBeforeClick);
   assert.equal(Object.keys(f.state().replyRequests).length, 1);
   assert.deepEqual(f.errors, []);
 });
