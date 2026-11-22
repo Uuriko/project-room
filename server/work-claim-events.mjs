@@ -347,7 +347,7 @@ export function emitWorkClaimEvent(store, roomId, options) {
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
   const currentWrite=current?.current ? prepareCurrentWrite(store,{roomId,previous:room,state:compact,event:incoming,sequence,current:current.current}) : null;
   const projection = currentWrite?.projection ?? store.storedProjection(roomId, compact);
-  if (!resolvingEvent && Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+  if (!resolvingEvent && store.projectionExceedsWriteLimit(projection)) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, projection, roomId);
   currentWrite?.persistEntities();
