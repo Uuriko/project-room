@@ -549,9 +549,10 @@ export class RoomAgentClient {
   }
   // A wake-up hint only. Consumers re-read their authorized queue before acting;
   // no streamed message body is used as executable input or saved as history.
-  async waitForChange(after, { signal, timeoutMs = 10000, requestHints = false, reviewWorkItemId, receiverScope } = {}) {
+  async waitForChange(after, { signal, timeoutMs = 10000, requestHints = false, reviewWorkItemId, receiverScope, waitingForWork = false } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000
       || receiverScope !== undefined && (!requestHints || !validReceiverRouteScope(receiverScope))
+      || typeof waitingForWork !== "boolean" || waitingForWork && !receiverScope
       || reviewWorkItemId !== undefined && (!validId(reviewWorkItemId) || requestHints))
       throw new Error("Choose a valid stream cursor and timeout");
     const deadline = AbortSignal.timeout(timeoutMs), controller = new AbortController();
@@ -562,7 +563,8 @@ export class RoomAgentClient {
       await this.checkConnection({ signal: stop });
       const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/stream?after=${after}`,
         { signal: stop, timeoutMs: timeoutMs + 1000, headers: { Accept: "text/event-stream",
-          ...(receiverScope ? { "X-Project-Room-Receiver-Scope": JSON.stringify(receiverScope) } : {}) } });
+          ...(receiverScope ? { "X-Project-Room-Receiver-Scope": JSON.stringify(receiverScope) } : {}),
+          ...(waitingForWork ? { "X-Project-Room-Receiver-State": "waiting_for_work" } : {}) } });
       if (!response.ok) throw this.#requestError(response, null, "Room stream unavailable");
       if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body)
         throw new RoomClientError(200, "invalid_response", "Room returned an invalid event stream");
