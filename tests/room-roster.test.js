@@ -272,6 +272,10 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /grouped-time/);
   assert.match(app, /messageMentionsMember/);
   assert.match(app, /data-mention-id/);
+  const mentionPicker = app.slice(app.indexOf("function mentionChoices()"), app.indexOf("function chooseMention("));
+  assert.match(mentionPicker, /const pickerName = createMemberDisplayNames\(members\)/);
+  assert.match(mentionPicker, /pickerLabel: humanExperience\.assistantName\(member\.id\) \|\| pickerName\(member\.id\)/);
+  assert.match(mentionPicker, /data-mention-id="\$\{esc\(m\.id\)\}"[^>]*>\$\{esc\(m\.pickerLabel\)\}/);
   assert.doesNotMatch(app, /\$\("#presence-list"\)\.addEventListener\("click", e => \{\s*if \(e\.target\.closest\("details, summary, button, a"\)\) return;/);
   // UI calming #6: the uppercase "AGENT" pill was removed from message metadata
   // (the avatar class already marks agent messages: message-avatar ${author.kind}).
