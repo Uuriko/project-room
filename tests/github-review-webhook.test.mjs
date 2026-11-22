@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { dispatchGithubReview, observeWebhookPull, readGithubReviewWebhookBinding } from "../server/github-review-webhook.mjs";
+import { buildReplyCommand } from "../client/reply-actions.mjs";
 
 const head = "a".repeat(40), oldHead = "b".repeat(40), newHead = "c".repeat(40);
 const repo = "Uuriko/project-room";
@@ -82,6 +83,37 @@ test("exact webhook review uses one native request across redelivery, and stale 
   assert.equal(calls, callsAfterWithdrawal, "retry after a lost withdrawal response needs no GitHub read");
   assert.equal(store.headSequence("commons"), beforeFailure + 1);
   assert.equal(store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "open" }).requests.length, 1);
+
+  nextCheck(24, "success");
+  assert.deepEqual(await dispatchGithubReview(store, binding, checkDelivery(newHead, 24, "success"), options),
+    [{ number: 6319, status: "replayed" }], "a stale passing observation cannot revive the withdrawn review");
+  nextCheck(26, "success");
+  const repaired = checkDelivery(newHead, 26, "success");
+  const replacement = await Promise.all([dispatchGithubReview(store, binding, repaired, options),
+    dispatchGithubReview(store, binding, repaired, options)]);
+  assert.deepEqual(replacement.flat().map(row => row.status).sort(), ["posted", "replayed"]);
+  assert.equal(store.headSequence("commons"), beforeFailure + 2);
+  const activeAfterRepair = store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "open" }).requests;
+  assert.equal(activeAfterRepair.length, 2, "one open review for each of the two heads");
+  const fresh = activeAfterRepair.find(request => !inbox.requests.some(prior => prior.id === request.id));
+  assert.ok(fresh);
+  const message = store.snapshot(reviewer.identitySecret, "commons").state.messages.find(row => row.id === fresh.id);
+  assert.equal(message.replyToId, cancelled.requests[0].id, "replacement retains the original Work Thread context");
+  assert.match(message.body, /attempt 26/);
+  const callsAfterRepair = calls;
+  assert.deepEqual(await dispatchGithubReview(store, binding, repaired, options), [{ number: 6319, status: "replayed" }]);
+  assert.equal(calls, callsAfterRepair, "lost replacement response is recovered without GitHub reads");
+  assert.equal(store.headSequence("commons"), beforeFailure + 2);
+
+  store.command(secret, "commons", buildReplyCommand({roomId:"commons",memberId:"owner"}, "room_cancel_request", {
+    requestId:"human-chose-to-cancel", requestMessageId:fresh.id, expectedRequestRevision:fresh.revision,
+    reason:"Hold this candidate for a different reason.",
+  }));
+  nextCheck(27, "success");
+  assert.deepEqual(await dispatchGithubReview(store, binding, checkDelivery(newHead, 27, "success"), options),
+    [{ number: 6319, status: "replayed" }], "GitHub cannot reopen a human cancellation");
+  assert.equal(calls, callsAfterRepair);
+  assert.equal(store.headSequence("commons"), beforeFailure + 3);
 });
 
 test("authoritative GitHub reads pause before checking stale candidates and recheck the exact head before posting", async () => {
