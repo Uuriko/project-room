@@ -343,9 +343,9 @@ test("the verdict links exact candidate release checks without claiming missing 
 });
 
 test("shared result links keep identical old and new text bound to different verdicts", { timeout: 45000 }, async t => {
-  const source = "https://github.com/Uuriko/project-room/blob/d9e1f712c6a3f8f4f4180cb41980507709befeb5";
+  const source = "https://example.test/pinned/src";
   const verdictSource = source + "/src/result-reader.js#L401-L411";
-  const regressionSource = source + "/scripts/result-diff-browser-check.mjs#L377-L384";
+  const regressionSource = source + "/scripts/pin.mjs#L10-L20";
   const body = [
     "Result A",
     "Verdict binding: " + verdictSource,
@@ -398,7 +398,7 @@ test("shared result links keep identical old and new text bound to different ver
   assert.deepEqual(await receiver.locator("#result-body a").evaluateAll(links => links.map(link => link.href)),
     [verdictSource, regressionSource]);
   const requests = [];
-  await receiver.context().route("https://github.com/**", async route => {
+  await receiver.context().route("https://example.test/**", async route => {
     requests.push(route.request().url());
     await route.fulfill({ body: "Pinned public source destination" });
   });
