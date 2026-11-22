@@ -12718,6 +12718,16 @@ paths:
         checks the current posted context event and request revision. This
         does not attest to edits made in place to an existing message.
         No capability is advertised for an unselected or contended lease.
+        For a configured scoped pickup receiver, the heartbeat advertises
+        `idlePickupAvailable: true`. After its Room queue drains and a full
+        wake poll returns no outstanding wakes, that receiver may send a
+        separate idle report with `hostId`, `listenerLease: { roomId }`,
+        `idlePickup: true` and the current `x-room-listener-token` header.
+        The report never renews the lease. It returns
+        `idlePickup: { roomId, status, evaluatedThrough }`. A successful
+        pickup appears as a regular incoming Room request on the usual wake
+        transport. The report grants no new authority and reports only the
+        capacity of this Room listener.
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
         host), optional `mode` (defaults to `wakeable` — the host can wait on
         `/api/agent-wakes/poll` without a public endpoint, with an optional
@@ -12769,6 +12779,10 @@ paths:
                       required: [roomId]
                       properties:
                         roomId: { type: string, minLength: 1 }
+                idlePickup:
+                  type: boolean
+                  enum: [true]
+                  description: "Report a drained Room listener queue. Only hostId and explicit listenerLease room accompany this flag. Requires the current x-room-listener-token header."
                 disconnect:
                   description: "graceful disconnect: marks this host gone now (presence stops reading online until its next heartbeat) and, with fencingToken, releases its listener lease. Send with hostId and optional listenerLease only. Queued wakes stay queued. Returns { agentId, disconnected, released }"
                   oneOf:
@@ -12792,6 +12806,7 @@ paths:
         '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], wakeSelection?: { version: 1, newest: true, roomId }, listener?: { acquired, fencingToken?, leaseExpiresAt, renewed?, firstFormalAckRoomId? | activeListenerId } (only when listenerLease was sent) }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
+        '409': { description: stale listener lease for idle pickup }
         '422': { description: invalid_heartbeat }
         '429': { description: rate_limited }
     get:

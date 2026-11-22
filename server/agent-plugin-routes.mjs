@@ -869,7 +869,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         assertListenerFence(store, current, roomId, token);
         const lease = store.db.prepare("SELECT listener_id FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?")
           .get(current.identityId, roomId);
-        const status = store.idlePickup?.dispatch(roomId, current.identityId, bearer(req), lease.listener_id) ?? "disabled";
+        const status = store.idlePickup?.dispatch(roomId, current.identityId, bearer(req), lease.listener_id, origin) ?? "disabled";
         return { idlePickup: { roomId, status, evaluatedThrough: store.headSequence(roomId) } };
       }));
     }

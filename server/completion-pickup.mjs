@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
 import { validId } from "../src/events.js";
-import { listRoomWork } from "./mcp-room-profile.mjs";
+import { listRoomWork, mcpKeyGrantsScope } from "./mcp-room-profile.mjs";
+import { readRoomNext } from "./room-next.mjs";
 
 const investigation = "Room investigation pass.";
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
@@ -47,27 +48,29 @@ export function dispatchCompletionPickup(store, route, secret, event, sequence) 
 
 // Read through the idle agent's own authorization. The configured sender
 // carries no selected task details across the two credential scopes.
-function dispatchIdlePickup(store, route, senderSecret, receiverSecret, identityId, hostId) {
+function dispatchIdlePickup(store, route, senderSecret, receiverSecret, identityId, hostId, origin) {
   const { roomId, requesterId, recipientId, workItemId, after } = route;
   if (store.wakeQueue.pauseStatus(roomId, recipientId)) return "paused";
   const wake = store.agentHeartbeats.pendingWakePage(identityId, { roomId, hostId, limit: 1, observe: false });
   if (wake.signals.length || wake.more) return "wake_pending";
-  const open = store.replyRequests.list(receiverSecret, roomId, { direction: "incoming", status: "open" });
-  if (open.requests.length || open.page?.hasMore) return "request_pending";
+  const pickup = readRoomNext(store, receiverSecret, roomId, { view: "pickup" },
+    () => listRoomWork(store, receiverSecret, { roomId, focus: "help_wanted", limit: 1 }),
+    { discoveryOrigin: origin, allowPublicReview: true, allowInvestigation: mcpKeyGrantsScope(store, receiverSecret, "rooms:write") });
+  if (pickup.requests?.items.length || pickup.nextRead?.tool === "room_read_request") return "request_pending";
+  if (pickup.requests?.coverage !== "complete" || pickup.work?.coverage !== "complete") return "unknown";
+  const addressed = pickup.work.items.find(item => item.reason === "revise") ?? pickup.work.items[0];
+  const ready = addressed ? [addressed.id, addressed.revision, addressed.reason]
+    : ["invitation", "public_review"].includes(pickup.ifIdle?.status) || pickup.ifIdle?.discoveryReview
+      ? [pickup.ifIdle.status, pickup.ifIdle.nextRead ?? pickup.ifIdle.discoveryReview.nextRead] : null;
+  if (ready) return postIdleRequest(store, route, senderSecret, [roomId, recipientId, ...ready], "ready",
+    "Room found a next step for you. Read room_next and take the current authorized step. If it changed, use the current action or report the blocker.");
 
-  const assigned = listRoomWork(store, receiverSecret, { roomId, focus: "needs_me", limit: 1 });
-  if (assigned.evaluatedThrough !== open.evaluatedThrough || assigned.selection?.available === false
-    || (!assigned.work.length && assigned.page?.hasMore))
-    return "unknown";
-  const offers = assigned.work.length ? null : listRoomWork(store, receiverSecret, { roomId, focus: "help_wanted", limit: 1 });
-  if (offers && (offers.selection?.available === false || offers.evaluatedThrough !== assigned.evaluatedThrough)) return "unknown";
-  const work = assigned.work[0] ?? offers?.work[0];
-  if (work) {
-    const basis = [roomId, recipientId, work.id, work.revision, assigned.work.length ? work.next?.action : "offer"];
-    return postIdleRequest(store, route, senderSecret, basis, "ready",
-      "Room found a next step for you. Read room_next and take the current authorized step. If it changed, use the current action or report the blocker.");
-  }
-  if (offers?.page?.hasMore) return "unknown";
+  const lead = pickup.ifIdle?.investigation;
+  if (lead) return postIdleRequest(store, route, senderSecret, [roomId, lead.basis], "investigation", [
+    investigation, "Use the current investigation in room_next. Check existing work first and follow the selected exact evidence.",
+    "Record an observation and the smallest useful next step, or a scoped clean check. Keep restricted evidence within its original audience."
+  ].join("\n"));
+  if (!["no_invitation", "unavailable"].includes(pickup.ifIdle?.status)) return "unknown";
 
   const latest = store.db.prepare(`
     SELECT sequence,body FROM events WHERE room_id=? AND sequence>? AND
@@ -173,11 +176,11 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
   };
   const idle = {
     supports: (roomId, identityId) => idleBindings.size > 0 && Boolean(idleBinding(roomId, identityId)),
-    dispatch(roomId, identityId, receiverSecret, hostId) {
+    dispatch(roomId, identityId, receiverSecret, hostId, origin) {
       const binding = idleBinding(roomId, identityId);
       if (!binding) return "disabled";
       const { route, secret } = binding;
-      return dispatchIdlePickup(store, route, secret, receiverSecret, identityId, hostId);
+      return dispatchIdlePickup(store, route, secret, receiverSecret, identityId, hostId, origin);
     }
   };
   if (idleBindings.size) store.idlePickup = idle;
