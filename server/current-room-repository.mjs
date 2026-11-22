@@ -1528,14 +1528,14 @@ export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{inclu
   const members=Object.create(null);for(const id of ids){const member=readCurrentRecord(db,roomId,'members',id,b);if(member!==undefined)members[id]=member;}
   const replyRequests=Object.create(null);
   const privacy=readCurrentWorkPrivacy(db,roomId,workId,b);
-  if(includeReplies){
-    if(privacy.requests>8)refuse('Selected work replies require continuation for this work item');
+  const repliesDeferred=includeReplies&&privacy.requests>8&&Object.hasOwn(privacy.parties,viewerId);
+  if(includeReplies&&privacy.requests<=8){
     const prefix=workRequestPrefix(workId),requests=db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='workRequest' AND present=1 AND record_key>=? AND record_key<? ORDER BY record_key LIMIT 9").all(roomId,prefix,prefix+'\uffff');
     charge(b,requests.length*256,requests.length);if(requests.length!==privacy.requests)corrupt('selected request index count differs');
     for(const {record_key:key} of requests){const link=readCurrentRecord(db,roomId,'workRequest',key,b);if(!link||link.workItemId!==workId||workRequestKey(workId,link.requestId)!==key)corrupt('selected request index binding differs');const request=readCurrentRecord(db,roomId,'replyRequests',link.requestId,b);if(request?.workItemId!==workId)corrupt('selected private request missing');Object.defineProperty(replyRequests,link.requestId,{value:request,enumerable:true});}
   }
   // The protected privacy record remains authoritative even when replies are not requested.
-  return {sequence:head.sequence,state:{room,members,workItems:{[workId]:privateWorkForViewer(db,roomId,workId,item,viewerId,b,privacy)},replyRequests},privateParties:privacy.requests?new Set(Object.keys(privacy.parties)):null};
+  return {sequence:head.sequence,state:{room,members,workItems:{[workId]:privateWorkForViewer(db,roomId,workId,item,viewerId,b,privacy)},replyRequests},privateParties:privacy.requests?new Set(Object.keys(privacy.parties)):null,repliesDeferred};
 }
 
 export {currentWorkSummary} from './current-work-summary.mjs';

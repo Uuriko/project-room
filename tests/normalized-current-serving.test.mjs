@@ -13,18 +13,19 @@ const raw = store => JSON.parse(store.db.prepare("SELECT projection FROM rooms W
 for (const representation of ['legacy', 'normalized-current-v1']) test(`${representation} selected work can omit replies without widening access`, t => {
   const store = new RoomStore(':memory:');
   t.after(() => store.close());
-  const members = ['participant', 'observer'].map(memberId => event({
+  const members = ['participant', 'reviewer', 'observer'].map(memberId => event({
     id: 'selected-work-' + memberId, roomId: 'commons', actorId: 'owner', type: 'member.added',
     data: { memberId, displayName: memberId, kind: 'human', permissions: [] },
   }));
   store.initialize([...initialRoom(), ...members], representation === 'legacy' ? {} : { representation });
   const owner = store.issueAccessKey('commons', 'owner');
   const participant = store.issueAccessKey('commons', 'participant');
+  const reviewer = store.issueAccessKey('commons', 'reviewer');
   const observer = store.issueAccessKey('commons', 'observer');
   const send = (id, type, data) => store.command(owner, 'commons', { id, type, data });
   send('selected-work', 'work.proposed', {
     workItemId: 'selected-work', title: 'Saved work title', definitionOfDone: 'Read the scoped work',
-    accountableMemberId: 'owner',
+    accountableMemberId: 'owner', verifierMemberId: 'reviewer',
   });
   for (let index = 0; index < 9; index++) {
     const id = `selected-reply-${index}`;
@@ -46,6 +47,34 @@ for (const representation of ['legacy', 'normalized-current-v1']) test(`${repres
   }
   assert.throws(() => store.workContext(observer, 'commons', 'selected-work', { includeReplies: false }),
     error => error.status === 403 && error.code === 'work_private');
+  assert.throws(() => store.workContext(observer, 'commons', 'selected-work'),
+    error => error.status === 403 && error.code === 'work_private');
+  const context = store.workContext(participant, 'commons', 'selected-work');
+  assert.equal(context.work.title, 'Saved work title');
+  assert.equal(context.next.action, store.workContext(participant, 'commons', 'selected-work', { includeReplies: false }).next.action);
+  assert.equal(store.workContext(reviewer, 'commons', 'selected-work').replyRequestContext.total, 0);
+  if (representation === 'legacy') {
+    assert.equal(context.replyRequestContext.total, 9);
+    return;
+  }
+  const replies = context.replyRequestContext;
+  assert.equal(replies.total, null, 'the bounded work read did not count the open replies');
+  assert.equal(replies.truncated, true);
+  assert.equal(replies.shown, 0);
+  assert.deepEqual(replies.requests, []);
+  assert.equal(replies.nextRead.tool, 'room_list_requests');
+  const first = store.replyRequests.list(participant, 'commons', { ...replies.nextRead.arguments, limit: 3 });
+  assert.throws(() => store.replyRequests.list(observer, 'commons', first.nextRead.arguments),
+    error => error.code === 'reply_cursor_identity_changed');
+  const ids = first.requests.map(request => request.id);
+  let page = first;
+  for (let count = 1; page.nextRead && count < 4; count++) {
+    page = store.replyRequests.list(participant, 'commons', page.nextRead.arguments);
+    ids.push(...page.requests.map(request => request.id));
+    assert.ok(ids.length <= 9);
+  }
+  assert.equal(page.nextRead, null);
+  assert.deepEqual(ids, Array.from({ length: 9 }, (_, index) => `selected-reply-${index}`));
 });
 
 test('explicit synthetic initialization selects actual normalized serving, not replay staging', t => {

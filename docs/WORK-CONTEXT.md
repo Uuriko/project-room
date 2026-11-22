@@ -61,7 +61,12 @@ Contract version 1 includes:
   next reads. No message text or other participants' private conversations.
   `total`, `shown` and `truncated` expose omitted pointers; the overflow
   `room_list_requests` read lists all your open conversations, so filter those
-  results by this `workItemId`. Requests share this view's `evaluatedThrough`.
+  results by this `workItemId`. On normalized storage, when the work read
+  cannot enumerate the linked requests within its window, it returns
+  `total: null`, `truncated: true`, and that same next read. The count is
+  unknown. The brief includes this structured continuation as well.
+  Follow request-list continuations through empty pages.
+  Inline pointers share this view's `evaluatedThrough`.
   An open conversation does not reopen completed work or add a completion gate.
   Finish the selected request's context before answering; reading never answers.
   Older services omit this field; omission does not mean no pending requests.

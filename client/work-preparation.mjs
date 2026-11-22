@@ -203,6 +203,7 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     const brief = await createWorkBrief(context);
     const identity = { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
+      ...(context.replyRequestContext?.total === null ? { replyRequestContext: context.replyRequestContext } : {}),
       continuation: workContinuation(context, { hosted }), briefVersion: brief.version };
     if (args.knownBriefVersion === brief.version) return { ...identity, briefUnchanged: true,
       evaluatedAt: context.evaluatedAt,
