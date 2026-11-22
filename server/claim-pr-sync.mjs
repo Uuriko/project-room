@@ -365,6 +365,10 @@ function delayFor(item, kind, token) {
   return nextPullBackoff(item?.pullRequest?.pollBackoffMs, Boolean(token));
 }
 
+const pullPollBasis = pull => JSON.stringify([pull.etag ?? null, pull.nextPollAt ?? null]);
+const pullObservationKey = pull => JSON.stringify([pull.url, pull.etag ?? null, pull.ciCursor ?? null,
+  pull.ciReadHeadSha ?? null, pull.ciStatus ?? null]);
+
 // Look up due claims. Pull, combined status, and check runs share one request
 // budget (one call without a token, four with one). A claim whose status
 // read is unfinished stays due so the next tick spends the budget there.
@@ -378,10 +382,12 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
   let budgetExceeded = false;
   for (const item of due) {
     const url = item.pullRequest.url;
-    const prior = seen.get(url);
+    const observationKey = pullObservationKey(item.pullRequest);
+    const pollBasis = pullPollBasis(item.pullRequest);
+    const prior = seen.get(observationKey);
     if (prior) {
       // Room-scoped: the result is re-attributed to this item's room.
-      results.push({ ...prior, claimId: item.id, roomId: item.roomId });
+      results.push({ ...prior, claimId: item.id, roomId: item.roomId, pollBasis });
       continue;
     }
     if (budget.remaining <= 0 || rateLimitedUntil) break;
@@ -423,11 +429,11 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       }
       if (signals.budget) {
         const result = {
-          claimId: item.id, roomId: item.roomId, url,
+          claimId: item.id, roomId: item.roomId, url, pollBasis,
           delayMs: looked.ciCursor && looked.ciCursor !== "done" ? 0 : delayFor(item, looked.kind, token),
           ...looked
         };
-        seen.set(url, result);
+        seen.set(observationKey, result);
         results.push(result);
         break;
       }
@@ -436,10 +442,11 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       claimId: item.id,
       roomId: item.roomId,
       url,
+      pollBasis,
       delayMs: looked.ciCursor && looked.ciCursor !== "done" ? 0 : delayFor(item, looked.kind, token),
       ...looked
     };
-    seen.set(url, result);
+    seen.set(observationKey, result);
     results.push(result);
     if (typeof yieldBetween === "function") await yieldBetween();
     if (looked.kind === "rateLimited") {
@@ -533,6 +540,9 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
     return true;
   }
   if (result.kind === "open" || result.kind === "notModified" || result.kind === "missing" || result.kind === "error" || result.kind === "unconfigured") {
+    // An authenticated check event can invalidate this lookup while it is
+    // in flight. Keep the newly due cursor rather than restoring its old ETag.
+    if (result.pollBasis !== undefined && result.pollBasis !== pullPollBasis(linked)) return false;
     let next = fresh;
     let changed = false;
     if (result.ci) {

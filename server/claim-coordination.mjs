@@ -181,6 +181,12 @@ export function rememberPoll(item, nowMs, delayMs, { etag, rateLimitedUntil = nu
   }));
 }
 
+// A verified check event invalidates cached PR metadata. Keep the last
+// observation and rate-limit hold until the normal reader can refresh it.
+export function makePullPollDue(item, nowMs) {
+  return withCurrentPull(item, Object.freeze({ ...item.pullRequest, etag: null, nextPollAt: nowMs }));
+}
+
 // Hold every still-open link until GitHub's reset. The stored ETag stays so
 // the next poll can be a conditional request.
 export function holdForRateLimit(item, nowMs, until) {
