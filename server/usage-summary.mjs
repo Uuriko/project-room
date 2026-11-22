@@ -101,7 +101,7 @@ export function roomUsageSummary(store, token, roomId, { days = USAGE_DEFAULT_DA
         members: headroom(activeMemberCount(room.state.members), PILOT_LIMITS.membersPerRoom),
         events: headroom(room.sequence, PILOT_LIMITS.eventsPerRoom),
         workItems: headroom(Object.keys(room.state.workItems ?? {}).length, PILOT_LIMITS.workItemsPerRoom),
-        projectionBytes: headroom(projectionBytes, PILOT_LIMITS.projectionBytes)
+        projectionBytes: headroom(projectionBytes, store.projectionByteLimit)
       }
     };
   });
