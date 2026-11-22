@@ -24,7 +24,7 @@
 // work_claim_config under _claim-pr-webhook: and _claim-pr-discover: keys.
 // The webhook secret is never read here as a value for storage and never
 // leaves the process; only its env var NAME is documented (ops__STATE.md).
-import { parsePullRequestUrl, pullLinks, rateLimitUntil } from "./claim-coordination.mjs";
+import { makePullPollDue, parsePullRequestUrl, pullLinks, rateLimitUntil } from "./claim-coordination.mjs";
 import { applyPullRequestWebhook, publicNamespaceSqlExclusion, isPublicClaimNamespace, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { MAX_CLAIM_HISTORY } from "./work-claims.mjs";
@@ -456,6 +456,43 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
   return out;
 }
 
+// Called only after route authentication. A check delivery is a refresh hint,
+// never CI evidence. Old heads and already observed deliveries are no-ops.
+function refreshLinkedChecks(store, { event, action, payload }, nowMs) {
+  if (action !== "completed" || !["check_run", "check_suite"].includes(event)) return 0;
+  const check = payload[event];
+  const repo = payload.repository?.full_name;
+  const completedAt = Date.parse(event === "check_run" ? check?.completed_at : check?.updated_at);
+  if (typeof repo !== "string" || !REPO_PATTERN.test(repo) || !SHA40.test(check?.head_sha ?? "")
+    || !Number.isFinite(completedAt) || !Array.isArray(check.pull_requests)) return 0;
+  const urls = new Set(check.pull_requests.filter(pull => Number.isSafeInteger(pull?.number)
+    && pull.number > 0 && (!pull.head?.sha || pull.head.sha === check.head_sha))
+    .map(pull => ["https://github.com", repo.toLowerCase(), "pull", pull.number].join("/")));
+  if (!urls.size) return 0;
+  const rows = store.db.prepare(`
+    SELECT room_id AS roomId, claim_id AS claimId
+    FROM work_claims
+    WHERE CASE WHEN json_valid(item_json) THEN (
+      lower(coalesce(json_extract(item_json, '$.data.pullRequest.url'), json_extract(item_json, '$.pullRequest.url')))
+        IN (SELECT value FROM json_each(?))
+    ) ELSE 0 END${publicNamespaceSqlExclusion(store)}
+  `).all(JSON.stringify([...urls]));
+  let refreshed = 0;
+  store.workClaims.transaction(() => {
+    for (const { roomId, claimId } of rows) {
+      const item = store.workClaims.get(roomId, claimId);
+      const pull = item?.pullRequest;
+      if (!pull || pull.outcome || !LIVE_CLAIM_STATES.has(item.state) || item.ci?.headSha !== check.head_sha
+        || !urls.has(pull.url.toLowerCase()) || Date.parse(item.ci.checkedAt) >= completedAt
+        || ["status", "checks"].includes(pull.ciCursor)
+        || (!pull.etag && pull.nextPollAt !== null && pull.nextPollAt <= nowMs)) continue;
+      store.workClaims.set(roomId, makePullPollDue(item, nowMs));
+      refreshed++;
+    }
+  });
+  return refreshed;
+}
+
 // --- HTTP route (mounted via the route table; mount is a coordinated
 // handoff, see the module header) ---------------------------------------
 // POST /api/github/pr-webhook — GitHub pull_request webhook receiver.
@@ -488,10 +525,11 @@ export async function postPrWebhook(ctx) {
     nowMs: Date.now(),
     webhook: { rawBody: text, signature256: ctx.req.headers["x-hub-signature-256"], env },
   }) : null;
+  const refreshed = legacy ? refreshLinkedChecks(ctx.store, parsedEvent, Date.now()) : 0;
   let review;
   try { review = await maybeDispatchGithubReview(ctx.store, parsedEvent, env); }
   catch { return ctx.json(ctx.res, 503, { ok: false, reason: "review_evidence_unavailable" }); }
-  if (!result?.ok) return ctx.json(ctx.res, 200, review.length ? { ok: true, review }
+  if (!result?.ok) return ctx.json(ctx.res, 200, review.length || refreshed ? { ok: true, ...(review.length ? { review } : {}), ...(refreshed ? { refreshed } : {}) }
     : { ok: true, ignored: true, ...(result?.reason ? { reason: result.reason } : {}) });
   // Minimal by design: claim id, PR number, and state. Nothing else.
   return ctx.json(ctx.res, 200, {

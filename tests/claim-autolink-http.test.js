@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { collectPullRequestLookups, commitPullRequestLookup } from '../server/claim-pr-sync.mjs';
+import { appendWorkPullRequest, claimHistoryLength } from '../server/work-claims.mjs';
 import { createRoomServer } from '../server/http.mjs';
 test('real PR receiver rejects unauthorized requests and links a signed PR exactly once', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'room-pr-receiver-'));
@@ -61,5 +63,83 @@ test('real PR receiver rejects unauthorized requests and links a signed PR exact
   const replayed = await call('/contributor-fix');
   assert.equal(replayed.body.pullRequests.length, 1, 'redelivery does not add another PR');
   assert.equal(replayed.body.history.length, linked.body.history.length, 'redelivery does not add another claim update');
+
+  // Recorded Buzz App #3620: GitHub reused the PR ETag after the check
+  // run changed result on the same revision. The signed delivery is simulated.
+  const head = '2fdcb5158ecafbb19ab6d0b567754d5d4401847c';
+  const pr = 'https://github.com/block/buzz-app/pull/3620';
+  const etag = '"8f9cebdcf2bf0665d5ce6e33710af20d02270d87d4553fb1c8db00934e0c3f53"';
+  const id = 'rerun-observation';
+  const now = Date.now();
+  assert.equal((await call('', { id, repo: 'block/buzz-app', files: ['src/rerun-fixture.js'] })).status, 201);
+  assert.equal((await call('/' + id + '/claim', { leaseHours: 1 })).status, 200);
+  const row = () => store.workClaims.get('commons', id);
+  const current = row();
+  const withPull = appendWorkPullRequest(current, 'owner', { pullRequest: pr, now,
+    expectedClaimedAt: current.claimedAt, expectedHistoryLength: claimHistoryLength(current) });
+  const pullRequest = { ...withPull.pullRequest, etag, ciCursor: 'done', nextPollAt: now };
+  store.workClaims.set('commons', { ...withPull, pullRequest, pullRequests: [pullRequest],
+    ci: { state: 'failure', headSha: head, checkedAt: '2026-11-21T22:54:28Z', url: pr } });
+  const requests = [];
+  const observe = async (address, { headers }) => {
+    const resource = new URL(address);
+    requests.push(resource.pathname);
+    if (resource.pathname.endsWith('/pulls/3620')) {
+      if (headers['If-None-Match'] === etag) return new Response(null, { status: 304 });
+      return Response.json({ number: 3620, html_url: pr, state: 'open', merged: false, head: { sha: head } }, { headers: { etag } });
+    }
+    if (resource.pathname.endsWith('/status')) return Response.json({ state: 'pending', total_count: 0, statuses: [] });
+    assert.ok(resource.pathname.endsWith('/check-runs'));
+    return Response.json({ total_count: 1, check_runs: [{ id: 137015706322, name: 'CI required',
+      head_sha: head, status: 'completed', conclusion: 'success' }] });
+  };
+  const poll = async () => {
+    const item = row();
+    const { results: [result] } = await collectPullRequestLookups([{ ...item, roomId: 'commons' }], {
+      fetchImpl: observe, token: 'fixture', nowMs: Date.now()
+    });
+    commitPullRequestLookup(store, store.workClaims, 'commons', item, result, Math.max(Date.now(), Date.parse('2026-11-21T23:02:09Z')));
+  };
+  await poll();
+  assert.equal(row().ci.state, 'failure');
+  assert.equal(requests.length, 1, 'unchanged PR metadata does not contain the rerun result');
+
+  const sendCheck = async (sha, timestamp, authenticated = true) => {
+    const raw = JSON.stringify({ action: 'completed', repository: { full_name: 'block/buzz-app' }, check_suite: {
+      id: 121675876441, head_sha: sha, updated_at: timestamp, pull_requests: [{ number: 3620 }]
+    } });
+    const hmac = createHmac('sha256', 'isolated-http-fixture').update(raw).digest('hex');
+    return fetch(url, { method: 'POST', headers: {
+      'Content-Type': 'application/json', 'X-GitHub-Event': 'check_suite',
+      'X-Hub-Signature-256': 'sha256=' + (authenticated ? hmac : '0'.repeat(64))
+    }, body: raw });
+  };
+  const completedAt = '2026-11-21T23:02:08Z';
+  assert.equal((await sendCheck(head, completedAt, false)).status, 401);
+  assert.deepEqual(await (await sendCheck('a'.repeat(40), completedAt)).json(), { ok: true, ignored: true });
+  assert.equal(row().pullRequest.etag, etag);
+  const sequence = () => store.room('commons').sequence;
+  const prior = sequence();
+  const stale = await collectPullRequestLookups([{ ...row(), roomId: 'commons' }], {
+    fetchImpl: observe, token: 'fixture', nowMs: row().pullRequest.nextPollAt
+  });
+  assert.equal(stale.results[0].kind, 'notModified');
+  assert.deepEqual(await (await sendCheck(head, completedAt)).json(), { ok: true, refreshed: 1 });
+  const due = row().pullRequest.nextPollAt;
+  assert.equal(row().pullRequest.etag, null);
+  assert.equal(row().ci.state, 'failure', 'delivery alone is not observed CI');
+  assert.equal(sequence(), prior, 'delivery alone creates no wake event');
+  commitPullRequestLookup(store, store.workClaims, 'commons', row(), stale.results[0], Date.now());
+  assert.equal(row().pullRequest.etag, null, 'in-flight conditional poll cannot restore the invalidated ETag');
+  assert.equal(row().pullRequest.nextPollAt, due);
+  assert.deepEqual(await (await sendCheck(head, completedAt)).json(), { ok: true, ignored: true });
+  assert.equal(row().pullRequest.nextPollAt, due);
+  await poll();
+  assert.equal(row().ci.state, 'success');
+  assert.equal(row().ci.headSha, head);
+  assert.equal(requests.length, 5, 'two conditional reads, then one normal three-call refresh');
+  assert.deepEqual(await (await sendCheck(head, completedAt)).json(), { ok: true, ignored: true });
+  assert.equal(row().pullRequest.etag, etag);
+
 
 });
