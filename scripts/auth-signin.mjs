@@ -1,6 +1,10 @@
 // Authenticate disposable local browser fixtures through the real credential API.
 // This helper never mounts a production form or injects store/session state.
-export async function signInFixture(page, accessKey, { returnTo = page.url() } = {}) {
+// Since #6322 a human's first room entry can land on the full-page Updates
+// view. By default the fixture then uses the visible Conversation control
+// (#updates-close), as a member would, so composer journeys start from
+// Conversation. Pass { landing: "default" } to keep and assert the landing.
+export async function signInFixture(page, accessKey, { returnTo = page.url(), landing = "conversation" } = {}) {
   const origin = new URL(page.url()).origin;
   const hostname = new URL(origin).hostname;
   const target = new URL(returnTo);
@@ -31,6 +35,9 @@ export async function signInFixture(page, accessKey, { returnTo = page.url() } =
     if (!account.authenticated || !account.account?.id) throw new Error("Fixture login did not return an account");
     await page.evaluate(destination => globalThis.history.replaceState(globalThis.history.state, "", destination), target.href);
     await page.reload();
+    // An account lands in a room or in its Rooms list; settle a room landing.
+    await page.locator("#account-rooms-panel:visible, #main:visible").first().waitFor({ state: "visible" });
+    if (await page.locator("#main").isVisible()) await settleLanding(page, landing);
     return account;
   }
   if (response.status() !== 201) throw new Error(`Fixture credential login failed (${response.status()})`);
@@ -40,5 +47,17 @@ export async function signInFixture(page, accessKey, { returnTo = page.url() } =
   await page.evaluate(destination => globalThis.history.replaceState(globalThis.history.state, "", destination), target.href);
   await page.reload();
   await page.locator("#main").waitFor({ state: "visible" });
+  await settleLanding(page, landing);
   return session;
+}
+
+// The first snapshot reveals #main and opens Updates in the same task, so
+// the landing is settled once #main is visible.
+export async function settleLanding(page, landing = "conversation") {
+  if (landing !== "conversation") return;
+  const conversation = page.locator("#updates-close");
+  if (await conversation.isVisible()) {
+    await conversation.click();
+    await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  }
 }

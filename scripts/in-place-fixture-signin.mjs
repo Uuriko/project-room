@@ -2,10 +2,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { hashPassword } from "../src/password-auth.mjs";
+import { settleLanding } from "./auth-signin.mjs";
 
 const fixtureLogins = new WeakMap();
 
-export async function signInFixtureInPlace(page, store, accessKey, roomId = "commons") {
+export async function signInFixtureInPlace(page, store, accessKey, roomId = "commons", { landing = "conversation" } = {}) {
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(new URL(page.url()).hostname));
   const member = store.authenticate(accessKey, roomId).member;
   assert.equal(member.kind, "human");
@@ -41,4 +42,5 @@ export async function signInFixtureInPlace(page, store, accessKey, roomId = "com
     if (!await page.locator("#main").isVisible()) await page.locator(`[data-account-room="${roomId}"]`).click();
   }
   await page.locator("#main").waitFor({ state: "visible" });
+  await settleLanding(page, landing);
 }
