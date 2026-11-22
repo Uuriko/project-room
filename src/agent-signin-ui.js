@@ -128,9 +128,15 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRecord 
   }
 
   function targetRoomHtml() {
-    return `<p class="form-hint">This Work Thread opens in its original room.</p>
-      <button type="button" class="button primary" data-agent-retry-room ${busy ? "disabled" : ""}>${busy ? "Signing in…" : "Retry room access"}</button>
-      <button type="button" class="text-button" data-agent-back ${busy ? "disabled" : ""}>Use a different identity</button>`;
+    return [
+      `<p class="form-hint">${uiText("agentSignIn.pinnedRoom")}</p>`,
+      `<button type="button" class="button primary" data-agent-retry-room ${busy ? "disabled" : ""}>`,
+      uiText(busy ? "agentSignIn.signingIn" : "agentSignIn.retryRoom"),
+      "</button>",
+      `<button type="button" class="text-button" data-agent-back ${busy ? "disabled" : ""}>`,
+      uiText("agentSignIn.differentIdentity"),
+      "</button>"
+    ].join("");
   }
 
   function roomsHtml() {
