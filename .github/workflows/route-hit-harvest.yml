@@ -1,0 +1,57 @@
+name: route-hit-harvest
+
+# Daily route-hit harvest for the 30-day usage clock (deep-pass T0
+# usage-reads, Read 1). Queries Cloudflare Workers Logs for the production
+# project-room worker's room.request events over the previous UTC day,
+# aggregates them per route family (scripts/route-family-aggregate.mjs),
+# and retains the daily JSON as a workflow artifact (retention-days: 90) —
+# the mechanism this repo's scheduled jobs already use for daily output
+# (see answer-engine-check). The fleet files each artifact into the
+# standing clock state dir (usage-reads/route-hits/) as it retrieves it.
+#
+# The first run on main doubles as the scope test for the existing
+# CLOUDFLARE_API_TOKEN secret: a token without Workers Observability read
+# scope fails the run loudly as ROUTE_HIT_HARVEST_CF_TOKEN_SCOPE.
+on:
+  schedule:
+    - cron: "37 2 * * *"
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "UTC day to harvest (YYYY-MM-DD); defaults to yesterday. Backfill only works inside Workers Logs retention (3-7 days)."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: route-hit-harvest
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - id: day
+        env:
+          INPUT_DAY: ${{ inputs.day }}
+        run: |
+          if [ -n "$INPUT_DAY" ]; then echo "day=$INPUT_DAY" >> "$GITHUB_OUTPUT";
+          else echo "day=$(date -u -d yesterday +%F)" >> "$GITHUB_OUTPUT"; fi
+      - name: Harvest one day of room.request events
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node scripts/route-hit-harvest.mjs --day "${{ steps.day.outputs.day }}" --out-dir route-hits-out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: route-hits-${{ steps.day.outputs.day }}
+          path: route-hits-out/route-hits-${{ steps.day.outputs.day }}.json
+          retention-days: 90
+          if-no-files-found: error
