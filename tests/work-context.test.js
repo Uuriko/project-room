@@ -488,7 +488,7 @@ test("selected work reply pointers are bounded, detached and do not change compl
   assert.equal(context.replyRequestContext.total, 30); assert.equal(context.replyRequestContext.shown, 25);
   assert.equal(context.replyRequestContext.truncated, true);
   assert.deepEqual(context.replyRequestContext.requests.map(q => q.id), Array.from({ length: 25 }, (_, i) => `request-${String(i).padStart(2, "0")}`));
-  assert.deepEqual(context.replyRequestContext.nextRead, { tool: "room_list_requests", arguments: { direction: "both", status: "open" } });
+  assert.deepEqual(context.replyRequestContext.nextRead, { tool: "room_list_requests", arguments: { direction: "both", status: "open", workItemId: item.id } });
   assert.equal(context.work.state, "completed"); assert.equal(context.next.action, "complete");
   assert.equal(context.next.needsAttention, false); assert.equal(JSON.stringify(context).includes("BODY-SENTINEL"), false);
   context.replyRequestContext.requests[0].recipientId = "mutated";

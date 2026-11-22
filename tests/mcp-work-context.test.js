@@ -24,10 +24,11 @@ test("hosted and bound stdio selected-work hints and briefs expose callable part
   send("message.posted", { messageId: "pending", body: "PRIVATE-BODY-SENTINEL", toMemberId: "peer", requestKind: "reply", workItemId: "task" });
   const call = async (name, args) => (await (await fetch(`${origin}/room/mcp?profile=full`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${identity.secret}` }, body: JSON.stringify({ jsonrpc: "2.0", id: "test", method: "tools/call", params: { name, arguments: args } }) })).json()).result;
   for (let i = 0; i < 25; i++) send("message.posted", { messageId: `pending-extra-${i}`, body: "PRIVATE-BODY-SENTINEL", toMemberId: "peer", requestKind: "reply", workItemId: "task" });
+  send("message.posted", { messageId: "unrelated-pending", body: "Unrelated ask", toMemberId: "peer", requestKind: "reply" });
   const before = store.roomAuthority("test-room", { memberId: identity.identityId }).sequence;
   const hosted = (await call("room_read_work", { roomId: "test-room", workItemId: "task" })).structuredContent;
   assert.equal(hosted.replyRequestContext.truncated, true);
-  assert.deepEqual(hosted.replyRequestContext.nextRead.arguments, { roomId: "test-room", direction: "both", status: "open" });
+  assert.deepEqual(hosted.replyRequestContext.nextRead.arguments, { roomId: "test-room", direction: "both", status: "open", workItemId: "task" });
   assert.equal((await call(hosted.replyRequestContext.nextRead.tool, hosted.replyRequestContext.nextRead.arguments)).structuredContent.requests.length, 26);
   const pointer = hosted.replyRequestContext.requests.find(q => q.id === "pending").nextRead;
   assert.deepEqual(pointer, { tool: "room_read_request", arguments: { roomId: "test-room", requestMessageId: "pending" } });
@@ -38,6 +39,10 @@ test("hosted and bound stdio selected-work hints and briefs expose callable part
   saveAgentConnection(config, { version: 1, origin, roomId: "test-room", memberId: identity.identityId, token: identity.secret });
   stdio = await openMcpTestClient(config);
   const bound = (await stdio.call("room_read_work", { workItemId: "task" })).result.structuredContent;
+  assert.deepEqual(bound.replyRequestContext.nextRead.arguments, { direction: "both", status: "open", workItemId: "task" });
+  const scoped = (await stdio.call(bound.replyRequestContext.nextRead.tool, bound.replyRequestContext.nextRead.arguments)).result.structuredContent;
+  assert.equal(scoped.requests.length, 26);
+  assert.ok(scoped.requests.every(request => request.workItemId === "task"));
   assert.deepEqual(bound.replyRequestContext.requests.find(q => q.id === "pending").nextRead.arguments, { requestMessageId: "pending" });
   assert.equal((await stdio.call("room_read_request", bound.replyRequestContext.requests.find(q => q.id === "pending").nextRead.arguments)).result.structuredContent.selection.requestMessageId, "pending");
   const selectedBatch = (await stdio.call("room_read_work", { workItemIds: ["task"], brief: false })).result.structuredContent;

@@ -60,8 +60,8 @@ Contract version 1 includes:
   pointers, oldest first, with incoming/outgoing direction and `room_read_request`
   next reads. No message text or other participants' private conversations.
   `total`, `shown` and `truncated` expose omitted pointers; the overflow
-  `room_list_requests` read lists all your open conversations, so filter those
-  results by this `workItemId`. On normalized storage, when the work read
+  `room_list_requests` read selects your open conversations for this
+  `workItemId`. On normalized storage, when the work read
   cannot enumerate the linked requests within its window, it returns
   `total: null`, `truncated: true`, and a request-list read scoped to this
   `workItemId`. The count is
