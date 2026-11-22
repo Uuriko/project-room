@@ -173,14 +173,26 @@ test('lost committed formal response retries the frozen recipe after restart wit
   assert.equal(saved.phase, 'posted');
 });
 
+const fencedAnswer = '```json\n' + JSON.stringify({outcome:'answered',body:'Verified the exact candidate'}) + '\n```';
 for (const [text, stopReason, status] of [
   [JSON.stringify({outcome:'declined',body:'Outside my scope'}),'end_turn','declined'],
   [JSON.stringify({outcome:'pending',body:'I need approval before continuing'}),'end_turn','open'],
+  [fencedAnswer, 'end_turn', 'answered'],
+  [fencedAnswer, 'max_tokens', 'open'],
+  ['Some outside prose\n' + fencedAnswer, 'end_turn', 'open'],
+  [fencedAnswer + '\n' + fencedAnswer, 'end_turn', 'open'],
+  ['{"outcome":"pending","outcome":"answered","body":"Ambiguous"}', 'end_turn', 'open'],
   ['I have finished it','end_turn','open'],
   [JSON.stringify({outcome:'answered',body:'partial answer'}),'max_tokens','open']
 ]) test(`formal response uses explicit outcome (${status}, ${stopReason}, ${text.slice(0,20)})`, async t => {
   const f = await fixture(t, {text, stopReason}), bridge = f.make(); await f.ready(bridge);
-  await bridge.turn('dm', [f.wake]); assert.equal((await f.read(bridge)).request.status, status);
+  await bridge.turn('dm', [f.wake]);
+  const current = await f.read(bridge);
+  assert.equal(current.request.status, status);
+  if (status === 'answered') {
+    assert.equal(current.page.items.find(item => item.kind === 'answered')?.message.body, 'Verified the exact candidate');
+    assert.equal(f.counts.prompts, 1);
+  }
 });
 
 test('formal prompt reads every page without the ordinary thread family limit', async t => {

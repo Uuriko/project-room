@@ -1,6 +1,7 @@
 import { clickChrome } from "./room-chrome.mjs";
 // Browser regressions for session ownership, stale writes, live announcements,
 // and user-controlled record identities. All state and credentials are disposable.
+import { settleLanding } from "./auth-signin.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -71,6 +72,7 @@ async function enterRoom(page, accessKey, expectedIdentity) {
   await page.locator("#refresh-button").evaluate(button => button.click());
   await page.locator("#main").waitFor({ state: "visible" });
   await page.waitForFunction(name => document.querySelector("#identity-label")?.textContent.startsWith(name), expectedIdentity);
+  await settleLanding(page); // #6322: start from Conversation, not the Updates landing
 }
 
 async function login(page, origin, accessKey, expectedIdentity) {

@@ -1,3 +1,4 @@
+import { exactResultHref } from "./room-deep-link.js";
 import { clipboard } from "./clipboard.js";
 import { canReplyToResult } from "./result-availability.js";
 import { uiText } from "./strings.js";
@@ -158,6 +159,26 @@ export function installResultReader({ client, getState, getSession, sameSession,
     else link.addEventListener("click", () => closeResult(false));
     return link;
   }
+  function showResultBody(text) {
+    const body = resultElement("result-body");
+    body.replaceChildren();
+    // Keep exact text for copy, comparison, and passage selection. Only
+    // canonical GitHub file links at a full commit SHA become navigable.
+    const sourceLink = /(?<!\S)https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?(?=$|\s)/gi;
+    let offset = 0;
+    for (const match of text.matchAll(sourceLink)) {
+      const href = match[0];
+      if (new URL(href).href !== href) continue;
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = href;
+      body.append(text.slice(offset, match.index), link);
+      offset = match.index + href.length;
+    }
+    body.append(text.slice(offset));
+  }
   function showReleaseChecks(report) {
     if (!releaseLink || !releasePanel) return;
     const focused = resultView?.focused === true;
@@ -205,6 +226,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (view.withdrawn) {
       pointerSelection = null;
       view.body = "";
+      if (view.linked) resultElement("result-title").textContent = "Result";
       showCorrection(null);
       showReleaseChecks(null);
       resultElement("result-body").textContent = "";
@@ -217,7 +239,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
       && view.pendingCorrection.verificationEventId === item?.blocker?.eventId ? view.pendingCorrection : null;
     showCorrection(view.withdrawn ? null : pending ?? view.previousCorrection, Boolean(pending));
-    const earlier = !matchesReceipt(view.receipt, item?.receipt) || (!pending && item?.state !== S.COMPLETED) || Boolean(item?.supersededBy);
+    const earlier = item ? !matchesReceipt(view.receipt, item.receipt) || (!pending && item.state !== S.COMPLETED) || Boolean(item.supersededBy)
+      : view.selectionStatus === "historical";
     resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
@@ -232,17 +255,18 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
     const context = resultElement("result-work-context");
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
-    if (context) context.hidden = !current;
+    if (context) context.hidden = !current || !item;
     const verdict = resultElement("result-verdict");
-    const finding = current && matchesReceipt(item.verification, item.receipt) ? item.verification : null;
-    verdict.hidden = !view.focused || !current;
+    const finding = current && item && matchesReceipt(item.verification, item.receipt) ? item.verification
+      : view.linked ? view.selectedVerdict : null;
+    verdict.hidden = !view.focused || (!current && !(view.linked && finding && usableText(view)));
     if (!verdict.hidden) {
       verdict.dataset.outcome = finding?.result ?? "pending";
       verdict.textContent = finding
         ? `Verification · ${finding.result === "pass" ? "Passed" : finding.result === "fail" ? "Failed" : "Recorded"}`
         : "Verification · Pending";
     }
-    if (current && context) {
+    if (current && context && item) {
       const next = nextWorkStep(item, Date.now(), getState().room.ownerId);
       resultElement("result-work-criteria").textContent = item.definitionOfDone;
       resultElement("result-work-verification").textContent = finding?.summary ?? "";
@@ -253,7 +277,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         : nextLabel;
     }
     const workAction = resultElement("result-work-action");
-    const action = current && selectedWorkAction(view, item);
+    const action = current && item && selectedWorkAction(view, item);
     if (workAction) {
       workAction.hidden = !action;
       workAction.disabled = isBusy();
@@ -264,9 +288,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-discuss").disabled = !canDiscuss() || Boolean(view.resolving);
     retry.hidden = !view.error && !view.retrying;
     retry.disabled = !view.error;
-    for (const action of ["result-copy-text", "result-download"]) {
+    for (const action of ["result-copy-link", "result-copy-text", "result-download"]) {
       resultElement(action).hidden = !usableText(view);
-      resultElement(action).disabled = action === "result-copy-text" && Boolean(view.copying || clipboard.busy);
+      resultElement(action).disabled = action !== "result-download" && Boolean(view.copying || clipboard.busy);
     }
     if (focused && (!focused.getClientRects().length || focused.disabled)) resultElement(view.focused ? "result-title" : "close-result").focus({ preventScroll: true });
     if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
@@ -286,6 +310,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
     resultElement("result-use-status").textContent = "";
+    resultElement("result-copy-link").hidden = true;
     resultElement("result-copy-text").hidden = true;
     resultElement("result-download").hidden = true;
     clearResultComparison(resultElement("result-diff"));
@@ -302,24 +327,29 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
   }
   resultElement("close-result").addEventListener("click", () => closeResult());
+  resultElement("result-copy-link").textContent = uiText("result.copyLink");
   resultElement("result-copy-text").textContent = uiText("result.copyText");
   resultElement("result-download").textContent = uiText("result.download");
-  resultElement("result-copy-text").addEventListener("click", async () => {
+  async function copyResult(link) {
     const view = resultView;
     if (!usableText(view) || view.copying || clipboard.busy) return;
+    const text = link ? exactResultHref({ ...view, completionEventId: view.receipt.completionEventId }) : view.body;
+    if (!text) return;
     view.copying = true; resultStatus();
     resultElement("result-use-status").textContent = "";
     try {
-      const outcome = await clipboard.copy(view.body);
+      const outcome = await clipboard.copy(text);
       if (outcome === "failed") throw new Error("clipboard_failed");
-      if (usableText(view)) resultElement("result-use-status").textContent = uiText(outcome === "copied" ? "result.copied" : "clipboard.pending");
+      if (usableText(view)) resultElement("result-use-status").textContent = uiText(outcome === "copied" ? (link ? "result.linkCopied" : "result.copied") : "clipboard.pending");
     } catch {
-      if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.copyFailed");
+      if (usableText(view)) resultElement("result-use-status").textContent = uiText(link ? "result.copyLinkFailed" : "result.copyFailed");
     } finally {
       view.copying = false;
       if (resultView === view) resultStatus();
     }
-  });
+  }
+  resultElement("result-copy-link").addEventListener("click", () => copyResult(true));
+  resultElement("result-copy-text").addEventListener("click", () => copyResult(false));
   resultElement("result-download").addEventListener("click", () => {
     const view = resultView;
     if (!usableText(view)) return;
@@ -393,7 +423,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
     client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
       if (!owns()) return;
       if (value?.result?.receipt?.eventId !== view.receipt.completionEventId
-        || value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion) throw new Error("Pinned version changed");
+        || (view.receipt.evidenceVersion && value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion)) throw new Error("Pinned version changed");
+      view.receipt.evidenceVersion = value.result.receipt.evidenceVersion;
+      view.selectionStatus = value.selection.status;
+      view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
+      if (view.linked && !value.result.text.withdrawnAt) {
+        resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
+      }
       view.reportedById = value.result.receipt.reportedById;
       view.reviewRuntime = value.reviewRuntime;
       view.previousCompletionEventId = value.result.receipt.nativeText?.previousCompletionEventId;
@@ -407,7 +443,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         : null;
       view.releaseChecks = value.workThread?.releaseChecks;
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
-      resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
+      showResultBody(view.withdrawn ? "" : value.result.text.body);
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);
@@ -450,6 +486,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
+      resultElement("result-copy-link").hidden = true;
       resultElement("result-copy-text").hidden = true;
       resultElement("result-download").hidden = true;
       resultElement("result-use-status").textContent = "";
@@ -499,9 +536,22 @@ export function installResultReader({ client, getState, getSession, sameSession,
     return false;
   }
 
+  function openLinked({ roomId, workItemId, completionEventId }) {
+    const session = getSession();
+    if (!session || session.roomId !== roomId) return;
+    if (resultView?.linked && resultView.roomId === roomId && resultView.workItemId === workItemId
+      && resultView.receipt.completionEventId === completionEventId) return;
+    forgetSelection();
+    openResult({ linked: true, focused: true, generation: client.generation, roomId,
+      memberId: session.member.id, workItemId, receipt: { completionEventId } }, "Result");
+  }
+  function closeLinked() {
+    if (resultView?.linked) closeResult(false);
+  }
+
   new MutationObserver(() => { if (resultView && $("#main").hidden) closeResult(false); })
     .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
   wide.addEventListener("change", resultStatus);
   clipboard.subscribe(resultStatus);
-  return { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult, restore: restoreSelection };
+  return { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult, restore: restoreSelection, openLinked, closeLinked };
 }
