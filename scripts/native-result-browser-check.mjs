@@ -8,7 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { clickChrome, messageAction, openWorkFromSearch } from "./room-chrome.mjs";
+import { clickChrome, messageAction, openCatchUp, openWorkFromSearch } from "./room-chrome.mjs";
 
 // Hosted runners stall hard enough that the page-wide 8s default kills waits
 // whose product leg is ~1s on an unloaded box. Waits on an async round trip
@@ -78,8 +78,33 @@ async function setup(t, { mobile = false, review = false, viewport = null, onPag
   };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/native-result-${name}.png` }); };
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
-  return { ...f, page, workItemId, body, item, send, mutate, complete, open, fill, textReady, capture, save: page.locator("#action-form button[type=submit]") };
+  return { ...f, browser, page, workItemId, body, item, send, mutate, complete, open, fill, textReady, capture, save: page.locator("#action-form button[type=submit]") };
 }
+
+test("a fresh exact result defers catch-up until the reader opens it", { timeout: 25000 }, async t => {
+  const fixture = await setup(t, { review: true });
+  const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 },
+    storageState: await fixture.page.context().storageState() });
+  page.setDefaultTimeout(5000);
+  const cursor = () => fixture.store.snapshot(fixture.keys["human-checker"], "commons").cursor;
+  const before = cursor();
+  const selector = new URL("/?room=commons", fixture.page.url());
+  selector.hash = ["pr-record", "result", fixture.workItemId, fixture.item().receipt.eventId].join("/");
+  const brief = url => url.pathname.endsWith("/return-brief");
+  let reads = 0;
+  page.on("request", request => { if (brief(new URL(request.url()))) reads++; });
+  await page.goto(selector.href);
+  await page.waitForFunction(() => document.querySelector("#result-body")?.textContent.includes("A quiet room"));
+  assert.equal(reads, 0);
+  assert.equal(await page.locator("#catchup-dialog").evaluate(dialog => dialog.open), false);
+  assert.equal(cursor(), before);
+  const loaded = page.waitForResponse(response => brief(new URL(response.url())) && response.ok());
+  await openCatchUp(page);
+  await loaded;
+  await page.waitForFunction(() => Boolean(document.querySelector("#rb-ack-button").dataset.horizon));
+  assert.equal(reads, 1);
+  assert.equal(cursor(), before);
+});
 
 for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "desktop"}: selected old draft becomes exact result`, { timeout: 25000 }, async t => {
   const f = await setup(t, { mobile, body: previewBody }); await f.open(); await f.textReady(); await f.fill();

@@ -604,7 +604,8 @@ const client = new RoomClient({
       }
       if (!location.hash) restoreResultSelection();
     }
-    if (!briefView.owns(briefView.chain)) loadReturnBrief();
+    // An exact result link can open without fetching unrelated catch-up history.
+    if (!briefView.owns(briefView.chain) && (!exactResultDestination(location) || $("#return-brief-panel").open)) loadReturnBrief();
     if (firstSnapshot) {
       revealLocationHash();
       if (session.member.kind !== "agent" && !savedRoomDestination() && $("#result-dialog").hidden
@@ -6791,9 +6792,10 @@ function openCatchUp() {
   const dialog = $("#catchup-dialog");
   if (!dialog) return;
   if (!dialog.open) dialog.showModal();
-  $("#return-brief-panel").open = true;
+  const briefPanel = $("#return-brief-panel");
+  if (briefPanel.open) loadReturnBrief();
+  else briefPanel.open = true;
   $("#return-brief-panel > summary").focus({ preventScroll: true });
-  loadReturnBrief();
 }
 function selectWorkView(view) {
   if (view !== "results") return;
