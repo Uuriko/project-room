@@ -7,6 +7,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { dispatchGithubReview, observeWebhookPull, readGithubReviewWebhookBinding } from "../server/github-review-webhook.mjs";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
+import { operatorNormalization } from "../server/operator-normalization.mjs";
 
 const head = "a".repeat(40), oldHead = "b".repeat(40), newHead = "c".repeat(40);
 const repo = "Uuriko/project-room";
@@ -50,13 +51,33 @@ test("exact webhook review uses one native request across redelivery, and stale 
   assert.deepEqual(await dispatchGithubReview(store, binding, delivery(head), options), [{ number: 6319, status: "replayed" }]);
   assert.equal(store.headSequence("commons"), saved);
   assert.equal(calls, 3, "durable redelivery lookup must skip GitHub");
+  const initial = store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "open" }).requests[0];
+  const obsolete = store.replyRequests.selected(reviewer.identitySecret, "commons", initial.id).responseActions[0];
+  const delayed = Promise.withResolvers();
+  const observing = Promise.withResolvers();
+  const late = dispatchGithubReview(store, binding, delivery(oldHead), {
+    credential: () => secret,
+    observe() {
+      observing.resolve();
+      return delayed.promise;
+    },
+  });
+  await observing.promise;
   current = snapshot(newHead);
   const suite = { event: "check_suite", action: "completed", payload: { repository: { full_name: repo },
     check_suite: { head_sha: newHead, pull_requests: [{ number: 6319 }, { number: 6319 }] } } };
   const concurrent = await Promise.all([dispatchGithubReview(store, binding, suite, options), dispatchGithubReview(store, binding, suite, options)]);
   assert.deepEqual(concurrent.flat().map(x => x.status).sort(), ["posted", "replayed"]);
+  delayed.resolve({ snapshot: snapshot(oldHead) });
+  assert.deepEqual(await late, [{ number: 6319, status: "review_changed_during_observation" }]);
   const inbox = store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "open" });
-  assert.equal(inbox.requests.length, 2);
+  assert.equal(inbox.requests.length, 1);
+  assert.equal(store.replyRequests.selected(reviewer.identitySecret, "commons", initial.id).request.status, "cancelled");
+  assert.throws(() => store.command(reviewer.identitySecret, "commons", buildReplyCommand({
+    roomId: "commons", memberId: reviewer.memberId,
+  }, obsolete.tool, { ...obsolete.arguments, requestId: "obsolete-head-answer", body: "Obsolete." })), {
+    code: "command_rejected",
+  });
   const body = store.snapshot(reviewer.identitySecret, "commons").state.messages.find(message => message.id === inbox.requests[0].id).body;
   assert.match(body, /Candidate revision: [ac]{40}/);
 
@@ -75,14 +96,13 @@ test("exact webhook review uses one native request across redelivery, and stale 
     dispatchGithubReview(store, binding, failed, options)]);
   assert.deepEqual(withdrawals.flat().map(row => row.status).sort(), ["replayed", "withdrawn"]);
   assert.equal(store.headSequence("commons"), beforeFailure + 1);
-  const cancelled = store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "cancelled" });
-  assert.equal(cancelled.requests.length, 1);
-  assert.ok(inbox.requests.some(request => request.id === cancelled.requests[0].id));
+  const withdrawnByCheck = store.replyRequests.selected(reviewer.identitySecret, "commons", inbox.requests[0].id);
+  assert.equal(withdrawnByCheck.request.status, "cancelled");
   const callsAfterWithdrawal = calls;
   assert.deepEqual(await dispatchGithubReview(store, binding, failed, options), [{ number: 6319, status: "replayed" }]);
   assert.equal(calls, callsAfterWithdrawal, "retry after a lost withdrawal response needs no GitHub read");
   assert.equal(store.headSequence("commons"), beforeFailure + 1);
-  assert.equal(store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "open" }).requests.length, 1);
+  assert.equal(store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "open" }).requests.length, 0);
 
   nextCheck(24, "success");
   assert.deepEqual(await dispatchGithubReview(store, binding, checkDelivery(newHead, 24, "success"), options),
@@ -94,11 +114,11 @@ test("exact webhook review uses one native request across redelivery, and stale 
   assert.deepEqual(replacement.flat().map(row => row.status).sort(), ["posted", "replayed"]);
   assert.equal(store.headSequence("commons"), beforeFailure + 2);
   const activeAfterRepair = store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "open" }).requests;
-  assert.equal(activeAfterRepair.length, 2, "one open review for each of the two heads");
+  assert.equal(activeAfterRepair.length, 1, "only the current head has an open review");
   const fresh = activeAfterRepair.find(request => !inbox.requests.some(prior => prior.id === request.id));
   assert.ok(fresh);
   const message = store.snapshot(reviewer.identitySecret, "commons").state.messages.find(row => row.id === fresh.id);
-  assert.equal(message.replyToId, cancelled.requests[0].id, "replacement retains the original Work Thread context");
+  assert.equal(message.replyToId, withdrawnByCheck.request.id, "replacement retains the original Work Thread context");
   assert.match(message.body, /attempt 26/);
   const callsAfterRepair = calls;
   assert.deepEqual(await dispatchGithubReview(store, binding, repaired, options), [{ number: 6319, status: "replayed" }]);
@@ -114,6 +134,135 @@ test("exact webhook review uses one native request across redelivery, and stale 
     [{ number: 6319, status: "replayed" }], "GitHub cannot reopen a human cancellation");
   assert.equal(calls, callsAfterRepair);
   assert.equal(store.headSequence("commons"), beforeFailure + 3);
+});
+
+for (const normalized of [false, true]) test(`replacement withdraws only journal-bound reviews (${normalized ? "normalized" : "legacy"})`, async t => {
+  const store = new RoomStore(":memory:");
+  t.after(() => store.close());
+  store.initialize(initialRoom("commons"));
+  const roomId = "commons";
+  const secret = store.issueAccessKey(roomId, "owner");
+  const reviewer = store.invites.redeem(store.invites.create(secret, roomId, { profile: "contribute" }).code, { displayName: "Reviewer" });
+  const workItemId = "qa";
+  store.command(secret, roomId, { id: "proposal", type: "work.proposed", data: {
+    workItemId, title: "GitHub QA", accountableMemberId: reviewer.memberId, mode: "read", definitionOfDone: "Review exact source",
+  } });
+  if (normalized) {
+    const input = { roomId, discardLegacyAssignments: false };
+    const plan = operatorNormalization(store, input);
+    operatorNormalization(store, { ...input, planHash: plan.planHash, requestId: "normalize-superseded-test",
+      reason: "Test normalized review replacement" }, true);
+  }
+  const binding = readGithubReviewWebhookBinding({ version: 1, enabled: true, roomId, repository: repo,
+    requiredChecks: [{ app: "github-actions", name: "safety-net" }], pulls: [6319],
+    requesterId: "owner", reviewerId: reviewer.memberId, workItemId });
+  const select = requestId => store.replyRequests.selected(reviewer.identitySecret, roomId, requestId);
+  const incoming = () => store.replyRequests.list(reviewer.identitySecret, roomId, { workItemId }).requests;
+  let current = snapshot(head);
+  const options = { credential: () => secret, observe: async () => ({ snapshot: current }) };
+  const push = async (latest, before) => {
+    const update = delivery(latest);
+    update.payload.before = before;
+    return (await dispatchGithubReview(store, binding, update, options))[0].status;
+  };
+  assert.equal(await push(head, oldHead), "posted");
+  const original = incoming()[0].id;
+  const manualCommand = buildReplyCommand({ roomId, memberId: "owner" }, "room_request_reply", {
+    workItemId, toMemberId: reviewer.memberId, requestId: "manual-lookalike",
+    body: `Review the exact GitHub candidate for https://github.com/${repo.toLowerCase()}/pull/6319.\nCandidate revision: ${head}`,
+  });
+  store.command(secret, roomId, manualCommand);
+
+  // The immediate predecessor was never delivered to Room. Even the incomplete
+  // checks on the confirmed new head should retire the earlier automatic ask.
+  const delayed = Promise.withResolvers();
+  const observing = Promise.withResolvers();
+  const late = dispatchGithubReview(store, binding, delivery(oldHead), {
+    credential: () => secret,
+    observe() {
+      observing.resolve();
+      return delayed.promise;
+    },
+  });
+  await observing.promise;
+  current = snapshot(newHead);
+  current.checks[0].status = "in_progress";
+  current.checks[0].conclusion = null;
+  assert.equal(await push(newHead, oldHead), "required_check_pending");
+  assert.equal(select(original).request.status, "cancelled");
+  delayed.resolve({ snapshot: snapshot(oldHead) });
+  assert.deepEqual(await late, [{ number: 6319, status: "review_changed_during_observation" }]);
+  assert.deepEqual(incoming().map(request => request.id), [manualCommand.data.messageId]);
+
+  current = snapshot(newHead);
+  assert.equal(await push(newHead, oldHead), "posted");
+  const newest = incoming().find(request => request.id !== manualCommand.data.messageId).id;
+  assert.equal(await push(head, oldHead), "stale_head");
+  assert.equal(select(newest).request.status, "open");
+
+  current = snapshot(head);
+  const beforeReturn = store.headSequence(roomId);
+  assert.equal(await push(head, newHead), "posted");
+  assert.equal(store.headSequence(roomId), beforeReturn + 2);
+  assert.equal(select(newest).request.status, "cancelled");
+  assert.equal(select(original).request.status, "cancelled");
+  assert.equal(select(manualCommand.data.messageId).request.status, "open");
+  assert.equal(incoming().length, 2, "one active machine review plus the unrelated manual ask");
+  assert.equal(await push(head, newHead), "replayed");
+  assert.equal(store.headSequence(roomId), beforeReturn + 2);
+});
+
+test("a pending first observation fences a delayed review across store connections", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "github-review-fence-"));
+  const filename = join(directory, "room.sqlite");
+  const store = new RoomStore(filename);
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const roomId = "commons";
+  store.initialize(initialRoom(roomId));
+  const secret = store.issueAccessKey(roomId, "owner");
+  const reviewer = store.invites.redeem(store.invites.create(secret, roomId, { profile: "contribute" }).code,
+    { displayName: "Reviewer" });
+  const workItemId = "qa";
+  store.command(secret, roomId, { id: "proposal", type: "work.proposed", data: {
+    workItemId, title: "GitHub QA", accountableMemberId: reviewer.memberId, mode: "read", definitionOfDone: "Review exact source",
+  } });
+  const binding = readGithubReviewWebhookBinding({ version: 1, enabled: true, roomId, repository: repo,
+    requiredChecks: [{ app: "github-actions", name: "safety-net" }], pulls: [6319],
+    requesterId: "owner", reviewerId: reviewer.memberId, workItemId });
+  const delayed = Promise.withResolvers();
+  const observing = Promise.withResolvers();
+  const late = dispatchGithubReview(store, binding, delivery(oldHead), {
+    credential: () => secret,
+    observe() {
+      observing.resolve();
+      return delayed.promise;
+    },
+  });
+  try {
+    await observing.promise;
+    const pending = snapshot(newHead);
+    Object.assign(pending.checks[0], { status: "in_progress", conclusion: null });
+    const before = store.headSequence(roomId);
+    const other = new RoomStore(filename);
+    try {
+      assert.deepEqual(await dispatchGithubReview(other, binding, delivery(newHead), {
+        credential: () => secret, observe: async () => ({ snapshot: pending }),
+      }), [{ number: 6319, status: "required_check_pending" }]);
+    } finally { other.close(); }
+    assert.equal(store.headSequence(roomId), before, "a pending observation needs no Work Thread event");
+    delayed.resolve({ snapshot: snapshot(oldHead) });
+    assert.deepEqual(await late, [{ number: 6319, status: "review_changed_during_observation" }]);
+    const incoming = () => store.replyRequests.list(reviewer.identitySecret, roomId, { direction: "incoming", status: "open" }).requests;
+    assert.equal(incoming().length, 0);
+    const options = { credential: () => secret, observe: async () => ({ snapshot: snapshot(newHead) }) };
+    assert.deepEqual(await dispatchGithubReview(store, binding, delivery(newHead), options), [{ number: 6319, status: "posted" }]);
+    assert.deepEqual(await dispatchGithubReview(store, binding, delivery(newHead), options), [{ number: 6319, status: "replayed" }]);
+    assert.equal(incoming().length, 1);
+    assert.equal(store.headSequence(roomId), before + 1);
+  } finally {
+    delayed.resolve({ snapshot: snapshot(oldHead) });
+    await late.catch(() => {});
+  }
 });
 
 test("authoritative GitHub reads pause before checking stale candidates and recheck the exact head before posting", async () => {

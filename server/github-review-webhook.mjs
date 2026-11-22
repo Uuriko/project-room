@@ -6,6 +6,13 @@ import { validId } from "../src/events.js";
 const SHA = /^[0-9a-f]{40}$/;
 const PR_ACTIONS = new Set(["opened", "reopened", "ready_for_review", "synchronize"]);
 const FAILURE_REASON = "A current required GitHub check failed on this exact candidate. Failed check: ";
+const SUPERSEDED_REASON = "GitHub confirmed that this review's head was superseded by ";
+
+function reviewOperation({ recipe, reviewerId }, { number, head }) {
+  return `github-review-${createHash("sha256").update(JSON.stringify([
+    recipe.roomId, recipe.repository, number, head, reviewerId
+  ])).digest("hex")}`;
+}
 
 function selectedCandidates(binding, delivery) {
   const { event, action, payload } = delivery;
@@ -106,10 +113,67 @@ function readOpenedReview(store, binding, receipt, secret) {
   return request;
 }
 
+function observationFence(store, { recipe, requesterId, reviewerId, workItemId }, { number }) {
+  const { roomId, repository } = recipe;
+  const scope = createHash("sha256").update(JSON.stringify([repository, number, requesterId, reviewerId, workItemId])).digest("hex");
+  const select = store.db.prepare("SELECT generation, fingerprint FROM github_review_observations WHERE room_id=? AND scope=?");
+  const startedAt = select.get(roomId, scope)?.generation ?? 0;
+  return (snapshot, decision) => {
+    const fingerprint = createHash("sha256").update(JSON.stringify([snapshot.head, decision.reason, decision.checks])).digest("hex");
+    const current = select.get(roomId, scope);
+    if (current?.fingerprint === fingerprint) return true;
+    if ((current?.generation ?? 0) !== startedAt) return false;
+    // A pending review can advance this fence without any Room event. Record it
+    // in the same transaction as any withdrawal or opening it authorizes.
+    store.db.prepare(`INSERT INTO github_review_observations (room_id, scope, generation, fingerprint) VALUES (?, ?, 1, ?)
+      ON CONFLICT(room_id, scope) DO UPDATE SET generation=generation+1, fingerprint=excluded.fingerprint`)
+      .run(roomId, scope, fingerprint);
+    return true;
+  };
+}
+
+function withdrawSupersededReviews(store, binding, candidate, decision, secret) {
+  const { recipe, requesterId, reviewerId, workItemId } = binding;
+  const { roomId } = recipe;
+  const superseded = [];
+  const openingBody = store.db.prepare(`SELECT json_extract(body,'$.data.body') AS body
+    FROM events WHERE room_id=? AND id=? AND json_extract(body,'$.data.messageId')=?`);
+  let cursor;
+  do {
+    const selected = store.replyRequests.list(secret, roomId, {
+      workItemId, direction: "outgoing", status: "open", ...(cursor && { cursor }),
+    });
+    for (const request of selected.requests) {
+      if (request.recipientId !== reviewerId || request.workItemId !== workItemId) continue;
+      const original = openingBody.get(roomId, request.openingEventId, request.id)?.body;
+      const [intro, pin] = (original ?? "").split("\n", 2);
+      const head = pin?.slice("Candidate revision: ".length);
+      if (intro !== `Review the exact GitHub candidate for ${decision.pullRequest}.`
+        || !pin?.startsWith("Candidate revision: ") || !SHA.test(head ?? "") || head === candidate.head) continue;
+      // Text identifies a possible source, while only the original journal
+      // receipt proves that this is the recipe's request, rather than a manual copy.
+      const operation = latestReviewOperation(store, roomId, requesterId, reviewOperation(binding, { ...candidate, head }));
+      const receipt = store.operationReceipt(secret, roomId, operation);
+      if (receipt.status === "recorded" && receipt.eventId === request.openingEventId)
+        superseded.push({ request, operation });
+    }
+    cursor = selected.page?.nextCursor;
+  } while (cursor);
+  for (const { request, operation } of superseded) {
+    store.command(secret, roomId, buildReplyCommand({ roomId, memberId: requesterId }, "room_cancel_request", {
+      requestId: operation + "-withdraw",
+      requestMessageId: request.id,
+      expectedRequestRevision: request.revision,
+      reason: SUPERSEDED_REASON + candidate.head + ".",
+    }));
+  }
+}
+
 async function withdrawFailedReview(store, binding, candidate, check, operation, request, secret, observe, token) {
   const { recipe, requesterId } = binding;
   const { roomId } = recipe;
   if (request.status !== "open") return "replayed";
+  const recordObservation = observationFence(store, binding, candidate);
   const { snapshot, reason } = await observe(recipe, candidate, { token });
   if (!snapshot || snapshot.head !== candidate.head || snapshot.number !== candidate.number) return reason ?? "stale_head";
   const decision = evaluateGithubReview(recipe, snapshot);
@@ -117,20 +181,21 @@ async function withdrawFailedReview(store, binding, candidate, check, operation,
   // must show this required check at the delivered attempt or a newer failure.
   const failure = decision.checks?.find(current => current.app === check.app?.slug
     && current.name === check.name && current.id >= check.id && current.status === "failed");
-  if (decision.reason !== "required_check_failed" || !failure)
-    return "replayed";
-
-  const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_cancel_request", {
-    requestId: operation + "-withdraw",
-    requestMessageId: request.id,
-    expectedRequestRevision: request.revision,
-    reason: FAILURE_REASON + JSON.stringify({ app: failure.app, name: failure.name, id: failure.id }),
-  });
+  let command;
   try {
-    const result = store.command(secret, roomId, command);
-    return result.duplicate ? "replayed" : "withdrawn";
+    return store.transaction(() => {
+      if (!recordObservation(snapshot, decision)) return "review_changed_during_observation";
+      if (decision.reason !== "required_check_failed" || !failure) return "replayed";
+      command = buildReplyCommand({ roomId, memberId: requesterId }, "room_cancel_request", {
+        requestId: operation + "-withdraw",
+        requestMessageId: request.id,
+        expectedRequestRevision: request.revision,
+        reason: FAILURE_REASON + JSON.stringify({ app: failure.app, name: failure.name, id: failure.id }),
+      });
+      return store.command(secret, roomId, command).duplicate ? "replayed" : "withdrawn";
+    });
   } catch (error) {
-    if (error?.code === "idempotency_conflict" && store.operationReceipt(secret, roomId, command.id).status === "recorded")
+    if (error?.code === "idempotency_conflict" && command && store.operationReceipt(secret, roomId, command.id).status === "recorded")
       return "replayed";
     if (error?.code === "command_rejected"
         && store.replyRequests.selected(secret, roomId, request.id, { view: "compact" }).request.status !== "open")
@@ -145,20 +210,24 @@ async function recoverPassingReview(store, binding, candidate, check, original, 
   const { roomId } = recipe;
   const row = store.db.prepare(`SELECT json_extract(body,'$.data.reason') AS reason
     FROM events WHERE room_id=? AND sequence=? AND id=?`).get(roomId, withdrawal.sequence, withdrawal.eventId);
-  if (!row?.reason?.startsWith(FAILURE_REASON)) return "replayed";
-  const failed = JSON.parse(row.reason.slice(FAILURE_REASON.length));
+  const headChanged = row?.reason?.startsWith(SUPERSEDED_REASON);
+  if (!headChanged && !row?.reason?.startsWith(FAILURE_REASON)) return "replayed";
+  const failed = headChanged ? null : JSON.parse(row.reason.slice(FAILURE_REASON.length));
+  const recordObservation = observationFence(store, binding, candidate);
   const { snapshot, reason } = await observe(recipe, candidate, { token });
   if (!snapshot || snapshot.head !== candidate.head || snapshot.number !== candidate.number) return reason ?? "stale_head";
   const decision = evaluateGithubReview(recipe, snapshot);
   const matchesAttempt = (app, name, minimum) => decision.checks?.some(row =>
     row.app === app && row.name === name && row.status === "passed" && row.id >= minimum);
-  if (decision.action !== "review_ready" || !matchesAttempt(failed.app, failed.name, failed.id + 1)
-      || (check && !matchesAttempt(check.app?.slug, check.name, check.id))) return "replayed";
-
+  const ready = decision.action === "review_ready" && (!failed || matchesAttempt(failed.app, failed.name, failed.id + 1))
+    && (!check || matchesAttempt(check.app?.slug, check.name, check.id));
   const resumeId = original + "-r-" + createHash("sha256").update(withdrawal.eventId).digest("hex").slice(0, 24);
   return store.transaction(() => {
     if (latestReviewOperation(store, roomId, requesterId, original) !== operation) return "replayed";
-    return postReview(store, binding, candidate, resumeId, decision, secret, request.id);
+    if (!recordObservation(snapshot, decision)) return "review_changed_during_observation";
+    if (!headChanged && !ready) return "replayed";
+    withdrawSupersededReviews(store, binding, candidate, decision, secret);
+    return ready ? postReview(store, binding, candidate, resumeId, decision, secret, request.id) : decision.reason;
   });
 }
 
@@ -188,33 +257,38 @@ function postReview(store, {recipe, requesterId, reviewerId, workItemId}, {head}
 // command is the durable deduplication record, across processes and redeliveries.
 export async function dispatchGithubReview(store, binding, delivery, { credential, observe = observeWebhookPull, token } = {}) {
   if (!binding) return [];
-  const { recipe, requesterId, reviewerId } = binding;
+  const { recipe, requesterId } = binding;
   const candidates = selectedCandidates(binding, delivery)
     .filter(({ number, head }) => binding.pulls.includes(number) && typeof head === "string" && SHA.test(head));
   if (!candidates.length) return [];
   const secret = await credential();
   if (store.authenticate(secret, recipe.roomId).member.id !== requesterId)
     throw new Error("GitHub review requester does not match the saved identity");
+  store.db.exec(`CREATE TABLE IF NOT EXISTS github_review_observations (
+    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, scope TEXT NOT NULL,
+    generation INTEGER NOT NULL, fingerprint TEXT NOT NULL, PRIMARY KEY (room_id, scope)
+  ) WITHOUT ROWID`);
   const outcomes = [];
   for (const candidate of candidates) {
     const { number, head } = candidate;
-    const original = `github-review-${createHash("sha256").update(JSON.stringify([
-      recipe.roomId, recipe.repository, number, head, reviewerId
-    ])).digest("hex")}`;
+    const original = reviewOperation(binding, candidate);
     const operation = latestReviewOperation(store, recipe.roomId, requesterId, original);
     const receipt = store.operationReceipt(secret, recipe.roomId, operation);
     if (receipt.status === "recorded") {
       const check = delivery.event === "check_run" ? delivery.payload.check_run : null;
       const passedSuite = delivery.event === "check_suite" && delivery.payload.check_suite?.conclusion === "success"
         && recipe.requiredChecks.some(required => required.app === delivery.payload.check_suite?.app?.slug);
-      if (!passedSuite && (!Number.isSafeInteger(check?.id) || check.id <= 0 || typeof check.conclusion !== "string")) {
+      const synchronize = delivery.event === "pull_request" && delivery.action === "synchronize"
+        && typeof delivery.payload.before === "string" && SHA.test(delivery.payload.before)
+        && delivery.payload.before !== head;
+      if (!passedSuite && !synchronize && (!Number.isSafeInteger(check?.id) || check.id <= 0 || typeof check.conclusion !== "string")) {
         outcomes.push({ number, status: "replayed" });
         continue;
       }
       // A final suite completion can recover a check_run callback that arrived
       // before the authoritative list caught up. It cannot withdraw a review:
       // a suite by itself does not identify a failed required check.
-      const withdrawal = passedSuite || check.conclusion === "success"
+      const withdrawal = passedSuite || synchronize || check?.conclusion === "success"
         ? store.operationReceipt(secret, recipe.roomId, operation + "-withdraw") : null;
       if (withdrawal && withdrawal.status !== "recorded") {
         outcomes.push({ number, status: "replayed" });
@@ -227,17 +301,22 @@ export async function dispatchGithubReview(store, binding, delivery, { credentia
       outcomes.push({ number, status });
       continue;
     }
+    const recordObservation = observationFence(store, binding, candidate);
     const { snapshot, reason } = await observe(recipe, candidate, { token });
     if (!snapshot || snapshot.head !== head || snapshot.number !== number) {
       outcomes.push({ number, status: reason ?? "stale_head" });
       continue;
     }
     const decision = evaluateGithubReview(recipe, snapshot);
-    if (decision.action !== "review_ready") {
-      outcomes.push({ number, status: decision.reason });
-      continue;
-    }
-    outcomes.push({ number, status: postReview(store, binding, candidate, operation, decision, secret) });
+    const status = store.transaction(() => {
+      if (store.operationReceipt(secret, recipe.roomId, operation).status === "recorded") return "replayed";
+      if (!recordObservation(snapshot, decision)) return "review_changed_during_observation";
+      withdrawSupersededReviews(store, binding, candidate, decision, secret);
+      return decision.action === "review_ready"
+        ? postReview(store, binding, candidate, operation, decision, secret)
+        : decision.reason;
+    });
+    outcomes.push({ number, status });
   }
   return outcomes;
 }
