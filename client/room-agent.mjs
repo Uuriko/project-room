@@ -572,7 +572,14 @@ export class RoomAgentClient {
       reader = response.body.getReader();
       const decoder = new TextDecoder(); let buffer = "";
       while (true) {
-        const chunk = await reader.read(); if (chunk.done) return idle();
+        const chunk = await reader.read();
+        if (chunk.done) {
+          // A disconnected request stream needs an authoritative inbox
+          // catch-up. Quiet deadline expiry still uses the fast stream path.
+          if (requestHints && !stop.aborted)
+            throw new RoomClientError(503, "request_stream_disconnected", "Room request stream disconnected; check pending requests");
+          return idle();
+        }
         buffer += decoder.decode(chunk.value, { stream: true });
         if (buffer.length > 262144) throw new RoomClientError(200, "invalid_response", "Room stream frame exceeds its limit");
         let boundary;
