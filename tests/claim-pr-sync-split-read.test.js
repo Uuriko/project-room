@@ -97,7 +97,7 @@ test("a CI read split by the budget keeps the combined status for the resume", a
   const item2 = { ...registry.get(ROOM, "split-1"), roomId: ROOM };
   const batch2 = await collectPullRequestLookups([item2], { fetchImpl: fetch2, token: "t", nowMs: NOW + 1000 });
   assert.equal(calls2.length, 1, "the resume spent its only call on the check runs");
-  assert.ok(calls2[0].endsWith("/check-runs"));
+  assert.ok(new URL(calls2[0]).pathname.endsWith("/check-runs"));
   assert.equal(batch2.results.length, 1);
   const result2 = batch2.results[0];
   assert.equal(result2.ciCursor, "done");
@@ -227,4 +227,48 @@ test("the persisted status digest survives a claim state-machine write between t
   assert.equal(normalized.pullRequest.ciCursor, "checks");
   assert.deepEqual(normalized.pullRequest.ciStatus, { state: "failure", totalCount: 1, targetUrl: STATUS_URL });
   assert.deepEqual(normalized.pullRequests[0].ciStatus, { state: "failure", totalCount: 1, targetUrl: STATUS_URL });
+});
+
+
+test("a failure beyond GitHub's first check page cannot look green", async () => {
+  const registry = seededRegistry(), calls = [];
+  const success = { status: "completed", conclusion: "success", head_sha: SHA };
+  const fetchImpl = scriptedFetch([
+    ["/pulls/1600", { state: "open", merged: false, head: { sha: SHA } }],
+    [`/commits/${SHA}/status`, { state: "pending", total_count: 0, statuses: [] }],
+    ["page=1&filter=latest", { total_count: 101, check_runs: Array.from({ length: 100 }, () => success) }],
+    ["page=2&filter=latest", { total_count: 101, check_runs: [{ ...success, conclusion: "failure" }] }]
+  ], calls);
+  const result = await collectPullRequestLookups(registry.list(ROOM), { fetchImpl, token: "t", nowMs: NOW, limit: 4 });
+  assert.equal(result.results[0].ci?.state, "failure");
+  assert.equal(calls.length, 4);
+});
+
+test("an incomplete check page cannot publish success for an anonymous poll", async () => {
+  const registry = seededRegistry(), calls = [];
+  const row = registry.list(ROOM)[0];
+  const continuing = { ...row, pullRequest: { ...row.pullRequest, ciCursor: "checks" } };
+  const fetchImpl = scriptedFetch([
+    ["/check-runs", { total_count: 2, check_runs: [{ status: "completed", conclusion: "success" }] }]
+  ], calls);
+  const result = await collectPullRequestLookups([continuing], { fetchImpl, nowMs: NOW });
+  assert.equal(result.results[0].ci?.state, "pending");
+  assert.equal(result.results[0].ciCursor, "done");
+  assert.equal(calls.length, 1);
+});
+
+test("an incomplete check page preserves an observed combined-status failure", async () => {
+  const registry = seededRegistry(), calls = [];
+  const row = registry.list(ROOM)[0];
+  const continuing = { ...row, pullRequest: {
+    ...row.pullRequest, ciCursor: "checks", ciStatus: { state: "failure", totalCount: 1, targetUrl: STATUS_URL }
+  } };
+  const fetchImpl = scriptedFetch([
+    ["/check-runs", { total_count: 2, check_runs: [{ status: "completed", conclusion: "success" }] }]
+  ], calls);
+  const { results: [result] } = await collectPullRequestLookups([continuing], { fetchImpl, nowMs: NOW });
+  assert.equal(result.ci?.state, "failure");
+  assert.equal(result.ci?.url, STATUS_URL);
+  assert.equal(result.ciCursor, "done");
+  assert.equal(calls.length, 1);
 });

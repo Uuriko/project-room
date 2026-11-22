@@ -28,7 +28,7 @@ function mockGitHub() {
   const snapshot = {
     pr: { title: "Land the queue", merged: false, merge_commit_sha: null, mergeable: true, mergeable_state: "clean", head: { sha: SHA } },
     status: { state: "pending" },
-    checks: { check_runs: [{ status: "in_progress", conclusion: null }] },
+    checks: { total_count: 1, check_runs: [{ status: "in_progress", conclusion: null }] },
   };
   return { fetchImpl: async url => {
     let body = snapshot.pr;
