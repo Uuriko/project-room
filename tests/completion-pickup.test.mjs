@@ -266,18 +266,31 @@ test("the Muse CLI leases an idle seat, reconciles its terminal doorbell, and re
   const policyFile = join(f.directory, "muse-policy.json");
   atomicPrivateJson(policyFile, { version: 1, origin, roomId, memberId: recipientId,
     requesters: [requesterId], workItems: [workItemId], requests: [], bootstrapAfter: after, windowSeconds: 5 });
-  const hostId = `muse-${randomUUID()}`;
-  atomicPrivateJson(join(f.directory, "idle-listener.json"), { binding: [origin, roomId, recipientId], hostId });
-  const disconnected = new RoomClient({ apiBase: origin, roomId, memberId: recipientId, credential: agent.secret });
-  const priorLease = await disconnected.heartbeat({ hostId });
-  assert.equal(priorLease.listener.acquired, true);
-  assert.ok(priorLease.listener.leaseExpiresAt > Date.now(), "a crashed helper can leave a live lease");
   const script = fileURLToPath(new URL("../scripts/muse-stream-handoff.mjs", import.meta.url));
-  const output = await new Promise((resolve, reject) => {
-    const child = execFile(process.execPath, [script, policyFile, "-", "--stay-armed", "--receiver-ack", "--advertise-scope", "--idle-pickup"],
-      { timeout: 5000 }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(JSON.parse(stdout)));
-    child.stdin.end(JSON.stringify({ version: 1, origin, roomId, memberId: recipientId, token: agent.secret }));
+  let primary, loseResponse = true;
+  const dispatch = f.store.idlePickup.dispatch.bind(f.store.idlePickup);
+  f.store.idlePickup.dispatch = (...args) => {
+    const result = dispatch(...args);
+    if (loseResponse && ["ready_posted", "investigation_posted"].includes(result)) {
+      loseResponse = false;
+      primary.kill("SIGKILL"); // Commit proceeds, but this process cannot receive the result.
+    }
+    return result;
+  };
+  const launch = () => new Promise((resolve, reject) => {
+    primary = execFile(process.execPath, [script, policyFile, "-", "--stay-armed", "--receiver-ack", "--advertise-scope", "--idle-pickup"],
+      { timeout: 5000 }, (error, stdout, stderr) => {
+        if (error?.signal === "SIGKILL") return resolve({ interrupted: true });
+        if (error) return reject(new Error(stderr || error.message));
+        try { resolve(JSON.parse(stdout)); } catch (failure) { reject(failure); }
+      });
+    primary.stdin.end(JSON.stringify({ version: 1, origin, roomId, memberId: recipientId, token: agent.secret }));
   });
+  assert.deepEqual(await launch(), { interrupted: true });
+  const opened = f.store.replyRequests.list(agent.secret, roomId, { direction: "incoming", status: "open" }).requests;
+  assert.equal(opened.length, 1);
+  const output = await launch();
+  assert.equal(output.requestMessageId, opened[0].id);
   assert.equal(output.status, "handoff");
   assert.ok(output.receiverAcknowledgment.sequence > output.openingSequence);
   const records = f.store.replyRequests.list(agent.secret, roomId, { direction: "incoming", status: "all" }).requests;
