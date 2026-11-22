@@ -63,7 +63,8 @@ Contract version 1 includes:
   `room_list_requests` read lists all your open conversations, so filter those
   results by this `workItemId`. On normalized storage, when the work read
   cannot enumerate the linked requests within its window, it returns
-  `total: null`, `truncated: true`, and that same next read. The count is
+  `total: null`, `truncated: true`, and a request-list read scoped to this
+  `workItemId`. The count is
   unknown. The brief includes this structured continuation as well.
   Follow request-list continuations through empty pages.
   Inline pointers share this view's `evaluatedThrough`.

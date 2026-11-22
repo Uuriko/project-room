@@ -23,8 +23,9 @@ export function workRoleHolder(item, memberId) {
 function openWorkReplies(state, workItemId, viewerId, floor, deferred) {
   const nextRead = { tool: "room_list_requests", arguments: { direction: "both", status: "open" } };
   if (deferred) return {
-    version: 1, total: null, shown: 0, truncated: true, requests: [], nextRead,
-    guidance: "Linked replies exceed this work read's window. The total is unknown. Follow each request-list continuation, even after an empty page, and select this workItemId. Read the exact request before answering.",
+    version: 1, total: null, shown: 0, truncated: true, requests: [],
+    nextRead: { ...nextRead, arguments: { ...nextRead.arguments, workItemId } },
+    guidance: "Linked replies exceed this work read's window. The total is unknown. Follow each request-list continuation, even after an empty page. Read the exact request before answering.",
   };
   const requests = Object.values(state.replyRequests ?? {}).filter(request =>
     request.workItemId === workItemId && request.status === "open"

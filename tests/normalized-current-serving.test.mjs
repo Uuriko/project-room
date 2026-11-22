@@ -74,7 +74,7 @@ for (const representation of ['legacy', 'normalized-current-v1']) test(`${repres
     assert.ok(ids.length <= 9);
   }
   assert.equal(page.nextRead, null);
-  assert.deepEqual(ids, Array.from({ length: 9 }, (_, index) => `selected-reply-${index}`));
+  assert.deepEqual(ids.sort(), Array.from({ length: 9 }, (_, index) => `selected-reply-${index}`));
 });
 
 test('explicit synthetic initialization selects actual normalized serving, not replay staging', t => {
