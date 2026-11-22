@@ -33,12 +33,12 @@ test('an attribution remains distinct from literal names that resemble its quali
   const members = {
     a: { id: 'a', displayName: 'Peer', active: false },
     b: { id: 'b', displayName: 'Peer', active: true },
-    c: { id: 'c', displayName: ' peer (a) ', active: true },
+    c: { id: 'c', displayName: ' peer  (a) ', active: true },
     d: { id: 'd', displayName: 'Peer (a) [2]', active: true },
   };
   const lookup = createMemberDisplayNames(members);
   assert.deepEqual(Object.keys(members).map(lookup), [
-    'Peer (a) [3]', 'Peer (b)', ' peer (a) ', 'Peer (a) [2]',
+    'Peer (a) [3]', 'Peer (b)', ' peer  (a) ', 'Peer (a) [2]',
   ]);
   assert.equal(createMemberDisplayNames({ ...members, a: { ...members.a, displayName: 'Earlier Peer' } })('a'), 'Earlier Peer');
 });
