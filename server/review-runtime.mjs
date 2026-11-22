@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
+import { LISTENER_TOKEN_HEADER } from "./listener-fence.mjs";
 import { nativeOutboxEventId } from "./mcp-outbox-event-id.mjs";
+import { runOnce } from "./run-once.mjs";
 
 export const reviewRuntimeSchema = `
   CREATE TABLE IF NOT EXISTS review_runtime_reports (
@@ -15,16 +18,24 @@ export const reviewRuntimeSchema = `
     revision INTEGER NOT NULL, member_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
     observed_at INTEGER NOT NULL,
     PRIMARY KEY (room_id,work_item_id,completion_id,revision,member_id)
+  );
+  CREATE TABLE IF NOT EXISTS review_runtime_interruptions (
+    room_id TEXT NOT NULL, work_item_id TEXT NOT NULL, completion_id TEXT NOT NULL,
+    revision INTEGER NOT NULL, member_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+    observed_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id,work_item_id,completion_id,revision,member_id)
   );`;
 
-const phases = ["claimed", "started", "start_unknown"];
+const phases = ["claimed", "started", "start_unknown", "interrupted"];
 const fail = (status, code) => { throw Object.assign(new Error(code), { status, code }); };
 const tableReady = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 
 // Call inside the same write transaction that validated the exact action.
-export function recordReviewRuntime(db, roomId, work, member, input, now) {
+export function recordReviewRuntime(db, roomId, work, member, input, now, listenerToken) {
   if (!input || Array.isArray(input)
-    || Object.keys(input).some(k => !["workItemId","completionEventId","evidenceVersion","expectedRevision","attemptId","phase"].includes(k))
+    || Object.keys(input).some(k => !["workItemId","completionEventId","evidenceVersion","expectedRevision","attemptId","phase","reserveDispatch","reservationId"].includes(k))
+    || input.reserveDispatch !== undefined && (input.reserveDispatch !== true || input.phase !== "start_unknown")
+    || input.reservationId !== undefined && (input.reserveDispatch !== true || !validId(input.reservationId) || !listenerToken)
     || ![input.workItemId,input.completionEventId,input.attemptId].every(validId)
     || !Number.isSafeInteger(input.expectedRevision) || !phases.includes(input.phase)) fail(422, "invalid_review_runtime");
   const next = nextWorkStep(work, now);
@@ -36,6 +47,30 @@ export function recordReviewRuntime(db, roomId, work, member, input, now) {
   const row = db.prepare("SELECT * FROM review_runtime_reports WHERE room_id=? AND work_item_id=?").get(roomId, work.id);
   const sameReview = row?.completion_id === input.completionEventId && row.revision === input.expectedRevision && row.member_id === member.id;
   if (sameReview && row.attempt_id !== input.attemptId) fail(409, "review_runtime_attempt_conflict");
+  if (input.phase === "interrupted") {
+    db.prepare(`INSERT INTO review_runtime_interruptions VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`)
+      .run(roomId,work.id,input.completionEventId,work.revision,member.id,input.attemptId,now);
+  }
+  const interrupted = db.prepare(`SELECT attempt_id,observed_at FROM review_runtime_interruptions
+    WHERE room_id=? AND work_item_id=? AND completion_id=? AND revision=? AND member_id=?`)
+    .get(roomId,work.id,input.completionEventId,work.revision,member.id);
+  if (interrupted) {
+    if (interrupted.attempt_id !== input.attemptId) fail(409, "review_runtime_attempt_conflict");
+    return { status:"interrupted", observedAt:interrupted.observed_at };
+  }
+  // Only the initiating call can replay a lost grant, under its original live
+  // listener fence and call ID. A replacement gets the observation only.
+  const reservationScope = input.reservationId && "review-dispatch:" + createHash("sha256").update(JSON.stringify([
+    roomId, work.id, input.completionEventId, input.evidenceVersion, work.revision, member.id, input.attemptId, listenerToken,
+  ])).digest("hex");
+  if (input.reserveDispatch === true && sameReview && row.phase !== "claimed") {
+    if (row.phase === "start_unknown" && reservationScope && tableReady(db, "request_replays")) {
+      const saved = db.prepare("SELECT result_json FROM request_replays WHERE scope=? AND request_id=?")
+        .get(reservationScope, input.reservationId);
+      if (saved) return JSON.parse(saved.result_json);
+    }
+    return { status:row.phase, observedAt:row.observed_at };
+  }
   if (input.phase === "claimed" || (sameReview && row.phase === "claimed")) {
     // Keep the actual first claim separate from the latest provider phase.
     // Neither the claim nor a retry settles the work wake.
@@ -53,7 +88,9 @@ export function recordReviewRuntime(db, roomId, work, member, input, now) {
     ON CONFLICT(room_id,work_item_id) DO UPDATE SET completion_id=excluded.completion_id, member_id=excluded.member_id,
     revision=excluded.revision, attempt_id=excluded.attempt_id,phase=excluded.phase,observed_at=excluded.observed_at`)
     .run(roomId,work.id,input.completionEventId,member.id,work.revision,input.attemptId,input.phase,now);
-  return { status: input.phase, observedAt: now };
+  const result = { status: input.phase, observedAt: now, ...(input.reserveDispatch === true ? { dispatchGranted:true } : {}) };
+  if (reservationScope) runOnce(db, reservationScope, input.reservationId, () => result, { now });
+  return result;
 }
 
 function claimObservation(db, roomId, work, revision, memberId) {
@@ -77,6 +114,13 @@ export function reviewRuntimeFor(store, roomId, work, next, now, { includeClaim 
     return { ...verdict, ...claimObservation(db, roomId, work, basis?.revision, work.verification.verifierId) };
   }
   if (next?.action !== "verify") return null;
+  if (tableReady(db, "review_runtime_interruptions")) {
+    const interrupted = db.prepare(`SELECT observed_at FROM review_runtime_interruptions
+      WHERE room_id=? AND work_item_id=? AND completion_id=? AND revision=? AND member_id=?`)
+      .get(roomId,work.id,work.receipt.eventId,work.revision,next.memberId);
+    if (interrupted) return { status:"interrupted", source:"managed_host", observedAt:interrupted.observed_at,
+      ...(includeClaim ? claimObservation(db, roomId, work, work.revision, next.memberId) : {}) };
+  }
   if (tableReady(db, "review_runtime_reports")) {
     const report = db.prepare(`SELECT phase,observed_at FROM review_runtime_reports
       WHERE room_id=? AND work_item_id=? AND completion_id=? AND revision=? AND member_id=?`)
@@ -119,7 +163,7 @@ export function reviewRuntimeFor(store, roomId, work, next, now, { includeClaim 
 export const REVIEW_RUNTIME_ROUTE = Object.freeze({
   id: "review-runtime-observe", method: "POST", path: "/api/rooms/{roomId}/review-runtime",
   auth: "room", capability: null, scope: "room",
-  parity: "exempt:host-only runtime observations carry no execution authority",
+  parity: "exempt:host-only observations and dispatch fencing do not authorize Room actions",
   schema: { params:{ type:"object", required:["roomId"], properties:{ roomId:{type:"string"} } },
     body:{ type:"object" }, response:{type:"object"} }, events: [],
   async handler(ctx) {
@@ -131,7 +175,10 @@ export const REVIEW_RUNTIME_ROUTE = Object.freeze({
     if (auth.credentialScope !== "room") ctx.reject(403, "access_denied", "A room bearer is required");
     if (auth.kind === "api-key" && !auth.apiKeyScopes?.some(scope => ["rooms:write","rooms:*"].includes(scope)))
       ctx.reject(403, "insufficient_scope", "Room write scope is required");
-    ctx.rate(`review-runtime:${auth.credentialHash}`, 60);
-    return ctx.json(ctx.res,200,ctx.store.reportReviewRuntime(selected.token,roomId,await ctx.body(ctx.req,{limit:4096}),binding));
+    const body = await ctx.body(ctx.req,{limit:4096});
+    const bucket = body?.reserveDispatch === true ? "review-dispatch" : "review-runtime";
+    ctx.rate(`${bucket}:${auth.credentialHash}`, 60);
+    return ctx.json(ctx.res,200,ctx.store.reportReviewRuntime(selected.token,roomId,body,
+      binding,ctx.req.headers[LISTENER_TOKEN_HEADER]));
   }
 });
