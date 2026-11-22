@@ -8429,7 +8429,7 @@ async function restoreAtStartup(roomId = null) {
         return restored;
       } catch (error) {
         if (error.startupCancelled || controller.signal.aborted || location.href !== destination) throw cancelled();
-        if (binding && error.code === "session_binding_changed") {
+        if (binding && (error.code === "session_binding_changed" || [401, 403].includes(error.status))) {
           throw Object.assign(error, { agentRecordSessionChanged: true });
         }
         const delay = Math.max(250, error.retryAfterMs ?? 1000) * 2 ** attempt;
@@ -8518,7 +8518,7 @@ const ready = (async () => {
         if (joined?.roomId === requestedRoom) return;
         client.endAccess();
       } catch (error) {
-        if (![401, 403].includes(error.status)) throw error;
+        if (error.agentRecordSessionChanged || ![401, 403].includes(error.status)) throw error;
       }
     }
     const account = await ensureAccountSession();
