@@ -157,8 +157,20 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
       const cursor=store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get(roomId,auth.member.id)?.sequence??0;
       const floor=readCurrentHistoryFloor(store.db,roomId,auth.member.id,b),catchUpCursor=Math.max(cursor,floor?floor.sequence-1:0);
       const replyRequests=Object.create(null),requestIds=new Set(conversation.messages.flatMap(m=>[m.id,m.responseToRequestId]).filter(Boolean));
-      for(const id of requestIds){const request=readCurrentRecord(store.db,roomId,'replyRequests',id,b);if(request&&[request.requesterId,request.recipientId].includes(auth.member.id))Object.defineProperty(replyRequests,id,{value:request,enumerable:true});}
-
+      let requestCoverage = "visible-conversation-records";
+      try {
+        for (const id of requestIds) {
+          const request = readCurrentRecord(store.db, roomId, 'replyRequests', id, b);
+          if (request && [request.requesterId, request.recipientId].includes(auth.member.id)) {
+            Object.defineProperty(replyRequests, id, { value: request, enumerable: true });
+          }
+        }
+      } catch (error) {
+        if (!(error instanceof CurrentReadBudgetExceeded)) throw error;
+        // The bounded window already has its authority and conversation data.
+        // Exact request reads can still recover any metadata omitted here.
+        requestCoverage = "partial-visible-conversation-records";
+      }
 
       // This is explicitly a partial current view. Neither omitted counts nor
       // absent request/work records mean that the room contains no more work.
@@ -176,7 +188,7 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
         messagesWindow: { mode: "recent", omitted: null, complete: conversation.nextCursor === null },
         messagesPage: { cursor: conversation.nextCursor, hasMore: conversation.nextCursor !== null, contractVersion: 2, limit: messageLimit },
         workWindow: overview.workWindow,
-        sections: { assistant:{available:true,coverage:'selected-run-window',maxRuns:100},requestRuns:{available:false,code:'current_request_runs_unavailable'},notifications:{available:false,code:'current_notification_aggregate_unavailable'},updates:{available:false,replacement:'needs-me',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/needs-me`}},returnBrief:{available:true,coverage:'visible-history-window',sourceLimit:16},files:{available:true,coverage:'selected-messages',complete:false},fileUploads:{available:true}, helpOffers: { available: false, code: "current_help_offers_unavailable" }, replyRequests: { available: true,complete:false,coverage:"visible-conversation-records", nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } } } }
+        sections: { assistant:{available:true,coverage:'selected-run-window',maxRuns:100},requestRuns:{available:false,code:'current_request_runs_unavailable'},notifications:{available:false,code:'current_notification_aggregate_unavailable'},updates:{available:false,replacement:'needs-me',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/needs-me`}},returnBrief:{available:true,coverage:'visible-history-window',sourceLimit:16},files:{available:true,coverage:'selected-messages',complete:false},fileUploads:{available:true}, helpOffers: { available: false, code: "current_help_offers_unavailable" }, replyRequests: { available: true,complete:false,coverage:requestCoverage, nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } } } }
       };
       });
     }, { maxRecords: 1024 }));
