@@ -6,11 +6,11 @@ export function createResultFeedback({ getState, getConversation, isBlocked,
   getDraft, onBlocked, openThread, setReply }) {
   return (messageId, selection = null) => {
     const state = getState();
-    const message = state?.messages.find(entry => entry.id === messageId);
-    if (!canReplyToResult(state, message) || isBlocked()) return false;
     const conversation = getConversation();
-    const destination = conversation?.rootById.get(message.id);
-    if (!destination || !conversation.threads.has(destination)) return false;
+    const message = conversation?.byId.get(messageId);
+    if (!canReplyToResult(state, message) || isBlocked()) return false;
+    const destination = conversation.rootById.get(message.id);
+    if (!destination || !conversation.threads.has(destination) || !canReplyToResult(state, conversation.byId.get(destination))) return false;
     const draft = getDraft(destination);
     let quote;
     if (selection) {
