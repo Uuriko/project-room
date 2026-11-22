@@ -493,3 +493,68 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
   assert.equal(await nonparty.locator("#result-copy-link").isVisible(), false);
   assert.equal(await nonparty.locator("#result-work-action").isVisible(), false);
 });
+
+// Keep a delayed browser response separate from the current membership decision.
+for (const revokeAt of ["before-issue", "after-issue", "active-control"]) {
+  test(`saved-agent exact sign-in authority at the response boundary (${revokeAt})`, { timeout: 30000 }, async t => {
+    const f = await setup(t, 390);
+    const saved = f.store.identities.create("Saved test reviewer");
+    linkWithProof(f.store, f.keys.owner, "commons", saved, { permissions: ["verify"] });
+    const recipient = await f.newRoomPage();
+    const destination = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+    let release, announce;
+    const held = new Promise(resolve => { release = resolve; });
+    const reached = new Promise(resolve => { announce = resolve; });
+    await recipient.route("**/api/auth/agent/session", async route => {
+      if (revokeAt === "before-issue") {
+        announce();
+        await held;
+        await route.continue();
+      } else {
+        const response = await route.fetch();
+        announce();
+        await held;
+        await route.fulfill({ response });
+      }
+    });
+    try {
+      await recipient.goto(destination);
+      await recipient.locator("#agent-signin-button").click();
+      await recipient.locator('[name="identityId"]').fill(saved.identityId);
+      await recipient.locator('[name="secret"]').fill(saved.secret);
+      const responsePromise = recipient.waitForResponse(res => res.url().endsWith("/api/auth/agent/session"));
+      await recipient.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+      await reached;
+      if (revokeAt !== "active-control") {
+        assert.equal(f.store.identities.unlink(f.keys.owner, "commons", saved.identityId).unlinked, true);
+      }
+      release();
+      const response = await responsePromise;
+      if (revokeAt === "before-issue") {
+        assert.ok([401, 403].includes(response.status()), "the server refuses the pre-issue revoke");
+      } else {
+        assert.equal(response.status(), 201, "the delayed response was issued while the seat still had access");
+      }
+      const completion = encodeURIComponent(f.first.event.id);
+      const read = await recipient.request.get(f.origin + "/api/rooms/commons/work-result?workItemId=revision-journey&completionEventId=" + completion);
+      const body = await read.text();
+      if (revokeAt === "active-control") {
+        assert.equal(read.status(), 200);
+        assert.match(body, /Missing named owner/);
+        await recipient.goto(destination);
+        await recipient.locator("#result-body").getByText("Missing named owner", { exact: false }).waitFor();
+      } else {
+        assert.ok([401, 403, 404].includes(read.status()));
+        assert.doesNotMatch(body, /Missing named owner/);
+        await recipient.goto(destination);
+        await recipient.locator("#agent-signin-button").waitFor();
+        assert.equal(await recipient.locator("#result-body").getByText("Missing named owner", { exact: false }).count(), 0);
+      }
+      t.diagnostic(JSON.stringify({ revokeAt, signinHttp: response.status(), exactReadHttp: read.status(),
+        disclosed: body.includes("Missing named owner") }));
+    } finally {
+      release();
+      await recipient.close();
+    }
+  });
+}
