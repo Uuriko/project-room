@@ -153,7 +153,7 @@ async function recoverPassingReview(store, binding, candidate, check, original, 
   const matchesAttempt = (app, name, minimum) => decision.checks?.some(row =>
     row.app === app && row.name === name && row.status === "passed" && row.id >= minimum);
   if (decision.action !== "review_ready" || !matchesAttempt(failed.app, failed.name, failed.id + 1)
-      || !matchesAttempt(check.app?.slug, check.name, check.id)) return "replayed";
+      || (check && !matchesAttempt(check.app?.slug, check.name, check.id))) return "replayed";
 
   const resumeId = original + "-r-" + createHash("sha256").update(withdrawal.eventId).digest("hex").slice(0, 24);
   return store.transaction(() => {
@@ -205,11 +205,16 @@ export async function dispatchGithubReview(store, binding, delivery, { credentia
     const receipt = store.operationReceipt(secret, recipe.roomId, operation);
     if (receipt.status === "recorded") {
       const check = delivery.event === "check_run" ? delivery.payload.check_run : null;
-      if (!Number.isSafeInteger(check?.id) || check.id <= 0 || typeof check.conclusion !== "string") {
+      const passedSuite = delivery.event === "check_suite" && delivery.payload.check_suite?.conclusion === "success"
+        && recipe.requiredChecks.some(required => required.app === delivery.payload.check_suite?.app?.slug);
+      if (!passedSuite && (!Number.isSafeInteger(check?.id) || check.id <= 0 || typeof check.conclusion !== "string")) {
         outcomes.push({ number, status: "replayed" });
         continue;
       }
-      const withdrawal = check.conclusion === "success"
+      // A final suite completion can recover a check_run callback that arrived
+      // before the authoritative list caught up. It cannot withdraw a review:
+      // a suite by itself does not identify a failed required check.
+      const withdrawal = passedSuite || check.conclusion === "success"
         ? store.operationReceipt(secret, recipe.roomId, operation + "-withdraw") : null;
       if (withdrawal && withdrawal.status !== "recorded") {
         outcomes.push({ number, status: "replayed" });
