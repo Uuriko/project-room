@@ -8,6 +8,16 @@ import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
+import { attentionTools, roomTools } from "../client/mcp-stdio.mjs";
+import { withOpenWorldHint } from "../server/content-trust.mjs";
+
+function advertisedCatalog(tools, expected) {
+  const names = tools.map(tool => tool.name);
+  assert.equal(new Set(names).size, names.length, "each command is advertised once");
+  assert.ok(names.includes("room_map"));
+  assert.deepEqual(tools, expected.map(withOpenWorldHint));
+  return tools;
+}
 
 async function fixture(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store }), requests = [], clients = [];
@@ -73,7 +83,7 @@ test("opt-in v3 CLI and MCP share request notices and exact acknowledgement acro
   const wrongVersion = await f.cli(["pull", f.attentionDirectory]);
   assert.equal(wrongVersion.code, 1); assert.match(wrongVersion.stderr, /state_schema_mismatch/);
   const mcp = await f.mcp(true, 3);
-  assert.equal((await mcp.request("tools/list")).result.tools.length, 51);
+  advertisedCatalog((await mcp.request("tools/list")).result.tools, [...roomTools, ...attentionTools]);
   assert.equal((await mcp.call("room_read_attention", { version: 3 })).error.code, -32602, "agent cannot select an operator inbox/version");
   assert.deepEqual((await mcp.call("room_read_attention")).result.structuredContent.items, initial.items);
   const context = (await mcp.call(request.nextRead.tool, request.nextRead.arguments)).result.structuredContent;
@@ -98,12 +108,11 @@ test("opt-in v3 CLI and MCP share request notices and exact acknowledgement acro
 test("optional real MCP pull/read-pointer/ack shares persisted identity with CLI and remains Room read-only", { timeout: 20000 }, async t => {
   const f = await fixture(t); f.charter("An exact synthetic instruction");
   const disabled = await f.mcp(false);
-  const disabledTools = (await disabled.request("tools/list")).result.tools;
-  assert.equal(disabledTools.length, 49);
-  assert.ok(disabledTools.some(tool => tool.name === "room_map"));
+  const disabledTools = advertisedCatalog((await disabled.request("tools/list")).result.tools, roomTools);
   assert.equal((await disabled.call("room_read_attention")).error.code, -32602); await disabled.close();
-  let mcp = await f.mcp(); const tools = (await mcp.request("tools/list")).result.tools;
-  assert.equal(tools.length, 51); assert.ok(tools.some(tool => tool.name === "room_map")); assert.ok(tools.slice(-2).every(t => t.annotations.readOnlyHint === false));
+  let mcp = await f.mcp(); const tools = advertisedCatalog((await mcp.request("tools/list")).result.tools, [...roomTools, ...attentionTools]);
+  assert.deepEqual(tools.slice(0, disabledTools.length), disabledTools, "enabling attention appends tools without changing the room catalog");
+  assert.ok(tools.slice(-attentionTools.length).every(t => t.annotations.readOnlyHint === false));
   assert.equal((await mcp.call("room_read_attention", { directory: "/not-operator-authorized" })).error.code, -32602);
   assert.equal((await mcp.call("room_acknowledge_attention", { noticeId: 1 })).error.code, -32602);
   const before = f.store.snapshot(f.keys.producer, "commons");
