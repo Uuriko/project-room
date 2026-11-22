@@ -5124,8 +5124,14 @@ function mentionChoices() {
   const input = $("#message-input"), found = mentionQuery(input.value, input.selectionStart);
   if (!found || !state) return [];
   // In the human view the room assistant's seat reads as "Room" (as everywhere else), so @Room finds it.
-  const members = Object.values(state.members).map(m => { const name = humanExperience.assistantName(m.id); return name ? { ...m, displayName: name } : m; });
-  return mentionMatches(members, found.query);
+  const members = Object.fromEntries(Object.values(state.members).map(member => {
+    const name = humanExperience.assistantName(member.id);
+    return [member.id, name ? { ...member, displayName: name } : member];
+  }));
+  const pickerName = createMemberDisplayNames(members);
+  return mentionMatches(Object.values(members), found.query).map(member => ({
+    ...member, pickerLabel: humanExperience.assistantName(member.id) || pickerName(member.id),
+  }));
 }
 function renderMentions() {
   const list = $("#mention-list");
@@ -5136,10 +5142,7 @@ function renderMentions() {
   list.hidden = false;
   // Each row is the option itself (role="option" + aria-selected are invalid on a
   // nested button). Focus stays in the textarea; aria-activedescendant names the row.
-  list.innerHTML = matches.map((m, i) => {
-    const label = humanExperience.assistantName(m.id) || displayName(m.id);
-    return `<li role="option" id="mention-option-${i}" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(label)} <span>${esc(kindLabel(m.kind))}</span></li>`;
-  }).join("");
+  list.innerHTML = matches.map((m, i) => `<li role="option" id="mention-option-${i}" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(m.pickerLabel)} <span>${esc(kindLabel(m.kind))}</span></li>`).join("");
   const input = $("#message-input");
   input.removeAttribute("aria-expanded");
   input.setAttribute("aria-activedescendant", `mention-option-${mentionIndex}`);
