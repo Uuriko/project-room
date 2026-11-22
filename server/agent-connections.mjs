@@ -150,10 +150,17 @@ export class AgentConnections {
     return row.status === "issued" && row.expires_at > this.store.now() && this.authority(row)
       && this.db.prepare("SELECT revoked FROM credentials WHERE hash=?").get(row.credential_hash)?.revoked === 0;
   }
+  matchesFriendBrowserSession(connection, credential) {
+    return credential.kind === "session" && credential.parent_hash === connection.credential_hash
+      && Boolean(credential.identity_secret_hash) && credential.expires_at <= connection.expires_at
+      && this.friendSponsored(connection);
+  }
   assertCredential(credential) {
     const row = this.row(credential.room_id, credential.member_id);
-    if (row && (row.status !== "issued" || row.credential_hash !== credential.hash || credential.kind !== "access"
-      || credential.parent_hash !== null || !this.authority(row))) fail(401, "unauthenticated", "Agent access ended; ask the owner to reconnect");
+    if (!row) return;
+    const accessKey = credential.kind === "access" && credential.parent_hash === null && row.credential_hash === credential.hash;
+    if (row.status !== "issued" || (!accessKey && !this.matchesFriendBrowserSession(row, credential)) || !this.authority(row))
+      fail(401, "unauthenticated", "Agent access ended; ask the owner to reconnect");
   }
   revokeMember(roomId, memberId) {
     this.db.prepare(`UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id IN
