@@ -10,7 +10,8 @@
 // be a member of the room it asks about. Exact poll timestamps never leave
 // the server (activity fingerprinting) — entries coarsen to
 // { agentId, wakeable }. Server-side consumers use the exact in-process
-// store.agentHeartbeats.wakeStatusOf/wakeStatusList instead.
+// store.agentHeartbeats.wakeStatusOf/wakeStatusList instead. Room mode also
+// returns idle: { [agentId]: { state, kind, needsOwner? } } (coarse only).
 //
 // Route-table row (batch RT): the OpenAPI route gate forbids new
 // legacy-chain registrations (the legacy allowlist only shrinks), so the
@@ -20,6 +21,7 @@
 // room access token) — no duplicated credential logic.
 
 import { createHeartbeatActor, translateWith, requiredScope } from "../agent-plugin-routes.mjs";
+import { roomIdleStates, coarseIdleEntry } from "../agent-idle-facts.mjs";
 
 const coarsen = wakeable => entry => Object.freeze({ agentId: entry.agentId, wakeable });
 
@@ -68,9 +70,17 @@ export async function readWakeStatus(ctx) {
     for (const identityId of members) {
       if (!seen.has(identityId)) notWakeable.push(Object.freeze({ agentId: identityId, wakeable: false }));
     }
+    // Idle-to-useful-work (docs/IDLE-TO-USEFUL-WORK.md): additive, coarse
+    // per-member idle state keyed by agentId, plus a needsOwner reason when
+    // no live channel can reach the member. No timestamps or idle minutes.
+    const nowMs = typeof ctx.store.now === "function" ? ctx.store.now() : Date.now();
+    const idle = {};
+    for (const entry of roomIdleStates(ctx.store.db, roomId, nowMs))
+      if (entry.identityId && members.has(entry.identityId)) idle[entry.identityId] = coarseIdleEntry(entry);
     return ctx.json(ctx.res, 200, {
       roomId, windowMs: list.windowMs, asOf: list.asOf,
       wakeable: Object.freeze(wakeable), notWakeable: Object.freeze(notWakeable),
+      idle: Object.freeze(idle),
     });
   })();
 }

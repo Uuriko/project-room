@@ -121,11 +121,20 @@ owns definitions (as in the existing design).
    `deliveryFor` instead of their own window logic, once their owners agree.
    #6387 must first resolve its backup HOLD (move its two runtime tables into
    the schema/recovery path or derive from existing tables).
-3. **Fact reader.** A read-only `store` helper that gathers the facts for a
-   room's members from the existing heartbeat tables, claims and requests
-   (Grok, after 1; touches no Codex files).
-4. **Owner line + coarse state on wake-status.** Additive `idleState` on
-   room-mode `GET /api/wake-status` (coarse only) and the "needs owner" line.
+3. **Fact reader (done, this branch).** `server/agent-idle-facts.mjs` reads
+   identity links, human member records, agent hosts, push configs (URL
+   presence and suspended flag only; tokens are never selected), polls,
+   room-scoped activity, listener leases, wake signals, active claims (via the
+   `work_claim_inbox_owner` index), open requests (current and legacy rooms)
+   and wake-queue pauses. Read-only; a missing optional table reads as "no
+   fact". Known gaps: no table records a cloud launcher, so cloud agents read
+   as `idle_unreachable / no_live_channel` until one exists; a stream/Muse
+   reader is inferred from room-scoped activity with no identity-level
+   listener.
+4. **Owner line + coarse state on wake-status (done, this branch).** Room-mode
+   `GET /api/wake-status` adds `idle: { [agentId]: { state, kind,
+   needsOwner? } }`. Existing fields are unchanged; no timestamps, idle
+   minutes or channels are served.
 5. **Webhook and Muse delivery** using the existing dispatcher and formal
    requests; cloud launch stays an owner decision.
 
