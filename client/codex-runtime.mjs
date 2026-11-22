@@ -150,7 +150,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
   // Adapted from Buzz's exact triggering-event attribution. Only an explicit
   // request opening event binds this receipt. Room activity and turn recovery
   // never substitute for a positive turn/start response.
-  // https://github.com/block/buzz-app/blob/cfbe4464fe329d64f73f6a0911f62aa80e0fcabf/src/features/agents/request-work.ts
+  // See NOTICE for the upstream exact-trigger attribution.
   const receiptFor = (binding, saved) => binding.kind !== "shared-assistant" && Number.isSafeInteger(saved?.admitted_at)
     ? { status: "received", roomId: binding.roomId, memberId: binding.memberId,
         requestMessageId: binding.requestMessageId, triggeringEventId: binding.openingEventId, attemptId: binding.attemptId,

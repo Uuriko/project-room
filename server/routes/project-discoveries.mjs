@@ -3,13 +3,20 @@ import { isGuestAgentMemberId } from '../guest-agent-links.mjs';
 import { fileProjectDiscovery, reviewerProjectDiscoveries } from '../project-discoveries.mjs';
 import { authorizeRoomRead } from './room-window.mjs';
 
+// Identity gate shared by the POST handler and the dispatcher's wrong-method
+// path, so anonymous callers get 401 before any 405 or 422 (SEC-03).
+function authenticateFiling(ctx) {
+  const secret = ctx.bearer(ctx.req);
+  const identity = ctx.store.identities.resolveGlobalIdentitySecret(secret);
+  if (!identity) ctx.reject(401, 'unauthenticated', 'Use your saved agent identity credential');
+  return { secret, identity };
+}
+
 async function fileFinding(ctx) {
   const { store, req, params, url } = ctx;
-  if (url.search) ctx.reject(422, 'invalid_project_discovery', 'No query parameters accepted');
   ctx.rate('public-work-write:' + ctx.remoteAddress, 60);
-  const secret = ctx.bearer(req);
-  const identity = store.identities.resolveGlobalIdentitySecret(secret);
-  if (!identity) ctx.reject(401, 'unauthenticated', 'Use your saved agent identity credential');
+  const { secret, identity } = authenticateFiling(ctx);
+  if (url.search) ctx.reject(422, 'invalid_project_discovery', 'No query parameters accepted');
   store.publicWorkClaims.enforceIdentityRateLimit(identity.identityId);
   const data = await ctx.body(req, { limit: 65536 });
   if (!validId(params.offerId)) ctx.reject(404, 'not_found', 'Not found');
@@ -35,7 +42,7 @@ const params = names => ({ type: 'object', required: names,
 
 export const PROJECT_DISCOVERY_ROUTES = [
   { id: 'project-discovery-file', method: 'POST', path: '/api/project-offers/{offerId}/discoveries',
-    auth: 'bearer', capability: null, scope: 'public', handler: fileFinding, bodyLimit: 65536,
+    auth: 'bearer', capability: null, scope: 'public', handler: fileFinding, authenticate: authenticateFiling, bodyLimit: 65536,
     parity: 'exempt:outside contributors use the published REST filing action',
     publication: 'open:identity-authenticated filing returns only the contributor’s own finding',
     schema: { params: params(['offerId']), response: { type: 'object' } }, events: [] },

@@ -133,7 +133,7 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
       try {
         const { requesters, workItems, requests, allowStandaloneRequests } = policy;
         change = await client.waitForChange(state.after, { timeoutMs: 12000, requestHints: true, signal,
-          ...(advertiseScope ? { receiverScope: { requesters, workItems, requests, allowStandaloneRequests } } : {}) });
+          ...(advertiseScope ? { receiverScope: { requesters, workItems, requests, allowStandaloneRequests }, waitingForWork: true } : {}) });
       }
       catch (error) { throw Object.assign(error, { handoffStage: "room_stream" }); }
       if (!change.changed) {

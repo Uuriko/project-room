@@ -14,7 +14,7 @@ import { signInFixture } from "./auth-signin.mjs";
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
 
-async function setup(t, width, { retained = false, credentialReadBurst } = {}) {
+async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60, credentialReadBurst });
   let browser;
   t.after(async () => {
@@ -24,8 +24,8 @@ async function setup(t, width, { retained = false, credentialReadBurst } = {}) {
   });
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
   const item = id => f.store.room("commons").state.workItems[id];
-  const completeWithText = (workItemId, body) => {
-    const posted = send("producer", T.MESSAGE_POSTED, { messageId: randomUUID(), workItemId, body });
+  const completeWithText = (workItemId, body, toMemberId) => {
+    const posted = send("producer", T.MESSAGE_POSTED, { messageId: randomUUID(), workItemId, body, ...(toMemberId ? { toMemberId } : {}) });
     return send("producer", T.WORK_COMPLETED, { workItemId, expectedRevision: item(workItemId).revision,
       evidenceKind: "room_text", evidenceMessageId: posted.event.data.messageId, evidenceMessageEventId: posted.event.id,
       evidenceVersion: textVersion(body), previousCompletionEventId: item(workItemId).receipt?.eventId ?? null,
@@ -43,23 +43,23 @@ async function setup(t, width, { retained = false, credentialReadBurst } = {}) {
   send("owner", T.WORK_PROPOSED, { workItemId: "calm-result", title: "A first result", definitionOfDone: "One version", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
   lifecycle("calm-result");
   completeWithText("calm-result", "Only version of this result");
-  const first = completeWithText("revision-journey", retained ? retainedBody : "Result A\nKeep this line\nMissing named owner");
+  const first = completeWithText("revision-journey", firstBody ?? (retained ? retainedBody : "Result A\nKeep this line\nMissing named owner"), firstDirectTo);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const errors = [];
-  async function login(actor) {
+  async function login(actor, destination = origin) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
     await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     const page = await context.newPage(); page.setDefaultTimeout(8000);
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(origin); await signInFixture(page, f.keys[actor]);
+    await page.goto(destination); await signInFixture(page, f.keys[actor]);
     await page.locator("#main").waitFor({ state: "visible" });
     return page;
   }
   const mutate = (type, data) => send("producer", type, { workItemId: "revision-journey", expectedRevision: item("revision-journey").revision, ...data });
   t.after(() => assert.deepEqual(errors, []));
-  return { ...f, item: () => item("revision-journey"), first, login, mutate, send, complete: body => completeWithText("revision-journey", body) };
+  return { ...f, origin, item: () => item("revision-journey"), first, login, mutate, send, complete: body => completeWithText("revision-journey", body) };
 }
 const card = page => page.locator('[data-work-record-id="revision-journey"]');
 async function openResult(page) {
@@ -340,4 +340,119 @@ test("the verdict links exact candidate release checks without claiming missing 
     t.diagnostic(JSON.stringify({ viewport, route: "Accepted release in Updates All", actionsFromDefaultUpdates: 2,
       exactCompletion: completed.event.id, candidate: candidateRevision, labels }));
   }
+});
+
+test("shared result links keep identical old and new text bound to different verdicts", { timeout: 45000 }, async t => {
+  const revision = "a".repeat(40);
+  const source = `https://github.com/room-fixtures/pinned-result/blob/${revision}`;
+  const verdictSource = source + "/src/result-reader.js#L401-L411";
+  const regressionSource = source + "/scripts/pin.mjs#L10-L20";
+  const body = [
+    "Result A",
+    "Verdict binding: " + verdictSource,
+    "Regression: " + regressionSource,
+    "Literal moving link: https://github.com/Uuriko/project-room/blob/main/src/result-reader.js",
+    `Literal unsupported host: https://example.test/room-fixtures/pinned-result/blob/${revision}/src/result-reader.js`,
+    "Literal noncanonical link: " + source + "/../../../../main/src/result-reader.js",
+    "Literal comma path: " + source + "/docs/a,b.md",
+    "Literal semicolon path: " + source + "/docs/a;b.md",
+    "Literal closing parenthesis path: " + source + "/docs/a)b.md"
+  ].join("\n");
+  const f = await setup(t, 1440, { firstBody: body });
+  const check = (receipt, result) => f.send("human-checker", T.VERIFICATION_RECORDED, {
+    workItemId: f.item().id, expectedRevision: f.item().revision, completionEventId: receipt.event.id,
+    evidenceVersion: receipt.event.data.evidenceVersion, result, summary: "Checked the exact revision",
+    ...(result === "fail" ? { nextAction: "Use the same text with the correct evidence." } : {})
+  });
+  check(f.first, "fail");
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Rechecked the evidence." });
+  f.mutate(T.WORK_STARTED, {});
+  const second = f.complete(body);
+  check(second, "pass");
+  const sender = await f.login("owner");
+  await openResult(sender);
+  await sender.evaluate(() => {
+    const noisy = new URL(location.href);
+    noisy.searchParams.set("unrelated", "discard");
+    history.replaceState(history.state, "", noisy.href);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async value => { window.sharedLink = value; }
+    } });
+  });
+  await sender.locator("#result-options > summary").click();
+  await sender.getByRole("button", { name: "Copy result link", exact: true }).click();
+  await sender.getByText("Result link copied.", { exact: true }).waitFor();
+  const current = await sender.evaluate(() => window.sharedLink);
+  const expected = completion => f.origin + "/?room=commons#pr-record/result/revision-journey/" + completion;
+  assert.equal(current, expected(second.event.id));
+  const earlier = await sender.getByRole("link", { name: "Open earlier result" }).getAttribute("href");
+  assert.equal(earlier, expected(f.first.event.id));
+
+  const receiver = await f.login("human-checker", earlier);
+  await receiver.getByText("Verification · Failed", { exact: true }).waitFor();
+  assert.match(await receiver.locator("#result-status").textContent(), /^Earlier result/);
+  assert.equal(await receiver.locator("#result-body").textContent(), body);
+  assert.equal(await receiver.locator("#result-work-action").isVisible(), false);
+  await receiver.goto(current);
+  await receiver.getByText("Verification · Passed", { exact: true }).waitFor();
+  assert.doesNotMatch(await receiver.locator("#result-status").textContent(), /^Earlier result/);
+  assert.equal(await receiver.locator("#result-body").textContent(), body);
+  assert.deepEqual(await receiver.locator("#result-body a").evaluateAll(links => links.map(link => link.href)),
+    [verdictSource, regressionSource]);
+  const requests = [];
+  await receiver.context().route("https://github.com/room-fixtures/pinned-result/**", async route => {
+    requests.push(route.request().url());
+    await route.fulfill({ body: "Pinned public source destination" });
+  });
+  await receiver.reload();
+  await receiver.getByText("Verification · Passed", { exact: true }).waitFor();
+  assert.deepEqual(requests, [], "initial exact result read fetches no public source");
+  const [target] = await Promise.all([
+    receiver.waitForEvent("popup"),
+    receiver.locator("#result-body").getByRole("link", { name: regressionSource, exact: true }).click(),
+  ]);
+  await target.waitForLoadState();
+  assert.equal(target.url(), regressionSource);
+  await target.close();
+  assert.equal(requests.length, 1);
+
+  await receiver.goto(expected("missing-completion"));
+  await receiver.getByText(/Exact text unavailable/).waitFor();
+  assert.equal(await receiver.locator("#result-body").textContent(), "");
+  assert.equal(await receiver.locator("#result-title").textContent(), "Result");
+
+  const reads = [];
+  receiver.on("request", request => {
+    if (request.url().includes("/work-result?")) reads.push(request.url());
+  });
+  await receiver.evaluate(href => {
+    history.replaceState(null, "", href);
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }, earlier.replace("room=commons", "room=other-room"));
+  await receiver.getByText("That link belongs to another room. Open that room first.", { exact: true }).waitFor();
+  assert.deepEqual(reads, []);
+  assert.equal(await receiver.locator("#result-body").textContent(), "");
+
+  const messageId = f.first.event.data.evidenceMessageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.store.room("commons").state.messages.find(message => message.id === messageId).revision ?? 0 });
+  await receiver.goto(earlier);
+  await receiver.getByText(/Text withdrawn by/).waitFor();
+  assert.equal(await receiver.locator("#result-body").textContent(), "");
+  assert.equal(await receiver.locator("#result-copy-link").isVisible(), false);
+});
+
+test("an exact result link refuses a nonparty without falling forward", { timeout: 30000 }, async t => {
+  const f = await setup(t, 1440, { firstDirectTo: "human-checker" });
+  const target = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+  const party = await f.login("human-checker");
+  await party.goto(target);
+  await party.locator("#result-body").getByText(/Result A/).waitFor();
+
+  const nonparty = await f.login("owner");
+  await nonparty.goto(target);
+  await nonparty.getByText(/Exact text unavailable/).waitFor();
+  assert.equal(await nonparty.locator("#result-body").textContent(), "");
+  assert.equal(await nonparty.locator("#result-title").textContent(), "Result");
+  assert.equal(await nonparty.locator("#result-copy-link").isVisible(), false);
+  assert.equal(await nonparty.locator("#result-work-action").isVisible(), false);
 });
