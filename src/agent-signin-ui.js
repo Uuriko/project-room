@@ -188,7 +188,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRecord 
   // off to the app and mount the one-time agent orientation (no-op when the
   // agent has already seen it in this browser).
   async function startSession(signinIdentityId, roomId, signinSecret) {
-    const res = await fetch("/api/auth/agent/session", {
+    const issueSession = () => fetch("/api/auth/agent/session", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -203,6 +203,12 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRecord 
       }),
       credentials: "same-origin"
     });
+    // Agent tabs in one browser share the Room cookie. Finish an earlier
+    // response before a later sign-in can replace that cookie.
+    const locks = globalThis.navigator?.locks;
+    const res = locks?.request
+      ? await locks.request("project-room:agent-browser-signin", issueSession)
+      : await issueSession();
     if (!res.ok) {
       if (res.status === 401 && phase === "target-room") {
         secret = "";

@@ -4,7 +4,7 @@ import { openWorkFromSearch, clickWorkAction } from "./room-chrome.mjs";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { chromium } from "playwright";
+import { chromium, request as playwrightRequest } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
@@ -555,6 +555,86 @@ for (const revokeAt of ["before-issue", "after-issue", "active-control"]) {
     } finally {
       release();
       await recipient.close();
+    }
+  });
+}
+
+// A browser context shares one Room cookie across its tabs.
+for (const scope of ["shared-context", "independent-contexts"]) {
+  test(`two saved-agent sign-ins preserve request order (${scope})`, { timeout: 30000 }, async t => {
+    const f = await setup(t, 390);
+    const firstSeat = f.store.identities.create("First saved reviewer");
+    const secondSeat = f.store.identities.create("Second saved reviewer");
+    const firstLink = linkWithProof(f.store, f.keys.owner, "commons", firstSeat, { permissions: ["verify"] });
+    const secondLink = linkWithProof(f.store, f.keys.owner, "commons", secondSeat, { permissions: ["verify"] });
+    assert.notEqual(firstLink.memberId, secondLink.memberId);
+    const first = await f.newRoomPage();
+    const second = scope === "shared-context" ? await first.context().newPage() : await f.newRoomPage();
+    let release, issue;
+    const held = new Promise(resolve => { release = resolve; });
+    const issued = new Promise(resolve => { issue = resolve; });
+    const sessionRoute = "/api/auth/agent/session";
+    let secondPosts = 0;
+    second.on("request", request => {
+      if (request.url().endsWith(sessionRoute)) secondPosts++;
+    });
+    // Keep the proxy's cookie jar separate. route.fetch may otherwise install
+    // response cookies in the browser context before route.fulfill.
+    const proxy = await playwrightRequest.newContext();
+    await first.route("**" + sessionRoute, async route => {
+      const request = route.request();
+      const response = await proxy.post(request.url(), {
+        headers: { authorization: request.headers().authorization, origin: f.origin },
+        data: request.postDataJSON(),
+      });
+      issue(response.status());
+      await held;
+      await route.fulfill({ response });
+    });
+    const submit = async (page, seat, hash) => {
+      await page.goto(f.origin + "/?room=commons" + hash);
+      await page.locator("#agent-signin-button").click();
+      await page.locator('[name="identityId"]').fill(seat.identityId);
+      await page.locator('[name="secret"]').fill(seat.secret);
+      await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+    };
+    const currentSession = async page => {
+      const response = await page.request.get(f.origin + "/api/session");
+      assert.equal(response.status(), 200);
+      return (await response.json()).member.id;
+    };
+    try {
+      const firstResponse = first.waitForResponse(r => r.url().endsWith(sessionRoute));
+      await submit(first, firstSeat, "#pr-record/result/revision-journey/" + f.first.event.id);
+      assert.equal(await issued, 201);
+      const secondResponse = second.waitForResponse(r => r.url().endsWith(sessionRoute));
+      await submit(second, secondSeat, "#pr-record/work/calm-result");
+      if (scope === "shared-context") {
+        await second.waitForFunction(async () => {
+          const locks = await navigator.locks.query();
+          return locks.pending.some(lock => lock.name === "project-room:agent-browser-signin");
+        }, undefined, { timeout: 3000 });
+        assert.equal(secondPosts, 0, "the newer tab has not sent a request while the older response is held");
+      } else {
+        assert.equal((await secondResponse).status(), 201);
+        assert.equal(await currentSession(second), secondLink.memberId);
+      }
+      release();
+      assert.equal((await firstResponse).status(), 201);
+      assert.equal((await secondResponse).status(), 201);
+      await first.locator("#agent-signin-enter-link").waitFor();
+      await second.locator("#agent-signin-enter-link").waitFor();
+      const expectedFirst = scope === "shared-context" ? secondLink.memberId : firstLink.memberId;
+      assert.equal(await currentSession(first), expectedFirst);
+      assert.equal(await currentSession(second), secondLink.memberId);
+      assert.equal(secondPosts, 1);
+      assert.ok((await second.locator("#agent-signin-enter-link").getAttribute("href")).endsWith("#pr-record/work/calm-result"));
+      t.diagnostic(JSON.stringify({ scope, secondPosts, secondKeptItsSeat: true }));
+    } finally {
+      release();
+      await second.close();
+      await first.close();
+      await proxy.dispose();
     }
   });
 }
