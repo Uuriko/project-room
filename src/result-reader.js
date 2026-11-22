@@ -257,8 +257,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
     if (context) context.hidden = !current || !item;
     const verdict = resultElement("result-verdict");
+    // A bounded snapshot can drop the selected work while its exact result
+    // remains open. The server-confirmed verdict still belongs to that result.
     const finding = current && item && matchesReceipt(item.verification, item.receipt) ? item.verification
-      : view.linked ? view.selectedVerdict : null;
+      : view.linked || (current && !item) ? view.selectedVerdict : null;
     verdict.hidden = !view.focused || (!current && !(view.linked && finding && usableText(view)));
     if (!verdict.hidden) {
       verdict.dataset.outcome = finding?.result ?? "pending";
