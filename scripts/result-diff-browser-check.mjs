@@ -629,6 +629,18 @@ for (const scope of ["shared-context", "independent-contexts"]) {
       assert.equal(await currentSession(second), secondLink.memberId);
       assert.equal(secondPosts, 1);
       assert.ok((await second.locator("#agent-signin-enter-link").getAttribute("href")).endsWith("#pr-record/work/calm-result"));
+      if (scope === "shared-context") {
+        const oldTarget = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+        const staleRestore = first.waitForResponse(response => new URL(response.url()).pathname === "/api/session");
+        const orientation = first.locator("#agent-first-run");
+        if (await orientation.isVisible()) await orientation.locator('[data-step="dismiss"]').click();
+        await first.locator("#agent-signin-enter-link").click();
+        assert.equal((await staleRestore).status(), 409);
+        await first.getByText(/This tab’s agent session changed or ended/).waitFor();
+        assert.equal(first.url(), oldTarget);
+        assert.equal(await first.locator("#result-body").getByText("Missing named owner", { exact: false }).count(), 0);
+        assert.equal(await currentSession(second), secondLink.memberId);
+      }
       t.diagnostic(JSON.stringify({ scope, secondPosts, secondKeptItsSeat: true }));
     } finally {
       release();
@@ -638,3 +650,45 @@ for (const scope of ["shared-context", "independent-contexts"]) {
     }
   });
 }
+
+test("an expired agent entry does not fall back to the signed-in human", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const account = f.store.accountForMember("commons", "owner");
+  const human = await f.newRoomPage();
+  await human.goto(f.origin + "/?account=1");
+  await signInFixture(human, f.store.issueAccountAccessKey(account.id));
+
+  const agent = await human.context().newPage();
+  const saved = f.store.identities.create("Saved review agent");
+  linkWithProof(f.store, f.keys.owner, "commons", saved, { permissions: ["verify"] });
+  const hash = "#pr-record/result/revision-journey/" + f.first.event.id;
+  const destination = f.origin + "/?room=commons" + hash;
+  const signIn = f.origin + "/agent-signin?room=commons&record=" + encodeURIComponent(hash);
+  await agent.goto(signIn);
+  await agent.locator('[name="identityId"]').fill(saved.identityId);
+  await agent.locator('[name="secret"]').fill(saved.secret);
+  await agent.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+  await agent.locator("#agent-signin-enter-link").waitFor();
+  const orientation = agent.locator("#agent-first-run");
+  if (await orientation.isVisible()) await orientation.locator('[data-step="dismiss"]').click();
+
+  await agent.context().clearCookies({ name: /room_session$/ });
+  const roomReads = [];
+  agent.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/session" || url.pathname.startsWith("/api/rooms/")) {
+      roomReads.push(url.pathname + url.search);
+    }
+  });
+  await agent.locator("#agent-signin-enter-link").click();
+  await agent.waitForFunction(() =>
+    document.querySelector("#auth-error")?.textContent.includes("intended agent")
+    || document.querySelector("#result-body")?.textContent.includes("Missing named owner"));
+  assert.equal(agent.url(), destination);
+  assert.deepEqual(roomReads, ["/api/session"]);
+  assert.ok(await agent.getByText(/This tab’s agent session changed or ended/).isVisible());
+  assert.equal(await agent.locator("#result-body").getByText("Missing named owner", { exact: false }).count(), 0);
+
+  await human.goto(f.origin + "/?account=1&room=commons" + hash);
+  await human.locator("#result-body").getByText("Missing named owner", { exact: false }).waitFor();
+});

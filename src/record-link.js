@@ -38,3 +38,31 @@ export function agentSigninRecord({ search = "", hash = "" }) {
     return validRecordId(id) ? { roomId: rooms[0], workItemId:id, hash: `#pr-record/work/${encodeURIComponent(id)}` } : null;
   } catch { return null; }
 }
+
+const AGENT_RECORD_BINDING_KEY = "project-room:agent-record-binding";
+
+export function rememberAgentRecordBinding(target, session) {
+  if (!target || target.roomId !== session?.roomId || !/^[a-f0-9]{64}$/.test(session.sessionBinding ?? "")) return;
+  try {
+    sessionStorage.setItem(AGENT_RECORD_BINDING_KEY, JSON.stringify({
+      roomId: target.roomId, hash: target.hash, binding: session.sessionBinding
+    }));
+  } catch { /* Browser storage may be unavailable. */ }
+}
+
+export function agentRecordBinding(locationLike = globalThis.location) {
+  const target = agentSigninRecord(locationLike);
+  if (!target) return null;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(AGENT_RECORD_BINDING_KEY));
+    if (saved?.roomId === target.roomId && saved.hash === target.hash && /^[a-f0-9]{64}$/.test(saved.binding ?? "")) return saved.binding;
+  } catch { /* Ignore missing or invalid navigation state. */ }
+  return null;
+}
+
+export function clearAgentRecordBinding(binding) {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(AGENT_RECORD_BINDING_KEY));
+    if (saved?.binding === binding) sessionStorage.removeItem(AGENT_RECORD_BINDING_KEY);
+  } catch { /* Browser storage may be unavailable. */ }
+}
