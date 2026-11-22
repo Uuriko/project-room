@@ -60,15 +60,25 @@ export async function observeWebhookPull(recipe, { number, head }, options = {})
   if (first.head !== head) return { reason: "stale_head" };
   if (first.state !== "open" || first.draft) return { reason: first.draft ? "draft" : "closed" };
   const checks = [];
+  const checkIds = new Set();
+  let expectedCount;
   let more = true;
   for (let page = 1; more && page <= 4; page++) {
     const reply = await readGithubJson(`repos/${recipe.repository}/commits/${head}/check-runs?filter=all&per_page=100&page=${page}`, request);
-    if (!Array.isArray(reply.value.check_runs)) throw new Error("GitHub did not return check attempts");
-    checks.push(...reply.value.check_runs.map(check => ({ id: check.id, app: check.app?.slug, name: check.name,
-      head: check.head_sha, status: check.status, conclusion: check.conclusion })));
+    const { total_count: count, check_runs: rows } = reply.value ?? {};
+    expectedCount ??= count;
+    if (!Number.isSafeInteger(count) || count < 0 || count > 400 || count !== expectedCount || !Array.isArray(rows))
+      return { reason: "incomplete_checks" };
+    for (const check of rows) {
+      if (check?.head_sha !== head || !Number.isSafeInteger(check.id) || check.id <= 0 || checkIds.has(check.id))
+        return { reason: "incomplete_checks" };
+      checkIds.add(check.id);
+      checks.push({ id: check.id, app: check.app?.slug, name: check.name,
+        head: check.head_sha, status: check.status, conclusion: check.conclusion });
+    }
     more = reply.more;
   }
-  if (more) return { reason: "incomplete_checks" };
+  if (more || checks.length !== expectedCount) return { reason: "incomplete_checks" };
   const verified = await readPull();
   if (Object.keys(first).some(key => first[key] !== verified[key])) return { reason: "pull_changed" };
   return { snapshot: { ...verified, checks, observedAt: Date.now() } };

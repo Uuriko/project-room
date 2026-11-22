@@ -5182,15 +5182,24 @@ touchKeyboard.addEventListener("change", syncComposerHint);
 syncComposerHint();
 $("#message-input").addEventListener("keydown", e => {
   const list = $("#mention-list"), open = list && !list.hidden;
-  const matches = open ? mentionChoices() : [];
-  if (open && matches.length) {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      mentionIndex = (mentionIndex + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length;
+  const move = e.key === "ArrowDown" || e.key === "ArrowUp";
+  if (open && (move || e.key === "Tab" || e.key === "Enter")) {
+    e.preventDefault();
+    const matches = mentionChoices();
+    const selected = list.querySelector('[aria-selected="true"]')?.dataset.mentionId;
+    const index = matches.findIndex(member => member.id === selected);
+    // A roster update can move or remove the option the user saw. Confirm the
+    // exact member if still eligible, or refresh the menu for a new choice.
+    if (index < 0) {
+      mentionIndex = 0;
       renderMentions();
-      return;
+    } else if (move) {
+      mentionIndex = (index + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length;
+      renderMentions();
+    } else {
+      chooseMention(matches[index]);
     }
-    if (e.key === "Tab" || e.key === "Enter") { e.preventDefault(); chooseMention(matches[mentionIndex]); return; }
+    return;
   }
   // Some IME confirmation keys arrive after compositionend; keyCode 229 is the
   // legacy UI Events signal. Neither confirmation nor key repeat sends a message.
@@ -5203,7 +5212,12 @@ $("#mention-list")?.addEventListener("mousedown", e => {
   const option = e.target.closest("[data-mention-id]");
   if (!option) return;
   e.preventDefault();
-  chooseMention(state.members[option.dataset.mentionId]);
+  const member = mentionChoices().find(candidate => candidate.id === option.dataset.mentionId);
+  if (member) chooseMention(member);
+  else {
+    mentionIndex = 0;
+    renderMentions();
+  }
 });
 // C6: the owner's pause roster is one read when People opens and after each
 // action; the row buttons never appear for non-owners or inactive agents.

@@ -15,9 +15,9 @@ import { linkWithProof } from "./helpers/link-with-proof.mjs";
 // F5: read-only usage summary per room.
 const DAY = 86400000;
 
-async function serve(t) {
+async function serve(t, options) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-usage-"));
-  const store = new RoomStore(join(directory, "room.sqlite"));
+  const store = new RoomStore(join(directory, "room.sqlite"), options);
   store.initialize(initialRoom());
   store.initialize(initialRoom("lab"));
   let now = Date.parse("2026-09-14T12:00:00.000Z");
@@ -36,6 +36,17 @@ async function serve(t) {
   };
   return { origin, ownerKey, store, get, cmd, usage, clock };
 }
+
+test("projection headroom uses the configured write limit", async t => {
+  const projectionByteLimit = 6 * 1024 * 1024;
+  const { usage } = await serve(t, { projectionByteLimit });
+  const { status, body } = await usage();
+  assert.equal(status, 200);
+  const { used, limit, remaining } = body.caps.projectionBytes;
+  assert.ok(used > 0);
+  assert.equal(limit, projectionByteLimit);
+  assert.equal(remaining, projectionByteLimit - used);
+});
 
 test("agents are never counted as human seats; identities are counted separately", async t => {
   const { ownerKey, store, cmd, usage } = await serve(t);

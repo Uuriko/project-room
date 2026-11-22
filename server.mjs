@@ -1,5 +1,5 @@
 import { readInstanceCardFiles } from './server/instance-card-runtime.mjs';
-import { mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { RoomStore } from "./server/store.mjs";
 import { stitchConfigFromEnv } from "./server/inbox-stitch.mjs";
@@ -17,6 +17,7 @@ import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
+import { startCompletionPickup } from "./server/completion-pickup.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -44,7 +45,9 @@ const lockPath = process.env.ROOM_INSTANCE_LOCK_PATH || join(dirname(filename), 
 const instanceLock = paused ? null : acquireInstanceLock(lockPath);
 let store = null;
 try {
-  store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(process.env) });
+  const projectionByteLimit = process.env.ROOM_LEGACY_PROJECTION_BYTES === undefined
+    ? undefined : Number(process.env.ROOM_LEGACY_PROJECTION_BYTES);
+  store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(process.env), projectionByteLimit });
   if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); store = null; throw new Error("Provision a room before deployment"); }
 } catch (error) { instanceLock?.release(); throw error; }
 // Event-push dispatch: after an event commit journals webhook deliveries,
@@ -94,7 +97,9 @@ const server = paused ? createServer((req, res) => {
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
 }) : createRoomServer({ ...serverArgs, gzipAsset: promisify(gzip) });
-server.on('close', () => nodeJobs?.stop());
+const pickupConfig = process.env.ROOM_COMPLETION_PICKUP_CONFIG ?? join(dirname(filename), "completion-pickup.json");
+const stopCompletionPickup = store && existsSync(pickupConfig) ? startCompletionPickup(store, pickupConfig) : () => {};
+server.on('close', () => { stopCompletionPickup(); nodeJobs?.stop(); });
 // Track C C11 — growth collector persistence. The snapshot lives in its own
 // JSON file next to the store file; it never touches the store schema. Any
 // failure here only costs analytics history, never boot or shutdown.
