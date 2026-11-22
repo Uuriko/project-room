@@ -609,6 +609,8 @@ export default {
   "composer.viewSaved": "View message",
   "composer.mentionUnresolved": " · A mention could not select a recipient. Choose a member to notify.",
   "composer.wakeDisposition": " · {name} — {status}",
+  "composer.storageRetry": "Draft kept. Give storage time to recover, then retry the original. If writes still fail, contact the Room operator.",
+  "composer.storageRetryAfter": "Draft kept. Wait at least {seconds} seconds, then retry the original. If writes still fail, contact the Room operator.",
   "composer.wakeEvidenceUnknown": " · Wake status unavailable for this saved send.",
   "composer.wakeQueued": "Wake queued",
   "composer.noReceiver": "No receiver connected",
