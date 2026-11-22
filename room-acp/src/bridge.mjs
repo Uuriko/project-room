@@ -555,27 +555,42 @@ export class Bridge {
         if (runnable && item.reason === READY_WORK_REASON) promptClaim = await this.readyWorkCurrent(claimId, item.messageId);
         if (this.controller.signal.aborted) return;
         const prompt = promptClaim && buildClaimPrompt({ roomTitle: this.title, claim: promptClaim, author: item.author });
-        const started = this.claimReceipts.begin(item.signalId, prompt ? {} : {
-          phase: "discarded", ...(runnable ? { disposition: "ready_work_stale" } : {})
-        });
-        receipt = started.receipt;
-        if (started.fresh && prompt) {
+        if (!prompt) {
+          const discarded = this.claimReceipts.begin(item.signalId, {
+            phase: "discarded", ...(runnable ? { disposition: "ready_work_stale" } : {})
+          });
+          receipt = discarded.receipt;
+          if (discarded.fresh && runnable) {
+            this.log(`claim ${claimId} ready_work wake is stale: dependent or prerequisites changed since the wake; no turn`);
+            this.stats.stale++;
+          }
+        } else {
+          const alreadyOwned = new Error("Another host owns the claim turn");
           let body;
           try {
-            const { recorder, stopReason } = await this.host.prompt(threadKey, prompt, { sessionId });
+            const { recorder, stopReason } = await this.host.prompt(threadKey, prompt, {
+              sessionId,
+              beforeDispatch: () => {
+                const started = this.claimReceipts.begin(item.signalId);
+                receipt = started.receipt;
+                if (!started.fresh) throw alreadyOwned;
+              }
+            });
             body = renderTurn(recorder, { stopReason });
             this.stats.turns++;
           } catch (error) {
-            this.log(`claim turn failed: ${error.message}`);
-            if (this.controller.signal.aborted) return;
-            body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
+            if (error !== alreadyOwned) {
+              if (!receipt) throw error; // No frame was offered to the provider.
+              this.log(`claim turn failed: ${error.message}`);
+              if (this.controller.signal.aborted) return;
+              body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
+            }
           }
-          receipt = { ...receipt, phase: "result", body: body.length > MAX_CLAIM_NOTE ? body.slice(0, MAX_CLAIM_NOTE - 1) + "…" : body };
-          this.claimReceipts.save(key, receipt);
-        }
-        if (started.fresh && runnable && !prompt) {
-          this.log(`claim ${claimId} ready_work wake is stale: dependent or prerequisites changed since the wake; no turn`);
-          this.stats.stale++;
+          if (body !== undefined) {
+            if (!receipt) throw new Error("ACP host did not record the claim dispatch");
+            receipt = { ...receipt, phase: "result", body: body.length > MAX_CLAIM_NOTE ? body.slice(0, MAX_CLAIM_NOTE - 1) + "…" : body };
+            this.claimReceipts.save(key, receipt);
+          }
         }
       }
       if (receipt.phase === "started") {

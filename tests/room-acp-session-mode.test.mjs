@@ -37,6 +37,33 @@ test("a delayed ACP pipe error retires the peer and rejects all pending requests
   }
 });
 
+test("ACP runs the write guard only for serializable frames on an open peer", async t => {
+  const input = new PassThrough();
+  const output = new PassThrough({ highWaterMark: 1 });
+  const peer = createPeer({ input, output });
+  t.after(() => { peer.close(); input.destroy(); output.destroy(); });
+  let guarded = 0;
+  const beforeWrite = () => { guarded++; };
+  const circular = {};
+  circular.self = circular;
+  await assert.rejects(peer.request("session/prompt", circular, { beforeWrite }), { code: -32000 });
+  assert.equal(guarded, 0);
+
+  const refusal = new Error("receipt already owned");
+  await assert.rejects(peer.request("session/prompt", {}, { beforeWrite: () => { throw refusal; } }), refusal);
+  assert.equal(output.readableLength, 0);
+
+  const pending = peer.request("session/prompt", {}, { beforeWrite });
+  const frame = JSON.parse(output.read().toString());
+  assert.equal(guarded, 1);
+  input.write(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: { stopReason: "end_turn" } }) + "\n");
+  assert.deepEqual(await pending, { stopReason: "end_turn" });
+
+  peer.close();
+  await assert.rejects(peer.request("session/prompt", {}, { beforeWrite }), { message: "connection closed" });
+  assert.equal(guarded, 1);
+});
+
 function mockHost({ saved = null, mode = "read-only", loadError = null, modeError = null } = {}) {
   const calls = [], writes = [], logs = [];
   const savedSessions = new Map(saved ? [["thread", saved]] : []);
