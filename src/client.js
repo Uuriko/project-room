@@ -1252,12 +1252,14 @@ export class RoomClient {
   }
   // C2: one read-only GET of the selected-work view, used to preview what an agent
   // can access before a run. It never starts, claims or acknowledges anything.
-  async workContext(workItemId) {
+  async workContext(workItemId, { includeReplies = true } = {}) {
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
     const generation = this.generation, session = this.session;
     try {
-      const value = await this.request(this.path(`/work-context?${new URLSearchParams({ workItemId })}`));
+      const params = new URLSearchParams({ workItemId });
+      if (!includeReplies) params.set("includeReplies", "false");
+      const value = await this.request(this.path(`/work-context?${params}`));
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(value, session)) { this.endAccess(); return null; }
       verifyAccessSummary(value, { roomId: session.roomId, workItemId });

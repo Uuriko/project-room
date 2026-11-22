@@ -166,7 +166,7 @@ export function accessSummary({ item, linked, participantIds }) {
 
 // An authenticated selected read, not the deliberately narrower portable export.
 // All input comes from one committed Room projection and one service clock.
-export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null, replacementAvailable = null, sourceObservation = undefined, dependencies = undefined }) {
+export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, includeReplies = true, floor = null, messageRecords = null, replacementAvailable = null, sourceObservation = undefined, dependencies = undefined }) {
   if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
   const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
   // Work assignment does not expand a targeted message's audience. Apply the
@@ -221,7 +221,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
     workThread: { workItemId, href: workThreadHref(workItemId) },
-    replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor),
+    ...(includeReplies ? { replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor) } : {}),
     publishedVerdicts: workPublishedVerdicts(item),
     resume: workResume(work, now, state.room.ownerId, next),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
