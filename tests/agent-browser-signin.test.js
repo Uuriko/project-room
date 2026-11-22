@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
+import { privateMarkers, privateWorkFixture } from "./helpers/private-work-fixture.mjs";
 
 const startServer = async (t, f) => {
   const server = createRoomServer({ store: f.store });
@@ -106,6 +107,38 @@ test("POST /api/auth/agent/session creates browser session for linked agent", as
   const cookie = res.headers.get("set-cookie");
   assert.ok(cookie && cookie.includes("HttpOnly"), "Session cookie must be HttpOnly");
 });
+
+for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`a linked nonparticipant cannot sign into a private corrected completion (${representation})`, async t => {
+    const f = await privateWorkFixture(t, representation);
+    const path = "/api/auth/agent/session";
+    const { eventId: completionEventId } = f.item("secret").receipt;
+    const room = { roomId: "commons" };
+    const record = { ...room, workItemId: "secret", completionEventId };
+    const signIn = (member, selection) => post(f.origin, path, { identityId: member.id, ...selection }, member.secret);
+    const sessionCount = () => f.store.db.prepare(
+      "SELECT count(*) AS count FROM credentials WHERE room_id = ? AND member_id = ? AND kind = 'session'"
+    ).get("commons", f.observer.id).count;
+
+    const producer = await signIn(f.producer, record);
+    assert.equal(producer.status, 201);
+    assert.match(producer.headers.get("set-cookie"), /room_session=/);
+
+    const before = sessionCount();
+    const denied = await signIn(f.observer, record);
+    assert.equal(denied.status, 403);
+    assert.equal(denied.headers.has("set-cookie"), false);
+    const response = await denied.text();
+    assert.equal(JSON.parse(response).error.code, "work_private");
+    assert.deepEqual(privateMarkers(response), []);
+    assert.equal(sessionCount(), before);
+
+    const ordinary = await signIn(f.observer, room);
+    assert.equal(ordinary.status, 201);
+    assert.match(ordinary.headers.get("set-cookie"), /room_session=/);
+    assert.equal(sessionCount(), before + 1);
+  });
+}
 
 test("POST /api/auth/agent/session rejects unlinked room", async t => {
   const f = createAcceptanceFixture();
