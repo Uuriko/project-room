@@ -35,7 +35,7 @@ function mockGitHub({ checks = "success", sha = SHA, notFound = false } = {}) {
     }
     let body;
     if (url.includes("/check-runs")) {
-      body = { check_runs: [{ status: "completed", conclusion: checks, name: "unit" }] };
+      body = { total_count: 1, check_runs: [{ status: "completed", conclusion: checks, name: "unit" }] };
     } else if (url.endsWith("/status")) {
       body = { state: checks };
     } else {

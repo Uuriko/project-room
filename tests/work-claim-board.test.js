@@ -45,8 +45,9 @@ function fakeGitHub(phase) {
         statuses: [{ state: failure ? "failure" : "pending", target_url: "https://example.com/ci" }]
       });
     }
-    if (target.endsWith("/check-runs")) {
+    if (new URL(target).pathname.endsWith("/check-runs")) {
       return githubResponse({
+        total_count: 1,
         check_runs: phase.failure === true
           ? [{ conclusion: "failure" }]
           : [{ status: "in_progress", conclusion: null }]

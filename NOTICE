@@ -31,3 +31,11 @@ src/bundled/github/watch.ts in block/buzz-app@5a21469faa8c53d20105d58c592a48f68c
 https://github.com/block/buzz-app/blob/5a21469faa8c53d20105d58c592a48f68c6dcf7c/src/bundled/github/watch.ts
 Room uses explicit check providers and names, exact candidate offers, replay-safe
 checkpoints, and event-triggered reads. Buzz merge policy and timers are omitted.
+
+Block Buzz GitHub check coverage adaptation
+Copyright 2026 Block, Inc. Licensed under the Apache License, Version 2.0.
+server/claim-pr-sync.mjs adapts the bounded check-runs page read and
+completeness check from src/bundled/github/checks.ts in block/buzz-app.
+https://github.com/block/buzz-app/blob/352f46e77e4eb0682fe2c29b7139f823f2effc74/src/bundled/github/checks.ts
+Room retains its per-tick budget, authenticated split cursor, and combined
+status rollup. It additionally checks for changed counts and overlapping runs.

@@ -226,6 +226,7 @@ const pullRequestOf = value => {
   let rateLimitedUntil = null;
   let pollBackoffMs = null;
   let ciCursor = null;
+  let ciReadHeadSha = null;
   let ciStatus = null;
   if (value !== null && typeof value === "object") {
     if (value.outcome !== undefined && value.outcome !== null) {
@@ -256,6 +257,10 @@ const pullRequestOf = value => {
       check(value.ciCursor === "status" || value.ciCursor === "checks" || value.ciCursor === "done", "pullRequest ciCursor must be status, checks, or done");
       ciCursor = value.ciCursor;
     }
+    if (value.ciReadHeadSha != null) {
+      check(typeof value.ciReadHeadSha === "string" && /^[0-9a-f]{40}$/.test(value.ciReadHeadSha), "pullRequest ciReadHeadSha must be a commit sha");
+      ciReadHeadSha = value.ciReadHeadSha;
+    }
     if (value.ciStatus !== undefined && value.ciStatus !== null) {
       // The digest of a combined status fetched by a split CI read (#2841):
       // it rides with ciCursor "checks" so the resumed read can roll it up.
@@ -274,7 +279,7 @@ const pullRequestOf = value => {
   }
   return Object.freeze({
     url: parsed.url, repo: parsed.repo, number: parsed.number, outcome, syncedAt, nextPollAt,
-    etag, rateLimitedUntil, pollBackoffMs, ciCursor, ciStatus
+    etag, rateLimitedUntil, pollBackoffMs, ciCursor, ciReadHeadSha, ciStatus
   });
 };
 const pullRequestsOf = value => {

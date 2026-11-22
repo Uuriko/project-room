@@ -264,7 +264,7 @@ async function fetchCommitDocument(url, { fetchImpl, token, nowMs, deadline = In
   if (!response.ok) return { kind: "error" };
   const read = await readJson(response);
   if (read.error) return { kind: "error" };
-  return { kind: "ok", body: read.body };
+  return { kind: "ok", body: read.body, hasNextPage: /rel="next"/.test(responseHeader(response, "link") ?? "") };
 }
 
 // The rollup reads only the combined status's state, its total_count, and
@@ -322,20 +322,42 @@ async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, bud
     cursor = "checks";
   }
   if (cursor === "checks") {
-    if (budget.remaining <= 0 || Date.now() > deadline) return { cursor, partial: true, status, budget: Date.now() > deadline };
-    budget.remaining -= 1;
-    const read = await fetchCommitDocument(`${base}/check-runs`, { fetchImpl, token, nowMs, deadline });
-    if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
-    if (read.kind === "rateLimited" || read.kind === "unconfigured") return { ...read, status, cursor };
-    // Same guard for the check-runs leg: a failed fetch must not advance
-    // the cursor to "done" or record a rollup built from the status alone.
-    // The status already fetched rides along so the resume keeps it.
-    if (read.kind !== "ok") return { cursor, partial: true, status };
-    checkRuns = Array.isArray(read.body?.check_runs) ? read.body.check_runs : [];
-    cursor = "done";
+    // Adapted from Block Buzz App's bounded readChecks in
+    // src/bundled/github/checks.ts at 352f46e77e4eb0682fe2c29b7139f823f2effc74.
+    // Apache-2.0. Room keeps its shared request budget and existing split cursor.
+    let expectedTotal;
+    const seenIds = new Set();
+    for (let page = 1; page <= 3; page++) {
+      if (budget.remaining <= 0 || Date.now() > deadline) return { cursor, partial: true, status, budget: Date.now() > deadline };
+      budget.remaining -= 1;
+      const read = await fetchCommitDocument(`${base}/check-runs?per_page=100&page=${page}&filter=latest`,
+        { fetchImpl, token, nowMs, deadline });
+      if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
+      if (read.kind === "rateLimited" || read.kind === "unconfigured") return { ...read, status, cursor };
+      if (read.kind !== "ok") return { cursor, partial: true, status };
+      const batch = read.body?.check_runs;
+      const total = read.body?.total_count;
+      if (!Array.isArray(batch) || !Number.isSafeInteger(total) || total < 0
+        || expectedTotal !== undefined && total !== expectedTotal
+        || checkRuns.length + batch.length > total) break;
+      expectedTotal = total;
+      const ids = batch.map(run => run?.id).filter(Number.isSafeInteger);
+      if (new Set(ids).size !== ids.length || ids.some(id => seenIds.has(id))
+        || batch.some(run => !run || typeof run !== "object" || run.head_sha && run.head_sha !== headSha)) break;
+      for (const id of ids) seenIds.add(id);
+      checkRuns.push(...batch);
+      if (checkRuns.length === total && !read.hasNextPage) {
+        cursor = "done";
+        break;
+      }
+      if (!batch.length || !token) break;
+    }
   }
   const rollup = rollupClaimCi({ status, checkRuns, pullUrl: pullRequest.url });
-  return { cursor, ci: { state: rollup.state, url: rollup.url, headSha } };
+  // An incomplete observation cannot prove success, but an observed failure
+  // still has to reach the claim's existing failure notification.
+  const state = cursor === "done" || rollup.state === "failure" ? rollup.state : "pending";
+  return { cursor: "done", ci: { state, url: rollup.url, headSha } };
 }
 
 function delayFor(item, kind, token) {
@@ -364,16 +386,21 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
     }
     if (budget.remaining <= 0 || rateLimitedUntil) break;
     if (Date.now() > deadline) { budgetExceeded = true; break; }
-    const continuing = (item.pullRequest.ciCursor === "status" || item.pullRequest.ciCursor === "checks") && SHA.test(item.ci?.headSha ?? "");
+    const { ciCursor, ciReadHeadSha } = item.pullRequest;
+    const unfinished = ciCursor === "status" || ciCursor === "checks";
+    const continuing = unfinished && SHA.test(ciReadHeadSha ?? "");
     // A verification candidate (#3661) gets exactly one lookup: no CI read
     // rides along on a claim that is already done.
     const verifyOnly = !pullRequestDue(item, nowMs) && pullVerificationDue(item, nowMs);
     let looked;
     if (continuing) {
-      looked = { kind: "open", etag: item.pullRequest.etag, headSha: item.ci.headSha, continued: true };
+      looked = { kind: "open", etag: item.pullRequest.etag, headSha: ciReadHeadSha, continued: true };
     } else {
       budget.remaining -= 1;
-      looked = await lookupPull(item.pullRequest, { fetchImpl, token, nowMs, deadline });
+      // A legacy cursor has no head binding. Read the pull again, allowing
+      // neither a cached 304 nor an old status digest to resume that cursor.
+      const pull = unfinished ? { ...item.pullRequest, etag: null } : item.pullRequest;
+      looked = await lookupPull(pull, { fetchImpl, token, nowMs, deadline });
       if (looked.kind === "budget") { budgetExceeded = true; break; }
     }
     if (looked.kind === "open" && !verifyOnly && SHA.test(looked.headSha ?? "") && looked.kind !== "rateLimited") {
@@ -517,6 +544,7 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       next = { ...next, pullRequest: {
         ...next.pullRequest,
         ciCursor: result.ciCursor,
+        ciReadHeadSha: result.ciCursor === "done" ? null : result.headSha,
         // The combined-status digest of a split read rides with its cursor.
         // A completed read folded the status into result.ci, so it clears;
         // a result carrying no digest keeps the one already stored.
