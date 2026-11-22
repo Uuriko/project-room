@@ -35,10 +35,9 @@ export async function signInFixture(page, accessKey, { returnTo = page.url(), la
     if (!account.authenticated || !account.account?.id) throw new Error("Fixture login did not return an account");
     await page.evaluate(destination => globalThis.history.replaceState(globalThis.history.state, "", destination), target.href);
     await page.reload();
-    if (target.searchParams.has("room")) {
-      await page.locator("#auth-panel:visible, #account-rooms-panel:visible, #main:visible").first().waitFor({ state: "visible" });
-      if (await page.locator("#main").isVisible()) await settleLanding(page, landing);
-    }
+    // An account lands in a room or in its Rooms list; settle a room landing.
+    await page.locator("#account-rooms-panel:visible, #main:visible").first().waitFor({ state: "visible" });
+    if (await page.locator("#main").isVisible()) await settleLanding(page, landing);
     return account;
   }
   if (response.status() !== 201) throw new Error(`Fixture credential login failed (${response.status()})`);
@@ -54,7 +53,7 @@ export async function signInFixture(page, accessKey, { returnTo = page.url(), la
 
 // The first snapshot reveals #main and opens Updates in the same task, so
 // the landing is settled once #main is visible.
-async function settleLanding(page, landing) {
+export async function settleLanding(page, landing = "conversation") {
   if (landing !== "conversation") return;
   const conversation = page.locator("#updates-close");
   if (await conversation.isVisible()) {

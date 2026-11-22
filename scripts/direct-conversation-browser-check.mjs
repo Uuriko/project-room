@@ -1,4 +1,5 @@
 // Disposable local rooms; no production messages or accounts are touched.
+import { openConversation } from './room-chrome.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
@@ -134,6 +135,7 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
   assert.equal(await page.locator('#conversation-title').innerText(), 'Alice');
   await page.reload();
   await page.waitForFunction(() => document.querySelector('#conversation-title').textContent === 'Alice');
+  await openConversation(page); // #6322: a reload lands on Updates over the restored DM
   assert.equal(await input.inputValue(), '');
   await input.fill('Alice after send');
   if (width === 1440) {
