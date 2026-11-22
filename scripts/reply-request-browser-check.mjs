@@ -185,6 +185,34 @@ test("unconfirmed receipt locks the exact request; ordinary drafts remain separa
 });
 
 
+test("the original private request keeps receipt and acceptance separate from provider start", { timeout: 30000 }, async t => {
+  const f = await setup(t, { width: 390, height: 844 });
+  const id = "provider-start-unconfirmed";
+  f.request(id, "producer");
+  const owner = await f.login("owner");
+  const row = await record(owner, id);
+  const run = row.locator("[data-request-run]");
+  assert.equal(await run.textContent(), "");
+
+  const progress = state => f.send("producer", "reply_request.progressed", {
+    requestMessageId: id, expectedRequestRevision: 0, progress: state
+  });
+  progress("acknowledged");
+  await run.filter({ hasText: /^Acknowledged · start unconfirmed$/ }).waitFor();
+  assert.equal(await row.getByRole("button", { name: /retry/i }).count(), 0);
+
+  progress("accepted");
+  await run.filter({ hasText: /^Accepted · start unconfirmed$/ }).waitFor();
+  assert.equal(f.state().replyRequests[id].revision, 0);
+
+  const selected = f.store.replyRequests.selected(f.keys.producer, "commons", id);
+  const command = selected.responseHttpActions.find(action => action.command.data.responseOutcome === "answered").command;
+  f.send("producer", command.type, { ...command.data, body: "Reviewed the original request." });
+  await row.getByText("Answered", { exact: true }).waitFor();
+  assert.equal(await run.textContent(), "");
+  assert.deepEqual(f.errors, []);
+});
+
 test("original conversation shows host progress and recovery without changing the request", { timeout: 60000 }, async t => {
   const f = await setup(t), requestMessageId = "host-visible";
   f.request(requestMessageId, "producer");

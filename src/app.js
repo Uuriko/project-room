@@ -3191,9 +3191,15 @@ function restoreComposer(draft) {
   autosizeComposer();
 }
 function requestRunLabel(id) {
-  if(client.sectionAvailability('requestRuns')?.available===false)return uiText("currentRoom.executionUnavailable");
-  const run = requestRuns[id];
-  if (!run || state?.replyRequests?.[id]?.status !== "open") return "";
+  const request = state?.replyRequests?.[id];
+  if (request?.status !== "open") return "";
+  const unavailable = client.sectionAvailability("requestRuns")?.available === false;
+  const run = unavailable ? undefined : requestRuns[id];
+  if (!run) {
+    if (request.progressState === "acknowledged") return "Acknowledged · start unconfirmed";
+    if (request.progressState === "accepted") return "Accepted · start unconfirmed";
+    return unavailable ? uiText("currentRoom.executionUnavailable") : "";
+  }
   const status = run.state === "working" && Date.now() - run.updatedAt > 120000 ? "unknown" : run.state;
   return ({ working: "Agent working", result_ready: "Result saved · delivery pending",
     needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
