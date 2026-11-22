@@ -98,7 +98,7 @@ function firstAddressedSequence(db,roomId,memberId,after,headSequence,b){
 }
 // Conversation delivery and standing obligations are separate cursors. Reading
 // a source window neither acknowledges conversation nor clears formal work.
-export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,olderCursor,expectedSessionBinding=null,skipUnaddressed=false}={}){
+export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,olderCursor,expectedSessionBinding=null,skipUnaddressed=false,conversationOnly=false}={}){
  return store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
   const auth=store.authenticate(secret,roomId,expectedSessionBinding),memberId=auth.member.id,head=readCurrentHead(store.db,roomId);
   const floor=store.historyFloor(roomId,memberId,head.sequence);
@@ -168,6 +168,9 @@ export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,older
     if(parent?.authorId===memberId)replies.push({...row,inReplyTo:e.data.replyToId});
    }
   }
+  if(conversationOnly)return {directMessages,directMentions,replies,older,
+   cursor:{after:page.next,hasMore:page.hasMore},
+   coverage:{conversation:{examined:recent?older.examined:examined}}};
   const ownerId=store.roomAuthority(roomId,{memberId}).ownerId,discovery=readCurrentInboxDiscovery(store,roomId,auth.member,ownerId,floor,b),replyRequests=discovery.requests;
   const workNext={tool:'room_list_work',arguments:{roomId,focus:'needs_me',limit:1}};
   const requestStates={};
