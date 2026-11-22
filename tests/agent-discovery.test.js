@@ -711,6 +711,13 @@ test("front-door packets scope the query-parameter rule and name the no-credenti
   assert.ok(full.includes("no-credential catalog") || full.includes("no-credential catalog is seven"), "llms-full.txt: the anonymous catalog must be named distinctly");
 });
 
+test("the full packet carries the public investigation path when the room has no claimable tasks", () => {
+  const emptyBoard = llmsFullTxt().split("\n").find(line => line.startsWith("Empty board"));
+  assert.match(emptyBoard, /roomId=ROOM_ID&view=pickup/);
+  assert.match(emptyBoard, /follow (?:the returned )?nextAction/);
+  assert.match(emptyBoard, /submitFinding/);
+});
+
 test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
   const text = llmsTxt();
   // llmstxt.org: H1, then a blockquote summary, before anything else.
