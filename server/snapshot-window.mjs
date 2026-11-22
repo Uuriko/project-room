@@ -143,7 +143,7 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
       fail(409, "current_snapshot_selection_unavailable", "Use the bounded current room window and addressed detail reads");
     const readWindow = ({ workLimit, messageLimit, eventLimit }) => store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {
       const auth = store.authenticate(token, roomId, fence);
-      return withCurrentWorkSummaryReuse(store,roomId,auth.member.id,()=>{
+      const snapshot = withCurrentWorkSummaryReuse(store,roomId,auth.member.id,()=>{
       const overview = store.currentOverview(roomId, auth.member.id, { limit:workLimit });
       const conversation = readConversation(store, token, roomId, { limit:messageLimit, expectedSessionBinding: fence });
       const channelKeys=store.db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='channels' AND present=1 ORDER BY record_key LIMIT 51").all(roomId);
@@ -156,21 +156,6 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
       const events=eventPage.events.map(row=>row.event),eventLog=auditView==='activity'?events.filter(e=>e.type==='decision.recorded'||/^(work\.|work_claim\.|verification\.|owner_decision\.)/.test(e.type)||e.data?.workItemId!==undefined):events;
       const cursor=store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get(roomId,auth.member.id)?.sequence??0;
       const floor=readCurrentHistoryFloor(store.db,roomId,auth.member.id,b),catchUpCursor=Math.max(cursor,floor?floor.sequence-1:0);
-      const replyRequests=Object.create(null),requestIds=new Set(conversation.messages.flatMap(m=>[m.id,m.responseToRequestId]).filter(Boolean));
-      let requestCoverage = "visible-conversation-records";
-      try {
-        for (const id of requestIds) {
-          const request = readCurrentRecord(store.db, roomId, 'replyRequests', id, b);
-          if (request && [request.requesterId, request.recipientId].includes(auth.member.id)) {
-            Object.defineProperty(replyRequests, id, { value: request, enumerable: true });
-          }
-        }
-      } catch (error) {
-        if (!(error instanceof CurrentReadBudgetExceeded)) throw error;
-        // The bounded window already has its authority and conversation data.
-        // Exact request reads can still recover any metadata omitted here.
-        requestCoverage = "partial-visible-conversation-records";
-      }
 
       // This is explicitly a partial current view. Neither omitted counts nor
       // absent request/work records mean that the room contains no more work.
@@ -180,7 +165,7 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
         ...(auditView==='activity'?{auditView,auditVersion:1}:{}),
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null,
-        state: { ...overview.state,channels,eventLog,replyRequests, messages: conversation.messages,
+        state: { ...overview.state,channels,eventLog,replyRequests:Object.create(null), messages: conversation.messages,
           pins:(overview.state.pins??[]).filter(pin=>conversation.messages.some(message=>message.id===pin.messageId&&!message.deletedAt&&message.body!=null)) },
         pinsWindow:{complete:false,coverage:'visible-conversation-records',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/pins`}},
         channelsWindow:{complete:true,shown:channelKeys.length},
@@ -188,9 +173,24 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
         messagesWindow: { mode: "recent", omitted: null, complete: conversation.nextCursor === null },
         messagesPage: { cursor: conversation.nextCursor, hasMore: conversation.nextCursor !== null, contractVersion: 2, limit: messageLimit },
         workWindow: overview.workWindow,
-        sections: { assistant:{available:true,coverage:'selected-run-window',maxRuns:100},requestRuns:{available:false,code:'current_request_runs_unavailable'},notifications:{available:false,code:'current_notification_aggregate_unavailable'},updates:{available:false,replacement:'needs-me',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/needs-me`}},returnBrief:{available:true,coverage:'visible-history-window',sourceLimit:16},files:{available:true,coverage:'selected-messages',complete:false},fileUploads:{available:true}, helpOffers: { available: false, code: "current_help_offers_unavailable" }, replyRequests: { available: true,complete:false,coverage:requestCoverage, nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } } } }
+        sections: { assistant:{available:true,coverage:'selected-run-window',maxRuns:100},requestRuns:{available:false,code:'current_request_runs_unavailable'},notifications:{available:false,code:'current_notification_aggregate_unavailable'},updates:{available:false,replacement:'needs-me',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/needs-me`}},returnBrief:{available:true,coverage:'visible-history-window',sourceLimit:16},files:{available:true,coverage:'selected-messages',complete:false},fileUploads:{available:true}, helpOffers: { available: false, code: "current_help_offers_unavailable" }, replyRequests: { available: true,complete:false,coverage:"visible-conversation-records", nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } } } }
       };
       });
+      // Keep the same read transaction and budget. Finish the summary reuse
+      // checks before optional rows can consume the remaining input budget.
+      const requestIds = new Set(snapshot.state.messages.flatMap(message => [message.id, message.responseToRequestId]).filter(Boolean));
+      try {
+        for (const id of requestIds) {
+          const request = readCurrentRecord(store.db, roomId, 'replyRequests', id, b);
+          if (request && [request.requesterId, request.recipientId].includes(auth.member.id)) {
+            Object.defineProperty(snapshot.state.replyRequests, id, { value: request, enumerable: true });
+          }
+        }
+      } catch (error) {
+        if (!(error instanceof CurrentReadBudgetExceeded)) throw error;
+        snapshot.sections.replyRequests.coverage = "partial-visible-conversation-records";
+      }
+      return snapshot;
     }, { maxRecords: 1024 }));
     try {
       return readWindow({ workLimit:8, messageLimit:8, eventLimit:16 });
