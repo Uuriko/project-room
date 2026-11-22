@@ -629,6 +629,18 @@ for (const scope of ["shared-context", "independent-contexts"]) {
       assert.equal(await currentSession(second), secondLink.memberId);
       assert.equal(secondPosts, 1);
       assert.ok((await second.locator("#agent-signin-enter-link").getAttribute("href")).endsWith("#pr-record/work/calm-result"));
+      if (scope === "shared-context") {
+        const oldTarget = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+        const staleRestore = first.waitForResponse(response => new URL(response.url()).pathname === "/api/session");
+        const orientation = first.locator("#agent-first-run");
+        if (await orientation.isVisible()) await orientation.locator('[data-step="dismiss"]').click();
+        await first.locator("#agent-signin-enter-link").click();
+        assert.equal((await staleRestore).status(), 409);
+        await first.getByText(/Another sign-in changed this browser’s agent session/).waitFor();
+        assert.equal(first.url(), oldTarget);
+        assert.equal(await first.locator("#result-body").getByText("Missing named owner", { exact: false }).count(), 0);
+        assert.equal(await currentSession(second), secondLink.memberId);
+      }
       t.diagnostic(JSON.stringify({ scope, secondPosts, secondKeptItsSeat: true }));
     } finally {
       release();

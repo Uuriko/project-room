@@ -55,6 +55,7 @@ import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUN
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { agentRecordBinding, clearAgentRecordBinding } from "./record-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -8414,6 +8415,7 @@ if (initialInvitationFragment && !initialInvitationFragment.redirect && !initial
 // redemption and other landing effects must never be replayed by this loop.
 async function restoreAtStartup(roomId = null) {
   const controller = new AbortController(), destination = location.href;
+  const binding = roomId === null ? agentRecordBinding(location) : null;
   startupRestoreController?.abort(); startupRestoreController = controller;
   const cancelled = () => Object.assign(new Error("Startup restore superseded"), { startupCancelled: true });
   let waited = 0;
@@ -8421,11 +8423,15 @@ async function restoreAtStartup(roomId = null) {
     for (let attempt = 0; ; attempt++) {
       if (controller.signal.aborted || location.href !== destination) throw cancelled();
       try {
-        const restored = await client.restore(roomId);
+        const restored = await client.restore(roomId, { roomSessionBinding: binding });
         if (!restored || controller.signal.aborted) throw cancelled();
+        if (binding) clearAgentRecordBinding(binding);
         return restored;
       } catch (error) {
         if (error.startupCancelled || controller.signal.aborted || location.href !== destination) throw cancelled();
+        if (binding && error.code === "session_binding_changed") {
+          throw Object.assign(error, { agentRecordSessionChanged: true });
+        }
         const delay = Math.max(250, error.retryAfterMs ?? 1000) * 2 ** attempt;
         if (error.status !== 429 || attempt >= 3 || !Number.isFinite(delay) || waited + delay > 10000) throw error;
         // restore's own failure cleanup may advance generation. Capture after
@@ -8576,6 +8582,13 @@ const ready = (async () => {
   throw Object.assign(new Error("sign in required"), { status: 401 });
 })().catch(error => {
   if (error.startupCancelled) return;
+  if (error.agentRecordSessionChanged) {
+    setFormStatus($("#auth-error"), uiText("agentSignIn.recordSessionChanged"), true);
+    setConnectionStatus("Not connected · sign in required");
+    $("#identity-label").textContent = "Not signed in";
+    $("#auth-panel").hidden = false;
+    return;
+  }
   if (accountClient.session?.authenticated && [401, 403].includes(error.status)) {
     showAccountWorkspace();
     if (selectedRoomFromLocation()) showRoomAccessNotice();

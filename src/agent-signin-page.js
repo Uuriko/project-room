@@ -8,7 +8,7 @@
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { agentFirstRunSeen } from "./agent-first-run.js";
 import { withBoardDeepLink } from "./board-deeplink.js";
-import { agentSigninRecord } from "./record-link.js";
+import { agentSigninRecord, rememberAgentRecordBinding } from "./record-link.js";
 
 const mountPrefix = location.pathname.startsWith("/room/") ? "/room" : "";
 let roomTarget = `${mountPrefix}/`;
@@ -21,6 +21,7 @@ const enterLink = document.getElementById("agent-signin-enter-link");
 const ui = createAgentSigninUI({
   targetRecord: intendedRecord,
   onSignedIn: (session) => {
+    rememberAgentRecordBinding(intendedRecord, session);
     const roomId = session?.roomId;
     const roomQuery = roomId ? `?room=${encodeURIComponent(roomId)}` : "";
     roomTarget = [mountPrefix, roomQuery].join("/") + (intendedRecord && intendedRecord.roomId === roomId ? intendedRecord.hash : "");

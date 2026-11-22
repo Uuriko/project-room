@@ -187,7 +187,7 @@ export class RoomClient {
     error.status = status;
     return error;
   }
-  async performRequest(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full", compactRequests = false } = {}) {
+  async performRequest(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full", compactRequests = false, roomSessionBinding = null } = {}) {
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
@@ -197,7 +197,8 @@ export class RoomClient {
           ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
           ...(auditView === "activity" ? { "X-Project-Room-Audit-View": "activity-v1" } : {}),
           ...(compactRequests ? { "X-Project-Room-Reply-View": "browser-v1" } : {}),
-          ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
+          ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) }
+            : roomSessionBinding ? { "X-Session-Binding": roomSessionBinding } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       const type = response.headers?.get?.("content-type") ?? "";
       if (type && !/json/i.test(type)) {
@@ -231,7 +232,7 @@ export class RoomClient {
       throw failure;
     } finally { clearTimeout(timer); }
   }
-  async restore(roomId = null) {
+  async restore(roomId = null, { roomSessionBinding = null } = {}) {
     this.disconnect(); this.sequence = 0; this.session = null; this.accountOwnership = null;
     const generation = this.generation;
     const accountMode = roomId !== null;
@@ -244,7 +245,7 @@ export class RoomClient {
     try {
       const restored = await this.request(accountMode ? `/api/session?room=${encodeURIComponent(roomId)}` : "/api/session",
         // Each restore revalidates the session; it never joins an earlier check.
-        accountMode ? { authMode: "account", authSession: accountSession, fresh: true } : { fresh: true });
+        accountMode ? { authMode: "account", authSession: accountSession, fresh: true } : { roomSessionBinding, fresh: true });
       if (generation !== this.generation) return null;
       if (accountMode && (accountClient !== this.accountClient || accountGeneration !== accountClient.generation || accountSession !== accountClient.session
         || restored?.authMode !== "account" || restored.roomId !== roomId || !sameAccountSession(restored, accountSession))) return null;

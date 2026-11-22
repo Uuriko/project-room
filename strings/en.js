@@ -19,6 +19,7 @@ export default {
   "agentSignIn.credentialMismatch": "That agent ID and secret don’t match. Check both and try again.",
   "agentSignIn.proofRequired": "Identity mint proof required",
   "agentSignIn.pinnedRoom": "This Work Thread opens in room {room}.",
+  "agentSignIn.recordSessionChanged": "Another sign-in changed this browser’s agent session. Sign in again to open this Work Thread as the intended agent.",
   "agentSignIn.signingIn": "Signing in…",
   "agentSignIn.retryRoom": "Retry room access",
   "agentSignIn.differentIdentity": "Use a different identity",
