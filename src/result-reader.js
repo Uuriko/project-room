@@ -10,7 +10,8 @@ import { currentResult } from "./work-selectors.js";
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, memberLabel, workRecord, focusRecord,
-  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, storage = null, recoveryScope = () => null }) {
+  clearResultComparison, loadResultComparison, discussionMessage, loadDiscussion,
+  onDiscuss, onOriginal, onWorkAction, onReturn, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null, pointerSelection = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
@@ -119,12 +120,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
       || isRoomArchived(getState())) return null;
     // The ordinary thread composer does not inherit a DM audience.
-    return getState().messages.find(message => canReplyToResult(getState(), message) && message.id === view.textMessageId && message.workItemId === view.workItemId
-      && message.body === view.body);
+    const message = discussionMessage(view.textMessageId);
+    return canReplyToResult(getState(), message) && message.workItemId === view.workItemId && message.body === view.body
+      ? message : null;
   }
   function needsConversation(view) {
-    return Boolean(usableText(view) && !isRoomArchived(getState()) && client.owesHistory
-      && !getState().messages.some(message => message.id === view.textMessageId));
+    return Boolean(usableText(view) && view.textMessageId && !isRoomArchived(getState()) && client.owesHistory
+      && !discussionMessage(view.textMessageId));
   }
   // During a release, a cached page may lack the new reader controls.
   function selectedWorkAction(view, item) {
@@ -257,8 +259,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
     if (context) context.hidden = !current || !item;
     const verdict = resultElement("result-verdict");
+    // A bounded snapshot can drop the selected work while its exact result
+    // remains open. The server-confirmed verdict still belongs to that result.
     const finding = current && item && matchesReceipt(item.verification, item.receipt) ? item.verification
-      : view.linked ? view.selectedVerdict : null;
+      : view.linked || (current && !item) ? view.selectedVerdict : null;
     verdict.hidden = !view.focused || (!current && !(view.linked && finding && usableText(view)));
     if (!verdict.hidden) {
       verdict.dataset.outcome = finding?.result ?? "pending";
@@ -385,11 +389,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.resolving = true; resultStatus();
       resultElement("result-use-status").textContent = uiText("result.loadingConversation");
       try {
-        await client.refresh(null, { fill: true });
-        // The room read is a window: an older result's message arrives through older pages.
-        if (needsConversation(view) && typeof client.pageOlder === "function") await client.pageOlder();
+        if (!await loadDiscussion(view.textMessageId)) {
+          if (resultView === view && usableText(view)) resultElement("result-use-status").textContent = uiText("result.conversationUnavailable");
+          return;
+        }
       } catch {
-        if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.conversationUnavailable");
+        if (resultView === view && usableText(view)) resultElement("result-use-status").textContent = uiText("result.conversationUnavailable");
         return;
       } finally {
         view.resolving = false;

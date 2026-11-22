@@ -48,20 +48,37 @@ export function stalledAssignmentStep(item,now,viewerId,thresholdMs=STALLED_ASSI
     memberId:viewerId,role:'proposer',needsAttention:true,workItemId:item.id,workRevision:item.revision,
     completionEventId:null,evidenceVersion:null,assigneeId:item.accountableMemberId,stalledForMs:age};
 }
-export function addressedWorkWindow(store,roomId,memberId,ownerId,after,limit,b) {
+const pickupFilterReady = new WeakSet();
+function addressedPickupFilter(db, at, memberId, ownerId) {
+  if (at === undefined || typeof db.function !== 'function') return { clause: '', args: [] };
+  if (!pickupFilterReady.has(db)) {
+    db.function('project_room_work_action_addressed', { deterministic: true, directOnly: true }, (payload, viewer, owner, at) => {
+      const item = JSON.parse(payload)?.work;
+      if (!item || typeof item.state !== 'string') return 1;
+      const step = nextWorkStep(item, at, owner);
+      return Number(step.memberId === viewer && (step.needsAttention || step.action === 'in_progress'));
+    });
+    pickupFilterReady.add(db);
+  }
+  return { clause: ' AND project_room_work_action_addressed(payload,?,?,?)=1', args: [memberId, ownerId, at] };
+}
+
+export function addressedWorkWindow(store,roomId,memberId,ownerId,after,limit,b,{ actionableAt }={}) {
   const candidates=new Set(); let examinedKeys=0;
+  // Selected rows still go through the canonical proof and viewer-privacy reader.
+  const filter = addressedPickupFilter(store.db, actionableAt, memberId, ownerId);
   for (const [role,path] of INBOX_WORK_ROLES) {
     const rows=store.db.prepare(`SELECT record_key FROM current_room_records INDEXED BY current_inbox_work_${role}
-      WHERE room_id=? AND domain='workSummary' AND json_extract(payload,'${path}')=? AND record_key>?
-      ORDER BY record_key LIMIT ?`).all(roomId,memberId,after,limit+1);
+      WHERE room_id=? AND domain='workSummary' AND json_extract(payload,'${path}')=? AND record_key>?${filter.clause}
+      ORDER BY record_key LIMIT ?`).all(roomId,memberId,after,...filter.args,limit+1);
     chargeCurrentReadBudget(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
     examinedKeys+=rows.length; for(const row of rows)candidates.add(row.record_key);
   }
   if(memberId===ownerId) {
     const rows=store.db.prepare(`SELECT record_key FROM current_room_records INDEXED BY current_inbox_owner_handoffs
       WHERE room_id=? AND domain='workSummary' AND json_extract(payload,'$.work.handoff.open')=1
-        AND json_extract(payload,'$.work.handoff.triageMemberId') IS NULL AND record_key>?
-      ORDER BY record_key LIMIT ?`).all(roomId,after,limit+1);
+        AND json_extract(payload,'$.work.handoff.triageMemberId') IS NULL AND record_key>?${filter.clause}
+      ORDER BY record_key LIMIT ?`).all(roomId,after,...filter.args,limit+1);
     chargeCurrentReadBudget(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
     examinedKeys+=rows.length; for(const row of rows)candidates.add(row.record_key);
   }
@@ -70,8 +87,8 @@ export function addressedWorkWindow(store,roomId,memberId,ownerId,after,limit,b)
   {
     const rows=store.db.prepare(`SELECT record_key FROM current_room_records INDEXED BY current_inbox_proposed_by
       WHERE room_id=? AND domain='workSummary' AND json_extract(payload,'$.work.proposedById')=?
-        AND json_extract(payload,'$.work.state')='proposed' AND record_key>?
-      ORDER BY record_key LIMIT ?`).all(roomId,memberId,after,limit+1);
+        AND json_extract(payload,'$.work.state')='proposed' AND record_key>?${filter.clause}
+      ORDER BY record_key LIMIT ?`).all(roomId,memberId,after,...filter.args,limit+1);
     chargeCurrentReadBudget(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
     examinedKeys+=rows.length; for(const row of rows)candidates.add(row.record_key);
   }

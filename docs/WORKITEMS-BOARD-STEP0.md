@@ -101,6 +101,9 @@ last three carry state with no board field (§4.5).
   caps normalized `work_entities` rows and bytes before preparing or converting
   message authority (2026-11-01). This is a bounded dependency census, not a new
   work-item writer, board mapping or sync event.
+- **Retained Board normalization:** `server/operator-normalization.mjs`
+  reads the matching native work item to verify that an open legacy mirror has
+  the same owner and lifecycle before archiving the mirror with its evidence.
 - **Explicit historical-session reconciliation:** `server/legacy-session-replay.mjs`
   reuses the public reducer while restoring only the three documented pre749
   session/lifecycle effects; `server/operator-legacy-session-repair.mjs` compares

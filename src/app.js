@@ -3495,14 +3495,19 @@ async function readSelectedWorkRecord(id, expandDetails, retrySnapshot = pending
       // A refresh can revoke access or replace the result. The same navigation
       // owns a fresh read, so a delayed response never mounts across snapshots.
       if (retrySnapshot) return readSelectedWorkRecord(id, expandDetails, false);
-      if (pendingWorkThreadEpoch === epoch) notice("The room updated while opening this work. Open the Work Thread again.", true);
-      return null;
+      // A background repaint can replace an equivalent snapshot during the
+      // retry. Use the selected read only if it covers the current snapshot.
+      const threadOpening = pendingWorkThreadEpoch === epoch;
+      if (!threadOpening || !Number.isSafeInteger(selected?.evaluatedThrough) || selected.evaluatedThrough < client.sequence) {
+        if (threadOpening) notice("The room updated while opening this work. Open the Work Thread again.", true);
+        return null;
+      }
     }
     const item = selected?.work;
     if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
       || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
       || typeof item.definitionOfDone !== "string" || !Number.isSafeInteger(item.revision) || item.revision < 0
-      || Number.isSafeInteger(held.workItems[id]?.revision) && item.revision < held.workItems[id].revision) {
+      || Number.isSafeInteger(state.workItems[id]?.revision) && item.revision < state.workItems[id].revision) {
       notice(SOURCE_UNAVAILABLE_NOTICE, true); return null;
     }
     // Mount only this independently selected current record. The room's
@@ -6844,6 +6849,12 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
+  discussionMessage: id => conversation?.byId.get(id),
+  async loadDiscussion(id) {
+    const generation = client.generation;
+    const opened = await selectedMessage.open(id, generation, client.sequence);
+    return opened && generation === client.generation;
+  },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
   onReturn() { $("#work-navigation-return").click(); },
   onWorkAction(item, action) { openWorkAction(item, action); },
