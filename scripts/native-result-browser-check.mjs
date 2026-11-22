@@ -399,6 +399,29 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "phone" : "de
   assert.equal(await f.page.locator("#message-input").inputValue(), "Keep my steering draft.");
 });
 
+test("a private exact result explains how to get access and preserves the signed-in room", { timeout: 25000 }, async t => {
+  const f = await setup(t, { body: previewBody });
+  f.complete();
+  const roomUrl = new URL(f.page.url());
+  roomUrl.searchParams.set("room", "commons");
+  roomUrl.hash = `pr-record/result/${f.workItemId}/${f.item().receipt.eventId}`;
+  const path = "**/work-result?**";
+  await f.page.route(path, route => route.fulfill({
+    status: 403, json: { error: { code: "work_private", message: "This work is private to its participants" } },
+  }));
+  await f.page.goto(roomUrl.href);
+  await f.page.getByText("This result is unavailable to your account. Ask the sender to share access.", { exact: true }).waitFor();
+  assert.equal(await f.page.locator("#result-retry").isVisible(), false);
+  assert.equal(await f.page.locator("#result-verdict").isVisible(), false);
+  assert.equal(await f.page.locator("#result-release-checks").isVisible(), false);
+  assert.equal(await f.page.locator("#result-body").textContent(), "");
+  await f.page.locator("#auth-panel").waitFor({ state: "hidden" });
+  await f.page.unroute(path);
+  await f.page.reload();
+  await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+  assert.equal(new URL(f.page.url()).hash, roomUrl.hash);
+});
+
 for (const boundary of ["close", "revoke"]) test(`native result: held retry cannot restore text after ${boundary}`, { timeout: 25000 }, async t => {
   const f = await setup(t, { body: previewBody }); f.complete(); let attempts = 0, release, began;
   const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { began = resolve; }); t.after(() => release());

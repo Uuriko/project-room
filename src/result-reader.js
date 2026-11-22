@@ -241,7 +241,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
     showCorrection(view.withdrawn ? null : pending ?? view.previousCorrection, Boolean(pending));
     const earlier = item ? !matchesReceipt(view.receipt, item.receipt) || (!pending && item.state !== S.COMPLETED) || Boolean(item.supersededBy)
       : view.selectionStatus === "historical";
-    resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
+    const privateResult = view.error === "private";
+    resultElement("result-status").textContent = privateResult ? uiText("result.privateAccess")
+      : (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
     if (view.releaseChecks && getState().messages.some(message => (message.deletedAt || message.editedAt)
@@ -286,8 +288,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const retry = resultElement("result-retry");
     resultElement("result-discuss").hidden = !resultDiscussionMessage(view) && !needsConversation(view);
     resultElement("result-discuss").disabled = !canDiscuss() || Boolean(view.resolving);
-    retry.hidden = !view.error && !view.retrying;
-    retry.disabled = !view.error;
+    retry.hidden = privateResult || !view.error && !view.retrying;
+    retry.disabled = privateResult || !view.error;
     for (const action of ["result-copy-link", "result-copy-text", "result-download"]) {
       resultElement(action).hidden = !usableText(view);
       resultElement(action).disabled = action !== "result-download" && Boolean(view.copying || clipboard.busy);
@@ -466,11 +468,16 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultStatus();
       if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
         resultElement("result-diff"), () => owns() && !view.withdrawn);
-    }).catch(() => { if (owns()) { view.error = true; view.retrying = false; resultStatus(); } });
+    }).catch(error => {
+      if (!owns()) return;
+      view.error = error.status === 403 && error.code === "work_private" ? "private" : "unavailable";
+      view.retrying = false;
+      resultStatus();
+    });
   }
   resultElement("result-retry").addEventListener("click", () => {
     const view = resultView;
-    if (!view?.error || isBusy() || !sameSession(view.generation, view.roomId, view.memberId)) return;
+    if (view?.error !== "unavailable" || isBusy() || !sameSession(view.generation, view.roomId, view.memberId)) return;
     if (document.activeElement === resultElement("result-retry")) resultElement(view.focused ? "result-title" : "close-result").focus({ preventScroll: true });
     view.error = false; view.retrying = true; resultStatus();
     loadExactResult(view);
