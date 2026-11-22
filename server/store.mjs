@@ -6674,7 +6674,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             ? {state:'unknown',satisfied:false} : nativePrerequisiteState(dep,now);
           return {id,...state};
         });
-        const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now,includeSource,includeOffers,includeReplies,sourceObservation,dependencies,
+        const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now,includeSource,includeOffers,includeReplies,repliesDeferred:current.repliesDeferred,sourceObservation,dependencies,
           floor:this.historyFloor(roomId,auth.member.id,current.sequence),messageRecords:{get:id=>selectedMessageRecord(this,roomId,id,false)},
           replacementAvailable:validId(target)&&target!==workItemId&&Boolean(readWorkItem(this.db,roomId,target))});
         // Native commands do not support the legacy help invitation/offer service.
