@@ -178,6 +178,7 @@ export class Bridge {
     this.reviewReceipts = new TurnReceipts(connection, env, persistSessions, 'work-review-turns');
     this.reviewRecoveries = new Set();
     this.reviewInFlight = new Set();
+    this.queuedReviewBases = new Map();
     this.reviewRecoveryScanned = false;
     this.reviewRecoveryAt = 0;
     this.parkedThreads = new TurnReceipts(connection, env, persistSessions, "chat-blocked-threads");
@@ -375,7 +376,12 @@ export class Bridge {
         // must keep it available through the normal exact Work Thread read.
         if (binding && this.respondTo === 'anyone') {
           const key = REVIEW_KEY + JSON.stringify([binding.workItemId,binding.completionEventId,binding.expectedRevision]);
-          this.queue.push(key, { signalId:signal.signalId, binding });
+          const queued = this.queuedReviewBases.get(binding.workItemId) ?? { latest: binding, count: 0 };
+          if (this.queue.push(key, { signalId:signal.signalId, binding, queued })) {
+            queued.count++;
+            if (binding.expectedRevision > queued.latest.expectedRevision) queued.latest = binding;
+            this.queuedReviewBases.set(binding.workItemId, queued);
+          }
         }
         return;
       }
@@ -601,7 +607,7 @@ export class Bridge {
     }
   }
 
-  async reviewSignalTurn(threadKey, {signalId, binding}) {
+  async reviewSignalTurn(threadKey, {signalId, binding, queued}) {
     const signalIds = [signalId];
     const key = this.reviewReceipts.key(signalId);
     if (this.reviewInFlight.has(key)) return;
@@ -652,6 +658,13 @@ export class Bridge {
           // An observed dispatch or interruption survives loss of local state.
           if (await claimAllowsDispatch === false) return;
           await this.assertListener();
+        }
+        // A later wake can arrive while the host prepares or obtains a grant.
+        // Leave the old signal to Room's retirement logic. In particular, do
+        // not mark a provider start or touch an already saved verdict.
+        if (queued?.latest.expectedRevision > expectedRevision && queued.latest.completionEventId !== completionEventId) {
+          this.log(`exact review ${workItemId} superseded before provider dispatch`);
+          return;
         }
         const started = this.reviewReceipts.begin(signalId,{binding,signalId,requestId:attemptId});
         if (!started.fresh) return;
@@ -764,11 +777,17 @@ export class Bridge {
   }
 
   async turn(threadKey, batch) {
-    if (this.controller.signal.aborted) return;
     if (threadKey.startsWith(REVIEW_KEY)) {
-      for (const item of batch) await this.reviewSignalTurn(threadKey, item);
+      for (const item of batch) {
+        try {
+          if (!this.controller.signal.aborted) await this.reviewSignalTurn(threadKey, item);
+        } finally {
+          if (item.queued && --item.queued.count === 0) this.queuedReviewBases.delete(item.binding.workItemId);
+        }
+      }
       return;
     }
+    if (this.controller.signal.aborted) return;
     if (threadKey.startsWith(CLAIM_KEY)) return this.claimTurn(threadKey, batch);
     try {
       const fresh = [], replay = new Map(), unique = new Set();
