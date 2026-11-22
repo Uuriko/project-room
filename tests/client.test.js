@@ -52,6 +52,23 @@ test("bounded conversation reads preserve selection and reject a late response a
   payload = { ...payload, channelId: "general", messages: [{ id: "root", body: "legacy public message" }] };
   assert.equal((await client.conversation({ limit: 3, messageId: "root", channelId: "general" })).messages[0].body, "legacy public message");
 });
+test("private work context preserves a valid session while auth failures still close it", async () => {
+  for (const [status, code, preserve] of [
+    [403, "work_private", true],
+    [403, "access_denied", false],
+    [401, "access_denied", false],
+    [409, "session_binding_changed", false],
+  ]) {
+    const accountClient = { session: identity(), generation: 0 };
+    const client = new RoomClient({ accountClient,
+      fetcher: async () => response({ error: { code, message: "Refused" } }, status) });
+    const session = { ...accountClient.session, authMode: "account" };
+    client.session = session;
+    client.accountOwnership = { client: accountClient, generation: 0, session: accountClient.session };
+    await assert.rejects(client.workContext("work"), error => error.status === status && error.code === code);
+    assert.equal(client.session, preserve ? session : null);
+  }
+});
 test("exact result privacy refusal preserves the session while access failures still close it", async () => {
   for (const [status, code, preserve] of [
     [403, "work_private", true],
