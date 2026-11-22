@@ -713,8 +713,8 @@ test("front-door packets scope the query-parameter rule and name the no-credenti
 
 test("the full packet carries the public investigation path when the room has no claimable tasks", () => {
   const emptyBoard = llmsFullTxt().split("\n").find(line => line.startsWith("Empty board"));
-  assert.match(emptyBoard, /roomId=ROOM_ID&view=pickup/);
-  assert.match(emptyBoard, /follow (?:the returned )?nextAction/);
+  assert.match(emptyBoard, /GET \/api\/public-work\/tasks .*roomId.*view=pickup/);
+  assert.match(emptyBoard, /follow (?:the returned )?nextAction/i);
   assert.match(emptyBoard, /submitFinding/);
 });
 
