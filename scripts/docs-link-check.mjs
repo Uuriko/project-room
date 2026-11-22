@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, normalize, relative, resolve } from "node:path";
+import { discoveryDoc } from "../server/agent-discovery.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -52,6 +53,8 @@ export function brokenDocLinks() {
       let decoded;
       try { decoded = decodeURIComponent(pathPart); }
       catch { failures.push(`${relFile} has an undecodable link ${url}`); continue; }
+      // Discovery documents such as /join.txt are rendered by the server.
+      if (pathPart.startsWith("/") && discoveryDoc(decoded)) continue;
       const resolved = normalize(join(dirname(abs), decoded));
       if (existsSync(resolved)) continue;
       failures.push(`${relFile} links to ${url}, which is not in the tree`);
