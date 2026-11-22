@@ -31,7 +31,7 @@ export class AgentHost {
       return capabilities;
     } catch (error) {
       if (this.process === spawned) { this.process = null; this.capabilities = null; }
-      spawned.peer.close(); spawned.child.kill();
+      spawned.stop();
       throw error;
     }
   }
@@ -107,6 +107,6 @@ export class AgentHost {
 
   stop() {
     const current = this.process; this.process = null; this.capabilities = null; this.stopped = true;
-    if (current) { current.peer.close(); current.child.kill(); }
+    current?.stop();
   }
 }

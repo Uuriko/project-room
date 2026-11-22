@@ -97,10 +97,37 @@ export function childEnvFor(env = process.env) {
 // Spawn an agent process and wrap its stdio as a JSON-RPC peer. The Room
 // credential variables are excluded from the child's environment.
 export function spawnAgent(candidate, { cwd = process.cwd(), env = process.env, onRequest, onNotification, log = () => {} } = {}) {
-  const child = spawn(candidate.command, candidate.args, { cwd, env: childEnvFor(env), stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32" && candidate.command === "npx" });
+  // A POSIX process group belongs to this launch, including adapter helpers.
+  const ownsProcessGroup = process.platform !== "win32";
+  const child = spawn(candidate.command, candidate.args, {
+    cwd, env: childEnvFor(env), stdio: ["pipe", "pipe", "pipe"],
+    detached: ownsProcessGroup, shell: process.platform === "win32" && candidate.command === "npx",
+  });
   child.stderr.on("data", () => {});
   const peer = createPeer({ input: child.stdout, output: child.stdin, onRequest, onNotification, log });
-  return { child, peer };
+  let stopping = false, exited = false, forceStop;
+  const signalGroup = signal => {
+    if (!child.pid) return;
+    try { process.kill(-child.pid, signal); }
+    catch (error) {
+      if (error.code !== "ESRCH") log(`could not stop ACP process group (${error.code ?? "unknown"})`);
+    }
+  };
+  child.once("exit", () => {
+    exited = true;
+    clearTimeout(forceStop);
+    // A failed or exited adapter can leave helpers holding its stdio open.
+    if (ownsProcessGroup) signalGroup("SIGKILL");
+  });
+  return { child, peer, stop() {
+    if (stopping) return;
+    stopping = true;
+    peer.close();
+    if (exited || !child.pid) return;
+    if (!ownsProcessGroup) { child.kill(); return; }
+    signalGroup("SIGTERM");
+    forceStop = setTimeout(() => signalGroup("SIGKILL"), 1000);
+  } };
 }
 
 export async function initialize(peer, { timeoutMs = 5000 } = {}) {
@@ -140,6 +167,6 @@ export async function probe(candidate, options = {}) {
     return { ...candidate, ok: false, error: String(error.message ?? error) };
   } finally {
     host?.stop();
-    if (spawned) { spawned.peer.close(); spawned.child.kill(); }
+    spawned?.stop();
   }
 }
