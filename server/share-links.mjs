@@ -190,7 +190,7 @@ export class ShareLinks {
     const roomId=incoming.roomId,sequence=room.sequence+1;
     const write=context?prepareCurrentWrite(this.store,{roomId,previous:room,state,event:incoming,sequence,current:context.current}):null;
     const projection=write?.projection ?? this.store.storedProjection(roomId,state);
-    if(Buffer.byteLength(projection)>PILOT_LIMITS.projectionBytes)fail(409,'pilot_limit','This room has reached its storage limit; no data was changed. Ask the room owner to review storage capacity.');
+    if(this.store.projectionExceedsWriteLimit(projection))fail(409,'pilot_limit','This room has reached its storage limit; no data was changed. Ask the room owner to review storage capacity.');
     withCurrentServingWriter(this.db,roomId,()=>{
       this.db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(roomId,sequence,incoming.id,JSON.stringify(incoming));
       this.db.prepare('UPDATE rooms SET sequence=?,projection=? WHERE id=?').run(sequence,projection,roomId);
@@ -603,7 +603,7 @@ export class ShareLinks {
         if(grant){const next=this.admissionRoom(row.room_id,[row.issuer_member_id,memberId]);this.saveAdmission(next.room,next.context,state,grant);}
       }else{
       const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + (grant ? 2 : 1);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to have older messages archived to free space.");
+      if (this.store.projectionExceedsWriteLimit(projection)) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to have older messages archived to free space.");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, room.sequence + 1, incoming.id, JSON.stringify(incoming));
       if (grant) this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, grant.id, JSON.stringify(grant));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
