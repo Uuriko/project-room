@@ -14,7 +14,7 @@ import { signInFixture } from "./auth-signin.mjs";
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
 
-async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo } = {}) {
+async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60, credentialReadBurst });
   let browser;
   t.after(async () => {
@@ -43,7 +43,7 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
   send("owner", T.WORK_PROPOSED, { workItemId: "calm-result", title: "A first result", definitionOfDone: "One version", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
   lifecycle("calm-result");
   completeWithText("calm-result", "Only version of this result");
-  const first = completeWithText("revision-journey", retained ? retainedBody : "Result A\nKeep this line\nMissing named owner", firstDirectTo);
+  const first = completeWithText("revision-journey", firstBody ?? (retained ? retainedBody : "Result A\nKeep this line\nMissing named owner"), firstDirectTo);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
@@ -343,13 +343,25 @@ test("the verdict links exact candidate release checks without claiming missing 
 });
 
 test("shared result links keep identical old and new text bound to different verdicts", { timeout: 45000 }, async t => {
-  const f = await setup(t, 1440);
+  const source = "https://github.com/Uuriko/project-room/blob/d9e1f712c6a3f8f4f4180cb41980507709befeb5";
+  const verdictSource = source + "/src/result-reader.js#L401-L411";
+  const regressionSource = source + "/scripts/result-diff-browser-check.mjs#L377-L384";
+  const body = [
+    "Result A",
+    "Verdict binding: " + verdictSource,
+    "Regression: " + regressionSource,
+    "Literal moving link: https://github.com/Uuriko/project-room/blob/main/src/result-reader.js",
+    "Literal noncanonical link: " + source + "/../../../../main/src/result-reader.js",
+    "Literal comma path: " + source + "/docs/a,b.md",
+    "Literal semicolon path: " + source + "/docs/a;b.md",
+    "Literal closing parenthesis path: " + source + "/docs/a)b.md"
+  ].join("\n");
+  const f = await setup(t, 1440, { firstBody: body });
   const check = (receipt, result) => f.send("human-checker", T.VERIFICATION_RECORDED, {
     workItemId: f.item().id, expectedRevision: f.item().revision, completionEventId: receipt.event.id,
     evidenceVersion: receipt.event.data.evidenceVersion, result, summary: "Checked the exact revision",
     ...(result === "fail" ? { nextAction: "Use the same text with the correct evidence." } : {})
   });
-  const body = "Result A\nKeep this line\nMissing named owner";
   check(f.first, "fail");
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Rechecked the evidence." });
   f.mutate(T.WORK_STARTED, {});
@@ -383,6 +395,24 @@ test("shared result links keep identical old and new text bound to different ver
   await receiver.getByText("Verification · Passed", { exact: true }).waitFor();
   assert.doesNotMatch(await receiver.locator("#result-status").textContent(), /^Earlier result/);
   assert.equal(await receiver.locator("#result-body").textContent(), body);
+  assert.deepEqual(await receiver.locator("#result-body a").evaluateAll(links => links.map(link => link.href)),
+    [verdictSource, regressionSource]);
+  const requests = [];
+  await receiver.context().route("https://github.com/**", async route => {
+    requests.push(route.request().url());
+    await route.fulfill({ body: "Pinned public source destination" });
+  });
+  await receiver.reload();
+  await receiver.getByText("Verification · Passed", { exact: true }).waitFor();
+  assert.deepEqual(requests, [], "initial exact result read fetches no public source");
+  const [target] = await Promise.all([
+    receiver.waitForEvent("popup"),
+    receiver.locator("#result-body").getByRole("link", { name: regressionSource, exact: true }).click(),
+  ]);
+  await target.waitForLoadState();
+  assert.equal(target.url(), regressionSource);
+  await target.close();
+  assert.equal(requests.length, 1);
 
   await receiver.goto(expected("missing-completion"));
   await receiver.getByText(/Exact text unavailable/).waitFor();
