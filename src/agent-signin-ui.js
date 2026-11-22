@@ -4,7 +4,8 @@
 //
 // Flow:
 // 1. Agent enters identity ID + secret → POST /api/auth/agent/rooms
-// 2. Server returns linked rooms → agent picks one
+// 2. Server returns linked rooms → agent picks one. A pinned Work Thread
+//    already names its room and opens it directly instead.
 // 3. POST /api/auth/agent/session with roomId → browser session cookie set
 // 4. onSignedIn(session) fires, same as human sign-in
 //
@@ -20,9 +21,9 @@ import { escapeHtml } from "./html-escape.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 import { submitIdentityMint } from "./account-client.js";
 
-export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
+export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRoomId = null }) {
   let container = null;
-  let phase = "credentials"; // or "rooms" | "create" | "created" | "make-room"
+  let phase = "credentials";
   let identityId = "";
   let secret = "";
   let rooms = [];
@@ -70,6 +71,8 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
 
   function panelHtml() {
     if (phase === "rooms") return roomsHtml();
+    if (phase === "target-room") return targetRoomHtml();
+    if (phase === "signed-in") return "";
     if (phase === "create") return createHtml();
     if (phase === "created") return createdHtml();
     if (phase === "make-room") return makeRoomHtml();
@@ -122,6 +125,12 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Creating…" : "Create room & enter"}</button>
       <button type="button" class="text-button" data-agent-back-to-rooms>Back</button>
     </form>`;
+  }
+
+  function targetRoomHtml() {
+    return `<p class="form-hint">This Work Thread opens in its original room.</p>
+      <button type="button" class="button primary" data-agent-retry-room ${busy ? "disabled" : ""}>${busy ? "Signing in…" : "Retry room access"}</button>
+      <button type="button" class="text-button" data-agent-back ${busy ? "disabled" : ""}>Use a different identity</button>`;
   }
 
   function roomsHtml() {
@@ -182,10 +191,17 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       body: JSON.stringify({ identityId: signinIdentityId, roomId }),
       credentials: "same-origin"
     });
-    if (!res.ok) throw await apiError(res, "Sign-in failed");
+    if (!res.ok) {
+      if (res.status === 401 && phase === "target-room") {
+        secret = "";
+        phase = "credentials";
+      }
+      throw await apiError(res, "Sign-in failed");
+    }
     const session = await res.json();
     // Clear credentials from memory the moment the session exists.
     identityId = ""; secret = ""; createdIdentity = null; roomDraftId = ""; roomTitle = "";
+    if (phase === "target-room") phase = "signed-in";
     await onSignedIn?.(session);
     try { mountAgentFirstRun({ actions: firstRunActions }); }
     catch { /* orientation is optional; never break sign-in */ }
@@ -198,7 +214,12 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
     if (t?.closest?.("[data-agent-back-to-signin]")) { phase = "credentials"; render(); return; }
     if (t?.closest?.("[data-agent-back-to-rooms]")) { phase = "rooms"; render(); return; }
     if (t?.closest?.("[data-agent-create-room]")) { phase = "make-room"; render(); return; }
+    if (t?.closest?.("[data-agent-retry-room]") && phase === "target-room") {
+      await withBusy(() => startSession(identityId, targetRoomId, secret));
+      return;
+    }
     if (t?.closest?.("[data-agent-back]")) {
+      if (phase === "target-room") { secret = ""; setError(""); }
       phase = "credentials";
       rooms = [];
       render();
@@ -273,6 +294,11 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       secret = (data.secret || "").trim();
       if (!identityId || !secret) {
         setError("Enter both your identity ID and secret.");
+        return;
+      }
+      if (targetRoomId) {
+        phase = "target-room";
+        await withBusy(() => startSession(identityId, targetRoomId, secret));
         return;
       }
       await withBusy(async () => {

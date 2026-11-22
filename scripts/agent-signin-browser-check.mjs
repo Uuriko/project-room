@@ -268,3 +268,54 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   assert.equal(await page.locator('[name="secret"]').inputValue(), "");
   assert.equal(await page.locator('[data-agent-secret]').count(), 0);
 });
+
+test("a pinned Work Thread retries the same room without re-entering the saved identity", { timeout: 25000 }, async t => {
+  const f = createAcceptanceFixture();
+  const owner = f.store.issueAccessKey("commons", "owner");
+  const identity = f.store.identities.create("Returning Work Thread agent");
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close();
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close();
+    rmSync(f.directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  f.store.command(owner, "commons", {
+    id: "signin-record-fixture", type: "work.proposed",
+    data: { workItemId: "saved-work-thread", title: "Work Thread after access returns", definitionOfDone: "Read the selected thread", accountableMemberId: "owner", mode: "read" },
+  });
+  const hash = "#pr-record/work/saved-work-thread";
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(6000);
+  const authReads = [];
+  page.on("response", response => {
+    const path = new URL(response.url()).pathname;
+    if (path.startsWith("/api/auth/agent/")) authReads.push([path, response.status()]);
+  });
+  await page.goto(origin + "/?room=commons" + hash);
+  await page.locator("#agent-signin-button").click();
+  assert.equal(new URL(page.url()).searchParams.get("record"), hash);
+  await page.locator('[name="identityId"]').fill(identity.identityId);
+  await page.locator('[name="secret"]').fill(identity.secret);
+  await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+  await page.locator("[data-agent-status]").getByText("This agent identity is not linked to that room").waitFor();
+  assert.deepEqual(authReads, [["/api/auth/agent/session", 403]]);
+  assert.equal(await page.locator("[data-agent-create-room]").count(), 0);
+  assert.equal((await page.context().cookies()).some(cookie => cookie.name === "room_session"), false);
+
+  linkWithProof(f.store, owner, "commons", identity, { permissions: ["accept_work"] });
+  await page.getByRole("button", { name: "Retry room access", exact: true }).click();
+  const card = page.locator("#agent-first-run");
+  await card.waitFor({ state: "visible" });
+  await card.locator('[data-step="dismiss"]').click();
+  await page.locator("#agent-signin-enter-link").click();
+  await page.waitForURL(url => url.hash === hash);
+  await page.locator('[data-work-record-id="saved-work-thread"]').waitFor({ state: "visible" });
+  assert.deepEqual(authReads, [["/api/auth/agent/session", 403], ["/api/auth/agent/session", 201]]);
+  assert.equal(await page.locator("#identity-label").textContent(), identity.displayName);
+});
