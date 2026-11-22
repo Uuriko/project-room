@@ -5,7 +5,7 @@ import { chromium } from "playwright";
 import { createResultsFixture } from "./results-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { openSearch } from "./room-chrome.mjs";
+import { openConversation, openSearch } from "./room-chrome.mjs";
 import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 test("agent conversation retains full work records and result controls", { timeout: 30000 }, async t => {
@@ -107,3 +107,48 @@ for (const mobile of [false, true]) for (const theme of ["dark", "light"]) {
     assert.equal(Object.keys(f.state().workItems).length, 30, "navigation preserves all work records");
   });
 }
+
+test("mention confirmation uses the displayed recipient when the roster changes", { timeout: 30000 }, async t => {
+  const f = createResultsFixture();
+  const server = createRoomServer({ store: f.store, streamInterval: 40 });
+  let browser;
+  t.after(async () => {
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  for (const [memberId, name] of [["qa-first", "First"], ["qa-second", "Second"], ["qa-third", "Third"]]) {
+    f.send("owner", "member.added", { memberId, displayName: "Mention QA " + name, kind: "human", permissions: [] });
+  }
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  page.setDefaultTimeout(8000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, f.keys.owner);
+  await openConversation(page);
+  const input = page.locator("#message-input");
+  const selection = page.locator('#mention-list [aria-selected="true"]');
+  const members = page.locator("#message-to-select");
+  const deactivate = async memberId => {
+    f.send("owner", "member.access_changed", { memberId, expectedMemberRevision: 0, permissions: [], active: false });
+    await members.locator(`option[value="${memberId}"]`).waitFor({ state: "detached" });
+  };
+
+  await input.fill("@qa");
+  await input.press("ArrowDown");
+  assert.equal(await selection.getAttribute("data-mention-id"), "qa-second");
+  await deactivate("qa-first");
+  await input.press("Enter");
+  assert.equal(await input.inputValue(), "@(qa-second) ");
+
+  await input.fill("@qa");
+  assert.equal(await selection.getAttribute("data-mention-id"), "qa-second");
+  await deactivate("qa-second");
+  await input.press("Tab");
+  assert.equal(await input.inputValue(), "@qa", "a removed selection cannot redirect confirmation");
+  assert.equal(await selection.getAttribute("data-mention-id"), "qa-third");
+  await input.press("Enter");
+  assert.equal(await input.inputValue(), "@(qa-third) ");
+  assert.equal(await members.inputValue(), "", "choosing a mention keeps the existing audience");
+});
