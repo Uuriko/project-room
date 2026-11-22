@@ -17,6 +17,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentPages, PASTE_PAGE } from "../scripts/build-agent-docs.mjs";
+import { discoveryDoc } from "../server/agent-discovery.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // docs/agents/*.html are generated build output (no longer committed): read
@@ -96,7 +97,7 @@ function linksFrom(srcFile, html) {
 function resolveTarget(path) {
   if (path.startsWith("/api/")) return true; // API links are not pages
   if (pageFiles.has(path)) return true;
-  if (dynamicRoutes.has(path)) return true;
+  if (dynamicRoutes.has(path) || discoveryDoc(path)) return true;
   if (existsSync(join(root, path.slice(1)))) return true; // static asset on disk
   if (existsSync(join(root, path.slice(1) + ".html"))) return true; // extensionless static page
   if (path.endsWith("/index.html") && existsSync(join(root, path.slice(1)))) return true;
