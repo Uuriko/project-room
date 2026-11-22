@@ -19,7 +19,7 @@ async function openDirectConversation(page, memberId) {
   await page.locator('#new-direct-dialog').waitFor({ state: 'hidden' });
 }
 
-async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false, olderResult = false, secondRoom = null } = {}) {
+async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false, olderResult = false, secondRoom = null, blockServiceWorkers = Boolean(secondRoom) } = {}) {
   const f = createResultsFixture();
   let accountKey;
   if (secondRoom) {
@@ -63,7 +63,7 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true });
   const p = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
-    isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce", ...(secondRoom && { serviceWorkers: "block" }) });
+    isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce", ...(blockServiceWorkers && { serviceWorkers: "block" }) });
   p.setDefaultTimeout(8000);
   await p.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   const errors = [], outside = [], writes = [];
@@ -173,17 +173,7 @@ test("late result reads cannot restore content after sign-out, and the Results v
   assert.equal(await p.locator("#result-discuss").isVisible(), false);
 });
 
-test("an exact link cannot paint an old room's held result over a replacement room", { timeout: 30000 }, async t => {
-  const secondRoom = "result-switch-target";
-  const f = await setup(t, { secondRoom }), p = f.p;
-  const completionEventId = f.state().workItems["native-result"].receipt.eventId;
-  const link = exactResultHref({ roomId: "commons", workItemId: "native-result", completionEventId }, new URL(f.origin));
-  const writes = [];
-  p.on("request", request => {
-    const path = new URL(request.url()).pathname;
-    if (request.method() === "POST" && !path.endsWith("/typing")) writes.push(path);
-  });
-
+async function holdExactResult(t, p, completionEventId) {
   const release = Promise.withResolvers();
   const held = Promise.withResolvers();
   const matcher = url => url.pathname === "/api/rooms/commons/work-result"
@@ -193,7 +183,7 @@ test("an exact link cannot paint an old room's held result over a replacement ro
       const response = await route.fetch();
       assert.equal(response.status(), 200);
       assert.equal((await response.json()).result.receipt.eventId, completionEventId);
-      held.resolve();
+      held.resolve(route.request());
       await release.promise;
       await route.fulfill({ response });
     } catch (error) {
@@ -202,18 +192,45 @@ test("an exact link cannot paint an old room's held result over a replacement ro
     }
   }, { times: 1 });
   t.after(() => release.resolve());
+  return {
+    captured: held.promise,
+    async deliver() {
+      const request = await held.promise;
+      const lateResponse = p.waitForResponse(response => response.request() === request);
+      release.resolve();
+      const delivered = await lateResponse;
+      assert.equal(delivered.status(), 200);
+      assert.equal((await delivered.json()).result.receipt.eventId, completionEventId);
+      await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    },
+  };
+}
+
+function observeNonTypingPosts(p) {
+  const writes = [];
+  p.on("request", request => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "POST" && !path.endsWith("/typing")) writes.push(path);
+  });
+  return writes;
+}
+
+test("an exact link cannot paint an old room's held result over a replacement room", { timeout: 30000 }, async t => {
+  const secondRoom = "result-switch-target";
+  const f = await setup(t, { secondRoom }), p = f.p;
+  const completionEventId = f.state().workItems["native-result"].receipt.eventId;
+  const link = exactResultHref({ roomId: "commons", workItemId: "native-result", completionEventId }, new URL(f.origin));
+  const writes = observeNonTypingPosts(p);
+  const held = await holdExactResult(t, p, completionEventId);
   await p.goto(link, { waitUntil: "domcontentloaded" });
-  await held.promise;
+  await held.captured;
   await clickChrome(p, "#choose-room");
   await p.locator(`[data-account-room="${secondRoom}"]`).click();
   await p.waitForFunction(title => document.querySelector("#room-title")?.textContent === title, secondRoom);
   await openConversation(p);
   const draft = p.locator("#message-input");
   await draft.fill("Keep the replacement room's unsent draft");
-  const lateResponse = p.waitForResponse(response => matcher(new URL(response.url())));
-  release.resolve();
-  await (await lateResponse).finished();
-  await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await held.deliver();
 
   assert.equal(await p.locator("#room-title").textContent(), secondRoom);
   assert.equal(await draft.inputValue(), "Keep the replacement room's unsent draft");
@@ -236,6 +253,56 @@ test("an exact link cannot paint an old room's held result over a replacement ro
   await p.goto(link);
   await f.ready();
   assert.equal(await p.locator("#result-title").textContent(), "Café notes");
+  assert.deepEqual(writes, []);
+});
+
+test("a held exact response cannot overtake the next result in the same room", { timeout: 30000 }, async t => {
+  const f = await setup(t, { blockServiceWorkers: true }), p = f.p;
+  const nextId = "next-result";
+  const nextTitle = "Replacement visit result";
+  const nextBody = "This is the exact result for the replacement visit.";
+  f.send("owner", T.WORK_PROPOSED, {
+    workItemId: nextId, title: nextTitle, definitionOfDone: "Publish a distinct result.",
+    accountableMemberId: "producer", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read",
+  });
+  f.change(nextId, T.WORK_ACCEPTED);
+  const posted = f.send("producer", T.MESSAGE_POSTED, { workItemId: nextId, messageId: "next-result-text", body: nextBody });
+  f.change(nextId, T.WORK_COMPLETED, {
+    summary: nextTitle, nextAction: "Read", producerId: "producer", evidenceKind: "room_text",
+    previousCompletionEventId: null, evidenceMessageId: posted.event.data.messageId,
+    evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(nextBody),
+  });
+  const selector = workItemId => {
+    const completionEventId = f.state().workItems[workItemId].receipt.eventId;
+    const href = exactResultHref({ roomId: "commons", workItemId, completionEventId }, new URL(f.origin));
+    return { completionEventId, hash: new URL(href).hash };
+  };
+  const previous = selector("native-result"), next = selector(nextId);
+  const open = hash => p.evaluate(value => { location.hash = value; }, hash);
+  const draft = p.locator("#message-input");
+  await openConversation(p);
+  await draft.fill("Keep my unsent work");
+  const writes = observeNonTypingPosts(p);
+  const timeOrigin = await p.evaluate(() => performance.timeOrigin);
+  const held = await holdExactResult(t, p, previous.completionEventId);
+  await open(previous.hash);
+  await held.captured;
+
+  const readingNext = p.waitForResponse(response =>
+    response.ok() && new URL(response.url()).searchParams.get("completionEventId") === next.completionEventId);
+  await open(next.hash);
+  assert.equal((await (await readingNext).json()).result.receipt.eventId, next.completionEventId);
+  await p.locator("#result-body").getByText(nextBody, { exact: true }).waitFor();
+  await held.deliver();
+
+  assert.equal(await p.evaluate(() => performance.timeOrigin), timeOrigin);
+  assert.equal(new URL(p.url()).hash, next.hash);
+  assert.equal(await p.locator("#result-title").textContent(), nextTitle);
+  assert.equal(await p.locator("#result-body").textContent(), nextBody);
+  assert.equal(await p.locator("#result-retry").isVisible(), false);
+  assert.equal(await draft.inputValue(), "Keep my unsent work");
+  await open(previous.hash);
+  await f.ready();
   assert.deepEqual(writes, []);
 });
 
