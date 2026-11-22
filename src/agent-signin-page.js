@@ -8,7 +8,7 @@
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { agentFirstRunSeen } from "./agent-first-run.js";
 import { withBoardDeepLink } from "./board-deeplink.js";
-import { agentSigninRecord } from "./room-deep-link.js";
+import { agentSigninRecord } from "./record-link.js";
 
 const mountPrefix = location.pathname.startsWith("/room/") ? "/room" : "";
 let roomTarget = `${mountPrefix}/`;
