@@ -71,6 +71,19 @@ async function setup(t, {respondTo, reviewScope, pending = false, nextAction, re
   const recordCompetingVerdict = () => f.store.command(identity.secret,roomId,{id:randomUUID(),type:'verification.recorded',data:{
     workItemId,expectedRevision:current().revision,completionEventId:completion.event.id,evidenceVersion:textVersion(body),
     result:'fail',summary:'The agenda owner is missing from the result.'}});
+  const replaceCompletion = () => {
+    recordCompetingVerdict();
+    transition('work.blocker_resolved', { resolution:'Correct the agenda owner.' });
+    transition('work.started');
+    const body = 'Evidence for the agenda is ready. The corrected owner is Ada.';
+    const messageId = randomUUID();
+    const posted = f.store.command(producer.secret,roomId,{id:randomUUID(),type:'message.posted',data:{workItemId,messageId,body}});
+    const replacement = transition('work.completed',{evidenceKind:'room_text',evidenceMessageId:messageId,
+      evidenceMessageEventId:posted.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:completion.event.id,
+      producerId,summary:'Corrected evidence',nextAction:'Review the corrected text'});
+    return f.store.workWakes.pending(identity.identityId,{roomId,hostId})
+      .find(signal => signal.completionEventId === replacement.event.id);
+  };
   const correctionSignals = () => f.store.workWakes.pending(producer.identityId,{roomId,hostId:producerHost});
   const readAsProducer = async ({tool,arguments:args}) => {
     const response = await fetch(connection.apiBase+'/mcp', {method:'POST',
@@ -82,7 +95,8 @@ async function setup(t, {respondTo, reviewScope, pending = false, nextAction, re
     return value.structuredContent;
   };
   const receipt = () => bridge.reviewReceipts.read(bridge.reviewReceipts.key(wake.signalId));
-  return {bridge,wake,counts,prompts,make,receipt,receiptPhase:()=>receipt()?.phase,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer};
+  return {bridge,wake,counts,prompts,make,receipt,receiptPhase:()=>receipt()?.phase,verdict,pendingRows,
+    recordCompetingVerdict,replaceCompletion,correctionSignals,readAsProducer};
 }
 
 test('an ACP failed review hands the exact reproducer to the producer with one protected wake read',async t=>{
@@ -717,6 +731,34 @@ test('a live receiver recovers a lost reservation response before dispatching on
   assert.equal(reserveIds[0], reserveIds[1]);
   assert.deepEqual(f.counts, {prompt:1,write:1,receipt:0,ack:1});
   assert.equal(f.verdict().result, 'pass');
+});
+
+test('a newer observed review skips the old prompt after a grant and preserves lost-response recovery', async t => {
+  const f = await setup(t);
+  const request = f.bridge.room.request;
+  const reads = [];
+  let replacement;
+  f.bridge.room.request = async (path, options) => {
+    if (path.includes('/work-result')) reads.push(path);
+    const response = await request(path, options);
+    if (options?.body?.reserveDispatch && response.dispatchGranted && !replacement) {
+      replacement = f.replaceCompletion();
+      assert.ok(replacement);
+      // Route two exact bases in a page with a redelivered older signal last.
+      for (const signal of [replacement, f.wake]) await f.bridge.accept(signal);
+    }
+    if (options?.body?.type === 'verification.recorded') throw new RoomError(0,'network','Committed response lost');
+    return response;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(reads.length, 2);
+  assert.deepEqual(f.counts, { prompt:1, write:1, receipt:1, ack:1 });
+  assert.match(f.prompts[0].prompt[0].text, /corrected owner is Ada/);
+  assert.equal(f.verdict().result, 'fail');
+  assert.ok(f.pendingRows().invalidated_at);
+  assert.equal(f.bridge.reviewReceipts.find(f.bridge.reviewReceipts.key(f.wake.signalId)), undefined);
+  assert.equal(f.bridge.queuedReviewBases.size, 0);
 });
 
 test('a fresh listener cannot dispatch when the original lost every reservation response', async t => {
