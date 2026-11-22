@@ -33,7 +33,9 @@ function readPage(store,secret,roomId,{cursor,after,freshWindow=500,expectedMode
  if(expectedMode!==undefined&&state.mode!==expectedMode||cursor!==undefined&&state.mode==='catch_up'&&after!==undefined&&state.minimum!==Math.min(after,binding.sequence))fail();
  const items=[];let examined=0,conversationComplete=state.conversationDone,workComplete=state.workDone,visibleThrough=0;
  if(!state.conversationDone){
-  const inbox=readCurrentNativeInbox(store,secret,roomId,state.mode==='recent'?{limit:4,expectedSessionBinding,...(state.older?{olderCursor:state.older}:{})}:{limit:4,after:state.after,expectedSessionBinding});
+  // Standing work and formal requests are paged independently below.
+  const inbox=readCurrentNativeInbox(store,secret,roomId,{limit:4,expectedSessionBinding,conversationOnly:true,
+   ...(state.mode==='recent'?(state.older?{olderCursor:state.older}:{}):{after:state.after})});
   for(const [kind,rows]of [['mention',inbox.directMentions],['dm',inbox.directMessages],['reply',inbox.replies]])for(const row of rows){
    if(row.requestKind==='reply'||row.sequence<=state.minimum||kind==='reply'&&[...inbox.directMentions,...inbox.directMessages].some(other=>other.messageId===row.messageId))continue;
    items.push({kind,roomId,seq:row.sequence,id:row.messageId,...(kind==='dm'?{channel:'room'}:{}),...(kind==='reply'?{replyToId:row.inReplyTo}:{}),summary:clip(row.body),next:{tool:'room_reply',arguments:{roomId,requestId:`needs-me-${roomId}-${row.messageId}`,replyToId:row.messageId,...(row.replyToMemberId?{toMemberId:row.replyToMemberId}:{})}}});
