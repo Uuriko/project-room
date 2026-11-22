@@ -75,7 +75,7 @@ test('native invitation HTTPS browser: review Back, lost-response retry and revo
   const start = origin + '/oauth/authorize?' + new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0], scope: 'rooms:read chat:read chat:write', state: 'browser-state', code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', resource });
   const initial = await page.goto(start);
   assert.equal(initial.headers()['referrer-policy'], 'same-origin');
-  const nonce = await page.locator('input[name="nonce"]').inputValue();
+  const nonce = await page.locator('#invite-connection input[name="nonce"]').inputValue(); // #6299 adds a second (owner pairing) form with the same nonce
   const consentCookie = (await context.cookies()).find(cookie => cookie.name === `__Host-oauth_invite_${nonce.slice(0, 16)}`);
   assert.equal(consentCookie?.value, nonce, 'real browser persisted the exact form nonce in its scoped cookie');
   if (!await page.getByLabel('Agent invitation link or RM code').isVisible()) await page.getByText('Join with an invitation', { exact: true }).click();
