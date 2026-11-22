@@ -14,6 +14,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { openConversation } from "./room-chrome.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -120,6 +121,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   // --- Alice's pending becomes approved ("Bob approved your request"); the DM posts. ---
   await a.page.reload();
   await a.page.locator("#main").waitFor({ state: "visible" });
+  await openConversation(a.page);
   await openPeople(a.page);
   const aliceBob2 = consentSection(a.page, "bob");
   await openConsentDetails(aliceBob2);
@@ -160,6 +162,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   assert.equal(await consentSection(b.page, "alice").getByRole("button", { name: "Unblock", exact: true }).count(), 1);
   await a.page.reload();
   await a.page.locator("#main").waitFor({ state: "visible" });
+  await openConversation(a.page);
   await openPeople(a.page);
   const aliceBob3 = consentSection(a.page, "bob");
   await openConsentDetails(aliceBob3);
@@ -169,6 +172,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await b.page.locator("#status.visible").getByText(/Alice unblocked/).waitFor();
   await a.page.reload();
   await a.page.locator("#main").waitFor({ state: "visible" });
+  await openConversation(a.page);
   await openPeople(a.page);
   const aliceBob4 = consentSection(a.page, "bob");
   await openConsentDetails(aliceBob4);
@@ -190,6 +194,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await aliceBob4.getByText("Request pending").waitFor();
   await b.page.reload();
   await b.page.locator("#main").waitFor({ state: "visible" });
+  await openConversation(b.page);
   await openPeople(b.page);
   const inbox2 = b.page.locator(".dm-requests");
   await inbox2.getByText("Direct message requests (1)").waitFor();

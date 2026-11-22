@@ -182,7 +182,8 @@ jobs:
   unit:
     needs: [changes]
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
+    # Qualify OS upgrades with the existing Bubblewrap namespace probe first.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read

@@ -14,7 +14,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
-import { ensureSidebarClosed, ensureSidebarOpen, openSettings } from "./room-chrome.mjs";
+import { ensureSidebarClosed, ensureSidebarOpen, openSettings, openConversation } from "./room-chrome.mjs";
 
 async function setup(t, viewport) {
   const f = createAcceptanceFixture();
@@ -74,6 +74,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(f.roomMetadata(created).kind, "organization");
     assert.equal(await page.locator("#room-archived-note").isHidden(), true);
     assert.equal(await page.locator("#message-input").isDisabled(), false);
+    await openConversation(page); // #6322: entering the new room lands on Updates
     await captureDesignEvidence(page, { id: "created-room", title: "Created room and empty composer", fixture: "actual room creation from Rooms", testName: t.name, component: "empty state and composer" });
     await page.locator("#message-input").fill("First note before archiving.");
     await page.locator('#message-form button[type="submit"]').click();

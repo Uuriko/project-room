@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,6 +66,7 @@ test('scripts/docs-link-check.mjs fails on missing targets including formerly ex
 
   mkdirSync(join(fixtureDir, 'scripts'), { recursive: true });
   mkdirSync(join(fixtureDir, 'docs'), { recursive: true });
+  symlinkSync(join(root, 'server'), join(fixtureDir, 'server'), 'dir');
   copyFileSync(join(root, 'scripts', 'docs-link-check.mjs'), join(fixtureDir, 'scripts', 'docs-link-check.mjs'));
 
   writeFileSync(join(fixtureDir, 'docs', 'VALID.md'), '# Valid\n');
@@ -76,6 +77,7 @@ test('scripts/docs-link-check.mjs fails on missing targets including formerly ex
     '[Valid](VALID.md)',
     '[External](https://example.com)',
     '[Fragment](#section)',
+    '[Published admission](/join.txt?room=example)',
   ].join('\n'));
 
   const validRun = spawnSync(process.execPath, [join(fixtureDir, 'scripts', 'docs-link-check.mjs')], {
@@ -94,6 +96,7 @@ test('scripts/docs-link-check.mjs fails on missing targets including formerly ex
     '[Claims](WORK-CLAIMS.md)',
     '[QA2](QA2-SYSTEMS.md)',
     '[Missing](OTHER-MISSING.md)',
+    '[Mistyped route](/jion.txt)',
   ].join('\n'));
 
   const failRun = spawnSync(process.execPath, [join(fixtureDir, 'scripts', 'docs-link-check.mjs')], {
@@ -107,5 +110,6 @@ test('scripts/docs-link-check.mjs fails on missing targets including formerly ex
   assert.match(failRun.stderr, /docs\/INDEX\.md links to WORK-CLAIMS\.md, which is not in the tree/);
   assert.match(failRun.stderr, /docs\/INDEX\.md links to QA2-SYSTEMS\.md, which is not in the tree/);
   assert.match(failRun.stderr, /docs\/INDEX\.md links to OTHER-MISSING\.md, which is not in the tree/);
-  assert.match(failRun.stderr, /docs-link-check: FAILED \(5 broken, 6 checked\)/);
+  assert.match(failRun.stderr, /docs\/INDEX\.md links to \/jion\.txt, which is not in the tree/);
+  assert.match(failRun.stderr, /docs-link-check: FAILED \(6 broken, 7 checked\)/);
 });

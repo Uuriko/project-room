@@ -23,6 +23,7 @@
         '200': { description: "Project state, at most 6144 bytes of JSON" }
   /api/rooms/{roomId}/mac-capability:
     post:
+      x-room-permission: self
       summary: Report local Mac check readiness
       description: |
         An authenticated Room agent reports its own short-lived, approved Mac

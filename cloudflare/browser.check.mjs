@@ -1,4 +1,4 @@
-import { clickChrome } from '../scripts/room-chrome.mjs';
+import { clickChrome, openConversation } from '../scripts/room-chrome.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdir, mkdtemp } from 'node:fs/promises';
@@ -93,6 +93,8 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
       if (visit === 0) assert.deepEqual(streamStatuses, [429, 200], 'a closed stream recovers automatically after a temporary refusal');
       assert.equal(await owner.locator('#connection-status').textContent(), 'Connected');
     }
+    // #6322: each return lands the guest on Updates; read the conversation as a member would.
+    await openConversation(guest);
     await owner.locator('#message-input').fill('Still live after six guest returns');
     await owner.locator('#message-input').press('Enter');
     await guest.getByText('Still live after six guest returns', { exact: true }).waitFor();
@@ -107,6 +109,7 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     returned.setDefaultTimeout(12000);
     await returned.goto(returnUrl);
     await returned.locator('#main').waitFor({ state: 'visible' });
+    await openConversation(returned);
     await returned.locator('#message-list').getByText('Hello back — live updates work', { exact: true }).waitFor();
     assert.match(await returned.locator('#identity-label').textContent(), /Cloudflare guest/);
     await returned.screenshot({ path: join(output, 'cloudflare-return.png'), fullPage: true });

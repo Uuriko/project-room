@@ -37,6 +37,11 @@ const BOND_DM_DATA_SHAPES = {
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
 export const ERROR_REGISTRY = {
+  review_runtime_stale: {
+    status: "action_required", hint: uiText("agentError.review_runtime_stale.hint"),
+    next: [{ command: uiText("agentError.review_runtime_stale.recovery") }],
+    catalog: { http: 409, retry: "re-read", recovery: uiText("agentError.review_runtime_stale.recovery") }
+  },
   attention_wait_superseded: {
     status: "action_required", hint: uiText("agentError.attention_wait_superseded.hint"),
     next: [{ command: uiText("agentError.attention_wait_superseded.recovery") }],
@@ -556,6 +561,8 @@ export function errorRegistryAx(code, { httpStatus = 0, message = "", roomId, wo
 // covered by axFamilyRecovery() below; tests/errors-catalog-drift.test.js
 // fails if a catalogued code loses either kind of coverage.
 const AX_NAMED_RECOVERIES = {
+  reconnect_scope_mismatch: [uiText("agentError.reconnect_scope_mismatch.hint"), uiText("agentError.reconnect_scope_mismatch.recovery")],
+  review_runtime_attempt_conflict: [uiText("agentError.review_runtime_attempt_conflict.hint"), uiText("agentError.review_runtime_attempt_conflict.recovery")],
   // Current-room refusals retain their qualified recovery and existing grants.
   current_room_context_required: [uiText("agentError.current_room_context_required.hint"), uiText("agentError.current_room_context_required.recovery")],
   current_directory_integrity: [uiText("agentError.current_directory_integrity.hint"), uiText("agentError.current_directory_integrity.recovery")],

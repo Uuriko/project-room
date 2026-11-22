@@ -7,6 +7,7 @@ import { createRoomServer } from "./server/http.mjs";
 import { telegramConfig } from "./server/channel-adapters/telegram-config.mjs";
 import { defaultServerArgs } from "./server/boot-options.mjs";
 import { wireNodeJobs } from "./server/jobs.mjs";
+import { localRecoveryEnabled, localRecoveryPoint } from "./server/node-recovery-point.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
@@ -139,6 +140,9 @@ if (!paused && store) {
   try {
     nodeJobs = wireNodeJobs(store, {
       env: process.env,
+      // Automatic projection relief needs a verified recovery point; a Node
+      // store has no R2/KV backup, so it takes a verified local copy.
+      recoveryPoint: localRecoveryEnabled(process.env) ? () => localRecoveryPoint(store, { env: process.env }) : null,
       channelWebhooks: serverArgs.channelWebhooks,
       gmailAuth: serverArgs.gmailAuth
     });

@@ -258,7 +258,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   assert.equal(await chip.evaluate(el => getComputedStyle(el).animationName), "done-chip-pop");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await ownerRow.click();
-  assert.match(await page.locator("#message-input").inputValue(), /@Room owner/);
+  assert.match(await page.locator("#message-input").inputValue(), /@\(owner\)/); // exact mention token since #6332
   mkdirSync("test-results", { recursive: true });
   await page.locator("#people-panel").scrollIntoViewIfNeeded();
   await page.screenshot({ path: "test-results/people-rail-desktop.png" });
