@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { RoomAgentClient } from "../client/room-agent.mjs";
 import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
 
 const connection = { origin: "https://room.example.org", roomId: "build", memberId: "muse" };
@@ -430,4 +431,45 @@ test("a stale refusal, a committed re-read ack with a lost response and a restar
   assert.equal(recovered.receiverAcknowledgment.duplicate, true);
   assert.equal(recovered.receiverAcknowledgment.sequence, 14);
   assert.equal(ops.size, 1);
+});
+
+
+test("a closed stream catches up the original linked request exactly once", async () => {
+  const ready = request("existing-review", { contextEventId: "open-existing-review" });
+  const signal = new AbortController().signal;
+  let streams = 0, scans = 0, exact = 0, acks = 0;
+  let checkpoint = { after: 10, inFlight: null };
+  const transport = new RoomAgentClient({ ...connection, token: "T".repeat(43), async fetchImpl(url) {
+    if (new URL(url).pathname.endsWith("/stream")) {
+      assert.equal(++streams, 1);
+      return new Response("", { headers: { "Content-Type": "text/event-stream" } });
+    }
+    return Response.json({ authMode: "room", roomId: "build", credentialKind: "identity", expiresAt: null,
+      account: null, csrf: null, sessionBinding: null, sessionRevision: null,
+      member: { id: "muse", kind: "agent", active: true, revision: 0, permissions: [] } });
+  } });
+  const client = {
+    waitForChange: transport.waitForChange.bind(transport),
+    replyRequests() {
+      return ++scans === 1 ? { evaluatedThrough: 14, requests: [] } : { evaluatedThrough: 15, requests: [ready] };
+    },
+    replyContext(id) {
+      assert.equal(id, ready.id);
+      exact++;
+      return context(ready, 15);
+    },
+    command(command) {
+      assert.equal(command.data.requestMessageId, ready.id);
+      assert.equal(command.data.ifUnacknowledgedContextEventId, ready.openingEventId);
+      return { event: { id: "ack-original" }, sequence: 15 + ++acks };
+    },
+  };
+  const result = await runMuseHandoff({ mode: "--stay-armed", windowMs: 10000, stop: signal,
+    run(signal, progress) {
+      return holdMuseHandoff({ client, policy, checkpoint, save(value) { checkpoint = value; },
+        signal, receiverAck: true, ...progress });
+    } });
+  assert.equal(result.requestMessageId, ready.id);
+  assert.equal(result.source, "catch_up");
+  assert.deepEqual({ streams, scans, exact, acks }, { streams: 1, scans: 2, exact: 1, acks: 1 });
 });
