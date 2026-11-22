@@ -164,7 +164,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     body.replaceChildren();
     // Keep exact text for copy, comparison, and passage selection. Only
     // canonical GitHub file links at a full commit SHA become navigable.
-    const sourceLink = /(?<!\S)https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?(?=$|[\s),;])/gi;
+    const sourceLink = /(?<!\S)https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?(?=$|\s)/gi;
     let offset = 0;
     for (const match of text.matchAll(sourceLink)) {
       const href = match[0];

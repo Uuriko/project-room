@@ -351,7 +351,10 @@ test("shared result links keep identical old and new text bound to different ver
     "Verdict binding: " + verdictSource,
     "Regression: " + regressionSource,
     "Literal moving link: https://github.com/Uuriko/project-room/blob/main/src/result-reader.js",
-    "Literal noncanonical link: " + source + "/../../../../main/src/result-reader.js"
+    "Literal noncanonical link: " + source + "/../../../../main/src/result-reader.js",
+    "Literal comma path: " + source + "/docs/a,b.md",
+    "Literal semicolon path: " + source + "/docs/a;b.md",
+    "Literal closing parenthesis path: " + source + "/docs/a)b.md"
   ].join("\n");
   const f = await setup(t, 1440, { firstBody: body });
   const check = (receipt, result) => f.send("human-checker", T.VERIFICATION_RECORDED, {
