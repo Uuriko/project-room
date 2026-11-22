@@ -68,7 +68,7 @@ export function createDirectConversationWindow({ read, changed = () => {} }) {
 // Every snapshot change revalidates the selection; late account/link reads die.
 export function createMessageSelection({ read, changed = () => {} }) {
   let epoch = 0, selected = null, boundary = null, wanted = null, attempted = null;
-  let messages = [], error = null, loading = false;
+  let messages = [], error = null, loading = false, flight = null;
   const view = () => ({ messages, error, loading });
   async function load() {
     if (!selected || loading) return;
@@ -94,17 +94,21 @@ export function createMessageSelection({ read, changed = () => {} }) {
     } finally {
       if (ticket === epoch) {
         loading = false; changed(view());
-        if (wanted !== sequence) void load();
+        if (wanted !== sequence) void sync(wanted);
       }
     }
   }
   function select(id, identity) {
     if (selected === id && boundary === identity) return;
     epoch++; selected = id; boundary = identity;
-    messages = []; error = null; loading = false; wanted = attempted = null;
+    messages = []; error = null; loading = false; flight = null; wanted = attempted = null;
   }
-  return { view, select,
-    sync(sequence) { wanted = sequence; if (attempted !== sequence) void load(); },
+  function sync(sequence, { retry = false } = {}) {
+    wanted = sequence;
+    if (!loading && (attempted !== sequence || retry)) flight = load();
+    return flight;
+  }
+  return { view, select, sync,
     clear() { select(null, null); },
   };
 }

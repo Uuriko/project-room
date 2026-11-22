@@ -1,4 +1,4 @@
-import { openComposerOptions } from "./room-chrome.mjs";
+import { openComposerOptions, openConversation } from "./room-chrome.mjs";
 import { clickChrome, ensureSidebarClosed, messageAction } from "./room-chrome.mjs";
 // Simulated people, real local browser. Fictional rooms; no outside services.
 import test from "node:test";
@@ -199,6 +199,7 @@ test("guest Results remain useful with large text and no creation controls", { t
 
 for (const theme of ["dark", "light"]) for (const mobile of [false, true]) test(`a withdrawn result clears its reader: ${theme} ${mobile ? "phone" : "desktop"}`, { timeout: 30000 }, async t => {
   const f = await setup(t, { theme, mobile }), p = f.p;
+  await openConversation(p);
   await p.locator("#message-input").fill("Keep this thought");
   await f.open(); await f.read(); await f.ready();
   await p.locator("#result-discuss").waitFor({ state: "visible" });
@@ -330,6 +331,7 @@ for (const mobile of [false, true]) test(`result search ${mobile ? "phone" : "de
 
 for (const guest of [false, true]) test(`private result continuation keeps its audience: ${guest ? "recipient phone light" : "author desktop dark"}`, { timeout: 30000 }, async t => {
   const f = await setup(t, { privateResult: true, guest, mobile: guest, theme: guest ? "light" : "dark" }), p = f.p;
+  await openConversation(p);
   await p.locator("#message-input").fill("Keep my existing draft");
   await f.open(); await f.read(); await f.ready();
   const before = structuredClone(f.state().workItems["private-result"]);
@@ -539,11 +541,21 @@ test("saved scoped channel: human assignment to inline result, continuation and 
 for (const mobile of [false, true]) test(`older result resolves its reply conversation: ${mobile ? "phone" : "desktop"}`, { timeout: 30000 }, async t => {
   const f = await setup(t, { olderResult: true, mobile }), p = f.p;
   await f.open(); await f.read(); await f.ready();
+  const resultId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  const exact = [], history = [];
+  p.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/conversation") && url.searchParams.has("messageId")) exact.push(url.searchParams.get("messageId"));
+    if (url.pathname.endsWith("/messages")) history.push(url.pathname);
+  });
   await p.locator("#result-discuss").click();
   await p.locator("#settings-dialog").waitFor({ state: "hidden" });
   await p.waitForFunction(() => document.querySelector("#message-input") === document.activeElement);
   assert.equal(await p.locator("#message-input").evaluate(node => node === document.activeElement), true);
   assert.match(await p.locator("#reply-context").textContent(), /Café|One useful result/);
+  assert.equal(exact[0], resultId, "resolve the exact older result first");
+  assert.ok(exact.length <= 3, "read only the target and its ancestry");
+  assert.equal(history.length, 0, "no history walk before opening the composer");
 });
 
 test("stalled clipboard preserves download and fences copies across collaboration views", { timeout: 30000 }, async t => {
