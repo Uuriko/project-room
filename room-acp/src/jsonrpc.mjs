@@ -6,18 +6,39 @@ export class JsonRpcError extends Error {
   constructor(code, message, data) { super(message); this.code = code; this.data = data; }
 }
 
-export function createPeer({ input, output, onRequest = async () => { throw new JsonRpcError(-32601, "Method not found"); }, onNotification = () => {}, log = () => {} }) {
+export function createPeer({ input, output, onRequest = async () => { throw new JsonRpcError(-32601, "Method not found"); }, onNotification = () => {}, onTransportError = () => {}, log = () => {} }) {
   let nextId = 1, closed = false;
   const pending = new Map();
   const write = message => {
     if (closed) return false;
-    try { output.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n"); return true; } catch { return false; }
+    let frame;
+    try { frame = JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n"; } catch { return false; }
+    try { output.write(frame); return true; } catch { transportFailed(); return false; }
   };
   const failAll = reason => {
     for (const { reject } of pending.values()) reject(new JsonRpcError(-32000, reason));
     pending.clear();
   };
   const lines = createInterface({ input, crlfDelay: Infinity });
+  const close = reason => {
+    if (closed) return false;
+    closed = true;
+    failAll(reason);
+    lines.close();
+    return true;
+  };
+  // A failed stream may have sent a partial frame. Retire the whole peer so
+  // neither a later request nor a cancel is appended to that frame.
+  function transportFailed(reason = "connection failed") {
+    if (close(reason)) onTransportError();
+  }
+  const onStreamError = () => transportFailed();
+  lines.on("error", onStreamError);
+  output.on("error", onStreamError);
+  output.once("close", () => {
+    output.off("error", onStreamError);
+    transportFailed();
+  });
   lines.on("line", async line => {
     if (!line.trim()) return;
     let message;
@@ -34,7 +55,7 @@ export function createPeer({ input, output, onRequest = async () => { throw new 
       else resolve(message.result);
     }
   });
-  lines.on("close", () => { closed = true; failAll("connection closed"); });
+  lines.on("close", () => transportFailed("connection closed"));
   return {
     request(method, params = {}, { timeoutMs = 0 } = {}) {
       const id = nextId++;
@@ -47,7 +68,7 @@ export function createPeer({ input, output, onRequest = async () => { throw new 
       });
     },
     notify(method, params = {}) { return write({ method, params }); },
-    close() { closed = true; lines.close(); failAll("connection closed"); },
+    close() { close("connection closed"); },
     get closed() { return closed; },
   };
 }
