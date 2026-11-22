@@ -1,3 +1,4 @@
+import { settleBeforeRun, settleAfterDelivery } from "./settle-linked-work.mjs";
 import { hostReplyBody } from "./host-result.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -40,7 +41,7 @@ export function openRequestJournal(filename) {
 // execute receives no connection secret: only the selected conversation and
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
-export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId }) {
+export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId, settleLinkedWork = false }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
   if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
   if (selectRequest !== undefined && typeof selectRequest !== "function") throw new Error("Execution selection must be a function");
@@ -177,8 +178,12 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
           controller.abort(error);
       }).finally(() => { heartbeat = null; });
   }, 30000);
+  const settleKey = settleLinkedWork === true && context.request.workItemId ? [id, attemptId] : null;
+  const settlement = [];
   try {
     controller.signal.throwIfAborted();
+    if (settleKey) settlement.push(await settleBeforeRun(client, { memberId: connection.memberId, attemptKey: settleKey,
+      workItemId: context.request.workItemId, signal: controller.signal }));
     const result = await execute({ requestId: id, request: structuredClone(context.request), messages,
       preparation: context.preparation, signal: controller.signal }, { binding: Object.freeze({
         origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId,
@@ -199,6 +204,13 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
       if (error?.status !== undefined && error.status !== 408 && error.status !== 429 && error.status < 500) throw error;
     }
     const delivered = await deliver({ response: JSON.stringify(response), attempt_id: attemptId });
+    if (settleKey) {
+      // The answer is delivered; a lifecycle refusal is reported, not thrown.
+      try { settlement.push(await settleAfterDelivery(client, { memberId: connection.memberId, attemptKey: settleKey,
+        workItemId: context.request.workItemId, body, receipt: delivered.receipt, signal })); }
+      catch (error) { settlement.push({ steps: [], refused: error?.code ?? error?.status ?? "error" }); }
+      return { ...delivered, hostExecuted: true, linkedWork: settlement };
+    }
     return { ...delivered, hostExecuted: true };
   } catch (error) {
     clearInterval(timer); await heartbeat;
@@ -227,7 +239,7 @@ export function isRequestEligible(request, { owned, runState, hasPendingDelivery
   return runState !== "needs_attention" && hasPendingDelivery;
 }
 
-export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, selectRequest, onPoll = () => {} }) {
+export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, selectRequest, onPoll = () => {}, settleLinkedWork = false }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
   let delay = intervalMs, connectionUnavailable = false, pendingStatement, recoveryRow = 0;
@@ -281,7 +293,7 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
         // A saved response may be retried only by its original local journal.
         // Another host's ownership is never a lease that can be stolen.
         if (owned(request) && !pending(request)) continue;
-        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest, selectRequest })); }
+        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest, selectRequest, settleLinkedWork })); }
         catch (error) {
           if (error?.code === "host_isolation_unavailable") throw error;
           if (error?.runReportPending) { reportPending = true; emit({ status: "report_pending", requestMessageId: request.id }); continue; }
