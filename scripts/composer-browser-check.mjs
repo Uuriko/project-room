@@ -376,6 +376,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     await page.locator('[data-message-record-id="reply"] [data-message-action="reply"]').click();
 
+    // An absent receipt read still exercises the exact original resend.
+    const receiptUrl = url => url.pathname.endsWith("/events") && url.searchParams.has("operationId");
+    const loseReceipt = route => route.abort("failed");
+    await page.route(receiptUrl, loseReceipt);
     await input.fill("Keep this thread reply");
     await input.focus();
     await input.evaluate(e => e.setSelectionRange(5, 9, "backward"));
@@ -415,6 +419,29 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const messages = store.snapshot(owner, "commons").state.messages.filter(m => m.body === "Keep this thread reply");
     assert.equal(messages.length, 1); assert.equal(messages[0].replyToId, "reply"); assert.equal(messages[0].toMemberId, null);
     await page.unroute("**/api/rooms/commons/commands");
+    await page.unroute(receiptUrl, loseReceipt);
+
+    // A real commit with a lost POST response settles from one exact read.
+    const recoveryCommands = [], recoveryReads = [];
+    await page.route(receiptUrl, route => {
+      recoveryReads.push(new URL(route.request().url()).searchParams.get("operationId"));
+      return route.continue();
+    });
+    await page.route("**/api/rooms/commons/commands", async route => {
+      const command = route.request().postDataJSON();
+      recoveryCommands.push(command);
+      assert.equal((await route.fetch()).ok(), true);
+      await route.abort("failed");
+    });
+    await input.fill("Recovered without another send");
+    await input.press("Control+Enter");
+    await waitForSaved();
+    assert.equal(recoveryCommands.length, 1);
+    assert.deepEqual(recoveryReads, [recoveryCommands[0].id]);
+    assert.equal(store.room("commons").state.messages.filter(message => message.body === "Recovered without another send").length, 1);
+    assert.equal(await status.textContent(), "");
+    await page.unroute("**/api/rooms/commons/commands");
+    await page.unroute(receiptUrl);
 
     // Explicit opt-in survives reload only after authenticating the same room.
     await input.fill("Recover this thread after reload");

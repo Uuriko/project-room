@@ -4705,7 +4705,8 @@ $("#message-form").addEventListener("submit", e => {
   saveComposer();
   const generation = client.generation, draftKey = composerKey();
   const fileDraftOwner = drafts, fileDraft = drafts.get(draftKey);
-  const ownsSendingDraft = () => drafts === fileDraftOwner && composerKey() === draftKey && drafts.entries.get(draftKey) === fileDraft;
+  const ownsSendingDraft = () => drafts === fileDraftOwner && composerKey() === draftKey && drafts.entries.get(draftKey) === fileDraft
+    && fileDraft.pending?.command === sendingCommand;
   submit(e.currentTarget, async () => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
@@ -4717,7 +4718,7 @@ $("#message-form").addEventListener("submit", e => {
         if (generation === client.generation && state) maybeShowGuestUpgradeHint();
         return;
       }
-      receipt = await client.send(sendingCommand);
+      receipt = await client.send(sendingCommand, { confirmAfterUnknown: true });
     } catch (error) {
       if (generation !== client.generation || !state) return;
       throw mapDmConsentRefusal(sendingCommand, error) ?? error;

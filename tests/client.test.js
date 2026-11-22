@@ -67,6 +67,57 @@ test("committed command is not reported as failed when the refresh disconnects",
   assert.equal((await client.send({ id: "one", type: "message.posted", data: { body: "hello" } })).sequence, 9);
   assert.match(status, /interrupted/);
 });
+test("the browser confirms a lost message response with one actor and operation bound receipt", async () => {
+  const command = draftCommand(null, "message.posted", { body: "Sent once" }).command;
+  const receipt = { contractVersion: 1, operationId: command.id, roomId: "commons", viewerId: "human",
+    status: "recorded", currentStateVerified: false, eventType: command.type, eventId: "recorded-event", sequence: 4, checkedThrough: 6 };
+  for (const refusal of [null, { viewerSessionBinding: "different-session" }, { roomId: "wrong-room" },
+    { receipt: { ...receipt, operationId: "another-operation" } }, { receipt: { status: "not_recorded" } }, { receipt: { ...receipt, eventType: "message.edited" } }]) {
+    const requests = [], settled = [];
+    const client = new RoomClient({ onSendSettled: result => settled.push(result), fetcher: async (path, options) => {
+      requests.push([path, options.method]);
+      if (options.method === "POST") throw new TypeError("Response lost");
+      if (path.includes("operationId=")) return response({ ...snapshot(6), readKind: "operation-receipt", receipt, ...refusal });
+      return response(snapshot(6));
+    } });
+    client.session = identity();
+    if (refusal) await assert.rejects(client.send(command, { confirmAfterUnknown: true }), /Response lost/);
+    else assert.deepEqual(await client.send(command, { confirmAfterUnknown: true }), receipt);
+    assert.equal(settled[0].ok, !refusal);
+    assert.equal(settled[0].maybeSaved, Boolean(refusal));
+    assert.equal(requests.filter(([, method]) => method === "POST").length, 1);
+    assert.match(requests[1][0], new RegExp(`operationId=${command.id}&view=browser&limit=1`));
+    assert.equal(requests.length, refusal ? 2 : 3);
+  }
+});
+
+test("a delayed receipt cannot settle a replacement room or end its session", async () => {
+  const waiting = deferred(), reply = deferred(), settled = [];
+  const client = new RoomClient({
+    onSendSettled: value => settled.push(value),
+    fetcher: async (path, options) => {
+      if (options.method === "POST") throw new TypeError("Response lost");
+      assert.match(path, /operationId=old-operation/);
+      waiting.resolve();
+      return reply.promise;
+    }
+  });
+  client.session = identity();
+  const started = client.send({ id: "old-operation", type: "message.posted", data: { body: "Old draft" } }, { confirmAfterUnknown: true });
+  await waiting.promise;
+  client.disconnect();
+  const replacement = { ...identity("other"), roomId: "another-room" };
+  client.session = replacement;
+  reply.resolve(response({
+    ...snapshot(6), readKind: "operation-receipt",
+    receipt: { contractVersion: 1, operationId: "old-operation", roomId: "commons", viewerId: "human",
+      status: "recorded", currentStateVerified: false, eventType: "message.posted", eventId: "recorded-event", sequence: 4, checkedThrough: 6 }
+  }));
+  await assert.rejects(started, /Response lost/);
+  assert.deepEqual(settled, []);
+  assert.equal(client.session, replacement);
+});
+
 test("simultaneous refreshes coalesce and do not drop a pending newer event", async () => {
   let release, calls = 0; const seen = [];
   const client = new RoomClient({ fetcher: async () => { calls++; if (calls === 1) return new Promise(resolve => release = () => resolve(response(snapshot(4)))); return response(snapshot(5)); }, onSnapshot: s => seen.push(s.sequence) });

@@ -1,4 +1,4 @@
-import { openSearch } from "./room-chrome.mjs";
+import { openConversation, openSearch } from "./room-chrome.mjs";
 // Real browser + local HTTP service; all identities, messages, and keys are disposable fixtures.
 import { openChannel } from "./reveal-record.mjs";
 import test from "node:test";
@@ -69,6 +69,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       await p.locator("#main").waitFor({ state: "visible" });
     };
     await login(page, owner); await login(other, human);
+    await openConversation(page); await openConversation(other);
     const input = page.locator("#message-input");
     const unicodeBody = "Ready 👍🏽 👨‍👩‍👧‍👦 🇺🇸";
     await input.fill(unicodeBody);
@@ -100,6 +101,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await input.fill("The paperback edition sounds good.");
 
     // The first request commits but loses its response. The browser retries the same ID.
+    await page.route(url => url.pathname.endsWith("/events") && url.searchParams.has("operationId"), route => route.abort("failed"));
     const commandIds = []; let loseResponse = true;
     await page.route("**/api/rooms/commons/commands", async route => {
       const command = route.request().postDataJSON();
