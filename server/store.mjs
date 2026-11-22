@@ -1385,6 +1385,8 @@ export class RoomStore {
     if (!Number.isSafeInteger(projectionByteLimit) || projectionByteLimit < PILOT_LIMITS.projectionBytes
         || projectionByteLimit > PILOT_LIMITS.legacyProjectionCeilingBytes) throw new Error("Invalid legacy projection ceiling");
     this.projectionByteLimit = projectionByteLimit;
+    // Set by the Node job scheduler: asks for an early relief tick.
+    this.onProjectionLimit = null;
     this._restoreOpening = true;
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
@@ -4180,7 +4182,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   // Phase 1a: the one serializer for rooms.projection. Every writer uses it.
   projectionExceedsWriteLimit(value) {
-    return Buffer.byteLength(value) > this.projectionByteLimit;
+    const over = Buffer.byteLength(value) > this.projectionByteLimit;
+    // A full projection asks the job scheduler (when one is wired) for an
+    // early automatic relief tick. The hook only schedules; it never writes
+    // inside this transaction and never changes the refusal.
+    if (over && typeof this.onProjectionLimit === "function") {
+      try { this.onProjectionLimit(); } catch { /* the refusal stands */ }
+    }
+    return over;
   }
 
   storedProjection(roomId, state) {

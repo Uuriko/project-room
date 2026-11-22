@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRuntimePackage, verifyRuntimePackage } from './runtime-package.mjs';
-import { signInFixture } from "./auth-signin.mjs";
+import { signInFixture, settleLanding } from "./auth-signin.mjs";
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 // A schema number does not imply browser-format compatibility. In GitHub's
@@ -79,6 +79,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   const switchTo = async name => {
     // Preserve the same page/sessionStorage/cookies and the same service origin.
     await start(name); await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
+    await settleLanding(page);
   };
   const noDrafts = () => page.evaluate(() => Object.keys(sessionStorage).filter(key => /^project-room:drafts:v\d+$/.test(key)).length === 0);
   await page.goto(origin); await enter(); await remember();

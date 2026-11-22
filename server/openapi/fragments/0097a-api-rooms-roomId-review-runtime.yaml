@@ -1,5 +1,6 @@
   /api/rooms/{roomId}/review-runtime:
     post:
+      x-room-permission: verifier
       operationId: "reportExactReviewRuntime"
       summary: Report a managed review runtime observation
       description: Report the exact reviewer runtime phase. The active Room listener can reserve a single provider dispatch in the start_unknown phase. The reservation grants no Room action permissions.
