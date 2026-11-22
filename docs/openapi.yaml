@@ -12725,7 +12725,9 @@ paths:
         `idlePickup: true` and the current `x-room-listener-token` header.
         API keys also need `rooms:read` and `rooms:write` for idle pickup.
         The report never renews the lease. It returns
-        `idlePickup: { roomId, status, evaluatedThrough }`. A successful
+        `idlePickup: { roomId, status, evaluatedThrough, refreshAfterMs? }`.
+        A receiver that remains idle can refresh the observation after the
+        indicated interval on its existing wake poll path. A successful
         pickup appears as a regular incoming Room request on the usual wake
         transport. The report grants no new authority and reports only the
         capacity of this Room listener.

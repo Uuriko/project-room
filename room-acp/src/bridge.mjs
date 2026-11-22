@@ -1128,7 +1128,7 @@ export class Bridge {
       if (this.controller.signal.aborted) return;
       if (!(await this.pacePoll())) return;
       const idleProbe = page === 0 && cursor === null && this.idlePickupAvailable && this.queue.isIdle
-        && this.idleReportedVersion !== this.queue.version;
+        && (this.idleReportedVersion !== this.queue.version || performance.now() >= (this.idleRefreshAt ?? Infinity));
       const version = this.queue.version;
       const value = await this.room.poll({ hostId: this.connection.hostId,
         waitMs: page === 0 && cursor === null && !idleProbe ? this.waitMs : 0,
@@ -1150,6 +1150,8 @@ export class Bridge {
           if (report?.idlePickup?.roomId === this.connection.roomId) {
             this.idleReportedVersion = version;
             this.idleReportedThrough = report.idlePickup.evaluatedThrough;
+            const refresh = report.idlePickup.refreshAfterMs;
+            this.idleRefreshAt = Number.isSafeInteger(refresh) && refresh >= 10000 ? performance.now() + refresh : null;
             this.log(`room idle pickup: ${report.idlePickup.status}`);
           }
         }

@@ -6,6 +6,7 @@ import { listRoomWork, mcpKeyGrantsScope } from "./mcp-room-profile.mjs";
 import { readRoomNext } from "./room-next.mjs";
 
 const investigation = "Room investigation pass.";
+const CAPACITY_TTL_MS = 60000;
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
   JSON.stringify([roomId, requesterId, recipientId, workItemId]);
 
@@ -174,6 +175,7 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
     const link = store.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
     return idleBindings.get(JSON.stringify([roomId, link?.member_id]));
   };
+  const observations = new Map();
   const idle = {
     supports: (roomId, identityId) => idleBindings.size > 0 && Boolean(idleBinding(roomId, identityId)),
     dispatch(roomId, identityId, receiverSecret, hostId, origin) {
@@ -181,6 +183,39 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
       if (!binding) return "disabled";
       const { route, secret } = binding;
       return dispatchIdlePickup(store, route, secret, receiverSecret, identityId, hostId, origin);
+    },
+    observe(roomId, identityId, leaseToken, hostId, status, through) {
+      const route = idleBinding(roomId, identityId)?.route;
+      if (!route) return;
+      const key = routeKey(route);
+      observations.delete(key);
+      if (["replayed", "no_successor"].includes(status)) {
+        observations.set(key, { route, identityId, leaseToken, hostId, through, at:store.agentHeartbeats.now() });
+      }
+      return status === "paused" ? undefined : CAPACITY_TTL_MS / 2;
+    },
+    clearObservation(roomId, identityId) {
+      const route = idleBinding(roomId, identityId)?.route;
+      if (route) observations.delete(routeKey(route));
+    },
+    availablePeer(roomId, requesterId) {
+      const now = store.agentHeartbeats.now();
+      const through = store.headSequence(roomId);
+      for (const sample of observations.values()) {
+        const { route, identityId, leaseToken, hostId, at } = sample;
+        if (route.roomId !== roomId || route.requesterId !== requesterId || sample.through !== through
+          || now >= at + CAPACITY_TTL_MS || !idleBinding(roomId, identityId)
+          || store.wakeQueue.pauseStatus(roomId, route.recipientId)) continue;
+        const lease = store.db.prepare("SELECT fencing_token AS token, lease_expires_at AS expires FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?")
+          .get(identityId, roomId);
+        if (lease?.token !== leaseToken || lease.expires <= now) continue;
+        const pending = store.agentHeartbeats.pendingWakePage(identityId, { roomId, hostId, limit:1, observe:false });
+        if (pending.signals.length || pending.more) continue;
+        return { memberId:route.recipientId, scope:"room_queue", status:"idle", observedAt:at,
+          expiresAt:Math.min(lease.expires, at + CAPACITY_TTL_MS),
+          nextRead:{ tool:"room_read_work", arguments:{ roomId, workItemId:route.workItemId } } };
+      }
+      return null;
     }
   };
   if (idleBindings.size) store.idlePickup = idle;

@@ -10,6 +10,8 @@ import { Bridge } from "../room-acp/src/bridge.mjs";
 import { RoomClient } from "../room-acp/src/room.mjs";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { startCompletionPickup } from "../server/completion-pickup.mjs";
+import { readRoomNext } from "../server/room-next.mjs";
+import { listRoomWork } from "../server/mcp-room-profile.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -130,6 +132,8 @@ for (const ready of [false, true]) {
       }
     } });
     const list = () => f.store.replyRequests.list(agent.secret, roomId, { direction: "incoming", status: "all" }).requests;
+    const pickup = secret => readRoomNext(f.store, secret, roomId, { view:"pickup" },
+      () => listRoomWork(f.store, secret, { roomId, focus:"help_wanted", limit:1 }), { allowInvestigation:true });
     assert.equal(list().length, 0);
     await bridge.refreshRoom();
     const runTurn = bridge.queue.run;
@@ -140,6 +144,7 @@ for (const ready of [false, true]) {
     await bridge.pollOnce();
     assert.equal(bridge.idlePickupAvailable, true);
     assert.equal(list().length, 0, "a busy receiver does not ask for another turn");
+    assert.equal(pickup(f.keys.owner).availablePeer, undefined);
     finishCurrentTurn();
     await bridge.queue.idle();
     if (ready) await assert.rejects(bridge.pollOnce(), error => error.status === 0);
@@ -165,6 +170,24 @@ for (const ready of [false, true]) {
     await setImmediate();
     const latest = await observe();
     assert.ok(["replayed", "no_successor"].includes(latest.idlePickup.status), JSON.stringify(latest));
+    assert.equal(latest.idlePickup.refreshAfterMs, 30000);
+    const peer = pickup(f.keys.owner).availablePeer;
+    assert.equal(peer?.memberId, recipientId);
+    assert.equal(peer?.scope, "room_queue");
+    assert.deepEqual(peer?.nextRead, { tool:"room_read_work", arguments:{ roomId, workItemId } });
+    assert.equal(pickup(agent.secret).availablePeer, undefined, "only the scoped requester sees the observation");
+    const clock = f.store.agentHeartbeats.now;
+    f.store.agentHeartbeats.now = () => peer.expiresAt;
+    assert.equal(pickup(f.keys.owner).availablePeer, undefined, "the observation expires");
+    f.store.agentHeartbeats.now = clock;
+    const head = f.store.headSequence(roomId);
+    const { signal } = f.store.agentHeartbeats.enqueueWake({ agentId:agent.identityId, kind:"land", roomId, messageId:"idle-expiry-test" });
+    assert.equal(pickup(f.keys.owner).availablePeer, undefined, "pending attention invalidates the hint before delivery");
+    assert.ok((await bridge.room.poll({ hostId, waitMs:0 })).pendingWakes.some(wake => wake.signalId === signal.signalId));
+    await bridge.room.ack({ signalIds:[signal.signalId], fencingToken:bridge.fencingToken });
+    assert.equal(f.store.headSequence(roomId), head, "the transport test does not append a Room event");
+    assert.equal(pickup(f.keys.owner).availablePeer, undefined, "an acknowledged wake cannot revive an old idle report");
+    await observe();
     assert.equal(list().length, 1);
     assert.equal(prompts, 1);
     if (!ready) {
@@ -174,6 +197,7 @@ for (const ready of [false, true]) {
       const idleVersion = bridge.idleReportedVersion;
       const idleThrough = bridge.idleReportedThrough;
       propose("later-exact-work", recipientId);
+      assert.equal(pickup(f.keys.owner).availablePeer, undefined, "new Room evidence invalidates the stale observation");
       await bridge.pollOnce();
       assert.equal(bridge.idleReportedVersion, idleVersion);
       assert.ok(bridge.idleReportedThrough > idleThrough);
@@ -184,6 +208,7 @@ for (const ready of [false, true]) {
     }
     const openedCount = ready ? 1 : 2;
     f.store.agentHeartbeats.releaseListenerLease({ agentId: agent.identityId, roomId, fencingToken: bridge.fencingToken });
+    assert.equal(pickup(f.keys.owner).availablePeer, undefined, "a lost lease invalidates the observation");
     await assert.rejects(observe, error => error.code === "stale_listener");
     const nextHost = "idle-test-reconnected";
     const attached = await bridge.room.heartbeat({ hostId: nextHost });
