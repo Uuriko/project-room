@@ -251,7 +251,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.releaseChecks = null;
       showReleaseChecks(null);
     }
-    if (!earlier && view.loaded && !view.error && !view.withdrawn && item && !item.verification) {
+    if (!earlier && view.loaded && !view.error && !view.withdrawn && !item?.verification) {
       const runtime = reviewRuntimeLabel(view.reviewRuntime?.status, view.reviewRuntime?.webhook);
       if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
     }
