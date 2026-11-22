@@ -108,7 +108,15 @@ export function createMessageSelection({ read, changed = () => {} }) {
     if (!loading && (attempted !== sequence || retry)) flight = load();
     return flight;
   }
-  return { view, select, sync,
+  async function open(id, identity, sequence) {
+    select(id, identity);
+    const ticket = epoch;
+    await sync(sequence, { retry: true });
+    // A room refresh can queue one revalidation behind the first read.
+    if (ticket === epoch && loading) await flight;
+    return ticket === epoch && !loading && !error && messages.at(-1)?.id === id;
+  }
+  return { view, select, sync, open,
     clear() { select(null, null); },
   };
 }

@@ -6852,10 +6852,8 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   discussionMessage: id => conversation?.byId.get(id),
   async loadDiscussion(id) {
     const generation = client.generation;
-    selectedMessage.select(id, generation);
-    await selectedMessage.sync(client.sequence, { retry: true });
-    const selection = selectedMessage.view();
-    return generation === client.generation && !selection.loading && selection.messages.some(message => message.id === id);
+    const opened = await selectedMessage.open(id, generation, client.sequence);
+    return opened && generation === client.generation;
   },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
   onReturn() { $("#work-navigation-return").click(); },

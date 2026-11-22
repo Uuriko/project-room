@@ -82,6 +82,23 @@ test('message selection discards stale identity replies and bounds malformed anc
   cyclic.sync(1); await tick(); assert.equal(calls, 1, 'no retry loop on corrupt ancestry');
 });
 
+test('opening a selected discussion awaits one coalesced refresh and refuses a changed scope', async () => {
+  const { createMessageSelection } = await import('../src/direct-conversation-window.js');
+  for (const scopeChanges of [false, true]) {
+    const reads = [];
+    const selection = createMessageSelection({ read: query => new Promise(resolve => reads.push({ query, resolve })) });
+    const opening = selection.open('evidence', 'first-scope', 10);
+    selection.sync(11);
+    reads[0].resolve({ mode: 'replace', sequence: 10, messages: [{ id: 'evidence' }] });
+    await tick();
+    assert.deepEqual(reads.map(({ query }) => query), [{ messageId: 'evidence', limit: 1 }, { messageId: 'evidence', limit: 1 }]);
+    if (scopeChanges) selection.select('other', 'next-scope');
+    reads[1].resolve({ mode: 'replace', sequence: 11, messages: [{ id: 'evidence' }] });
+    assert.equal(await opening, !scopeChanges);
+    assert.equal(selection.view().messages.length, scopeChanges ? 0 : 1);
+  }
+});
+
 
 test('selected-message ancestry has a hard request bound and drops denied records', async () => {
   const { createMessageSelection } = await import('../src/direct-conversation-window.js');
