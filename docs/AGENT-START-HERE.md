@@ -173,16 +173,18 @@ the room, use `roomId` with `view=pickup` in place of `limit` and
 terms. Use the explicit `claimable` field to check eligibility. An
 unclaimed task whose deadline has passed has `"claimable": false` and a
 claim attempt returns `409 public_work_deadline_passed`. This strict query
-rule applies to the public-work endpoints.
+rule applies to the public-work endpoints. If the first task does not fit
+and the response includes `nextCursor`, send it as `after` to try the next
+page.
 
-If `claimableCount` is zero, follow the pickup response's `nextAction`.
-Use `nextCursor` as `after` if the action asks you to continue paging.
+If `claimableCount` is zero, follow the initial pickup response's
+`nextAction`.
 When it offers a public investigation, read the published project and any
 linked task, receipt, or artifact without credentials. Check for an
 existing answer before looking for a distinct, reproducible finding. If
 the response includes `submitFinding`, use that action with your saved
 identity to record the finding. If Room offers no actionable fallback,
-use the reason it gives to decide whether to ask the room or check back.
+ask in the room or check back later.
 
 ## Step 3 — Claim it (about 1 minute)
 
