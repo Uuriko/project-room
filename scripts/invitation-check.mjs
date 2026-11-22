@@ -151,6 +151,13 @@ async function switchAccount(page, key) {
   }, key);
 }
 
+async function openDraftComposer(page) {
+  const input=page.locator("#message-input");
+  if (!await input.isVisible()) await page.locator("#channel-list [data-channel]").first().click();
+  await input.waitFor({state:"visible"});
+  return input;
+}
+
 test("targeted invitation preview retries its retained secret without accepting or losing the opener", { timeout: 45000 }, async t => {
   const { browser, store, origin, targetRoomKey, invitationToken, invitationId } = await fixture(t);
   const page = await browser.newPage({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" });
@@ -158,7 +165,7 @@ test("targeted invitation preview retries its retained secret without accepting 
   await page.goto(origin);
   await signInFixture(page, targetRoomKey);
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#message-input").fill("Preserve this selected draft.");
+  await (await openDraftComposer(page)).fill("Preserve this selected draft.");
   await page.locator("#message-input").evaluate(el => { el.focus(); el.setSelectionRange(0, 8); el.dispatchEvent(new Event("select")); });
   const before = counts(store, invitationId), secrets = [];
   await page.route("**/api/invitations/preview", async route => {
@@ -199,7 +206,7 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
   await page.locator("#main").waitFor({ state: "visible" });
   assert.match(await page.locator("#identity-label").textContent(), /^Target human/);
 
-  const composer = page.locator("#message-input");
+  const composer = await openDraftComposer(page);
   await composer.fill("Keep this private lobby draft");
   page.locator("#message-to-select").evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); }, "lobby-owner");
   await composer.focus();
@@ -332,7 +339,7 @@ test("cancelled authentication preserves drafts and committed email upgrade fenc
   await page.goto(f.origin);
   await signInFixture(page, f.targetRoomKey);
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#message-input").fill("Retain this draft until I choose to switch");
+  await (await openDraftComposer(page)).fill("Retain this draft until I choose to switch");
   await page.evaluate(token => { location.hash = `invite/${token}`; }, f.invitationToken);
   await page.locator("#invitation-email").waitFor({ state: "visible" });
   assert.match(await page.locator("#invitation-account-warning").textContent(), /Switching accounts clears.*drafts.*Save a copy first/i);
@@ -426,7 +433,7 @@ for (const responseBody of ["{", "{}"] ) test(`committed email response ${JSON.s
   const f = await fixture(t);
   const page = await (await f.browser.newContext()).newPage();
   await page.goto(f.origin); await signInFixture(page, f.targetRoomKey);
-  await page.locator("#message-input").fill("Old private room draft must be fenced after uncertain authentication");
+  await (await openDraftComposer(page)).fill("Old private room draft must be fenced after uncertain authentication");
   await page.evaluate(token => { location.hash = `invite/${token}`; }, f.invitationToken);
   await fillInvitationEmail(page, f.targetAccountKey);
   let loginCommitted = false;
@@ -457,7 +464,7 @@ test("successful email POST followed by a failed account restore fences private 
   const f = await fixture(t);
   const page = await (await f.browser.newContext()).newPage();
   await page.goto(f.origin); await signInFixture(page, f.targetRoomKey);
-  await page.locator("#message-input").fill("Private draft before failed identity confirmation");
+  await (await openDraftComposer(page)).fill("Private draft before failed identity confirmation");
   await page.evaluate(token => { location.hash = `invite/${token}`; }, f.invitationToken);
   await fillInvitationEmail(page, f.targetAccountKey);
   let loginCommitted = false, restoreFailed = false, restoredFailure;
