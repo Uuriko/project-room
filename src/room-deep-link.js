@@ -115,3 +115,18 @@ export function exactResultHref({ roomId, workItemId, completionEventId }, locat
   url.hash = ["pr-record", "result", workItemId, completionEventId].join("/");
   return url.href;
 }
+
+// Carry record selectors through agent sign-in. The chosen room still owns
+// the post-login destination and the record reader still authorizes access.
+export function agentSigninRecord({ search = "", hash = "" }) {
+  const rooms = new URLSearchParams(search).getAll("room");
+  if (rooms.length !== 1 || !validId(rooms[0])) return null;
+  const exact = exactResultDestination({ search, hash });
+  if (exact) return { roomId:exact.roomId, hash };
+  const work = /^#pr-record\/work\/([^/]+)$/.exec(hash);
+  if (!work) return null;
+  try {
+    const id = decodeURIComponent(work[1]);
+    return validId(id) ? { roomId:rooms[0], hash:`#pr-record/work/${encodeURIComponent(id)}` } : null;
+  } catch { return null; }
+}

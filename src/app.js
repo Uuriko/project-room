@@ -54,7 +54,7 @@ import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-nav
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -1021,6 +1021,14 @@ const initialSignin = signinUI.mount($("#auth-signin-ui"));
 // (GET /agent-signin, decision #37): src/agent-signin-page.js hosts
 // the same component and endpoints; the wall keeps only the labeled
 // link (#agent-signin-button).
+const agentSigninLink = $("#agent-signin-button");
+const agentSigninTarget = agentSigninRecord(location);
+if (agentSigninLink && agentSigninTarget) {
+  const signIn = new URL(agentSigninLink.href);
+  signIn.searchParams.set("room", agentSigninTarget.roomId);
+  signIn.searchParams.set("record", agentSigninTarget.hash);
+  agentSigninLink.href = signIn.href;
+}
 async function openAccountSettings() {
   setSessionMenuOpen(false);
   const owned = accountClient.session;
