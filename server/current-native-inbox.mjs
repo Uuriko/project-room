@@ -98,16 +98,36 @@ function firstAddressedSequence(db,roomId,memberId,after,headSequence,b){
 }
 // Conversation delivery and standing obligations are separate cursors. Reading
 // a source window neither acknowledges conversation nor clears formal work.
-export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,olderCursor,expectedSessionBinding=null,skipUnaddressed=false}={}){
+export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,olderCursor,expectedSessionBinding=null,skipUnaddressed=false,conversationOnly=false}={}){
  return store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
   const auth=store.authenticate(secret,roomId,expectedSessionBinding),memberId=auth.member.id,head=readCurrentHead(store.db,roomId);
   const floor=store.historyFloor(roomId,memberId,head.sequence);
-  const binding={kind:'native_inbox_older_v1',roomId,memberId,head:head.head_sha256,credential:auth.credentialHash,limit:Math.min(limit,4)};
   if(after!==undefined&&olderCursor!==undefined)throw new ServiceError(422,'invalid_inbox_cursor','Use after or olderCursor, not both');
   const recent=after===undefined;let older=null,page;let skippedUnaddressed=0,examined=0;
   if(recent){
-    const saved=olderCursor===undefined?null:conversationCursorCodec(store).decode(olderCursor);
-    if(olderCursor!==undefined&&(!saved||Object.entries(binding).some(([k,v])=>saved[k]!==v)))throw new ServiceError(409,'stale_inbox_cursor','Inbox source changed or the service restarted; restart without olderCursor');
+    const codec=conversationCursorCodec(store);
+    const binding={
+      kind:'native_inbox_older_v2',roomId,memberId,credential:auth.credentialHash,
+      accountId:auth.account?.id??null,authEpoch:auth.account?.authEpoch??null,
+      sessionBinding:auth.sessionBinding??null,sessionRevision:auth.sessionRevision??null,
+      limit:Math.min(limit,4)
+    };
+    const saved=olderCursor===undefined?null:codec.decode(olderCursor);
+    const stale=()=>new ServiceError(409,'stale_inbox_cursor','Inbox continuation expired or no longer matches its source; restart without olderCursor');
+    if(olderCursor!==undefined&&(!saved||Object.entries(binding).some(([k,v])=>saved[k]!==v)))throw stale();
+    // Freeze conversation membership by opening position and keep the original
+    // catch-up watermark. The current read still enforces visibility and uses
+    // current message bodies, including intervening edits and removals.
+    const horizon=saved?.horizon??head.sequence;
+    const horizonEventId=saved?.horizonEventId??head.event_id;
+    if(saved){
+      if(!Number.isSafeInteger(horizon)||horizon<1||horizon>head.sequence
+        ||!Number.isSafeInteger(saved.before)||saved.before<1||saved.before>horizon
+        ||typeof horizonEventId!=='string'||Buffer.byteLength(horizonEventId)>512)throw stale();
+      chargeCurrentReadBudget(b,64);
+      const anchor=store.db.prepare('SELECT 1 FROM events WHERE room_id=? AND sequence=? AND id=?').get(roomId,horizon,horizonEventId);
+      if(!anchor)throw stale();
+    }
     // The shared read allowance (256 KiB) is spent by the proof read of every
     // selected message and again by its event envelope, so a window of several
     // long posts used to 409 (current_room_context_unavailable) even though a
@@ -115,7 +135,7 @@ export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,older
     // already read (continuation resumes at the next older row), and if not even
     // one row fit, restore the allowance and retry with a single-row window.
     const attempt=pageLimit=>{
-    const selected=currentConversationRows(store,roomId,{viewerId:memberId,limit:pageLimit,before:saved?.before??head.sequence+1,beforeId:saved?.beforeId??'',messageId:null,channelId:null,peerMemberId:null,floor,liveOnly:true});
+    const selected=currentConversationRows(store,roomId,{viewerId:memberId,limit:pageLimit,before:saved?.before??horizon+1,beforeId:saved?.beforeId??'',messageId:null,channelId:null,peerMemberId:null,floor,liveOnly:true});
     const events=[];let sourceBytes=0,last=null,prefixTruncated=false;
     for(const row of selected.rows){
       const m=JSON.parse(row.body),scalar=store.db.prepare('SELECT length(CAST(id AS BLOB)) AS idBytes,length(CAST(body AS BLOB)) AS bodyBytes FROM events WHERE room_id=? AND sequence=?').get(roomId,row.position);
@@ -145,8 +165,8 @@ export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,older
     }
     const {selected,events,last,prefixTruncated}=result;
     const continuation=prefixTruncated?{position:last.position,messageId:last.messageId}:selected.continuation;
-    older={hasMore:prefixTruncated||!selected.complete,examined:selected.examined,nextRead:continuation?{tool:'room_read_inbox',arguments:{roomId,limit,olderCursor:conversationCursorCodec(store).encode({...binding,before:continuation.position,beforeId:continuation.messageId})}}:null};
-    page={events,next:head.sequence,hasMore:false};
+    older={hasMore:prefixTruncated||!selected.complete,examined:selected.examined,nextRead:continuation?{tool:'room_read_inbox',arguments:{roomId,limit,olderCursor:codec.encode({...binding,horizon,horizonEventId,before:continuation.position,beforeId:continuation.messageId})}}:null};
+    page={events,next:horizon,hasMore:false};
   }else{
     // The inbox's coverage contract bounds source examined per call
     // (coverage.conversation.examined), so it keeps the single-window page;
@@ -168,6 +188,9 @@ export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,older
     if(parent?.authorId===memberId)replies.push({...row,inReplyTo:e.data.replyToId});
    }
   }
+  if(conversationOnly)return {directMessages,directMentions,replies,older,
+   cursor:{after:page.next,hasMore:page.hasMore},
+   coverage:{conversation:{examined:recent?older.examined:examined}}};
   const ownerId=store.roomAuthority(roomId,{memberId}).ownerId,discovery=readCurrentInboxDiscovery(store,roomId,auth.member,ownerId,floor,b),replyRequests=discovery.requests;
   const workNext={tool:'room_list_work',arguments:{roomId,focus:'needs_me',limit:1}};
   const requestStates={};

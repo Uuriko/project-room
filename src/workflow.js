@@ -187,7 +187,7 @@ export function mayWriteBoardClaims(member, ownerId = null) {
 
 // Presentation choices only. Every submitted action is still validated by the service.
 export function workActions(item, member, now = Date.now()) {
-  if (!member || member.active === false || item.state === S.SUPERSEDED || item.supersededBy) return [];
+  if (!item || !member || member.active === false || item.state === S.SUPERSEDED || item.supersededBy) return [];
   const actions = [], own = item.accountableMemberId === member.id;
   const can = permission => member.permissions.includes(permission);
   const claim = activeClaim(item, now) && item.claim.holderId === member.id;
