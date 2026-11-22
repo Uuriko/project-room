@@ -204,7 +204,7 @@
     "cloudflare/room.mjs": "sha256:1d052edb335de399907ca9c3d40e400cfe9d33bff24a75f875d5efba6516742a",
     "cloudflare/storage.mjs": "sha256:8ab552b91c75ef7fb87e9a5c001a242b54739f6f6bf0a21702633b718f657432",
     "cloudflare/wrangler.jsonc": "sha256:fb298c415e846fde5cdf2ca65788484caf99122435dd688c77be91751eebdb48",
-    "scripts/deploy-recovery.mjs": "sha256:0bce7a1ea4d2beff4e15d3383383950cd3c14b5e7ecc8e8dfa640211c4617d04"
+    "scripts/deploy-recovery.mjs": "sha256:e442a9f1a9a720fca1f6255e7c033596dd531f7b91ffe443361458060e4f3826"
   },
   "packages": {
     "package-lock.json": "sha256:97f950336aea1338aba623810f8cb6ffd5acfc32b43324d71f70019d9f805777",
