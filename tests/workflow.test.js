@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EVENT_TYPES as T, applyEvent, event, replay, matchesReceipt as domainMatches } from "../src/events.js";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { matchesReceipt, nextWorkStep, terminalWork, workStatus, workActions, presentedWorkActions, renderWorkActions } from "../src/workflow.js";
+import { matchesReceipt, nextWorkStep, terminalWork, workStatus, workActions, presentedWorkActions, renderWorkActions, readRecordInterval } from "../src/workflow.js";
 import { needsAttention, workInvolvingMe } from "../src/work-selectors.js";
 import * as serviceSelectors from "../server/return-selectors.mjs";
 
@@ -191,4 +191,22 @@ test("human result entry is visible on first render without changing agent actio
   for (const unauthorized of [{ ...member, permissions: [] }, { ...member, active: false }, { ...member, id: "other" }]) {
     assert.doesNotMatch(renderWorkActions(item, unauthorized), /data-action="complete"|Share result/);
   }
+});
+
+test("an empty partial audit page keeps reading forward through the original interval", async () => {
+  const window = { after: 40, olderAfter: 24, hasOlder: true, complete: false };
+  const row = sequence => ({ sequence, event: { id: `event-${sequence}` } });
+  const calls = [];
+  const found = await readRecordInterval(window, async after => {
+    calls.push(after);
+    if (after === 24) return { next: 25, hasMore: true, events: [] };
+    if (after === 25) return { next: 39, hasMore: true, events: [row(31)] };
+    return { next: 41, hasMore: false, events: [row(40), row(41)] };
+  }, [{ id: "later" }]);
+  assert.deepEqual(calls, [24, 25, 39]);
+  assert.deepEqual(found.eventLog.map(event => event.id), ["event-31", "event-40", "later"]);
+  assert.deepEqual(found.window, { after: 24, olderAfter: 8, hasOlder: true, complete: false });
+  await assert.rejects(() => readRecordInterval(window, async () => ({
+    next: 25, hasMore: false, events: [],
+  }), []));
 });

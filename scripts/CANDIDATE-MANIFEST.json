@@ -102,7 +102,7 @@
     "src/agent-invite-ui.js": "sha256:59dd07a3da0379ea0b5214d9462dbe5d82c5f9acad46c4b8ee08190835c17571",
     "src/agent-signin-page.js": "sha256:bd12efdafe474d67a5e53050bee973d323b27d43a179ee18df9386adfb2e3c03",
     "src/agent-signin-ui.js": "sha256:1b3e497e55ed24a857293880a3622401cf9543a8c49f350e38ec7a810f232279",
-    "src/app.js": "sha256:67b6e41f9f28d0f795330e7194c3f3d1532e027946f95e9c03a5b86003065da7",
+    "src/app.js": "sha256:57a2162d5b2d25df72bdc370b8df861ea18414a3669b022e0c8c7d05c78d0ae9",
     "src/auth-signin-ui.js": "sha256:144766e0999763ded6f81ac249d2d69899ef1bc8673c49b138d2ee5bf9bf8c73",
     "src/board-deeplink.js": "sha256:1c0829f21cafacfb78d01d0429083dffdd09aa7e329bcd23d2146e47ab24ecf9",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
@@ -191,7 +191,7 @@
     "src/work-reducers.js": "sha256:b906d53be3ffbf0c113a6b97c15fc5669d11164c538ba0671a41942fa5a56070",
     "src/work-selectors.js": "sha256:eeda5f25e3cbfd632c6b89387eadd96accbcc998a37fd7cf6cb2ef94889ec9c4",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
-    "src/workflow.js": "sha256:045a6de36b95f973493dc383fc266d764f1404a86836a00ad83e682276a0a0ce",
+    "src/workflow.js": "sha256:b1220dabd6edd4237cf75200db75f608ff60d4300c85183df98d02a8c1edd91a",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
     "strings/en.js": "sha256:d2ef403ffcda5227d5c53873f689270833ad51cb2a15ea6c0b76a0c4ccc0062e",
     "strings/en.json": "sha256:cb34e02d7e275f8bd9c2af824e1124a55668262a097b614e204b622995ec6c5e"

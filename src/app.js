@@ -30,7 +30,7 @@ function clipGraphemes(text, maxUnits) {
   }
   return value.slice(0, taken);
 }
-import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, workRecipeOptions, workThreadHref } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, workRecipeOptions, workThreadHref, readRecordInterval } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { attemptReceipts, attemptLedger, attemptDeclarationLabel, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage, failureTextWithHint } from "./share-links.js";
@@ -2356,9 +2356,13 @@ $("#event-list").addEventListener("click", event => {
 async function loadEarlierRecord(){
  if(recordPageReading||!nativeEventsWindow?.hasOlder||!state||!session)return;
  const anchor=nativeEventsWindow,generation=client.generation,identity=session,held=state;recordPageReading=true;renderRecordPanel();
- try{const page=await client.recordPage({after:anchor.olderAfter});if(!page||client.generation!==generation||session!==identity||state!==held||nativeEventsWindow!==anchor)return;
-  const seen=new Set(state.eventLog.map(e=>e.id)),older=page.events.filter(row=>row.sequence<=anchor.after&&!seen.has(row.event.id)).map(row=>row.event);
-  state={...state,eventLog:[...older,...state.eventLog]};nativeEventsWindow={...anchor,after:anchor.olderAfter,olderAfter:anchor.olderAfter>0?Math.max(0,anchor.olderAfter-16):null,hasOlder:anchor.olderAfter>0,complete:anchor.olderAfter===0};
+ try{
+  const next=await readRecordInterval(anchor,async after=>{
+    const page=await client.recordPage({after});
+    return client.generation===generation&&session===identity&&state===held&&nativeEventsWindow===anchor ? page : null;
+  },held.eventLog);
+  if(!next||nativeEventsWindow!==anchor||state!==held)return;
+  state={...state,eventLog:next.eventLog};nativeEventsWindow=next.window;
  }catch(error){if(client.generation===generation)notice(error.message,true);}finally{recordPageReading=false;renderRecordPanel();}
 }
 // Phase 2 channels: one main channel plus user-created channels. Chat and work
