@@ -99,6 +99,8 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-download").evaluate(el => el === document.activeElement), true);
   await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-copy-link").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#close-result").evaluate(el => el === document.activeElement), true);
   await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-body").evaluate(el => el === document.activeElement), true, "scrollable exact text remains keyboard reachable");

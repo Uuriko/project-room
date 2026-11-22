@@ -12,7 +12,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { signInFixture } from './auth-signin.mjs';
-import { openSettings, clickChrome } from './room-chrome.mjs';
+import { openSettings, clickChrome, openConversation } from './room-chrome.mjs';
 import { signInFixtureInPlace } from './in-place-fixture-signin.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { admitHistoricalMember } from './unstamped-member.mjs';
@@ -571,6 +571,7 @@ test('Mark unread survives a reload: layout scrolls never mark read; a reader wh
     const readUrl = reads[0], lastRead = () => page.evaluate(async url => (await (await fetch(url)).json()).lastReadMessageId, readUrl);
     reads.length = 0;
     await page.reload();
+    await openConversation(page); // #6322: a reload lands on Updates; return to the conversation
     await newest.locator('.message-body').waitFor({ state: 'attached' });
     // The app's own layout settles: chrome mounts above the list, then goes
     // away, and the list's scroll position moves with no reader input.

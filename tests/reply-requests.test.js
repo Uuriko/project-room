@@ -873,9 +873,9 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.equal(committed.event.data.ifUnacknowledgedContextEventId, undefined);
     assert.equal(read(q).request.progressState, "acknowledged");
     assert.equal(read(q).request.progressNote, current.data.note);
-    const replay = send(current);
-    assert.equal(replay.duplicate, true);
-    assert.equal(replay.event.id, committed.event.id);
+    const repeatedReceipt = send(current);
+    assert.equal(repeatedReceipt.duplicate, true);
+    assert.equal(repeatedReceipt.event.id, committed.event.id);
     assert.equal(f.store.headSequence(roomId), before + 1, "one acknowledgment event");
     assert.throws(() => send({ ...current, id: "second-first-ack" }), error => error.code === "request_already_acknowledged");
     const leased = f.open("owner", { toMemberId: recipient.identityId }, "muse-leased-q");

@@ -5295,6 +5295,7 @@ paths:
         '200': { description: "Result record; a withdrawn room_text result answers 200 with body: null" }
   /api/rooms/{roomId}/review-runtime:
     post:
+      x-room-permission: verifier
       operationId: "reportExactReviewRuntime"
       summary: Report a managed review runtime observation
       description: Report the exact reviewer runtime phase. The active Room listener can reserve a single provider dispatch in the start_unknown phase. The reservation grants no Room action permissions.
@@ -10170,7 +10171,9 @@ paths:
         proof and legacy assignment counts. No room data changes. The plan binds
         the exact head and explicit legacy assignment disposition; it does not
         certify historical replay. Existing accounts, members, credentials,
-        connections, events and canonical work remain intact.
+        connections, events and canonical work remain intact. With mirror
+        retention selected, the plan also binds the exact eligible mirror and
+        native work contents.
       security:
         - operatorToken: []
       requestBody:
@@ -10184,6 +10187,10 @@ paths:
               properties:
                 roomId: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
                 discardLegacyAssignments: { type: boolean }
+                adoptAbsentInlineProofs: { type: boolean }
+                retainMirroredLegacyClaims:
+                  type: boolean
+                  description: Archive aligned Board mirrors with their review evidence. Requires discardLegacyAssignments false.
       responses:
         '200': { description: Exact head and assignment census with planHash }
         '404': { description: Operator surface unset or credential not accepted }
@@ -10201,6 +10208,10 @@ paths:
         the saved result; changed input conflicts. An interrupted transaction
         rolls back. Explicit discardLegacyAssignments true removes only legacy
         work_claims, work_claim_history and collab_assignments for this room.
+        Explicit retainMirroredLegacyClaims true instead archives only open
+        Board mirrors with matching native lifecycle and ownership and no live
+        lease or file lock. The archive keeps the original review evidence and
+        visibility. Unreconciled rows stop the conversion.
         Canonical tasks, messages, accounts, grants, revocations and security
         journals remain intact. No historical replay certification is claimed.
       security:
@@ -10216,6 +10227,10 @@ paths:
               properties:
                 roomId: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
                 discardLegacyAssignments: { type: boolean }
+                adoptAbsentInlineProofs: { type: boolean }
+                retainMirroredLegacyClaims:
+                  type: boolean
+                  description: Archive aligned Board mirrors with their review evidence. Requires discardLegacyAssignments false.
                 planHash: { type: string, pattern: '^[a-f0-9]{64}$' }
                 requestId: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
                 reason: { type: string, description: Nonblank reason of at most 280 UTF-8 bytes }
@@ -16827,6 +16842,7 @@ paths:
         '200': { description: "Project state, at most 6144 bytes of JSON" }
   /api/rooms/{roomId}/mac-capability:
     post:
+      x-room-permission: self
       summary: Report local Mac check readiness
       description: |
         An authenticated Room agent reports its own short-lived, approved Mac
@@ -19072,6 +19088,7 @@ paths:
         '422': { description: Invalid request or missing plan }
   /api/project-offers/{offerId}/discoveries:
     post:
+      x-room-permission: public
       operationId: fileProjectDiscovery
       summary: File a private evidence finding for the published project.
       description: Use your saved identity and a stable requestId. Use the version and revision from pickup. Exact
