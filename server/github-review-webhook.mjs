@@ -252,7 +252,7 @@ function postReview(store, {recipe, requesterId, reviewerId, workItemId}, {head}
 // command is the durable deduplication record, across processes and redeliveries.
 export async function dispatchGithubReview(store, binding, delivery, { credential, observe = observeWebhookPull, token } = {}) {
   if (!binding) return [];
-  const { recipe, requesterId, reviewerId } = binding;
+  const { recipe, requesterId } = binding;
   const candidates = selectedCandidates(binding, delivery)
     .filter(({ number, head }) => binding.pulls.includes(number) && typeof head === "string" && SHA.test(head));
   if (!candidates.length) return [];
