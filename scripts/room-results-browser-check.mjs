@@ -10,6 +10,7 @@ import { createResultsFixture } from "./results-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { exactResultHref } from "../src/room-deep-link.js";
 
 async function openDirectConversation(page, memberId) {
   await openComposerOptions(page);
@@ -18,8 +19,22 @@ async function openDirectConversation(page, memberId) {
   await page.locator('#new-direct-dialog').waitFor({ state: 'hidden' });
 }
 
-async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false, olderResult = false } = {}) {
+async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false, olderResult = false, secondRoom = null, blockServiceWorkers = Boolean(secondRoom) } = {}) {
   const f = createResultsFixture();
+  let accountKey;
+  if (secondRoom) {
+    const account = f.store.createAccount("shared-result-friend");
+    f.store.completeOnboarding(account.id);
+    accountKey = f.store.issueAccountAccessKey(account.id);
+    const slot = f.store.createAccountSessionSlot();
+    const auth = f.store.loginAccountSession(slot.token, accountKey, 0);
+    f.store.createAccountRoom(slot.token, auth.sessionBinding, {
+      roomId: secondRoom, title: secondRoom, purpose: "Check saved-account room switching",
+      kind: "personal", displayName: "Results fixture owner",
+    });
+    f.send("owner", T.MEMBER_ADDED, { memberId: "friend", displayName: "Results fixture friend", kind: "human", permissions: [] });
+    f.store.bindHumanAccount("commons", "friend", account.id);
+  }
   if (olderResult) {
     const now = f.store.now; let offset = 0;
     f.store.now = () => now() + offset;
@@ -48,7 +63,7 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true });
   const p = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
-    isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
+    isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce", ...(blockServiceWorkers && { serviceWorkers: "block" }) });
   p.setDefaultTimeout(8000);
   await p.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   const errors = [], outside = [], writes = [];
@@ -57,7 +72,13 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
     if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); }
     return route.continue();
   });
-  await p.goto(origin); await signInFixture(p, f.keys[guest ? "guest" : "owner"]);
+  if (secondRoom) {
+    await p.goto(`${origin}/?account=1`);
+    await signInFixture(p, accountKey, { returnTo: `${origin}/?room=commons` });
+  } else {
+    await p.goto(origin);
+    await signInFixture(p, f.keys[guest ? "guest" : "owner"]);
+  }
   await p.locator("#main").waitFor({ state: "visible" });
   p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/") && !new URL(request.url()).pathname.endsWith("/typing")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
@@ -69,7 +90,7 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
     mkdirSync("test-results/room-results-20260908", { recursive: true });
     await p.screenshot({ path: `test-results/room-results-20260908/${name}.png` });
   };
-  return { ...f, p, row, open, read, ready, capture };
+  return { ...f, origin, p, row, open, read, ready, capture };
 }
 
 for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"}: find, read and return without losing conversation`, { timeout: 30000 }, async t => {
@@ -150,6 +171,139 @@ test("late result reads cannot restore content after sign-out, and the Results v
   await p.unroute("**/work-result?**", { behavior: "wait" });
   assert.equal(await p.locator("#result-dialog").isVisible(), false);
   assert.equal(await p.locator("#result-discuss").isVisible(), false);
+});
+
+async function holdExactResult(t, p, completionEventId) {
+  const release = Promise.withResolvers();
+  const held = Promise.withResolvers();
+  const matcher = url => url.pathname === "/api/rooms/commons/work-result"
+    && url.searchParams.get("completionEventId") === completionEventId;
+  await p.route(matcher, async route => {
+    try {
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      assert.equal((await response.json()).result.receipt.eventId, completionEventId);
+      held.resolve(route.request());
+      await release.promise;
+      await route.fulfill({ response });
+    } catch (error) {
+      held.reject(error);
+      throw error;
+    }
+  }, { times: 1 });
+  t.after(() => release.resolve());
+  return {
+    captured: held.promise,
+    async deliver() {
+      const request = await held.promise;
+      const lateResponse = p.waitForResponse(response => response.request() === request);
+      release.resolve();
+      const delivered = await lateResponse;
+      assert.equal(delivered.status(), 200);
+      assert.equal((await delivered.json()).result.receipt.eventId, completionEventId);
+      await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    },
+  };
+}
+
+function observeNonTypingPosts(p) {
+  const writes = [];
+  p.on("request", request => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "POST" && !path.endsWith("/typing")) writes.push(path);
+  });
+  return writes;
+}
+
+test("an exact link cannot paint an old room's held result over a replacement room", { timeout: 30000 }, async t => {
+  const secondRoom = "result-switch-target";
+  const f = await setup(t, { secondRoom }), p = f.p;
+  const completionEventId = f.state().workItems["native-result"].receipt.eventId;
+  const link = exactResultHref({ roomId: "commons", workItemId: "native-result", completionEventId }, new URL(f.origin));
+  const writes = observeNonTypingPosts(p);
+  const held = await holdExactResult(t, p, completionEventId);
+  await p.goto(link, { waitUntil: "domcontentloaded" });
+  await held.captured;
+  await clickChrome(p, "#choose-room");
+  await p.locator(`[data-account-room="${secondRoom}"]`).click();
+  await p.waitForFunction(title => document.querySelector("#room-title")?.textContent === title, secondRoom);
+  await openConversation(p);
+  const draft = p.locator("#message-input");
+  await draft.fill("Keep the replacement room's unsent draft");
+  await held.deliver();
+
+  assert.equal(await p.locator("#room-title").textContent(), secondRoom);
+  assert.equal(await draft.inputValue(), "Keep the replacement room's unsent draft");
+  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.locator("#result-body").textContent(), "");
+  assert.doesNotMatch(await p.locator("#result-title").textContent(), /Café notes/);
+  assert.deepEqual(writes, [], "opening the link and switching existing rooms need no write");
+
+  f.reopen("native-result");
+  f.change("native-result", T.WORK_STARTED, { resolvedBlocker: "Ready to revise" });
+  const replacement = "New result after the original link was shared.";
+  const posted = f.send("producer", T.MESSAGE_POSTED, {
+    messageId: "result-switch-replacement", workItemId: "native-result", body: replacement,
+  });
+  f.change("native-result", T.WORK_COMPLETED, {
+    summary: "New result", nextAction: "Read", producerId: "producer", evidenceKind: "room_text",
+    previousCompletionEventId: completionEventId, evidenceMessageId: posted.event.data.messageId,
+    evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(replacement),
+  });
+  await p.goto(link);
+  await f.ready();
+  assert.equal(await p.locator("#result-title").textContent(), "Café notes");
+  assert.deepEqual(writes, []);
+});
+
+test("a held exact response cannot overtake the next result in the same room", { timeout: 30000 }, async t => {
+  const f = await setup(t, { blockServiceWorkers: true }), p = f.p;
+  const nextId = "next-result";
+  const nextTitle = "Replacement visit result";
+  const nextBody = "This is the exact result for the replacement visit.";
+  f.send("owner", T.WORK_PROPOSED, {
+    workItemId: nextId, title: nextTitle, definitionOfDone: "Publish a distinct result.",
+    accountableMemberId: "producer", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read",
+  });
+  f.change(nextId, T.WORK_ACCEPTED);
+  const posted = f.send("producer", T.MESSAGE_POSTED, { workItemId: nextId, messageId: "next-result-text", body: nextBody });
+  f.change(nextId, T.WORK_COMPLETED, {
+    summary: nextTitle, nextAction: "Read", producerId: "producer", evidenceKind: "room_text",
+    previousCompletionEventId: null, evidenceMessageId: posted.event.data.messageId,
+    evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(nextBody),
+  });
+  const selector = workItemId => {
+    const completionEventId = f.state().workItems[workItemId].receipt.eventId;
+    const href = exactResultHref({ roomId: "commons", workItemId, completionEventId }, new URL(f.origin));
+    return { completionEventId, hash: new URL(href).hash };
+  };
+  const previous = selector("native-result"), next = selector(nextId);
+  const open = hash => p.evaluate(value => { location.hash = value; }, hash);
+  const draft = p.locator("#message-input");
+  await openConversation(p);
+  await draft.fill("Keep my unsent work");
+  const writes = observeNonTypingPosts(p);
+  const timeOrigin = await p.evaluate(() => performance.timeOrigin);
+  const held = await holdExactResult(t, p, previous.completionEventId);
+  await open(previous.hash);
+  await held.captured;
+
+  const readingNext = p.waitForResponse(response =>
+    response.ok() && new URL(response.url()).searchParams.get("completionEventId") === next.completionEventId);
+  await open(next.hash);
+  assert.equal((await (await readingNext).json()).result.receipt.eventId, next.completionEventId);
+  await p.locator("#result-body").getByText(nextBody, { exact: true }).waitFor();
+  await held.deliver();
+
+  assert.equal(await p.evaluate(() => performance.timeOrigin), timeOrigin);
+  assert.equal(new URL(p.url()).hash, next.hash);
+  assert.equal(await p.locator("#result-title").textContent(), nextTitle);
+  assert.equal(await p.locator("#result-body").textContent(), nextBody);
+  assert.equal(await p.locator("#result-retry").isVisible(), false);
+  assert.equal(await draft.inputValue(), "Keep my unsent work");
+  await open(previous.hash);
+  await f.ready();
+  assert.deepEqual(writes, []);
 });
 
 for (const theme of ["dark", "light"]) for (const guest of [false, true]) test(`discuss exact result preserves drafts and authorship: ${theme} ${guest ? "guest phone" : "owner desktop"}`, { timeout: 30000 }, async t => {
