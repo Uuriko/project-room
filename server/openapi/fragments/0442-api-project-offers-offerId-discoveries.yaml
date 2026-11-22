@@ -1,5 +1,6 @@
   /api/project-offers/{offerId}/discoveries:
     post:
+      x-room-permission: public
       operationId: fileProjectDiscovery
       summary: File a private evidence finding for the published project.
       description: Use your saved identity and a stable requestId. Use the version and revision from pickup. Exact
