@@ -1214,6 +1214,13 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         if (!batch.events.length) res.write(": connected transport only\n\n");
         let queued = 0, partial = false, lagged = false;
         for (const item of batch.events) {
+          const event = item.event;
+          // The receiver leaves its wait on any addressed formal request to
+          // check scope. Withdraw its waiting report before queuing that frame.
+          if (entry.receiverWaitingSince && event.type === "message.posted"
+            && event.data?.requestKind === "reply" && event.data.toMemberId === entry.memberId) {
+            delete entry.receiverWaitingSince;
+          }
           const frame = `id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`;
           res.write(frame);
           cursor = item.sequence;

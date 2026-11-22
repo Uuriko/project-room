@@ -102,11 +102,29 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       headers: { Authorization: "Bearer " + keys.peer },
     });
     assert.equal(spoofed.status, 422);
+    // Keep a receiver connection open even after the server sends the formal
+    // request, as it can be when the host stalls or loses the network.
+    const lingering = await fetch(origin + "/api/rooms/commons/stream?after=" + sequence, {
+      headers: { Authorization: "Bearer " + keys.receiver,
+        "X-Project-Room-Receiver-Scope": JSON.stringify(advertised),
+        "X-Project-Room-Receiver-State": "waiting_for_work" },
+    });
+    assert.equal(lingering.status, 200);
+    assert.equal((await preview(owner)).receiver.state, "waiting_for_work");
+    assert.equal(store.headSequence("commons"), sequence);
+    command("next-request", "message.posted", {
+      messageId: "next-request", toMemberId: "receiver", workItemId: "approved-work",
+      requestKind: "reply", body: "Please check whether the receiver is still waiting.",
+    });
+    const change = await waiting;
+    assert.equal(change.requestHint.id, "next-request");
+    const dispatched = await preview(owner);
+    assert.equal(dispatched.status, "matches_scope");
+    assert.equal(dispatched.receiver, undefined);
     server.closeStreams();
-    await waiting;
+    await lingering.body.cancel();
     const closed = await preview(owner);
     assert.equal(closed.status, "unknown");
     assert.equal(closed.receiver, undefined);
-    assert.equal(store.headSequence("commons"), sequence);
   });
 }
