@@ -702,14 +702,19 @@ jobs:
             if [ "$result" != "success" ]; then failed=1; fi
           done
           exit "$failed"
-  # Verdict naming. Reporting only: this job never gates, exits 0, and is
-  # not a required check. It runs on every pull-request event, including
-  # the runs where the heavy jobs above skip, and writes one summary that
-  # names the exact subject (pull request, head SHA, event) and every job
-  # as PASSED, FAILED, or NOT-RUN. A skipped job is NOT-RUN here even
-  # though GitHub reports a skipped job's status as "Success": NOT-RUN is
-  # named, never folded into green. Mapping: success -> PASSED,
-  # skipped -> NOT-RUN, failure or cancelled -> FAILED.
+  # Verdict. This job grades the run against the in-repo job table
+  # (.github/ci-substantive.json, consumed by scripts/ci-verdict.mjs) and its
+  # exit code IS the verdict: it exits non-zero unless every required job
+  # PASSED and every substantive job's evidence actually ran. A skipped or
+  # absent required/substantive job is NOT-RUN and fails the verdict —
+  # skipped is stripped from the passing set, never folded into green, even
+  # though GitHub reports a skipped job's status as "Success". The summary
+  # names the exact subject (pull request, head SHA, event), the manifest
+  # hash that graded the run, and every job as PASSED, FAILED, NOT-RUN, or
+  # NOT-GRADED (manifest OUT-OF-SCOPE rows). Before this binding, the job
+  # only wrote the table and exited 0 unconditionally, so the check read
+  # green in runs where a substantive job had FAILED and coverage never ran
+  # (run 43750749856 at PR #6208's head 96f12308).
   ci-verdict:
     # Actions cannot report "neutral", and a skipped suite still shows a green
     # check, so a run that tested nothing says so in the check's own name.
@@ -719,42 +724,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Name each job PASSED, FAILED, or NOT-RUN
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Grade each job against the in-repo manifest
         env:
-          CHANGES: ${{ needs.changes.result }}
-          CONTRACT: ${{ needs.contract.result }}
-          LINT: ${{ needs.lint.result }}
-          UNIT: ${{ needs.unit.result }}
-          BROWSER_SHARDS: ${{ needs.browser-shards.result }}
-          BROWSER: ${{ needs.browser.result }}
-          CLOUDFLARE: ${{ needs.cloudflare.result }}
-          CLOUDFLARE_SHARD_2: ${{ needs.cloudflare-shard-2.result }}
-          VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
-          FRIEND_AGENT_E2E: ${{ needs.friend-agent-e2e.result }}
-          COVERAGE: ${{ needs.coverage.result }}
-          SAFETY_NET: ${{ needs.safety-net.result }}
-          TEST: ${{ needs.test.result }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          EVENT_ACTION: ${{ github.event.action }}
-          READY_TO_LAND: ${{ contains(github.event.pull_request.labels.*.name, 'ready-to-land') }}
+          CI_JOB_RESULT_CHANGES: ${{ needs.changes.result }}
+          CI_JOB_RESULT_CONTRACT: ${{ needs.contract.result }}
+          CI_JOB_RESULT_LINT: ${{ needs.lint.result }}
+          CI_JOB_RESULT_UNIT: ${{ needs.unit.result }}
+          CI_JOB_RESULT_BROWSER_SHARDS: ${{ needs.browser-shards.result }}
+          CI_JOB_RESULT_BROWSER: ${{ needs.browser.result }}
+          CI_JOB_RESULT_CLOUDFLARE: ${{ needs.cloudflare.result }}
+          CI_JOB_RESULT_CLOUDFLARE_SHARD_2: ${{ needs.cloudflare-shard-2.result }}
+          CI_JOB_RESULT_VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
+          CI_JOB_RESULT_FRIEND_AGENT_E2E: ${{ needs.friend-agent-e2e.result }}
+          CI_JOB_RESULT_COVERAGE: ${{ needs.coverage.result }}
+          CI_JOB_RESULT_SAFETY_NET: ${{ needs.safety-net.result }}
+          CI_JOB_RESULT_TEST: ${{ needs.test.result }}
+          CI_SUBJECT: "pull request #${{ github.event.pull_request.number }} at head ${{ github.event.pull_request.head.sha }} (event: ${{ github.event.action }}, ready-to-land label present: ${{ contains(github.event.pull_request.labels.*.name, 'ready-to-land') }})"
         run: |
-          {
-            echo "## CI verdict"
-            echo ""
-            if [ "$TEST" = "skipped" ]; then echo "**NOTHING RAN.** Every suite was skipped; this green check is not a test result. Add the ready-to-land label to run CI."; echo ""; fi
-            echo "Subject: pull request #$PR_NUMBER at head $HEAD_SHA (event: $EVENT_ACTION, ready-to-land label present: $READY_TO_LAND)"
-            echo ""
-            echo "| Job | Verdict |"
-            echo "| --- | --- |"
-            for pair in "changes:$CHANGES" "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser-shards:$BROWSER_SHARDS" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "cloudflare-shard-2:$CLOUDFLARE_SHARD_2" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "friend-agent-e2e:$FRIEND_AGENT_E2E" "coverage:$COVERAGE" "safety-net:$SAFETY_NET" "test:$TEST"; do
-              name=${pair%%:*}
-              result=${pair#*:}
-              case "$result" in
-                success) verdict=PASSED ;;
-                skipped) verdict=NOT-RUN ;;
-                *) verdict=FAILED ;;
-              esac
-              echo "| $name | $verdict |"
-            done
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          if [ "${{ needs.test.result }}" = "skipped" ]; then echo "**NOTHING RAN.** Every suite was skipped; this check is not a test result. Add the ready-to-land label to run CI." | tee -a "$GITHUB_STEP_SUMMARY"; fi
+          node scripts/ci-verdict.mjs | tee -a "$GITHUB_STEP_SUMMARY"
