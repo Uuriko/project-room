@@ -10,12 +10,17 @@
         - name: includeSource
           in: query
           schema: { type: boolean, default: false }
+        - name: includeReplies
+          in: query
+          description: Set to false to omit replyRequestContext when reading the work record or access summary. The same work privacy check applies.
+          schema: { type: boolean, default: true }
         - name: sourceObservation
           in: query
           description: JSON observation from an earlier includeSource read of this work and viewer. Requires includeSource=true. Fields roomId, workItemId, viewerId, messageId, revision (nonnegative safe integer), sha256 (lowercase hex). Maximum 1024 characters.
           schema: { type: string, maxLength: 1024 }
       responses:
         '401': { description: unauthenticated }
+        '403': { description: work is private to its participants }
         '200':
           description: |
             Work context. Includes `accessSummary` (version 1): the read-only

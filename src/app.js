@@ -3483,7 +3483,7 @@ async function readSelectedWorkRecord(id, expandDetails) {
   const current = () => context === workNavigationContext() && generation === client.generation
     && identity === session && held === state && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
   try {
-    const selected = await client.workContext(id);
+    const selected = await client.workContext(id, { includeReplies: false });
     if (!current()) return null;
     const item = selected?.work;
     if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
@@ -6627,7 +6627,7 @@ document.addEventListener("click", async e => {
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
   button.disabled = true;
   try {
-    const context = await client.workContext(workId);
+    const context = await client.workContext(workId, { includeReplies: false });
     if (!context || !sameSession(generation, roomId, memberId)) return;
     accessPreviews.set(workId, { summary: context.accessSummary, evaluatedAt: context.evaluatedAt });
   } catch (error) {

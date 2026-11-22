@@ -1518,7 +1518,7 @@ export function readCurrentWakePolicyState(store,roomId,memberIds,{workItemId=nu
   }
   return {room,members,workItems,channels};
 }
-export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{includeOffers=false}={}) {
+export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{includeOffers=false,includeReplies=true}={}) {
   const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
   if(includeOffers)refuse('Cross-work offers require an indexed selected dependency context');
   const room=readCurrentRecord(db,roomId,'metadata','room',b),item=readCurrentWorkItem(db,roomId,workId,b);
@@ -1528,12 +1528,14 @@ export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{inclu
   const members=Object.create(null);for(const id of ids){const member=readCurrentRecord(db,roomId,'members',id,b);if(member!==undefined)members[id]=member;}
   const replyRequests=Object.create(null);
   const privacy=readCurrentWorkPrivacy(db,roomId,workId,b);
-  if(privacy.requests>8)refuse('Selected work replies require continuation for this work item');
-  const prefix=workRequestPrefix(workId),requests=db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='workRequest' AND present=1 AND record_key>=? AND record_key<? ORDER BY record_key LIMIT 9").all(roomId,prefix,prefix+'\uffff');
-  charge(b,requests.length*256,requests.length);if(requests.length!==privacy.requests)corrupt('selected request index count differs');
-  for(const {record_key:key} of requests){const link=readCurrentRecord(db,roomId,'workRequest',key,b);if(!link||link.workItemId!==workId||workRequestKey(workId,link.requestId)!==key)corrupt('selected request index binding differs');const request=readCurrentRecord(db,roomId,'replyRequests',link.requestId,b);if(request?.workItemId!==workId)corrupt('selected private request missing');Object.defineProperty(replyRequests,link.requestId,{value:request,enumerable:true});}
-  // privateParties: the parties this read already observed (null when the work has no private request), so the caller's refusal check needs no second privacy read.
-  return {sequence:head.sequence,state:{room,members,workItems:{[workId]:privateWorkForViewer(db,roomId,workId,item,viewerId,b)},replyRequests},privateParties:privacy.requests?new Set(Object.keys(privacy.parties)):null};
+  if(includeReplies){
+    if(privacy.requests>8)refuse('Selected work replies require continuation for this work item');
+    const prefix=workRequestPrefix(workId),requests=db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='workRequest' AND present=1 AND record_key>=? AND record_key<? ORDER BY record_key LIMIT 9").all(roomId,prefix,prefix+'\uffff');
+    charge(b,requests.length*256,requests.length);if(requests.length!==privacy.requests)corrupt('selected request index count differs');
+    for(const {record_key:key} of requests){const link=readCurrentRecord(db,roomId,'workRequest',key,b);if(!link||link.workItemId!==workId||workRequestKey(workId,link.requestId)!==key)corrupt('selected request index binding differs');const request=readCurrentRecord(db,roomId,'replyRequests',link.requestId,b);if(request?.workItemId!==workId)corrupt('selected private request missing');Object.defineProperty(replyRequests,link.requestId,{value:request,enumerable:true});}
+  }
+  // The protected privacy record remains authoritative even when replies are not requested.
+  return {sequence:head.sequence,state:{room,members,workItems:{[workId]:privateWorkForViewer(db,roomId,workId,item,viewerId,b,privacy)},replyRequests},privateParties:privacy.requests?new Set(Object.keys(privacy.parties)):null};
 }
 
 export {currentWorkSummary} from './current-work-summary.mjs';
@@ -1729,8 +1731,7 @@ export function purgeCurrentCandidateForPrivacy(db,roomId) {
 export function readCurrentWorkPrivacy(db,roomId,workId,b=contextBudgets.get(db)??budget()) {
   return validateWorkPrivacy(readCurrentRecord(db,roomId,'workPrivacy',workId,b));
 }
-function privateWorkForViewer(db,roomId,workId,item,viewerId,b) {
-  const privacy=readCurrentWorkPrivacy(db,roomId,workId,b);
+function privateWorkForViewer(db,roomId,workId,item,viewerId,b,privacy=readCurrentWorkPrivacy(db,roomId,workId,b)) {
   if(!privacy.requests||Object.hasOwn(privacy.parties,viewerId)||workRoleHolder(item,viewerId))return item;
   // The handoff is member-authored content of this private work, in the same
   // class as its title and definition of done: a viewer who is neither a

@@ -10,6 +10,44 @@ import { readRoomSnapshot } from '../server/snapshot-window.mjs';
 
 const raw = store => JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
 
+for (const representation of ['legacy', 'normalized-current-v1']) test(`${representation} selected work can omit replies without widening access`, t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  const members = ['participant', 'observer'].map(memberId => event({
+    id: 'selected-work-' + memberId, roomId: 'commons', actorId: 'owner', type: 'member.added',
+    data: { memberId, displayName: memberId, kind: 'human', permissions: [] },
+  }));
+  store.initialize([...initialRoom(), ...members], representation === 'legacy' ? {} : { representation });
+  const owner = store.issueAccessKey('commons', 'owner');
+  const participant = store.issueAccessKey('commons', 'participant');
+  const observer = store.issueAccessKey('commons', 'observer');
+  const send = (id, type, data) => store.command(owner, 'commons', { id, type, data });
+  send('selected-work', 'work.proposed', {
+    workItemId: 'selected-work', title: 'Saved work title', definitionOfDone: 'Read the scoped work',
+    accountableMemberId: 'owner',
+  });
+  for (let index = 0; index < 9; index++) {
+    const id = `selected-reply-${index}`;
+    send(id, 'message.posted', {
+      messageId: id, workItemId: 'selected-work', body: 'Private request', requestKind: 'reply', toMemberId: 'participant',
+    });
+    if (index === 0) {
+      const ordinary = store.workContext(participant, 'commons', 'selected-work');
+      assert.equal(ordinary.replyRequestContext.requests[0].id, id);
+      assert.equal(ordinary.replyRequestContext.total, 1);
+    }
+  }
+  for (const viewer of [owner, participant]) {
+    const context = store.workContext(viewer, 'commons', 'selected-work', { includeReplies: false });
+    assert.equal(context.work.title, 'Saved work title');
+    assert.ok(context.next.action);
+    assert.equal(Object.hasOwn(context, 'replyRequestContext'), false);
+    assert.equal(JSON.stringify(context).includes('selected-reply-'), false);
+  }
+  assert.throws(() => store.workContext(observer, 'commons', 'selected-work', { includeReplies: false }),
+    error => error.status === 403 && error.code === 'work_private');
+});
+
 test('explicit synthetic initialization selects actual normalized serving, not replay staging', t => {
   const store = new RoomStore(':memory:');
   t.after(() => store.close());
