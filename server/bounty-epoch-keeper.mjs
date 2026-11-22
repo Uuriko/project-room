@@ -30,19 +30,49 @@ const TERMINAL_DISPUTE = `EXISTS (SELECT 1 FROM bounty_disputes d
   AND COALESCE(json_extract(d.body, '$.data.state'), json_extract(d.body, '$.state'))
     IN ('resolved','withdrawn'))`;
 
+// Public-work mirror exemption (S3, CURE-MIRROR-REVIEW-EXEMPTION): the
+// SQL twin of BountyEscrow._mirrorReviewPending. A submitted bounty linked
+// in public_work_settlements with an attached submission whose review has
+// no terminal verdict is not keeper-due at its (placeholder) deadline, so
+// the scan, the due/overdue counts and the next-due wake all agree with
+// the pass. The fragment is built only when the rail's tables exist — a
+// store that predates them has no mirror bounties, and a query naming a
+// missing table would fail the whole scan. When the reviews table is
+// absent no terminal verdict can have been recorded, so the link alone
+// proves the review pending.
+function mirrorPendingSql(store) {
+  if (!store?.db?.prepare) return null;
+  let tables;
+  try {
+    tables = new Set(store.db.prepare(
+      "SELECT name AS n FROM sqlite_master WHERE type='table' AND name IN ('public_work_settlements','public_work_reviews')")
+      .all().map(row => row.n));
+  } catch { return null; }
+  if (!tables.has("public_work_settlements")) return null;
+  const link = `EXISTS (SELECT 1 FROM public_work_settlements s
+    WHERE s.room_id = b.room_id AND s.bounty_id = b.bounty_id AND s.receipt_id IS NOT NULL`;
+  if (!tables.has("public_work_reviews")) return `${link})`;
+  return `${link} AND NOT EXISTS (SELECT 1 FROM public_work_reviews r
+    WHERE r.receipt_id = s.receipt_id
+    AND json_extract(r.state_json, '$.state') IN ('accepted','rejected')))`;
+}
+
 // "Due" mirrors _keeperPass in bounty-escrow.mjs exactly:
 // - approved: always actionable (the sweep is the second close);
 // - accepted: challenge window fully passed;
 // - proposed: deadline passed and any snooze has lapsed (expire unfunded);
-// - submitted / funded / claimed: deadline passed (settle / refund);
+// - funded / claimed: deadline passed (refund);
+// - submitted: deadline passed (settle), unless the bounty is a public-work
+//   mirror with a review still pending (never due — see above);
 // - disputed, unsettled: dispute terminal (retry) or open past the 14-day
 //   timeout (default release).
-// Five ? parameters, all the same `now`.
-const DUE_WHERE = `(
+// Six ? parameters, all the same `now`.
+const dueWhere = mirror => `(
      b.state = 'approved'
   OR (b.state = 'accepted' AND b.challenge_ends_ms IS NOT NULL AND b.challenge_ends_ms <= ?)
   OR (b.state = 'proposed' AND b.deadline_ms <= ? AND (b.snoozed_until_ms IS NULL OR b.snoozed_until_ms <= ?))
-  OR (b.state IN ('submitted','funded','claimed') AND b.deadline_ms <= ?)
+  OR (b.state IN ('funded','claimed') AND b.deadline_ms <= ?)
+  OR (b.state = 'submitted' AND b.deadline_ms <= ?${mirror ? ` AND NOT ${mirror}` : ""})
   OR (b.state = 'disputed' AND b.dispute_id IS NOT NULL AND b.resolution_json IS NULL
       AND ((b.dispute_opened_ms IS NOT NULL AND ? - b.dispute_opened_ms > ${DISPUTE_TIMEOUT_MS})
            OR ${TERMINAL_DISPUTE}))
@@ -56,8 +86,8 @@ function query(store, sql, params = []) {
 
 function dueCount(store, now, { excludeApproved = false } = {}) {
   const rows = query(store,
-    `SELECT COUNT(*) AS n FROM bounty_records b WHERE ${DUE_WHERE}${excludeApproved ? " AND b.state != 'approved'" : ""}`,
-    [now, now, now, now, now]);
+    `SELECT COUNT(*) AS n FROM bounty_records b WHERE ${dueWhere(mirrorPendingSql(store))}${excludeApproved ? " AND b.state != 'approved'" : ""}`,
+    [now, now, now, now, now, now]);
   return rows ? Number(rows[0]?.n ?? 0) : 0;
 }
 
@@ -66,6 +96,7 @@ function dueCount(store, now, { excludeApproved = false } = {}) {
 // used as the due time of work that is already actionable (approved rows
 // awaiting their sweep, terminal disputes awaiting their retry).
 export function escrowEpochNextDueAt(store, now) {
+  const mirror = mirrorPendingSql(store);
   const rows = query(store, `SELECT MIN(t) AS due FROM (
       SELECT CASE b.state
         WHEN 'approved' THEN ?
@@ -73,6 +104,7 @@ export function escrowEpochNextDueAt(store, now) {
         WHEN 'proposed' THEN MAX(b.deadline_ms, COALESCE(b.snoozed_until_ms, b.deadline_ms))
         WHEN 'disputed' THEN CASE WHEN ${TERMINAL_DISPUTE} THEN ?
           ELSE b.dispute_opened_ms + ${DISPUTE_TIMEOUT_MS + 1} END
+        WHEN 'submitted' THEN CASE WHEN ${mirror ? mirror : "0"} THEN NULL ELSE b.deadline_ms END
         ELSE b.deadline_ms
       END AS t
       FROM bounty_records b
@@ -103,8 +135,8 @@ export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } 
   summary.due = dueCount(store, now);
   if (summary.due === 0) return summary;
   const roomRows = query(store,
-    `SELECT DISTINCT b.room_id AS roomId FROM bounty_records b WHERE ${DUE_WHERE}`,
-    [now, now, now, now, now]);
+    `SELECT DISTINCT b.room_id AS roomId FROM bounty_records b WHERE ${dueWhere(mirrorPendingSql(store))}`,
+    [now, now, now, now, now, now]);
   const instance = escrow
     ?? (store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store));
   for (const { roomId } of roomRows ?? []) {

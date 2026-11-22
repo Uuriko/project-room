@@ -39,7 +39,12 @@ import { ServiceError } from './service-error.mjs';
 //   actual review verdict. The free-miss flip (Constitution VIII.1) is
 //   John-gated and not decided, so the mirror bounty's deadline is set a
 //   year out — the escrow keeper must never free-miss a public-work mirror
-//   out from under a pending review.
+//   out from under a pending review. That "must never" is enforced, not
+//   just distanced: BountyEscrow._mirrorReviewPending exempts a submitted
+//   mirror bounty with a review still pending from the keeper's free-miss
+//   (and finalizeBounty), and the epoch due-scan in bounty-epoch-keeper.mjs
+//   carries the same exemption, so neither side can settle the race the
+//   365-day placeholder used to leave to keeper-vs-verdict ordering (S3).
 export const publicWorkSettlementSchema = `
 CREATE TABLE IF NOT EXISTS public_work_settlements (
   offer_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, bounty_id TEXT NOT NULL UNIQUE,
