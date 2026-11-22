@@ -386,16 +386,21 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
     }
     if (budget.remaining <= 0 || rateLimitedUntil) break;
     if (Date.now() > deadline) { budgetExceeded = true; break; }
-    const continuing = (item.pullRequest.ciCursor === "status" || item.pullRequest.ciCursor === "checks") && SHA.test(item.ci?.headSha ?? "");
+    const { ciCursor, ciReadHeadSha } = item.pullRequest;
+    const unfinished = ciCursor === "status" || ciCursor === "checks";
+    const continuing = unfinished && SHA.test(ciReadHeadSha ?? "");
     // A verification candidate (#3661) gets exactly one lookup: no CI read
     // rides along on a claim that is already done.
     const verifyOnly = !pullRequestDue(item, nowMs) && pullVerificationDue(item, nowMs);
     let looked;
     if (continuing) {
-      looked = { kind: "open", etag: item.pullRequest.etag, headSha: item.ci.headSha, continued: true };
+      looked = { kind: "open", etag: item.pullRequest.etag, headSha: ciReadHeadSha, continued: true };
     } else {
       budget.remaining -= 1;
-      looked = await lookupPull(item.pullRequest, { fetchImpl, token, nowMs, deadline });
+      // A legacy cursor has no head binding. Read the pull again, allowing
+      // neither a cached 304 nor an old status digest to resume that cursor.
+      const pull = unfinished ? { ...item.pullRequest, etag: null } : item.pullRequest;
+      looked = await lookupPull(pull, { fetchImpl, token, nowMs, deadline });
       if (looked.kind === "budget") { budgetExceeded = true; break; }
     }
     if (looked.kind === "open" && !verifyOnly && SHA.test(looked.headSha ?? "") && looked.kind !== "rateLimited") {
@@ -539,6 +544,7 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       next = { ...next, pullRequest: {
         ...next.pullRequest,
         ciCursor: result.ciCursor,
+        ciReadHeadSha: result.ciCursor === "done" ? null : result.headSha,
         // The combined-status digest of a split read rides with its cursor.
         // A completed read folded the status into result.ci, so it clears;
         // a result carrying no digest keeps the one already stored.

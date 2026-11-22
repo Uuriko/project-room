@@ -85,6 +85,7 @@ test("a CI read split by the budget keeps the combined status for the resume", a
   commitPullRequestLookup({}, registry, ROOM, registry.get(ROOM, "split-1"), result1, NOW);
   const stored1 = registry.get(ROOM, "split-1");
   assert.equal(stored1.pullRequest.ciCursor, "checks");
+  assert.equal(stored1.pullRequest.ciReadHeadSha, SHA);
   assert.equal(stored1.pullRequest.ciStatus?.state, "failure", "the status digest was persisted with the cursor");
   assert.equal(stored1.pullRequest.ciStatus?.targetUrl, STATUS_URL);
 
@@ -108,6 +109,7 @@ test("a CI read split by the budget keeps the combined status for the resume", a
   const stored2 = registry.get(ROOM, "split-1");
   assert.equal(stored2.ci.state, "failure");
   assert.equal(stored2.pullRequest.ciCursor, "done");
+  assert.equal(stored2.pullRequest.ciReadHeadSha, null);
   assert.equal(stored2.pullRequest.ciStatus, null, "a completed read clears the persisted digest");
 });
 
@@ -183,8 +185,8 @@ test("a failed check-runs fetch on a resumed read keeps the checks cursor and pr
   const digest = { state: "failure", totalCount: 1, targetUrl: STATUS_URL };
   registry.set(ROOM, {
     ...seeded,
-    pullRequest: { ...seeded.pullRequest, ciCursor: "checks", ciStatus: digest },
-    pullRequests: [{ ...seeded.pullRequest, ciCursor: "checks", ciStatus: digest }]
+    pullRequest: { ...seeded.pullRequest, ciCursor: "checks", ciReadHeadSha: SHA, ciStatus: digest },
+    pullRequests: [{ ...seeded.pullRequest, ciCursor: "checks", ciReadHeadSha: SHA, ciStatus: digest }]
   });
   const calls = [];
   const fetchImpl = scriptedFetchWithErrors([
@@ -211,11 +213,11 @@ test("the persisted status digest survives a claim state-machine write between t
   const split = {
     ...item,
     pullRequest: {
-      ...item.pullRequest, ciCursor: "checks",
+      ...item.pullRequest, ciCursor: "checks", ciReadHeadSha: SHA,
       ciStatus: { state: "failure", totalCount: 1, targetUrl: STATUS_URL }
     },
     pullRequests: [{
-      ...item.pullRequest, ciCursor: "checks",
+      ...item.pullRequest, ciCursor: "checks", ciReadHeadSha: SHA,
       ciStatus: { state: "failure", totalCount: 1, targetUrl: STATUS_URL }
     }]
   };
@@ -225,6 +227,7 @@ test("the persisted status digest survives a claim state-machine write between t
   // read's resume would again roll up the check runs alone.
   const normalized = stampClaimHistory(split, "alice", { action: "note", note: "between ticks", now: NOW + 500 });
   assert.equal(normalized.pullRequest.ciCursor, "checks");
+  assert.equal(normalized.pullRequest.ciReadHeadSha, SHA);
   assert.deepEqual(normalized.pullRequest.ciStatus, { state: "failure", totalCount: 1, targetUrl: STATUS_URL });
   assert.deepEqual(normalized.pullRequests[0].ciStatus, { state: "failure", totalCount: 1, targetUrl: STATUS_URL });
 });
@@ -247,7 +250,7 @@ test("a failure beyond GitHub's first check page cannot look green", async () =>
 test("an incomplete check page cannot publish success for an anonymous poll", async () => {
   const registry = seededRegistry(), calls = [];
   const row = registry.list(ROOM)[0];
-  const continuing = { ...row, pullRequest: { ...row.pullRequest, ciCursor: "checks" } };
+  const continuing = { ...row, pullRequest: { ...row.pullRequest, ciCursor: "checks", ciReadHeadSha: SHA } };
   const fetchImpl = scriptedFetch([
     ["/check-runs", { total_count: 2, check_runs: [{ status: "completed", conclusion: "success" }] }]
   ], calls);
@@ -261,7 +264,7 @@ test("an incomplete check page preserves an observed combined-status failure", a
   const registry = seededRegistry(), calls = [];
   const row = registry.list(ROOM)[0];
   const continuing = { ...row, pullRequest: {
-    ...row.pullRequest, ciCursor: "checks", ciStatus: { state: "failure", totalCount: 1, targetUrl: STATUS_URL }
+    ...row.pullRequest, ciCursor: "checks", ciReadHeadSha: SHA, ciStatus: { state: "failure", totalCount: 1, targetUrl: STATUS_URL }
   } };
   const fetchImpl = scriptedFetch([
     ["/check-runs", { total_count: 2, check_runs: [{ status: "completed", conclusion: "success" }] }]
@@ -271,4 +274,60 @@ test("an incomplete check page preserves an observed combined-status failure", a
   assert.equal(result.ci?.url, STATUS_URL);
   assert.equal(result.ciCursor, "done");
   assert.equal(calls.length, 1);
+});
+
+test("a split read resumes the PR head fetched by that read", async () => {
+  const registry = seededRegistry();
+  const earlier = registry.get(ROOM, "split-1");
+  registry.set(ROOM, { ...earlier, ci: { ...earlier.ci, state: "pending" } });
+  const currentHead = "d".repeat(40);
+  const calls = [];
+  const fetchImpl = scriptedFetch([
+    ["/pulls/1600", { state: "open", merged: false, head: { sha: currentHead } }],
+    [`/commits/${currentHead}/status`, { state: "success", total_count: 1, statuses: [] }],
+    [`/commits/${currentHead}/check-runs`, { total_count: 1, check_runs: [
+      { head_sha: currentHead, status: "completed", conclusion: "failure" }
+    ] }],
+    [`/commits/${SHA}/check-runs`, CHECK_RUNS_BODY]
+  ], calls);
+
+  const { results: [partial] } = await collectPullRequestLookups(registry.list(ROOM), {
+    fetchImpl, token: "t", nowMs: NOW, limit: 2
+  });
+  assert.equal(partial.ciCursor, "checks");
+  commitPullRequestLookup({}, registry, ROOM, earlier, partial, NOW);
+
+  const { results: [resumed] } = await collectPullRequestLookups(registry.list(ROOM), {
+    fetchImpl, token: "t", nowMs: NOW + 1000
+  });
+  assert.equal(resumed.ci?.state, "failure");
+  assert.equal(resumed.ci?.headSha, currentHead);
+  assert.equal(calls.length, 3);
+  assert.match(calls[2], new RegExp(`/${currentHead}/check-runs`));
+});
+
+test("a legacy split cursor refreshes the head and discards its unbound status", async () => {
+  const registry = seededRegistry();
+  const item = registry.get(ROOM, "split-1");
+  const legacy = { ...item.pullRequest, ciCursor: "checks", etag: '"cached"',
+    ciStatus: { state: "failure", totalCount: 1, targetUrl: STATUS_URL } };
+  registry.set(ROOM, { ...item, pullRequest: legacy, pullRequests: [legacy] });
+  const currentHead = "d".repeat(40);
+  const calls = [];
+  const scripted = scriptedFetch([
+    ["/pulls/1600", { state: "open", merged: false, head: { sha: currentHead } }],
+    [`/commits/${currentHead}/status`, { state: "success", total_count: 1, statuses: [] }],
+    [`/commits/${currentHead}/check-runs`, CHECK_RUNS_BODY]
+  ], calls);
+  const fetchImpl = (url, { headers }) => {
+    if (url.includes("/pulls/1600")) assert.equal(new Headers(headers).has("if-none-match"), false);
+    return scripted(url);
+  };
+
+  const { results: [result] } = await collectPullRequestLookups(registry.list(ROOM), {
+    fetchImpl, token: "t", nowMs: NOW, limit: 3
+  });
+  assert.equal(result.ci?.headSha, currentHead);
+  assert.equal(result.ci?.state, "success");
+  assert.equal(calls.length, 3);
 });
