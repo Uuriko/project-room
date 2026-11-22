@@ -698,7 +698,28 @@ test('losing the local dispatch receipt before any provider output cannot repeat
   assert.equal(f.pendingRows().delivered_at, null);
 });
 
-test('losing a committed dispatch reservation does not authorize a fresh prompt', async t => {
+test('a live receiver recovers a lost reservation response before dispatching only once', async t => {
+  const f = await setup(t);
+  const request = f.bridge.room.request.bind(f.bridge.room);
+  const reserveIds = [];
+  f.bridge.room.request = async (path, options) => {
+    const result = await request(path, options);
+    if (options?.body?.reserveDispatch) {
+      assert.equal(result.dispatchGranted, true);
+      reserveIds.push(options.body.reservationId);
+      if (reserveIds.length === 1) throw new RoomError(0, 'network', 'Committed reservation response lost');
+    }
+    return result;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(reserveIds.length, 2);
+  assert.equal(reserveIds[0], reserveIds[1]);
+  assert.deepEqual(f.counts, {prompt:1,write:1,receipt:0,ack:1});
+  assert.equal(f.verdict().result, 'pass');
+});
+
+test('a fresh listener cannot dispatch when the original lost every reservation response', async t => {
   const f = await setup(t);
   const report = f.bridge.room.request.bind(f.bridge.room);
   f.bridge.room.request = async (path, options) => {

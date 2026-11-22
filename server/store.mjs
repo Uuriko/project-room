@@ -6751,7 +6751,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = isCurrentRoom(this.db, roomId) ? readCurrentRecord(this.db,roomId,'metadata','room')
         : JSON.parse(this.db.prepare("SELECT json_extract(projection,'$.room') AS room FROM rooms WHERE id=?").get(roomId).room);
       if (room?.archivedAt) fail(409, "review_runtime_stale", "Room is archived");
-      return recordReviewRuntime(this.db, roomId, work, member, input, this.now());
+      return recordReviewRuntime(this.db, roomId, work, member, input, this.now(), listenerToken);
     });
   }
   workResult(token, roomId, workItemId, { completionEventId = null, draftMessageId = null, expectedSessionBinding = null } = {}) {

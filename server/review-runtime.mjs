@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { LISTENER_TOKEN_HEADER } from "./listener-fence.mjs";
 import { nativeOutboxEventId } from "./mcp-outbox-event-id.mjs";
+import { runOnce } from "./run-once.mjs";
 
 export const reviewRuntimeSchema = `
   CREATE TABLE IF NOT EXISTS review_runtime_reports (
@@ -29,10 +31,11 @@ const fail = (status, code) => { throw Object.assign(new Error(code), { status, 
 const tableReady = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 
 // Call inside the same write transaction that validated the exact action.
-export function recordReviewRuntime(db, roomId, work, member, input, now) {
+export function recordReviewRuntime(db, roomId, work, member, input, now, listenerToken) {
   if (!input || Array.isArray(input)
-    || Object.keys(input).some(k => !["workItemId","completionEventId","evidenceVersion","expectedRevision","attemptId","phase","reserveDispatch"].includes(k))
+    || Object.keys(input).some(k => !["workItemId","completionEventId","evidenceVersion","expectedRevision","attemptId","phase","reserveDispatch","reservationId"].includes(k))
     || input.reserveDispatch !== undefined && (input.reserveDispatch !== true || input.phase !== "start_unknown")
+    || input.reservationId !== undefined && (input.reserveDispatch !== true || !validId(input.reservationId) || !listenerToken)
     || ![input.workItemId,input.completionEventId,input.attemptId].every(validId)
     || !Number.isSafeInteger(input.expectedRevision) || !phases.includes(input.phase)) fail(422, "invalid_review_runtime");
   const next = nextWorkStep(work, now);
@@ -55,9 +58,17 @@ export function recordReviewRuntime(db, roomId, work, member, input, now) {
     if (interrupted.attempt_id !== input.attemptId) fail(409, "review_runtime_attempt_conflict");
     return { status:"interrupted", observedAt:interrupted.observed_at };
   }
-  // A lost response or missing local disk cannot authorize a second prompt.
-  // Only the transition into uncertain dispatch returns a grant.
+  // Only the initiating call can replay a lost grant, under its original live
+  // listener fence and call ID. A replacement gets the observation only.
+  const reservationScope = input.reservationId && "review-dispatch:" + createHash("sha256").update(JSON.stringify([
+    roomId, work.id, input.completionEventId, input.evidenceVersion, work.revision, member.id, input.attemptId, listenerToken,
+  ])).digest("hex");
   if (input.reserveDispatch === true && sameReview && row.phase !== "claimed") {
+    if (row.phase === "start_unknown" && reservationScope && tableReady(db, "request_replays")) {
+      const saved = db.prepare("SELECT result_json FROM request_replays WHERE scope=? AND request_id=?")
+        .get(reservationScope, input.reservationId);
+      if (saved) return JSON.parse(saved.result_json);
+    }
     return { status:row.phase, observedAt:row.observed_at };
   }
   if (input.phase === "claimed" || (sameReview && row.phase === "claimed")) {
@@ -77,7 +88,9 @@ export function recordReviewRuntime(db, roomId, work, member, input, now) {
     ON CONFLICT(room_id,work_item_id) DO UPDATE SET completion_id=excluded.completion_id, member_id=excluded.member_id,
     revision=excluded.revision, attempt_id=excluded.attempt_id,phase=excluded.phase,observed_at=excluded.observed_at`)
     .run(roomId,work.id,input.completionEventId,member.id,work.revision,input.attemptId,input.phase,now);
-  return { status: input.phase, observedAt: now, ...(input.reserveDispatch === true ? { dispatchGranted:true } : {}) };
+  const result = { status: input.phase, observedAt: now, ...(input.reserveDispatch === true ? { dispatchGranted:true } : {}) };
+  if (reservationScope) runOnce(db, reservationScope, input.reservationId, () => result, { now });
+  return result;
 }
 
 function claimObservation(db, roomId, work, revision, memberId) {

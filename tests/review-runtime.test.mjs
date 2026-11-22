@@ -56,17 +56,25 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.equal(read().reviewRuntime.status, "claimed");
     assert.equal(read().reviewRuntime.claimObservedAt, claim.observedAt);
     assert.throws(() => report({attemptId:"another"}), { code:"review_runtime_attempt_conflict" });
-    const lease = store.agentHeartbeats.acquireListenerLease({agentId:reviewer.identityId, roomId:"commons", listenerId:"review-fixture"});
-    const reserve = token => store.reportReviewRuntime(reviewer.secret, "commons", {
-      ...input, phase:"start_unknown", reserveDispatch:true,
+    let lease = store.agentHeartbeats.acquireListenerLease({agentId:reviewer.identityId, roomId:"commons", listenerId:"review-fixture"});
+    const reserve = (token, reservationId) => store.reportReviewRuntime(reviewer.secret, "commons", {
+      ...input, phase:"start_unknown", reserveDispatch:true, ...(reservationId ? {reservationId} : {}),
     }, null, token);
     assert.throws(() => reserve("wrong-token"), { code:"stale_listener" });
-    const reservation = reserve(lease.fencingToken);
+    const reservation = reserve(lease.fencingToken, "original-reservation");
     assert.equal(reservation.dispatchGranted, true);
+    assert.deepEqual(reserve(lease.fencingToken, "original-reservation"), reservation);
+    assert.deepEqual(reserve(lease.fencingToken, "replacement-reservation"), { status:"start_unknown", observedAt:reservation.observedAt });
     assert.deepEqual(reserve(lease.fencingToken), { status:"start_unknown", observedAt:reservation.observedAt });
     assert.equal(report().status, "start_unknown");
+    const originalFence = lease.fencingToken;
+    store.agentHeartbeats.releaseListenerLease({agentId:reviewer.identityId, roomId:"commons", fencingToken:originalFence});
+    lease = store.agentHeartbeats.acquireListenerLease({agentId:reviewer.identityId, roomId:"commons", listenerId:"replacement-fixture"});
+    assert.throws(() => reserve(originalFence, "original-reservation"), { code:"stale_listener" });
+    assert.deepEqual(reserve(lease.fencingToken, "original-reservation"), { status:"start_unknown", observedAt:reservation.observedAt });
     now += 10;
     report({phase:"started"});
+    assert.deepEqual(reserve(lease.fencingToken, "original-reservation"), { status:"started", observedAt:now });
     assert.equal(report({phase:"start_unknown"}).status, "started");
     assert.equal(read().reviewRuntime.claimObservedAt, claim.observedAt);
     assert.equal(read().reviewRuntime.observedAt, now);

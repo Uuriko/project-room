@@ -5316,6 +5316,7 @@ paths:
                 attemptId: { type: string }
                 phase: { type: string, enum: [claimed, started, start_unknown, interrupted] }
                 reserveDispatch: { type: boolean, enum: [true], description: Requires the current Room listener token and phase start_unknown. }
+                reservationId: { type: string, description: Optional ID for retrying the same reservation under its original live listener token before dispatch. }
       responses:
         '200': { description: Review runtime observation }
         '401': { description: Unauthenticated }

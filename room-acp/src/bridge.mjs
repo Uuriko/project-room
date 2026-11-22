@@ -630,12 +630,24 @@ export class Bridge {
         const {sessionId} = await this.host.session(threadKey);
         this.stageObserver.mark(signalIds,'session_ready');
         if (review.dispatchFence) {
-          if (!this.fencingToken || this.controller.signal.aborted) return;
-          const reservation = await this.room.request(path, {
-            body: { ...binding, attemptId, phase:'start_unknown', reserveDispatch:true },
-            listenerToken: this.fencingToken, signal: AbortSignal.timeout(1500),
+          const listenerToken = this.fencingToken;
+          if (!listenerToken || this.controller.signal.aborted) return;
+          const reservationId = randomUUID();
+          const reserve = () => this.room.request(path, {
+            body: { ...binding, attemptId, phase:'start_unknown', reserveDispatch:true, reservationId },
+            listenerToken, signal: AbortSignal.timeout(1500),
           });
-          if (reservation?.dispatchGranted !== true || this.controller.signal.aborted) return;
+          const active = () => !this.controller.signal.aborted && this.fencingToken === listenerToken;
+          let reservation;
+          try {
+            reservation = await reserve();
+          } catch (error) {
+            // Still in the same call, before the local dispatch receipt or
+            // provider prompt. A later wake uses a different reservation ID.
+            if (!(error instanceof RoomError && (error.status === 0 || error.status >= 500)) || !active()) throw error;
+            reservation = await reserve();
+          }
+          if (reservation?.dispatchGranted !== true || !active()) return;
         } else {
           // An observed dispatch or interruption survives loss of local state.
           if (await claimAllowsDispatch === false) return;
