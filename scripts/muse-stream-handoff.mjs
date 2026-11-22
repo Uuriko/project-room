@@ -103,6 +103,19 @@ export async function reportMuseIdle({ client, listener, policy, hostId, fencing
   return report?.idlePickup?.roomId === policy.roomId ? report.idlePickup.status : "unconfirmed";
 }
 
+export async function sendFencedMuseAck(command, acquire, send, invalidate) {
+  const token = await acquire();
+  if (!token) throw Object.assign(Error("Muse receipt is waiting for its listener lease"), { status: 503 });
+  try { return await send(command, token); }
+  catch (error) {
+    // Keep the checkpoint and inspect it again through the ordinary recovery
+    // path. Reuse the exact operation, including after a lost success response.
+    if (error.code !== "stale_listener" && error.status !== 0) throw error;
+    if (error.code === "stale_listener") invalidate();
+    throw Object.assign(error, { status: 503 });
+  }
+}
+
 export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, setWaiting = () => {}, onIdle, sendAck = (command, options) => client.command(command, options) }) {
   let state = checkpoint;
   const remember = (after, inFlight = null) => { state = { after, inFlight }; save(state); };
@@ -329,6 +342,12 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   const listenerClient = signal => new RoomClient({ apiBase: connection.origin, roomId: policy.roomId,
     memberId: policy.memberId, credential: connection.token, signal });
   let fencingToken, nextIdleProbe = 0;
+  async function acquireListener(listener) {
+    const info = await listener.request("/api/agent-heartbeats", {
+      body: { hostId, mode: "wakeable", listenerLease: { roomId: policy.roomId } } });
+    fencingToken = info?.listener?.acquired ? info.listener.fencingToken : null;
+    return info;
+  }
   async function observeIdle(client, signal) {
     if (Date.now() < nextIdleProbe) return;
     // The existing stream drives this probe. Never start a second listener loop.
@@ -336,9 +355,7 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
     const probeSignal = AbortSignal.any([signal, AbortSignal.timeout(2500)]);
     const listener = listenerClient(probeSignal);
     try {
-      const info = await listener.request("/api/agent-heartbeats", {
-        body: { hostId, mode: "wakeable", listenerLease: { roomId: policy.roomId } } });
-      fencingToken = info?.listener?.acquired ? info.listener.fencingToken : null;
+      const info = await acquireListener(listener);
       if (!fencingToken) return;
       if (!info.idlePickupAvailable) {
         await releaseListener();
@@ -361,19 +378,16 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   try {
     const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
     const statusFile = join(directory, "receiver-status.json");
-    const sendAck = async (command, { signal }) => {
-      if (fencingToken) {
-        try {
-          return await listenerClient(signal).request(`/api/rooms/${encodeURIComponent(policy.roomId)}/commands`,
-            { body: command, listenerToken: fencingToken });
-        } catch (error) {
-          if (error.code !== "stale_listener") throw error;
-          fencingToken = null;
+    const sendAck = (command, { signal }) => {
+      const listener = listenerClient(signal);
+      return sendFencedMuseAck(command, async () => {
+        if (!fencingToken) {
+          try { await acquireListener(listener); }
+          catch (error) { if (error.status !== 0) throw error; }
         }
-      }
-      // The exact command is safe to reuse. The server still refuses a
-      // token-free first receipt if another listener acquired the lease.
-      return client.command(command, { signal });
+        return fencingToken;
+      }, (body, listenerToken) => listener.request(`/api/rooms/${encodeURIComponent(policy.roomId)}/commands`,
+        { body, listenerToken }), () => { fencingToken = null; });
     };
     const result = mode === "--recover"
       ? await runRecovery({ client, directory, file, policy, statusFile, signal: stop.signal })

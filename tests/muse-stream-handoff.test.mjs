@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, reportMuseIdle, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
+import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, reportMuseIdle, runMuseHandoff, sendFencedMuseAck } from "../scripts/muse-stream-handoff.mjs";
 
 const connection = { origin: "https://room.example.org", roomId: "build", memberId: "muse" };
 const policy = museHandoffPolicy({ ...connection, version: 1, requesters: ["codex"], workItems: ["ready"],
@@ -479,4 +479,22 @@ test("a dry initial scan reports idle before handing off the resulting exact str
     signal: new AbortController().signal, onIdle: () => { order.push("report"); } });
   assert.deepEqual(order, ["scan", "report", "stream"]);
   assert.equal(result.requestMessageId, "idle-picked");
+});
+
+test("an expired or unavailable listener fence cannot fall back to an unfenced receipt", async () => {
+  const writes = [], command = { id: "same-exact-operation" };
+  let token = "expired-fence";
+  const acquire = () => token;
+  const send = (submitted, fence) => {
+    writes.push({ submitted, fence });
+    if (fence === "expired-fence") throw Object.assign(Error("expired"), { code: "stale_listener" });
+    return { sequence: 17 };
+  };
+  const invalidate = () => { token = null; };
+  await assert.rejects(sendFencedMuseAck(command, acquire, send, invalidate), { status: 503 });
+  await assert.rejects(sendFencedMuseAck(command, acquire, send, invalidate), { status: 503 });
+  assert.deepEqual(writes, [{ submitted: command, fence: "expired-fence" }]);
+  token = "renewed-fence";
+  assert.deepEqual(await sendFencedMuseAck(command, acquire, send, invalidate), { sequence: 17 });
+  assert.deepEqual(writes.at(-1), { submitted: command, fence: "renewed-fence" });
 });
