@@ -681,3 +681,63 @@ test('restart surfaces a review interrupted before output and never runs it twic
   assert.deepEqual(f.counts, {prompt:1,write:0,receipt:0,ack:0});
   assert.equal(f.pendingRows().delivered_at, null);
 });
+
+test('losing the local dispatch receipt before any provider output cannot repeat the prompt', async t => {
+  const f = await setup(t);
+  f.bridge.host.prompt = async () => { f.counts.prompt++; throw Error('host stopped after dispatch'); };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  const receipts = f.bridge.reviewReceipts;
+  rmSync(join(receipts.dir, receipts.key(f.wake.signalId) + '.json'));
+  const replacement = f.make();
+  assert.equal(await replacement.lease(), true);
+  await replacement.accept(f.wake);
+  await replacement.queue.idle();
+  assert.deepEqual(f.counts, {prompt:1,write:0,receipt:0,ack:0});
+  assert.equal((await f.readAsProducer(f.wake.nextRead)).reviewRuntime.status, 'start_unknown');
+  assert.equal(f.pendingRows().delivered_at, null);
+});
+
+test('a live receiver recovers a lost reservation response before dispatching only once', async t => {
+  const f = await setup(t);
+  const request = f.bridge.room.request.bind(f.bridge.room);
+  const reserveIds = [];
+  f.bridge.room.request = async (path, options) => {
+    const result = await request(path, options);
+    if (options?.body?.reserveDispatch) {
+      assert.equal(result.dispatchGranted, true);
+      reserveIds.push(options.body.reservationId);
+      if (reserveIds.length === 1) throw new RoomError(0, 'network', 'Committed reservation response lost');
+    }
+    return result;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(reserveIds.length, 2);
+  assert.equal(reserveIds[0], reserveIds[1]);
+  assert.deepEqual(f.counts, {prompt:1,write:1,receipt:0,ack:1});
+  assert.equal(f.verdict().result, 'pass');
+});
+
+test('a fresh listener cannot dispatch when the original lost every reservation response', async t => {
+  const f = await setup(t);
+  const report = f.bridge.room.request.bind(f.bridge.room);
+  f.bridge.room.request = async (path, options) => {
+    const result = await report(path, options);
+    if (options?.body?.reserveDispatch) {
+      assert.equal(result.dispatchGranted, true);
+      throw new RoomError(0, 'network', 'Committed reservation response lost');
+    }
+    return result;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.throws(f.receipt, { code:'ENOENT' });
+  assert.equal((await f.readAsProducer(f.wake.nextRead)).reviewRuntime.status, 'start_unknown');
+  const replacement = f.make();
+  assert.equal(await replacement.lease(), true);
+  await replacement.accept(f.wake);
+  await replacement.queue.idle();
+  assert.deepEqual(f.counts, {prompt:0,write:0,receipt:0,ack:0});
+  assert.equal(f.pendingRows().delivered_at, null);
+});
