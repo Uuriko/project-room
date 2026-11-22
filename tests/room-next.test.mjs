@@ -218,6 +218,12 @@ test("an empty work page advances, keeps ongoing work, and invalidates stale aut
   });
   f.send(f.reviewer.key, "work.accepted", { workItemId: id, expectedRevision: f.rev(id) });
   f.send(f.reviewer.key, "work.started", { workItemId: id, expectedRevision: f.rev(id) });
+  const indexed = await f.mcp(f.reviewer, "room_next", { view: "pickup" });
+  assert.equal(indexed.value.work.coverage, "complete");
+  assert.equal(indexed.value.work.items.find(item => item.id === id)?.reason, "in_progress");
+  // Exercise an adapter without native SQL functions as well.
+  Object.defineProperty(f.store.db, "function", { value: undefined, configurable: true });
+  t.after(() => delete f.store.db.function);
   const first = await f.mcp(f.reviewer, "room_next", { view: "pickup" });
   assert.equal(first.ok, true, first.text);
   assert.equal(first.value.work.coverage, "partial");
@@ -470,6 +476,16 @@ test("reviewer pickup drains settled work before offering a finding and honors a
 
   const follow = (who, pointer) => f.mcp(who, pointer.tool, pointer.arguments);
   const start = () => f.mcp(f.triage, "room_next", { view: "pickup" });
+  const indexed = await start();
+  assert.ok(indexed.ok, indexed.text);
+  validatePickup(indexed.value);
+  assert.equal(indexed.value.work.coverage, "complete");
+  assert.deepEqual(indexed.value.work.items, []);
+  assert.equal(preferredRead(indexed.value).tool, "room_read_project_discoveries");
+  assert.doesNotMatch(indexed.text, /Private finding text/);
+  // Preserve coverage of the bounded continuation on adapters without the filter.
+  Object.defineProperty(f.store.db, "function", { value: undefined, configurable: true });
+  t.after(() => delete f.store.db.function);
   const drain = async () => {
     let page = await start();
     for (let i = 0; i < 2; i++) {
