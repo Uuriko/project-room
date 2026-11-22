@@ -569,6 +569,7 @@
   "clipboard.pending": "Clipboard is still busy. You can keep working.",
   "result.closePreview": "Close preview",
   "result.backConversation": "Back to conversation",
+  "result.privateAccess": "This result is unavailable to your account. Ask the sender to share access.",
   "result.resize": "Resize preview",
   "result.searchCount": "{count} results",
   "review.runtime.acknowledged": "Receiver acknowledged the review wake. Review start unconfirmed.",
