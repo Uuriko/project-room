@@ -82,6 +82,23 @@ test("a late private result refusal cannot close the replacement Room session", 
   assert.equal(await read, null);
   assert.equal(client.session, replacement);
 });
+test("private work context preserves a valid session while auth failures still close it", async () => {
+  for (const [status, code, preserve] of [
+    [403, "work_private", true],
+    [403, "access_denied", false],
+    [401, "access_denied", false],
+    [409, "session_binding_changed", false],
+  ]) {
+    const accountClient = { session: identity(), generation: 0 };
+    const client = new RoomClient({ accountClient,
+      fetcher: async () => response({ error: { code, message: "Refused" } }, status) });
+    const session = { ...accountClient.session, authMode: "account" };
+    client.session = session;
+    client.accountOwnership = { client: accountClient, generation: 0, session: accountClient.session };
+    await assert.rejects(client.workContext("work"), error => error.status === status && error.code === code);
+    assert.equal(client.session, preserve ? session : null);
+  }
+});
 test("failed command leaves retry object unchanged and never reports a receipt", async () => {
   const client = new RoomClient({ fetcher: async () => response({ error: { message: "Stale revision" } }, 409) });
   client.session = identity();

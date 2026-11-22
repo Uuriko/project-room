@@ -12,7 +12,7 @@ test('real room-cookie browser session reads normalized selected native work abs
 });
 const source=readFileSync(new URL('../src/app.js',import.meta.url),'utf8');
 function harness({held={}}={}){
- const calls=[],card={querySelector:()=>({open:false})},ctx={structuredClone,calls,card,partialWorkSnapshot:true,inspectedWorkRecord:null,state:{room:{id:'commons'},members:{owner:{id:'owner',active:true}},workItems:held},session:{roomId:'commons',member:{id:'owner'}},client:{generation:1,workContext:async id=>{calls.push(['read',id]);return {roomId:'commons',viewerId:'owner',work:{id,title:'Full title',definitionOfDone:'Complete selected definition',revision:1},viewerSessionBinding:'bound'};},ownsResponse:()=>true},busy:false,activeWorkNavigationId:null,activeWorkNavigation:null,workNavigationEpoch:1,location:{href:'http://localhost/#pr-record/work/late'},CSS:{escape:x=>x},SOURCE_UNAVAILABLE_NOTICE:'unavailable'};
+ const calls=[],card={querySelector:()=>({open:false})},ctx={structuredClone,calls,card,partialWorkSnapshot:true,inspectedWorkRecord:null,pendingWorkThreadEpoch:null,state:{room:{id:'commons'},members:{owner:{id:'owner',active:true}},workItems:held},session:{roomId:'commons',member:{id:'owner'}},client:{generation:1,workContext:async id=>{calls.push(['read',id]);return {roomId:'commons',viewerId:'owner',work:{id,title:'Full title',definitionOfDone:'Complete selected definition',revision:1},viewerSessionBinding:'bound'};},ownsResponse:()=>true},busy:false,activeWorkNavigationId:null,activeWorkNavigation:null,workNavigationEpoch:1,location:{href:'http://localhost/#pr-record/work/late'},CSS:{escape:x=>x},SOURCE_UNAVAILABLE_NOTICE:'unavailable'};
  vm.createContext(ctx);const start=source.indexOf('// JDOT-COH-NAV begin\nfunction revealWork('),end=source.indexOf('function workNavigationContext()',start);assert.ok(start>=0&&end>start);
  vm.runInContext(`var revealClaimRecord=id=>calls.push(['legacy-board',id]);var workRecord=()=>card;var revealWorkTimeline=id=>{calls.push(['mount',id]);return card;};var focusRecord=()=>{};var syncWorkReturnControl=()=>{};var closeResult=()=>{};var notice=text=>calls.push(['notice',text]);var workNavigationContext=()=>session&&state?client.generation+'|'+session.roomId+'|'+session.member.id:null;${source.slice(start,end)}this.reveal=revealWork;`,ctx);return ctx;
 }
@@ -75,3 +75,35 @@ test('a later direct native work selection wins even when an older read complete
  for(const id of ['first','second']){resolvers[id]({roomId:'commons',viewerId:'owner',work:{id,title:id,definitionOfDone:id,revision:1}});await(id==='first'?first:second);}
  assert.equal(h.state.workItems.first,undefined);assert.equal(h.state.workItems.second.definitionOfDone,'second');assert.equal(h.activeWorkNavigationId,'second');
 });
+
+for (const firstReadFails of [false, true]) {
+  test(`a pending Work Thread re-reads after refresh when the first read ${firstReadFails ? 'fails' : 'succeeds'}`, async () => {
+   const h = harness(), reads = [], opened = [];
+   h.client.workContext = () => new Promise((resolve, reject) => reads.push({ resolve, reject }));
+   h.card.querySelector = selector => selector === '[data-read-result]' ? { id: 'result-button' } : { open: false };
+   Object.assign(h, { updatesUi: null, opened });
+   const start = source.indexOf('function showWorkDestination(');
+   const end = source.indexOf('// #3795: open the board', start);
+   vm.runInContext(`var $=()=>({open:false});var currentWorkOrigin=()=>null;
+    var readResult=()=>opened.push(state.workItems.late.receipt.eventId);
+    ${source.slice(start,end)}this.show=showWorkDestination;`, h);
+
+   h.show('work', 'late', 'thread');
+   const result = (revision, eventId) => ({
+    roomId: 'commons', viewerId: 'owner', work: { id: 'late', title: 'Selected work',
+     definitionOfDone: 'Full record', revision, receipt: { eventId } }
+   });
+   assert.equal(reads.length, 1);
+   h.state = { ...h.state, workItems: { late: { revision: 2 } } };
+   if (firstReadFails) reads[0].reject(new Error('Selected work response was lost'));
+   else reads[0].resolve(result(1, 'previous-completion'));
+   await new Promise(resolve => setImmediate(resolve));
+   assert.equal(reads.length, 2);
+   assert.deepEqual(opened, []);
+   assert.equal(h.state.workItems.late.revision, 2);
+   reads[1].resolve(result(2, 'current-completion'));
+   await new Promise(resolve => setImmediate(resolve));
+   assert.deepEqual(opened, ['current-completion']);
+   assert.equal(h.pendingWorkThreadEpoch, null);
+  });
+}

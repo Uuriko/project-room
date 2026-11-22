@@ -4,8 +4,78 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { CurrentReadBudgetExceeded } from '../server/current-room-repository.mjs';
+import { readCurrentEventWindow } from '../server/current-room-events.mjs';
+import { readRoomSnapshot } from '../server/snapshot-window.mjs';
 
 const raw = store => JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+
+for (const representation of ['legacy', 'normalized-current-v1']) test(`${representation} selected work can omit replies without widening access`, t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  const members = ['participant', 'reviewer', 'observer'].map(memberId => event({
+    id: 'selected-work-' + memberId, roomId: 'commons', actorId: 'owner', type: 'member.added',
+    data: { memberId, displayName: memberId, kind: 'human', permissions: [] },
+  }));
+  store.initialize([...initialRoom(), ...members], representation === 'legacy' ? {} : { representation });
+  const owner = store.issueAccessKey('commons', 'owner');
+  const participant = store.issueAccessKey('commons', 'participant');
+  const reviewer = store.issueAccessKey('commons', 'reviewer');
+  const observer = store.issueAccessKey('commons', 'observer');
+  const send = (id, type, data) => store.command(owner, 'commons', { id, type, data });
+  send('selected-work', 'work.proposed', {
+    workItemId: 'selected-work', title: 'Saved work title', definitionOfDone: 'Read the scoped work',
+    accountableMemberId: 'owner', verifierMemberId: 'reviewer',
+  });
+  for (let index = 0; index < 9; index++) {
+    const id = `selected-reply-${index}`;
+    send(id, 'message.posted', {
+      messageId: id, workItemId: 'selected-work', body: 'Private request', requestKind: 'reply', toMemberId: 'participant',
+    });
+    if (index === 0) {
+      const ordinary = store.workContext(participant, 'commons', 'selected-work');
+      assert.equal(ordinary.replyRequestContext.requests[0].id, id);
+      assert.equal(ordinary.replyRequestContext.total, 1);
+    }
+  }
+  for (const viewer of [owner, participant]) {
+    const context = store.workContext(viewer, 'commons', 'selected-work', { includeReplies: false });
+    assert.equal(context.work.title, 'Saved work title');
+    assert.ok(context.next.action);
+    assert.equal(Object.hasOwn(context, 'replyRequestContext'), false);
+    assert.equal(JSON.stringify(context).includes('selected-reply-'), false);
+  }
+  assert.throws(() => store.workContext(observer, 'commons', 'selected-work', { includeReplies: false }),
+    error => error.status === 403 && error.code === 'work_private');
+  assert.throws(() => store.workContext(observer, 'commons', 'selected-work'),
+    error => error.status === 403 && error.code === 'work_private');
+  const context = store.workContext(participant, 'commons', 'selected-work');
+  assert.equal(context.work.title, 'Saved work title');
+  assert.equal(context.next.action, store.workContext(participant, 'commons', 'selected-work', { includeReplies: false }).next.action);
+  assert.equal(store.workContext(reviewer, 'commons', 'selected-work').replyRequestContext.total, 0);
+  if (representation === 'legacy') {
+    assert.equal(context.replyRequestContext.total, 9);
+    return;
+  }
+  const replies = context.replyRequestContext;
+  assert.equal(replies.total, null, 'the bounded work read did not count the open replies');
+  assert.equal(replies.truncated, true);
+  assert.equal(replies.shown, 0);
+  assert.deepEqual(replies.requests, []);
+  assert.equal(replies.nextRead.tool, 'room_list_requests');
+  const first = store.replyRequests.list(participant, 'commons', { ...replies.nextRead.arguments, limit: 3 });
+  assert.throws(() => store.replyRequests.list(observer, 'commons', first.nextRead.arguments),
+    error => error.code === 'reply_cursor_identity_changed');
+  const ids = first.requests.map(request => request.id);
+  let page = first;
+  for (let count = 1; page.nextRead && count < 4; count++) {
+    page = store.replyRequests.list(participant, 'commons', page.nextRead.arguments);
+    ids.push(...page.requests.map(request => request.id));
+    assert.ok(ids.length <= 9);
+  }
+  assert.equal(page.nextRead, null);
+  assert.deepEqual(ids.sort(), Array.from({ length: 9 }, (_, index) => `selected-reply-${index}`));
+});
 
 test('explicit synthetic initialization selects actual normalized serving, not replay staging', t => {
   const store = new RoomStore(':memory:');
@@ -171,4 +241,29 @@ for(const count of [1000,5000])test(`excluded history${count} keeps an honest bo
   assert.equal(second.messages.length,0);assert.ok(second.sourceWindow.examined>0&&second.sourceWindow.examined<=64);
   assert.throws(()=>readConversation(store,token,'commons',{messageId:'not-present'}),error=>error.code==='message_not_found');
   assert.throws(()=>readConversation(store,token,'commons',{messageId:'hidden-0'}),error=>error.code==='message_not_found');
+});
+
+test('oversized normalized startup keeps audit history available by cursor', t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  store.initialize(initialRoom(), { representation: 'normalized-current-v1' });
+  const token = store.issueAccessKey('commons', 'owner');
+  const post = store.command(token, 'commons', { id: 'recent-evidence', type: 'message.posted',
+    data: { messageId: 'recent-evidence', body: 'Recent evidence should remain reachable.' } });
+  const base = store.currentOverview.bind(store);
+  store.currentOverview = (roomId, viewerId, options) => {
+    if (options.limit === 8) throw new CurrentReadBudgetExceeded();
+    return base(roomId, viewerId, options);
+  };
+  const snapshot = readRoomSnapshot(store, token, 'commons', null, { windowed: true });
+  assert.equal(snapshot.sequence, post.sequence);
+  assert.equal(snapshot.state.messages.at(-1).id, 'recent-evidence');
+  assert.deepEqual(snapshot.state.eventLog, []);
+  assert.equal(snapshot.eventsWindow.complete, false);
+  assert.equal(snapshot.eventsWindow.after, post.sequence);
+  assert.equal(snapshot.eventsWindow.hasOlder, true);
+  const page = store.readTransaction(() => readCurrentEventWindow(store, 'commons', 'owner',
+    { after: snapshot.eventsWindow.olderAfter, limit: 16 }));
+  assert.equal(page.next, post.sequence);
+  assert.ok(page.events.some(row => row.event.id === post.event.id));
 });

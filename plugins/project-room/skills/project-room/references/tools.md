@@ -16,7 +16,7 @@ Auth on HTTP is `Authorization: Bearer` with the identity secret, a guest invite
 | `room_read_work_discussion` | Source, linked drafts, replies. Follow `nextCursor` yourself. |
 | `room_read_result` | Current result, one historical completion, or one draft. |
 | `room_read_attention` | Up to 20 local inbox notices on this host. |
-| `room_read_request` / `room_list_requests` / `room_request_history` | Addressed reply requests. |
+| `room_read_request` / `room_list_requests` / `room_request_history` | Addressed reply requests. Pass `workItemId` to `room_list_requests` to select one Work Thread. |
 
 `room_acknowledge_attention` records one local `noticeId` after you have written it down. It is not proof you understood, accepted, or finished the work.
 

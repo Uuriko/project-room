@@ -4913,7 +4913,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         if (req.method === "POST") return json(res, 200, store.requestRuns.apply(selected.token, roomId, await body(req), fence));
       }
       if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
-        const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status", "cursor", "limit", "states"]
+        const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status", "workItemId", "cursor", "limit", "states"]
           : route === "reply-context" ? ["requestMessageId", "cursor", "limit", "view"] : ["direction", "cursor", "checkpoint", "limit"];
         if ([...params.keys()].some(key => ![...names, "auth"].includes(key) || params.getAll(key).length !== 1)
           || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))
@@ -4943,9 +4943,9 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         const params = url.searchParams;
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && offerContext !== "1") reject(422, "invalid_offer_context", "Choose offer context version 1");
-        if ([...params.keys()].some(key => !["workItemId", "includeSource", "sourceObservation", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource")))) {
-          reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
+        if ([...params.keys()].some(key => !["workItemId", "includeSource", "sourceObservation", "includeReplies", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || ["includeSource", "includeReplies"].some(key => params.has(key) && !["true", "false"].includes(params.get(key)))) {
+          reject(422, "invalid_work_context", "Choose one work ID and boolean context options");
         }
         let sourceObservation;
         if (params.has("sourceObservation")) {
@@ -4955,7 +4955,8 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         }
         const context = store.workContext(selected.token, roomId, params.get("workItemId"), {
           sourceObservation,
-          includeSource: params.get("includeSource") === "true", includeOffers: offerContext === "1", expectedSessionBinding: fence
+          includeSource: params.get("includeSource") === "true", includeOffers: offerContext === "1",
+          includeReplies: params.get("includeReplies") !== "false", expectedSessionBinding: fence
         });
         // Older SDKs strictly validate the original resume shape. Their
         // primary next step already carries the prerequisite observation.

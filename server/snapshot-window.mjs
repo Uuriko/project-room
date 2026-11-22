@@ -2,7 +2,7 @@
 // The default GET /api/rooms/{id} and ?messages=recent are this window.
 // ?full=1 is the retired unbounded document, and only while
 // ROOM_SNAPSHOT_FULL_COMPAT=1. Older history pages through /messages.
-import { isCurrentRoom, withCurrentReadContext,withCurrentWorkSummaryReuse,readCurrentRecord,readCurrentHistoryFloor,chargeCurrentReadBudget } from './current-room-repository.mjs';
+import { CurrentReadBudgetExceeded, isCurrentRoom, withCurrentReadContext,withCurrentWorkSummaryReuse,readCurrentRecord,readCurrentHistoryFloor,chargeCurrentReadBudget } from './current-room-repository.mjs';
 import {readCurrentEventWindow} from './current-room-events.mjs';
 import { readConversation } from './conversation-sync.mjs';
 import { messageSequences } from "./message-queries.mjs";
@@ -141,16 +141,18 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
   if (view === "full" && isCurrentRoom(store.db, roomId)) {
     if (!windowed || helpContext || !["full","activity"].includes(auditView))
       fail(409, "current_snapshot_selection_unavailable", "Use the bounded current room window and addressed detail reads");
-    return store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {
+    const readWindow = ({ workLimit, messageLimit, eventLimit }) => store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {
       const auth = store.authenticate(token, roomId, fence);
       return withCurrentWorkSummaryReuse(store,roomId,auth.member.id,()=>{
-      const overview = store.currentOverview(roomId, auth.member.id);
-      const conversation = readConversation(store, token, roomId, { limit: 8, expectedSessionBinding: fence });
+      const overview = store.currentOverview(roomId, auth.member.id, { limit:workLimit });
+      const conversation = readConversation(store, token, roomId, { limit:messageLimit, expectedSessionBinding: fence });
       const channelKeys=store.db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='channels' AND present=1 ORDER BY record_key LIMIT 51").all(roomId);
       if(channelKeys.length>50)fail(409,'current_channel_catalog_unavailable','Channel catalog exceeds the supported room limit');
       chargeCurrentReadBudget(b,channelKeys.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),channelKeys.length);
       const channels=Object.create(null);for(const {record_key:id}of channelKeys){const channel=readCurrentRecord(store.db,roomId,'channels',id,b);if(!channel||channel.id!==id)throw Error('Current channel membership differs');Object.defineProperty(channels,id,{value:channel,enumerable:true});}
-      const sourceAfter=Math.max(0,overview.sequence-16),eventPage=readCurrentEventWindow(store,roomId,auth.member.id,{after:sourceAfter,limit:16});
+      const sourceAfter=Math.max(0,overview.sequence-eventLimit);
+      const eventPage=eventLimit===0 ? {events:[],next:sourceAfter}
+        : readCurrentEventWindow(store,roomId,auth.member.id,{after:sourceAfter,limit:eventLimit});
       const events=eventPage.events.map(row=>row.event),eventLog=auditView==='activity'?events.filter(e=>e.type==='decision.recorded'||/^(work\.|work_claim\.|verification\.|owner_decision\.)/.test(e.type)||e.data?.workItemId!==undefined):events;
       const cursor=store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get(roomId,auth.member.id)?.sequence??0;
       const floor=readCurrentHistoryFloor(store.db,roomId,auth.member.id,b),catchUpCursor=Math.max(cursor,floor?floor.sequence-1:0);
@@ -170,14 +172,22 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
           pins:(overview.state.pins??[]).filter(pin=>conversation.messages.some(message=>message.id===pin.messageId&&!message.deletedAt&&message.body!=null)) },
         pinsWindow:{complete:false,coverage:'visible-conversation-records',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/pins`}},
         channelsWindow:{complete:true,shown:channelKeys.length},
-        eventsWindow:{complete:sourceAfter===0,after:sourceAfter,examinedThrough:eventPage.next,hasOlder:sourceAfter>0,olderAfter:sourceAfter>0?Math.max(0,sourceAfter-16):null,sourceLimit:16},
+        eventsWindow:{complete:sourceAfter===0,after:sourceAfter,examinedThrough:eventPage.next,hasOlder:sourceAfter>0,olderAfter:sourceAfter>0?Math.max(0,sourceAfter-16):null,sourceLimit:eventLimit},
         messagesWindow: { mode: "recent", omitted: null, complete: conversation.nextCursor === null },
-        messagesPage: { cursor: conversation.nextCursor, hasMore: conversation.nextCursor !== null, contractVersion: 2, limit: 8 },
+        messagesPage: { cursor: conversation.nextCursor, hasMore: conversation.nextCursor !== null, contractVersion: 2, limit: messageLimit },
         workWindow: overview.workWindow,
         sections: { assistant:{available:true,coverage:'selected-run-window',maxRuns:100},requestRuns:{available:false,code:'current_request_runs_unavailable'},notifications:{available:false,code:'current_notification_aggregate_unavailable'},updates:{available:false,replacement:'needs-me',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/needs-me`}},returnBrief:{available:true,coverage:'visible-history-window',sourceLimit:16},files:{available:true,coverage:'selected-messages',complete:false},fileUploads:{available:true}, helpOffers: { available: false, code: "current_help_offers_unavailable" }, replyRequests: { available: true,complete:false,coverage:"visible-conversation-records", nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } } } }
       };
       });
     }, { maxRecords: 1024 }));
+    try {
+      return readWindow({ workLimit:8, messageLimit:8, eventLimit:16 });
+    } catch (error) {
+      if (!(error instanceof CurrentReadBudgetExceeded)) throw error;
+      // Keep startup within its shared input budget. Audit history remains
+      // available through its existing browser record page and exact links.
+      return readWindow({ workLimit:2, messageLimit:2, eventLimit:0 });
+    }
   }
   // #4265: the non-windowed form is the explicit full-history contract (the
   // compat ?full=1 read; the work view returns before the messages branch),

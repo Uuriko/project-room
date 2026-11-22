@@ -30,7 +30,7 @@ function clipGraphemes(text, maxUnits) {
   }
   return value.slice(0, taken);
 }
-import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, workRecipeOptions, workThreadHref } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, workRecipeOptions, workThreadHref, readRecordInterval } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { attemptReceipts, attemptLedger, attemptDeclarationLabel, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage, failureTextWithHint } from "./share-links.js";
@@ -357,7 +357,7 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
-let partialWorkSnapshot = false, inspectedWorkRecord = null;
+let partialWorkSnapshot = false, inspectedWorkRecord = null, pendingWorkThreadEpoch = null;
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -610,7 +610,8 @@ const client = new RoomClient({
       if (session.member.kind !== "agent" && !savedRoomDestination() && $("#result-dialog").hidden
         && !$("#board-dialog").open && !$("#message-input").value) updatesUi?.open("needs", false);
     }
-    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
+    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId
+      && pendingWorkThreadEpoch !== workNavigationEpoch) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
     retryPendingHashReveal();
     resumeConfirmedWorkNavigation();
   },
@@ -2355,9 +2356,13 @@ $("#event-list").addEventListener("click", event => {
 async function loadEarlierRecord(){
  if(recordPageReading||!nativeEventsWindow?.hasOlder||!state||!session)return;
  const anchor=nativeEventsWindow,generation=client.generation,identity=session,held=state;recordPageReading=true;renderRecordPanel();
- try{const page=await client.recordPage({after:anchor.olderAfter});if(!page||client.generation!==generation||session!==identity||state!==held||nativeEventsWindow!==anchor)return;
-  const seen=new Set(state.eventLog.map(e=>e.id)),older=page.events.filter(row=>row.sequence<=anchor.after&&!seen.has(row.event.id)).map(row=>row.event);
-  state={...state,eventLog:[...older,...state.eventLog]};nativeEventsWindow={...anchor,after:anchor.olderAfter,olderAfter:anchor.olderAfter>0?Math.max(0,anchor.olderAfter-16):null,hasOlder:anchor.olderAfter>0,complete:anchor.olderAfter===0};
+ try{
+  const next=await readRecordInterval(anchor,async after=>{
+    const page=await client.recordPage({after});
+    return client.generation===generation&&session===identity&&state===held&&nativeEventsWindow===anchor ? page : null;
+  },held.eventLog);
+  if(!next||nativeEventsWindow!==anchor||state!==held)return;
+  state={...state,eventLog:next.eventLog};nativeEventsWindow=next.window;
  }catch(error){if(client.generation===generation)notice(error.message,true);}finally{recordPageReading=false;renderRecordPanel();}
 }
 // Phase 2 channels: one main channel plus user-created channels. Chat and work
@@ -3471,16 +3476,28 @@ function revealWork(id, expandDetails = false) {
   syncWorkReturnControl();
   return card;
 }
-async function readSelectedWorkRecord(id, expandDetails) {
+async function readSelectedWorkRecord(id, expandDetails, retrySnapshot = pendingWorkThreadEpoch === workNavigationEpoch) {
   const context = workNavigationContext();
   if (!context || busy) return null;
   const generation = client.generation, identity = session, held = state;
   const epoch = workNavigationEpoch, url = location.href;
   const current = () => context === workNavigationContext() && generation === client.generation
-    && identity === session && held === state && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
+    && identity === session && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
   try {
-    const selected = await client.workContext(id);
+    const selected = await client.workContext(id, { includeReplies: false }).catch(error => {
+      if (held === state) throw error;
+      // Once refreshed, the first response's failure is also stale. The
+      // navigation and snapshot checks below decide whether to re-read.
+      return null;
+    });
     if (!current()) return null;
+    if (held !== state) {
+      // A refresh can revoke access or replace the result. The same navigation
+      // owns a fresh read, so a delayed response never mounts across snapshots.
+      if (retrySnapshot) return readSelectedWorkRecord(id, expandDetails, false);
+      if (pendingWorkThreadEpoch === epoch) notice("The room updated while opening this work. Open the Work Thread again.", true);
+      return null;
+    }
     const item = selected?.work;
     if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
       || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
@@ -3494,7 +3511,7 @@ async function readSelectedWorkRecord(id, expandDetails) {
     state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
     return revealWork(id, expandDetails);
   } catch (error) {
-    if (current()) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
+    if (current() && held === state) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
     return null;
   }
 }
@@ -3565,11 +3582,11 @@ function showWorkDestination(kind, id, presentation = "focus") {
   if ($("#board-dialog").open) $("#board-dialog").close();
   if (kind === "work" && presentation === "drafts") { revealDrafts(id); activeWorkNavigationId = id; }
   else if (kind === "work") {
-    const selected = revealWork(id, presentation === "details");
     if (presentation === "thread") {
       const epoch = workNavigationEpoch, identity = session;
       const completion = currentWorkOrigin()?.updates?.completionEventId;
-      void Promise.resolve(selected).then(card => {
+      pendingWorkThreadEpoch = epoch;
+      void Promise.resolve(revealWork(id)).then(card => {
         if (!card || workNavigationEpoch !== epoch || session !== identity || activeWorkNavigationId !== id) return;
         if (completion && state.workItems[id]?.receipt?.eventId !== completion) {
           notice("This release changed. Return to Updates to open the accepted result.", true);
@@ -3578,8 +3595,10 @@ function showWorkDestination(kind, id, presentation = "focus") {
         const button = card.querySelector("[data-read-result]");
         if (button) readResult({ target: button }, { focused: true });
         syncWorkReturnControl();
+      }).finally(() => {
+        if (pendingWorkThreadEpoch === epoch) pendingWorkThreadEpoch = null;
       });
-    }
+    } else revealWork(id, presentation === "details");
   } else revealMessage(id);
   syncWorkReturnControl();
 }
@@ -6623,7 +6642,7 @@ document.addEventListener("click", async e => {
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
   button.disabled = true;
   try {
-    const context = await client.workContext(workId);
+    const context = await client.workContext(workId, { includeReplies: false });
     if (!context || !sameSession(generation, roomId, memberId)) return;
     accessPreviews.set(workId, { summary: context.accessSummary, evaluatedAt: context.evaluatedAt });
   } catch (error) {

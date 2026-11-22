@@ -6649,14 +6649,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return digest;
     });
   }
-  workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, sourceObservation = undefined, expectedSessionBinding = null } = {}) {
+  workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, includeReplies = true, sourceObservation = undefined, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => withCurrentReadContext(this.db,roomId,() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
-      if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
+      if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean" || typeof includeReplies !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
       if (sourceObservation !== undefined && (!includeSource || !validSourceObservation(sourceObservation)
         || sourceObservation.roomId !== roomId || sourceObservation.workItemId !== workItemId || sourceObservation.viewerId !== auth.member.id))
         fail(422, "invalid_source_observation", "Use an observation from this room, work and viewer with includeSource=true");
-      const current=readCurrentSelectedWorkState(this,roomId,workItemId,auth.member.id,{includeOffers});
+      const current=readCurrentSelectedWorkState(this,roomId,workItemId,auth.member.id,{includeOffers,includeReplies});
       if(current) {
         if(!Object.hasOwn(current.state.workItems,workItemId))fail(404,'work_not_found','Work item not found in this Room');
         const item=current.state.workItems[workItemId],target=item.supersededBy;
@@ -6671,7 +6671,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             ? {state:'unknown',satisfied:false} : nativePrerequisiteState(dep,now);
           return {id,...state};
         });
-        const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now,includeSource,includeOffers,sourceObservation,dependencies,
+        const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now,includeSource,includeOffers,includeReplies,repliesDeferred:current.repliesDeferred,sourceObservation,dependencies,
           floor:this.historyFloor(roomId,auth.member.id,current.sequence),messageRecords:{get:id=>selectedMessageRecord(this,roomId,id,false)},
           replacementAvailable:validId(target)&&target!==workItemId&&Boolean(readWorkItem(this.db,roomId,target))});
         // Native commands do not support the legacy help invitation/offer service.
@@ -6684,15 +6684,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Default selected reads hydrate only the selected work payload. Offers
       // validate cross-work references and still require the broader aggregate.
       // Both paths scan legacy room JSON; neither is a bounded SQL-work claim.
-      const row = this.db.prepare(includeOffers
-        ? "SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.helpOffers','$.messagesArchive') AS fields FROM rooms WHERE id=?"
-        : "SELECT sequence,json_extract(projection,'$.room','$.members','$.replyRequests','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
+      const paths = ["$.room", "$.members", ...(includeOffers ? ["$.workItems"] : []),
+        ...(includeReplies ? ["$.replyRequests"] : []), ...(includeOffers ? ["$.helpOffers"] : []), "$.messagesArchive"];
+      const fieldsSql = paths.map(() => "?").join(",");
+      const row = this.db.prepare(`SELECT sequence,json_extract(projection,${fieldsSql}) AS fields FROM rooms WHERE id=?`).get(...paths, roomId);
       if (!row) fail(404, "room_not_found", "Room not found");
       const fields = JSON.parse(row.fields);
-      const [metadata, members] = fields;
+      const [metadata, members, ...contextFields] = fields;
       const selected = includeOffers ? null : readWorkItem(this.db, roomId, workItemId);
-      const [workItems, replyRequests, helpOffers, messagesArchive] = includeOffers ? fields.slice(2)
-        : [selected ? { [workItemId]: selected } : {}, fields[2], null, fields[3]];
+      const workItems = includeOffers ? contextFields.shift() : selected ? { [workItemId]: selected } : {};
+      const replyRequests = includeReplies ? contextFields.shift() : null;
+      const helpOffers = includeOffers ? contextFields.shift() : null;
+      const [messagesArchive] = contextFields;
       const state = includeOffers ? hydrateWorkItems(this.db, roomId, { room: metadata, members, workItems,
         ...(replyRequests ? { replyRequests } : {}), ...(helpOffers ? { helpOffers } : {}) })
         : { room: metadata, members, workItems, ...(replyRequests ? { replyRequests } : {}) };
@@ -6709,7 +6712,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           ? { state: "unknown", satisfied: false } : boardPrerequisiteState(dep);
         return { id, ...state };
       });
-      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, sourceObservation, dependencies, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
+      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, includeReplies, sourceObservation, dependencies, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
         floor: this.historyFloor(roomId, auth.member.id, room.sequence),
         replacementAvailable: (() => {
           const target = room.state.workItems[workItemId].supersededBy;

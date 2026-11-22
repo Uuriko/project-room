@@ -187,7 +187,7 @@ export function mayWriteBoardClaims(member, ownerId = null) {
 
 // Presentation choices only. Every submitted action is still validated by the service.
 export function workActions(item, member, now = Date.now()) {
-  if (!member || member.active === false || item.state === S.SUPERSEDED || item.supersededBy) return [];
+  if (!item || !member || member.active === false || item.state === S.SUPERSEDED || item.supersededBy) return [];
   const actions = [], own = item.accountableMemberId === member.id;
   const can = permission => member.permissions.includes(permission);
   const claim = activeClaim(item, now) && item.claim.holderId === member.id;
@@ -383,4 +383,30 @@ export function reviewRuntimeLabel(status, webhook) {
     unavailable: "review.runtime.unavailable"
   }[status];
   return typeof key === "string" ? uiText(key) : "";
+}
+
+// Read forward through the selected interval before moving to an earlier one.
+export async function readRecordInterval(window, readPage, eventLog) {
+  const { after: through, olderAfter } = window;
+  let after = olderAfter;
+  const seen = new Set(eventLog.map(event => event.id));
+  const events = [];
+  while (after < through) {
+    const page = await readPage(after);
+    if (!page) return null;
+    if (page.next <= after || page.next < through && !page.hasMore) {
+      throw new Error(uiText("currentRoom.recordUnconfirmed"));
+    }
+    for (const row of page.events) {
+      if (row.sequence > through || seen.has(row.event.id)) continue;
+      seen.add(row.event.id);
+      events.push(row.event);
+    }
+    after = page.next;
+  }
+  return {
+    eventLog: [...events, ...eventLog],
+    window: { ...window, after: olderAfter, olderAfter: olderAfter > 0 ? Math.max(0, olderAfter - 16) : null,
+      hasOlder: olderAfter > 0, complete: olderAfter === 0 },
+  };
 }

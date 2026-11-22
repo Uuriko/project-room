@@ -112,15 +112,16 @@ export class ReplyRequests {
       if (requestSelection) {
         // Listing needs no conversation bodies, event history or work payloads.
         // Select only this viewer's request metadata at the authenticated head.
-        const {direction,status} = requestSelection;
+        const { direction, status, workItemId = null } = requestSelection;
         const memberId = auth.member.id;
         const row = this.store.db.prepare(`SELECT sequence, (SELECT json_group_array(json(item.value))
           FROM json_each(rooms.projection,'$.replyRequests') AS item
           WHERE ((? AND json_extract(item.value,'$.recipientId')=?)
               OR (? AND json_extract(item.value,'$.requesterId')=?))
-            AND (?='all' OR json_extract(item.value,'$.status')=?)) AS requests
+            AND (?='all' OR json_extract(item.value,'$.status')=?)
+            AND (? IS NULL OR json_extract(item.value,'$.workItemId')=?)) AS requests
           FROM rooms WHERE id=?`).get(direction !== "outgoing" ? 1 : 0, memberId,
-            direction !== "incoming" ? 1 : 0, memberId, status, status, roomId);
+            direction !== "incoming" ? 1 : 0, memberId, status, status, workItemId, workItemId, roomId);
         if (!row) fail("room_not_found", "Room not found", 404);
         room = { sequence: row.sequence, state: { replyRequests: JSON.parse(row.requests) } };
       } else room = this.store.room(roomId);
@@ -134,7 +135,8 @@ export class ReplyRequests {
     const {states=false,...selection}=options;
     if(typeof states!=="boolean")fail("invalid_reply_selection","states must be true or false");
     options=selection;
-    const {direction="incoming",status="open",expectedSessionBinding=null}=options;
+    const {direction="incoming",status="open",workItemId,expectedSessionBinding=null}=options;
+    if(workItemId!==undefined&&!validId(workItemId))fail("invalid_reply_selection","Choose a valid work item");
     const shapeRequest=states?statefulRequest:compactRequest;
     if(isCurrentRoom(this.store.db,roomId))return withOverdueActions(readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates}), roomId);
     if(options.cursor!==undefined||options.limit!==undefined)fail("invalid_reply_selection","Legacy request lists do not accept pagination; omit cursor and limit");
@@ -142,6 +144,7 @@ export class ReplyRequests {
       fail("invalid_reply_selection", "Choose a request direction and current status");
     return this.read(token, roomId, expectedSessionBinding, ({ auth, room, floor }) => {
       const requests = Object.values(room.state.replyRequests ?? {}).filter(request => directionMatches(request, auth.member.id, direction)
+        && (workItemId === undefined || request.workItemId === workItemId)
         && requestInHistory(request, floor) && (status === "all" || request.status === status)).map(shapeRequest);
       const nextReads = requests.map(request => ({ requestMessageId: request.id,
         http: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(request.id)}` },
@@ -155,8 +158,9 @@ export class ReplyRequests {
       // visible, so their horizon still reaches it.
       const evaluatedThrough = visibleSequenceHorizon(this.store.db, roomId, auth.member.id, room.sequence,
         auth.member.id === this.store.roomOwnerId(roomId));
-      return withOverdueActions({ viewerId: auth.member.id, evaluatedThrough, selection: { direction, status }, requests, nextReads }, roomId);
-    }, { requestSelection: { direction, status } });
+      return withOverdueActions({ viewerId: auth.member.id, evaluatedThrough, selection: { direction, status,
+        ...(workItemId === undefined ? {} : { workItemId }) }, requests, nextReads }, roomId);
+    }, { requestSelection: { direction, status, workItemId } });
   }
   selected(token, roomId, requestMessageId, options = {}) {
     if (!validId(requestMessageId)) fail("invalid_reply_selection", "Choose one request");
