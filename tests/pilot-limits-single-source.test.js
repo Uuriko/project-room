@@ -25,7 +25,8 @@ const scan = predicate => modules.flatMap(path => readFileSync(path, "utf8").spl
 
 test("the walk covers the write paths it guards", () => {
   assert.ok(modules.every(path=>!/\.(?:test|check)\./.test(path)),"exclude executable test fixtures, not runtime paths");
-  for (const name of ["store.mjs", "access-requests.mjs", "referrals.mjs", "share-links.mjs", "guest-invites.mjs", "agent-invites.mjs", "referral-invites.mjs", "storage.mjs"]) {
+  for (const name of ["store.mjs", "access-requests.mjs", "referrals.mjs", "share-links.mjs", "guest-invites.mjs", "agent-invites.mjs", "referral-invites.mjs", "storage.mjs",
+    "guest-agent-links.mjs", "pairing.mjs", "work-claim-events.mjs", "usage-summary.mjs", "mcp-oauth.mjs", "native-mention-context.mjs", "operator-rooms.mjs"]) {
     assert.ok(modules.some(path => path.endsWith(`/${name}`)), name);
   }
 });
@@ -40,6 +41,19 @@ test("no module hard-codes the room projection cap", () => {
     /MAX_PROJECTION_BYTES\s*=/.test(line)
     || (/byteLength\(\s*projection/.test(line) && />\s*/.test(line) && !/PILOT_LIMITS\.projectionBytes/.test(line))
     || (/projection(?!\s*\()/i.test(line) && literal.test(line) && !/CACHE|PILOT_LIMITS\s*=|^\s*\/\//.test(line))), []);
+});
+
+// #6452 made the projection guard configurable (ROOM_LEGACY_PROJECTION_BYTES,
+// at most 6 MiB). Every write path must ask the store for it, or a room the
+// operator allowed past 5 MiB refuses invites, access requests, pairing,
+// referrals and share links while Room and Board writes succeed.
+test("every projection write path uses the store's configured guard", () => {
+  const store = "server/store.mjs";
+  assert.deepEqual(scan(line => !/^\s*\/\//.test(line)
+    && (/byteLength\(\s*(?:write\.)?projection\b[^)]*\)\s*>/.test(line) || /PILOT_LIMITS\.projectionBytes/.test(line)))
+    .filter(hit => !hit.startsWith(store)), []);
+  // store.mjs itself only uses the fixed number as the default and the floor.
+  assert.equal(scan(line => /PILOT_LIMITS\.projectionBytes/.test(line)).filter(hit => hit.startsWith(store)).length, 2);
 });
 
 test("room capacity policy retains 1,000,000 events and the 5 MiB application guard", () => {

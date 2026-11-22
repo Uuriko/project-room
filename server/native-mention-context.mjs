@@ -1,6 +1,5 @@
 // An ordinary native mention callback authorizes a pointer, not message content.
 // Every delivery barrier still supplies fresh grant and room policy checks.
-import { PILOT_LIMITS } from './store.mjs';
 import { hasMessageAuthority } from './message-authority.mjs';
 import { decodeMessageEntity } from './message-entity-projection.mjs';
 import { assertProjectionWrite, assertMessageWrite, MESSAGE_PROOF_FIELDS } from './write-integrity.mjs';
@@ -9,7 +8,7 @@ export function canonicalNativeMentionPolicyContext(store, descriptor, event, co
   if (!['mention', 'squad-mention'].includes(context.kind)
     || event?.name !== 'room.requested' || event.data?.roomId !== descriptor.roomId
     || event.data?.memberId !== descriptor.memberId || typeof event.data?.messageId !== 'string') return null;
-  const db = store.db, roomId = descriptor.roomId, id = event.data.messageId, cap = PILOT_LIMITS.projectionBytes;
+  const db = store.db, roomId = descriptor.roomId, id = event.data.messageId, cap = store.projectionByteLimit;
   // A legacy room must never return its inline history into this helper. Admit
   // every scalar used by the existing metadata proof before loading its bytes.
   const admission = db.prepare(`SELECT length(CAST(r.projection AS BLOB)) AS projection_bytes,
