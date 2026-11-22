@@ -168,10 +168,12 @@ const countActiveMembers = members =>
 const AUTO_APPROVE_FORBIDDEN_PERMISSIONS = Object.freeze(
   ["manage_members", "decide", "manage_claims", "write_external", "invite_member"]);
 
-// Admission needs the bounded member census for capacity and name uniqueness,
-// never conversation or task history. Legacy rooms retain their existing path.
-const accessRoom = (store, roomId) => {
-  const context = currentInviteContext(store, roomId, { census: true });
+// Admission needs the bounded ACTIVE member roster for capacity and name
+// uniqueness, never conversation or task history. Legacy rooms retain their
+// existing path. Callers that must see a specific deactivated record (a bound
+// member id, the admission target) name it in memberIds for an addressed add.
+const accessRoom = (store, roomId, memberIds = []) => {
+  const context = currentInviteContext(store, roomId, { memberIds, census: 'active' });
   return context ? { ...context.room, current: context.current } : store.room(roomId);
 };
 const accessProjection = (store, roomId, room, state, incoming) => {
@@ -270,9 +272,9 @@ export class AccessRequests {
     const account = requestContents(row).account;
     const current = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(account.id);
     if (!current || current.active !== 1 || current.auth_epoch !== account.authEpoch) fail(409, "account_access_changed", "Applicant account access changed; a fresh request is required");
-    const room = accessRoom(this.store, roomId);
-    if (isRoomArchived(room.state)) fail(409, "room_archived", "Archived rooms cannot admit members");
     const bound = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, account.id);
+    const room = accessRoom(this.store, roomId, bound ? [bound.member_id] : []);
+    if (isRoomArchived(room.state)) fail(409, "room_archived", "Archived rooms cannot admit members");
     let memberId = bound?.member_id;
     if (memberId) {
       const member = ownMember(room.state.members, memberId);
@@ -660,7 +662,7 @@ export class AccessRequests {
       return { approved: false, pendingNote:
         "This room's auto-approve rule is suspended: its author no longer holds membership administration. The request waits for an owner decision." };
     }
-    const room = accessRoom(this.store, row.room_id);
+    const room = accessRoom(this.store, row.room_id, [row.identity_id, config.updatedBy]);
     if (isRoomArchived(room.state)) {
       return { approved: false, pendingNote: "This room is archived; new admissions wait for an owner decision." };
     }

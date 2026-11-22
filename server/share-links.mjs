@@ -183,7 +183,7 @@ export class ShareLinks {
     return currentInviteContext(this.store,roomId,{memberIds})?.room.state ?? this.store.room(roomId).state;
   }
   admissionRoom(roomId,memberIds=[]) {
-    const context=currentInviteContext(this.store,roomId,{memberIds,census:true});
+    const context=currentInviteContext(this.store,roomId,{memberIds,census:'active'});
     return {context,room:context?.room ?? this.store.room(roomId)};
   }
   saveAdmission(room,context,state,incoming) {
