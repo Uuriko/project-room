@@ -10,6 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
@@ -48,18 +49,22 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const errors = [];
-  async function login(actor, destination = origin) {
+  async function newRoomPage() {
     const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
     await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     const page = await context.newPage(); page.setDefaultTimeout(8000);
     page.on("pageerror", error => errors.push(error.message));
+    return page;
+  }
+  async function login(actor, destination = origin) {
+    const page = await newRoomPage();
     await page.goto(destination); await signInFixture(page, f.keys[actor]);
     await page.locator("#main").waitFor({ state: "visible" });
     return page;
   }
   const mutate = (type, data) => send("producer", type, { workItemId: "revision-journey", expectedRevision: item("revision-journey").revision, ...data });
   t.after(() => assert.deepEqual(errors, []));
-  return { ...f, origin, item: () => item("revision-journey"), first, login, mutate, send, complete: body => completeWithText("revision-journey", body) };
+  return { ...f, origin, item: () => item("revision-journey"), first, login, newRoomPage, mutate, send, complete: body => completeWithText("revision-journey", body) };
 }
 const card = page => page.locator('[data-work-record-id="revision-journey"]');
 async function openResult(page) {
@@ -203,7 +208,10 @@ test("the verdict links exact candidate release checks without claiming missing 
   // Three receipt popups each bootstrap a fresh Room view on the same credential.
   const f = await setup(t, 390, { credentialReadBurst: 600 });
   const candidateRevision = "a".repeat(40);
-  f.mutate(T.WORK_BLOCKED, { reason: "Select exact release", nextAction: "Resubmit" });
+  f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: "revision-journey",
+    expectedRevision: f.item().revision, completionEventId: f.first.event.id,
+    evidenceVersion: f.first.event.data.evidenceVersion, result: "fail", summary: "Select exact release",
+    nextAction: "Resubmit" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Candidate pinned" });
   f.mutate(T.WORK_STARTED, {});
   const completed = f.complete(`Candidate revision: ${candidateRevision}\nResult B`);
@@ -267,6 +275,35 @@ test("the verdict links exact candidate release checks without claiming missing 
   assert.equal(candidate, "Candidate " + candidateRevision);
   const labels = await stages.allInnerTexts();
   assert.deepEqual(labels, ["Build · Passed", "Browser · Passed", "Deploy · Passed"]);
+  const saved = f.store.identities.create("Saved release reviewer");
+  linkWithProof(f.store, f.keys.owner, "commons", saved, { permissions: ["verify"] });
+  const recipient = await f.newRoomPage();
+  const signInRequests = [];
+  recipient.on("request", request => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/api/auth/agent/")) signInRequests.push([request.method(), path]);
+  });
+  const resultLink = completion => `${f.origin}/?room=commons#pr-record/result/revision-journey/${completion}`;
+  await recipient.goto(resultLink(completed.event.id));
+  await recipient.locator("#agent-signin-button").click();
+  await recipient.locator('[name="identityId"]').fill(saved.identityId);
+  await recipient.locator('[name="secret"]').fill(saved.secret);
+  await recipient.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+  await recipient.locator("#agent-signin-enter-link").waitFor();
+  const orientation = recipient.locator("#agent-first-run");
+  if (await orientation.isVisible()) await orientation.locator('[data-step="dismiss"]').click();
+  await recipient.locator("#agent-signin-enter-link").click();
+  await recipient.getByText("Verification · Passed", { exact: true }).waitFor();
+  assert.equal(recipient.url(), resultLink(completed.event.id));
+  assert.deepEqual(signInRequests, [["POST", "/api/auth/agent/session"]]);
+  await recipient.locator("#result-release-checks").waitFor({ state: "visible" });
+  assert.equal(await recipient.locator("#result-release-candidate").innerText(), candidate);
+  assert.deepEqual(await recipient.locator("#result-release-stages summary").allInnerTexts(), labels);
+  await recipient.goto(resultLink(f.first.event.id));
+  await recipient.getByText("Verification · Failed", { exact: true }).waitFor();
+  assert.equal(await recipient.locator("#result-release-checks").isVisible(), false);
+  await recipient.close();
+
   const destinations = [];
   for (const stage of ["Build", "Browser", "Deploy"]) {
     await stages.filter({ hasText: stage + " · Passed" }).click();
