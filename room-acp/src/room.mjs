@@ -106,6 +106,10 @@ export class RoomClient {
   heartbeat({ hostId, cadenceSeconds = 30 }) {
     return this.request("/api/agent-heartbeats", { body: { hostId, mode: "wakeable", cadenceSeconds, listenerLease: { roomId: this.roomId } } });
   }
+  reportIdle({ hostId, fencingToken }) {
+    return this.request("/api/agent-heartbeats", { listenerToken: fencingToken,
+      body: { hostId, listenerLease: { roomId: this.roomId }, idlePickup: true } });
+  }
   async poll({ hostId, waitMs = 25000, signal, cursor = null, order = "oldest" }) {
     const roomId = this.roomId;
     // Match the server poll route's validId + 64-character bound without
