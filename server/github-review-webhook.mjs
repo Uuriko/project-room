@@ -113,20 +113,28 @@ function readOpenedReview(store, binding, receipt, secret) {
   return request;
 }
 
-function withdrawSupersededReviews(store, binding, candidate, decision, secret, observedFrom) {
+function observationFence(store, { recipe, requesterId, reviewerId, workItemId }, { number }) {
+  const { roomId, repository } = recipe;
+  const scope = createHash("sha256").update(JSON.stringify([repository, number, requesterId, reviewerId, workItemId])).digest("hex");
+  const select = store.db.prepare("SELECT generation, fingerprint FROM github_review_observations WHERE room_id=? AND scope=?");
+  const startedAt = select.get(roomId, scope)?.generation ?? 0;
+  return (snapshot, decision) => {
+    const fingerprint = createHash("sha256").update(JSON.stringify([snapshot.head, decision.reason, decision.checks])).digest("hex");
+    const current = select.get(roomId, scope);
+    if (current?.fingerprint === fingerprint) return true;
+    if ((current?.generation ?? 0) !== startedAt) return false;
+    // A pending review can advance this fence without any Room event. Record it
+    // in the same transaction as any withdrawal or opening it authorizes.
+    store.db.prepare(`INSERT INTO github_review_observations (room_id, scope, generation, fingerprint) VALUES (?, ?, 1, ?)
+      ON CONFLICT(room_id, scope) DO UPDATE SET generation=generation+1, fingerprint=excluded.fingerprint`)
+      .run(roomId, scope, fingerprint);
+    return true;
+  };
+}
+
+function withdrawSupersededReviews(store, binding, candidate, decision, secret) {
   const { recipe, requesterId, reviewerId, workItemId } = binding;
   const { roomId } = recipe;
-  const scope = " [" + createHash("sha256").update(JSON.stringify([
-    roomId, recipe.repository, candidate.number, requesterId, reviewerId, workItemId,
-  ])).digest("hex") + "]";
-  // Pending checks can supersede an old request without creating a new one.
-  // Its withdrawal still fences an older observation that was already in flight.
-  const moved = store.db.prepare(`SELECT 1 FROM events
-    WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='reply_request.cancelled'
-      AND json_extract(body,'$.actorId')=? AND instr(json_extract(body,'$.data.reason'),?)=1
-      AND substr(json_extract(body,'$.data.reason'),?)=? LIMIT 1`)
-    .get(roomId, observedFrom, requesterId, SUPERSEDED_REASON, -scope.length, scope);
-  if (moved) return false;
   const superseded = [];
   const openingBody = store.db.prepare(`SELECT json_extract(body,'$.data.body') AS body
     FROM events WHERE room_id=? AND id=? AND json_extract(body,'$.data.messageId')=?`);
@@ -147,28 +155,25 @@ function withdrawSupersededReviews(store, binding, candidate, decision, secret, 
       const operation = latestReviewOperation(store, roomId, requesterId, reviewOperation(binding, { ...candidate, head }));
       const receipt = store.operationReceipt(secret, roomId, operation);
       if (receipt.status === "recorded" && receipt.eventId === request.openingEventId)
-        superseded.push({ request, operation, sequence: receipt.sequence });
+        superseded.push({ request, operation });
     }
     cursor = selected.page?.nextCursor;
   } while (cursor);
-  // An observation that raced another Room opening cannot authorize retiring
-  // that opening. A later authoritative delivery can reconcile it.
-  if (superseded.some(entry => entry.sequence > observedFrom)) return false;
   for (const { request, operation } of superseded) {
     store.command(secret, roomId, buildReplyCommand({ roomId, memberId: requesterId }, "room_cancel_request", {
       requestId: operation + "-withdraw",
       requestMessageId: request.id,
       expectedRequestRevision: request.revision,
-      reason: SUPERSEDED_REASON + candidate.head + "." + scope,
+      reason: SUPERSEDED_REASON + candidate.head + ".",
     }));
   }
-  return true;
 }
 
 async function withdrawFailedReview(store, binding, candidate, check, operation, request, secret, observe, token) {
   const { recipe, requesterId } = binding;
   const { roomId } = recipe;
   if (request.status !== "open") return "replayed";
+  const recordObservation = observationFence(store, binding, candidate);
   const { snapshot, reason } = await observe(recipe, candidate, { token });
   if (!snapshot || snapshot.head !== candidate.head || snapshot.number !== candidate.number) return reason ?? "stale_head";
   const decision = evaluateGithubReview(recipe, snapshot);
@@ -176,20 +181,21 @@ async function withdrawFailedReview(store, binding, candidate, check, operation,
   // must show this required check at the delivered attempt or a newer failure.
   const failure = decision.checks?.find(current => current.app === check.app?.slug
     && current.name === check.name && current.id >= check.id && current.status === "failed");
-  if (decision.reason !== "required_check_failed" || !failure)
-    return "replayed";
-
-  const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_cancel_request", {
-    requestId: operation + "-withdraw",
-    requestMessageId: request.id,
-    expectedRequestRevision: request.revision,
-    reason: FAILURE_REASON + JSON.stringify({ app: failure.app, name: failure.name, id: failure.id }),
-  });
+  let command;
   try {
-    const result = store.command(secret, roomId, command);
-    return result.duplicate ? "replayed" : "withdrawn";
+    return store.transaction(() => {
+      if (!recordObservation(snapshot, decision)) return "review_changed_during_observation";
+      if (decision.reason !== "required_check_failed" || !failure) return "replayed";
+      command = buildReplyCommand({ roomId, memberId: requesterId }, "room_cancel_request", {
+        requestId: operation + "-withdraw",
+        requestMessageId: request.id,
+        expectedRequestRevision: request.revision,
+        reason: FAILURE_REASON + JSON.stringify({ app: failure.app, name: failure.name, id: failure.id }),
+      });
+      return store.command(secret, roomId, command).duplicate ? "replayed" : "withdrawn";
+    });
   } catch (error) {
-    if (error?.code === "idempotency_conflict" && store.operationReceipt(secret, roomId, command.id).status === "recorded")
+    if (error?.code === "idempotency_conflict" && command && store.operationReceipt(secret, roomId, command.id).status === "recorded")
       return "replayed";
     if (error?.code === "command_rejected"
         && store.replyRequests.selected(secret, roomId, request.id, { view: "compact" }).request.status !== "open")
@@ -207,7 +213,7 @@ async function recoverPassingReview(store, binding, candidate, check, original, 
   const headChanged = row?.reason?.startsWith(SUPERSEDED_REASON);
   if (!headChanged && !row?.reason?.startsWith(FAILURE_REASON)) return "replayed";
   const failed = headChanged ? null : JSON.parse(row.reason.slice(FAILURE_REASON.length));
-  const observedFrom = store.headSequence(roomId);
+  const recordObservation = observationFence(store, binding, candidate);
   const { snapshot, reason } = await observe(recipe, candidate, { token });
   if (!snapshot || snapshot.head !== candidate.head || snapshot.number !== candidate.number) return reason ?? "stale_head";
   const decision = evaluateGithubReview(recipe, snapshot);
@@ -215,13 +221,12 @@ async function recoverPassingReview(store, binding, candidate, check, original, 
     row.app === app && row.name === name && row.status === "passed" && row.id >= minimum);
   const ready = decision.action === "review_ready" && (!failed || matchesAttempt(failed.app, failed.name, failed.id + 1))
     && (!check || matchesAttempt(check.app?.slug, check.name, check.id));
-  if (!headChanged && !ready) return "replayed";
-
   const resumeId = original + "-r-" + createHash("sha256").update(withdrawal.eventId).digest("hex").slice(0, 24);
   return store.transaction(() => {
     if (latestReviewOperation(store, roomId, requesterId, original) !== operation) return "replayed";
-    if (!withdrawSupersededReviews(store, binding, candidate, decision, secret, observedFrom))
-      return "review_changed_during_observation";
+    if (!recordObservation(snapshot, decision)) return "review_changed_during_observation";
+    if (!headChanged && !ready) return "replayed";
+    withdrawSupersededReviews(store, binding, candidate, decision, secret);
     return ready ? postReview(store, binding, candidate, resumeId, decision, secret, request.id) : decision.reason;
   });
 }
@@ -259,6 +264,10 @@ export async function dispatchGithubReview(store, binding, delivery, { credentia
   const secret = await credential();
   if (store.authenticate(secret, recipe.roomId).member.id !== requesterId)
     throw new Error("GitHub review requester does not match the saved identity");
+  store.db.exec(`CREATE TABLE IF NOT EXISTS github_review_observations (
+    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, scope TEXT NOT NULL,
+    generation INTEGER NOT NULL, fingerprint TEXT NOT NULL, PRIMARY KEY (room_id, scope)
+  ) WITHOUT ROWID`);
   const outcomes = [];
   for (const candidate of candidates) {
     const { number, head } = candidate;
@@ -292,7 +301,7 @@ export async function dispatchGithubReview(store, binding, delivery, { credentia
       outcomes.push({ number, status });
       continue;
     }
-    const observedFrom = store.headSequence(recipe.roomId);
+    const recordObservation = observationFence(store, binding, candidate);
     const { snapshot, reason } = await observe(recipe, candidate, { token });
     if (!snapshot || snapshot.head !== head || snapshot.number !== number) {
       outcomes.push({ number, status: reason ?? "stale_head" });
@@ -301,8 +310,8 @@ export async function dispatchGithubReview(store, binding, delivery, { credentia
     const decision = evaluateGithubReview(recipe, snapshot);
     const status = store.transaction(() => {
       if (store.operationReceipt(secret, recipe.roomId, operation).status === "recorded") return "replayed";
-      if (!withdrawSupersededReviews(store, binding, candidate, decision, secret, observedFrom))
-        return "review_changed_during_observation";
+      if (!recordObservation(snapshot, decision)) return "review_changed_during_observation";
+      withdrawSupersededReviews(store, binding, candidate, decision, secret);
       return decision.action === "review_ready"
         ? postReview(store, binding, candidate, operation, decision, secret)
         : decision.reason;

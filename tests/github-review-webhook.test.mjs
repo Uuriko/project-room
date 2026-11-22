@@ -212,6 +212,59 @@ for (const normalized of [false, true]) test(`replacement withdraws only journal
   assert.equal(store.headSequence(roomId), beforeReturn + 2);
 });
 
+test("a pending first observation fences a delayed review across store connections", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "github-review-fence-"));
+  const filename = join(directory, "room.sqlite");
+  const store = new RoomStore(filename);
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const roomId = "commons";
+  store.initialize(initialRoom(roomId));
+  const secret = store.issueAccessKey(roomId, "owner");
+  const reviewer = store.invites.redeem(store.invites.create(secret, roomId, { profile: "contribute" }).code,
+    { displayName: "Reviewer" });
+  const workItemId = "qa";
+  store.command(secret, roomId, { id: "proposal", type: "work.proposed", data: {
+    workItemId, title: "GitHub QA", accountableMemberId: reviewer.memberId, mode: "read", definitionOfDone: "Review exact source",
+  } });
+  const binding = readGithubReviewWebhookBinding({ version: 1, enabled: true, roomId, repository: repo,
+    requiredChecks: [{ app: "github-actions", name: "safety-net" }], pulls: [6319],
+    requesterId: "owner", reviewerId: reviewer.memberId, workItemId });
+  const delayed = Promise.withResolvers();
+  const observing = Promise.withResolvers();
+  const late = dispatchGithubReview(store, binding, delivery(oldHead), {
+    credential: () => secret,
+    observe() {
+      observing.resolve();
+      return delayed.promise;
+    },
+  });
+  try {
+    await observing.promise;
+    const pending = snapshot(newHead);
+    Object.assign(pending.checks[0], { status: "in_progress", conclusion: null });
+    const before = store.headSequence(roomId);
+    const other = new RoomStore(filename);
+    try {
+      assert.deepEqual(await dispatchGithubReview(other, binding, delivery(newHead), {
+        credential: () => secret, observe: async () => ({ snapshot: pending }),
+      }), [{ number: 6319, status: "required_check_pending" }]);
+    } finally { other.close(); }
+    assert.equal(store.headSequence(roomId), before, "a pending observation needs no Work Thread event");
+    delayed.resolve({ snapshot: snapshot(oldHead) });
+    assert.deepEqual(await late, [{ number: 6319, status: "review_changed_during_observation" }]);
+    const incoming = () => store.replyRequests.list(reviewer.identitySecret, roomId, { direction: "incoming", status: "open" }).requests;
+    assert.equal(incoming().length, 0);
+    const options = { credential: () => secret, observe: async () => ({ snapshot: snapshot(newHead) }) };
+    assert.deepEqual(await dispatchGithubReview(store, binding, delivery(newHead), options), [{ number: 6319, status: "posted" }]);
+    assert.deepEqual(await dispatchGithubReview(store, binding, delivery(newHead), options), [{ number: 6319, status: "replayed" }]);
+    assert.equal(incoming().length, 1);
+    assert.equal(store.headSequence(roomId), before + 1);
+  } finally {
+    delayed.resolve({ snapshot: snapshot(oldHead) });
+    await late.catch(() => {});
+  }
+});
+
 test("authoritative GitHub reads pause before checking stale candidates and recheck the exact head before posting", async () => {
   const recipe = { repository: repo.toLowerCase() };
   const row = sha => ({ base: { repo: { full_name: repo } }, number: 6319, head: { sha }, state: "open", draft: false, merged: false });
