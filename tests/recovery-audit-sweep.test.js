@@ -127,6 +127,13 @@ function sweep() {
     status: "open", scope: "A second pair of eyes", expiresAt: new Date(Date.now() + 3600_000).toISOString()
   }));
   step(T.WORK_STARTED, "producer", () => ({ workItemId: W, expectedRevision: item().revision }));
+  const sourceVerdict = step(T.WORK_VERDICT_PUBLISHED, "reviewer", () => ({
+    workItemId: W, expectedRevision: item().revision, repository: "Uuriko/project-room",
+    pullNumber: 6392, head: "a".repeat(40), base: "b".repeat(40), verdict: "pass",
+    summary: "Reviewed the exact source candidate.", evidenceDigest: "sha256:" + "c".repeat(64)
+  }));
+  if (!sourceVerdict || !item().publishedVerdicts?.some(entry => entry.eventId === sourceVerdict.event.id))
+    broke.push(`${T.WORK_VERDICT_PUBLISHED}: the exact source verdict was not recorded`);
   step(T.SESSION_STOP_REQUESTED, "owner", () => ({ workItemId: W, expectedRevision: item().revision }));
   step(T.SESSION_STOPPED, "producer", () => ({ workItemId: W, expectedRevision: item().revision, status: "done", spendCents: 20, budgetEnforced: true, reason: "finished", outputs: "agenda" }));
   step(T.WORK_BLOCKED, "producer", () => ({ workItemId: W, expectedRevision: item().revision, reason: "waiting", nextAction: "unblock" }));
@@ -358,6 +365,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // covered by tests/pairing-flow.test.js and tests/pairing-reconnect.test.js.
   // member.sponsor_transferred requires explicit account sponsorship consent;
   // tests/agent-sponsor-transfer.test.mjs exercises that event and auditRecovery.
-  assert.equal(Object.values(T).length, 74,
+  assert.equal(Object.values(T).length, 75,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
