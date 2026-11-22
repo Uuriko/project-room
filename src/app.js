@@ -54,7 +54,7 @@ import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-nav
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -3511,7 +3511,7 @@ function syncWorkReturnControl() {
   const button = $("#work-navigation-return");
   const origin = currentWorkOrigin();
   button.disabled = false;
-  button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message)\//.test(location.hash);
+  button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message|result)\//.test(location.hash);
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
 }
 function clearWorkNavigation() {
@@ -3873,6 +3873,8 @@ function retryPendingHashReveal() {
 }
 function revealLocationHash() {
   if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
+  const exactResult = exactResultDestination(location);
+  if (!exactResult) closeLinkedResult();
   if (!location.hash) return;
   const hash = location.hash;
   // Account destinations also work before any room has been opened.
@@ -3903,6 +3905,18 @@ function revealLocationHash() {
     return;
   }
   // JDOT-COH-NAV end
+  if (hash.startsWith("#pr-record/result/")) {
+    if (!exactResult || exactResult.roomId !== session?.roomId) {
+      closeLinkedResult();
+      notice(SOURCE_UNAVAILABLE_NOTICE, true);
+      return;
+    }
+    updatesUi?.close();
+    if ($("#board-dialog").open) $("#board-dialog").close();
+    openLinkedResult(exactResult);
+    syncWorkReturnControl();
+    return;
+  }
   const deepRoom = roomIdFromHash(hash);
   if (deepRoom) {
     if (state.room?.id === deepRoom) {
@@ -6781,7 +6795,7 @@ function resultRow(item) {
 }
 const { clear: clearResultComparison, sync: syncResultComparisons, load: loadResultComparison } =
   createResultComparison({ client, getState: () => state, esc });
-const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult, restore: restoreResultSelection } = installResultReader({
+const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult, restore: restoreResultSelection, openLinked: openLinkedResult, closeLinked: closeLinkedResult } = installResultReader({
   client, getState: () => state, getSession: () => session, sameSession,
   storage: recovery.storage, recoveryScope: () => session ? draftScope(session) : null,
   isBusy: () => busy,
