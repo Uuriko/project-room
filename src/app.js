@@ -357,7 +357,7 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
-let partialWorkSnapshot = false, inspectedWorkRecord = null;
+let partialWorkSnapshot = false, inspectedWorkRecord = null, pendingWorkThreadEpoch = null;
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -610,7 +610,8 @@ const client = new RoomClient({
       if (session.member.kind !== "agent" && !savedRoomDestination() && $("#result-dialog").hidden
         && !$("#board-dialog").open && !$("#message-input").value) updatesUi?.open("needs", false);
     }
-    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
+    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId
+      && pendingWorkThreadEpoch !== workNavigationEpoch) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
     retryPendingHashReveal();
     resumeConfirmedWorkNavigation();
   },
@@ -3475,16 +3476,28 @@ function revealWork(id, expandDetails = false) {
   syncWorkReturnControl();
   return card;
 }
-async function readSelectedWorkRecord(id, expandDetails) {
+async function readSelectedWorkRecord(id, expandDetails, retrySnapshot = pendingWorkThreadEpoch === workNavigationEpoch) {
   const context = workNavigationContext();
   if (!context || busy) return null;
   const generation = client.generation, identity = session, held = state;
   const epoch = workNavigationEpoch, url = location.href;
   const current = () => context === workNavigationContext() && generation === client.generation
-    && identity === session && held === state && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
+    && identity === session && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
   try {
-    const selected = await client.workContext(id, { includeReplies: false });
+    const selected = await client.workContext(id, { includeReplies: false }).catch(error => {
+      if (held === state) throw error;
+      // Once refreshed, the first response's failure is also stale. The
+      // navigation and snapshot checks below decide whether to re-read.
+      return null;
+    });
     if (!current()) return null;
+    if (held !== state) {
+      // A refresh can revoke access or replace the result. The same navigation
+      // owns a fresh read, so a delayed response never mounts across snapshots.
+      if (retrySnapshot) return readSelectedWorkRecord(id, expandDetails, false);
+      if (pendingWorkThreadEpoch === epoch) notice("The room updated while opening this work. Open the Work Thread again.", true);
+      return null;
+    }
     const item = selected?.work;
     if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
       || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
@@ -3498,7 +3511,7 @@ async function readSelectedWorkRecord(id, expandDetails) {
     state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
     return revealWork(id, expandDetails);
   } catch (error) {
-    if (current()) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
+    if (current() && held === state) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
     return null;
   }
 }
@@ -3569,11 +3582,11 @@ function showWorkDestination(kind, id, presentation = "focus") {
   if ($("#board-dialog").open) $("#board-dialog").close();
   if (kind === "work" && presentation === "drafts") { revealDrafts(id); activeWorkNavigationId = id; }
   else if (kind === "work") {
-    const selected = revealWork(id, presentation === "details");
     if (presentation === "thread") {
       const epoch = workNavigationEpoch, identity = session;
       const completion = currentWorkOrigin()?.updates?.completionEventId;
-      void Promise.resolve(selected).then(card => {
+      pendingWorkThreadEpoch = epoch;
+      void Promise.resolve(revealWork(id)).then(card => {
         if (!card || workNavigationEpoch !== epoch || session !== identity || activeWorkNavigationId !== id) return;
         if (completion && state.workItems[id]?.receipt?.eventId !== completion) {
           notice("This release changed. Return to Updates to open the accepted result.", true);
@@ -3582,8 +3595,10 @@ function showWorkDestination(kind, id, presentation = "focus") {
         const button = card.querySelector("[data-read-result]");
         if (button) readResult({ target: button }, { focused: true });
         syncWorkReturnControl();
+      }).finally(() => {
+        if (pendingWorkThreadEpoch === epoch) pendingWorkThreadEpoch = null;
       });
-    }
+    } else revealWork(id, presentation === "details");
   } else revealMessage(id);
   syncWorkReturnControl();
 }
