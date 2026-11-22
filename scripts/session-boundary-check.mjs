@@ -11,7 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { event, EVENT_TYPES as T } from "../src/events.js";
-import { openSearch, openSettings, closeSettings } from "./room-chrome.mjs";
+import { openSearch, openSettings, closeSettings, openCatchUp } from "./room-chrome.mjs";
 
 const chromiumOptions = process.env.ROOM_TEST_CHROMIUM_PATH
   ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH }
@@ -79,25 +79,11 @@ async function login(page, origin, accessKey, expectedIdentity) {
 }
 
 async function openReadyBrief(page) {
-  // The return-brief panel now lives inside the Catch up dialog. The login
-  // snapshot auto-fetches the brief; wait for it to settle, then open the
-  // dialog (which refreshes the brief) and wait for the fresh horizon.
-  const ready = () => page.waitForFunction(() => {
+  await openCatchUp(page);
+  await page.waitForFunction(() => {
     const button = document.querySelector("#rb-ack-button");
     return button && !button.disabled && /^\d+$/.test(button.dataset.horizon);
   });
-  await ready(); // Let the initial snapshot's brief settle before opening it.
-  const dialog = page.locator("#catchup-dialog");
-  if (!(await dialog.evaluate(element => element.open))) {
-    // Opening schedules another fetch. Do not read the old button while its
-    // asynchronous toggle handler is about to replace the displayed horizon.
-    await Promise.all([
-      page.waitForResponse(response => response.url().endsWith("/return-brief")),
-      clickChrome(page, "#topbar-catchup")
-    ]);
-    await page.locator("#catchup-dialog").waitFor({ state: "visible" });
-  }
-  await ready();
 }
 
 // The Catch up dialog is modal: close it before clicking controls behind it.
