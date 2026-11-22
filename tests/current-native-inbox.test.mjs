@@ -22,7 +22,42 @@ test('native inbox reads a full source window of incoming replies without repeat
 test('late answered ordinary mention is not reintroduced as pending by the native inbox',t=>{const{s,key}=fixture(t),owner=s.issueAccessKey('commons','owner'),after=s.headSequence('commons');s.command(owner,'commons',{id:'mention-worker',type:'message.posted',data:{messageId:'waiting',body:'@worker please inspect'}});let page=s.agentInbox(key,'commons',{after});assert.deepEqual(page.directMentions.map(x=>x.messageId),['waiting']);const deadline=s.db.prepare("SELECT timeout_at FROM mention_states WHERE room_id='commons' AND mentioned_member_id='worker'").get().timeout_at;s.now=()=>deadline+1;s.command(key,'commons',{id:'late-answer',type:'message.posted',data:{messageId:'late-answer',body:'Handled',replyToId:'waiting'}});page=s.agentInbox(key,'commons',{after});assert.deepEqual(page.directMentions,[]);assert.equal(page.attention.acknowledges,false);});
 import{withCurrentReadContext}from'../server/current-room-repository.mjs';
 test('fresh native inbox finds late conversation, owned task and request in one read at a measured scoped reservation',t=>{const{s,key}=fixture(t),measure=maxRecords=>s.readTransaction(()=>withCurrentReadContext(s.db,'commons',b=>{let result,error;try{result=s.agentInbox(key,'commons');}catch(e){error=e.code;}return{result,error,bytes:b.bytes,records:b.records};},{maxRecords}));const old=measure(200),expanded=measure(512);console.log('INBOX_CAP_COMPARE '+JSON.stringify({old:{error:old.error,bytes:old.bytes,records:old.records},expanded:{error:expanded.error,bytes:expanded.bytes,records:expanded.records}}));assert.equal(old.error,undefined);assert.equal(expanded.error,undefined);assert.ok(expanded.records<=512&&expanded.bytes<=262144);assert.deepEqual(expanded.result.directMessages.map(x=>x.messageId),['request','dm']);assert.deepEqual(expanded.result.replies.map(x=>x.messageId),['answer']);assert.deepEqual(expanded.result.nativeWork.map(x=>x.id),['task-9']);assert.deepEqual(expanded.result.replyRequests.map(x=>x.id),['request']);assert.equal(expanded.result.coverage.work.complete,false);console.log('INBOX_RESERVATION_EXPERIMENT '+JSON.stringify({at200:{error:old.error,bytes:old.bytes,records:old.records},at512:{bytes:expanded.bytes,records:expanded.records,payloadBytes:Buffer.byteLength(JSON.stringify(expanded.result))}}));});
-test('fresh, explicit catch-up and encrypted older inbox windows keep separate truthful cursors',t=>{const{s,key}=fixture(t),owner=s.issueAccessKey('commons','owner');for(let i=0;i<9;i++)s.command(owner,'commons',{id:'new-public-'+i,type:'message.posted',data:{messageId:'new-public-'+i,body:'Recent public '+i}});const fresh=s.agentInbox(key,'commons');assert.equal(fresh.coverage.conversation.direction,'recent');assert.equal(fresh.cursor.after,s.headSequence('commons'));assert.equal(fresh.cursor.hasMore,false);assert.ok(fresh.older.hasMore);assert.ok(fresh.older.nextRead);let p=fresh;const olderReplies=[];for(let i=0;p.older.nextRead&&i<10;i++){p=s.agentInbox(key,'commons',p.older.nextRead.arguments);olderReplies.push(...p.replies);}assert.deepEqual(olderReplies.map(x=>x.messageId),['answer']);const explicit=s.agentInbox(key,'commons',{after:0});assert.equal(explicit.coverage.conversation.direction,'catch_up');assert.ok(explicit.cursor.hasMore);assert.equal(explicit.older,null);assert.throws(()=>s.agentInbox(key,'commons',{after:0,olderCursor:fresh.older.nextRead.arguments.olderCursor}),e=>e.status===422);assert.throws(()=>s.agentInbox(key,'commons',{olderCursor:fresh.older.nextRead.arguments.olderCursor+'x'}),e=>e.code==='stale_inbox_cursor');s.command(owner,'commons',{id:'invalidate-older',type:'message.posted',data:{messageId:'invalidate-older',body:'Changed'}});assert.throws(()=>s.agentInbox(key,'commons',fresh.older.nextRead.arguments),e=>e.code==='stale_inbox_cursor');});
+test('fresh, explicit catch-up and encrypted older inbox windows keep separate truthful cursors',t=>{const{s,key}=fixture(t),owner=s.issueAccessKey('commons','owner');for(let i=0;i<9;i++)s.command(owner,'commons',{id:'new-public-'+i,type:'message.posted',data:{messageId:'new-public-'+i,body:'Recent public '+i}});const fresh=s.agentInbox(key,'commons');assert.equal(fresh.coverage.conversation.direction,'recent');assert.equal(fresh.cursor.after,s.headSequence('commons'));assert.equal(fresh.cursor.hasMore,false);assert.ok(fresh.older.hasMore);assert.ok(fresh.older.nextRead);let p=fresh;const olderReplies=[];for(let i=0;p.older.nextRead&&i<10;i++){p=s.agentInbox(key,'commons',p.older.nextRead.arguments);olderReplies.push(...p.replies);}assert.deepEqual(olderReplies.map(x=>x.messageId),['answer']);const explicit=s.agentInbox(key,'commons',{after:0});assert.equal(explicit.coverage.conversation.direction,'catch_up');assert.ok(explicit.cursor.hasMore);assert.equal(explicit.older,null);assert.throws(()=>s.agentInbox(key,'commons',{after:0,olderCursor:fresh.older.nextRead.arguments.olderCursor}),e=>e.status===422);assert.throws(()=>s.agentInbox(key,'commons',{olderCursor:fresh.older.nextRead.arguments.olderCursor+'x'}),e=>e.code==='stale_inbox_cursor');});
+test('older inbox reaches addressed history while new writes keep arriving',t=>{
+ const{s,key}=fixture(t),owner=s.issueAccessKey('commons','owner');
+ const post=(id,toMemberId)=>s.command(owner,'commons',{id,type:'message.posted',data:{messageId:id,body:id,...(toMemberId?{toMemberId}:{})}});
+ for(let i=0;i<9;i++)post('recent-public-'+i);
+ const first=s.agentInbox(key,'commons',{limit:4});
+ const token=first.older.nextRead.arguments;
+ const otherKey=s.issueAccessKey('commons','other');
+ assert.throws(()=>s.agentInbox(otherKey,'commons',token),e=>e.code==='stale_inbox_cursor');
+ let current=first;
+ const messages=[],replies=[];
+ for(let i=0;current.older.nextRead&&i<10;i++){
+  post('concurrent-public-'+i);
+  post('hidden-after-start-'+i,'other');
+  post('addressed-after-start-'+i,'worker');
+  current=s.agentInbox(key,'commons',current.older.nextRead.arguments);
+  assert.equal(current.cursor.after,first.cursor.after);
+  assert.equal(current.coverage.conversation.through,first.cursor.after);
+  assert.doesNotMatch(JSON.stringify(current),/hidden-after-start-|addressed-after-start-|HIDDEN-/);
+  messages.push(...current.directMessages.map(x=>x.messageId));
+  replies.push(...current.replies.map(x=>x.messageId));
+ }
+ assert.equal(current.older.hasMore,false);
+ assert.deepEqual(messages,['request','dm']);
+ assert.deepEqual(replies,['answer']);
+ let after=current.cursor.after;
+ const fresh=[];
+ for(let i=0;i<10;i++){
+  const page=s.agentInbox(key,'commons',{limit:4,after});
+  fresh.push(...page.directMessages.map(x=>x.messageId));
+  if(!page.cursor.hasMore)break;
+  after=page.cursor.after;
+ }
+ assert.ok(fresh.includes('addressed-after-start-0'));
+ assert.equal(new Set(fresh).size,fresh.length);
+});
 import{withCurrentRoomWriter}from'../server/current-room-repository.mjs';import{exportNdjsonText}from'../server/room-export.mjs';import{replayNdjsonInto}from'../server/restore-ndjson.mjs';
 test('native inbox index DDL substitution and equal-size protected payload mutation fail closed',t=>{
  {const{s,key}=fixture(t);s.agentInbox(key,'commons');const name='current_inbox_work_accountable',before=s.db.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(name).sql;s.db.exec('DROP INDEX '+name);s.db.exec(before.replace('DESC','ASC '));const after=s.db.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(name).sql;assert.equal(Buffer.byteLength(after),Buffer.byteLength(before));assert.equal(s.db.prepare('SELECT count(*) n FROM sqlite_master WHERE name=?').get(name).n,1);assert.throws(()=>s.agentInbox(key,'commons'),/owned serving schema changed/);}

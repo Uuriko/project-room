@@ -29,7 +29,7 @@ test('cold idle inbox does not hydrate unrelated public conversation or work', t
     if(!value||typeof value!=='object')return value;
     return Object.fromEntries(Object.entries(value).map(([key,item])=>{
       if(key!=='olderCursor')return[key,semantic(item)];
-      const decoded=codec.decode(item);assert.equal(decoded.roomId,'idle-inbox');assert.equal(decoded.memberId,ada.identityId);assert.equal(decoded.kind,'native_inbox_older_v1');assert.equal(decoded.limit,4);
+      const decoded=codec.decode(item);assert.equal(decoded.roomId,'idle-inbox');assert.equal(decoded.memberId,ada.identityId);assert.equal(decoded.kind,'native_inbox_older_v2');assert.equal(decoded.limit,4);
       return[key,{authenticatedCursor:decoded}];
     }));
   };
