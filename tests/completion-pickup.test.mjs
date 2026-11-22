@@ -289,7 +289,22 @@ test("the Muse CLI leases an idle seat, reconciles its terminal doorbell, and re
   assert.deepEqual(await launch(), { interrupted: true });
   const opened = f.store.replyRequests.list(agent.secret, roomId, { direction: "incoming", status: "open" }).requests;
   assert.equal(opened.length, 1);
+  const command = f.store.command.bind(f.store);
+  let committedAck;
+  f.store.command = (...args) => {
+    const body = args[2], result = command(...args);
+    if (!committedAck && body.type === "reply_request.progressed"
+      && body.data.requestMessageId === opened[0].id && body.data.progress === "acknowledged") {
+      committedAck = result.sequence;
+      primary.kill("SIGKILL"); // The exact receipt exists, but never reaches the primary.
+    }
+    return result;
+  };
+  assert.deepEqual(await launch(), { interrupted: true });
+  assert.ok(Number.isSafeInteger(committedAck));
   const output = await launch();
+  assert.equal(output.receiverAcknowledgment.sequence, committedAck);
+  assert.equal(output.receiverAcknowledgment.duplicate, true);
   assert.equal(output.requestMessageId, opened[0].id);
   assert.equal(output.status, "handoff");
   assert.ok(output.receiverAcknowledgment.sequence > output.openingSequence);
