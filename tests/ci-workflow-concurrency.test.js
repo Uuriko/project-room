@@ -27,8 +27,9 @@ function evaluateGithubExpression(raw, ctx) {
   const trimmed = String(raw).trim();
   if (trimmed === "true") return true;
   if (trimmed === "false") return false;
-  const wrapped = trimmed.match(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/);
-  if (!wrapped) throw new Error(`unsupported expression: ${raw}`);
+  const expressions = [...trimmed.matchAll(/\$\{\{\s*([\s\S]*?)\s*\}\}/g)];
+  const wrapped = expressions.length === 1 && expressions[0][0] === trimmed ? expressions[0] : null;
+  if (!wrapped) return trimmed.replace(/\$\{\{[\s\S]*?\}\}/g, expression => String(evaluateGithubExpression(expression, ctx)));
   const source = wrapped[1];
   let i = 0;
 
@@ -96,7 +97,7 @@ function evaluateGithubExpression(raw, ctx) {
       return value;
     }
     if (ch === "'" || ch === "\"") return parseString();
-    const ident = source.slice(i).match(/^[A-Za-z_][A-Za-z0-9_.]*/);
+    const ident = source.slice(i).match(/^[A-Za-z_][A-Za-z0-9_.*]*/);
     if (!ident) throw new Error(`expected value at ${source.slice(i)}`);
     i += ident[0].length;
     skip();
@@ -121,7 +122,7 @@ function evaluateGithubExpression(raw, ctx) {
   }
 
   function parseCall(name) {
-    if (name !== "format") throw new Error(`unsupported function ${name}`);
+    if (!["format", "contains"].includes(name)) throw new Error(`unsupported function ${name}`);
     i += 1;
     const args = [];
     skip();
@@ -136,6 +137,12 @@ function evaluateGithubExpression(raw, ctx) {
     }
     if (source[i] !== ")") throw new Error("expected ) after format");
     i += 1;
+    if (name === "contains") {
+      const [search, item] = args;
+      return Array.isArray(search)
+        ? search.some(value => String(value).toLowerCase() === String(item).toLowerCase())
+        : String(search).toLowerCase().includes(String(item).toLowerCase());
+    }
     const [template, ...values] = args;
     return String(template).replace(/\{(\d+)\}/g, (_, index) => String(values[Number(index)] ?? ""));
   }
@@ -160,12 +167,16 @@ function workflowConcurrency(file) {
   return { file, name, group: field("group"), cancel: field("cancel-in-progress") };
 }
 
-function context(workflow, { event_name, ref, run_id }) {
+function context(workflow, { event_name, ref, run_id, draft = false, labels = ["ready-to-land"], head = "head-a" }) {
   return {
     "github.event_name": event_name,
     "github.ref": ref,
     "github.workflow": workflow,
     "github.run_id": run_id,
+    "github.event.pull_request.draft": draft,
+    "github.event.pull_request.labels.*.name": labels,
+    "github.event.pull_request.number": ref?.match(/refs\/pull\/(\d+)\//)?.[1] ?? "",
+    "github.event.pull_request.head.sha": head,
   };
 }
 
@@ -206,6 +217,27 @@ test("main pushes never cancel an in-progress test or schema-gate run", () => {
   assert.equal(evaluateGithubExpression(legacy, mainPush), true);
 
   for (const file of ["test.yml", "schema-gate.yml"]) assertMainDoesNotCancelInProgress(file);
+});
+
+test("ineligible PR events cannot cancel or replace eligible running or pending checks", () => {
+  for (const file of ["test.yml", "pr-gates.yml", "schema-gate.yml", "machine.yml", "relay.yml"]) {
+    const workflow = workflowConcurrency(file);
+    const event = overrides => context(workflow.name, { event_name: "pull_request", ref: "refs/pull/42/merge", run_id: "ready", ...overrides });
+    const group = ctx => evaluateGithubExpression(workflow.group, ctx);
+    const eligible = event({});
+    const obsolete = event({ run_id: "old", head: "old-head" });
+    assert.equal(group(eligible), group(obsolete), `${file}: new eligible heads must still replace obsolete checks`);
+    assert.equal(evaluateGithubExpression(workflow.cancel, eligible), true);
+    for (const overrides of [{ labels: [] }, { labels: ["other-label"] }, { draft: true }]) {
+      const skipped = event({ run_id: "late-ineligible", ...overrides });
+      // Same-group enqueue replaces pending work even when cancellation is false.
+      // Different groups protect both running and pending checks in either arrival order.
+      assert.notEqual(group(skipped), group(eligible), `${file}: skipped event must not enter eligible concurrency group`);
+      assert.notEqual(group(skipped), group(event({ ...overrides, run_id: "other-ineligible" })), `${file}: skipped events are isolated per run`);
+    }
+    const otherPr = event({ ref: "refs/pull/43/merge", run_id: "other-pr" });
+    assert.notEqual(group(eligible), group(otherPr));
+  }
 });
 
 // Execute the actual workflow shell command with a stand-in npm binary.
