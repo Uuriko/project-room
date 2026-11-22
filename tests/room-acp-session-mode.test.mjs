@@ -5,8 +5,37 @@ import assert from "node:assert/strict";
 import { AgentHost } from "../room-acp/src/agent-host.mjs";
 import { renderTurn } from "../room-acp/src/render.mjs";
 import { fileURLToPath } from "node:url";
+import { PassThrough, Writable } from "node:stream";
+import { createPeer } from "../room-acp/src/jsonrpc.mjs";
 
 const prompt = [{ type: "text", text: "synthetic task" }];
+
+test("a delayed ACP pipe error retires the peer and rejects all pending requests", async () => {
+  const input = new PassThrough();
+  const frames = [];
+  let retired = 0;
+  const output = new Writable({
+    write(frame, _encoding, done) {
+      frames.push(frame.toString());
+      setImmediate(() => done(Object.assign(new Error("fixture pipe closed"), { code: "EPIPE" })));
+    },
+  });
+  const peer = createPeer({ input, output, onTransportError: () => { retired++; } });
+  try {
+    await Promise.all([
+      assert.rejects(peer.request("session/prompt"), { code: -32000, message: "connection failed" }),
+      assert.rejects(peer.request("session/load"), { code: -32000, message: "connection failed" }),
+    ]);
+    assert.equal(peer.closed, true);
+    assert.equal(retired, 1);
+    assert.equal(peer.notify("session/cancel"), false);
+    await assert.rejects(peer.request("session/new"), { code: -32000, message: "connection closed" });
+    assert.deepEqual(frames.map(frame => JSON.parse(frame).method), ["session/prompt"]);
+  } finally {
+    peer.close();
+    input.destroy();
+  }
+});
 
 function mockHost({ saved = null, mode = "read-only", loadError = null, modeError = null } = {}) {
   const calls = [], writes = [], logs = [];

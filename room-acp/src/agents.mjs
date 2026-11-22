@@ -99,7 +99,10 @@ export function childEnvFor(env = process.env) {
 export function spawnAgent(candidate, { cwd = process.cwd(), env = process.env, onRequest, onNotification, log = () => {} } = {}) {
   const child = spawn(candidate.command, candidate.args, { cwd, env: childEnvFor(env), stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32" && candidate.command === "npx" });
   child.stderr.on("data", () => {});
-  const peer = createPeer({ input: child.stdout, output: child.stdin, onRequest, onNotification, log });
+  const peer = createPeer({
+    input: child.stdout, output: child.stdin, onRequest, onNotification, log,
+    onTransportError: () => child.kill(),
+  });
   return { child, peer };
 }
 

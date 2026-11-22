@@ -136,6 +136,28 @@ test('exact work wake runs native review and records one verdict, recovering a l
   assert.deepEqual(f.counts,{prompt:1,write:1,receipt:1,ack:2});
 });
 
+test('exact review prompt separates earlier correction from current evidence',async t=>{
+  const f = await setup(t);
+  const correction = { completionEventId:'prior-result', summary:'The prior result is stale.' };
+  const releaseChecks = { status:'passed', checks:[{ name:'build' }] };
+  const read = f.bridge.room.request;
+  f.bridge.room.request = async (path,options) => {
+    const value = await read(path,options);
+    if (path.includes('/work-result')) {
+      Object.assign(value.workThread, { correction, releaseChecks });
+    }
+    return value;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  const [{ text }] = f.prompts[0].prompt;
+  const context = JSON.parse(text.split('\n\n').at(-1));
+  assert.equal(context.currentResult.receipt.eventId, f.wake.completionEventId);
+  assert.deepEqual(context.correctionToPriorResult, correction);
+  assert.deepEqual(context.releaseChecks, releaseChecks);
+  assert.equal(context.workThread, undefined);
+});
+
 test('the scope check refuses ineligible or incomplete origin facts without contacting the model',async t=>{
   for (const [label,reviewScope,changeOrigin] of [
     ['different requester',{requesterId:'another-member',openedAfter:0}],
@@ -591,4 +613,131 @@ test('repair: a duplicate-field restatement, raw or fenced, is not filed',async 
     assert.equal(f.verdict(),undefined);
     assert.equal(f.receiptPhase(),'needs_review');
   }
+});
+
+test('a fresh receiver resumes the same claim after session preparation stops', async t => {
+  const f = await setup(t);
+  const claims = [];
+  function observe(bridge) {
+    const request = bridge.reviewRuntimeRoom.request.bind(bridge.reviewRuntimeRoom);
+    bridge.reviewRuntimeRoom.request = (path, options) => {
+      const response = request(path, options);
+      if (options.body.phase === 'claimed') claims.push({ id: options.body.attemptId, response });
+      return response;
+    };
+  }
+  observe(f.bridge);
+  f.bridge.host.session = async () => {
+    assert.equal((await claims[0].response).status, 'claimed');
+    throw Error('receiver stopped while preparing the session');
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(claims.length, 1);
+  assert.equal(f.counts.prompt, 0);
+  assert.throws(f.receipt, { code: 'ENOENT' });
+  assert.equal((await f.readAsProducer(f.wake.nextRead)).reviewRuntime.status, 'claimed');
+
+  const fresh = f.make();
+  observe(fresh);
+  const prepare = fresh.host.session.bind(fresh.host);
+  fresh.host.session = async (...args) => {
+    assert.deepEqual(await claims[1].response, await claims[0].response);
+    return prepare(...args);
+  };
+  assert.equal(await fresh.lease(), true);
+  await fresh.accept(f.wake);
+  await fresh.queue.idle();
+  assert.equal(claims.length, 2);
+  assert.equal(claims[1].id, claims[0].id);
+  assert.equal(f.receipt().requestId, claims[0].id);
+  assert.deepEqual(f.counts, {prompt:1,write:1,receipt:0,ack:1});
+  assert.equal(f.verdict().result, 'pass');
+});
+
+test('restart surfaces a review interrupted before output and never runs it twice', async t => {
+  const f = await setup(t);
+  f.bridge.host.prompt = async () => { f.counts.prompt++; throw Error('host stopped'); };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.receiptPhase(), 'started');
+  const fresh = f.make();
+  assert.equal(await fresh.lease(), true);
+  await fresh.accept(f.wake);
+  await fresh.queue.idle();
+  assert.equal(f.receipt()?.reason, 'turn_interrupted');
+  assert.deepEqual(f.counts, {prompt:1,write:0,receipt:0,ack:0});
+  assert.equal(f.pendingRows().delivered_at, null);
+  const exact = await f.readAsProducer(f.wake.nextRead);
+  assert.equal(exact.reviewRuntime.status, 'interrupted');
+
+  // A replacement runtime may have the seat and lease but lose its local disk.
+  const receipts = fresh.reviewReceipts;
+  rmSync(join(receipts.dir, receipts.key(f.wake.signalId) + '.json'));
+  const replacement = f.make();
+  assert.equal(await replacement.lease(), true);
+  await replacement.accept(f.wake);
+  await replacement.queue.idle();
+  assert.deepEqual(f.counts, {prompt:1,write:0,receipt:0,ack:0});
+  assert.equal(f.pendingRows().delivered_at, null);
+});
+
+test('losing the local dispatch receipt before any provider output cannot repeat the prompt', async t => {
+  const f = await setup(t);
+  f.bridge.host.prompt = async () => { f.counts.prompt++; throw Error('host stopped after dispatch'); };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  const receipts = f.bridge.reviewReceipts;
+  rmSync(join(receipts.dir, receipts.key(f.wake.signalId) + '.json'));
+  const replacement = f.make();
+  assert.equal(await replacement.lease(), true);
+  await replacement.accept(f.wake);
+  await replacement.queue.idle();
+  assert.deepEqual(f.counts, {prompt:1,write:0,receipt:0,ack:0});
+  assert.equal((await f.readAsProducer(f.wake.nextRead)).reviewRuntime.status, 'start_unknown');
+  assert.equal(f.pendingRows().delivered_at, null);
+});
+
+test('a live receiver recovers a lost reservation response before dispatching only once', async t => {
+  const f = await setup(t);
+  const request = f.bridge.room.request.bind(f.bridge.room);
+  const reserveIds = [];
+  f.bridge.room.request = async (path, options) => {
+    const result = await request(path, options);
+    if (options?.body?.reserveDispatch) {
+      assert.equal(result.dispatchGranted, true);
+      reserveIds.push(options.body.reservationId);
+      if (reserveIds.length === 1) throw new RoomError(0, 'network', 'Committed reservation response lost');
+    }
+    return result;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(reserveIds.length, 2);
+  assert.equal(reserveIds[0], reserveIds[1]);
+  assert.deepEqual(f.counts, {prompt:1,write:1,receipt:0,ack:1});
+  assert.equal(f.verdict().result, 'pass');
+});
+
+test('a fresh listener cannot dispatch when the original lost every reservation response', async t => {
+  const f = await setup(t);
+  const report = f.bridge.room.request.bind(f.bridge.room);
+  f.bridge.room.request = async (path, options) => {
+    const result = await report(path, options);
+    if (options?.body?.reserveDispatch) {
+      assert.equal(result.dispatchGranted, true);
+      throw new RoomError(0, 'network', 'Committed reservation response lost');
+    }
+    return result;
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.throws(f.receipt, { code:'ENOENT' });
+  assert.equal((await f.readAsProducer(f.wake.nextRead)).reviewRuntime.status, 'start_unknown');
+  const replacement = f.make();
+  assert.equal(await replacement.lease(), true);
+  await replacement.accept(f.wake);
+  await replacement.queue.idle();
+  assert.deepEqual(f.counts, {prompt:0,write:0,receipt:0,ack:0});
+  assert.equal(f.pendingRows().delivered_at, null);
 });
