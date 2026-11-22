@@ -363,7 +363,7 @@ optional.push("src/board-deeplink.js"); // Agent first-run board navigation (sta
 optional.push("src/agent-first-run.js"); // Agent first-run orientation card (imported by src/agent-signin-ui.js, RC-2026-09-24-213)
 optional.push("src/invite-context.js"); // Invitation context stashed at OAuth start (imported by src/app.js, RC-2026-09-18-007)
 optional.push("src/request-access.js"); // Request-access disclosure for signed-in users with no rooms (RC-2026-09-30-3611)
-optional.push("src/room-deep-link.js"); // #room/{roomId} Open/People deep-link
+optional.push("src/room-deep-link.js", "src/room-ids.js"); // #room/{roomId} and exact-result link validation
 optional.push("src/browser-session.js", "src/google-room-return.js"); // Last-room + Sign out session-hint clear
 optional.push("src/entry-started.js", "src/entry-watchdog.js"); // Startup marker shared by entry.js and the cached direct app.js path
 optional.push("src/composer-files.js"); // Composer file chips (imported by src/app.js)
