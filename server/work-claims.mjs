@@ -1665,6 +1665,20 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
     claimRound: (item.claimRound ?? 0) + 1,
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
+  // #4116: a delivered claim's reopen re-enters the lease sweep's
+  // jurisdiction — delivered is not an active claim state, so a lease
+  // that lapsed while the claim awaited review was inert; keeping it
+  // would let the next sweep reap the reopened claim, clearing the
+  // new owner and the retained delivery record with it. A lapsed
+  // lease therefore restarts at the room default for the new owner's
+  // rework spell, mirroring the send-back transition (updateWork,
+  // #4085 D2). A live lease is kept untouched; a claim that opted out
+  // of leases stays lease-less.
+  const reopened = !fresh && item.state === "delivered";
+  const restartHours = reopened && item.leaseExpiresAt !== null && Date.parse(item.leaseExpiresAt) <= atMs
+    ? roomWorkClaimConfig(room).defaultLeaseHours : null;
+  const reopenedLease = restartHours === null ? {}
+    : { leaseStartAt: isoOf(atMs), leaseExpiresAt: isoOf(atMs + restartHours * 3600 * 1000) };
   // A fresh assignment opens a fresh round (delivery state cleared,
   // exactly like a claim). A live round keeps its delivery state. A
   // delivered claim reopens to in_progress with its delivery retained
@@ -1673,7 +1687,7 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   const round = fresh
     ? { delivery: null, verification: null, ci: null, deliveryGeneration: 0 }
     : item.state === "delivered"
-      ? { state: "in_progress", verification: null }
+      ? { state: "in_progress", verification: null, ...reopenedLease }
       : {};
   const { delegate: _previousDelegate, ...reassigned } = item;
   return withHistory({ ...reassigned, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
