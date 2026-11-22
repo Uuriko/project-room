@@ -474,6 +474,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_action` | 422 | Action must be a wake or open_task action naming active members | fix+resend | Fix the refused input and resend. |
 | `invalid_activity_limit` | 422 | limit must be an integer between 1 and ${ACTIVITY_LIMIT_MAX} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_read` | 422 | ids is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_starter_work` | 422 | starterWork must be { title, definitionOfDone } for a profile that can accept work | fix+resend | Fix the starterWork fields named in the message (title 1-120 characters, definitionOfDone 1-500, no other keys, and a profile that can accept work) or send null; resend. |
 | `invalid_work_action` | 422 | Current work revision unavailable | fix+resend | Read the work with room_read_work, then resend with that revision as expectedRevision. Keep the same requestId if the earlier send was uncertain. |
 | `invalid_activity_selection` | 422 | before must be a positive event id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_type` | 422 | type must be one of ${ACTIVITY_TYPES.join(", ")} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
