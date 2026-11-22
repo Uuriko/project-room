@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PILOT_LIMITS, RoomStore } from "../server/store.mjs";
@@ -13,7 +13,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { archivedMessageRow } from "../server/messages-store.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { RELIEF_BACKOFF_BASE_MS, RELIEF_REASON, reliefLineBytes, relieveProjections, relieveProjectionsIncrementally } from "../server/store-relief.mjs";
-import { RECOVERY_DIRECTORY_NAME, localRecoveryPoint } from "../server/node-recovery-point.mjs";
+import { RECOVERY_DIRECTORY_NAME, localRecoveryPoint, recoveryDiskNeed } from "../server/node-recovery-point.mjs";
 import { HOUR_MS, NODE_RELIEF_KICK_MS, STORE_GROWTH_LIMITS, jobByName, startNodeScheduler } from "../server/jobs.mjs";
 
 const KEEP = 100;
@@ -96,6 +96,22 @@ test("a Node store gets a verified local recovery point, reused for a day", asyn
   assert.notEqual(next.key, point.key);
   assert.equal(copies, 2);
   assert.deepEqual(readdirSync(dir).sort(), [next.key, `${next.key}.verified.json`], "older copies are pruned");
+});
+
+test("the local copy is owner-only while it is written, and the WAL counts toward free disk", async t => {
+  const f = fixture(t);
+  f.post(3);
+  let modeDuringCopy = null;
+  const copy = async (db, path) => { modeDuringCopy = statSync(path).mode & 0o777; const { backup } = await import("node:sqlite"); return backup(db, path); };
+  assert.ok(await localRecoveryPoint(f.store, { copy }));
+  assert.equal(modeDuringCopy, 0o600, "no world-readable window before the copy finishes");
+  // A sparse WAL takes no disk but counts: the copy can need its pages.
+  const fake = join(f.directory, "sized.sqlite");
+  writeFileSync(fake, "");
+  truncateSync(fake, 1000);
+  writeFileSync(`${fake}-wal`, "");
+  truncateSync(`${fake}-wal`, 5_000_000);
+  assert.equal(recoveryDiskNeed(fake), (1000 + 5_000_000) * 2 + 64 * 1024 * 1024);
 });
 
 test("a local recovery point fails closed: bad copy, opt-out, in-memory, read-only", async t => {
