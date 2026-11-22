@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { chmodSync, rmSync } from "node:fs";
@@ -223,3 +225,62 @@ for (const ready of [false, true]) {
     assert.equal(list().length, openedCount);
   });
 }
+
+test("the Muse CLI leases an idle seat, reconciles its terminal doorbell, and receives drafted work", async t => {
+  const f = createAcceptanceFixture(), roomId = "commons", workItemId = "muse-qa", recipientId = "muse-idle";
+  const agent = f.store.identities.create("Muse idle receiver");
+  linkWithProof(f.store, f.keys.owner, roomId, agent, { memberId: recipientId, permissions: ["accept_work", "verify"] });
+  const requesterId = f.store.authenticate(f.keys.owner, roomId).member.id;
+  f.store.command(f.keys.owner, roomId, { id: randomUUID(), type: "work.proposed",
+    data: { workItemId, title: "QA lane", definitionOfDone: "Return a scoped finding.", accountableMemberId: requesterId, mode: "read" } });
+  const answer = messageId => {
+    const exact = f.store.replyRequests.selected(agent.secret, roomId, messageId);
+    const template = exact.responseActions.find(action => action.arguments.responseOutcome === "answered");
+    const { roomId: _roomId, ...args } = template.arguments;
+    f.store.command(agent.secret, roomId, buildReplyCommand({ roomId, memberId: recipientId }, template.tool,
+      { ...args, requestId: randomUUID(), body: "Checked the authorized evidence." }));
+  };
+  const original = f.store.command(f.keys.owner, roomId, buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply",
+    { requestId: "muse-original-qa", workItemId, toMemberId: recipientId, body: "Check the current evidence." }));
+  const originalId = original.event.data.messageId;
+  const { signal: doorbell } = f.store.agentHeartbeats.enqueueWake({ agentId: agent.identityId, kind: "dm", roomId, messageId: originalId });
+  answer(originalId);
+  const after = f.store.headSequence(roomId);
+  const credentialPath = join(f.directory, "operator.json"), config = join(f.directory, "pickup.json");
+  chmodSync(f.directory, 0o700);
+  atomicPrivateJson(credentialPath, { identitySecret: f.keys.owner });
+  atomicPrivateJson(config, { checkpointPath: join(f.directory, "pickup-checkpoint.json"),
+    routes: [{ roomId, requesterId, recipientId, workItemId, credentialPath, after, onIdle: true }] });
+  const stop = startCompletionPickup(f.store, config);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    stop();
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close();
+    rmSync(f.directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const policyFile = join(f.directory, "muse-policy.json");
+  atomicPrivateJson(policyFile, { version: 1, origin, roomId, memberId: recipientId,
+    requesters: [requesterId], workItems: [workItemId], requests: [], bootstrapAfter: after, windowSeconds: 5 });
+  const script = fileURLToPath(new URL("../scripts/muse-stream-handoff.mjs", import.meta.url));
+  const output = await new Promise((resolve, reject) => {
+    const child = execFile(process.execPath, [script, policyFile, "-", "--stay-armed", "--receiver-ack", "--advertise-scope", "--idle-pickup"],
+      { timeout: 5000 }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(JSON.parse(stdout)));
+    child.stdin.end(JSON.stringify({ version: 1, origin, roomId, memberId: recipientId, token: agent.secret }));
+  });
+  assert.equal(output.status, "handoff");
+  assert.ok(output.receiverAcknowledgment.sequence > output.openingSequence);
+  const records = f.store.replyRequests.list(agent.secret, roomId, { direction: "incoming", status: "all" }).requests;
+  assert.equal(records.length, 2);
+  const next = records.find(item => item.id === output.requestMessageId);
+  assert.ok(next.id.startsWith("reply-"));
+  assert.equal(next.workItemId, workItemId);
+  assert.equal(next.status, "open");
+  assert.ok(!f.store.agentHeartbeats.pendingWakePage(agent.identityId, { roomId }).signals.some(wake => wake.signalId === doorbell.signalId));
+  answer(next.id);
+  assert.equal(f.store.replyRequests.list(agent.secret, roomId, { direction: "incoming", status: "all" }).requests.length, 2);
+});

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
+import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, reportMuseIdle, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
 
 const connection = { origin: "https://room.example.org", roomId: "build", memberId: "muse" };
 const policy = museHandoffPolicy({ ...connection, version: 1, requesters: ["codex"], workItems: ["ready"],
@@ -430,4 +430,53 @@ test("a stale refusal, a committed re-read ack with a lost response and a restar
   assert.equal(recovered.receiverAcknowledgment.duplicate, true);
   assert.equal(recovered.receiverAcknowledgment.sequence, 14);
   assert.equal(ops.size, 1);
+});
+
+test("idle probe reconciles only the exact terminal formal wake under the Muse scope", async () => {
+  const wake = (messageId, kind = "mention") => ({ signalId: "signal-" + messageId, roomId: "build", kind, messageId });
+  const pendingWakes = [wake("done"), wake("open"), wake("other"), wake("work", "assignment")];
+  const calls = [];
+  const client = { replyContextForHint(id) {
+    return context(request(id, id === "open" ? {} : {
+      status: "answered", terminalEventId: "answer-" + id, ...(id === "other" ? { workItemId: "other" } : {})
+    }), 14);
+  } };
+  const listener = {
+    poll: () => ({ pendingWakes }),
+    ack: args => calls.push(args),
+    reportIdle() { calls.push("report"); return { idlePickup: { roomId: "build", status: "investigation_posted" } }; }
+  };
+  const options = { client, listener, policy, hostId: "test-host", fencingToken: "fence", signal: new AbortController().signal };
+  assert.equal(await reportMuseIdle(options), "wake_pending");
+  assert.deepEqual(calls, [{ signalIds: ["signal-done"], fencingToken: "fence" }]);
+  pendingWakes.splice(1);
+  assert.equal(await reportMuseIdle(options), "investigation_posted");
+  assert.equal(calls.at(-1), "report");
+});
+
+test("a scoped open request prevents reporting idle even when its acknowledgement was recorded", async () => {
+  const controller = new AbortController();
+  const client = {
+    replyRequests: () => ({ evaluatedThrough: 16, requests: [request("open", { progress: { state: "acknowledged" } })] }),
+    waitForChange: () => { controller.abort(); return { changed: false }; }
+  };
+  await assert.rejects(holdMuseHandoff({ client, policy, checkpoint: { after: 10, inFlight: null }, save() {},
+    signal: controller.signal, onIdle: () => assert.fail("open request must keep idle pickup disabled") }), { name: "AbortError" });
+});
+
+test("a dry initial scan reports idle before handing off the resulting exact stream request", async () => {
+  const generated = request("idle-picked"), order = [];
+  const client = {
+    replyRequests() { order.push("scan"); return { evaluatedThrough: 16, requests: [] }; },
+    waitForChange(after) {
+      order.push("stream");
+      assert.equal(after, 16);
+      return { changed: true, sequence: 17, requestHint: generated };
+    },
+    replyContextForHint() { return context(generated, 17); }
+  };
+  const result = await holdMuseHandoff({ client, policy, checkpoint: { after: 10, inFlight: null }, save() {},
+    signal: new AbortController().signal, onIdle: () => { order.push("report"); } });
+  assert.deepEqual(order, ["scan", "report", "stream"]);
+  assert.equal(result.requestMessageId, "idle-picked");
 });
