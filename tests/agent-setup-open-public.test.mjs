@@ -5,3 +5,21 @@ test('actual HTTP open public preview requires host acceptance, then connects ex
 test('request-to-open transition and lost admission ACK reuse exact saved destination and request',async t=>{const f=await fixture(t,false),pending=await f.connect();assert.equal(pending.status,'pending');const before=f.journal(),key=Object.keys(before.targets)[0],requestId=before.targets[key].requestId;f.s.command(f.owner.secret,'open-target',{id:'open',type:'room.join_link_set',data:{enabled:true}});let lose=true;await assert.rejects(f.connect({fetchImpl:async(url,options)=>{const res=await fetch(url,options);if(lose&&new URL(url).pathname==='/api/access-requests'){lose=false;throw TypeError('synthetic lost admission response');}return res;}}));const result=await f.connect();assert.equal(result.status,'connected');assert.equal(result.identityId,f.peer.identityId);assert.deepEqual(Object.keys(f.journal().targets),[key]);assert.equal(f.journal().targets[key].requestId,requestId);assert.equal(f.s.db.prepare('SELECT count(*) n FROM access_requests WHERE identity_id=?').get(f.peer.identityId).n,1);assert.equal(f.s.db.prepare('SELECT count(*) n FROM identity_links WHERE room_id=? AND identity_id=?').get('open-target',f.peer.identityId).n,1);});
 test('received room key is checkpointed before verification and reused after interrupted read',async t=>{const f=await fixture(t);let issued=false,interrupted=false;await assert.rejects(f.connect({fetchImpl:async(url,options)=>{const path=new URL(url).pathname;if(issued&&!interrupted&&new Headers(options?.headers).get('authorization')?.startsWith('Bearer rak_')){interrupted=true;throw TypeError('synthetic interrupted verification');}const res=await fetch(url,options);if(path==='/api/agent-keys'&&options?.method==='POST')issued=true;return res;}}));assert.equal(interrupted,true);assert.equal(f.s.db.prepare('SELECT count(*) n FROM agent_api_keys').get().n,f.initialKeys+1);const step=Object.values(f.journal().targets)[0];assert.ok(step.roomCredential.startsWith('rak_'));const result=await f.connect();assert.equal(result.status,'connected');assert.equal(readAgentConnection(result.configDirectory).token,step.roomCredential);assert.equal(f.s.db.prepare('SELECT count(*) n FROM agent_api_keys').get().n,f.initialKeys+1);});
 test('unknown open-room key issuance stops rather than minting a second one-time key',async t=>{const f=await fixture(t);let lost=false;await assert.rejects(f.connect({fetchImpl:async(url,options)=>{const res=await fetch(url,options);if(!lost&&new URL(url).pathname==='/api/agent-keys'&&options?.method==='POST'){lost=true;throw TypeError('synthetic lost key issuance ACK');}return res;}}));assert.equal(lost,true);assert.equal(f.s.db.prepare('SELECT count(*) n FROM agent_api_keys').get().n,f.initialKeys+1);await assert.rejects(f.connect(),/issuance is unconfirmed/);assert.equal(f.s.db.prepare('SELECT count(*) n FROM agent_api_keys').get().n,f.initialKeys+1);});
+test('existing agent joins an open room, posts a result, and reads it back', async t => {
+  const f = await fixture(t);
+  const result = await f.connect();
+  const connection = readAgentConnection(result.configDirectory);
+  const headers = { 'Content-Type': 'application/json', Origin: f.origin, Authorization: `Bearer ${connection.token}` };
+  const body = { id: 'existing-agent-result', type: 'message.posted', data: {
+    messageId: 'existing-agent-result', body: 'Verified the setup journey and saved this result.'
+  } };
+  const response = await fetch(f.origin + '/api/rooms/open-target/commands', { method: 'POST', headers, body: JSON.stringify(body) });
+  const saved = await response.json();
+  assert.equal(response.status, 201, JSON.stringify(saved));
+  assert.equal(saved.event.actorId, f.peer.identityId);
+  const read = await fetch(f.origin + '/api/rooms/open-target/conversation?messageId=existing-agent-result', { headers });
+  const history = await read.json();
+  assert.equal(read.status, 200, JSON.stringify(history));
+  assert.equal(history.viewerId, f.peer.identityId);
+  assert.ok(history.messages.some(message => message.id === body.data.messageId && message.authorId === f.peer.identityId && message.body === body.data.body));
+});
