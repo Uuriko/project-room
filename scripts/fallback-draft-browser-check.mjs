@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openConversation } from "./room-chrome.mjs";
 // Local qualification of actual packaged runtimes, never live services/models.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRuntimePackage, verifyRuntimePackage } from './runtime-package.mjs';
-import { signInFixture, settleLanding } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 // A schema number does not imply browser-format compatibility. In GitHub's
@@ -64,6 +64,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   const enter = async (who = 'owner') => {
     await signInFixture(page, fixture.keys[who]);
     await page.locator('#main').waitFor({ state: 'visible' });
+    await openConversation(page);
   };
   const remember = async () => {
     const box = page.locator('#remember-drafts');
@@ -79,7 +80,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   const switchTo = async name => {
     // Preserve the same page/sessionStorage/cookies and the same service origin.
     await start(name); await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
-    await settleLanding(page);
+    await openConversation(page);
   };
   const noDrafts = () => page.evaluate(() => Object.keys(sessionStorage).filter(key => /^project-room:drafts:v\d+$/.test(key)).length === 0);
   await page.goto(origin); await enter(); await remember();
@@ -106,6 +107,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   await page.locator('#request-reply').click();
   assert.equal(await page.locator('#message-input').inputValue(), 'Private request draft', 'request draft remains separate from ordinary chat');
   assert.equal(fixture.store.room('commons').sequence, sequence, 'draft transitions never send messages');
+  await page.route(url => url.pathname.endsWith("/events") && url.searchParams.has("operationId"), route => route.abort("failed"));
   const commands = []; let lose = true;
   await page.route('**/api/rooms/commons/commands', async route => {
     commands.push(route.request().postDataJSON());

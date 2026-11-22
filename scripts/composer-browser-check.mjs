@@ -346,6 +346,34 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
     const waitForSaved = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#message-input").value === "");
 
+    // Consent can change after the composer shows the recipient as available.
+    await openPrivate("Maya");
+    const blockedDraft = "Keep this refused private draft editable";
+    await input.fill(blockedDraft);
+    const commandsUrl = "**/api/rooms/commons/commands";
+    const blockBeforeSend = async route => {
+      if (route.request().postDataJSON().data.body === blockedDraft) {
+        store.dmConsents.block("commons", "maya", "owner");
+      }
+      await route.continue();
+    };
+    await page.route(commandsUrl, blockBeforeSend);
+    const refused = page.waitForResponse(response => response.url().endsWith("/commands") && response.status() === 403);
+    await input.focus(); await page.keyboard.press("Control+Enter");
+    assert.equal((await (await refused).json()).error.code, "dm_blocked");
+    await waitForFailure();
+    assert.equal(await input.inputValue(), blockedDraft);
+    assert.equal(await input.evaluate(element => element.readOnly), false);
+    assert.equal(await recipient.isEnabled(), true);
+    assert.notEqual(await page.locator('#message-form button[type="submit"]').getAttribute("aria-label"), "Retry original");
+    assert.equal(store.room("commons").state.messages.some(message => message.body === blockedDraft), false);
+    await page.unroute(commandsUrl, blockBeforeSend);
+    await input.fill("");
+    store.dmConsents.unblock("commons", "maya", "owner");
+    store.dmConsents.request("commons", "owner", "maya", "browser test");
+    store.dmConsents.decide("commons", "maya", "owner", "approve");
+    await openPublic();
+
     // A live membership change must never turn a private draft into a public post.
     await openPrivate("Maya");
     await input.fill("Private draft retained while Maya is unavailable");
@@ -376,6 +404,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     await page.locator('[data-message-record-id="reply"] [data-message-action="reply"]').click();
 
+    // An absent receipt read still exercises the exact original resend.
+    const receiptUrl = url => url.pathname.endsWith("/events") && url.searchParams.has("operationId");
+    const loseReceipt = route => route.abort("failed");
+    await page.route(receiptUrl, loseReceipt);
     await input.fill("Keep this thread reply");
     await input.focus();
     await input.evaluate(e => e.setSelectionRange(5, 9, "backward"));
@@ -415,6 +447,61 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const messages = store.snapshot(owner, "commons").state.messages.filter(m => m.body === "Keep this thread reply");
     assert.equal(messages.length, 1); assert.equal(messages[0].replyToId, "reply"); assert.equal(messages[0].toMemberId, null);
     await page.unroute("**/api/rooms/commons/commands");
+    await page.unroute(receiptUrl, loseReceipt);
+
+    // A real commit with a lost POST response settles from one exact read.
+    const recoveryCommands = [], recoveryReads = [];
+    await page.route(receiptUrl, route => {
+      recoveryReads.push(new URL(route.request().url()).searchParams.get("operationId"));
+      return route.continue();
+    });
+    await page.route("**/api/rooms/commons/commands", async route => {
+      const command = route.request().postDataJSON();
+      recoveryCommands.push(command);
+      assert.equal((await route.fetch()).ok(), true);
+      await route.abort("failed");
+    });
+    await input.fill("Recovered without another send");
+    await input.press("Control+Enter");
+    await waitForSaved();
+    assert.equal(recoveryCommands.length, 1);
+    assert.deepEqual(recoveryReads, [recoveryCommands[0].id]);
+    assert.equal(store.room("commons").state.messages.filter(message => message.body === "Recovered without another send").length, 1);
+    assert.equal(await status.textContent(), "");
+    await page.unroute("**/api/rooms/commons/commands");
+    await page.unroute(receiptUrl);
+
+    // An edit cannot replace a committed but still unconfirmed operation.
+    const uncertainPosts = [];
+    await page.route(receiptUrl, loseReceipt);
+    await page.route("**/api/rooms/commons/commands", async route => {
+      uncertainPosts.push(route.request().postDataJSON());
+      const response = await route.fetch();
+      assert.equal(response.ok(), true);
+      if (uncertainPosts.length === 1) await route.abort("failed");
+      else await route.fulfill({ response });
+    });
+    await input.fill("Keep this unconfirmed send");
+    await input.press("Control+Enter");
+    await status.waitFor({ state: "visible" });
+    assert.equal(await input.evaluate(element => element.readOnly), true);
+    assert.equal(await page.locator("#message-form button[type=submit]").getAttribute("aria-label"), "Retry original");
+    await input.press("End");
+    await input.press("Backspace");
+    assert.equal(await input.inputValue(), "Keep this unconfirmed send");
+    page.once("dialog", dialog => dialog.accept());
+    await page.reload();
+    await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
+    assert.equal(await input.inputValue(), "Keep this unconfirmed send");
+    assert.equal(await input.evaluate(element => element.readOnly), true);
+    await input.press("Control+Enter");
+    await waitForSaved();
+    assert.equal(uncertainPosts.length, 2);
+    assert.deepEqual(uncertainPosts[0], uncertainPosts[1]);
+    assert.equal(store.room("commons").state.messages.filter(message => message.body === "Keep this unconfirmed send").length, 1);
+    await page.unroute("**/api/rooms/commons/commands");
+    await page.unroute(receiptUrl, loseReceipt);
 
     // Explicit opt-in survives reload only after authenticating the same room.
     await input.fill("Recover this thread after reload");

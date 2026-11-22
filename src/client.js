@@ -187,10 +187,10 @@ export class RoomClient {
     error.status = status;
     return error;
   }
-  async performRequest(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full", compactRequests = false } = {}) {
+  async performRequest(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full", compactRequests = false, timeoutMs = 10000 } = {}) {
     const controller = new AbortController();
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     try {
       const response = await this.fetcher(path, { method, credentials: "same-origin", signal: controller.signal,
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
@@ -836,21 +836,41 @@ export class RoomClient {
       return Array.isArray(items) ? items : [];
     } catch { return []; }
   }
-  async send(command) {
+  async confirmMessageSend(command, session, generation) {
+    if (!session || !validId(command.id) || session !== this.session || generation !== this.generation || !this.ownsAccountSession()) return null;
+    const query = new URLSearchParams({ operationId: command.id, view: "browser", limit: "1" });
+    const read = await this.request(this.path(`/events?${query}`), { authSession: session, fresh: true, timeoutMs: 2000 });
+    if (session !== this.session || generation !== this.generation || !this.ownsAccountSession()
+      || read?.readKind !== "operation-receipt" || !this.ownsResponse(read, session)) return null;
+    const receipt = read.receipt;
+    if (receipt?.contractVersion !== 1 || receipt.roomId !== session.roomId || receipt.viewerId !== session.member.id
+      || receipt.operationId !== command.id || receipt.status !== "recorded" || receipt.currentStateVerified !== false
+      || receipt.eventType !== command.type || !validId(receipt.eventId) || !Number.isSafeInteger(receipt.sequence)
+      || receipt.sequence < 1 || !Number.isSafeInteger(receipt.checkedThrough) || receipt.sequence > receipt.checkedThrough) return null;
+    return receipt;
+  }
+  async send(command, { confirmAfterUnknown = false } = {}) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before sending"); }
-    const generation = this.generation;
+    const session = this.session, generation = this.generation;
     const durable = command?.type === "message.posted" || command?.type === "dm.posted";
     if (durable) {
       this.rememberOutbox(command);
       if (typeof this.onOptimistic === "function") this.onOptimistic(command);
     }
+    const current = () => generation === this.generation && session === this.session;
     const settle = (ok, maybeSaved) => { if (typeof this.onSendSettled === "function") this.onSendSettled({ command, ok, maybeSaved }); };
+    const mayHaveCommitted = error => error?.code === "unconfirmed" || error?.name === "AbortError" || (confirmAfterUnknown && error instanceof TypeError);
     try {
-      const receipt = await this.request(this.path("/commands"), { method: "POST", data: command });
-      if (durable) this.forgetOutbox(command);
-      settle(true, false);
+      const receipt = await this.request(this.path("/commands"), { method: "POST", data: command }).catch(async error => {
+        if (!confirmAfterUnknown || !durable || !mayHaveCommitted(error)) throw error;
+        const recovered = await this.confirmMessageSend(command, session, generation).catch(() => null);
+        if (!recovered) throw error;
+        return recovered;
+      });
       // A committed receipt remains a success even when the subsequent snapshot fetch fails.
-      if (generation === this.generation && this.session) {
+      if (session && current()) {
+        if (durable) this.forgetOutbox(command);
+        settle(true, false);
         if (!this.ownsAccountSession()) this.endAccess();
         else {
           try { await this.refresh(receipt); } catch (error) { if (generation === this.generation) this.handleFailure(error); }
@@ -858,11 +878,10 @@ export class RoomClient {
       }
       return receipt;
     } catch (error) {
-      const unconfirmed = error?.code === "unconfirmed" || error?.name === "AbortError";
-      if (durable && unconfirmed) error.maybeSaved = true;
-      else if (durable) this.forgetOutbox(command);
-      settle(false, Boolean(error.maybeSaved));
-      if (generation === this.generation) {
+      if (durable && mayHaveCommitted(error)) error.maybeSaved = true;
+      if (current()) {
+        if (durable && !error.maybeSaved) this.forgetOutbox(command);
+        settle(false, Boolean(error.maybeSaved));
         if (this.session?.authMode === "account" && !this.ownsAccountSession()) this.endAccess();
         // Gate refusals are 403s but the session is still valid — ending
         // access here would sign the user out and swallow the refusal.
@@ -1511,6 +1530,7 @@ export function retryUnconfirmed(error, wasUnconfirmed = false) {
 // uncertain operation.
 export function draftRefused(error, hadPending = false) {
   if (!hadPending && [400, 404, 409, 413, 422].includes(error?.status)) return true;
+  if (!hadPending && error?.status === 403 && DM_CONSENT_REFUSAL_CODES.includes(error.code)) return true;
   return (error?.code === "command_rejected" && [409, 422].includes(error.status))
     || (error?.code === "channel_archived" && error.status === 409);
 }
