@@ -175,11 +175,23 @@ for (const normalized of [false, true]) test(`replacement withdraws only journal
 
   // The immediate predecessor was never delivered to Room. Even the incomplete
   // checks on the confirmed new head should retire the earlier automatic ask.
+  const delayed = Promise.withResolvers();
+  const observing = Promise.withResolvers();
+  const late = dispatchGithubReview(store, binding, delivery(oldHead), {
+    credential: () => secret,
+    observe() {
+      observing.resolve();
+      return delayed.promise;
+    },
+  });
+  await observing.promise;
   current = snapshot(newHead);
   current.checks[0].status = "in_progress";
   current.checks[0].conclusion = null;
   assert.equal(await push(newHead, oldHead), "required_check_pending");
   assert.equal(select(original).request.status, "cancelled");
+  delayed.resolve({ snapshot: snapshot(oldHead) });
+  assert.deepEqual(await late, [{ number: 6319, status: "review_changed_during_observation" }]);
   assert.deepEqual(incoming().map(request => request.id), [manualCommand.data.messageId]);
 
   current = snapshot(newHead);

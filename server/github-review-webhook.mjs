@@ -116,6 +116,17 @@ function readOpenedReview(store, binding, receipt, secret) {
 function withdrawSupersededReviews(store, binding, candidate, decision, secret, observedFrom) {
   const { recipe, requesterId, reviewerId, workItemId } = binding;
   const { roomId } = recipe;
+  const scope = " [" + createHash("sha256").update(JSON.stringify([
+    roomId, recipe.repository, candidate.number, requesterId, reviewerId, workItemId,
+  ])).digest("hex") + "]";
+  // Pending checks can supersede an old request without creating a new one.
+  // Its withdrawal still fences an older observation that was already in flight.
+  const moved = store.db.prepare(`SELECT 1 FROM events
+    WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='reply_request.cancelled'
+      AND json_extract(body,'$.actorId')=? AND instr(json_extract(body,'$.data.reason'),?)=1
+      AND substr(json_extract(body,'$.data.reason'),?)=? LIMIT 1`)
+    .get(roomId, observedFrom, requesterId, SUPERSEDED_REASON, -scope.length, scope);
+  if (moved) return false;
   const superseded = [];
   const openingBody = store.db.prepare(`SELECT json_extract(body,'$.data.body') AS body
     FROM events WHERE room_id=? AND id=? AND json_extract(body,'$.data.messageId')=?`);
@@ -148,7 +159,7 @@ function withdrawSupersededReviews(store, binding, candidate, decision, secret, 
       requestId: operation + "-withdraw",
       requestMessageId: request.id,
       expectedRequestRevision: request.revision,
-      reason: SUPERSEDED_REASON + candidate.head + ".",
+      reason: SUPERSEDED_REASON + candidate.head + "." + scope,
     }));
   }
   return true;
