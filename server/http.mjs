@@ -2816,9 +2816,9 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
             advertisedPageCache.set(cacheKey, { source: Buffer.from(frontDoor), payload }); // own copy: a later in-place change to the loader's buffer must not alias the snapshot
           }
         }
-        // A direct Room URL already needs the workspace. Start its root
-        // module early without downloading the workspace at the public door.
-        if (gzipAsset && shell && url.searchParams.has("room")) {
+        // Room-only URLs may carry an exact record in the browser fragment.
+        // Let the entry module decide whether to load the workspace there.
+        if (gzipAsset && shell && url.searchParams.has("room") && url.searchParams.size > 1) {
           payload = Buffer.from(payload.toString("utf8").replace(/<head>/i, '$&<link rel="modulepreload" href="/src/app.js">'));
         }
         // Only public, allowlisted static bytes are eligible. Room snapshots,

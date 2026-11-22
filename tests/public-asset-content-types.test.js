@@ -65,7 +65,7 @@ test("the production edge serves every public asset with the content type for it
   assert.deepEqual(wrong, []);
 });
 
-test("Node negotiates compression on public startup assets and preloads the workspace for direct room URLs", async t => {
+test("Node negotiates compression on public startup assets and only preloads the workspace for room URLs with additional parameters", async t => {
   const fixture = createAcceptanceFixture();
   const server = createRoomServer({ store: fixture.store, gzipAsset: promisify(gzip) });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -77,8 +77,8 @@ test("Node negotiates compression on public startup assets and preloads the work
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = (path, encoding = "gzip") => fetch(origin + path, { headers: { "Accept-Encoding": encoding } });
-  const [encoded, identity, landing, direct, health] = await Promise.all([
-    get("/src/app.js"), get("/src/app.js", "gzip;q=0, *;q=1"), get("/"), get("/?room=commons"), get("/api/health")
+  const [encoded, identity, landing, direct, callback, health] = await Promise.all([
+    get("/src/app.js"), get("/src/app.js", "gzip;q=0, *;q=1"), get("/"), get("/?room=commons"), get("/?room=commons&google=signed-in"), get("/api/health")
   ]);
   assert.equal(encoded.headers.get("content-encoding"), "gzip");
   assert.match(encoded.headers.get("vary"), /Accept-Encoding/i);
@@ -86,7 +86,8 @@ test("Node negotiates compression on public startup assets and preloads the work
   assert.equal(await encoded.text(), await identity.text());
   const hint = '<link rel="modulepreload" href="/src/app.js">';
   assert.ok(!(await landing.text()).includes(hint));
-  assert.ok((await direct.text()).includes(hint));
+  assert.ok(!(await direct.text()).includes(hint));
+  assert.ok((await callback.text()).includes(hint));
   assert.equal(health.headers.get("content-encoding"), null);
   await health.text();
 });
