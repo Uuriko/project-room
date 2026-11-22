@@ -876,7 +876,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         const lease = store.db.prepare("SELECT listener_id FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?")
           .get(current.identityId, roomId);
         const status = store.idlePickup?.dispatch(roomId, current.identityId, bearer(req), lease.listener_id, origin) ?? "disabled";
-        return { idlePickup: { roomId, status, evaluatedThrough: store.headSequence(roomId) } };
+        const evaluatedThrough = store.headSequence(roomId);
+        const refreshAfterMs = store.idlePickup?.observe(roomId, current.identityId, token, lease.listener_id, status, evaluatedThrough);
+        return { idlePickup: { roomId, status, evaluatedThrough, ...(refreshAfterMs ? { refreshAfterMs } : {}) } };
       }));
     }
     // listenerLease: true leases the credential's own scope (the bound
@@ -1080,6 +1082,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const pausedField = identityId => { const rooms = store.agentHeartbeats.pausedRoomsOf(identityId); return rooms.length ? { paused: rooms } : {}; };
     const idleSelection = current => roomId !== null && canUseIdlePickup(current) && store.idlePickup?.supports(roomId, current.identityId)
       ? { idlePickupThrough: store.headSequence(roomId) } : {};
+    const clearIdleOnWake = (current, page) => {
+      if (roomId !== null && (page.pendingWakes.length || page.more)) store.idlePickup?.clearObservation(roomId, current.identityId);
+    };
     const wakeNext = pendingWakes => [
       ...heartbeatNext(pendingWakes),
       Object.freeze({ action: "poll-wakes", method: "GET", path: "/api/agent-wakes/poll", requiredScope: "heartbeats:read",
@@ -1116,6 +1121,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const immediate = store.agentHeartbeats.notePoll({ agentId: auth.identityId, roomId, hostId: waiterHostId, cursor, order });
       if (!immediate.registered) reject(404, "agent_not_registered",
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
+      clearIdleOnWake(auth, immediate);
       // Wake-loop guard: a page made only of over-budget signals holds for
       // waitMs (or until an in-budget wake releases it) instead of
       // returning at once; the post-wait read still delivers them.
@@ -1149,6 +1155,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
           || selectedMember(current) !== initialMemberId)
         reject(403, "identity_changed", "Credential or selected room binding changed during wake wait");
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId, cursor, order });
+      clearIdleOnWake(current, fresh);
       store.agentHeartbeats.clearWakeBudgetMarks(current.identityId, fresh.pendingWakes.map(s => s.signalId));
       const timedOut = !woken && fresh.pendingWakes.length === 0 && fresh.more !== true;
       return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, ...selectionField, pendingWakes: fresh.pendingWakes,

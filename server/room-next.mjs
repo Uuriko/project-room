@@ -336,6 +336,8 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
     }
     // The default stays readable by clients with the original closed output schema.
     if (view === "pickup") {
+      const peer = !source && allowInvestigation && store.idlePickup?.availablePeer(roomId, auth.member.id);
+      if (peer) packet.availablePeer = peer;
       const correction = packet.work?.items.find(item => item.reason === "revise");
       const addressed = correction?.nextRead ?? recoveryRead
         ?? packet.requests?.items[0]?.nextRead ?? packet.work?.items[0]?.nextRead;
