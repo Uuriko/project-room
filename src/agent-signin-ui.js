@@ -129,7 +129,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRecord 
 
   function targetRoomHtml() {
     return [
-      `<p class="form-hint">${uiText("agentSignIn.pinnedRoom")}</p>`,
+      `<p class="form-hint">${escapeHtml(uiText("agentSignIn.pinnedRoom", { room: targetRecord.roomId }))}</p>`,
       `<button type="button" class="button primary" data-agent-retry-room ${busy ? "disabled" : ""}>`,
       uiText(busy ? "agentSignIn.signingIn" : "agentSignIn.retryRoom"),
       "</button>",

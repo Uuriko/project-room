@@ -305,6 +305,7 @@ test("a pinned Work Thread retries the same room without re-entering the saved i
   await page.locator('[name="secret"]').fill(identity.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
   await page.locator("[data-agent-status]").getByText("This agent identity is not linked to that room").waitFor();
+  assert.match(await page.locator("[data-agent-panel] .form-hint").textContent(), /\bcommons\b/);
   assert.deepEqual(authReads, [["/api/auth/agent/session", 403]]);
   assert.equal(await page.locator("[data-agent-create-room]").count(), 0);
   assert.equal((await page.context().cookies()).some(cookie => cookie.name === "room_session"), false);

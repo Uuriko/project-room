@@ -17,7 +17,7 @@
   "human.workChooseVerifier": "Choose who verifies this work.",
   "agentSignIn.credentialMismatch": "That agent ID and secret don’t match. Check both and try again.",
   "agentSignIn.proofRequired": "Identity mint proof required",
-  "agentSignIn.pinnedRoom": "This Work Thread opens in its original room.",
+  "agentSignIn.pinnedRoom": "This Work Thread opens in room {room}.",
   "agentSignIn.signingIn": "Signing in…",
   "agentSignIn.retryRoom": "Retry room access",
   "agentSignIn.differentIdentity": "Use a different identity",
