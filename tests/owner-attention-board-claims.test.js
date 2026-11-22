@@ -42,7 +42,10 @@ function delivered(f, { id, reviewPolicy = undefined, tags = [], holder = "agent
   item = claimWork(item, holder, { now: NOW });
   item = updateWork(item, holder, { state: "in_progress", now: NOW });
   item = updateWork(item, holder, { state: "delivered", deliveryMode: "result", now: NOW,
-    delivery: { result: "shipped",
+    // No `result` key in the bundle: the kernel never stores one (deliveryOf
+    // freezes { artifact, checks, criteria } only — see board-3849-followup),
+    // and the strict-shape delivery validator refuses unknown fields by name.
+    delivery: {
       artifact: { kind: "report", ref: `https://example.com/results/${id}`, sha256: "a".repeat(64) },
       checks: [{ name: "unit", result: "pass" }] } });
   f.store.workClaims.set("commons", item);
