@@ -12,6 +12,50 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { openConversation, openSearch } from "./room-chrome.mjs";
 
+test("a normalized attachment read retries after the next snapshot when the selection is unchanged", { timeout: 15000 }, async t => {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom(), { representation: "normalized-current-v1" });
+  const owner = store.issueAccessKey("commons", "owner");
+  const messageId = "own-file-message";
+  store.command(owner, "commons", { id: "own-file-operation", type: T.MESSAGE_POSTED,
+    data: { messageId, body: "An already saved message with a file" } });
+  store.roomAttachments.stage(owner, "commons", { id: "own-file", filename: "existing.txt", mediaType: "text/plain", data: "YQ==" });
+  store.roomAttachments.commit(owner, "commons", { id: "own-file", messageId });
+  const head = store.headSequence("commons");
+  const server = createRoomServer({ store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch();
+  t.after(async () => {
+    try { await browser.close(); } finally {
+      server.closeStreams();
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+      store.close();
+    }
+  });
+  const page = await browser.newPage();
+  page.setDefaultTimeout(5000);
+  const isOwnFileList = url => url.pathname.endsWith("/files") && url.searchParams.getAll("messageId").includes(messageId);
+  let reads = 0;
+  await page.route(isOwnFileList, route => {
+    reads++;
+    return reads === 1 ? route.fulfill({ status: 503, body: "{}" }) : route.continue();
+  });
+  const refused = page.waitForResponse(response => isOwnFileList(new URL(response.url())) && response.status() === 503, { timeout: 7000 });
+  await page.goto("http://127.0.0.1:" + server.address().port);
+  await signInFixture(page, owner);
+  await openConversation(page);
+  await refused;
+  const chip = page.locator('[data-message-record-id="own-file-message"]').getByText("existing.txt", { exact: true });
+  assert.equal(await chip.count(), 0);
+  assert.equal(reads, 1);
+  // Use the existing reconnect handler without forcing the connection offline.
+  await page.locator("#refresh-button").evaluate(button => button.click());
+  await chip.waitFor({ timeout: 3000 });
+  assert.equal(reads, 2);
+  assert.equal(store.headSequence("commons"), head);
+});
+
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["narrow", { width: 320, height: 780 }]]) {
   test(`composer ${label}: keyboard recovery, discussion errors, composition, and access cleanup`, { timeout: 60000 }, async t => {
     const directory = mkdtempSync(join(tmpdir(), "room-composer-"));
