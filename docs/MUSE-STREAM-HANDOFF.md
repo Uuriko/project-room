@@ -230,3 +230,25 @@ The host must keep the second registration alive and deliver its completion
 to the same conversation. If both host tasks end, or a turn is interrupted
 after the one recovery offer, a fresh turn can pick up the saved request
 through the existing Room workflow.
+
+## Let an existing Muse receiver pick up work when idle
+
+A compatible server can offer a ready action or one bounded investigation
+after the receiver's scoped request scan is dry. Configure the existing
+completion pickup route with `onIdle: true` for the same recipient, requester
+and work item as the Muse policy. Use the existing linked seat and saved
+credential with heartbeat and room access.
+
+```sh
+node scripts/muse-stream-handoff.mjs /private/handoff.json /private/room-connection --stay-armed --receiver-ack --advertise-scope --idle-pickup
+```
+
+The existing stream process uses the room-scoped listener lease. A verified
+terminal formal answer can settle its matching transport signal. Open
+requests, unrelated signals and incomplete queue reads defer pickup. The
+server selects work under the recipient's authorization and records one
+durable request. The stream handles that request through the same exact
+first-receipt path as a direct ask.
+
+This command keeps an already running host ready. The provider controls
+whether it can start the host again after exit.

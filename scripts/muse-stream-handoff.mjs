@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { on } from "node:events";
 import { lstatSync, realpathSync, watch } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -8,6 +9,7 @@ import { readAgentConnection, readConnectionInput } from "../client/agent-connec
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
 import { assertPrivatePath, atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
+import { RoomClient } from "../room-acp/src/room.mjs";
 import { validId } from "../src/events.js";
 import { checkReceiverRoute as checkMuseRoute } from "../src/reply-requests.js";
 
@@ -61,10 +63,11 @@ function pointer(context, candidate, policy, after, receiverAck = false) {
 }
 
 async function inspect(client, policy, after, signal, receiverAck = false) {
-  let cursor, through, next;
+  let cursor, through, next, pending = false;
   do {
     const page = await client.replyRequests({ direction: "incoming", status: "open", ...(cursor ? { cursor } : {}), signal });
     through ??= page.evaluatedThrough;
+    pending ||= page.requests.some(request => matches(request, policy));
     for (const candidate of page.requests.filter(request => matches(request, policy) && !request.progress)) {
       const context = await client.replyContext(candidate.id, { view: "compact", signal });
       const found = pointer(context, candidate, policy, after, receiverAck);
@@ -72,10 +75,48 @@ async function inspect(client, policy, after, signal, receiverAck = false) {
     }
     cursor = page.page?.hasMore ? page.page.nextCursor : null;
   } while (cursor);
-  return { next, through };
+  return { next, through, pending };
 }
 
-export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, setWaiting = () => {} }) {
+// A formal terminal response proves that this receiver's seat handled the
+// request even if it arrived on the stream instead of via the listener queue.
+export async function reportMuseIdle({ client, listener, policy, hostId, fencingToken, signal }) {
+  const page = await listener.poll({ hostId, waitMs: 0, signal });
+  if (page.paused?.some(entry => entry.roomId === policy.roomId)) return "paused";
+  const acknowledged = [];
+  for (const wake of page.pendingWakes.slice(0, 12)) {
+    if (wake.roomId !== policy.roomId || !["mention", "dm"].includes(wake.kind) || !validId(wake.messageId)) continue;
+    let exact;
+    try { exact = await client.replyContextForHint(wake.messageId, { signal }); }
+    catch (error) { if (error.status === 404) continue; throw error; }
+    const request = exact.request;
+    if (exact.roomId === policy.roomId && exact.viewerId === policy.memberId
+      && request.id === wake.messageId && request.recipientId === policy.memberId
+      && checkMuseRoute(policy, request) === "matches_scope"
+      && ["answered", "declined"].includes(request.status) && validId(request.terminalEventId)) {
+      acknowledged.push(wake.signalId);
+    }
+  }
+  if (acknowledged.length) await listener.ack({ signalIds: acknowledged, fencingToken });
+  if (page.more || page.pendingWakes.length !== acknowledged.length) return "wake_pending";
+  const report = await listener.reportIdle({ hostId, fencingToken });
+  return report?.idlePickup?.roomId === policy.roomId ? report.idlePickup.status : "unconfirmed";
+}
+
+export async function sendFencedMuseAck(command, acquire, send, invalidate) {
+  const token = await acquire();
+  if (!token) throw Object.assign(Error("Muse receipt is waiting for its listener lease"), { status: 503 });
+  try { return await send(command, token); }
+  catch (error) {
+    // Keep the checkpoint and inspect it again through the ordinary recovery
+    // path. Reuse the exact operation, including after a lost success response.
+    if (error.code !== "stale_listener" && error.status !== 0) throw error;
+    if (error.code === "stale_listener") invalidate();
+    throw Object.assign(error, { status: 503 });
+  }
+}
+
+export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, setWaiting = () => {}, onIdle, sendAck = (command, options) => client.command(command, options) }) {
   let state = checkpoint;
   const remember = (after, inFlight = null) => { state = { after, inFlight }; save(state); };
   const offer = async handoff => {
@@ -85,7 +126,7 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
     // Server compare-and-set: refused unless the request is still open, unacknowledged
     // and at the exact context this receiver inspected (server/store.mjs first-ack door).
     const { contextEventId, receiverSeen, ...offered } = handoff;
-    const receipt = await client.command({ id: requestId, type: "reply_request.progressed",
+    const receipt = await sendAck({ id: requestId, type: "reply_request.progressed",
       data: { ...data, note: receiverReceiptNote, ifUnacknowledgedContextEventId: contextEventId } }, { signal });
     if (!validId(receipt?.event?.id) || !integer(receipt.sequence))
       throw Object.assign(Error("Unconfirmed receiver acknowledgment"), { status: 503 });
@@ -112,17 +153,18 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
     }
     remember(state.after);
   }
-  let catchUp = !resumeStream || Boolean(checkpoint.inFlight);
+  let catchUp = Boolean(onIdle) || !resumeStream || Boolean(checkpoint.inFlight);
   for (;;) {
     signal.throwIfAborted();
     if (catchUp) {
       setWaiting(false);
-      const { next, through } = await inspect(client, policy, state.after, signal, receiverAck);
+      const { next, through, pending } = await inspect(client, policy, state.after, signal, receiverAck);
       if (next) {
         remember(next.openingSequence, next);
         return offer({ status: "handoff", replay: false, after: state.after, source: "catch_up", ...next });
       }
       if (integer(through) && through > state.after) remember(through);
+      if (wait && !pending && integer(through)) await onIdle?.(signal);
     }
     if (!wait) return { status: "no_work", after: state.after };
     catchUp = true;
@@ -138,6 +180,7 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
       catch (error) { throw Object.assign(error, { handoffStage: "room_stream" }); }
       if (!change.changed) {
         if (integer(change.through) && change.through > state.after) remember(change.through);
+        if (onIdle) break; // Re-read scoped obligations before another idle observation.
         continue;
       }
       const hint = change.requestHint;
@@ -268,14 +311,30 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
   } finally { await changes.return(); watcher.close(); }
 }
 
+function idleHostId(directory, policy) {
+  const file = join(directory, "idle-listener.json");
+  const binding = [policy.origin, policy.roomId, policy.memberId];
+  const saved = readOptionalPrivate(file);
+  if (saved === undefined) {
+    const hostId = `muse-${randomUUID()}`;
+    atomicPrivateJson(file, { binding, hostId });
+    return hostId;
+  }
+  if (JSON.stringify(saved.binding) !== JSON.stringify(binding) || !/^muse-[0-9a-f-]{36}$/.test(saved.hostId))
+    throw Error("invalid_muse_idle_listener");
+  return saved.hostId;
+}
+
 async function main([configFile, connectionDirectory, mode, ...extra]) {
   const routeCheck = mode === "--check-route";
   const receiverAck = extra.includes("--receiver-ack"), advertiseScope = extra.includes("--advertise-scope");
+  const idlePickup = extra.includes("--idle-pickup");
   const armedFlags = mode === "--stay-armed" && new Set(extra).size === extra.length
-    && extra.every(flag => flag === "--receiver-ack" || flag === "--advertise-scope");
+    && extra.every(flag => ["--receiver-ack", "--advertise-scope", "--idle-pickup"].includes(flag))
+    && (!idlePickup || receiverAck && advertiseScope);
   if (extra.length && !armedFlags && !routeCheck || mode !== undefined && !["--once", "--stay-armed", "--recover", "--check-route"].includes(mode) || !isAbsolute(configFile ?? "")
     || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack] [--advertise-scope] | --recover | --check-route REQUESTER WORK_ITEM_OR_DASH [REQUEST_ID]]");
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack] [--advertise-scope] [--idle-pickup] | --recover | --check-route REQUESTER WORK_ITEM_OR_DASH [REQUEST_ID]]");
   const directory = dirname(realpathSync(configFile));
   const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
   assertPrivatePath(directory, true);
@@ -293,15 +352,64 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   const stop = new AbortController();
   const interrupt = () => stop.abort();
   process.once("SIGINT", interrupt); process.once("SIGTERM", interrupt);
+  let hostId;
+  const listenerClient = signal => new RoomClient({ apiBase: connection.origin, roomId: policy.roomId,
+    memberId: policy.memberId, credential: connection.token, signal });
+  let fencingToken, nextIdleProbe = 0;
+  async function acquireListener(listener) {
+    const info = await listener.request("/api/agent-heartbeats", {
+      body: { hostId, mode: "wakeable", listenerLease: { roomId: policy.roomId } } });
+    fencingToken = info?.listener?.acquired ? info.listener.fencingToken : null;
+    return info;
+  }
+  async function observeIdle(client, signal) {
+    if (Date.now() < nextIdleProbe) return;
+    // The existing stream drives this probe. Never start a second listener loop.
+    nextIdleProbe = Date.now() + 36_000;
+    const probeSignal = AbortSignal.any([signal, AbortSignal.timeout(2500)]);
+    const listener = listenerClient(probeSignal);
+    try {
+      const info = await acquireListener(listener);
+      if (!fencingToken) return;
+      if (!info.idlePickupAvailable) {
+        await releaseListener();
+        return;
+      }
+      await reportMuseIdle({ client, listener, policy, hostId, fencingToken, signal: probeSignal });
+    } catch (error) {
+      // An optional idle probe must not prevent delivery of an explicit ask.
+      if (!signal.aborted) console.error(`idle_pickup: ${error.code ?? error.name}`);
+    }
+  }
+  async function releaseListener() {
+    if (!fencingToken) return;
+    const token = fencingToken;
+    fencingToken = null;
+    await listenerClient().request("/api/agent-heartbeats", { timeoutMs: 1000, body: {
+      hostId, disconnect: { fencingToken: token }, listenerLease: { roomId: policy.roomId }
+    } }).catch(() => {});
+  }
   try {
+    if (idlePickup) hostId = idleHostId(directory, policy);
     const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
     const statusFile = join(directory, "receiver-status.json");
+    const sendAck = (command, { signal }) => {
+      const listener = listenerClient(signal);
+      return sendFencedMuseAck(command, async () => {
+        if (!fencingToken) {
+          try { await acquireListener(listener); }
+          catch (error) { if (error.status !== 0) throw error; }
+        }
+        return fencingToken;
+      }, (body, listenerToken) => listener.request(`/api/rooms/${encodeURIComponent(policy.roomId)}/commands`,
+        { body, listenerToken }), () => { fencingToken = null; });
+    };
     const result = mode === "--recover"
       ? await runRecovery({ client, directory, file, policy, statusFile, signal: stop.signal })
       : await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
         onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
         run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
-          signal, receiverAck, advertiseScope, wait: mode !== "--once" }) });
+          signal, receiverAck, advertiseScope, ...(idlePickup ? { onIdle: observeIdle.bind(null, client), sendAck } : {}), wait: mode !== "--once" }) });
     if (mode === "--stay-armed") {
       if (result.status === "handoff") result.offeredAt = new Date().toISOString();
       atomicPrivateJson(statusFile, { pid: process.pid, ...result });
@@ -310,7 +418,12 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
     console.log(JSON.stringify(result));
   } catch (error) {
     if (!stop.signal.aborted) throw error;
-  } finally { process.removeListener("SIGINT", interrupt); process.removeListener("SIGTERM", interrupt); owner.close(); }
+  } finally {
+    await releaseListener();
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", interrupt);
+    owner.close();
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
