@@ -8,7 +8,7 @@ const browserType = browserEngine === 'webkit' ? webkit : chromium;
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
-import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed, openSearch } from './room-chrome.mjs';
+import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed, openSearch, openConversation } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
 
 
@@ -293,6 +293,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   assert.equal((await api('producer', publication)).result.resultMessageId, delivered.result.resultMessageId);
   await peer.reload();
   await peer.locator('#main').waitFor({ state:'visible' });
+  await openConversation(peer);
   await peer.locator('#assistant-face [data-assistant-reply]').waitFor();
   await peer.locator('#assistant-face [data-assistant-message]').click();
   await peer.locator(`[data-message-record-id="${delivered.result.resultMessageId}"]`).waitFor();
@@ -1096,7 +1097,7 @@ test('human room admin connects assistant without owner identity or redundant st
   await closeSettings(page);
   const member=f.store.room('commons').state.members.guest;
   f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'member.access_changed',data:{memberId:'guest',expectedMemberRevision:member.revision,permissions:['manage_members'],active:true}});
-  await page.reload();await page.locator('#main').waitFor({state:'visible'});
+  await page.reload();await page.locator('#main').waitFor({state:'visible'});await openConversation(page);
   await configureAssistant(page);
   const config=f.store.db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get('commons');
   assert.equal(JSON.parse(config.value).coordinatorMemberId,'producer');

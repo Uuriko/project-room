@@ -1,4 +1,4 @@
-import { clickChrome, openWorkFromSearch } from "./room-chrome.mjs";
+import { clickChrome, openWorkFromSearch, openConversation } from "./room-chrome.mjs";
 // Simulated people in isolated rooms, including real browser failure recovery.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -97,7 +97,11 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   page.on("dialog", dialog => dialog.accept());
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await page.locator("#auth-panel").waitFor();
   assert.equal(await page.locator("#portable-original-body").textContent(), "");
-  await login(); await open("source-b");
+  // Sign-in restores the exact Work Thread from the URL (#6322). Its return
+  // control leads to Updates; continue to Conversation as a member would.
+  await login(); if (await page.locator("#work-navigation-return").isVisible()) await page.locator("#work-navigation-return").click();
+  await openConversation(page);
+  await open("source-b");
   assert.equal(await page.locator("#portable-result").inputValue(), "A different draft.\nChecks: none.");
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
 });
