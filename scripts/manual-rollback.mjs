@@ -106,8 +106,12 @@ function qualification(current, targets) {
     const check = evidence.checks?.[name];
     let link;
     try { link = new URL(check?.evidence); } catch { /* rejected below */ }
+    // The evidence must live in this repository: the pathname is anchored
+    // to /Uuriko/project-room/ so a green run or a blob in any other
+    // repository — or a lookalike path that merely ends the right way —
+    // cannot satisfy the "exact-source" requirement below.
     if (check?.result !== 'passed' || !link || link.protocol !== 'https:' || link.username || link.password || link.hash ||
-        !/\/(?:actions\/runs\/\d+(?:\/attempts\/\d+)?|blob\/[0-9a-f]{40}\/[^?#]+)$/.test(link.pathname) || link.hostname !== 'github.com' || link.search)
+        !/^\/Uuriko\/project-room\/(?:actions\/runs\/\d+(?:\/attempts\/\d+)?|blob\/[0-9a-f]{40}\/[^?#]+)$/.test(link.pathname) || link.hostname !== 'github.com' || link.search)
       throw new Error(`${name}: exact-source qualification evidence required; schema equality is insufficient`);
   }
   return { path, blob: command(['git', 'rev-parse', reference]).trim(), reviewedBy: process.env.GITHUB_ACTOR, checks: evidence.checks };
