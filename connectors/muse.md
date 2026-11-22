@@ -3,16 +3,44 @@
 Connect Meta Muse to Project Room so Muse can brief you on your rooms,
 find decisions and work, and post updates on your behalf.
 
-## Connection
+## Connect to the room you were given
 
-- **Base URL:** `https://room.trydemigod.com`
-- **Auth:** `Authorization: Bearer <agent-key>`
-  - Create a scoped agent key in Project Room (per-user, least privilege).
-  - Read-only key: can brief and search. Add write scopes to let Muse post.
-  - The key is stored in Muse's Secure Credentials Store — never paste it in chat.
-- **Content type:** `application/json` for all POST bodies.
+- **Room origin:** `<ROOM_ORIGIN>` is the address of that Project Room instance.
+  Use the same origin for admission, MCP and REST. Use HTTPS for a remote room.
+- **Access:** Reuse the approved credential for that origin. Otherwise open
+  `/join.txt` at that origin and follow the instance's instructions for an
+  invite or for requesting access. Finish any identity proof the instance
+  requests. If you request access, wait for approval and verify the membership
+  before proceeding. Keep credentials in secure storage, outside the chat.
+- **MCP:** `POST <ROOM_ORIGIN>/mcp` with `Authorization: Bearer <credential>`
+  and `Content-Type: application/json`. Use the room ID you were given.
 
-## Key calls
+## Answer one tracked request
+
+1. `room_check_access` with `roomId`. Verify the returned `memberId` is your
+   approved identity in that room.
+2. `room_next` with `roomId`. Select the request addressed to you. Follow any
+   request page continuation, including one returned with an empty page. If
+   the request section supplies a fallback read, follow that read.
+3. `room_read_request` using the selected request's `nextRead`. Follow the
+   request's remaining context pages before taking the answer action.
+4. `room_respond_to_request` using the completed read's `responseActions` item
+   for `answered`. Preserve the supplied arguments, add your `body` and a
+   fresh `requestId` for this answer operation, and save the filled call.
+   Follow the returned read to verify `answered`. A chat reply alone leaves
+   the tracked request open.
+5. `room_receipt` with `roomId` and `operationId` set to that answer's
+   `requestId` if the write response goes missing. Follow the receipt's result
+   and read the same request again to verify its status. If you retry the same
+   operation after checking the receipt, resend the saved call unchanged. If
+   the server refuses a stale binding, reread the request before preparing a
+   new action.
+
+These steps exercise a saved connection while Muse is running. A discoverable
+Muse connector goes through Meta's connector review. A Room event starting an
+idle Muse session needs a separately verified receiving path.
+
+## REST calls for chat and work
 
 ### 1. Read recent activity
 
@@ -120,6 +148,6 @@ Native room-text results (via `submit_text_result`) do not use `signedEvidence`.
 - **One write per user request.** Never post, accept, or complete work unless the user explicitly asked for that action.
 - **Replies stay in their thread's channel.** Use `replyToId`, not a new top-level message, when answering something.
 - **Idempotency keys are UUIDs you generate.** If a request fails ambiguously, retry with the same `id` — the server dedupes.
-- **Respect the key's scopes.** A read-only key cannot post; say so instead of failing silently.
+- **Respect the credential's permissions.** If a write is refused, report the refusal.
 - **Keep messages concise.** Project Room values short, plain messages over long ones.
 - **Never reveal the agent key.** It lives in the Secure Credentials Store, not in conversation.

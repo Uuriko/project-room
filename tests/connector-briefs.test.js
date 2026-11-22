@@ -7,11 +7,13 @@
 // keys) are skipped; everything else is executed.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const brief = readFileSync(new URL("../connectors/muse.md", import.meta.url), "utf8");
 
@@ -115,4 +117,82 @@ test("connector brief: every example returns 2xx against the real API", async t 
       assert.equal(res.status, 200, `brief GET (line ${step.line}, ${path}) returned ${res.status}: ${await res.text()}`);
     }
   }
+});
+
+test("served Muse guide uses the room origin and recovers an exact formal answer", async t => {
+  const fixture = createAcceptanceFixture();
+  const { store } = fixture;
+  const owner = store.identities.create("Guide owner");
+  const producer = store.identities.create("Guide reader");
+  const { roomId, ownerMemberId } = new AgentRooms(store).create(owner.secret, {
+    roomId: "connector-guide", title: "Connector guide", purpose: "Test an exact reply", kind: "personal",
+    displayName: "Guide owner"
+  });
+  linkWithProof(store, owner.secret, roomId, producer, { displayName: "Guide reader", permissions: [] });
+  store.dmConsents.request(roomId, ownerMemberId, producer.identityId, "Fixture request");
+  store.dmConsents.decide(roomId, producer.identityId, ownerMemberId, "approve");
+  const server = createRoomServer({ store: fixture.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const served = await fetch(`${origin}/connectors/muse.md`);
+  assert.equal(served.status, 200);
+  const guide = await served.text();
+  const originLine = guide.match(/^- \*\*Room origin:\*\* `([^`]+)`/m);
+  assert.equal(originLine?.[1], "<ROOM_ORIGIN>");
+  assert.doesNotMatch(guide, /room\.trydemigod\.com/);
+  const endpoint = guide.match(/^- \*\*MCP:\*\* `POST ([^`]+)`/m)?.[1];
+  assert.equal(endpoint, "<ROOM_ORIGIN>/mcp");
+  const steps = Array.from(guide.matchAll(/^\d+\. `(room_[a-z_]+)`/gm), row => row[1]);
+  const [checkAccess, findRequest, readRequest, answerRequest, checkReceipt] = steps;
+  assert.equal(steps.length, 5);
+
+  async function send(key, tool, args = {}) {
+    const response = await fetch(endpoint.replace("<ROOM_ORIGIN>", origin), {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: tool, arguments: { roomId, ...args } } })
+    });
+    assert.equal(response.status, 200, tool);
+    return response;
+  }
+  async function call(key, tool, args) {
+    const value = await (await send(key, tool, args)).json();
+    assert.ok(!value.error && !value.result?.isError, `${tool}: ${JSON.stringify(value)}`);
+    return value.result.structuredContent;
+  }
+
+  const access = await call(producer.secret, checkAccess);
+  assert.equal(access.memberId, producer.identityId);
+  const opened = await call(owner.secret, "room_request_reply", {
+    requestId: randomUUID(), toMemberId: access.memberId, body: "What did the connector test verify?"
+  });
+  const next = await call(producer.secret, findRequest);
+  const selected = next.requests.items.find(item => item.id === opened.requestMessageId);
+  assert.equal(selected?.nextRead.tool, readRequest);
+  const exact = await call(producer.secret, selected.nextRead.tool, selected.nextRead.arguments);
+  assert.equal(exact.request.status, "open");
+  const action = exact.responseActions.find(entry => entry.arguments.responseOutcome === "answered");
+  assert.equal(action?.tool, answerRequest);
+
+  const operationId = randomUUID();
+  const write = await send(producer.secret, action.tool, {
+    ...action.arguments, requestId: operationId, body: "Verified access and my exact tracked request."
+  });
+  await write.body.cancel(); // The client loses the answer response after sending it.
+  const receipt = await call(producer.secret, checkReceipt, { operationId });
+  assert.equal(receipt.status, "recorded");
+  assert.equal(receipt.operationId, operationId);
+  const settled = await call(producer.secret, readRequest, { requestMessageId: opened.requestMessageId });
+  assert.equal(settled.request.status, "answered");
+  const answers = settled.page.items.filter(item => item.kind === "answered");
+  assert.equal(answers.length, 1);
+  assert.equal(answers[0].eventId, receipt.eventId);
 });
