@@ -1142,7 +1142,7 @@ export class AgentHeartbeats {
   // `more` is true when a signal remains past the cap. Fetching one extra
   // row from each source is enough: the oldest page takes at most `limit`
   // rows from either source.
-  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat", cursor = null, order = "oldest" } = {}) {
+  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat", cursor = null, order = "oldest", observe = true } = {}) {
     checkAgentId(agentId);
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
@@ -1179,7 +1179,7 @@ export class AgentHeartbeats {
     const continuation = more ? combined.length > limit ? page.at(-1) : horizon : null;
     // #3345: a served page is a delivery on this door. Count presentations
     // per store/kind (batched) so emitted vs delivered vs acked reconciles.
-    if (page.length > 0) {
+    if (observe && page.length > 0) {
       const workIds = new Set(work.map(entry => entry.signalId));
       const batches = new Map();
       for (const signal of page) {

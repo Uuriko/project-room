@@ -187,6 +187,8 @@ export class Bridge {
     this.permissionApproverId = permissionApproverId;
     this.permissionTimeoutMs = permissionTimeoutMs; this.permissionPollMs = permissionPollMs;
     this.restartDelayMs = restartDelayMs; this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0; this.wakeCursor = null; this.freshWakeDiscovery = false; this.crashes = []; this.pausedUntil = 0; this.ready = null;
+    this.idleReportedVersion = null;
+    this.idleReportedThrough = null;
     this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
     this.host.onExit?.(info => this.onAgentExit(info));
     this.approverController = new AbortController();
@@ -309,7 +311,10 @@ export class Bridge {
     // are rate limited, polls are the cheap call.
     if (this.fencingToken && Date.now() < this.leaseRenewAt) return true;
     const value = await this.room.heartbeat({ hostId: this.connection.hostId, cadenceSeconds: this.cadenceSeconds });
+    const previousToken = this.fencingToken;
     this.fencingToken = value?.listener?.acquired ? value.listener.fencingToken : null;
+    if (previousToken !== this.fencingToken) this.idleReportedVersion = null;
+    this.idlePickupAvailable = Boolean(this.fencingToken && value?.idlePickupAvailable === true);
     this.firstFormalAck = Boolean(this.fencingToken && value.listener.firstFormalAckRoomId === this.connection.roomId);
     const selection = value?.wakeSelection;
     this.freshWakeDiscovery = Boolean(this.queue.concurrency > 1 && this.fencingToken && selection?.version === 1 && selection.newest === true
@@ -1150,14 +1155,36 @@ export class Bridge {
       await this.discoverRecent();
       if (this.controller.signal.aborted) return;
       if (!(await this.pacePoll())) return;
-      const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: page === 0 && cursor === null ? this.waitMs : 0, signal: this.controller.signal, cursor });
+      const idleProbe = page === 0 && cursor === null && this.idlePickupAvailable && this.queue.isIdle
+        && (this.idleReportedVersion !== this.queue.version || performance.now() >= (this.idleRefreshAt ?? Infinity));
+      const version = this.queue.version;
+      const value = await this.room.poll({ hostId: this.connection.hostId,
+        waitMs: page === 0 && cursor === null && !idleProbe ? this.waitMs : 0,
+        signal: this.controller.signal, cursor });
       const wakes = value?.pendingWakes ?? [];
       this.stageObserver.received(wakes.map(wake => wake.signalId));
       for (const signal of wakes) {
         if (this.controller.signal.aborted) break;
         await this.accept(signal);
       }
-      if (!value?.more) { this.wakeCursor = null; return; }
+      if (!value?.more) {
+        this.wakeCursor = null;
+        const changedWhileIdle = Number.isSafeInteger(value?.idlePickupThrough)
+          && value.idlePickupThrough > (this.idleReportedThrough ?? -1);
+        if (this.idlePickupAvailable && page === 0 && cursor === null && (idleProbe || changedWhileIdle)
+          && !wakes.length && this.queue.isIdle && this.queue.version === version
+          && !this.controller.signal.aborted && !value.paused?.some(entry => entry.roomId === this.connection.roomId)) {
+          const report = await this.room.reportIdle({ hostId: this.connection.hostId, fencingToken: this.fencingToken });
+          if (report?.idlePickup?.roomId === this.connection.roomId) {
+            this.idleReportedVersion = version;
+            this.idleReportedThrough = report.idlePickup.evaluatedThrough;
+            const refresh = report.idlePickup.refreshAfterMs;
+            this.idleRefreshAt = Number.isSafeInteger(refresh) && refresh >= 10000 ? performance.now() + refresh : null;
+            this.log(`room idle pickup: ${report.idlePickup.status}`);
+          }
+        }
+        return;
+      }
       if (typeof value.nextCursor !== "string" || !value.nextCursor || value.nextCursor.length > 1024 || value.nextCursor === cursor)
         throw new RoomError(502, "invalid_wake_cursor", "Room returned a non-progressing wake continuation");
       this.wakeCursor = cursor = value.nextCursor;

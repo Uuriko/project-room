@@ -7,7 +7,7 @@ export class ThreadQueue {
     if (!Number.isInteger(reservedPriority) || reservedPriority < 0 || reservedPriority >= concurrency)
       throw Error('Priority reservation must leave at least one recovery slot');
     Object.assign(this, {run, concurrency, reservedPriority});
-    this.threads = new Map(); this.active = 0; this.normalActive = 0; this.priorityActive = 0; this.pendingPriorityKey = null;
+    this.threads = new Map(); this.active = 0; this.version = 0; this.normalActive = 0; this.priorityActive = 0; this.pendingPriorityKey = null;
     this.waiting = []; this.idleWaiters = [];
   }
 
@@ -26,6 +26,7 @@ export class ThreadQueue {
     if (!thread) { thread = { items: [], busy: false, priority: false }; this.threads.set(threadKey, thread); }
     if (thread.items.some(existing => item.signalId ? existing.signalId === item.signalId : item.messageId && existing.messageId === item.messageId)) return false;
     thread.items.push(item);
+    this.version++;
     if (priority === true && this.reservedPriority > 0) {
       const pending = this.threads.get(this.pendingPriorityKey);
       const newer = !pending?.priorityPosition || !priorityPosition
@@ -69,5 +70,7 @@ export class ThreadQueue {
     }
   }
 
-  idle() { return this.active || this.waiting.length ? new Promise(resolve => this.idleWaiters.push(resolve)) : Promise.resolve(); }
+  get isIdle() { return this.active === 0 && this.waiting.length === 0; }
+
+  idle() { return !this.isIdle ? new Promise(resolve => this.idleWaiters.push(resolve)) : Promise.resolve(); }
 }
