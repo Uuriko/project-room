@@ -852,10 +852,27 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // the HTTP receiving path can hold exclusive queue ownership with a
     // fencing token (see ackHeartbeats). Scoped credentials (room key, or
     // a rak_ key bound to one room) run the room-scoped listener contract.
-    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes", "listenerLease", "disconnect"];
+    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes", "listenerLease", "disconnect", "idlePickup"];
     if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
         || !Object.hasOwn(data, "hostId"))
       reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification, workWakes and listenerLease are optional");
+    if (data.idlePickup !== undefined) {
+      const roomId = data.listenerLease?.roomId;
+      const token = req.headers[LISTENER_TOKEN_HEADER];
+      if (data.idlePickup !== true || !validId(roomId) || typeof token !== "string" ||
+          Object.keys(data).some(field => !["hostId", "listenerLease", "idlePickup"].includes(field)))
+        reject(422, "invalid_heartbeat", "An idle pickup needs the selected room and listener token");
+      return json(res, 200, store.transaction(() => {
+        const current = heartbeatActor(req, requiredScope("heartbeats:report"));
+        if (current.identityId !== initialIdentity || current.roomId && current.roomId !== roomId)
+          reject(403, "room_mismatch", "The idle pickup must name the listener's room");
+        assertListenerFence(store, current, roomId, token);
+        const lease = store.db.prepare("SELECT listener_id FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?")
+          .get(current.identityId, roomId);
+        const status = store.idlePickup?.dispatch(roomId, current.identityId, bearer(req), lease.listener_id) ?? "disabled";
+        return { idlePickup: { roomId, status, evaluatedThrough: store.headSequence(roomId) } };
+      }));
+    }
     // listenerLease: true leases the credential's own scope (the bound
     // room for scoped credentials, the roomless identity queue otherwise);
     // { roomId } names the room queue to lease — the form the standard
@@ -908,8 +925,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // R327-1 (r6): the heartbeat carries the pause state so a machine whose
     // room the owner paused learns it before it asks anything in the room.
     const heartbeatPaused = store.agentHeartbeats.pausedRoomsOf(auth.identityId);
+    const listenerRoom = listener?.firstFormalAckRoomId;
+    const idlePickupAvailable = listenerRoom && store.idlePickup?.supports(listenerRoom, auth.identityId);
     return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, ...(heartbeatPaused.length ? { paused: heartbeatPaused } : {}), more: more === true, next, pushConfigured, reachability,
-      ...(listener ? { listener } : {}), ...(wakeSelection ? { wakeSelection } : {}) });
+      ...(listener ? { listener } : {}), ...(wakeSelection ? { wakeSelection } : {}),
+      ...(idlePickupAvailable ? { idlePickupAvailable: true } : {}) });
   });
 
   const ackHeartbeats = translate(async (req, res, { remoteAddress }) => {
@@ -1052,6 +1072,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // why its room wakes are being held, and learns at once when the pause
     // lands or lifts (releasePauseWaiters wakes the held poll).
     const pausedField = identityId => { const rooms = store.agentHeartbeats.pausedRoomsOf(identityId); return rooms.length ? { paused: rooms } : {}; };
+    const idleSelection = identityId => roomId !== null && store.idlePickup?.supports(roomId, identityId)
+      ? { idlePickupThrough: store.headSequence(roomId) } : {};
     const wakeNext = pendingWakes => [
       ...heartbeatNext(pendingWakes),
       Object.freeze({ action: "poll-wakes", method: "GET", path: "/api/agent-wakes/poll", requiredScope: "heartbeats:read",
@@ -1101,7 +1123,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         // seats that may never read a heartbeat response.
         return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, ...selectionField, pendingWakes: immediate.pendingWakes,
           cadenceSeconds: immediate.cadenceSeconds,
-          more: immediate.more === true, nextCursor: immediate.nextCursor ?? null, ...pausedField(auth.identityId),
+          more: immediate.more === true, nextCursor: immediate.nextCursor ?? null, ...pausedField(auth.identityId), ...idleSelection(auth.identityId),
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
       }
       const startedAt = Date.now();
@@ -1125,7 +1147,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const timedOut = !woken && fresh.pendingWakes.length === 0 && fresh.more !== true;
       return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, ...selectionField, pendingWakes: fresh.pendingWakes,
         cadenceSeconds: fresh.cadenceSeconds,
-        more: fresh.more === true, nextCursor: fresh.nextCursor ?? null, ...pausedField(auth.identityId),
+        more: fresh.more === true, nextCursor: fresh.nextCursor ?? null, ...pausedField(auth.identityId), ...idleSelection(auth.identityId),
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
     } finally {
       release();
