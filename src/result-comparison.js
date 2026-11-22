@@ -1,3 +1,4 @@
+import { exactResultHref } from "./room-deep-link.js";
 import { diffResultLines, diffResultSummary } from "./workflow.js";
 import { uiText } from "./strings.js";
 
@@ -55,6 +56,15 @@ export function createResultComparison({ client, getState, esc }) {
             return `<p class="form-hint"><strong>Resubmitted result.</strong> ${esc(uiText("result.comparisonSummary", { removed: summary.removedLines, added: summary.addedLines }))}</p>` +
               (summary.changedBytes ? `<pre class="result-diff">${body.map(row => `<span class="diff-${row.type}">${esc(row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  ")}${esc(row.text)}</span>`).join("\n")}${rows.length > 200 ? `<span class="form-hint">… ${rows.length - 200} more rows</span>` : ""}</pre>` : `<p class="form-hint">No text changes from the previous version.</p>`);
           })();
+      const earlierLink = exactResultHref({ roomId: previous.roomId, workItemId, completionEventId: previousId });
+      if (earlierLink) {
+        const paragraph = document.createElement("p");
+        const link = document.createElement("a");
+        link.href = earlierLink;
+        link.textContent = uiText("result.openEarlier");
+        paragraph.append(link);
+        box.append(paragraph);
+      }
       const report = previous.workThread?.releaseChecks;
       if (report?.completionEventId === previousId && typeof report.evidenceVersion === "string" && report.evidenceVersion.length > 0
         && report.evidenceVersion === previous.result.receipt.evidenceVersion
