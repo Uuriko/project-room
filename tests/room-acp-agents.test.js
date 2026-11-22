@@ -124,11 +124,12 @@ test("spawnAgent preserves exact locale/location/fixture names and excludes arbi
   for (const name of [...exact, ...excluded]) env[name] = "synthetic-placeholder-" + name.toLowerCase();
   const dir = mkdtempSync(pathJoin(tmpdir(), "room-acp-exact-env-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const { child, peer } = spawnAgent({ command: process.execPath,
+  const { child, exitInfo, stop } = spawnAgent({ command: process.execPath,
     args: ["-e", "require('node:fs').writeFileSync('observed.json',JSON.stringify(process.env))"] }, { cwd: dir, env });
-  t.after(() => { peer.close(); child.kill(); });
-  const code = await new Promise((resolve, reject) => child.once("exit", resolve).once("error", reject));
-  assert.equal(code, 0);
+  t.after(stop);
+  const info = await new Promise((resolve, reject) =>
+    child.once("exit", (code, signal) => resolve(exitInfo(code, signal))).once("error", reject));
+  assert.deepEqual(info, { code: 0, signal: null });
   const observed = JSON.parse(readFileSync(pathJoin(dir, "observed.json"), "utf8"));
   for (const name of [...exact, "HOME", "CODEX_HOME", "CODEX_PATH"]) assert.equal(observed[name], env[name], name);
   for (const name of excluded) assert.equal(Object.hasOwn(observed, name), false, `${name} crossed to child`);

@@ -3,6 +3,12 @@
 // when the agent cannot load sessions).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { Bridge, CRASH_LIMIT } from "../room-acp/src/bridge.mjs";
 import { join } from "../room-acp/src/join.mjs";
 import { SessionMap } from "../room-acp/src/sessions.mjs";
@@ -60,6 +66,45 @@ test('stopping during initialization cannot publish stale readiness', async () =
   host.stop();await assert.rejects(starting);
   await waitFor(()=>child.exitCode!==null||child.signalCode!==null);
   assert.equal(host.running,false);assert.equal(host.capabilities,null);
+});
+
+test('an abruptly stopped POSIX receiver ends its ACP helpers', { skip: process.platform === 'win32' }, async t => {
+  const directory = mkdtempSync(joinPath(tmpdir(), 'acp-receiver-lifetime-'));
+  const started = joinPath(directory, 'started');
+  const finished = joinPath(directory, 'finished');
+  const helper = `
+    import { writeFileSync } from 'node:fs';
+    writeFileSync(${JSON.stringify(started)}, '');
+    setTimeout(() => writeFileSync(${JSON.stringify(finished)}, ''), 1000);
+  `;
+  const adapter = `
+    import { spawn } from 'node:child_process';
+    import { createInterface } from 'node:readline';
+    createInterface({ input: process.stdin }).once('line', line => {
+      const request = JSON.parse(line);
+      spawn(process.execPath, ['--input-type=module', '-e', ${JSON.stringify(helper)}], { stdio: 'ignore' });
+      console.log(JSON.stringify({ jsonrpc: '2.0', id: request.id,
+        result: { protocolVersion: 1, agentCapabilities: {} } }));
+    });
+  `;
+  const hostModule = new URL('../room-acp/src/agent-host.mjs', import.meta.url).href;
+  const receiverScript = `
+    import { AgentHost } from ${JSON.stringify(hostModule)};
+    await new AgentHost({ candidate: { command: process.execPath, args: ['--input-type=module', '-e', ${JSON.stringify(adapter)}] } }).start();
+  `;
+  const receiver = spawn(process.execPath, ['--input-type=module', '-e', receiverScript], { stdio: 'ignore' });
+  const exited = once(receiver, 'exit');
+  t.after(async () => {
+    if (receiver.exitCode === null && receiver.signalCode === null) receiver.kill('SIGKILL');
+    await exited;
+    rmSync(directory, { recursive: true, force: true });
+  });
+  await waitFor(() => existsSync(started), 4000);
+  assert.ok(!existsSync(finished));
+  receiver.kill('SIGKILL');
+  await exited;
+  await delay(1150);
+  assert.ok(!existsSync(finished), 'the helper cannot finish after its receiver was killed');
 });
 
 test('stopping during restart backoff never starts another adapter', async () => {

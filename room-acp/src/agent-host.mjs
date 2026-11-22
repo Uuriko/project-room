@@ -20,18 +20,18 @@ export class AgentHost {
     });
     this.process = spawned;
     let initialized = false;
-    const exited = new Promise(resolve => spawned.child.once("exit", (code, signal) => resolve({ code, signal })));
+    const exited = new Promise(resolve => spawned.child.once("exit", (code, signal) => resolve(spawned.exitInfo(code, signal))));
     exited.then(info => { if (this.process === spawned) { this.process = null; this.capabilities = null; this.sessions.clear(); this.threadOf.clear(); if (initialized) for (const listener of this.exitListeners) listener(info); } });
     spawned.child.once("error", error => this.log(`agent failed to start: ${error.message}`));
     try {
-      const capabilities = await Promise.race([initialize(spawned.peer, { timeoutMs }), exited.then(info => { throw new Error(`agent exited during initialize (code ${info.code})`); })]);
+      const capabilities = await Promise.race([initialize(spawned.peer, { timeoutMs }), exited.then(info => { throw new Error(`agent exited during initialize (${info.error ?? info.code ?? info.signal})`); })]);
       if (this.process !== spawned) throw new Error('agent stopped during initialize');
       this.capabilities = capabilities;
       initialized = true;
       return capabilities;
     } catch (error) {
       if (this.process === spawned) { this.process = null; this.capabilities = null; }
-      spawned.peer.close(); spawned.child.kill();
+      spawned.stop();
       throw error;
     }
   }
@@ -107,6 +107,6 @@ export class AgentHost {
 
   stop() {
     const current = this.process; this.process = null; this.capabilities = null; this.stopped = true;
-    if (current) { current.peer.close(); current.child.kill(); }
+    current?.stop();
   }
 }
