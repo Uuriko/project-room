@@ -185,6 +185,29 @@ test("unconfirmed receipt locks the exact request; ordinary drafts remain separa
 });
 
 
+test("confirmed request offers one link to its original record", { timeout: 30000 }, async t => {
+  const f = await setup(t, { width: 390, height: 844 });
+  const owner = await f.login("owner");
+  const updates = owner.locator("#updates-dialog");
+  if (await updates.isVisible()) await updates.getByRole("button", { name: "Conversation", exact: true }).click();
+  await openComposerOptions(owner);
+  await owner.locator("#request-reply").click();
+  await input(owner).fill("Inspect this exact result.");
+  await owner.locator("#message-to-select").selectOption("producer");
+  await input(owner).press("Enter");
+  await saved(owner);
+
+  const [id] = Object.keys(f.state().replyRequests);
+  assert.ok(id);
+  const savedRequest = owner.locator("#message-delivery").getByRole("link", { name: "View request" });
+  assert.equal(await savedRequest.getAttribute("href", { timeout: 2000 }), `#pr-record/message/${id}`);
+  await savedRequest.click();
+  await owner.locator(`[data-message-record-id="${id}"]`).getByText("Inspect this exact result.", { exact: true }).waitFor();
+  assert.equal(new URL(owner.url()).hash, `#pr-record/message/${id}`);
+  assert.equal(Object.keys(f.state().replyRequests).length, 1);
+  assert.deepEqual(f.errors, []);
+});
+
 test("the original private request keeps receipt and acceptance separate from provider start", { timeout: 30000 }, async t => {
   const f = await setup(t, { width: 390, height: 844 });
   const id = "provider-start-unconfirmed";
@@ -214,16 +237,34 @@ test("the original private request keeps receipt and acceptance separate from pr
 });
 
 test("original conversation shows host progress and recovery without changing the request", { timeout: 60000 }, async t => {
-  const f = await setup(t), requestMessageId = "host-visible";
+  const f = await setup(t, { width: 390, height: 844 }), requestMessageId = "host-visible";
   f.request(requestMessageId, "producer");
   const request = f.state().replyRequests[requestMessageId];
-  const input = { requestMessageId, attemptId: "visible-host", action: "claim",
-    expectedRequestRevision: request.revision, contextEventId: request.contextEventId };
-  f.store.requestRuns.apply(f.keys.producer, "commons", input);
+  const db = openRequestJournal(join(f.directory, "lost-claim.sqlite"));
+  t.after(() => db.close());
+  let providerCalls = 0, attemptId;
+  await assert.rejects(runRequestOnce({
+    connection: {
+      version: 1, origin: f.origin, roomId: "commons", memberId: "producer", token: f.keys.producer,
+      async fetchImpl(url, options) {
+        const response = await fetch(url, options);
+        if (options.method === "POST" && new URL(url).pathname.endsWith("/request-runs")) {
+          attemptId = JSON.parse(options.body).attemptId;
+          throw new TypeError("lost claim response");
+        }
+        return response;
+      },
+    },
+    requestMessageId, db,
+    execute: async () => { providerCalls++; return { body: "Must not execute" }; },
+  }), /lost claim response/);
+  assert.equal(providerCalls, 0);
   const owner = await f.login("owner"), row = (await record(owner, requestMessageId));
-  await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent === "Agent working", requestMessageId);
+  await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent === "Host reserved · start unconfirmed", requestMessageId, { timeout: 4000 });
   assert.equal(f.state().replyRequests[requestMessageId].revision, request.revision);
-  f.store.requestRuns.apply(f.keys.producer, "commons", { ...input, action: "needs_attention" });
+  assert.ok(attemptId);
+  f.store.requestRuns.apply(f.keys.producer, "commons", { requestMessageId, attemptId, action: "needs_attention",
+    expectedRequestRevision: request.revision, contextEventId: request.contextEventId });
   // The operational poll does not require a new room event or a page reload.
   await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent.includes("Host needs attention"), requestMessageId, { timeout: 15000 });
   assert.equal(await row.locator('[data-message-action="request-cancelled"]').count(), 1);

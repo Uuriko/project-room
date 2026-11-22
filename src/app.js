@@ -3190,6 +3190,15 @@ function restoreComposer(draft) {
   syncComposerChrome();
   autosizeComposer();
 }
+function showComposerReceipt(messageId, text, linkText) {
+  const delivery = $("#message-delivery");
+  const link = document.createElement("a");
+  link.href = recordHref("message", messageId);
+  link.textContent = linkText;
+  delivery.replaceChildren(document.createTextNode(text), link);
+  delivery.hidden = false;
+  return delivery;
+}
 function requestRunLabel(id) {
   const request = state?.replyRequests?.[id];
   if (request?.status !== "open") return "";
@@ -3201,7 +3210,8 @@ function requestRunLabel(id) {
     return unavailable ? uiText("currentRoom.executionUnavailable") : "";
   }
   const status = run.state === "working" && Date.now() - run.updatedAt > 120000 ? "unknown" : run.state;
-  return ({ working: "Agent working", result_ready: "Result saved · delivery pending",
+  // The request-run row uses working for the initial reservation.
+  return ({ working: "Host reserved · start unconfirmed", result_ready: "Result saved · delivery pending",
     needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
 }
 async function refreshRequestRuns({ force = false } = {}) {
@@ -4765,14 +4775,11 @@ $("#message-form").addEventListener("submit", e => {
     }
     if (generation !== client.generation || !state) return;
     if (!ownsSendingDraft()) return;
-    const delivery = $("#message-delivery");
     const savedMessageId = data.messageId || sendingCommand.id;
     // An optimistic copy is not history: only a held (read-confirmed) copy counts.
     const visible = state.messages.some(message => message.id === savedMessageId && !message.pendingSend);
-    delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
-    const link = document.createElement("a");
-    link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
-    delivery.append(link);
+    const delivery = showComposerReceipt(savedMessageId,
+      visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending"), uiText("composer.viewSaved"));
     if (receipt?.mentionWarnings?.length)
       delivery.append(document.createTextNode(uiText("composer.mentionUnresolved")));
     if (receipt?.wakeDeliveryEvidence === "unknown")
@@ -4785,7 +4792,6 @@ $("#message-form").addEventListener("submit", e => {
         name: member?.displayName ?? wake.memberId, status: uiText(wakeText[wake.status]),
       })));
     }
-    delivery.hidden = false;
     await commitComposerFiles(data.messageId);
     if (!ownsSendingDraft()) return;
     if (generation !== client.generation || !state) return;
@@ -4942,7 +4948,9 @@ function submitRequest(form) {
       drafts.clear(key); requestMode = null; requestEpoch++;
       restoreComposer(drafts.get(composerKey())); updateReply(); persistDrafts();
       if (mode.resultEventId) renderReturnBrief();
-      notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
+      if (mode.kind === "request") {
+        showComposerReceipt(command.data.messageId, "Request saved. ", "View request");
+      } else notice(mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
     } catch (error) {
       if (generation !== client.generation || session !== identity || !state) return;
       // draftRefused: only a refusal issued after the exact-operation lookup
