@@ -76,31 +76,34 @@ test('a later direct native work selection wins even when an older read complete
  assert.equal(h.state.workItems.first,undefined);assert.equal(h.state.workItems.second.definitionOfDone,'second');assert.equal(h.activeWorkNavigationId,'second');
 });
 
-test('a pending Work Thread re-reads after refresh and opens only the freshly authorized result', async () => {
- const h = harness(), reads = [], opened = [];
- h.client.workContext = () => new Promise(resolve => reads.push(resolve));
- h.card.querySelector = selector => selector === '[data-read-result]' ? { id: 'result-button' } : { open: false };
- Object.assign(h, { updatesUi: null, opened });
- const start = source.indexOf('function showWorkDestination(');
- const end = source.indexOf('// #3795: open the board', start);
- vm.runInContext(`var $=()=>({open:false});var currentWorkOrigin=()=>null;
-  var readResult=()=>opened.push(state.workItems.late.receipt.eventId);
-  ${source.slice(start,end)}this.show=showWorkDestination;`, h);
+for (const firstReadFails of [false, true]) {
+  test(`a pending Work Thread re-reads after refresh when the first read ${firstReadFails ? 'fails' : 'succeeds'}`, async () => {
+   const h = harness(), reads = [], opened = [];
+   h.client.workContext = () => new Promise((resolve, reject) => reads.push({ resolve, reject }));
+   h.card.querySelector = selector => selector === '[data-read-result]' ? { id: 'result-button' } : { open: false };
+   Object.assign(h, { updatesUi: null, opened });
+   const start = source.indexOf('function showWorkDestination(');
+   const end = source.indexOf('// #3795: open the board', start);
+   vm.runInContext(`var $=()=>({open:false});var currentWorkOrigin=()=>null;
+    var readResult=()=>opened.push(state.workItems.late.receipt.eventId);
+    ${source.slice(start,end)}this.show=showWorkDestination;`, h);
 
- h.show('work', 'late', 'thread');
- const result = (revision, eventId) => ({
-  roomId: 'commons', viewerId: 'owner', work: { id: 'late', title: 'Selected work',
-   definitionOfDone: 'Full record', revision, receipt: { eventId } }
- });
- assert.equal(reads.length, 1);
- h.state = { ...h.state, workItems: { late: { revision: 2 } } };
- reads[0](result(1, 'previous-completion'));
- await new Promise(resolve => setImmediate(resolve));
- assert.equal(reads.length, 2);
- assert.deepEqual(opened, []);
- assert.equal(h.state.workItems.late.revision, 2);
- reads[1](result(2, 'current-completion'));
- await new Promise(resolve => setImmediate(resolve));
- assert.deepEqual(opened, ['current-completion']);
- assert.equal(h.pendingWorkThreadEpoch, null);
-});
+   h.show('work', 'late', 'thread');
+   const result = (revision, eventId) => ({
+    roomId: 'commons', viewerId: 'owner', work: { id: 'late', title: 'Selected work',
+     definitionOfDone: 'Full record', revision, receipt: { eventId } }
+   });
+   assert.equal(reads.length, 1);
+   h.state = { ...h.state, workItems: { late: { revision: 2 } } };
+   if (firstReadFails) reads[0].reject(new Error('Selected work response was lost'));
+   else reads[0].resolve(result(1, 'previous-completion'));
+   await new Promise(resolve => setImmediate(resolve));
+   assert.equal(reads.length, 2);
+   assert.deepEqual(opened, []);
+   assert.equal(h.state.workItems.late.revision, 2);
+   reads[1].resolve(result(2, 'current-completion'));
+   await new Promise(resolve => setImmediate(resolve));
+   assert.deepEqual(opened, ['current-completion']);
+   assert.equal(h.pendingWorkThreadEpoch, null);
+  });
+}

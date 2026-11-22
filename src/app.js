@@ -3476,7 +3476,12 @@ async function readSelectedWorkRecord(id, expandDetails, retrySnapshot = pending
   const current = () => context === workNavigationContext() && generation === client.generation
     && identity === session && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
   try {
-    const selected = await client.workContext(id, { includeReplies: false });
+    const selected = await client.workContext(id, { includeReplies: false }).catch(error => {
+      if (held === state) throw error;
+      // Once refreshed, the first response's failure is also stale. The
+      // navigation and snapshot checks below decide whether to re-read.
+      return null;
+    });
     if (!current()) return null;
     if (held !== state) {
       // A refresh can revoke access or replace the result. The same navigation
