@@ -311,6 +311,20 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
   } finally { await changes.return(); watcher.close(); }
 }
 
+function idleHostId(directory, policy) {
+  const file = join(directory, "idle-listener.json");
+  const binding = [policy.origin, policy.roomId, policy.memberId];
+  const saved = readOptionalPrivate(file);
+  if (saved === undefined) {
+    const hostId = `muse-${randomUUID()}`;
+    atomicPrivateJson(file, { binding, hostId });
+    return hostId;
+  }
+  if (JSON.stringify(saved.binding) !== JSON.stringify(binding) || !/^muse-[0-9a-f-]{36}$/.test(saved.hostId))
+    throw Error("invalid_muse_idle_listener");
+  return saved.hostId;
+}
+
 async function main([configFile, connectionDirectory, mode, ...extra]) {
   const routeCheck = mode === "--check-route";
   const receiverAck = extra.includes("--receiver-ack"), advertiseScope = extra.includes("--advertise-scope");
@@ -338,7 +352,7 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   const stop = new AbortController();
   const interrupt = () => stop.abort();
   process.once("SIGINT", interrupt); process.once("SIGTERM", interrupt);
-  const hostId = idlePickup && `muse-${randomUUID()}`;
+  let hostId;
   const listenerClient = signal => new RoomClient({ apiBase: connection.origin, roomId: policy.roomId,
     memberId: policy.memberId, credential: connection.token, signal });
   let fencingToken, nextIdleProbe = 0;
@@ -376,6 +390,7 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
     } }).catch(() => {});
   }
   try {
+    if (idlePickup) hostId = idleHostId(directory, policy);
     const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
     const statusFile = join(directory, "receiver-status.json");
     const sendAck = (command, { signal }) => {

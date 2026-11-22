@@ -266,6 +266,12 @@ test("the Muse CLI leases an idle seat, reconciles its terminal doorbell, and re
   const policyFile = join(f.directory, "muse-policy.json");
   atomicPrivateJson(policyFile, { version: 1, origin, roomId, memberId: recipientId,
     requesters: [requesterId], workItems: [workItemId], requests: [], bootstrapAfter: after, windowSeconds: 5 });
+  const hostId = `muse-${randomUUID()}`;
+  atomicPrivateJson(join(f.directory, "idle-listener.json"), { binding: [origin, roomId, recipientId], hostId });
+  const disconnected = new RoomClient({ apiBase: origin, roomId, memberId: recipientId, credential: agent.secret });
+  const priorLease = await disconnected.heartbeat({ hostId });
+  assert.equal(priorLease.listener.acquired, true);
+  assert.ok(priorLease.listener.leaseExpiresAt > Date.now(), "a crashed helper can leave a live lease");
   const script = fileURLToPath(new URL("../scripts/muse-stream-handoff.mjs", import.meta.url));
   const output = await new Promise((resolve, reject) => {
     const child = execFile(process.execPath, [script, policyFile, "-", "--stay-armed", "--receiver-ack", "--advertise-scope", "--idle-pickup"],
