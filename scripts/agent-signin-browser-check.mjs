@@ -4,6 +4,8 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { exactResultHref } from "../src/room-deep-link.js";
 import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 // After a successful agent session on the standalone page
@@ -267,4 +269,61 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   assert.equal(await page.locator('[name="identityId"]').inputValue(), "");
   assert.equal(await page.locator('[name="secret"]').inputValue(), "");
   assert.equal(await page.locator('[data-agent-secret]').count(), 0);
+});
+
+test("an exact result link never crosses the room selected at agent sign-in", { timeout: 30000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const { store } = fixture;
+  const other = "wrong-room-fixture";
+  store.initialize(initialRoom(other));
+  const identity = store.identities.create("Viewer from another room");
+  const member = linkWithProof(store, store.issueAccessKey(other, "owner"), other, identity, { permissions: [] });
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close();
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const link = exactResultHref({
+    roomId: "commons", workItemId: "linked-work", completionEventId: "linked-completion",
+  }, new URL(origin));
+  const context = await browser.newContext();
+  await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  const page = await context.newPage();
+  page.setDefaultTimeout(5000);
+  const resultRequests = [];
+  page.on("request", request => {
+    if (new URL(request.url()).pathname.endsWith("/work-result")) resultRequests.push(request.method());
+  });
+
+  await page.goto(link);
+  await page.locator("#agent-signin-button").click();
+  const carried = new URL(page.url());
+  assert.equal(carried.searchParams.get("room"), "commons");
+  assert.equal(carried.searchParams.get("record"), new URL(link).hash);
+  await page.locator('[name="identityId"]').fill(identity.identityId);
+  await page.locator('[name="secret"]').fill(identity.secret);
+  await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+  await page.locator(`[data-room-id="${other}"]`).click();
+  await enterRoomFromSigninPage(page);
+  assert.equal(new URL(page.url()).searchParams.get("room"), other);
+  assert.equal(new URL(page.url()).hash, "");
+
+  // Reopen the exact selector without switching the established room session.
+  await page.evaluate(url => {
+    window.history.replaceState(null, "", url);
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }, link);
+  await page.waitForFunction(() => document.querySelector("#status")?.textContent?.includes("That link belongs to another room"));
+  assert.equal(await page.locator("#result-body").isVisible(), false);
+  assert.deepEqual(resultRequests, []);
+  const session = await (await context.request.get(origin + "/api/session")).json();
+  assert.equal(session.roomId, other);
+  assert.equal(session.member.id, member.memberId);
 });
