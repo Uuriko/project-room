@@ -1,9 +1,9 @@
-import { validId } from "./events.js";
+import { ROOM_ID_PATTERN, validId } from "./room-ids.js";
 
 // Public Room deep-link: #room/{roomId}
 // Open and People honor this fragment. Query ?room= stays the account-home twin.
 
-export const ROOM_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+export { ROOM_ID_PATTERN } from "./room-ids.js";
 export const ROOM_HASH_PATTERN = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/;
 export const PUBLIC_ROOM_DOOR = "https://www.getdasha.com/room";
 
