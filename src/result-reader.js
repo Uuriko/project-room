@@ -159,6 +159,26 @@ export function installResultReader({ client, getState, getSession, sameSession,
     else link.addEventListener("click", () => closeResult(false));
     return link;
   }
+  function showResultBody(text) {
+    const body = resultElement("result-body");
+    body.replaceChildren();
+    // Keep exact text for copy, comparison, and passage selection. Only
+    // canonical GitHub file links at a full commit SHA become navigable.
+    const sourceLink = /(?<!\S)https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?(?=$|[\s),;])/gi;
+    let offset = 0;
+    for (const match of text.matchAll(sourceLink)) {
+      const href = match[0];
+      if (new URL(href).href !== href) continue;
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = href;
+      body.append(text.slice(offset, match.index), link);
+      offset = match.index + href.length;
+    }
+    body.append(text.slice(offset));
+  }
   function showReleaseChecks(report) {
     if (!releaseLink || !releasePanel) return;
     const focused = resultView?.focused === true;
@@ -423,7 +443,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         : null;
       view.releaseChecks = value.workThread?.releaseChecks;
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
-      resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
+      showResultBody(view.withdrawn ? "" : value.result.text.body);
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);
