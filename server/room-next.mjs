@@ -336,10 +336,14 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
     }
     // The default stays readable by clients with the original closed output schema.
     if (view === "pickup") {
-      const correction = packet.work?.items.find(item => item.reason === "revise");
+      const work = packet.work?.items;
+      const correction = work?.find(item => item.reason === "revise");
+      const actionableWork = work?.find(item => item.reason !== "permission_required");
       const addressed = correction?.nextRead ?? recoveryRead
-        ?? packet.requests?.items[0]?.nextRead ?? packet.work?.items[0]?.nextRead;
-      packet.nextRead = addressed ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
+        ?? packet.requests?.items[0]?.nextRead ?? actionableWork?.nextRead;
+      // Keep permission recovery visible while checking for useful work that
+      // the member can take without a grant change.
+      packet.nextRead = addressed ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? work?.[0]?.nextRead ?? null;
 
       // A source cursor has already passed its room, viewer and permission checks.
       // Only a cursor issued while walking a combined pickup can certify the other source.
