@@ -7,6 +7,7 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {RoomStore} from '../server/store.mjs';
 import {createRoomServer} from '../server/http.mjs';
+import {settleLanding} from './auth-signin.mjs';
 
 for (const scenario of ['same','other','logout']) for (const privateDraft of [false,true]) {
   const otherAccount=scenario==='other';
@@ -39,6 +40,7 @@ for (const scenario of ['same','other','logout']) for (const privateDraft of [fa
     const origin=`http://127.0.0.1:${server.address().port}`;
     await page.goto(origin+'/fixture/login');
     await page.locator('#connection-status').filter({hasText:/^Connected$/}).waitFor({state:'visible'});
+    await settleLanding(page);
     if(privateDraft) {
       await page.locator('#new-direct-message').click();
       await page.locator('#new-direct-dialog').getByRole('button',{name:'Other'}).click();
@@ -64,6 +66,7 @@ for (const scenario of ['same','other','logout']) for (const privateDraft of [fa
       assert.equal(await page.evaluate(()=>sessionStorage.getItem('project-room:drafts:v3')),null,'old account backup cleared before opening a room');
     } else {
       await page.getByRole('button',{name:'Open Draft test'}).click();
+      await settleLanding(page);
       await page.waitForFunction(()=>document.querySelector('#message-input')?.value==='synthetic private draft');
       assert.equal(await page.locator('#message-input').inputValue(),'synthetic private draft');
       if(privateDraft) {

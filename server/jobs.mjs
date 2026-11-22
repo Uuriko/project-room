@@ -21,7 +21,7 @@ import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
 import { backupFailureDetail, verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
-import { relieveProjectionsIncrementally } from "./store-relief.mjs";
+import { reliefLineBytes, relieveProjectionsIncrementally } from "./store-relief.mjs";
 import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
 import { healBackfillQuarantines } from "./messages-store.mjs";
 
@@ -385,7 +385,7 @@ export function reliefCounts(relief) {
   if (!relief || typeof relief !== "object") return {};
   const out = {};
   for (const [key, name] of [["attempted", "reliefAttempted"], ["relieved", "reliefRelieved"],
-    ["refused", "reliefRefused"], ["freedBytes", "reliefFreedBytes"], ["backupMissing", "reliefBackupMissing"]]) {
+    ["refused", "reliefRefused"], ["freedBytes", "reliefFreedBytes"], ["backupMissing", "reliefBackupMissing"], ["deferred", "reliefDeferred"]]) {
     if (Number.isFinite(relief[key])) out[name] = relief[key];
   }
   return out;
@@ -991,14 +991,21 @@ export const JOBS = Object.freeze([
     // archive door (server/store-relief.mjs), then measured again; only a
     // breach that relief could not clear fails the tick.
     // Relief needs a verified recovery point (the newest verified daily
-    // backup, at most a day old); without one it archives nothing.
+    // backup, at most a day old); without one it archives nothing. On Node
+    // the scheduler supplies a verified local SQLite copy
+    // (server/node-recovery-point.mjs), a refused room backs off per window,
+    // and a 409 pilot_limit on a full projection asks for an early tick.
     async run(store, ctx = {}) {
       let gauges = measureStoreGrowth(store);
       let relief = null;
-      if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
-        const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
+      const { maxProjectionBytes: escalationBytes } = STORE_GROWTH_LIMITS;
+      const limitBytes = reliefLineBytes(store, escalationBytes);
+      if (limitBytes !== null && gauges.maxProjectionBytes > limitBytes) {
         const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
-        relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery });
+        relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery,
+          ...(ctx.reliefBackoff instanceof Map ? { backoff: ctx.reliefBackoff } : {}),
+          ...(Number.isInteger(ctx.reliefCatchUpEvents) && ctx.reliefCatchUpEvents > 0 ? { eventCap: ctx.reliefCatchUpEvents } : {}),
+          ...(typeof ctx.now === "function" ? { now: ctx.now } : {}) });
         // Flat counts: the heartbeat keeps only top-level numbers, so a
         // nested relief object never reached /api/health/jobs.
         gauges = { ...measureStoreGrowth(store), ...reliefCounts(relief) };
@@ -1152,7 +1159,7 @@ export function failureDetailOf(source) {
 // that was just committed; this timer is the retry backstop.
 export function startNodeScheduler({
   store, env = process.env, channelWebhooks = null, gmailAuth = null,
-  tickMs = 1000, fetchImpl, dnsResolvers, now = () => Date.now()
+  tickMs = 1000, fetchImpl, dnsResolvers, now = () => Date.now(), recoveryPoint = null
 } = {}) {
   if (!store) throw new TypeError("node scheduler needs a store");
   const overrides = new Map();
@@ -1224,9 +1231,31 @@ export function startNodeScheduler({
   // retentionIndex so each tick prunes the next table). It must therefore be
   // passed to jobs as-is — a fresh spread copy per tick silently discarded
   // the rotated retentionIndex and every tick pruned table index 0 again.
-  const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, growthTick, retentionIndex: 0 };
+  const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, growthTick, retentionIndex: 0,
+    // Automatic projection relief on Node: a verified local copy is the
+    // recovery point (no R2/KV backup binding here); refused rooms back off
+    // across ticks, and a Node tick may replay more history than the
+    // Worker's CPU-bounded catch-up (it still yields every chunk).
+    // server.mjs passes recoveryPoint (server/node-recovery-point.mjs); the
+    // Worker graph never imports it.
+    ...(typeof recoveryPoint === "function" ? { recoveryPoint } : {}),
+    reliefBackoff: new Map(), reliefCatchUpEvents: NODE_RELIEF_CATCH_UP_EVENTS };
   let timer = null;
   let running = false;
+  // A write refused because a room's projection is full asks for an early
+  // store-growth tick instead of waiting up to an hour. At most one early
+  // tick per NODE_RELIEF_KICK_MS; the job's own backoff still applies.
+  let lastKickAt = -Infinity;
+  if (store && typeof store === "object" && !store.readOnly) {
+    store.onProjectionLimit = () => {
+      const at = now();
+      if (at - lastKickAt < NODE_RELIEF_KICK_MS) return;
+      lastKickAt = at;
+      lastRan.delete("store-growth");
+      const kick = setTimeout(() => { void runOnce(); }, 0);
+      if (typeof kick.unref === "function") kick.unref();
+    };
+  }
   async function runOnce() {
     if (running) return [];
     running = true;
@@ -1331,6 +1360,9 @@ function summaryFailed(result) {
   if (!result || typeof result !== "object") return false;
   return Boolean(result.scanError) || Number(result.errors) > 0;
 }
+
+export const NODE_RELIEF_CATCH_UP_EVENTS = 4000;
+export const NODE_RELIEF_KICK_MS = 15 * 60 * 1000;
 
 export function wireNodeJobs(store, options = {}) {
   store.agentPlugin?.setDispatchKick(() => {
