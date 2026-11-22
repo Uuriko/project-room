@@ -29,15 +29,23 @@ export const REQUIRED_CHECKS = Object.freeze([
 export const PASSING_CONCLUSIONS = Object.freeze(["success", "skipped", "neutral"]);
 
 const SHA = /^[0-9a-f]{40}$/;
+const REQUIRED_PRODUCERS = new Map(REQUIRED_CHECKS.map(name => [
+  name, name === "mechanical" ? "review-mechanical.yml" : "test.yml",
+]));
+const workflowPath = file => `.github/workflows/${file}`;
+const checkKey = (producer, name) => `${producer}\0${name}`;
 
 export function indexLatestCheckRuns(runs) {
-  const byName = new Map();
+  const byProducer = new Map();
   for (const run of runs || []) {
     if (!run || typeof run.name !== "string" || !run.name) continue;
-    const previous = byName.get(run.name);
-    if (!previous || prefer(run, previous)) byName.set(run.name, run);
+    const producer = run.workflowPath ?? (run.app?.slug === "github-actions"
+      ? `suite:${run.check_suite?.id ?? run.id}` : `app:${run.app?.id ?? run.app?.slug ?? "unknown"}`);
+    const key = checkKey(producer, run.name);
+    const previous = byProducer.get(key);
+    if (!previous || prefer(run, previous)) byProducer.set(key, run);
   }
-  return byName;
+  return byProducer;
 }
 
 // One check name can report from several workflow runs on the same head (the
@@ -80,10 +88,12 @@ export function indexLatestStatuses(statuses) {
  * present, so an `autoland` label cannot skip the ready-to-land suite.
  */
 export function evaluateHeadChecks(runs, statuses = []) {
-  const byName = indexLatestCheckRuns(runs);
+  const byProducer = indexLatestCheckRuns(runs);
+  const checkNames = new Set([...byProducer.values()].map(run => run.name));
   const problems = [];
   const pending = [];
-  for (const [name, run] of byName) {
+  for (const run of byProducer.values()) {
+    const { name } = run;
     if (run.status !== "completed") {
       pending.push(`${name}: ${run.status || "unknown"}`);
       continue;
@@ -94,12 +104,12 @@ export function evaluateHeadChecks(runs, statuses = []) {
   }
   const byContext = indexLatestStatuses(statuses);
   for (const [context, status] of byContext) {
-    if (byName.has(context)) continue;
+    if (checkNames.has(context)) continue;
     if (status.state === "pending") pending.push(`${context}: pending`);
     else if (status.state !== "success") problems.push(`${context}: ${status.state || "unknown"}`);
   }
-  for (const name of REQUIRED_CHECKS) {
-    const run = byName.get(name);
+  for (const [name, producer] of REQUIRED_PRODUCERS) {
+    const run = byProducer.get(checkKey(workflowPath(producer), name));
     if (!run) problems.push(`${name}: missing`);
     // `skipped` alone means the labeled suite did not run (no ready-to-land).
     else if (run.conclusion === "skipped") problems.push(`${name}: only skipped (add ready-to-land)`);
@@ -173,6 +183,31 @@ export function paginatedStatuses(repo, sha, request = ghJson) {
     if (batch.length < 100) break;
   }
   return statuses;
+}
+
+function workflowSuites(repo, sha, request) {
+  const suites = new Map();
+  for (let page = 1; page <= 20; page++) {
+    const data = request([`repos/${repo}/actions/runs?head_sha=${sha}&per_page=100&page=${page}`]);
+    const batch = data?.workflow_runs ?? [];
+    for (const run of batch) {
+      if (run.head_sha === sha && typeof run.path === "string" && Number.isSafeInteger(run.check_suite_id)) {
+        suites.set(run.check_suite_id, run.path);
+      }
+    }
+    if (batch.length < 100) break;
+  }
+  return suites;
+}
+
+function evaluatePrHead(repo, sha, request) {
+  const runs = paginatedCheckRuns(repo, sha, request);
+  const suites = workflowSuites(repo, sha, request);
+  return evaluateHeadChecks(runs.map(run => ({
+    ...run,
+    workflowPath: run.head_sha === sha && run.app?.slug === "github-actions"
+      ? suites.get(run.check_suite?.id) : undefined,
+  })), paginatedStatuses(repo, sha, request));
 }
 
 export function listOpenLabeledIssues(repo, request = ghJson) {
@@ -289,7 +324,7 @@ export async function autoland({
       skipped.push({ number: issue.number, reason: "head sha missing" });
       continue;
     }
-    const evaluation = evaluateHeadChecks(paginatedCheckRuns(repo, sha, api), paginatedStatuses(repo, sha, api));
+    const evaluation = evaluatePrHead(repo, sha, api);
     const eligibility = isEligiblePr(pr, evaluation);
     if (!eligibility.ok) {
       skipped.push({ number: pr.number, reason: eligibility.reason, sha });
@@ -304,14 +339,16 @@ export async function autoland({
     // Re-read immediately before merge so a just-landed neighbor cannot
     // leave this PR dirty while we still think it is CLEAN.
     const fresh = loadPr(repo, pr.number, api);
-    const freshEval = evaluateHeadChecks(
-      paginatedCheckRuns(repo, fresh.head.sha, api),
-      paginatedStatuses(repo, fresh.head.sha, api),
-    );
+    if (fresh.head?.sha !== sha) {
+      skipped.push({ number: pr.number, reason: "head moved", sha });
+      appendSummary(`#${pr.number} skipped at merge time: head moved`, env);
+      continue;
+    }
+    const freshEval = evaluatePrHead(repo, sha, api);
     const freshEligibility = isEligiblePr(fresh, freshEval);
-    if (!freshEligibility.ok || fresh.head.sha !== sha) {
-      skipped.push({ number: pr.number, reason: freshEligibility.ok ? "head moved" : freshEligibility.reason, sha });
-      appendSummary(`#${pr.number} skipped at merge time: ${freshEligibility.ok ? "head moved" : freshEligibility.reason}`, env);
+    if (!freshEligibility.ok) {
+      skipped.push({ number: pr.number, reason: freshEligibility.reason, sha });
+      appendSummary(`#${pr.number} skipped at merge time: ${freshEligibility.reason}`, env);
       continue;
     }
     api(
