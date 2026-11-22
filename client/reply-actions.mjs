@@ -195,16 +195,21 @@ const listedRequestKeys = request => {
 };
 const selectedContextFields = ["contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason"];
 const selectedProgressFields = ["acknowledgedAt", "lastActivityAt", "progressState", "progressNote", "progressEventId"];
+const selectedStageClocks = ["acceptedAt", "workingAt", "needsInputAt", "errorAt"];
 function selectedRequestKeys(request) {
   if (!request) return false;
   const stamped = Object.hasOwn(request, "answerCredential");
-  const progress = selectedProgressFields.some(key => Object.hasOwn(request, key));
-  return keys(request, [...requestFields, ...selectedContextFields, ...(stamped ? ["answerCredential"] : []),
-    ...(progress ? selectedProgressFields : [])])
-    && (!progress || date(request.acknowledgedAt) && date(request.lastActivityAt)
-      && Date.parse(request.acknowledgedAt) <= Date.parse(request.lastActivityAt)
-      && validProgress({ state: request.progressState, note: request.progressNote, at: request.lastActivityAt })
-      && validId(request.progressEventId));
+  const clocks = selectedStageClocks.filter(key => Object.hasOwn(request, key));
+  const progress = clocks.length > 0 || selectedProgressFields.some(key => Object.hasOwn(request, key));
+  if (!keys(request, [...requestFields, ...selectedContextFields, ...(stamped ? ["answerCredential"] : []),
+    ...(progress ? selectedProgressFields : []), ...clocks])) return false;
+  if (!progress) return true;
+  const first = Date.parse(request.acknowledgedAt), latest = Date.parse(request.lastActivityAt);
+  return date(request.acknowledgedAt) && date(request.lastActivityAt) && first <= latest
+    && validProgress({ state: request.progressState, note: request.progressNote, at: request.lastActivityAt })
+    && validId(request.progressEventId)
+    && clocks.every(key => date(request[key]) && first <= Date.parse(request[key]) && Date.parse(request[key]) <= latest)
+    && (request.workingAt === undefined || date(request.acceptedAt) && Date.parse(request.acceptedAt) <= Date.parse(request.workingAt));
 }
 function validRequest(request) {
   return request && ["id", "openingEventId", "requesterId", "recipientId", "contextEventId"].every(key => validId(request[key]))

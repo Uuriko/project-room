@@ -1165,6 +1165,29 @@ test("an acknowledged request remains readable with its exact answer basis", asy
     { code: "invalid_response" });
 });
 
+test("a fresh request reader accepts recorded progress clocks without changing the answer basis", async t => {
+  const f = await fixture(t), q = f.open(), requestMessageId = q.command.data.messageId;
+  const initial = await f.client.replyContext(requestMessageId);
+  const stages = [
+    ["accepted", "acceptedAt"], ["working", "workingAt"], ["needs_input", "needsInputAt"], ["error", "errorAt"]
+  ];
+  for (const [progress, clock] of stages) {
+    await f.client.replyAction("room_progress_request", {
+      requestId: "record-stage-" + progress, requestMessageId, expectedRequestRevision: 0,
+      progress, note: "Progress recorded by the receiving host."
+    });
+    const resumed = await new RoomAgentClient(f.config).replyContext(requestMessageId);
+    assert.equal(resumed.request.progressState, progress);
+    assert.equal(resumed.request[clock], resumed.request.lastActivityAt);
+    assert.deepEqual(resumed.current.answerBasis, initial.current.answerBasis);
+    const badRead = structuredClone(resumed);
+    badRead.request[clock] = "9999-01-01T00:00:00Z";
+    assert.throws(() => validateReplyRead(badRead, {
+      name: "room_read_request", args: { requestMessageId }, roomId: "commons"
+    }), { code: "invalid_response" });
+  }
+});
+
 test("the request hint skips ordinary room events and contains only exact pointer metadata", async t => {
   const f = await fixture(t), after = f.store.room("commons").sequence;
   f.store.command(f.keys.owner, "commons", { id: "noise", type: "message.posted", data: { messageId: "noise", body: "unrelated" } });
