@@ -140,13 +140,20 @@ test("lost committed answer remains exact and read-only across reload, then retr
   const f = await setup(t); f.request("retry");
   const page = await f.login("guest");
   await mode(page, "retry", "answered"); await input(page).fill("One answer only.");
-  const commands = []; let lose = true;
+  const commands = [], receipts = [];
   await page.route("**/api/rooms/commons/commands", async route => {
     commands.push(route.request().postDataJSON());
-    if (lose) { lose = false; await route.fetch(); await route.abort("failed"); }
-    else await route.continue();
+    const response = await route.fetch();
+    const receipt = await response.json();
+    receipts.push({ status: response.status(), duplicate: receipt.duplicate, eventId: receipt.event?.id });
+    if (receipts.length === 1) await route.abort("failed");
+    else await route.fulfill({ response });
   });
   await input(page).press("Enter"); await failed(page);
+  assert.equal(receipts[0].status, 201);
+  assert.equal(receipts[0].duplicate, false);
+  assert.equal(typeof receipts[0].eventId, "string");
+  assert.equal(f.state().replyRequests.retry.status, "answered", "the dropped response must follow a committed answer");
   assert.equal(await input(page).evaluate(el => el.readOnly), true);
   assert.equal(await page.locator("#request-refresh").isVisible(), false);
   page.once("dialog", dialog => dialog.accept()); await page.reload();
@@ -155,6 +162,7 @@ test("lost committed answer remains exact and read-only across reload, then retr
   assert.equal(await input(page).evaluate(el => el.readOnly), true);
   await page.getByRole("button", { name: "Retry original", exact: true }).click(); await saved(page);
   assert.equal(commands.length, 2); assert.deepEqual(commands[0], commands[1]);
+  assert.deepEqual(receipts[1], { status: 200, duplicate: true, eventId: receipts[0].eventId });
   assert.equal(f.state().messages.filter(message => message.body === "One answer only.").length, 1);
   assert.deepEqual(f.errors, []);
 });
