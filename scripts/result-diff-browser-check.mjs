@@ -343,7 +343,8 @@ test("the verdict links exact candidate release checks without claiming missing 
 });
 
 test("shared result links keep identical old and new text bound to different verdicts", { timeout: 45000 }, async t => {
-  const source = "https://example.test/pinned/src";
+  const revision = "a".repeat(40);
+  const source = `https://github.com/room-fixtures/pinned-result/blob/${revision}`;
   const verdictSource = source + "/src/result-reader.js#L401-L411";
   const regressionSource = source + "/scripts/pin.mjs#L10-L20";
   const body = [
@@ -351,6 +352,7 @@ test("shared result links keep identical old and new text bound to different ver
     "Verdict binding: " + verdictSource,
     "Regression: " + regressionSource,
     "Literal moving link: https://github.com/Uuriko/project-room/blob/main/src/result-reader.js",
+    `Literal unsupported host: https://example.test/room-fixtures/pinned-result/blob/${revision}/src/result-reader.js`,
     "Literal noncanonical link: " + source + "/../../../../main/src/result-reader.js",
     "Literal comma path: " + source + "/docs/a,b.md",
     "Literal semicolon path: " + source + "/docs/a;b.md",
@@ -398,7 +400,7 @@ test("shared result links keep identical old and new text bound to different ver
   assert.deepEqual(await receiver.locator("#result-body a").evaluateAll(links => links.map(link => link.href)),
     [verdictSource, regressionSource]);
   const requests = [];
-  await receiver.context().route("https://example.test/**", async route => {
+  await receiver.context().route("https://github.com/room-fixtures/pinned-result/**", async route => {
     requests.push(route.request().url());
     await route.fulfill({ body: "Pinned public source destination" });
   });
