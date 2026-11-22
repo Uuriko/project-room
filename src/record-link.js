@@ -30,11 +30,11 @@ export function agentSigninRecord({ search = "", hash = "" }) {
   const rooms = new URLSearchParams(search).getAll("room");
   if (rooms.length !== 1 || !validRecordId(rooms[0])) return null;
   const exact = exactResultDestination({ search, hash });
-  if (exact) return { roomId: exact.roomId, hash };
+  if (exact) return { ...exact, hash };
   const work = /^#pr-record\/work\/([^/]+)$/.exec(hash);
   if (!work) return null;
   try {
     const id = decodeURIComponent(work[1]);
-    return validRecordId(id) ? { roomId: rooms[0], hash: `#pr-record/work/${encodeURIComponent(id)}` } : null;
+    return validRecordId(id) ? { roomId: rooms[0], workItemId:id, hash: `#pr-record/work/${encodeURIComponent(id)}` } : null;
   } catch { return null; }
 }

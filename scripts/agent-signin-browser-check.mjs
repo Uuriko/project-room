@@ -4,6 +4,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 // After a successful agent session on the standalone page
@@ -318,4 +319,33 @@ test("a pinned Work Thread retries the same room without re-entering the saved i
   await page.locator('[data-work-record-id="saved-work-thread"]').waitFor({ state: "visible" });
   assert.deepEqual(authReads, [["/api/auth/agent/session", 403], ["/api/auth/agent/session", 201]]);
   assert.equal(await page.locator("#identity-label").textContent(), identity.displayName);
+
+  f.store.initialize(initialRoom("other-room"));
+  linkWithProof(f.store, f.store.issueAccessKey("other-room", "owner"), "other-room", identity, { permissions: ["accept_work"] });
+  const wrong = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  wrong.setDefaultTimeout(6000);
+  const wrongLink = new URL("/agent-signin", origin);
+  wrongLink.searchParams.set("room", "other-room");
+  wrongLink.searchParams.set("record", hash);
+  await wrong.goto(wrongLink.href);
+  await wrong.locator('[name="identityId"]').fill(identity.identityId);
+  await wrong.locator('[name="secret"]').fill(identity.secret);
+  const before = f.store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id='other-room' AND kind='session'").get().n;
+  const refusal = wrong.waitForResponse(response => response.url().endsWith("/api/auth/agent/session"));
+  await wrong.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+  assert.equal((await refusal).status(), 404);
+  await wrong.getByText("Work item not found in this Room", { exact: true }).waitFor();
+  assert.equal(new URL(wrong.url()).pathname, "/agent-signin");
+  assert.equal(await wrong.locator("#agent-signin-enter-link").isVisible(), false);
+  assert.equal((await wrong.context().cookies()).some(cookie => cookie.name === "room_session"), false);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id='other-room' AND kind='session'").get().n, before);
+
+  const beforeExact = f.store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id='commons' AND kind='session'").get().n;
+  const absentCompletion = await wrong.request.post(origin + "/api/auth/agent/session", {
+    headers: { Origin: origin, Authorization: "Bearer " + identity.secret },
+    data: { identityId: identity.identityId, roomId: "commons", workItemId: "saved-work-thread", completionEventId: "absent-completion" },
+  });
+  assert.equal(absentCompletion.status(), 404);
+  assert.equal(absentCompletion.headers()["set-cookie"], undefined);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id='commons' AND kind='session'").get().n, beforeExact);
 });

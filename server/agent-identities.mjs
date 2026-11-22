@@ -1453,7 +1453,7 @@ export class AgentIdentities {
       try {
         return withCurrentReadContext(this.db,row.roomId,()=>{
           const member = memberOf(this.store.roomAuthority(row.roomId,{memberId:row.memberId}).members, row.memberId);
-          if (!member || member.active === false) return false;
+          if (!member || member.active === false || !this.store.agentConnections.identityAuthority(row.roomId, row.memberId)) return false;
           if(isCurrentRoom(this.db,row.roomId)) {
             const room=readCurrentRecord(this.db,row.roomId,'metadata','room');
             row.title=room?.title||row.roomId;

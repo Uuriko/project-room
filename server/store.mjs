@@ -5254,7 +5254,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   insertCredential(roomId, memberId, kind, parent, expiresAt, identitySecretHash = null) {
-    if (this.agentConnections.row(roomId, memberId)) fail(409, "managed_agent", "Replace this agent's key through its room connection");
+    const managed = this.agentConnections.row(roomId, memberId);
+    if (managed && !this.agentConnections.matchesFriendBrowserSession(managed, {
+      kind, parent_hash: parent, identity_secret_hash: identitySecretHash, expires_at: expiresAt
+    })) fail(409, "managed_agent", "Replace this agent's key through its room connection");
     const count = this.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id=?").get(roomId).n;
     if (count >= 5000) fail(409, "pilot_limit", "Credential retention limit reached; administrator maintenance required");
     const member = this.roomAuthority(roomId, { memberId }).members[memberId];
@@ -5430,7 +5433,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // If the secret is rotated or revoked, authenticate() rejects sessions
       // carrying the old hash.
       const secretRow = this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId);
-      const token = this.insertCredential(roomId, link.member.id, "session", null, this.now() + 8 * 3600000, secretRow?.secretHash ?? null);
+      // A sponsored browser session is subordinate to both the current
+      // connection generation and the saved identity secret.
+      const connection = this.agentConnections.row(roomId, link.member.id);
+      const expiresAt = Math.min(this.now() + 8 * 3600000, connection?.expires_at ?? Infinity);
+      const token = this.insertCredential(roomId, link.member.id, "session", connection?.credential_hash ?? null, expiresAt, secretRow?.secretHash ?? null);
       return { token, session: this.authenticate(token) };
     });
   }

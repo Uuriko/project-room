@@ -3390,14 +3390,26 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         checkOrigin(req, true);
         rate(`login:${remoteAddress}`, 10);
         const data = await body(req);
-        if (!exact(data, ["identityId", "roomId"]) || typeof data.identityId !== "string" || typeof data.roomId !== "string") {
-          reject(422, "invalid_login", "An agent identity ID and room are required");
+        const { identityId, roomId, workItemId, completionEventId } = data;
+        const fields = ["identityId", "roomId"];
+        if (workItemId !== undefined) fields.push("workItemId");
+        if (completionEventId !== undefined) fields.push("completionEventId");
+        if (!exact(data, fields) || typeof identityId !== "string" || typeof roomId !== "string"
+          || workItemId !== undefined && !validId(workItemId)
+          || completionEventId !== undefined && (!workItemId || !validId(completionEventId))) {
+          reject(422, "invalid_login", "An agent identity ID, room, and optional exact work selection are required");
         }
         const secret = bearer(req);
         if (!secret) reject(401, "unauthenticated", "Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
-        // Verify the secret before creating the session
-        store.identities.authenticateIdentitySecret(data.identityId, secret);
-        const { token, session } = store.createAgentSession(data.identityId, data.roomId);
+        store.identities.authenticateIdentitySecret(identityId, secret);
+        const { token, session } = workItemId === undefined ? store.createAgentSession(identityId, roomId) : store.transaction(() => {
+          const created = store.createAgentSession(identityId, roomId);
+          // A link selects a record, not just a room. A refused record must
+          // leave neither a new browser credential nor a navigation target.
+          if (completionEventId === undefined) store.workContext(created.token, roomId, workItemId);
+          else store.workResult(created.token, roomId, workItemId, { completionEventId });
+          return created;
+        });
         setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
         return json(res, 201, sessionView(session));
       }

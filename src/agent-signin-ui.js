@@ -21,7 +21,7 @@ import { escapeHtml } from "./html-escape.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 import { submitIdentityMint } from "./account-client.js";
 
-export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRoomId = null }) {
+export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRecord = null }) {
   let container = null;
   let phase = "credentials";
   let identityId = "";
@@ -188,7 +188,13 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRoomId 
         "Content-Type": "application/json",
         "Authorization": `Bearer ${signinSecret}`
       },
-      body: JSON.stringify({ identityId: signinIdentityId, roomId }),
+      body: JSON.stringify({
+        identityId: signinIdentityId, roomId,
+        ...(phase === "target-room" && {
+          workItemId: targetRecord.workItemId,
+          ...(targetRecord.completionEventId && { completionEventId: targetRecord.completionEventId })
+        })
+      }),
       credentials: "same-origin"
     });
     if (!res.ok) {
@@ -215,7 +221,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRoomId 
     if (t?.closest?.("[data-agent-back-to-rooms]")) { phase = "rooms"; render(); return; }
     if (t?.closest?.("[data-agent-create-room]")) { phase = "make-room"; render(); return; }
     if (t?.closest?.("[data-agent-retry-room]") && phase === "target-room") {
-      await withBusy(() => startSession(identityId, targetRoomId, secret));
+      await withBusy(() => startSession(identityId, targetRecord.roomId, secret));
       return;
     }
     if (t?.closest?.("[data-agent-back]")) {
@@ -296,9 +302,9 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions, targetRoomId 
         setError("Enter both your identity ID and secret.");
         return;
       }
-      if (targetRoomId) {
+      if (targetRecord) {
         phase = "target-room";
-        await withBusy(() => startSession(identityId, targetRoomId, secret));
+        await withBusy(() => startSession(identityId, targetRecord.roomId, secret));
         return;
       }
       await withBusy(async () => {

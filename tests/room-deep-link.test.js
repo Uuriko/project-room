@@ -40,9 +40,9 @@ test("selectedRoomFromLocation prefers #room/{id} over ?room=", () => {
 test("agent sign-in carries only room-bound work and exact result selectors", () => {
   const search = "?room=commons";
   assert.deepEqual(agentSigninRecord({ search, hash:"#pr-record/work/review%3A43" }),
-    { roomId:"commons", hash:"#pr-record/work/review%3A43" });
+    { roomId:"commons", workItemId:"review:43", hash:"#pr-record/work/review%3A43" });
   assert.deepEqual(agentSigninRecord({ search, hash:"#pr-record/result/review/receipt" }),
-    { roomId:"commons", hash:"#pr-record/result/review/receipt" });
+    { roomId:"commons", workItemId:"review", completionEventId:"receipt", hash:"#pr-record/result/review/receipt" });
   for (const hash of ["https://example.com", "#join/token", "#pr-record/work/%2Ftarget", "#pr-record/work/%ZA", "#pr-record/result/review/receipt/extra"]) {
     assert.equal(agentSigninRecord({ search, hash }), null);
   }
