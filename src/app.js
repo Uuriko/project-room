@@ -4208,7 +4208,9 @@ function timelineWorkEntries(onlyId) {
     draftsByWork.get(message.workItemId).push(message);
   }
   return Object.values(state.workItems)
-    .filter(item => onlyId === undefined || item.id === onlyId)
+    // The collection may retain identifiers for private work, but its masked
+    // rows have no visible title or criteria and cannot supply a work card.
+    .filter(item => item.title !== null && (onlyId === undefined || item.id === onlyId))
     .map(item => {
       const proposals = draftsByWork.get(item.id) ?? [];
       // proposals is built newest-first via reverse iteration; the most recent
