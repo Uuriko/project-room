@@ -648,4 +648,14 @@ test('restart surfaces a review interrupted before output and never runs it twic
   assert.equal(f.pendingRows().delivered_at, null);
   const exact = await f.readAsProducer(f.wake.nextRead);
   assert.equal(exact.reviewRuntime.status, 'interrupted');
+
+  // A replacement runtime may have the seat and lease but lose its local disk.
+  const receipts = fresh.reviewReceipts;
+  rmSync(join(receipts.dir, receipts.key(f.wake.signalId) + '.json'));
+  const replacement = f.make();
+  assert.equal(await replacement.lease(), true);
+  await replacement.accept(f.wake);
+  await replacement.queue.idle();
+  assert.deepEqual(f.counts, {prompt:1,write:0,receipt:0,ack:0});
+  assert.equal(f.pendingRows().delivered_at, null);
 });

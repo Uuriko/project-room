@@ -619,16 +619,21 @@ export class Bridge {
         const reportPhase = phase => {
           if (!this.reviewReceipts.dir || !this.fencingToken) return;
           const path = '/api/rooms/' + encodeURIComponent(this.connection.roomId) + '/review-runtime';
-          void this.reviewRuntimeRoom.request(path, {
+          return this.reviewRuntimeRoom.request(path, {
             body: { ...binding, attemptId, phase }, signal: AbortSignal.timeout(1500),
-          }).catch(() => {});
+          });
         };
-        reportPhase('claimed');
+        const claimAllowsDispatch = reportPhase('claimed')?.then(
+          observation => observation?.status === 'claimed',
+          error => !(error instanceof RoomError && error.code === 'review_runtime_attempt_conflict'),
+        );
         await this.agentReady();
         if (this.controller.signal.aborted) return;
         this.stageObserver.mark(signalIds,'session_preparing');
         const {sessionId} = await this.host.session(threadKey);
         this.stageObserver.mark(signalIds,'session_ready');
+        // An observed dispatch or interruption survives loss of local state.
+        if (await claimAllowsDispatch === false) return;
         await this.assertListener();
         const started = this.reviewReceipts.begin(signalId,{binding,signalId,requestId:attemptId});
         if (!started.fresh) return;
@@ -637,7 +642,7 @@ export class Bridge {
           onDispatched:()=>this.stageObserver.mark(signalIds,'prompt_dispatch_attempt',receipt.requestId),
           onFirstOutput:kind=>{
             this.stageObserver.mark(signalIds,'first_observable_output',receipt.requestId,kind);
-            reportPhase('started');
+            void reportPhase('started')?.catch(() => {});
           }});
         this.stageObserver.mark(signalIds,'review_prompt_returned',receipt.requestId);
         this.stats.turns++;
