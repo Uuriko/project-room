@@ -98,7 +98,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     });
     assert.equal(spoofed.status, 422);
     server.closeStreams();
-    await waiting;
+    await assert.rejects(waiting, { status: 503, code: 'request_stream_disconnected' });
     assert.equal((await preview(owner)).status, "unknown");
     assert.equal(store.headSequence("commons"), sequence);
   });
