@@ -5806,11 +5806,18 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         if (params.has("operationId")) {
           const operationId = params.get("operationId");
           if (!validId(operationId) || [...params.keys()].some(key =>
-            !["operationId", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
-            || (params.has("limit") && params.get("limit") !== "1")) {
+            !["operationId", "limit", "auth", "view"].includes(key) || params.getAll(key).length !== 1)
+            || (params.has("limit") && params.get("limit") !== "1")
+            || (params.has("view") && (params.get("view") !== "browser" || selected.bearer))) {
             reject(422, "invalid_operation_selection", "Provide one operation ID without an event cursor");
           }
-          return json(res, 200, store.operationReceipt(selected.token, roomId, operationId, fence));
+          const receipt = store.operationReceipt(selected.token, roomId, operationId, fence);
+          if (!params.has("view")) return json(res, 200, receipt);
+          return json(res, 200, {
+            readKind: "operation-receipt", receipt, roomId, viewerId: auth.member.id,
+            viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+            viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null
+          });
         }
         if(params.has('view')){
           if(params.get('view')!=='browser'||[...params.keys()].some(key=>!['view','after','limit','eventId','auth'].includes(key)||params.getAll(key).length!==1)||params.has('eventId')&&(params.has('after')||params.has('limit')))
