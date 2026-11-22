@@ -471,7 +471,7 @@ let leavingPage = false;
 let composerFiles = [];
 let composerReselectId = null;
 let roomFilesByMessage = new Map();
-let roomFilesSelection = [], roomFilesNextCursor = null, roomFilesLoading = false, roomFilesAttemptKey = null, roomFilesFlight = null;
+let roomFilesSelection = [], roomFilesNextCursor = null, roomFilesLoading = false, roomFilesAttempt = null, roomFilesFlight = null;
 const messageFileDownloads = new Map();
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
@@ -558,6 +558,7 @@ const client = new RoomClient({
     $("#identity-label").textContent = displayName(session.member.id);
     $("#identity-label").title = `${memberLabel(session.member.id)} · ${kindLabel(session.member.kind)}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
+    if (roomFilesAttempt?.failed) roomFilesAttempt = null;
     render();
     syncRoomLifecycle();
     shareLinksUI?.sync();
@@ -568,13 +569,13 @@ const client = new RoomClient({
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
     if (presenceBoundary) startPresencePoll();
-    if(partialWorkSnapshot&&!firstSnapshot)void refreshRoomFiles();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       const accountId = accountClient.session?.account?.id ?? session?.account?.id;
       if (accountId) rememberMemberRoom(accountId, roomId, undefined, state.room?.title);
       if (session?.member?.id) rememberMemberRoom(session.member.id, roomId, undefined, state.room?.title);
-      void refreshRoomFiles();
+      // Partial snapshots load attachments for the visible selection in renderMessages.
+      if (!partialWorkSnapshot) void refreshRoomFiles();
       void refreshDmConsents();
       void refreshFriendBonds();
       void refreshSavedIds();
@@ -721,7 +722,7 @@ const client = new RoomClient({
     showSigninMethods();
     clearStoredPasswords();
     composerFiles = [];
-    roomFilesByMessage = new Map();roomFilesSelection=[];roomFilesNextCursor=null;roomFilesLoading=false;roomFilesAttemptKey=null;roomFilesFlight=null;
+    roomFilesByMessage = new Map();roomFilesSelection=[];roomFilesNextCursor=null;roomFilesLoading=false;roomFilesAttempt=null;roomFilesFlight=null;
     messageFileDownloads.clear();
     renderComposerFiles();
     $("#work-dialog").close();
@@ -2594,7 +2595,7 @@ function renderMessages() {
   directWindow.pin(activeDirectMemberId ? currentThreadId : null);
   if (activeDirectMemberId) directWindow.sync(client.sequence);
   const pairWindow = directWindow.view();
-  if(partialWorkSnapshot&&session&&!roomFilesLoading){const key=JSON.stringify([client.generation,client.sequence,visibleConversationMessages().filter(m=>!m.pendingSend&&!m.deletedAt).slice(-8).map(m=>m.id).sort()]);if(key!==roomFilesAttemptKey){roomFilesAttemptKey=key;queueMicrotask(()=>void refreshRoomFiles());}}
+  if (partialWorkSnapshot && session && !roomFilesLoading) queueMicrotask(() => void refreshRoomFiles(false, null, true));
   const list = $("#message-list"), view = conversationViewKey();
   const sameView = list.dataset.view === view;
   if (!sameView) syncChatSuggestions();
@@ -2977,13 +2978,19 @@ function scheduleRoomFilesRefresh() {
   roomFilesRefreshTimers.forEach(clearTimeout);
   roomFilesRefreshTimers = ROOM_FILE_REFRESH_DELAYS_MS.map(delay => setTimeout(() => void refreshRoomFiles(), delay));
 }
-async function refreshRoomFiles(more=false, selectedIds=null) {
-  if (!state || !session || !client.session || roomFilesLoading) return;
+async function refreshRoomFiles(more=false, selectedIds=null, fromRender=false) {
+  if (!state || !session || !client.session || roomFilesLoading || (fromRender && !partialWorkSnapshot)) return;
   const generation = client.generation;
   const roomId = state.room?.id, authSession=client.session, viewKey=conversationViewKey(), ticket={};
+  let attempt = null;
   try {
     const selection=partialWorkSnapshot?more?roomFilesSelection:selectedIds??[...new Set(visibleConversationMessages().filter(m=>!m.pendingSend&&!m.deletedAt).slice(-8).map(m=>m.id))].sort():[];
     if(partialWorkSnapshot&&!selection.length)return;
+    if (fromRender) {
+      const key = JSON.stringify([generation, client.sequence, viewKey, selection]);
+      if (roomFilesAttempt?.key === key) return;
+      attempt = roomFilesAttempt = { key, failed: false };
+    }
     const cursor=more?roomFilesNextCursor:null;
     if(more&&JSON.stringify(selection)!==JSON.stringify(roomFilesSelection))return;
     const query=new URLSearchParams();for(const id of selection)query.append('messageId',id);if(cursor)query.set('cursor',cursor);
@@ -3001,7 +3008,10 @@ async function refreshRoomFiles(more=false, selectedIds=null) {
     }
     roomFilesByMessage = next;roomFilesSelection=selection;roomFilesNextCursor=body.page?.nextCursor??null;
     if (state) renderMessages();
-  } catch { /* The last chips stay until the next successful read. */ }
+  } catch {
+    // The failure's render must not retry immediately. A fresh snapshot can.
+    if (attempt && roomFilesAttempt === attempt) attempt.failed = true;
+  }
   finally{if(roomFilesFlight===ticket){roomFilesFlight=null;roomFilesLoading=false;if(generation===client.generation&&state?.room?.id===roomId)renderMessages();}}
 }
 function composerFileOwner(file) {
