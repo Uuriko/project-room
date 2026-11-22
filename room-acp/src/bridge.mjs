@@ -542,47 +542,45 @@ export class Bridge {
     try {
       if (this.controller.signal.aborted) return;
       if (!(await this.authorized({ claimId }))) { await this.ack(signalIds); this.stats.skipped++; return; }
-      const { key, receipt: saved, fresh } = this.claimReceipts.begin(item.signalId);
-      let receipt = saved;
-      if (!fresh && receipt.phase === "started") {
-        this.log(`claim ${claimId} has an interrupted execution; inspect its work before assigning a new turn`);
-        return; // Never silently repeat external actions after an ambiguous crash.
-      }
-      if (fresh) {
-        let body;
-        try {
-          await this.agentReady();
-          if (this.controller.signal.aborted) return;
-          const { sessionId } = await this.host.session(threadKey);
-          // Queueing and session startup can outlive the assignment. Check
-          // runnable state here without blocking results already in progress.
-          if (!(await this.authorized({ claimId, requireRunnable: true }))) {
-            receipt = { phase: "discarded", requestId: receipt.requestId };
-            this.claimReceipts.save(key, receipt);
-            await this.ack(signalIds); return;
+      const key = this.claimReceipts.key(item.signalId);
+      let receipt = this.claimReceipts.find(key);
+      if (!receipt) {
+        await this.agentReady();
+        if (this.controller.signal.aborted) return;
+        const { sessionId } = await this.host.session(threadKey);
+        // Preparing a session cannot have prompted the provider. Keep this
+        // wake retryable until the claim and its prerequisites are current.
+        const runnable = await this.authorized({ claimId, requireRunnable: true });
+        let promptClaim = runnable ? item.claim : null;
+        if (runnable && item.reason === READY_WORK_REASON) promptClaim = await this.readyWorkCurrent(claimId, item.messageId);
+        if (this.controller.signal.aborted) return;
+        const prompt = promptClaim && buildClaimPrompt({ roomTitle: this.title, claim: promptClaim, author: item.author });
+        const started = this.claimReceipts.begin(item.signalId, prompt ? {} : {
+          phase: "discarded", ...(runnable ? { disposition: "ready_work_stale" } : {})
+        });
+        receipt = started.receipt;
+        if (started.fresh && prompt) {
+          let body;
+          try {
+            const { recorder, stopReason } = await this.host.prompt(threadKey, prompt, { sessionId });
+            body = renderTurn(recorder, { stopReason });
+            this.stats.turns++;
+          } catch (error) {
+            this.log(`claim turn failed: ${error.message}`);
+            if (this.controller.signal.aborted) return;
+            body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
           }
-          // Dependency-triggered wakes are fenced on current prerequisite
-          // truth, not only owner and terminal state. Assigned wakes are not.
-          let promptClaim = item.claim;
-          if (item.reason === READY_WORK_REASON) promptClaim = await this.readyWorkCurrent(claimId, item.messageId);
-          if (!promptClaim) {
-            this.log(`claim ${claimId} ready_work wake is stale: dependent or prerequisites changed since the wake; no turn`);
-            receipt = { phase: "discarded", requestId: receipt.requestId, disposition: "ready_work_stale" };
-            this.claimReceipts.save(key, receipt);
-            this.stats.stale++;
-            await this.ack(signalIds); return;
-          }
-          const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: promptClaim, author: item.author }), { sessionId });
-          body = renderTurn(recorder, { stopReason });
-          this.stats.turns++;
-        } catch (error) {
-          if (receipt.phase === "discarded") throw error; // Retry ACK without creating a result.
-          this.log(`claim turn failed: ${error.message}`);
-          if (this.controller.signal.aborted) return;
-          body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
+          receipt = { ...receipt, phase: "result", body: body.length > MAX_CLAIM_NOTE ? body.slice(0, MAX_CLAIM_NOTE - 1) + "…" : body };
+          this.claimReceipts.save(key, receipt);
         }
-        receipt = { ...receipt, phase: "result", body: body.length > MAX_CLAIM_NOTE ? body.slice(0, MAX_CLAIM_NOTE - 1) + "…" : body };
-        this.claimReceipts.save(key, receipt);
+        if (started.fresh && runnable && !prompt) {
+          this.log(`claim ${claimId} ready_work wake is stale: dependent or prerequisites changed since the wake; no turn`);
+          this.stats.stale++;
+        }
+      }
+      if (receipt.phase === "started") {
+        this.log(`claim ${claimId} has an interrupted execution; inspect its work before assigning a new turn`);
+        return;
       }
       if (receipt.phase === "result" && !(await this.authorized({ claimId }))) {
         receipt = { phase: "discarded", requestId: receipt.requestId };

@@ -57,6 +57,40 @@ test("lost result response retries identical note and request ID after restart",
   assert.equal(statSync(receipt).mode & 0o777, 0o600);
 });
 
+test("restart during session preparation retries the wake without duplicating a provider turn", async t => {
+  const { make, counts } = setup(t);
+  const first = make();
+  first.host.session = async () => {
+    first.stop();
+    throw new Error("interrupted before any provider prompt");
+  };
+  await deliver(first);
+  assert.deepEqual(counts, { prompts: 0, notes: [], acks: 0 });
+  await deliver(make());
+  assert.equal(counts.prompts, 1);
+  assert.equal(counts.notes.length, 1);
+  assert.equal(counts.acks, 1);
+});
+
+test("hosts racing to finish preparation cannot both prompt for one wake", async t => {
+  const { make, counts } = setup(t);
+  const first = make(), second = make();
+  const prepared = Promise.withResolvers(), finish = Promise.withResolvers();
+  t.after(() => finish.resolve());
+  first.host.session = async () => {
+    prepared.resolve();
+    await finish.promise;
+    return { sessionId: "first" };
+  };
+  await first.accept(signal);
+  await prepared.promise;
+  await deliver(second);
+  finish.resolve();
+  await first.queue.idle();
+  assert.equal(counts.prompts, 1);
+  assert.equal(counts.notes.length, 1);
+});
+
 test("interruption during execution never reruns or acknowledges uncertain work", async t => {
   const { make, counts } = setup(t);
   const first = make();
