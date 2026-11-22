@@ -387,7 +387,7 @@ ${pr}${merged}${verificationTier}${hashes}${payout}${disputeDecider}${work}${lot
 </dl>
 <p class="meta">${provenNote}</p>
 ${shareSection(receipt)}
-<nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
+<nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>
 <footer><a href="${escapeHtml(receipt.startHref)}">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
