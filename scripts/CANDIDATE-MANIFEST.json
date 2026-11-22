@@ -100,8 +100,8 @@
     "src/agent-connections.js": "sha256:145c29f576818d93e4355c027eaf05f69d61b9c3f3075fa5cb5a06c829bdc88a",
     "src/agent-first-run.js": "sha256:6bb048d6dc9a5b95eb182c5e76ddc2099b5120096b46d9db07e1194ced82cdec",
     "src/agent-invite-ui.js": "sha256:59dd07a3da0379ea0b5214d9462dbe5d82c5f9acad46c4b8ee08190835c17571",
-    "src/agent-signin-page.js": "sha256:bd12efdafe474d67a5e53050bee973d323b27d43a179ee18df9386adfb2e3c03",
-    "src/agent-signin-ui.js": "sha256:1b3e497e55ed24a857293880a3622401cf9543a8c49f350e38ec7a810f232279",
+    "src/agent-signin-page.js": "sha256:091c0ebadc51b0363d26c9d8d53208a618364f9b8323e05ec09660134a065876",
+    "src/agent-signin-ui.js": "sha256:24f4c0087c682b8b3a59bab9b6ed98ff5e0c805b0ad1b88593e0008bbcfb15d9",
     "src/app.js": "sha256:78166bd780c8322ec4cfdb06c1b6f4862317c93dc237cb986091c0fefe03392e",
     "src/auth-signin-ui.js": "sha256:144766e0999763ded6f81ac249d2d69899ef1bc8673c49b138d2ee5bf9bf8c73",
     "src/board-deeplink.js": "sha256:1c0829f21cafacfb78d01d0429083dffdd09aa7e329bcd23d2146e47ab24ecf9",
@@ -154,7 +154,7 @@
     "src/project-offers-ui.js": "sha256:9dbd4db46d6b6fa215e72f26bc0fbf75e0a6428cffdbd13b1fbd92efd9e9bdd6",
     "src/project-offers.css": "sha256:7d4cb16fa143b41ee29261e30c1ab77c78cd130934cd40b9aa13aaeb687a71ca",
     "src/public-a11y.css": "sha256:47d4ae6b452de90e2b731e78835c427328b470d5abedcbddec07500541662c72",
-    "src/record-link.js": "sha256:2bbd33dc6ed4866495138fda4d5b1a505bf12f140eb3c5d13222e2977562020f",
+    "src/record-link.js": "sha256:7c4ddfd8031ccc39a866f730961bce5eb243cbc007dbbc304f46a2a49ace36c3",
     "src/reminder-time.js": "sha256:b9b64c18baa9e66a49fc6a028e58763dddb9154d2277901914ff5f123dced652",
     "src/reminders.js": "sha256:b1a57316743260616b3925384d5e37cbc04ee9dd311fad9198d18e2dc46b6800",
     "src/reply-requests.js": "sha256:7d7dacc520507c6551e1b0f7368e07d96e13568fcfe3c794919a2aef61dd6866",
@@ -193,8 +193,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:045a6de36b95f973493dc383fc266d764f1404a86836a00ad83e682276a0a0ce",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "strings/en.js": "sha256:d2ef403ffcda5227d5c53873f689270833ad51cb2a15ea6c0b76a0c4ccc0062e",
-    "strings/en.json": "sha256:cb34e02d7e275f8bd9c2af824e1124a55668262a097b614e204b622995ec6c5e"
+    "strings/en.js": "sha256:1cdfade1e411ad4e0501da52260405b93abd6ba318e43bc20e5e85e5648f62c1",
+    "strings/en.json": "sha256:efdac952eca4095c6a0fc8a4fdbeb78cc89e361db531379576a43342aa9febd0"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

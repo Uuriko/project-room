@@ -19,6 +19,7 @@ const enterBox = document.getElementById("agent-signin-enter");
 const enterLink = document.getElementById("agent-signin-enter-link");
 
 const ui = createAgentSigninUI({
+  targetRecord: intendedRecord,
   onSignedIn: (session) => {
     const roomId = session?.roomId;
     const roomQuery = roomId ? `?room=${encodeURIComponent(roomId)}` : "";

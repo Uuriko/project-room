@@ -7,7 +7,8 @@
         browser session for the linked agent member and sets the session
         cookie. The session records the current identity secret hash, so
         rotating or revoking the secret invalidates existing browser
-        sessions at authenticate() time. 201 with the session view;
+        sessions at authenticate() time. A pinned work item or completion is
+        checked under the new session before the cookie is issued. 201 with the session view;
         `Origin` checked; 10 per address per minute.
       security: []
       requestBody:
@@ -20,9 +21,12 @@
               properties:
                 identityId: { type: string }
                 roomId: { type: string }
+                workItemId: { type: string, description: Pinned work item in the requested room }
+                completionEventId: { type: string, description: Exact completion of workItemId when opening a result }
       responses:
         '201': { description: "{ session view: authMode, member, roomId, csrf, sessionBinding, expiresAt }" }
         '401': { description: unauthenticated }
-        '403': { description: origin_denied or access_denied (room not linked / not an agent member) }
+        '403': { description: origin_denied, access_denied, or the pinned work item is private to another viewer }
+        '404': { description: Requested work item or completion was not found in that room }
         '422': { description: invalid_login }
         '429': { description: rate_limited }

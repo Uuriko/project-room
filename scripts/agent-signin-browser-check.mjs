@@ -4,6 +4,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 // After a successful agent session on the standalone page
@@ -267,4 +268,85 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   assert.equal(await page.locator('[name="identityId"]').inputValue(), "");
   assert.equal(await page.locator('[name="secret"]').inputValue(), "");
   assert.equal(await page.locator('[data-agent-secret]').count(), 0);
+});
+
+test("a pinned Work Thread retries the same room without re-entering the saved identity", { timeout: 25000 }, async t => {
+  const f = createAcceptanceFixture();
+  const owner = f.store.issueAccessKey("commons", "owner");
+  const identity = f.store.identities.create("Returning Work Thread agent");
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close();
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close();
+    rmSync(f.directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  f.store.command(owner, "commons", {
+    id: "signin-record-fixture", type: "work.proposed",
+    data: { workItemId: "saved-work-thread", title: "Work Thread after access returns", definitionOfDone: "Read the selected thread", accountableMemberId: "owner", mode: "read" },
+  });
+  const hash = "#pr-record/work/saved-work-thread";
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(6000);
+  const authReads = [];
+  page.on("response", response => {
+    const path = new URL(response.url()).pathname;
+    if (path.startsWith("/api/auth/agent/")) authReads.push([path, response.status()]);
+  });
+  await page.goto(origin + "/?room=commons" + hash);
+  await page.locator("#agent-signin-button").click();
+  assert.equal(new URL(page.url()).searchParams.get("record"), hash);
+  await page.locator('[name="identityId"]').fill(identity.identityId);
+  await page.locator('[name="secret"]').fill(identity.secret);
+  await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+  await page.locator("[data-agent-status]").getByText("This agent identity is not linked to that room").waitFor();
+  assert.match(await page.locator("[data-agent-panel] .form-hint").textContent(), /\bcommons\b/);
+  assert.deepEqual(authReads, [["/api/auth/agent/session", 403]]);
+  assert.equal(await page.locator("[data-agent-create-room]").count(), 0);
+  assert.equal((await page.context().cookies()).some(cookie => cookie.name === "room_session"), false);
+
+  linkWithProof(f.store, owner, "commons", identity, { permissions: ["accept_work"] });
+  await page.getByRole("button", { name: "Retry room access", exact: true }).click();
+  const card = page.locator("#agent-first-run");
+  await card.waitFor({ state: "visible" });
+  await card.locator('[data-step="dismiss"]').click();
+  await page.locator("#agent-signin-enter-link").click();
+  await page.waitForURL(url => url.hash === hash);
+  await page.locator('[data-work-record-id="saved-work-thread"]').waitFor({ state: "visible" });
+  assert.deepEqual(authReads, [["/api/auth/agent/session", 403], ["/api/auth/agent/session", 201]]);
+  assert.equal(await page.locator("#identity-label").textContent(), identity.displayName);
+
+  f.store.initialize(initialRoom("other-room"));
+  linkWithProof(f.store, f.store.issueAccessKey("other-room", "owner"), "other-room", identity, { permissions: ["accept_work"] });
+  const wrong = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  wrong.setDefaultTimeout(6000);
+  const wrongLink = new URL("/agent-signin", origin);
+  wrongLink.searchParams.set("room", "other-room");
+  wrongLink.searchParams.set("record", hash);
+  await wrong.goto(wrongLink.href);
+  await wrong.locator('[name="identityId"]').fill(identity.identityId);
+  await wrong.locator('[name="secret"]').fill(identity.secret);
+  const before = f.store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id='other-room' AND kind='session'").get().n;
+  const refusal = wrong.waitForResponse(response => response.url().endsWith("/api/auth/agent/session"));
+  await wrong.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+  assert.equal((await refusal).status(), 404);
+  await wrong.getByText("Work item not found in this Room", { exact: true }).waitFor();
+  assert.equal(new URL(wrong.url()).pathname, "/agent-signin");
+  assert.equal(await wrong.locator("#agent-signin-enter-link").isVisible(), false);
+  assert.equal((await wrong.context().cookies()).some(cookie => cookie.name === "room_session"), false);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id='other-room' AND kind='session'").get().n, before);
+
+  const beforeExact = f.store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id='commons' AND kind='session'").get().n;
+  const absentCompletion = await wrong.request.post(origin + "/api/auth/agent/session", {
+    headers: { Origin: origin, Authorization: "Bearer " + identity.secret },
+    data: { identityId: identity.identityId, roomId: "commons", workItemId: "saved-work-thread", completionEventId: "absent-completion" },
+  });
+  assert.equal(absentCompletion.status(), 404);
+  assert.equal(absentCompletion.headers()["set-cookie"], undefined);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id='commons' AND kind='session'").get().n, beforeExact);
 });
