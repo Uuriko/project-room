@@ -8,7 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
-import { closeCatchUp, openCatchUp } from "./room-chrome.mjs";
+import { closeCatchUp, openCatchUp, openConversation } from "./room-chrome.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 for (const mobile of [false, true]) {
@@ -56,11 +56,17 @@ for (const mobile of [false, true]) {
       return route.continue();
     });
     const page = await context.newPage(); page.setDefaultTimeout(12000);
+    const briefPath = "/api/rooms/commons/return-brief";
+    const briefReads = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.method() !== "GET" && request.url().includes("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
+    page.on("request", request => {
+      if (request.method() === "GET" && new URL(request.url()).pathname === briefPath) briefReads.push(request.url());
+    });
     await page.clock.install({ time: now });
     await page.goto(origin); await signInFixture(page, f.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
+    await openConversation(page);
     const panel = page.locator("#return-brief-panel"), summary = page.locator("#topbar-catchup");
     const attention = id => page.locator(`#rb-attention-list [data-open-work="${id}"]`);
     const card = id => page.locator(`[data-work-record-id="${id}"]`);
@@ -70,18 +76,20 @@ for (const mobile of [false, true]) {
       mkdirSync("test-results", { recursive: true });
       await page.screenshot({ path: `test-results/calm-return-${label}-${name}.png` });
     };
-    await ready(); await page.waitForFunction(() => document.querySelector("#reminder-count").textContent === "1 reminder");
+    await page.waitForFunction(() => document.querySelector("#reminder-count").textContent === "1 reminder");
     now += 6000; await page.clock.fastForward(6000); // Let the normal sign-in notice clear.
     assert.equal(await panel.evaluate(node => node.open), false, "chat is home; catch-up stays closed");
     assert.equal(await page.locator("#catchup-dialog").evaluate(node => node.open), false);
     assert.equal(await page.locator("#return-brief-panel").count(), 1);
     assert.equal(await page.locator("#caught-up-button").count(), 0);
     assert.match(await page.locator("#catchup-count").textContent(), /^7 need you/);
+    assert.equal(briefReads.length, 0, "the live count needs no history query");
     await page.evaluate(() => scrollTo(0, 0)); await capture("closed");
     assert.equal(await summary.evaluate(node => node.getBoundingClientRect().bottom < innerHeight), true);
     const openedBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
     await openCatchUp(page); await openedBrief; await ready();
     await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+    assert.equal(briefReads.length, 1, "opening Catch up reads one first page");
     const horizon = Number(await page.locator("#rb-ack-button").getAttribute("data-horizon"));
     assert.ok(horizon > 0, 'the opened brief owns a populated history horizon');
     assert.equal(await page.locator("#rb-attention-list a").count(), 5);

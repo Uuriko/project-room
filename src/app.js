@@ -604,7 +604,7 @@ const client = new RoomClient({
       }
       if (!location.hash) restoreResultSelection();
     }
-    if (!briefView.owns(briefView.chain)) loadReturnBrief();
+    if ($("#catchup-dialog").open && !briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) {
       revealLocationHash();
       if (session.member.kind !== "agent" && !savedRoomDestination() && $("#result-dialog").hidden
@@ -6791,9 +6791,10 @@ function openCatchUp() {
   const dialog = $("#catchup-dialog");
   if (!dialog) return;
   if (!dialog.open) dialog.showModal();
-  $("#return-brief-panel").open = true;
+  const panel = $("#return-brief-panel");
+  if (panel.open) loadReturnBrief();
+  else panel.open = true; // The disclosure's toggle loads the first page.
   $("#return-brief-panel > summary").focus({ preventScroll: true });
-  loadReturnBrief();
 }
 function selectWorkView(view) {
   if (view !== "results") return;
@@ -7265,7 +7266,11 @@ window.addEventListener("pageshow", e => {
 // Return brief: one compact entry before conversation. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
-function loadReturnBrief() { if(client.sectionAvailability('returnBrief')?.available===false){renderReturnBrief();return;}return briefView.refresh(); }
+function loadReturnBrief() {
+  if (!$("#catchup-dialog").open) return;
+  if (client.sectionAvailability("returnBrief")?.available === false) { renderReturnBrief(); return; }
+  return briefView.refresh();
+}
 // Notification feed (B4): items are derived on the server from events after your
 // caught-up marker and filtered by your notification preferences. Fetching never
 // acknowledges; "Mark read" moves the marker to exactly the sequence the list was
