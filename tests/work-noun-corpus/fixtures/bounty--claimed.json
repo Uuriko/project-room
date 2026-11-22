@@ -1,0 +1,85 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "bounty/claimed",
+  "machine": "bounty",
+  "legacyState": "claimed",
+  "provenance": {
+    "harvestedFrom": [
+      "server/bounty-escrow.mjs _viewBounty/_saveBounty",
+      "tests/bounty-escrow.test.js"
+    ],
+    "census": "prod-census.json: bounties observed live in paid/refunded/accepted/submitted/cancelled",
+    "volatileExcluded": [
+      "timeInStateMs (read-computed from now)"
+    ]
+  },
+  "legacy": {
+    "bountyId": "bty_u1_claimed",
+    "roomId": "room-u1-corpus",
+    "title": "Map the legacy work nouns",
+    "criteria": "Every legacy state has a unified home",
+    "amount": 5,
+    "amountMillis": 5000,
+    "poster": "member-poster",
+    "verifier": "member-verifier",
+    "claimant": "member-claimant",
+    "disputeDecider": "member-decider",
+    "approvalMode": "human",
+    "state": "claimed",
+    "group": "claimed",
+    "deadline": "2025-10-25T00:00:00.000Z",
+    "deadlineMs": 1761350400000,
+    "challengeEnds": null,
+    "challengeEndsMs": null,
+    "snoozedUntil": null,
+    "snoozedUntilMs": null,
+    "declineReason": null,
+    "duplicateOf": null,
+    "label": null,
+    "disputeId": null,
+    "disputeOpenedMs": null,
+    "evidence": null,
+    "attestation": null,
+    "resolution": null,
+    "rubric": {
+      "version": 1,
+      "hash": "sha256:u1corpus",
+      "criteria": [
+        "Every legacy state has a unified home"
+      ]
+    },
+    "submissionHash": null,
+    "watchers": [],
+    "createdAt": 1760745600000,
+    "updatedAt": 1760745600000,
+    "stateChangedAt": "2025-10-18T00:00:00.000Z"
+  },
+  "doors": {
+    "rest": {
+      "surface": "GET /rooms/{roomId}/bounties/{bountyId} -> _viewBounty",
+      "statePath": "state",
+      "state": "claimed",
+      "excerpt": {
+        "state": "claimed",
+        "group": "claimed",
+        "claimant": "member-claimant",
+        "disputeId": null
+      }
+    },
+    "mcp-full": {
+      "surface": "bounty read tool (MCP full profile) -> _viewBounty",
+      "statePath": "state",
+      "state": "claimed",
+      "excerpt": {
+        "state": "claimed",
+        "group": "claimed",
+        "claimant": "member-claimant",
+        "disputeId": null
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "claimed"
+  }
+}
