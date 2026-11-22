@@ -96,7 +96,7 @@ class TurnReceipts {
   key(signalId) { return createHash("sha256").update(this.scope + JSON.stringify(signalId)).digest("hex"); }
   begin(signalId, initial = {}) {
     const key = this.key(signalId);
-    const receipt = { ...initial, phase: initial.phase ?? 'started', requestId: randomUUID() };
+    const receipt = { ...initial, phase: initial.phase ?? 'started', requestId: initial.requestId ?? randomUUID() };
     if (!this.dir) {
       if (this.memory.has(key)) return { key, receipt: this.memory.get(key), fresh: false };
       this.memory.set(key, receipt);
@@ -611,28 +611,38 @@ export class Bridge {
       if (!receipt) {
         const prompt = await readReview(this.room,binding,this.reviewScope);
         if (!prompt || this.controller.signal.aborted) return;
+        const { workItemId, completionEventId, evidenceVersion, expectedRevision } = binding;
+        // A claim is recoverable while the provider session is still preparing.
+        // The existing atomic execution receipt still fences local dispatch.
+        const attemptId = createHash("sha256")
+          .update(JSON.stringify([key, workItemId, completionEventId, evidenceVersion, expectedRevision])).digest("hex");
+        const reportPhase = phase => {
+          if (!this.reviewReceipts.dir || !this.fencingToken) return;
+          const path = '/api/rooms/' + encodeURIComponent(this.connection.roomId) + '/review-runtime';
+          return this.reviewRuntimeRoom.request(path, {
+            body: { ...binding, attemptId, phase }, signal: AbortSignal.timeout(1500),
+          });
+        };
+        const claimAllowsDispatch = reportPhase('claimed')?.then(
+          observation => observation?.status === 'claimed',
+          error => !(error instanceof RoomError && error.code === 'review_runtime_attempt_conflict'),
+        );
         await this.agentReady();
         if (this.controller.signal.aborted) return;
         this.stageObserver.mark(signalIds,'session_preparing');
         const {sessionId} = await this.host.session(threadKey);
         this.stageObserver.mark(signalIds,'session_ready');
+        // An observed dispatch or interruption survives loss of local state.
+        if (await claimAllowsDispatch === false) return;
         await this.assertListener();
-        const started = this.reviewReceipts.begin(signalId,{binding,signalId});
+        const started = this.reviewReceipts.begin(signalId,{binding,signalId,requestId:attemptId});
         if (!started.fresh) return;
         receipt = started.receipt;
-        const reportPhase = phase => {
-          if (!this.reviewReceipts.dir) return;
-          const path = '/api/rooms/' + encodeURIComponent(this.connection.roomId) + '/review-runtime';
-          void this.reviewRuntimeRoom.request(path, {
-            body: { ...binding, attemptId: receipt.requestId, phase }, signal: AbortSignal.timeout(1500),
-          }).catch(() => {});
-        };
-        reportPhase('claimed');
         let {recorder, stopReason} = await this.host.prompt(threadKey,prompt,{sessionId,
           onDispatched:()=>this.stageObserver.mark(signalIds,'prompt_dispatch_attempt',receipt.requestId),
           onFirstOutput:kind=>{
             this.stageObserver.mark(signalIds,'first_observable_output',receipt.requestId,kind);
-            reportPhase('started');
+            void reportPhase('started')?.catch(() => {});
           }});
         this.stageObserver.mark(signalIds,'review_prompt_returned',receipt.requestId);
         this.stats.turns++;

@@ -593,6 +593,46 @@ test('repair: a duplicate-field restatement, raw or fenced, is not filed',async 
   }
 });
 
+test('a fresh receiver resumes the same claim after session preparation stops', async t => {
+  const f = await setup(t);
+  const claims = [];
+  function observe(bridge) {
+    const request = bridge.reviewRuntimeRoom.request.bind(bridge.reviewRuntimeRoom);
+    bridge.reviewRuntimeRoom.request = (path, options) => {
+      const response = request(path, options);
+      if (options.body.phase === 'claimed') claims.push({ id: options.body.attemptId, response });
+      return response;
+    };
+  }
+  observe(f.bridge);
+  f.bridge.host.session = async () => {
+    assert.equal((await claims[0].response).status, 'claimed');
+    throw Error('receiver stopped while preparing the session');
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(claims.length, 1);
+  assert.equal(f.counts.prompt, 0);
+  assert.throws(f.receipt, { code: 'ENOENT' });
+  assert.equal((await f.readAsProducer(f.wake.nextRead)).reviewRuntime.status, 'claimed');
+
+  const fresh = f.make();
+  observe(fresh);
+  const prepare = fresh.host.session.bind(fresh.host);
+  fresh.host.session = async (...args) => {
+    assert.deepEqual(await claims[1].response, await claims[0].response);
+    return prepare(...args);
+  };
+  assert.equal(await fresh.lease(), true);
+  await fresh.accept(f.wake);
+  await fresh.queue.idle();
+  assert.equal(claims.length, 2);
+  assert.equal(claims[1].id, claims[0].id);
+  assert.equal(f.receipt().requestId, claims[0].id);
+  assert.deepEqual(f.counts, {prompt:1,write:1,receipt:0,ack:1});
+  assert.equal(f.verdict().result, 'pass');
+});
+
 test('restart surfaces a review interrupted before output and never runs it twice', async t => {
   const f = await setup(t);
   f.bridge.host.prompt = async () => { f.counts.prompt++; throw Error('host stopped'); };
@@ -608,4 +648,14 @@ test('restart surfaces a review interrupted before output and never runs it twic
   assert.equal(f.pendingRows().delivered_at, null);
   const exact = await f.readAsProducer(f.wake.nextRead);
   assert.equal(exact.reviewRuntime.status, 'interrupted');
+
+  // A replacement runtime may have the seat and lease but lose its local disk.
+  const receipts = fresh.reviewReceipts;
+  rmSync(join(receipts.dir, receipts.key(f.wake.signalId) + '.json'));
+  const replacement = f.make();
+  assert.equal(await replacement.lease(), true);
+  await replacement.accept(f.wake);
+  await replacement.queue.idle();
+  assert.deepEqual(f.counts, {prompt:1,write:0,receipt:0,ack:0});
+  assert.equal(f.pendingRows().delivered_at, null);
 });
