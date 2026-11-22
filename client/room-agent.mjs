@@ -1750,7 +1750,8 @@ export function workContextMarkdown(result) {
         ? "Pending linked reply requests need a separate read. The count is unknown."
         : `Pending linked reply requests: ${result.replyRequestContext.total} (${result.replyRequestContext.shown} shown). Conversations, separate from work completion.`,
       ...result.replyRequestContext.requests.map(request => `${request.direction}: ${request.id} · ${request.requesterId} → ${request.recipientId}. Next read: ${JSON.stringify(request.nextRead)}`),
-      ...(result.replyRequestContext.truncated ? ["More pending requests: " + JSON.stringify(result.replyRequestContext.nextRead) + "; select this workItemId."] : [])
+      ...(result.replyRequestContext.truncated ? ["More pending requests: " + JSON.stringify(result.replyRequestContext.nextRead)
+        + (result.replyRequestContext.nextRead.arguments.workItemId ? "." : "; select this workItemId.")] : [])
     ] : []),
     "Current evidence references (not fetched): " + JSON.stringify(result.accessSummary.evidence.records),
     "Recorded write scope: " + JSON.stringify(result.work.claim),

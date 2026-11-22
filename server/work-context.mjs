@@ -21,10 +21,10 @@ export function workRoleHolder(item, memberId) {
 // linked to room-visible work. Neither a request body nor another member's
 // pending conversation is part of this selected task read.
 function openWorkReplies(state, workItemId, viewerId, floor, deferred) {
-  const nextRead = { tool: "room_list_requests", arguments: { direction: "both", status: "open" } };
+  const nextRead = { tool: "room_list_requests", arguments: { direction: "both", status: "open", workItemId } };
   if (deferred) return {
     version: 1, total: null, shown: 0, truncated: true, requests: [], nextRead,
-    guidance: "Linked replies exceed this work read's window. The total is unknown. Follow each request-list continuation, even after an empty page, and select this workItemId. Read the exact request before answering.",
+    guidance: "Linked replies exceed this work read's window. The total is unknown. Follow each request-list continuation, even after an empty page. Read the exact request before answering.",
   };
   const requests = Object.values(state.replyRequests ?? {}).filter(request =>
     request.workItemId === workItemId && request.status === "open"
@@ -39,7 +39,7 @@ function openWorkReplies(state, workItemId, viewerId, floor, deferred) {
   return { version: 1, total: requests.length, shown: shown.length, truncated: shown.length < requests.length,
     requests: shown,
     nextRead: requests.length > shown.length ? nextRead : null,
-    guidance: "Open conversations linked to this work where you are requester or recipient, oldest first. Metadata only; reads do not answer requests. Follow room_read_request and finish its context before answering. These conversations are separate from task completion and required checks. The overflow read lists all your open conversations; select this workItemId." };
+    guidance: "Open conversations linked to this work where you are requester or recipient, oldest first. Metadata only; reads do not answer requests. Follow room_read_request and finish its context before answering. These conversations are separate from task completion and required checks. The overflow read lists your open conversations linked to this work." };
 }
 
 // Authored source verdicts a designated verifier (or a member with verify)

@@ -1541,22 +1541,44 @@ export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{inclu
 export {currentWorkSummary} from './current-work-summary.mjs';
 // Examine a fixed source window before recipient/status/history predicates.
 // Tombstones are excluded by the partial index rather than scanned on refill.
-export function readCurrentReplyRequestWindow(store,roomId,{after='',limit=4}={}) {
+export function readCurrentReplyRequestWindow(store,roomId,{after='',limit=4,workItemId,viewerId}={}) {
   const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
   if(typeof after!=='string'||Buffer.byteLength(after)>200||!Number.isInteger(limit)||limit<1||limit>8)refuse('Invalid request source window');
-  const rows=db.prepare("SELECT record_key FROM current_room_record_proofs INDEXED BY current_reply_request_keys WHERE room_id=? AND domain='replyRequests' AND present=1 AND record_key>? ORDER BY record_key LIMIT ?").all(roomId,after,limit+1);
+  let rows,total=head.counts.replyRequests;
+  if(workItemId!==undefined){
+    const prefix=workRequestPrefix(workItemId);
+    if(after&&!after.startsWith(prefix))refuse('Invalid work request source continuation');
+    const protection=readCurrentRecord(db,roomId,'workPrivacy',workItemId,b);
+    if(!protection&&readCurrentRecord(db,roomId,'workItems',workItemId,b))corrupt('selected work privacy missing');
+    const privacy=protection&&validateWorkPrivacy(protection);
+    // A caller outside this work's conversations gets the same empty list as for an unknown work ID.
+    if(!privacy||!Object.hasOwn(privacy.parties,viewerId))return {requests:[],examinedAfter:after,hasMore:false,total:0};
+    total=privacy.requests;
+    rows=db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='workRequest' AND present=1 AND record_key>? AND record_key<? ORDER BY record_key LIMIT ?")
+      .all(roomId,after||prefix,prefix+'\uffff',limit+1);
+  }else{
+    rows=db.prepare("SELECT record_key FROM current_room_record_proofs INDEXED BY current_reply_request_keys WHERE room_id=? AND domain='replyRequests' AND present=1 AND record_key>? ORDER BY record_key LIMIT ?").all(roomId,after,limit+1);
+  }
   charge(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
   const requests=[];let examinedAfter=after;
-  for(const {record_key:id} of rows.slice(0,limit)) {
+  for(const {record_key:key} of rows.slice(0,limit)) {
+    let id=key;
+    if(workItemId!==undefined){
+      const link=readCurrentRecord(db,roomId,'workRequest',key,b);
+      if(!link||link.workItemId!==workItemId||!validId(link.requestId)||workRequestKey(workItemId,link.requestId)!==key)
+        corrupt('selected request index binding differs');
+      id=link.requestId;
+    }
     const scalar=db.prepare("SELECT payload_bytes FROM current_room_records WHERE room_id=? AND domain='replyRequests' AND record_key=?").get(roomId,id);
     if(!scalar)corrupt('request source payload missing');
     if ( requests . length && b . bytes + scalar . payload_bytes + 16384 > MAX_INPUT ) break ;
-    const request=readCurrentRecord(db,roomId,'replyRequests',id,b);if(request?.id!==id)corrupt('request source identity differs');
-    requests.push(request);examinedAfter=id;
+    const request=readCurrentRecord(db,roomId,'replyRequests',id,b);
+    if(request?.id!==id||workItemId!==undefined&&request.workItemId!==workItemId)corrupt('request source identity differs');
+    requests.push(request);examinedAfter=key;
   }
   const hasMore=rows.length>requests.length;
-  if(!after&&!hasMore&&requests.length!==head.counts.replyRequests)corrupt('complete request source membership differs');
-  return {requests,examinedAfter,hasMore,total:head.counts.replyRequests};
+  if(!after&&!hasMore&&requests.length!==total)corrupt('complete request source membership differs');
+  return {requests,examinedAfter,hasMore,total};
 }
 // viewerAuthority: the Board work list needs only the owner's and viewer's
 // member records, so it uses the existing addressed authority

@@ -23,6 +23,57 @@ test('normalized current requests list does not report an existing incoming obli
  const {store,keys}=fixture(t),listed=store.replyRequests.list(keys.reader,'commons');
  assert.deepEqual(listed.requests.map(request=>request.id),['question']);
 });
+
+for (const representation of ['', 'normalized-current-v1']) test(`${representation || 'legacy'} request list filters the selected Work Thread and binds its cursor`, t => {
+  const { store, keys } = fixture(t, (_events, add) => {
+    add('member.added', { memberId: 'outsider', displayName: 'Outsider', kind: 'human', permissions: [] });
+    for (const workItemId of ['selected-work', 'other-work']) {
+      add('work.proposed', { workItemId, title: workItemId, definitionOfDone: 'Check request selection', accountableMemberId: 'owner' });
+    }
+    const request = (messageId, workItemId, toMemberId) => add('message.posted', {
+      messageId, workItemId, toMemberId, requestKind: 'reply', requestPolicyVersion: 1, body: 'Focused ask',
+    });
+    for (let i = 0; i < 40; i++) request(`noise-${i}`, 'other-work', 'reader');
+    request('wanted-a', 'selected-work', 'reader');
+    request('wanted-b', 'selected-work', 'reader');
+    request('private-peer', 'selected-work', 'other');
+  }, representation);
+  const workItemId = 'selected-work';
+  const viewer = keys.reader, outsider = store.issueAccessKey('commons', 'outsider');
+  const options = { direction: 'both', status: 'open', workItemId };
+  assert.ok(validReplyArguments('room_list_requests', options));
+  const sequence = store.headSequence('commons');
+  let args = { ...options, ...(representation ? { limit: 1 } : {}) };
+  const ids = [];
+  for (let count = 0; args && count < 4; count++) {
+    const page = store.replyRequests.list(viewer, 'commons', args);
+    validateReplyRead(page, { name: 'room_list_requests', args, roomId: 'commons' });
+    if (page.nextRead) {
+      assert.equal(page.nextRead.arguments.workItemId, workItemId);
+      assert.throws(() => store.replyRequests.list(viewer, 'commons', { ...page.nextRead.arguments, workItemId: 'other-work' }),
+        error => error.code === 'reply_cursor_identity_changed');
+      assert.throws(() => store.replyRequests.list(outsider, 'commons', page.nextRead.arguments),
+        error => error.code === 'reply_cursor_identity_changed');
+    }
+    ids.push(...page.requests.map(request => request.id));
+    args = page.nextRead?.arguments;
+  }
+  assert.equal(args, undefined);
+  assert.deepEqual(ids.sort(), ['wanted-a', 'wanted-b']);
+  if (representation) {
+    const unscoped = store.replyRequests.list(viewer, 'commons', { limit: 1 });
+    assert.ok(unscoped.nextRead);
+    assert.doesNotThrow(() => store.replyRequests.list(viewer, 'commons', unscoped.nextRead.arguments));
+    assert.throws(() => store.replyRequests.list(viewer, 'commons', { ...unscoped.nextRead.arguments, workItemId }),
+      error => error.code === 'reply_cursor_identity_changed');
+  }
+  for (const id of [workItemId, 'absent-work']) {
+    const empty = store.replyRequests.list(outsider, 'commons', { ...options, workItemId: id });
+    assert.deepEqual(empty.requests, []);
+    assert.equal(empty.nextRead ?? null, null);
+  }
+  assert.equal(store.headSequence('commons'), sequence);
+});
 test('normalized room opens and recovers an exact request after 500 historical requests',t=>{
  const {store,keys}=fixture(t,(_events,add)=>{
   for(let i=0;i<499;i++){

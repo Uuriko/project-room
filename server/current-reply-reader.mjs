@@ -27,7 +27,7 @@ function codec(store){
   }catch{fail('invalid_reply_cursor','Continuation expired, is malformed, or belongs to another store. A service restart can expire it. If restarting this read, reconcile earlier pages and checkpoints; do not answer from partial context. No request was changed.');}}
  };
 }
-const selectionKeys='v mode roomId viewerId accountId authEpoch credentialHash sessionBinding sessionRevision roomCreatedEventId direction status requestMessageId'.split(' ');
+const selectionKeys='v mode roomId viewerId accountId authEpoch credentialHash sessionBinding sessionRevision roomCreatedEventId direction status requestMessageId workItemId'.split(' ');
 function decodeBound(crypto,token,binding){
  const saved=crypto.decode(token);
  if(!saved||!selectionKeys.every(key=>saved[key]===binding[key]))fail('reply_cursor_identity_changed','Continuation belongs to another viewer or selection');
@@ -95,6 +95,8 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   const memberCache=new Map(),memberAt=id=>{if(!validId(id))return undefined;if(!memberCache.has(id)){const m=readCurrentRecord(db,roomId,'members',id,b);if(m!==undefined&&m?.id!==id)changed();memberCache.set(id,m);}return memberCache.get(id);};
   const limit=args.limit??20;if(!Number.isSafeInteger(limit)||limit<1||limit>50)fail('invalid_reply_selection','Choose a page limit from1 to50',422);
   const requestMessageId=mode==='selected'?args.requestMessageId:null,direction=mode==='list'||mode==='history'?args.direction??'incoming':null,status=mode==='list'?args.status??'open':null;
+  const workItemId=mode==='list'?args.workItemId:undefined;
+  const workSelection=workItemId===undefined?{}:{workItemId};
   if(direction!==null&&!['incoming','outgoing','both'].includes(direction)||status!==null&&!['open','answered','declined','cancelled','all'].includes(status))fail('invalid_reply_selection','Choose a request direction and status',422);
   const eventCache=new Map(),messages=new Map(),requests=new Map();let evaluatedThrough=0;
   const eventAt=sequence=>{
@@ -105,7 +107,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    if(row.id!==row.eventId||row.roomId!==roomId||typeof row.type!=='string'||!row.type||!validId(row.actorId)||typeof row.at!=='string'||!Number.isFinite(Date.parse(row.at))||row.dataType!=='object')changed();eventCache.set(sequence,row);return row;
   };
   const created=eventAt(1);if(created.type!=='room.created')changed();
-  const binding={v:2,mode,roomId,viewerId:auth.member.id,accountId:auth.account?.id??null,authEpoch:auth.account?.authEpoch??null,credentialHash:auth.credentialHash,sessionBinding:auth.sessionBinding??null,sessionRevision:auth.sessionRevision??null,roomCreatedEventId:created.id,direction,status,requestMessageId};
+  const binding={v:2,mode,roomId,viewerId:auth.member.id,accountId:auth.account?.id??null,authEpoch:auth.account?.authEpoch??null,credentialHash:auth.credentialHash,sessionBinding:auth.sessionBinding??null,sessionRevision:auth.sessionRevision??null,roomCreatedEventId:created.id,direction,status,requestMessageId,...workSelection};
   const base={contractVersion:2,roomId,viewerId:auth.member.id,viewerAccountId:auth.account?.id??null,viewerAuthEpoch:auth.account?.authEpoch??null,viewerSessionBinding:auth.sessionBinding,viewerSessionRevision:auth.sessionRevision??null,scope:{...shape.scope,coverage:'bounded-source-window'},evaluationScope:'visible-encountered-anchors'};
   const loadMessage=id=>{
    if(!validId(id)&&!(typeof id==='string'&&id.endsWith(':channel')))changed();
@@ -145,7 +147,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    // already returned (kept as hashes inside the opaque cursor).
    const seen=new Set(saved?.seen??[]),found=[];
    if(saved?.seen!==undefined&&(!Array.isArray(saved.seen)||saved.seen.length>50||!saved.seen.every(v=>typeof v==='string')))fail('invalid_reply_cursor','Invalid request source continuation');
-   if(!saved&&status==='open'){
+   if(!saved&&status==='open'&&workItemId===undefined){
     // Incoming hits come from the open-request index; outgoing hits from the
     // requester party index filtered to open (B9). Same binding checks either way.
     const sources=[];
@@ -171,7 +173,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    let source,after=saved?.after??'',windows=0;const selected=[...found];
    if(selected.length>=limit||found.length&&(remainingCurrentReadBytes(b)<=144*1024+384*(selected.length+WINDOW)||(b.maxRecords??200)-b.records<=100+3*(selected.length+WINDOW)))source={requests:[],examinedAfter:after,hasMore:true};
    else do{
-    source=readCurrentReplyRequestWindow(store,roomId,{after,limit:Math.min(limit-selected.length,WINDOW)});
+    source=readCurrentReplyRequestWindow(store,roomId,{after,limit:Math.min(limit-selected.length,WINDOW),workItemId,viewerId:auth.member.id});
     for(const r of source.requests){if(!validId(r.id)||!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||!['open','answered','declined','cancelled'].includes(r.status)||r.revision!==(r.status==='open'?0:1)||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();requests.set(r.id,r);}
     selected.push(...source.requests.filter(r=>!seen.has(seenKey(r.id))&&directionMatches(r,auth.member.id,direction)&&messageInHistory({id:r.id,createdAt:r.createdAt},floor)&&(status==='all'||r.status===status)));
     after=source.examinedAfter;windows++;
@@ -180,8 +182,8 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
     &&(b.maxRecords??200)-b.records>100+3*(selected.length+WINDOW));
    for(const request of selected)noteRequest(request);
    const nextCursor=source.hasMore?crypto.encode({...binding,after:source.examinedAfter,...(seen.size?{seen:[...seen]}:{})}):null;
-   const nextRead=nextCursor?{tool:'room_list_requests',arguments:{direction,status,limit,cursor:nextCursor}}:null;
-   return {...base,evaluatedThrough,selection:{direction,status},requests:selected.map(shape.compactRequest),nextReads:selected.map(r=>({requestMessageId:r.id,http:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(r.id)}`},nextRead:{tool:'room_read_request',arguments:{requestMessageId:r.id}}})),sourceWindow:{complete:!source.hasMore,consistency:'current-per-page'},page:{cursor:args.cursor??null,limit,hasMore:source.hasMore,nextCursor,nextRead},nextRead};
+   const nextRead=nextCursor?{tool:'room_list_requests',arguments:{direction,status,...workSelection,limit,cursor:nextCursor}}:null;
+   return {...base,evaluatedThrough,selection:{direction,status,...workSelection},requests:selected.map(shape.compactRequest),nextReads:selected.map(r=>({requestMessageId:r.id,http:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(r.id)}`},nextRead:{tool:'room_read_request',arguments:{requestMessageId:r.id}}})),sourceWindow:{complete:!source.hasMore,consistency:'current-per-page'},page:{cursor:args.cursor??null,limit,hasMore:source.hasMore,nextCursor,nextRead},nextRead};
   }
   if(mode==='history'){
    const saved=args.cursor!=null?decodeBound(crypto,args.cursor,binding):null;
