@@ -51,6 +51,11 @@ test("composer retry forgets a draft command only on refusals issued after the e
   for (const error of [new Error("lost"), { status: 500 }, { status: 429, code: "rate_limited" }, { status: 403, code: "access_denied" }]) {
     assert.equal(draftRefused(error, false), false, JSON.stringify(error));
   }
+  for (const code of ["dm_blocked", "dm_consent_required"]) {
+    const refusal = { status: 403, code };
+    assert.equal(draftRefused(refusal), true, code);
+    assert.equal(draftRefused(refusal, true), false, code);
+  }
   // Retry of an uncertain send: only proof the original was never written frees it.
   for (const error of [{ status: 409, code: "command_rejected" }, { status: 422, code: "command_rejected" },
     // #3520: posting into an archived channel is the documented 409 channel_archived.

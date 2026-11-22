@@ -346,6 +346,34 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
     const waitForSaved = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#message-input").value === "");
 
+    // Consent can change after the composer shows the recipient as available.
+    await openPrivate("Maya");
+    const blockedDraft = "Keep this refused private draft editable";
+    await input.fill(blockedDraft);
+    const commandsUrl = "**/api/rooms/commons/commands";
+    const blockBeforeSend = async route => {
+      if (route.request().postDataJSON().data.body === blockedDraft) {
+        store.dmConsents.block("commons", "maya", "owner");
+      }
+      await route.continue();
+    };
+    await page.route(commandsUrl, blockBeforeSend);
+    const refused = page.waitForResponse(response => response.url().endsWith("/commands") && response.status() === 403);
+    await input.focus(); await page.keyboard.press("Control+Enter");
+    assert.equal((await (await refused).json()).error.code, "dm_blocked");
+    await waitForFailure();
+    assert.equal(await input.inputValue(), blockedDraft);
+    assert.equal(await input.evaluate(element => element.readOnly), false);
+    assert.equal(await recipient.isEnabled(), true);
+    assert.notEqual(await page.locator('#message-form button[type="submit"]').getAttribute("aria-label"), "Retry original");
+    assert.equal(store.room("commons").state.messages.some(message => message.body === blockedDraft), false);
+    await page.unroute(commandsUrl, blockBeforeSend);
+    await input.fill("");
+    store.dmConsents.unblock("commons", "maya", "owner");
+    store.dmConsents.request("commons", "owner", "maya", "browser test");
+    store.dmConsents.decide("commons", "maya", "owner", "approve");
+    await openPublic();
+
     // A live membership change must never turn a private draft into a public post.
     await openPrivate("Maya");
     await input.fill("Private draft retained while Maya is unavailable");

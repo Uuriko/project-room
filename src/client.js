@@ -1528,6 +1528,7 @@ export function retryUnconfirmed(error, wasUnconfirmed = false) {
 // uncertain operation.
 export function draftRefused(error, hadPending = false) {
   if (!hadPending && [400, 404, 409, 413, 422].includes(error?.status)) return true;
+  if (!hadPending && error?.status === 403 && DM_CONSENT_REFUSAL_CODES.includes(error.code)) return true;
   return (error?.code === "command_rejected" && [409, 422].includes(error.status))
     || (error?.code === "channel_archived" && error.status === 409);
 }

@@ -112,7 +112,7 @@
     "src/browser-session.js": "sha256:b907501db24660e1e45453a1f0f6a2fe2c544160b7c42488ed2f4b6c33e4018c",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
     "src/claim-overlap.js": "sha256:9fdf57e29229552f87e032240fc9a27a83ee297a9fd8ec1d0bf799a2f50e9b66",
-    "src/client.js": "sha256:19cb13bfcbd0b56de2bdef836d163afa9f4eb8094be8cece58dd96851640670e",
+    "src/client.js": "sha256:37f9e735d0d0cfb4a85514b18793ab5ffc5b0df066f5d503c139d11237562d5c",
     "src/clipboard.js": "sha256:849b3e4c3cfbb4e5859bf052674496c3d2e140ebd0ef2da540abd442db0a4ae6",
     "src/composer-files.js": "sha256:c82b382b8e7b66bcc915f614a2d9b4084601c5efa267be56e22a87cb19c1d84d",
     "src/conversation-intent.js": "sha256:518fa45e3c1a14e2a28c11bb29e98f821aea18549a8b8321b88a84b8eb39a591",
