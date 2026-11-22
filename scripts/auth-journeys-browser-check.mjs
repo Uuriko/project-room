@@ -290,6 +290,37 @@ for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`f
   await page.screenshot({ path: `test-results/signin-entry-${theme}-${kind.viewport.width}.png` });
 });
 
+test("shared result sign-in defers workspace while preserving the exact selector", async t => {
+  const f = await setup(t), page = await f.open(PHONE), requested = [];
+  page.on("request", request => requested.push(new URL(request.url()).pathname));
+  const link = new URL("/?room=commons#pr-record/result/shared-work/shared-result", f.origin);
+  const roomProbe = page.waitForResponse(response => new URL(response.url()).pathname === "/api/session");
+  const accountProbe = page.waitForResponse(response => new URL(response.url()).pathname === "/api/account-session");
+  await page.goto(link.href);
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  const [room, account] = await Promise.all([roomProbe, accountProbe]);
+  assert.equal(room.status(), 401);
+  assert.equal((await account.json()).authenticated, false);
+  assert.equal(new URL(page.url()).hash, link.hash);
+  assert.equal(requested.includes("/src/app.js"), false);
+  assert.equal(requested.includes("/src/events.js"), false);
+  assert.equal(requested.some(path => path.endsWith("/work-result")), false);
+  const agentLink = new URL(await page.locator("#agent-signin-button").getAttribute("href"), f.origin);
+  assert.equal(agentLink.searchParams.get("room"), "commons");
+  assert.equal(agentLink.searchParams.get("record"), link.hash);
+});
+
+test("a shared result restores a room cookie even with no browser hints", async t => {
+  const f = await setup(t), page = await f.open();
+  const roomSession = f.store.createSession(f.keys.owner);
+  await page.context().addCookies([{ name: "room_session", value: roomSession.token, url: f.origin }]);
+  const link = new URL("/?room=commons#pr-record/result/shared-work/shared-result", f.origin);
+  await page.goto(link.href);
+  await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(new URL(page.url()).hash, link.hash);
+  await page.locator("#auth-panel").waitFor({ state: "hidden" });
+});
+
 // Regression (Codex review of the #3068 integration, 2026-10-14): the lazy
 // entry must learn the deployment's sign-in capabilities like the workspace
 // app does (GET /api/auth/signin-options). Without the loader the entry's

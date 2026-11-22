@@ -2,10 +2,12 @@ import { AccountClient } from "./account-client.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { applyStoredTheme } from "./account-settings-ui.js";
 import { rememberAccountHint } from "./browser-session.js";
+import { stashGoogleRoom } from "./google-room-return.js";
+import { authPanelTitle } from "./room-deep-link.js";
 import { createSigninNavigation } from "./signin-navigation.js";
 import { uiText } from "./strings.js";
 
-export function mountSigninEntry({ openWorkspace }) {
+export function mountSigninEntry({ openWorkspace, record }) {
   const $ = selector => document.querySelector(selector);
   const accountClient = new AccountClient();
   const listeners = new AbortController();
@@ -29,7 +31,7 @@ export function mountSigninEntry({ openWorkspace }) {
     const session = await restore();
     if (!session?.authenticated) throw new Error(uiText("entry.sessionChanged"));
     rememberAccountHint();
-    await enterWorkspace({ accountClient, signedIn: !location.search && !location.hash });
+    await enterWorkspace({ accountClient, signedIn: Boolean(record) || !location.search && !location.hash });
   };
   const signin = createAuthSigninUI({
     accountClient,
@@ -51,11 +53,11 @@ export function mountSigninEntry({ openWorkspace }) {
       if (!active) return;
       $("#auth-panel").inert = value || enteringWorkspace;
       $("#auth-panel").setAttribute("aria-busy", String(value || enteringWorkspace));
-      if (!value && active && (location.search || location.hash)) void enterWorkspace().catch(() => {});
+      if (!value && active && !record && (location.search || location.hash)) void enterWorkspace().catch(() => {});
     },
     onSignInUncertain: async () => { await restore(); },
     onPasswordResetComplete: async () => { await restore(); signin.showPassword(); },
-    onMagicLinkRequest: () => "/",
+    onMagicLinkRequest: () => record ? `/?room=${encodeURIComponent(record.roomId)}` : "/",
     onAccountSwitch: () => window.confirm(uiText("entry.switchAccount"))
   });
   // The agent sign-in component loads lazily on first need: it is a
@@ -106,6 +108,25 @@ export function mountSigninEntry({ openWorkspace }) {
   $("#refresh-button").textContent = uiText("entry.refresh");
   $("#connection-explanation").textContent = uiText("entry.connection");
   signin.mount($("#auth-signin-ui"));
+  if (record) {
+    $("#auth-title").textContent = authPanelTitle(record.roomId);
+    const link = $("#agent-signin-button");
+    const target = new URL(link.href);
+    target.searchParams.set("room", record.roomId);
+    target.searchParams.set("record", record.hash);
+    link.href = target.href;
+    if ($("#google-signin")) on($("#google-signin"), "click", () => stashGoogleRoom(record.roomId));
+    // A valid cookie may outlive local browser hints. Probe without loading
+    // the workspace. Its normal restore still authenticates the exact room.
+    const roomSession = fetch("/api/session", { signal: listeners.signal }).then(async response => {
+      const session = await response.json();
+      return response.ok && typeof session.roomId === "string";
+    }).catch(() => false);
+    void Promise.all([restore().catch(() => null), roomSession]).then(([account, hasRoomSession]) => {
+      if (active && !enteringWorkspace && (account?.authenticated || hasRoomSession)) return enterWorkspace({accountClient});
+    }).catch(() => {});
+  }
+
   // Integration (CX2-PERF, flagged for Codex on the integration PR): on current
   // main the wall's agent sign-in is the standalone /agent-signin page
   // (decision #37, PR #3445) — #agent-auth-step / #agent-signin-ui are not in
