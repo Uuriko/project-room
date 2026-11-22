@@ -105,16 +105,24 @@ export function compactReplySelection(selected) {
 
 export class ReplyRequests {
   constructor(store) { this.store = store; }
-  read(token, roomId, expectedSessionBinding, fn, { requestsOnly = false } = {}) {
+  read(token, roomId, expectedSessionBinding, fn, { requestSelection = null } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
       let room;
-      if (requestsOnly) {
+      if (requestSelection) {
         // Listing needs no conversation bodies, event history or work payloads.
-        // Keep auth and the selected metadata at the same committed sequence.
-        const row = this.store.db.prepare("SELECT sequence,json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId);
+        // Select only this viewer's request metadata at the authenticated head.
+        const {direction,status} = requestSelection;
+        const memberId = auth.member.id;
+        const row = this.store.db.prepare(`SELECT sequence, (SELECT json_group_array(json(item.value))
+          FROM json_each(rooms.projection,'$.replyRequests') AS item
+          WHERE ((? AND json_extract(item.value,'$.recipientId')=?)
+              OR (? AND json_extract(item.value,'$.requesterId')=?))
+            AND (?='all' OR json_extract(item.value,'$.status')=?)) AS requests
+          FROM rooms WHERE id=?`).get(direction !== "outgoing" ? 1 : 0, memberId,
+            direction !== "incoming" ? 1 : 0, memberId, status, status, roomId);
         if (!row) fail("room_not_found", "Room not found", 404);
-        room = { sequence: row.sequence, state: { replyRequests: row.requests ? JSON.parse(row.requests) : {} } };
+        room = { sequence: row.sequence, state: { replyRequests: JSON.parse(row.requests) } };
       } else room = this.store.room(roomId);
       return { contractVersion: 1, roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding,
@@ -148,7 +156,7 @@ export class ReplyRequests {
       const evaluatedThrough = visibleSequenceHorizon(this.store.db, roomId, auth.member.id, room.sequence,
         auth.member.id === this.store.roomOwnerId(roomId));
       return withOverdueActions({ viewerId: auth.member.id, evaluatedThrough, selection: { direction, status }, requests, nextReads }, roomId);
-    }, { requestsOnly: true });
+    }, { requestSelection: { direction, status } });
   }
   selected(token, roomId, requestMessageId, options = {}) {
     if (!validId(requestMessageId)) fail("invalid_reply_selection", "Choose one request");
