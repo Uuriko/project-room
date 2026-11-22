@@ -96,7 +96,7 @@ class TurnReceipts {
   key(signalId) { return createHash("sha256").update(this.scope + JSON.stringify(signalId)).digest("hex"); }
   begin(signalId, initial = {}) {
     const key = this.key(signalId);
-    const receipt = { ...initial, phase: initial.phase ?? 'started', requestId: randomUUID() };
+    const receipt = { ...initial, phase: initial.phase ?? 'started', requestId: initial.requestId ?? randomUUID() };
     if (!this.dir) {
       if (this.memory.has(key)) return { key, receipt: this.memory.get(key), fresh: false };
       this.memory.set(key, receipt);
@@ -609,30 +609,58 @@ export class Bridge {
     try {
       let receipt = this.reviewReceipts.find(key);
       if (!receipt) {
-        const prompt = await readReview(this.room,binding,this.reviewScope);
-        if (!prompt || this.controller.signal.aborted) return;
+        const review = await readReview(this.room,binding,this.reviewScope);
+        if (!review || this.controller.signal.aborted) return;
+        const { workItemId, completionEventId, evidenceVersion, expectedRevision } = binding;
+        // A claim is recoverable while the provider session is still preparing.
+        // The existing atomic execution receipt still fences local dispatch.
+        const attemptId = createHash("sha256")
+          .update(JSON.stringify([key, workItemId, completionEventId, evidenceVersion, expectedRevision])).digest("hex");
+        const path = '/api/rooms/' + encodeURIComponent(this.connection.roomId) + '/review-runtime';
+        const reportPhase = phase => this.reviewReceipts.dir && this.fencingToken
+          ? this.reviewRuntimeRoom.request(path, { body: { ...binding, attemptId, phase }, signal: AbortSignal.timeout(1500) })
+          : undefined;
+        const claimAllowsDispatch = reportPhase('claimed')?.then(
+          observation => observation?.status === 'claimed',
+          error => !(error instanceof RoomError && error.code === 'review_runtime_attempt_conflict'),
+        );
         await this.agentReady();
         if (this.controller.signal.aborted) return;
         this.stageObserver.mark(signalIds,'session_preparing');
         const {sessionId} = await this.host.session(threadKey);
         this.stageObserver.mark(signalIds,'session_ready');
-        await this.assertListener();
-        const started = this.reviewReceipts.begin(signalId,{binding,signalId});
+        if (review.dispatchFence) {
+          const listenerToken = this.fencingToken;
+          if (!listenerToken || this.controller.signal.aborted) return;
+          const reservationId = randomUUID();
+          const reserve = () => this.room.request(path, {
+            body: { ...binding, attemptId, phase:'start_unknown', reserveDispatch:true, reservationId },
+            listenerToken, signal: AbortSignal.timeout(1500),
+          });
+          const active = () => !this.controller.signal.aborted && this.fencingToken === listenerToken;
+          let reservation;
+          try {
+            reservation = await reserve();
+          } catch (error) {
+            // Still in the same call, before the local dispatch receipt or
+            // provider prompt. A later wake uses a different reservation ID.
+            if (!(error instanceof RoomError && (error.status === 0 || error.status >= 500)) || !active()) throw error;
+            reservation = await reserve();
+          }
+          if (reservation?.dispatchGranted !== true || !active()) return;
+        } else {
+          // An observed dispatch or interruption survives loss of local state.
+          if (await claimAllowsDispatch === false) return;
+          await this.assertListener();
+        }
+        const started = this.reviewReceipts.begin(signalId,{binding,signalId,requestId:attemptId});
         if (!started.fresh) return;
         receipt = started.receipt;
-        const reportPhase = phase => {
-          if (!this.reviewReceipts.dir) return;
-          const path = '/api/rooms/' + encodeURIComponent(this.connection.roomId) + '/review-runtime';
-          void this.reviewRuntimeRoom.request(path, {
-            body: { ...binding, attemptId: receipt.requestId, phase }, signal: AbortSignal.timeout(1500),
-          }).catch(() => {});
-        };
-        reportPhase('claimed');
-        let {recorder, stopReason} = await this.host.prompt(threadKey,prompt,{sessionId,
+        let {recorder, stopReason} = await this.host.prompt(threadKey,review.prompt,{sessionId,
           onDispatched:()=>this.stageObserver.mark(signalIds,'prompt_dispatch_attempt',receipt.requestId),
           onFirstOutput:kind=>{
             this.stageObserver.mark(signalIds,'first_observable_output',receipt.requestId,kind);
-            reportPhase('started');
+            void reportPhase('started')?.catch(() => {});
           }});
         this.stageObserver.mark(signalIds,'review_prompt_returned',receipt.requestId);
         this.stats.turns++;
@@ -664,6 +692,20 @@ export class Bridge {
         if (this.reviewReceipts.dir) this.stageObserver.mark(signalIds,'durable_result_saved',receipt.requestId);
       }
       if (receipt.signalId !== signalId || !Object.entries(binding).every(([field,value])=>receipt.binding?.[field]===value)) return;
+      if (receipt.phase === 'started' || receipt.reason === 'turn_interrupted') {
+        if (receipt.phase === 'started') {
+          receipt = {...receipt,phase:'needs_review',reason:'turn_interrupted',
+            body:'The host stopped before saving a verdict. Use the exact Work Thread to recover this review.'};
+          this.reviewReceipts.save(key,receipt);
+          this.stageObserver.mark(signalIds,'review_parked',receipt.requestId);
+          this.log(`exact review ${binding.workItemId} interrupted before verdict; wake remains pending`);
+        }
+        await this.assertListener();
+        const path = '/api/rooms/' + encodeURIComponent(this.connection.roomId) + '/review-runtime';
+        await this.reviewRuntimeRoom.request(path,{body:{...binding,attemptId:receipt.requestId,phase:'interrupted'},
+          signal:AbortSignal.timeout(1500)});
+        return;
+      }
       if (receipt.phase === 'result') {
         await this.assertListener();
         if (!receipt.attempted) this.reviewReceipts.save(key,{...receipt,attempted:true});

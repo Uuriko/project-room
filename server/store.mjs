@@ -6740,17 +6740,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
-  reportReviewRuntime(token, roomId, input, binding = null) {
+  reportReviewRuntime(token, roomId, input, binding = null, listenerToken) {
     if (!validId(input?.workItemId)) fail(422, "invalid_review_runtime", "Choose a work item");
     return this.transaction(() => {
-      const { member } = this.authenticate(token, roomId, binding);
+      const auth = this.authenticate(token, roomId, binding);
+      const { member } = auth;
+      if (input.reserveDispatch === true) {
+        if (listenerToken === undefined) fail(403, "review_dispatch_requires_listener", "Only the active Room listener may reserve a provider dispatch");
+        assertListenerFence(this, auth, roomId, listenerToken);
+      }
       const work = readWorkItem(this.db, roomId, input.workItemId);
       if (!work) fail(404, "work_not_found", "Work item not found in this Room");
       assertSelectedWorkVisible(this, roomId, work.id, work, member.id);
       const room = isCurrentRoom(this.db, roomId) ? readCurrentRecord(this.db,roomId,'metadata','room')
         : JSON.parse(this.db.prepare("SELECT json_extract(projection,'$.room') AS room FROM rooms WHERE id=?").get(roomId).room);
       if (room?.archivedAt) fail(409, "review_runtime_stale", "Room is archived");
-      return recordReviewRuntime(this.db, roomId, work, member, input, this.now());
+      return recordReviewRuntime(this.db, roomId, work, member, input, this.now(), listenerToken);
     });
   }
   workResult(token, roomId, workItemId, { completionEventId = null, draftMessageId = null, expectedSessionBinding = null } = {}) {

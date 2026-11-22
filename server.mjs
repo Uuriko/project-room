@@ -1,5 +1,5 @@
 import { readInstanceCardFiles } from './server/instance-card-runtime.mjs';
-import { mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { RoomStore } from "./server/store.mjs";
 import { stitchConfigFromEnv } from "./server/inbox-stitch.mjs";
@@ -17,6 +17,7 @@ import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
+import { startCompletionPickup } from "./server/completion-pickup.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -96,7 +97,9 @@ const server = paused ? createServer((req, res) => {
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
 }) : createRoomServer({ ...serverArgs, gzipAsset: promisify(gzip) });
-server.on('close', () => nodeJobs?.stop());
+const pickupConfig = process.env.ROOM_COMPLETION_PICKUP_CONFIG ?? join(dirname(filename), "completion-pickup.json");
+const stopCompletionPickup = store && existsSync(pickupConfig) ? startCompletionPickup(store, pickupConfig) : () => {};
+server.on('close', () => { stopCompletionPickup(); nodeJobs?.stop(); });
 // Track C C11 — growth collector persistence. The snapshot lives in its own
 // JSON file next to the store file; it never touches the store schema. Any
 // failure here only costs analytics history, never boot or shutdown.
