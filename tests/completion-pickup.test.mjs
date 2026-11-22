@@ -7,6 +7,7 @@ import { setImmediate } from "node:timers/promises";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { Bridge } from "../room-acp/src/bridge.mjs";
+import { RoomClient } from "../room-acp/src/room.mjs";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { startCompletionPickup } from "../server/completion-pickup.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
@@ -86,9 +87,29 @@ for (const ready of [false, true]) {
       f.store.close();
       rmSync(f.directory, { recursive: true, force: true });
     });
+    const apiBase = `http://127.0.0.1:${server.address().port}`;
+    if (ready) {
+      const issued = await fetch(apiBase + "/api/agent-keys", {
+        method: "POST", headers: { authorization: "Bearer " + agent.secret, "content-type": "application/json" },
+        body: JSON.stringify({ scopes: ["heartbeats:report", "heartbeats:read", "mcp:room:commons"] })
+      });
+      assert.equal(issued.status, 201);
+      const { credential } = await issued.json();
+      const restricted = new RoomClient({ apiBase, roomId, memberId: recipientId, credential });
+      const hostId = "idle-heartbeat-only";
+      const heartbeat = await restricted.heartbeat({ hostId });
+      assert.equal(heartbeat.listener.acquired, true);
+      const before = f.store.headSequence(roomId);
+      await assert.rejects(restricted.reportIdle({ hostId, fencingToken: heartbeat.listener.fencingToken }),
+        error => error.status === 403 && error.code === "insufficient_scope");
+      assert.equal(f.store.headSequence(roomId), before);
+      assert.equal(heartbeat.idlePickupAvailable, undefined);
+      assert.equal((await restricted.poll({ hostId, waitMs: 0 })).idlePickupThrough, undefined);
+      await restricted.disconnect({ hostId, fencingToken: heartbeat.listener.fencingToken });
+    }
     const hostId = "idle-test-host";
     let prompts = 0, loseIdleResponse = ready;
-    const bridge = new Bridge({ connection: { apiBase: `http://127.0.0.1:${server.address().port}`, roomId,
+    const bridge = new Bridge({ connection: { apiBase, roomId,
       memberId: recipientId, credential: agent.secret, hostId }, waitMs: 0, minPollIntervalMs: 0,
     env: { ROOM_ACP_HOME: join(f.directory, "receiver") },
     fetchImpl: async (url, options) => {

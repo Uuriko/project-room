@@ -833,6 +833,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // single-room linked agent may report and read pull-only presence for
   // itself; wake URLs and push stay on the identity secret.
   const heartbeatActor = createHeartbeatActor({ store, bearer, reject });
+  // Idle pickup reads the recipient's work and opens a formal request that
+  // the recipient must be able to answer through the normal Room tools.
+  const canUseIdlePickup = auth => auth.keyId == null
+    || ["rooms:read", "rooms:write"].every(scope => grantsScope(auth.scopes, scope));
   const heartbeatNext = pendingWakes => pendingWakes.length > 0
     ? [Object.freeze({ action: "ack-wakes", method: "POST", path: "/api/agent-heartbeats/ack",
         description: "Acknowledge the wake signals you received (signalIds) so they stop being returned on the next heartbeat." })]
@@ -866,6 +870,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         const current = heartbeatActor(req, requiredScope("heartbeats:report"));
         if (current.identityId !== initialIdentity || current.roomId && current.roomId !== roomId)
           reject(403, "room_mismatch", "The idle pickup must name the listener's room");
+        if (!canUseIdlePickup(current))
+          reject(403, "insufficient_scope", "Idle pickup requires rooms:read and rooms:write");
         assertListenerFence(store, current, roomId, token);
         const lease = store.db.prepare("SELECT listener_id FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?")
           .get(current.identityId, roomId);
@@ -926,7 +932,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // room the owner paused learns it before it asks anything in the room.
     const heartbeatPaused = store.agentHeartbeats.pausedRoomsOf(auth.identityId);
     const listenerRoom = listener?.firstFormalAckRoomId;
-    const idlePickupAvailable = listenerRoom && store.idlePickup?.supports(listenerRoom, auth.identityId);
+    const idlePickupAvailable = listenerRoom && canUseIdlePickup(auth) && store.idlePickup?.supports(listenerRoom, auth.identityId);
     return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, ...(heartbeatPaused.length ? { paused: heartbeatPaused } : {}), more: more === true, next, pushConfigured, reachability,
       ...(listener ? { listener } : {}), ...(wakeSelection ? { wakeSelection } : {}),
       ...(idlePickupAvailable ? { idlePickupAvailable: true } : {}) });
@@ -1072,7 +1078,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // why its room wakes are being held, and learns at once when the pause
     // lands or lifts (releasePauseWaiters wakes the held poll).
     const pausedField = identityId => { const rooms = store.agentHeartbeats.pausedRoomsOf(identityId); return rooms.length ? { paused: rooms } : {}; };
-    const idleSelection = identityId => roomId !== null && store.idlePickup?.supports(roomId, identityId)
+    const idleSelection = current => roomId !== null && canUseIdlePickup(current) && store.idlePickup?.supports(roomId, current.identityId)
       ? { idlePickupThrough: store.headSequence(roomId) } : {};
     const wakeNext = pendingWakes => [
       ...heartbeatNext(pendingWakes),
@@ -1123,7 +1129,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         // seats that may never read a heartbeat response.
         return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, ...selectionField, pendingWakes: immediate.pendingWakes,
           cadenceSeconds: immediate.cadenceSeconds,
-          more: immediate.more === true, nextCursor: immediate.nextCursor ?? null, ...pausedField(auth.identityId), ...idleSelection(auth.identityId),
+          more: immediate.more === true, nextCursor: immediate.nextCursor ?? null, ...pausedField(auth.identityId), ...idleSelection(auth),
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
       }
       const startedAt = Date.now();
@@ -1147,7 +1153,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const timedOut = !woken && fresh.pendingWakes.length === 0 && fresh.more !== true;
       return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, ...selectionField, pendingWakes: fresh.pendingWakes,
         cadenceSeconds: fresh.cadenceSeconds,
-        more: fresh.more === true, nextCursor: fresh.nextCursor ?? null, ...pausedField(auth.identityId), ...idleSelection(auth.identityId),
+        more: fresh.more === true, nextCursor: fresh.nextCursor ?? null, ...pausedField(auth.identityId), ...idleSelection(current),
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
     } finally {
       release();
