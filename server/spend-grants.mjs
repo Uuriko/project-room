@@ -216,6 +216,26 @@ export class SpendGrantError extends Error {
 }
 const refuse = (status, code, message, detail) => { throw new SpendGrantError(status, code, message, detail); };
 
+// Freeze residual 16a (G8 cross-cut, T2-L10a-C6): spend writes never pass
+// through store.command — the one layer that carried the archived-room
+// freeze — so grant issuance and spend authorization landed in archived
+// rooms. PR #5502 named this family an explicit residual it does not
+// cover. This check mirrors #5502's archived-guard.mjs exactly (read the
+// rooms.archived_at SQL mirror at the moment of the write; no rooms row
+// or no rooms table means not a room-backed registry and the write
+// proceeds), in this module's own error shape: spend-grants.mjs cannot
+// import room-lifecycle.mjs (which imports store.mjs, which imports this
+// module). When #5502 lands, this is the same check its
+// refuseArchivedWriteDb performs and the two can be unified.
+export const ROOM_ARCHIVED_MESSAGE = "This room is archived: reading and export stay available, nothing new is recorded";
+export function refuseArchivedSpendWrite(db, roomId) {
+  if (!db || typeof db.prepare !== "function" || typeof roomId !== "string") return;
+  let row;
+  try { row = db.prepare("SELECT archived_at FROM rooms WHERE id=?").get(roomId); }
+  catch { return; } // no rooms table in this database: not a room-backed registry
+  if (typeof row?.archived_at === "string") refuse(409, "room_archived", ROOM_ARCHIVED_MESSAGE);
+}
+
 const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const validMemberId = id => typeof id === "string" && MEMBER_ID_PATTERN.test(id);
 // getTier returns a row object (or null when the member was never tiered —
@@ -358,6 +378,11 @@ export function issueSpendGrant(db, roomId, agentId, {
   denomination = SPEND_DENOMINATION, expiresAt = null, nowMs = Date.now(),
 } = {}) {
   if (!db || typeof roomId !== "string") refuse(422, "invalid_spend_grant", "roomId must be a string");
+  // 16a: issuing a grant is a write into the room; frozen when archived.
+  // This module function is the choke point — the HTTP route and every
+  // other caller issue through here. Revocation is deliberately NOT
+  // guarded (it removes authority, the benign direction, as in #5502).
+  refuseArchivedSpendWrite(db, roomId);
   if (!validMemberId(agentId)) refuse(422, "invalid_spend_grant", "agentId must be a room member id");
   if (isGuestAgentMemberId(agentId))
     refuse(422, "spend_grant_guest_forbidden", "Spend grants cannot widen guest passes; upgrade the pass instead");
@@ -490,6 +515,14 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
       // when the client only retries its original request.
       return { replay: "voided" };
     }
+    // 16a: a NEW authorization is a write into the room; frozen when
+    // archived. The guard sits after the replay check on purpose: replay
+    // of a settled/reserved authorization records nothing new (it returns
+    // the existing receipt/handle), and settle/void of a pre-archive
+    // reservation stay open below so an existing obligation can still
+    // settle or release — the same intake-vs-settlement split #5502
+    // applied to bounty escrow.
+    refuseArchivedSpendWrite(db, roomId);
     const grant = resolveSpendGrant(db, roomId, agentId, { nowMs, includeInactive: true });
     if (!grant) paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "no_spend_grant" });
     if (grant.edge.revokedAt !== null)
