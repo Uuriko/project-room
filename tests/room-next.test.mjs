@@ -384,7 +384,7 @@ test("compare first useful entry with the existing three reads", async t => {
   assert.deepEqual(compact.value.work.items.map(row => row.id).sort(), calls[1].value.work.map(row => row.id).sort());
   assert.deepEqual(compact.value.requests.items.map(row => row.id), calls[2].value.requests.map(row => row.id));
   assert.equal(compact.value.work.coverage, calls[1].value.page.hasMore ? "partial" : "complete");
-  assert.equal(compact.value.requests.coverage, calls[2].value.page.hasMore ? "partial" : "complete");
+  assert.equal(compact.value.requests.coverage, "complete", "the addressed index covers all open incoming requests");
   t.diagnostic(JSON.stringify({
     control: { calls: calls.length, wireBytes: calls.reduce((sum, row) => sum + Buffer.byteLength(row.text), 0) },
     next: { calls: 1, wireBytes: Buffer.byteLength(compact.text) }
@@ -462,6 +462,14 @@ test("reviewer pickup drains settled work before offering a finding and honors a
     f.send(f.owner, "work.superseded", { workItemId, expectedRevision: f.rev(workItemId),
       supersededByWorkItemId: "open", reason: "Consolidated" });
   }
+  f.store.dmConsents.request("commons", "owner", f.observer.id, "fixture");
+  f.store.dmConsents.decide("commons", f.observer.id, "owner", "approve");
+  for (let i = 0; i < 24; i++) {
+    const requestMessageId = `closed-unrelated-${i}`;
+    f.send(f.owner, "message.posted", { messageId: requestMessageId, toMemberId: f.observer.id,
+      requestKind: "reply", body: "An unrelated request already handled" });
+    f.send(f.owner, "reply_request.cancelled", { requestMessageId, expectedRequestRevision: 0, reason: "Already handled." });
+  }
   const offerId = "review-after-settled";
   f.store.projectOffers.create("commons", "owner", { requestId: "create-discovery", offerId,
     reviewerMemberIds: ["owner", f.triage.id], terms: { kind: "project", title: "Review a finding", summary: "Check one result",
@@ -480,6 +488,7 @@ test("reviewer pickup drains settled work before offering a finding and honors a
   assert.ok(indexed.ok, indexed.text);
   validatePickup(indexed.value);
   assert.equal(indexed.value.work.coverage, "complete");
+  assert.equal(indexed.value.requests.coverage, "complete");
   assert.deepEqual(indexed.value.work.items, []);
   assert.equal(preferredRead(indexed.value).tool, "room_read_project_discoveries");
   assert.doesNotMatch(indexed.text, /Private finding text/);
