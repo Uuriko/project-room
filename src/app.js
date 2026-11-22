@@ -5136,7 +5136,10 @@ function renderMentions() {
   list.hidden = false;
   // Each row is the option itself (role="option" + aria-selected are invalid on a
   // nested button). Focus stays in the textarea; aria-activedescendant names the row.
-  list.innerHTML = matches.map((m, i) => `<li role="option" id="mention-option-${i}" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(m.displayName)} <span>${esc(kindLabel(m.kind))}</span></li>`).join("");
+  list.innerHTML = matches.map((m, i) => {
+    const label = humanExperience.assistantName(m.id) || displayName(m.id);
+    return `<li role="option" id="mention-option-${i}" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(label)} <span>${esc(kindLabel(m.kind))}</span></li>`;
+  }).join("");
   const input = $("#message-input");
   input.removeAttribute("aria-expanded");
   input.setAttribute("aria-activedescendant", `mention-option-${mentionIndex}`);
