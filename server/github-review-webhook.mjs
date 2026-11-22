@@ -84,6 +84,49 @@ export async function observeWebhookPull(recipe, { number, head }, options = {})
   return { snapshot: { ...verified, checks, observedAt: Date.now() } };
 }
 
+async function withdrawFailedReview(store, binding, candidate, delivery, operation, receipt, secret, observe, token) {
+  const check = delivery.event === "check_run" ? delivery.payload.check_run : null;
+  if (!Number.isSafeInteger(check?.id) || check.id <= 0 || typeof check.conclusion !== "string" || check.conclusion === "success")
+    return "replayed";
+  const { recipe, requesterId, reviewerId, workItemId } = binding;
+  const { roomId } = recipe;
+  const opening = store.db.prepare(`SELECT json_extract(body,'$.data.messageId') AS id
+    FROM events WHERE room_id=? AND sequence=? AND id=?`).get(roomId, receipt.sequence, receipt.eventId);
+  if (!validId(opening?.id)) throw new Error("GitHub review receipt has no opening request");
+  const { request } = store.replyRequests.selected(secret, roomId, opening.id, { view: "compact" });
+  if (request.openingEventId !== receipt.eventId || request.requesterId !== requesterId
+      || request.recipientId !== reviewerId || request.workItemId !== workItemId)
+    throw new Error("GitHub review receipt does not match the configured request");
+  if (request.status !== "open") return "replayed";
+
+  const { snapshot, reason } = await observe(recipe, candidate, { token });
+  if (!snapshot || snapshot.head !== candidate.head || snapshot.number !== candidate.number) return reason ?? "stale_head";
+  const decision = evaluateGithubReview(recipe, snapshot);
+  // A delayed failure may have been superseded. The complete current observation
+  // must show this required check at the delivered attempt or a newer failure.
+  if (decision.reason !== "required_check_failed" || !decision.checks.some(current =>
+    current.app === check.app?.slug && current.name === check.name && current.id >= check.id && current.status === "failed"))
+    return "replayed";
+
+  const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_cancel_request", {
+    requestId: operation + "-withdraw",
+    requestMessageId: request.id,
+    expectedRequestRevision: request.revision,
+    reason: "A current required GitHub check failed on this exact candidate. This review was withdrawn.",
+  });
+  try {
+    const result = store.command(secret, roomId, command);
+    return result.duplicate ? "replayed" : "withdrawn";
+  } catch (error) {
+    if (error?.code === "idempotency_conflict" && store.operationReceipt(secret, roomId, command.id).status === "recorded")
+      return "replayed";
+    if (error?.code === "command_rejected"
+        && store.replyRequests.selected(secret, roomId, opening.id, { view: "compact" }).request.status !== "open")
+      return "replayed";
+    throw error;
+  }
+}
+
 // The caller verifies the signature before invoking this path. A posted Room
 // command is the durable deduplication record, across processes and redeliveries.
 export async function dispatchGithubReview(store, binding, delivery, { credential, observe = observeWebhookPull, token } = {}) {
@@ -101,8 +144,10 @@ export async function dispatchGithubReview(store, binding, delivery, { credentia
     const operation = `github-review-${createHash("sha256").update(JSON.stringify([
       recipe.roomId, recipe.repository, number, head, reviewerId
     ])).digest("hex")}`;
-    if (store.operationReceipt(secret, recipe.roomId, operation).status === "recorded") {
-      outcomes.push({ number, status: "replayed" });
+    const receipt = store.operationReceipt(secret, recipe.roomId, operation);
+    if (receipt.status === "recorded") {
+      const status = await withdrawFailedReview(store, binding, candidate, delivery, operation, receipt, secret, observe, token);
+      outcomes.push({ number, status });
       continue;
     }
     const { snapshot, reason } = await observe(recipe, candidate, { token });

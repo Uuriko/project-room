@@ -14,6 +14,9 @@ const delivery = (sha, number = 6319) => ({ event: "pull_request", action: "sync
 const snapshot = (sha, conclusion = "success") => ({ repository: repo, number: 6319, head: sha,
   state: "open", draft: false, merged: false, observedAt: Date.now(), checks: [{ name: "safety-net",
     app: "github-actions", id: 22, head: sha, status: "completed", conclusion }] });
+const checkDelivery = (sha, id, conclusion) => ({ event: "check_run", action: "completed",
+  payload: { repository: { full_name: repo }, check_run: { id, app: { slug: "github-actions" },
+    name: "safety-net", head_sha: sha, pull_requests: [{ number: 6319 }], conclusion } } });
 
 test("exact webhook review uses one native request across redelivery, and stale heads append nothing", async t => {
   const directory = mkdtempSync(join(tmpdir(), "github-review-hook-"));
@@ -55,6 +58,30 @@ test("exact webhook review uses one native request across redelivery, and stale 
   assert.equal(inbox.requests.length, 2);
   const body = store.snapshot(reviewer.identitySecret, "commons").state.messages.find(message => message.id === inbox.requests[0].id).body;
   assert.match(body, /Candidate revision: [ac]{40}/);
+
+  const beforeFailure = store.headSequence("commons");
+  const nextCheck = (id, conclusion) => {
+    current = snapshot(newHead, conclusion);
+    current.checks[0].id = id;
+  };
+  nextCheck(24, "success");
+  assert.deepEqual(await dispatchGithubReview(store, binding, checkDelivery(newHead, 23, "failure"), options),
+    [{ number: 6319, status: "replayed" }], "a delayed failed check cannot withdraw a review on a currently passing head");
+  assert.equal(store.headSequence("commons"), beforeFailure);
+  nextCheck(25, "failure");
+  const failed = checkDelivery(newHead, 25, "failure");
+  const withdrawals = await Promise.all([dispatchGithubReview(store, binding, failed, options),
+    dispatchGithubReview(store, binding, failed, options)]);
+  assert.deepEqual(withdrawals.flat().map(row => row.status).sort(), ["replayed", "withdrawn"]);
+  assert.equal(store.headSequence("commons"), beforeFailure + 1);
+  const cancelled = store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "cancelled" });
+  assert.equal(cancelled.requests.length, 1);
+  assert.ok(inbox.requests.some(request => request.id === cancelled.requests[0].id));
+  const callsAfterWithdrawal = calls;
+  assert.deepEqual(await dispatchGithubReview(store, binding, failed, options), [{ number: 6319, status: "replayed" }]);
+  assert.equal(calls, callsAfterWithdrawal, "retry after a lost withdrawal response needs no GitHub read");
+  assert.equal(store.headSequence("commons"), beforeFailure + 1);
+  assert.equal(store.replyRequests.list(reviewer.identitySecret, "commons", { direction: "incoming", status: "open" }).requests.length, 1);
 });
 
 test("authoritative GitHub reads pause before checking stale candidates and recheck the exact head before posting", async () => {
