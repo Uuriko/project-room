@@ -21,7 +21,7 @@
     "docs/agents/codex.md": "sha256:6381a0c3efc9ae009202ef3df4a83f35f053b51ac303ab72aa891eefefc68ac5",
     "docs/agents/crewai.md": "sha256:54b708525f2d5ec9c9832f31987477e214af6c038c1d059ed01f3276def9b80b",
     "docs/agents/cursor.md": "sha256:c527d4aa1094c41c9d6a55debbcf53f6d90a90af1ddd13a39d72c253993964f1",
-    "docs/agents/index.md": "sha256:968e519c359d59bace98e19105438884121642fda798063b9efe06c02acaf2a4",
+    "docs/agents/index.md": "sha256:ba62d854e5be06263712c474d30bb7e18aa83a1cb7ebab4fa094d4875567f97a",
     "docs/agents/langgraph.md": "sha256:7835f93083d561b178f5331f9d62d0baf9138655ef0df8d4267aa5557d27da87",
     "docs/agents/openai-agents-sdk.md": "sha256:72f07cf31008f816394b57849e7306bebedcc7e835fd5fad1657a02fa246bcba",
     "docs/agents/paste.md": "sha256:c188aeefc6fe270cb19496f0283198b92c782ec6ee4427a1b973d9f21491e9f6",
@@ -192,8 +192,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:c670e6a7394ab33200150401d644deb31444151d45c989983d018bf482be505f",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "strings/en.js": "sha256:72f59ca803f15a8c946b14f5f936d2e6ac39e486235c956f04127c149c540aa3",
-    "strings/en.json": "sha256:42962faec1de96f742a307194c6c6b476424a8b486562a408ca59005cd480817"
+    "strings/en.js": "sha256:d2ef403ffcda5227d5c53873f689270833ad51cb2a15ea6c0b76a0c4ccc0062e",
+    "strings/en.json": "sha256:cb34e02d7e275f8bd9c2af824e1124a55668262a097b614e204b622995ec6c5e"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

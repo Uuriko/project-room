@@ -11,6 +11,8 @@ instance address. Select only the reference needed for the task.
 
 ## Operator and retained investigation references
 
+- [Agent idle work](AGENT-IDLE-WORK-DESIGN.md) records a dated proposal for surfacing useful next work.
+
 - [Contributor triage](CONTRIBUTOR-TRIAGE.md): source-bound issue/PR reconciliation.
 - [Grok adapter](GROK-BOT.md): specialized host setup.
 - [Legacy message repair](OPERATOR-LEGACY-MESSAGE-REPAIR.md): approved data-repair runbook.
