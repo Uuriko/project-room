@@ -8,15 +8,15 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { readTalkPolicy, writeTalkPolicy, mayWake } from '../server/agent-talk-policy.mjs';
 const permissions=['steer','accept_work','complete_work','verify'];
-function fixture(t, file = ':memory:') {
-  const s=new RoomStore(file); t.after(()=>s.close()); s.initialize(initialRoom());
+function fixture(t, file = ':memory:', representation) {
+  const s=new RoomStore(file); t.after(()=>s.close()); s.initialize(initialRoom(), representation ? { representation } : {});
   const owner=s.issueAccessKey('commons','owner'); const sessions={owner:s.createSession(owner)};
   for(const id of ['friend','other']) {
     s.command(owner,'commons',{id:randomUUID(),type:'member.added',data:{memberId:id,displayName:id,kind:'human',permissions}});
     s.createAccount(`${id}-account`); s.bindHumanAccount('commons',id,`${id}-account`);
     sessions[id]=s.createSession(s.issueAccessKey('commons',id));
   }
-  const state=()=>s.room('commons').state;
+  const state=()=>representation ? s.roomAuthority('commons') : s.room('commons').state;
   const apply=(who,req)=>s.agentConnections.apply(sessions[who].token,'commons',req,sessions[who].session.sessionBinding);
   const key=()=>{const token=randomBytes(32).toString('base64url'); return {token,keyHash:createHash('sha256').update(token).digest('hex')};};
   const create=(who,memberId,extra={})=>{const credential=key();const req={action:'create',requestId:randomUUID(),memberId,displayName:memberId,access:'collaborate',keyHash:credential.keyHash,expiresAt:Date.now()+3600000,expectedOwnerRevision:state().members[who].revision,...extra};return {req,credential,result:apply(who,req)};};
@@ -140,4 +140,78 @@ test('two independently sponsored agents receive addressed requests and deliver 
   assert.equal(item().decision.decision,'approved');assert.equal(item().verification.independenceConfirmed,true);
   assert.notEqual(f.state().members['friend-dot'].accountableHumanId,f.state().members['john-agent'].accountableHumanId);
   assert.doesNotThrow(()=>f.s.agentConnections.verify());
+});
+
+for (const representation of [undefined, 'normalized-current-v1']) test(
+  `the friend browser picker drops stale sponsored access and reuses the identity (${representation ?? 'legacy'})`, async t => {
+  const f = fixture(t, ':memory:', representation);
+  const identity = f.s.identities.create('Existing browser agent');
+  const identityLinkCode = f.s.identities.mintLinkCode(identity.identityId, identity.secret, {
+    roomId: 'commons', sponsorAccountId: 'friend-account',
+  }).linkCode;
+  const memberId = 'friend-browser';
+  const created = f.create('friend', memberId, { identityId: identity.identityId, identityLinkCode });
+  const { createRoomServer } = await import('../server/http.mjs');
+  const server = createRoomServer({ store: f.s });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const origin = 'http://127.0.0.1:' + server.address().port;
+  const post = (route, data) => fetch(origin + '/api/auth/agent/' + route, {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json', Authorization: 'Bearer ' + identity.secret },
+    body: JSON.stringify({ identityId: identity.identityId, ...data }),
+  });
+  const rooms = async () => {
+    const response = await post('rooms');
+    assert.equal(response.status, 200);
+    return (await response.json()).rooms;
+  };
+  const sessionStatus = cookie => fetch(origin + '/api/session', { headers: { cookie } });
+  assert.deepEqual((await rooms()).map(room => room.memberId), [memberId]);
+  const original = await post('session', { roomId: 'commons' });
+  assert.equal(original.status, 201);
+  const oldCookie = original.headers.get('set-cookie').split(';', 1)[0];
+  assert.equal((await original.json()).expiresAt, created.req.expiresAt);
+  assert.equal((await sessionStatus(oldCookie)).status, 200);
+
+  // A sponsor permission change invalidates the sponsor's recorded revision
+  // while the linked agent seat itself still exists and remains active.
+  f.s.command(f.owner, 'commons', {
+    id: randomUUID(), type: 'member.access_changed',
+    data: { memberId: 'friend', expectedMemberRevision: 0, active: true, permissions: [] },
+  });
+  assert.equal(f.state().members[memberId].active, true);
+  const sequence = f.s.headSequence('commons');
+  const stale = await post('session', { roomId: 'commons' });
+  assert.equal(stale.status, 403);
+  assert.equal(stale.headers.has('set-cookie'), false);
+  assert.deepEqual(await rooms(), []);
+  assert.equal((await sessionStatus(oldCookie)).status, 401);
+  assert.equal(f.s.headSequence('commons'), sequence);
+  assert.equal(f.s.db.prepare('SELECT member_id FROM identity_links WHERE identity_id=?').get(identity.identityId).member_id, memberId);
+
+  f.s.command(f.owner, 'commons', {
+    id: randomUUID(), type: 'member.access_changed',
+    data: { memberId: 'friend', expectedMemberRevision: 1, active: true, permissions },
+  });
+  f.sessions.friend = f.s.createSession(f.s.issueAccessKey('commons', 'friend'));
+  f.change('friend', memberId, 'rotate');
+  assert.deepEqual((await rooms()).map(room => room.memberId), [memberId]);
+  const retry = await post('session', { roomId: 'commons' });
+  const session = await retry.json();
+  assert.equal(retry.status, 201, JSON.stringify(session));
+  const cookie = retry.headers.get('set-cookie');
+  assert.ok(cookie?.includes('HttpOnly'));
+  assert.equal(session.member.id, memberId);
+  assert.equal((await sessionStatus(oldCookie)).status, 401);
+  assert.equal((await sessionStatus(cookie.split(';', 1)[0])).status, 200);
+  // Room-issued access keys still must go through the managed connection.
+  assert.throws(() => f.s.issueAccessKey('commons', memberId), { code: 'managed_agent' });
+  assert.equal((await sessionStatus(cookie.split(';', 1)[0])).status, 200);
+  f.s.identities.revoke(identity.identityId, identity.secret);
+  assert.equal((await sessionStatus(cookie.split(';', 1)[0])).status, 401);
 });
