@@ -1,3 +1,4 @@
+import { assertAssignmentAvailable } from "./agent-pause.mjs";
 import { withAgentSessions } from "./agent-session-state.mjs";
 import { readWorkItem } from "./work-repository.mjs";
 import { boardPlanningEnabled, PLANNING_FIELDS, PLANNING_QUERY, planningPatchOf, hasPlanningInput, applyPlanning, planningQueryOf, filterPlanning, sortPlanning, groupPlanning } from "./board-planning.mjs";
@@ -1304,10 +1305,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
     if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
     const assignee = data.assignee;
+    const assigneeMember = assignee === undefined ? null : ownMember(store.roomAuthority(roomId).members, assignee);
     if (assignee !== undefined) {
-      const members = store.roomAuthority(roomId).members ?? {};
-      const member = typeof assignee === "string" ? members[assignee] : null;
-      if (!member || member.active === false) {
+      if (!assigneeMember || assigneeMember.active === false) {
         reject(422, "work_assignee_unknown_member",
           `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
       }
@@ -1324,6 +1324,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId, acceptanceCriteria: data.acceptanceCriteria }, { now: nowMs, agentId: caller }));
     if (Object.keys(planning.patch).length) item = applyPlanning(item, planning.patch);
     if (assignee) {
+      assertAssignmentAvailable(store, roomId, caller, assigneeMember);
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
       if (held >= config.maxMemberOpenClaims) {
         refuseCap("too_many_open_claims",
@@ -1865,7 +1866,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // room membership: the new owner must be a current, active member.
     const members = store.roomAuthority(roomId).members ?? {};
     const target = data.newOwner;
-    const targetMember = typeof target === "string" ? members[target] : null;
+    const targetMember = ownMember(members, target);
     if (!targetMember || targetMember.active === false) {
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
@@ -1899,6 +1900,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // QA200 ch-2037: reassign moves a lease to a new holder (and a fresh
     // unclaimed item lands claimed) without touching the claim route — run
     // the exclusivity check here too.
+    assertAssignmentAvailable(store, roomId, caller, targetMember);
     refuseFileLeaseConflict(reassigned);
     commit(reassigned, "reassigned", {
       previousOwnerId,
@@ -1941,10 +1943,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
     const target = data.delegate;
+    const delegateMember = target === null ? null : ownMember(store.roomAuthority(roomId).members, target);
     if (target !== null) {
-      const members = store.roomAuthority(roomId).members ?? {};
-      const member = typeof target === "string" ? ownMember(members, target) : null;
-      if (!member || member.active === false) {
+      if (!delegateMember || delegateMember.active === false) {
         reject(422, "work_delegate_unknown_member", `delegate "${typeof target === "string" ? target : "?"}" is not an active member of this room`);
       }
     }
@@ -1953,6 +1954,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     let delegated;
     try { delegated = delegateWork(item, caller, target, { note, now: nowMs, authority }); }
     catch (error) { if (error instanceof ClaimError) reject(422, error.code, error.message); throw error; }
+    assertAssignmentAvailable(store, roomId, caller, delegateMember);
     commit(delegated, "delegated", target === null ? {} : {
       attention: "assigned", attentionMemberId: target, wakeMemberId: target, wakeReason: "assigned" });
     return json(res, 200, delegated);
