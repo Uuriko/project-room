@@ -19769,6 +19769,10 @@ paths:
         - name: id
           in: query
           schema: { type: string }
+        - name: output
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: Read the preview's published plain-text run output
         - name: changes
           in: query
           schema: { type: string, enum: ['1'] }
@@ -19813,6 +19817,7 @@ paths:
                 head: { type: string }
                 html: { type: string, description: Standalone HTML limited to 384 KiB UTF-8 }
                 patch: { type: string, description: Optional committed unified patch limited to 192 KiB UTF-8 }
+                output: { type: string, description: Optional plain-text run output limited to 24 KiB UTF-8 }
                 expectedRevision: { type: integer, minimum: 0 }
       responses:
         '200': { description: Published preview metadata and revision }

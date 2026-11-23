@@ -9,9 +9,10 @@ import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room workspace start --path DIRECTORY [--base REF] [--connection NAME]
 room workspace list
-room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes]
-room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes]
+room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log]
+room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log]
 room workspace changes --id ID [--file PATH | --raw yes]
+room workspace output --id ID
 room workspace remove --id ID
 Pass --connection NAME to choose a saved connection explicitly.`;
 const validId = /^[a-f0-9]{32}$/;
@@ -72,6 +73,15 @@ function previewInput(cwd, flags) {
     if (patch.status !== 0) throw new Error("Could not read the committed patch within the 192 KiB limit");
     input.patch = patch.stdout;
   }
+  if (flags.output) {
+    const output = realpathSync(resolve(cwd, flags.output));
+    const within = relative(root, output);
+    if (within === ".." || within.startsWith(".." + sep) || !/\.(?:txt|log)$/i.test(within))
+      throw new Error("Choose a plain-text run log within this worktree");
+    const info = statSync(output);
+    if (!info.isFile() || info.size > 24 * 1024) throw new Error("Choose a plain-text run log up to 24 KiB");
+    input.output = readFileSync(output, "utf8");
+  }
   return input;
 }
 
@@ -97,12 +107,18 @@ export async function workspaceCommand(argv, io = {}) {
   const [action, ...extra] = positional;
   const out = data => (io.out ?? console.log)(JSON.stringify(data));
   const cwd = io.cwd ?? process.cwd();
-  if (extra.length || !["start", "list", "publish", "watch", "remove", "changes"].includes(action)) throw new Error(usage);
+  if (extra.length || !["start", "list", "publish", "watch", "remove", "changes", "output"].includes(action)) throw new Error(usage);
   if (action === "start") { out(launch(cwd, flags)); return 0; }
   const call = await connect(io, cwd, flags.connection);
   const list = async () => (await call()).items;
   if (action === "list") { out(await list()); return 0; }
   if (!validId.test(flags.id ?? "")) throw new Error("--id must be the ID from room workspace start");
+  if (action === "output") {
+    const query = new URLSearchParams({ id: flags.id, output: "1" });
+    const { run } = await call("GET", undefined, `?${query}`);
+    out(run);
+    return 0;
+  }
   if (action === "changes") {
     const query = new URLSearchParams({ id: flags.id, changes: "1" });
     if (flags.raw !== undefined && (flags.raw !== "yes" || flags.file)) throw new Error("Choose --file PATH or --raw yes");
@@ -122,24 +138,30 @@ export async function workspaceCommand(argv, io = {}) {
   };
   if (action === "publish") { await publish(); return 0; }
   // Watch the containing directory so build tools can atomically replace the file.
-  const file = resolve(cwd, flags.file);
+  const files = [flags.file, flags.output].filter(Boolean).map(name => resolve(cwd, name));
+  const watchers = [];
   let timer, failure = null, running = Promise.resolve();
   const stop = error => {
     clearTimeout(timer);
-    watcher.close();
+    for (const watcher of watchers) watcher.close();
     failure ??= error ?? null;
   };
   const queue = () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      running = running.then(() => { if (!failure && existsSync(file)) return publish(); }).catch(stop);
+      running = running.then(() => { if (!failure && files.every(existsSync)) return publish(); }).catch(stop);
     }, 125);
   };
-  const watcher = watch(dirname(file), (_event, changed) => {
-    if (changed === null || resolve(dirname(file), changed) === file) queue();
-  });
-  watcher.on("error", stop);
-  const closed = new Promise(resolveClose => watcher.once("close", resolveClose));
+  try {
+    for (const folder of new Set(files.map(dirname))) {
+      const watcher = watch(folder, (_event, changed) => {
+        if (changed === null || files.includes(resolve(folder, changed))) queue();
+      });
+      watcher.on("error", stop);
+      watchers.push(watcher);
+    }
+  } catch (error) { stop(error); throw error; }
+  const closed = Promise.all(watchers.map(watcher => new Promise(resolveClose => watcher.once("close", resolveClose))));
   running = publish().catch(stop);
   await closed;
   await running;

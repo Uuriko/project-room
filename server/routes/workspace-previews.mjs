@@ -64,6 +64,7 @@ async function serveWorkspacePreviews(ctx) {
   const params = url.searchParams, id = params.get("id"), frameRevision = params.get("frame");
   const frame = req.method === "GET" && frameRevision !== null;
   const changeRead = req.method === "GET" && params.has("changes");
+  const outputRead = req.method === "GET" && params.has("output");
   const fence = selected.mode === "account" ? ctx.accountBinding(req, frame ? url : null) : ctx.expectedBinding(req);
   const place = { roomId, selected, fence };
   const reading = req.method === "GET";
@@ -71,12 +72,14 @@ async function serveWorkspacePreviews(ctx) {
   const auth = authorize(ctx, place, needed), viewerId = auth.member.id;
   res.setHeader("Cache-Control", "no-store");
   const allowed = frame ? ["auth", "id", "frame", "binding"]
-    : changeRead ? ["auth", "id", "changes", "revision", "view", "path"] : ["auth", "id"];
+    : changeRead ? ["auth", "id", "changes", "revision", "view", "path"]
+      : outputRead ? ["auth", "id", "output", "revision"] : ["auth", "id"];
   if ([...params.keys()].some(name => !allowed.includes(name) || params.getAll(name).length !== 1)
     || id !== null && !validPreviewSelection(id)
     || changeRead && (!id || params.get("changes") !== "1" || params.has("revision") && !/^[1-9][0-9]*$/.test(params.get("revision"))
       || params.has("view") && !["summary", "file"].includes(params.get("view"))
       || (params.get("view") === "file" ? !params.get("path") || params.get("path").length > 4096 : params.has("path")))
+    || outputRead && (!id || params.get("output") !== "1" || params.has("revision") && !/^[1-9][0-9]*$/.test(params.get("revision")))
     || frame && (selected.bearer || !id || !/^[1-9][0-9]*$/.test(frameRevision)))
     ctx.reject(422, "invalid_preview", "Choose one preview ID and revision");
   if (reading) {
@@ -85,14 +88,20 @@ async function serveWorkspacePreviews(ctx) {
     const viewer = { roomId, viewerId, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
       viewerSessionBinding: auth.sessionBinding ?? null, viewerSessionRevision: auth.sessionRevision ?? null };
     if (id === null) return ctx.json(res, 200, { ...viewer, items: previews?.list(roomId) ?? [] });
-    const item = changeRead ? previews?.changes(roomId, id) : previews?.get(roomId, id);
+    const item = changeRead ? previews?.changes(roomId, id)
+      : outputRead ? previews?.output(roomId, id) : previews?.get(roomId, id);
     if (!item) ctx.reject(404, "preview_not_found", "This preview is unavailable");
     if (changeRead) return changeResponse(ctx, params, item, viewer);
+    if (outputRead) {
+      if (params.has("revision") && String(item.revision) !== params.get("revision"))
+        ctx.reject(409, "preview_changed", "This preview changed. Open the latest version.");
+      return ctx.json(res, 200, { ...viewer, run: item });
+    }
     if (frame) {
       if (String(item.revision) !== frameRevision) ctx.reject(409, "preview_changed", "This preview changed. Open the latest version.");
       return renderFrame(ctx, item);
     }
-    const { patch: _patch, ...preview } = item;
+    const { patch: _patch, output: _output, ...preview } = item;
     return ctx.json(res, 200, { ...viewer, item: preview });
   }
 

@@ -25,3 +25,9 @@ This release handles standalone HTML previews of up to 384 KiB. The frame isolat
 Add `--include-changes yes` when publishing or watching a preview to share the committed changes between the supplied base and the current checkout head. The change summary excludes unstaged and untracked files. Members can open **Changes** beside the preview and compare a second attempt from the same base commit. The change view opens a file's hunks and has a raw fallback when a patch cannot be fully parsed.
 
 Agents can get a compact file list with `room workspace changes --id PREVIEW_ID`, read one file with `--file PATH`, or retrieve the original patch with `--raw yes`. The patch stays attached to its exact source and preview revision.
+
+## Keep the preview, changes, and run together
+
+The Workspace opens available views for the selected attempt. Switch between Preview, Changes, and Run output without reopening the preview or losing the selected comparison. Use the arrows, Home, or End on the view tabs.
+
+Add `--output dist/run.log` to publish or watch alongside the HTML and optional patch. Choose a shareable plain-text file up to 24 KiB. Agents can read it directly with `room workspace output --id PREVIEW_ID`. Room binds the output to its preview revision. A replacement preview with different HTML or source clears the old output unless the publisher supplies the new output with it.

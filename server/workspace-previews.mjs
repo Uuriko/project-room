@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 
 export const previewBytes = 384 * 1024;
 export const patchBytes = 192 * 1024;
-export const previewJsonBytes = (previewBytes + patchBytes) * 6 + 4096;
+export const outputBytes = 24 * 1024;
+export const previewJsonBytes = (previewBytes + patchBytes + outputBytes) * 6 + 4096;
 const roomLimit = 24;
 const ownerLimit = 6;
 const fields = "id, publisher_id AS publisherId, title, base, head, digest, revision, updated_at AS updatedAt";
@@ -23,17 +24,27 @@ export function workspacePreviews(db, { create = true } = {}) {
     db.exec("ALTER TABLE room_workspace_previews ADD COLUMN patch TEXT; ALTER TABLE room_workspace_previews ADD COLUMN patch_digest TEXT");
     patchStorage = true;
   }
-  const projected = fields + (patchStorage ? ", patch_digest AS patchDigest" : ", NULL AS patchDigest");
+  let outputStorage = Boolean(db.prepare("SELECT 1 FROM pragma_table_info('room_workspace_previews') WHERE name='run_output'").get());
+  if (create && !outputStorage) {
+    db.exec("ALTER TABLE room_workspace_previews ADD COLUMN run_output TEXT; ALTER TABLE room_workspace_previews ADD COLUMN output_digest TEXT");
+    outputStorage = true;
+  }
+  const projected = fields + (patchStorage ? ", patch_digest AS patchDigest" : ", NULL AS patchDigest")
+    + (outputStorage ? ", output_digest AS outputDigest" : ", NULL AS outputDigest");
   return {
     list(roomId) {
       return db.prepare(`SELECT ${projected} FROM room_workspace_previews WHERE room_id=?
         ORDER BY updated_at DESC,id DESC LIMIT ${roomLimit}`).all(roomId);
     },
     get(roomId, id) {
-      return db.prepare(`SELECT ${projected},html,${patchStorage ? "patch" : "NULL AS patch"} FROM room_workspace_previews WHERE room_id=? AND id=?`).get(roomId, id);
+      return db.prepare(`SELECT ${projected},html,${patchStorage ? "patch" : "NULL AS patch"},${outputStorage ? "run_output AS output" : "NULL AS output"} FROM room_workspace_previews WHERE room_id=? AND id=?`).get(roomId, id);
     },
     changes(roomId, id) {
       return db.prepare(`SELECT id, base, head, revision, ${patchStorage ? "patch" : "NULL AS patch"}
+        FROM room_workspace_previews WHERE room_id=? AND id=?`).get(roomId, id);
+    },
+    output(roomId, id) {
+      return db.prepare(`SELECT id, base, head, revision, ${outputStorage ? "run_output AS output" : "NULL AS output"}
         FROM room_workspace_previews WHERE room_id=? AND id=?`).get(roomId, id);
     },
     publish(roomId, publisherId, input, now, reject) {
@@ -45,7 +56,10 @@ export function workspacePreviews(db, { create = true } = {}) {
       const sameSource = existing?.head === input.head && existing.base === input.base;
       const patch = input.patch ?? (sameSource ? existing.patch : null);
       const patchDigest = patch === null ? null : createHash("sha256").update(patch).digest("hex");
-      if (existing?.digest === digest && existing.title === title && sameSource && existing.patchDigest === patchDigest)
+      const output = input.output ?? (sameSource && existing.digest === digest ? existing.output : null);
+      const outputDigest = output === null ? null : createHash("sha256").update(output).digest("hex");
+      if (existing?.digest === digest && existing.title === title && sameSource && existing.patchDigest === patchDigest
+        && existing.outputDigest === outputDigest)
         return metadata(existing);
       if ((existing?.revision ?? 0) !== input.expectedRevision)
         reject(409, "preview_changed", "Read the latest preview revision before publishing");
@@ -55,11 +69,11 @@ export function workspacePreviews(db, { create = true } = {}) {
           reject(409, "preview_limit", "Remove an earlier workspace preview before publishing a new one");
       }
       db.prepare(`INSERT INTO room_workspace_previews
-        (room_id,id,publisher_id,title,base,head,digest,html,revision,updated_at,patch,patch_digest) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        (room_id,id,publisher_id,title,base,head,digest,html,revision,updated_at,patch,patch_digest,run_output,output_digest) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(room_id,id) DO UPDATE SET title=excluded.title,base=excluded.base,head=excluded.head,
         digest=excluded.digest,html=excluded.html,revision=excluded.revision,updated_at=excluded.updated_at,
-        patch=excluded.patch,patch_digest=excluded.patch_digest`)
-        .run(roomId, input.id, publisherId, title, input.base, input.head, digest, html, input.expectedRevision + 1, now, patch, patchDigest);
+        patch=excluded.patch,patch_digest=excluded.patch_digest,run_output=excluded.run_output,output_digest=excluded.output_digest`)
+        .run(roomId, input.id, publisherId, title, input.base, input.head, digest, html, input.expectedRevision + 1, now, patch, patchDigest, output, outputDigest);
       return metadata(this.get(roomId, input.id));
     },
     remove(roomId, publisherId, input, owner, reject) {
@@ -74,7 +88,7 @@ export function workspacePreviews(db, { create = true } = {}) {
   };
 }
 
-function metadata({ html: _html, patch: _patch, ...value }) { return value; }
+function metadata({ html: _html, patch: _patch, output: _output, ...value }) { return value; }
 
 export function validPreviewSelection(id) {
   return typeof id === "string" && previewId.test(id);
@@ -84,9 +98,11 @@ export function validatePreviewInput(input, removing) {
   if (!input || !validPreviewSelection(input.id)
     || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) return false;
   if (removing) return Object.keys(input).length === 2;
-  const validPatch = typeof input.patch === "string" && Buffer.byteLength(input.patch) <= patchBytes;
-  return (Object.keys(input).length === 6 && !Object.hasOwn(input, "patch") || Object.keys(input).length === 7 && validPatch)
-    && typeof input.title === "string" && input.title.trim().length > 0
+  const fields = ["id", "expectedRevision", "title", "html", "base", "head", "patch", "output"];
+  const bounded = (key, max) => !Object.hasOwn(input, key)
+    || typeof input[key] === "string" && Buffer.byteLength(input[key]) <= max;
+  return Object.keys(input).every(key => fields.includes(key))
+    && bounded("patch", patchBytes) && bounded("output", outputBytes) && typeof input.title === "string" && input.title.trim().length > 0
     && input.title.length <= 150 && typeof input.html === "string"
     && input.html.trim().length > 0 && Buffer.byteLength(input.html) <= previewBytes
     && typeof input.base === "string" && gitId.test(input.base)

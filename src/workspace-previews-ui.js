@@ -20,13 +20,23 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       <section class="workspace-preview-detail" aria-label="Selected preview">
         <h3 data-preview-heading>Open a shared preview</h3>
         <p data-preview-meta class="form-hint"></p>
-        <details data-workspace-changes hidden>
-          <summary>Changes</summary>
+        <div data-workspace-tabs role="tablist" aria-label="Attempt views" hidden>
+          <button type="button" class="button ghost" role="tab" id="workspace-tab-preview" aria-controls="workspace-panel-preview" data-workspace-tab="preview">Preview</button>
+          <button type="button" class="button ghost" role="tab" id="workspace-tab-changes" aria-controls="workspace-panel-changes" data-workspace-tab="changes">Changes</button>
+          <button type="button" class="button ghost" role="tab" id="workspace-tab-output" aria-controls="workspace-panel-output" data-workspace-tab="output">Run output</button>
+        </div>
+        <section id="workspace-panel-changes" role="tabpanel" aria-labelledby="workspace-tab-changes" data-workspace-changes hidden>
           <label>Compare with <select data-workspace-compare><option value="">Choose another attempt</option></select></label>
           <p data-workspace-change-status class="form-hint" role="status"></p>
           <div class="workspace-change-columns"><section data-workspace-primary></section><section data-workspace-peer hidden></section></div>
-        </details>
-        <iframe title="Shared project preview" sandbox="allow-scripts" referrerpolicy="no-referrer" hidden></iframe>
+        </section>
+        <section id="workspace-panel-output" role="tabpanel" aria-labelledby="workspace-tab-output" hidden>
+          <p data-workspace-output-status class="form-hint" role="status"></p>
+          <pre data-workspace-output tabindex="0"></pre>
+        </section>
+        <section id="workspace-panel-preview" role="tabpanel" aria-labelledby="workspace-tab-preview" hidden>
+          <iframe title="Shared project preview" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+        </section>
       </section>
     </div>`;
   document.body.append(dialog);
@@ -36,6 +46,10 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const meta = dialog.querySelector("[data-preview-meta]");
   const status = dialog.querySelector("[data-preview-status]");
   const frame = dialog.querySelector("iframe");
+  const tabs = dialog.querySelector("[data-workspace-tabs]");
+  const tabButtons = [...tabs.querySelectorAll("[role=tab]")];
+  const output = dialog.querySelector("[data-workspace-output]");
+  const outputStatus = dialog.querySelector("[data-workspace-output-status]");
   const changesView = dialog.querySelector("[data-workspace-changes]");
   const compare = dialog.querySelector("[data-workspace-compare]");
   const changeStatus = dialog.querySelector("[data-workspace-change-status]");
@@ -43,26 +57,58 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const primary = dialog.querySelector("[data-workspace-primary]");
   const peer = dialog.querySelector("[data-workspace-peer]");
   const patchCache = new Map();
-  let selected = null, revision = null, generation = 0, changeGeneration = 0, items = [], renderedChanges = null;
+  let selected = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
+  let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview";
+
+  function choosePanel(name) {
+    activePanel = name;
+    for (const tab of tabButtons) {
+      const active = tab.dataset.workspaceTab === name;
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+      document.getElementById(tab.getAttribute("aria-controls")).hidden = !active || tabs.hidden;
+    }
+  }
+  async function loadOutput() {
+    const current = items.find(item => item.id === selected);
+    if (!dialog.open || activePanel !== "output" || !current?.outputDigest) return;
+    const key = [current.id, current.outputDigest].join(":");
+    if (renderedOutput === key) return;
+    const ticket = ++outputGeneration, session = client.session;
+    const ownsOutput = () => dialog.open && activePanel === "output" && selected === current.id
+      && client.session === session && outputGeneration === ticket;
+    output.textContent = "";
+    outputStatus.textContent = "Loading run output…";
+    try {
+      const query = new URLSearchParams({ output: "1", id: current.id, revision: String(current.revision) });
+      const value = await client.roomRead(`/workspace-previews?${query}`);
+      if (!value || !ownsOutput()) return;
+      output.textContent = value.run.output ?? "";
+      outputStatus.textContent = "";
+      renderedOutput = key;
+    } catch (error) {
+      if (ownsOutput()) outputStatus.textContent = error.message || "Could not read run output.";
+    }
+  }
   async function loadChanges() {
-    if (!dialog.open || !changesView.open) return;
+    if (!dialog.open || changesView.hidden) return;
     const current = items.find(item => item.id === selected);
     if (!current?.patchDigest) return;
     const comparison = items.find(item => item.id === compare.value && item.base === current.base && item.patchDigest);
     const ticket = ++changeGeneration, session = client.session;
-    const stillOpen = () => dialog.open && changesView.open && ticket === changeGeneration && client.session === session;
-    const key = JSON.stringify([current.id, current.revision, comparison?.id, comparison?.revision]);
+    const stillOpen = () => dialog.open && !changesView.hidden && ticket === changeGeneration && client.session === session;
+    const key = JSON.stringify([current.id, current.patchDigest, comparison?.id, comparison?.patchDigest]);
     if (renderedChanges === key) return;
     columns.hidden = true;
     changeStatus.textContent = "Loading changes…";
     try {
       const getPatch = async item => {
         const cached = patchCache.get(item.id);
-        if (cached?.revision === item.revision) return cached.patch;
+        if (cached?.digest === item.patchDigest) return cached.patch;
         const query = new URLSearchParams({ id: item.id, changes: "1", revision: String(item.revision) });
         const value = await client.roomRead(`/workspace-previews?${query}`);
         if (!value || !stillOpen()) return null;
-        patchCache.set(item.id, value.changes);
+        patchCache.set(item.id, { digest: item.patchDigest, patch: value.changes.patch });
         return value.changes.patch;
       };
       const [{ renderWorkspaceChange }, a, b] = await Promise.all([
@@ -84,8 +130,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     }
   }
   function updateComparisons(current) {
-    changesView.hidden = !current.patchDigest;
-    if (changesView.hidden) return;
+    if (!current.patchDigest) return;
     const previous = compare.value;
     const eligible = items.filter(item => item.id !== current.id && item.base === current.base && item.patchDigest);
     compare.replaceChildren(new Option("Choose another attempt", ""), ...eligible.map(item => new Option(item.title, item.id)));
@@ -95,13 +140,14 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   }
   const owns = (ticket, session) => dialog.open && generation === ticket && client.session === session;
   function clearPreview() {
-    revision = null; changeGeneration++;
-    renderedChanges = null;
-    changesView.open = false; changesView.hidden = true;
+    frameDigest = null; changeGeneration++; outputGeneration++;
+    renderedChanges = null; renderedOutput = null;
+    tabs.hidden = true;
+    choosePanel("preview");
+    output.textContent = ""; outputStatus.textContent = "";
     primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
     compare.value = ""; changeStatus.textContent = "";
     frame.removeAttribute("src");
-    frame.hidden = true;
     heading.textContent = "Open a shared preview";
     meta.textContent = "";
   }
@@ -143,30 +189,51 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       if (focused) list.querySelector(`[data-preview-id="${CSS.escape(focused)}"]`)?.focus();
       status.textContent = page.items.length ? "" : "No previews shared yet. An agent can publish one with room workspace.";
       if (!current) return;
+      tabs.hidden = false;
+      for (const tab of tabButtons) {
+        tab.hidden = tab.dataset.workspaceTab === "changes" ? !current.patchDigest
+          : tab.dataset.workspaceTab === "output" ? !current.outputDigest : false;
+      }
+      const activeTab = tabButtons.find(tab => tab.dataset.workspaceTab === activePanel);
+      choosePanel(activeTab.hidden ? "preview" : activePanel);
       updateComparisons(current);
-      if (revision === current.revision) return;
+      void loadOutput();
+      heading.textContent = current.title;
+      meta.textContent = uiText("workspace.preview.source", {
+        name: memberLabel(current.publisherId) || current.publisherId,
+        head: current.head.slice(0, 12), revision: current.revision,
+      });
+      if (frameDigest === current.digest) return;
       const query = new URLSearchParams({ id: current.id, frame: String(current.revision) });
       if (session.authMode === "account") {
         query.set("auth", "account");
         query.set("binding", session.sessionBinding);
       }
       frame.src = client.path(`/workspace-previews?${query}`);
-      frame.hidden = false;
-      heading.textContent = current.title;
-      meta.textContent = uiText("workspace.preview.source", {
-        name: memberLabel(current.publisherId) || current.publisherId,
-        head: current.head.slice(0, 12), revision: current.revision,
-      });
-      revision = current.revision;
+      frameDigest = current.digest;
     } catch (error) {
       if (!owns(ticket, session)) return;
       clearPreview();
       status.textContent = error.message || "Could not open previews.";
     }
   }
-  changesView.addEventListener("toggle", () => {
-    if (changesView.open) void loadChanges();
-    else changeGeneration++;
+  function activate(tab) {
+    changeGeneration++; outputGeneration++;
+    choosePanel(tab.dataset.workspaceTab);
+    if (activePanel === "changes") void loadChanges();
+    if (activePanel === "output") void loadOutput();
+  }
+  for (const tab of tabButtons) tab.addEventListener("click", () => activate(tab));
+  tabs.addEventListener("keydown", event => {
+    const enabled = tabButtons.filter(tab => !tab.hidden);
+    const index = enabled.indexOf(event.target);
+    if (index < 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const step = event.key === "ArrowRight" ? 1 : -1;
+    const next = event.key === "Home" ? enabled[0] : event.key === "End" ? enabled.at(-1)
+      : enabled[(index + step + enabled.length) % enabled.length];
+    next.focus();
+    activate(next);
   });
   compare.addEventListener("change", () => void loadChanges());
   button.addEventListener("click", () => {
