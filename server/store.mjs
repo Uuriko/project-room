@@ -7315,10 +7315,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           || (command.type === T.MESSAGE_POSTED && !opensReplyRequest && (!isDraft || tier === "contributor"));
         if (!allowed) fail(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
+      const guardedDraft = command.type === T.MESSAGE_POSTED && Object.hasOwn(command.data, "ifOpenReplyRequestId");
+      let draftRequestId, draftData;
+      if (guardedDraft) {
+        ({ ifOpenReplyRequestId: draftRequestId, ...draftData } = command.data);
+        if (!validId(draftRequestId) || draftData.replyToId !== draftRequestId
+          || REPLY_FIELDS.some(field => Object.hasOwn(draftData, field)))
+          fail(422, "invalid_command", "A guarded draft must be an ordinary reply to its exact request");
+      }
       const fingerprint = hash(canonical(command));
       const prior = this.db.prepare("SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, command.id);
       if (prior) {
-        if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
+        if (prior.fingerprint !== fingerprint) {
+          // A pre-upgrade client could commit the identical ordinary draft
+          // without the guard. Compare the original command in this actor's
+          // receipt row. This path recovers a write and cannot append one.
+          if (!guardedDraft || !validId(draftData.toMemberId)
+            || prior.fingerprint !== hash(canonical({ ...command, data: draftData })))
+            fail(409, "idempotency_conflict", "Command ID already used for different content");
+        }
         return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true,
           ...(command.type === T.DM_POSTED && command.data.quiet ? { notification: "quiet" }
             : [T.MESSAGE_POSTED, T.DM_POSTED].includes(command.type) ? { wakeDeliveryEvidence: "unknown" } : {}) };
@@ -7355,19 +7370,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ?? this.canonicalMessageEditContext(roomId, command);
       let room = messageContext?.room ?? this.room(roomId);
       if(!isArchivedOwnerPrivacyEvent(room.state,{type:command.type,actorId:auth.member.id}))refuseArchivedWrite(room.state);
-      if (command.type === T.MESSAGE_POSTED && Object.hasOwn(command.data, "ifOpenReplyRequestId")) {
-        const { ifOpenReplyRequestId, ...data } = command.data;
-        if (!validId(ifOpenReplyRequestId) || data.replyToId !== ifOpenReplyRequestId
-          || REPLY_FIELDS.some(field => Object.hasOwn(data, field)))
-          fail(422, "invalid_command", "A guarded draft must be an ordinary reply to its exact request");
+      if (guardedDraft) {
         const requests = room.state.replyRequests ?? {};
-        const request = Object.hasOwn(requests, ifOpenReplyRequestId) ? requests[ifOpenReplyRequestId] : null;
-        if (request?.recipientId !== auth.member.id || data.toMemberId !== request.requesterId)
+        const request = Object.hasOwn(requests, draftRequestId) ? requests[draftRequestId] : null;
+        if (request?.recipientId !== auth.member.id || draftData.toMemberId !== request.requesterId)
           fail(404, "request_not_found", "No reply request addressed to this recipient");
         if (request.status !== "open")
           fail(409, "formal_draft_request_closed", "The addressed request is closed. Read it before taking another action.");
         // The fingerprint includes this live precondition. The stored event does not.
-        command = { ...command, data };
+        command = { ...command, data: draftData };
       }
       if (firstAck || exactProgress) {
         const { ifUnacknowledgedContextEventId, ifCurrentContextEventId, ...data } = command.data;

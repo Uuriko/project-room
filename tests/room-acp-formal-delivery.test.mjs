@@ -275,16 +275,38 @@ for (const representation of [null, 'normalized-current-v1']) test(`guarded draf
   assert.equal(send(f.seeded.token).sequence, saved.sequence);
 });
 
-for (const closeBeforeRetry of [false, true]) test(`lost stale-draft response recovers the original write (closed before retry: ${closeBeforeRetry})`, async t => {
-  const f=await fixture(t);let inject=true, lose=true, formalPosts=0;const drafts=[];
+for (const {closeBeforeRetry, oldClient, representation} of [
+  {closeBeforeRetry:false},
+  {closeBeforeRetry:true},
+  {closeBeforeRetry:true, oldClient:true},
+  {closeBeforeRetry:true, oldClient:true, representation:'normalized-current-v1'}
+]) test(`lost stale-draft response recovers the original write (closed: ${closeBeforeRetry}, old client: ${oldClient ?? false}, ${representation ?? 'legacy'})`, async t => {
+  const f=await fixture(t, {representation});let inject=true, lose=true, formalPosts=0;const drafts=[];
+  let savedDraft, replayedDraft;
   const transport=async(url,options)=>{
     const command=options?.body ? JSON.parse(options.body) : null;
     if(command?.data?.responseToRequestId) {
       formalPosts++;
       if(inject){inject=false;f.store.command(f.seeded.owner,'commons',{id:'changed',type:'message.posted',data:{messageId:'changed',body:'New constraint',replyToId:'dm',toMemberId:'worker'}});}
     }
+    const draft=command?.type==='message.posted'&&!command.data.responseToRequestId;
+    if (draft) drafts.push(options.body);
+    // Only the first client is old. The upgraded client never drops its guard.
+    if (draft && oldClient && lose) {
+      delete command.data.ifOpenReplyRequestId;
+      options={...options,body:JSON.stringify(command)};
+    }
     const response=await fetch(url,options);
-    if(command?.type==='message.posted'&&!command.data.responseToRequestId){drafts.push(options.body);if(lose){lose=false;await response.clone().json();throw Error('draft receipt lost');}}
+    if (draft && lose) {
+      lose=false;
+      assert.equal(response.status,201);
+      savedDraft=await response.clone().json();
+      throw Error('draft receipt lost');
+    }
+    if (draft) {
+      assert.equal(response.status,200);
+      replayedDraft=await response.clone().json();
+    }
     return response;
   };
   const first=f.make(transport);await f.ready(first);await first.turn('dm',[f.wake]);
@@ -292,9 +314,21 @@ for (const closeBeforeRetry of [false, true]) test(`lost stale-draft response re
     data:{requestMessageId:'dm',expectedRequestRevision:0,reason:'Another reviewer took this'}});
   const second=f.make(transport);await f.ready(second);await second.turn('dm',[f.wake]);
   assert.equal(formalPosts,1);assert.equal(f.counts.prompts,1);assert.equal(drafts.length,2);assert.equal(new Set(drafts).size,1);
+  assert.equal(replayedDraft.duplicate,true);
+  assert.equal(replayedDraft.sequence,savedDraft.sequence);
+  assert.equal(replayedDraft.event.id,savedDraft.event.id);
   const current=await f.read(second);assert.equal(current.request.status,closeBeforeRetry?'cancelled':'open');
   assert.equal(current.page.items.filter(item=>item.message?.body.includes('draft for review, not a completed answer')).length,1);
   assert.equal(second.chatReceipts.read(second.chatReceipts.key(f.wake.signalId)).phase,'posted');
+  if (oldClient) {
+    const replay=JSON.parse(drafts[1]);
+    const snapshot=f.store.operationReceipt(f.seeded.token,'commons',replay.id);
+    assert.equal(snapshot.sequence,savedDraft.sequence);
+    assert.throws(() => f.store.command(f.seeded.token,'commons',
+      {...replay,data:{...replay.data,body:'Different draft'}}), {status:409,code:'idempotency_conflict'});
+    assert.throws(() => f.store.command(f.seeded.token,'commons',
+      {...replay,data:{...replay.data,ifOpenReplyRequestId:'another-request'}}), {status:422,code:'invalid_command'});
+  }
 });
 
 test('complete context is bound to the actual recipient and every page is inspected', async t => {
