@@ -36,6 +36,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         <h3 data-preview-heading>Open a shared preview</h3>
         <p data-preview-meta class="form-hint"></p>
         <div class="workspace-link-actions">
+          <button type="button" data-workspace-live class="button secondary" hidden></button>
           <button type="button" data-workspace-link class="button ghost" hidden></button>
           <button type="button" data-workspace-agent-copy class="button ghost" hidden></button>
           <button type="button" data-workspace-thread-draft class="button ghost" hidden></button>
@@ -101,12 +102,14 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   const output = dialog.querySelector("[data-workspace-output]");
   const outputStatus = dialog.querySelector("[data-workspace-output-status]");
   const copyLink = dialog.querySelector("[data-workspace-link]");
+  const openLive = dialog.querySelector("[data-workspace-live]");
   const copyForAgent = dialog.querySelector("[data-workspace-agent-copy]");
   const addToThread = dialog.querySelector("[data-workspace-thread-draft]");
   const linkStatus = dialog.querySelector("[data-workspace-link-status]");
   const linkFallback = dialog.querySelector("[data-workspace-link-fallback]");
   const latest = dialog.querySelector("[data-workspace-latest]");
   copyLink.textContent = uiText("workspace.share.copy");
+  openLive.textContent = uiText("workspace.live.open");
   addToThread.textContent = uiText("workspace.share.threadDraft");
   copyForAgent.textContent = uiText("workspace.share.copyForAgent");
   latest.textContent = uiText("workspace.share.openCurrent");
@@ -243,7 +246,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     tabs.hidden = true;
     choosePanel("preview");
     output.textContent = ""; outputStatus.textContent = "";
-    latest.hidden = true; copyLink.hidden = true; copyForAgent.hidden = true; addToThread.hidden = true; linkFallback.hidden = true; linkStatus.textContent = "";
+    latest.hidden = true; openLive.hidden = true; copyLink.hidden = true; copyForAgent.hidden = true; addToThread.hidden = true; linkFallback.hidden = true; linkStatus.textContent = "";
     primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
     compare.value = ""; changeStatus.textContent = "";
     frame?.remove(); frame = null;
@@ -305,6 +308,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       const activeTab = tabButtons.find(tab => tab.dataset.workspaceTab === activePanel);
       choosePanel(activeTab.hidden ? "preview" : activePanel);
       copyLink.hidden = false;
+      openLive.hidden = !current.liveAvailable;
       copyForAgent.hidden = false;
       addToThread.hidden = !threadDraft || Boolean(current.recipientId);
       updateComparisons(current);
@@ -370,6 +374,33 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     }
   }
   copyLink.addEventListener("click", () => void copySelection(false));
+  openLive.addEventListener("click", async () => {
+    const current = items.find(item => item.id === selected), session = client.session;
+    if (!current?.liveAvailable || openLive.disabled) return;
+    const tab = window.open("about:blank", "_blank");
+    if (!tab) {
+      linkStatus.textContent = uiText("workspace.live.popupBlocked");
+      return;
+    }
+    tab.opener = null;
+    openLive.disabled = true;
+    try {
+      const opened = await client.roomWrite("/workspace-previews/open-live", { id: current.id, revision: current.revision });
+      if (!opened || !dialog.open || client.session !== session || selected !== current.id
+        || items.find(item => item.id === current.id)?.revision !== current.revision) return tab.close();
+      const url = new URL(opened.openUrl);
+      if (url.origin === location.origin || url.username || url.password || url.search
+        || url.pathname !== "/.room-preview" || !/^#[a-f0-9]{64}$/.test(url.hash)
+        || (url.protocol !== "https:" && !(url.protocol === "http:" && url.hostname.endsWith(".localhost"))))
+        throw new Error("Invalid live preview address");
+      tab.location.replace(url.href);
+    } catch {
+      tab.close();
+      if (dialog.open && client.session === session && selected === current.id) linkStatus.textContent = uiText("workspace.live.unavailable");
+    } finally {
+      openLive.disabled = false;
+    }
+  });
   copyForAgent.addEventListener("click", () => void copySelection(true));
   addToThread.addEventListener("click", async () => {
     const snapshot = shareSelection(), destination = threadDraft;

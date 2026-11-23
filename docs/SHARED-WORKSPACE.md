@@ -75,9 +75,68 @@ From the isolated worktree, run the project's trusted development command:
 room workspace run -- npm run dev -- --host {host} --port {port}
 ```
 
-Room chooses a preferred per-worktree port and falls back to a free port if it is occupied. Pass `--port PORT` before the separator when a specific port is required. The command may also use the supplied `HOST` and `PORT` variables. Room reports the preview URL when it observes that the launched process group owns the loopback listener. Its logs go to stderr.
+Room chooses a preferred per-worktree port and falls back to a free port if it is occupied. Pass `--port PORT` before the separator when a specific port is required. For a project inside a monorepo, pass its working directory before
+the command separator, for example `room workspace run --cwd apps/web -- npm run dev`.
+Use a directory within the same worktree. Port selection and relative run log
+paths still use the worktree root. The command may also use the supplied `HOST` and `PORT` variables. Room reports the preview URL when it observes that the launched process group owns the loopback listener. Its logs go to stderr.
 
 This command uses macOS or Linux with Git, lsof, and ps. Close it to stop this local process group without affecting other worktrees. The full development server stays on your machine. Use `publish` or `watch` from the section above for room-visible standalone builds.
+
+The Node server can start an optional Workspace publisher broker on loopback.
+Set `ROOM_WORKSPACE_PUBLISHER_PORT`, `ROOM_WORKSPACE_PUBLISHER_TLS_KEY` and
+`ROOM_WORKSPACE_PUBLISHER_TLS_CERT` together. Use a different port from the
+Room HTTP listener and absolute certificate paths. The broker accepts a
+short-lived grant for one exact publication over TLS 1.3.
+
+Publishers on other computers connect to the TLS passthrough address you
+provide. For example, route TCP port 8443 on `preview-host.example` to the
+Room machine's `127.0.0.1:8444` broker listener without terminating TLS at the
+proxy. [HAProxy's TCP setup](https://www.haproxy.com/documentation/haproxy-configuration-tutorials/protocol-support/tcp/)
+is one way to wire it. Use a broker certificate with a DNS subject alternative
+name for the exact hostname publishers dial. Use either a publicly trusted
+certificate and chain, or give publishers your private CA certificate for
+`--publisher-ca`. For an isolated trial with a self-signed certificate, run
+this in a private directory, replacing the example hostname with yours:
+
+```sh
+openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
+  -subj '/CN=preview-host.example' -addext 'subjectAltName=DNS:preview-host.example' \
+  -keyout publisher-key.pem -out publisher-cert.pem
+```
+
+Keep the key on the Room host. Give publishers only `publisher-cert.pem`
+as their `--publisher-ca` file. A hostname mismatch or an untrusted
+certificate stops registration.
+
+Set `ROOM_WORKSPACE_PUBLISHER_ADDRESS=tls://preview-host.example:8443` on the
+Room server so it supplies that address with the grant. To share a running app,
+publish a directed snapshot and pass its preview link to the launcher:
+
+```sh
+room workspace run --live "$PREVIEW_LINK" -- npm run dev -- --host {host} --port {port}
+```
+
+With a private CA, add `--publisher-ca FILE` before the separator and use
+the certificate file from the broker setup.
+If the Room has no advertised address, add `--publisher tls://HOST:PORT` using
+the address from your Room operator.
+
+The command checks the link against the local commit and the current Room
+publication, starts the app on its owned loopback port, and registers that
+exact publication. Give your teammate the same Room link.
+Stopping the command closes the live view. Withdrawing the publication
+also closes it and leaves the local process available to the publisher.
+
+To enable recipient live viewing, set `ROOM_WORKSPACE_VIEWER_ORIGIN` to a
+separate HTTPS origin and `ROOM_WORKSPACE_VIEWER_PORT` to a third, unused
+local port. Route wildcard DNS and TLS for the viewer domain to that
+loopback listener and preserve the HTTP Host, Origin and WebSocket upgrade.
+Use a dedicated domain for previews. Each live session uses a different
+hostname, a one-use handoff and its own host-only cookie. A publisher and
+the named recipient can use **Open live preview** when the exact directed
+publication has a registered publisher. The live page forwards GET/HEAD
+and the supported development-server hot reload connections. The saved
+preview is available separately.
 
 ## Share an attempt with one teammate
 

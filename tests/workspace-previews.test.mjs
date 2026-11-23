@@ -151,6 +151,12 @@ test("new worktrees keep the project selection outside the working copy", async 
     const metadata = join(git(receipt.path, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
     assert.deepEqual(JSON.parse(readFileSync(metadata, "utf8")), { connection: "first-room" });
   }
+  await assert.rejects(workspaceCommand(["run", "--cwd", "apps/absent", "--", process.execPath, "-v"],
+    { cwd: receipts[0].path }), /--cwd "apps\/absent".*existing directory/);
+  for (const directory of ["..", "page.html"]) {
+    await assert.rejects(workspaceCommand(["run", "--cwd", directory, "--", process.execPath, "-v"],
+      { cwd: receipts[0].path }), /working directory inside this worktree/);
+  }
 });
 
 test("continuation rechecks the share after fetching its missing commit", async t => {
@@ -190,4 +196,49 @@ test("continuation rechecks the share after fetching its missing commit", async 
   assert.equal(git(receiver, "rev-parse", head + "^{commit}"), head);
   assert.equal(git(receiver, "rev-parse", "HEAD"), base);
   assert.equal(existsSync(target), false);
+});
+
+test("only the current publisher can register an exact preview through the local broker", async t => {
+  let now = Date.now();
+  const store = new RoomStore(":memory:", { now: () => now });
+  store.initialize(initialRoom("commons"));
+  const owner = store.issueAccessKey("commons", "owner");
+  store.command(owner, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "viewer", displayName: "Reader", kind: "human", permissions: ["complete_work"] } });
+  const viewer = store.issueAccessKey("commons", "viewer");
+  const server = createRoomServer({ store, workspaceLivePublisherEnabled: true });
+  server.listen(0, "127.0.0.1");
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+  });
+  await once(server, "listening");
+  const id = "f".repeat(32), path = `http://127.0.0.1:${server.address().port}/api/rooms/commons/workspace-previews`;
+  const post = (url, key, body) => fetch(url, { method: "POST", headers: {
+    Authorization: `Bearer ${key}`, "Content-Type": "application/json",
+  }, body: JSON.stringify(body) });
+  const publish = (expectedRevision, html) => post(path, owner, { id, expectedRevision, html, title: "App",
+    base: "a".repeat(40), head: "b".repeat(40), recipientId: "viewer" });
+  const issue = (key, revision) => post(`${path}/publisher-grant`, key, { id, revision });
+  const exact = revision => ({ roomId: "commons", id, revision, publisherId: "owner" });
+  assert.equal((await publish(0, "<h1>First</h1>")).status, 200);
+  assert.equal((await issue(viewer, 1)).status, 404);
+  const first = await issue(owner, 1);
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get("cache-control"), "no-store");
+  const { grant } = await first.json();
+  assert.deepEqual(server.consumeWorkspacePublisherGrant(grant, exact(1)), exact(1));
+  assert.equal(server.consumeWorkspacePublisherGrant(grant, exact(1)), null);
+  const wrongScope = await (await issue(owner, 1)).json();
+  assert.equal(server.consumeWorkspacePublisherGrant(wrongScope.grant, { ...exact(1), roomId: "other" }), null);
+  assert.equal(server.consumeWorkspacePublisherGrant(wrongScope.grant, exact(1)), null);
+
+  const old = await (await issue(owner, 1)).json();
+  assert.equal((await publish(1, "<h1>Second</h1>")).status, 200);
+  assert.equal((await issue(owner, 1)).status, 409);
+  assert.equal(server.consumeWorkspacePublisherGrant(old.grant, exact(1)), null);
+  const expired = await (await issue(owner, 2)).json();
+  now += 10_001;
+  assert.equal(server.consumeWorkspacePublisherGrant(expired.grant, exact(2)), null);
 });

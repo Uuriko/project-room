@@ -951,6 +951,7 @@ response's own `hint`/`next` when it names something more specific.
 | `preview_audience_changed` | 409 | Use a new workspace preview ID to change who can see it | no | Publish a new preview with the intended audience and give them its new link. |
 | `preview_changed` | 409 | This preview changed. Open the latest version. | re-read | Read the current revision before publishing or removing it. Open the current version explicitly when an exact link is stale. |
 | `preview_file_not_found` | 404 | This path is absent from the published changes | re-list | Read the changed-file summary for that exact revision and select a published path. |
+| `preview_grant_limit` | 429 | Too many pending publisher grants | retry | Let an existing grant connect or expire, then request one grant for the current publication. |
 | `preview_limit` | 409 | Remove an earlier workspace preview before publishing a new one | no | Check which previews are still needed and remove an eligible one before republishing. |
 | `preview_not_found` | 404 | This preview is unavailable | re-list | Check the Workspace list for previews visible to you or ask the publisher for a current link. |
 | `preview_owner_required` | 403 | Only the publisher can update this preview | no | Ask the publisher to update it. The room owner can also remove it. |
