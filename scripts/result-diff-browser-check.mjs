@@ -48,18 +48,24 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const errors = [];
-  async function login(actor, destination = origin) {
+  async function login(actor, destination = origin, resultReads, { pauseUpdates = false } = {}) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
     await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    if (pauseUpdates) await context.route("**/stream?**", route =>
+      route.fulfill({ status: 200, contentType: "text/event-stream", body: ": updates held by fixture\n\n" }));
     const page = await context.newPage(); page.setDefaultTimeout(8000);
     page.on("pageerror", error => errors.push(error.message));
+    if (resultReads) page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname.endsWith("/work-result")) resultReads.push(url.searchParams.get("completionEventId"));
+    });
     await page.goto(destination); await signInFixture(page, f.keys[actor]);
     await page.locator("#main").waitFor({ state: "visible" });
     return page;
   }
   const mutate = (type, data) => send("producer", type, { workItemId: "revision-journey", expectedRevision: item("revision-journey").revision, ...data });
   t.after(() => assert.deepEqual(errors, []));
-  return { ...f, origin, item: () => item("revision-journey"), first, login, mutate, send, complete: body => completeWithText("revision-journey", body) };
+  return { ...f, origin, item: () => item("revision-journey"), first, login, mutate, send, complete: (body, toMemberId) => completeWithText("revision-journey", body, toMemberId) };
 }
 const card = page => page.locator('[data-work-record-id="revision-journey"]');
 async function openResult(page) {
@@ -388,14 +394,25 @@ test("shared result links keep identical old and new text bound to different ver
   const earlier = await sender.getByRole("link", { name: "Open earlier result" }).getAttribute("href");
   assert.equal(earlier, expected(f.first.event.id));
 
-  const receiver = await f.login("human-checker", earlier);
+  const selectedReads = [];
+  const receiver = await f.login("human-checker", earlier, selectedReads);
   await receiver.getByText("Verification · Failed", { exact: true }).waitFor();
   assert.match(await receiver.locator("#result-status").textContent(), /^Earlier result/);
   assert.equal(await receiver.locator("#result-body").textContent(), body);
   assert.equal(await receiver.locator("#result-work-action").isVisible(), false);
-  await receiver.goto(current);
+  const currentLink = receiver.getByRole("link", { name: "Open current result", exact: true });
+  await currentLink.waitFor({ timeout: 2000 });
+  assert.equal(await currentLink.getAttribute("href"), current);
+  assert.ok(!selectedReads.includes(second.event.id), "no current result read before activation");
+  assert.equal(await receiver.locator("#result-title").evaluate(node => node === document.activeElement), true);
+  await receiver.keyboard.press("Tab");
+  assert.equal(await currentLink.evaluate(node => node === document.activeElement), true);
+  await receiver.keyboard.press("Enter");
   await receiver.getByText("Verification · Passed", { exact: true }).waitFor();
+  assert.equal(selectedReads.filter(id => id === second.event.id).length, 1, "one exact current result read after activation");
   assert.doesNotMatch(await receiver.locator("#result-status").textContent(), /^Earlier result/);
+  assert.equal(await currentLink.isVisible(), false);
+  assert.equal(await receiver.locator("#result-title").evaluate(node => node === document.activeElement), true);
   assert.equal(await receiver.locator("#result-body").textContent(), body);
   assert.deepEqual(await receiver.locator("#result-body a").evaluateAll(links => links.map(link => link.href)),
     [verdictSource, regressionSource]);
@@ -418,6 +435,7 @@ test("shared result links keep identical old and new text bound to different ver
 
   await receiver.goto(expected("missing-completion"));
   await receiver.getByText(/Exact text unavailable/).waitFor();
+  assert.equal(await currentLink.isVisible(), false);
   assert.equal(await receiver.locator("#result-body").textContent(), "");
   assert.equal(await receiver.locator("#result-title").textContent(), "Result");
 
@@ -437,6 +455,7 @@ test("shared result links keep identical old and new text bound to different ver
   f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.store.room("commons").state.messages.find(message => message.id === messageId).revision ?? 0 });
   await receiver.goto(earlier);
   await receiver.getByText(/Text withdrawn by/).waitFor();
+  assert.equal(await currentLink.isVisible(), false);
   assert.equal(await receiver.locator("#result-body").textContent(), "");
   assert.equal(await receiver.locator("#result-copy-link").isVisible(), false);
 });
@@ -455,4 +474,65 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
   assert.equal(await nonparty.locator("#result-title").textContent(), "Result");
   assert.equal(await nonparty.locator("#result-copy-link").isVisible(), false);
   assert.equal(await nonparty.locator("#result-work-action").isVisible(), false);
+  assert.equal(await nonparty.getByRole("link", { name: "Open current result" }).isVisible(), false);
+});
+
+test("a public historical result does not offer a private replacement to a nonparty", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  f.mutate(T.WORK_BLOCKED, { reason: "Replace with narrower evidence", nextAction: "Report privately" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Replacement is ready" });
+  f.mutate(T.WORK_STARTED, {});
+  const replacement = f.complete("Private replacement body", "human-checker");
+  const target = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+  const nonparty = await f.login("owner", target);
+  await nonparty.locator("#result-body").getByText(/Result A/).waitFor();
+  assert.equal(await nonparty.getByRole("link", { name: "Open current result" }).isVisible(), false);
+  assert.equal(await nonparty.getByText("Private replacement body", { exact: true }).count(), 0);
+  const party = await f.login("human-checker", target);
+  const link = party.getByRole("link", { name: "Open current result", exact: true });
+  await link.waitFor();
+  assert.ok((await link.getAttribute("href")).endsWith("/" + replacement.event.id));
+  f.send("producer", T.MESSAGE_DELETED, { messageId: replacement.event.data.evidenceMessageId, expectedMessageRevision: 0 });
+  await party.reload();
+  await party.locator("#result-body").getByText(/Result A/).waitFor();
+  assert.equal(await link.isVisible(), false, "withdrawn replacement has no available text");
+});
+
+test("a second correction cannot make the activated replacement look current", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const replace = body => {
+    f.mutate(T.WORK_BLOCKED, { reason: "Refresh the evidence", nextAction: "Resubmit" });
+    f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Evidence ready" });
+    f.mutate(T.WORK_STARTED, {});
+    return f.complete(body);
+  };
+  const second = replace("Second exact result");
+  const target = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+  const reads = [];
+  const page = await f.login("human-checker", target, reads, { pauseUpdates: true });
+  const link = page.getByRole("link", { name: "Open current result", exact: true });
+  await link.waitFor();
+  assert.ok((await link.getAttribute("href")).endsWith("/" + second.event.id));
+  let third;
+  await page.route("**/work-result?**", route => {
+    if (!third && new URL(route.request().url()).searchParams.get("completionEventId") === second.event.id) {
+      third = replace("Third exact result");
+    }
+    return route.continue();
+  });
+  await page.keyboard.press("Tab");
+  assert.equal(await link.evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press("Enter");
+  await page.locator("#result-body").getByText("Second exact result", { exact: true }).waitFor();
+  assert.match(await page.locator("#result-status").textContent(), /^Earlier result/);
+  assert.equal(await page.locator("#result-work-context").isVisible(), false);
+  assert.ok((await link.getAttribute("href")).endsWith("/" + third.event.id));
+  assert.ok(!reads.includes(third.event.id), "third result is still an explicit selection");
+  await page.keyboard.press("Tab");
+  assert.equal(await link.evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press("Enter");
+  await page.locator("#result-body").getByText("Third exact result", { exact: true }).waitFor();
+  assert.doesNotMatch(await page.locator("#result-status").textContent(), /^Earlier result/);
+  assert.equal(await page.locator("#result-work-action").isVisible(), false, "older snapshot cannot supply a current action");
+  assert.equal(reads.filter(id => id === third.event.id).length, 1);
 });

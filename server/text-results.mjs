@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer, validateResultSegments } from "../src/work-packet.js";
 import { nextWorkStep, workActions, workThreadHref } from "../src/workflow.js";
 import { messageInHistory } from "./history-visibility.mjs";
-import { WORK_REVISION_TYPES } from "../src/events.js";
+import { WORK_REVISION_TYPES, WORK_STATES } from "../src/events.js";
 
 const check = condition => { if (!condition) throw new Error("Native result evidence requires reconciliation"); };
 export const textVersion = body => {
@@ -233,6 +233,13 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const selectionStatus = result.receipt
     ? (result.receipt.eventId === work.receipt?.eventId ? "current" : "historical")
     : result.kind;
+  const replacementId = work.receipt?.nativeText?.messageId;
+  const replacementMessages = selectionStatus === "historical" && result.text?.body != null && replacementId
+    && work.state === WORK_STATES.COMPLETED && !work.supersededBy
+    ? messageRecords ?? messageRepository({ db }, state.room.id, state) : null;
+  const replacement = replacementMessages?.get(replacementId);
+  const currentResultCompletionEventId = replacement && !replacement.deletedAt
+    && textVisibleToViewer(db, state, replacementId, viewerId, floor, replacementMessages) ? work.receipt.eventId : null;
   const review = selectionStatus === "current" && next.action === "verify"
     && result.text?.body !== null && workActions(work, reviewer, now).some(([action]) => action === "verify")
     ? { criteria: work.definitionOfDone, runtimeDispatchFence: true,
@@ -260,7 +267,8 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
             }, inputRequired: ["resolution"] } } : {}) }
     : null;
   return { contractVersion: 1, roomId: state.room.id, workItemId,
-    workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
+    workThread: { workItemId, href: workThreadHref(workItemId),
+      ...(currentResultCompletionEventId ? { currentResultCompletionEventId } : {}), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
       ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
       ...(releaseChecks ? { releaseChecks } : {}) },
     selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
