@@ -797,6 +797,21 @@ for (const replace of [false, true]) {
     const released = Promise.withResolvers();
     let deliverError;
     t.after(() => gate.resolve());
+    // Let the delivery and evidence verification finish before asserting what
+    // the old response can change. A fulfilled route alone cannot prove this.
+    await f.page.evaluate(async () => {
+      const { RoomClient } = await import("/src/client.js");
+      const readResult = RoomClient.prototype.workResult;
+      RoomClient.prototype.workResult = async function (workItemId, selection) {
+        const result = await readResult.call(this, workItemId, selection);
+        if (selection?.draftMessageId === "native-draft") {
+          setTimeout(() => {
+            document.documentElement.dataset.originalDraftRead = result?.result?.text?.messageId ?? "unavailable";
+          }, 0);
+        }
+        return result;
+      };
+    });
     await f.page.route("**/work-result?**", async route => {
       if (!original(new URL(route.request().url()))) return route.continue();
       try {
@@ -830,13 +845,13 @@ for (const replace of [false, true]) {
     gate.resolve();
     await released.promise;
     assert.ifError(deliverError);
+    await f.page.waitForFunction(() => document.documentElement.dataset.originalDraftRead === "native-draft");
     if (!replace) {
       await f.textReady();
       assert.equal(await f.save.isEnabled(), false);
       assert.equal(f.item().receipt, null);
       return;
     }
-    await f.page.evaluate(() => new Promise(requestAnimationFrame));
     assert.equal(await f.page.locator("#action-text-body").textContent(), corrected);
     assert.equal(f.item().receipt, null, "a late response cannot publish");
     assert.equal(await f.save.isEnabled(), true);
