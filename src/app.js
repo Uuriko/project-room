@@ -4006,8 +4006,8 @@ function revealLocationHash() {
       else pendHashReveal(id);
       return;
     }
-    if (current[1] === "work" && id !== null && (partialWorkSnapshot || state.workItems[id]?.receipt)) {
-      showWorkDestination("work", id, "thread");
+    if (current[1] === "work" && id !== null && (partialWorkSnapshot || Object.hasOwn(state.workItems, id))) {
+      showWorkDestination("work", id, partialWorkSnapshot || state.workItems[id]?.receipt ? "thread" : "focus");
     } else if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
     return;
   }
