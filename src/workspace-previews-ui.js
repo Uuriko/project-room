@@ -1,4 +1,19 @@
 import { uiText } from "./strings.js";
+import { clipboard } from "./clipboard.js";
+
+export function workspaceArtifactSelection(hash) {
+  const match = /^#pr-workspace\/([a-f0-9]{32})\/([1-9][0-9]*)\/(preview|changes|output)\/([a-f0-9]{64})\/([^/]{1,384})$/.exec(hash);
+  if (!match || !Number.isSafeInteger(Number(match[2]))) return null;
+  try {
+    return { id: match[1], revision: Number(match[2]), panel: match[3], digest: match[4], publisherId: decodeURIComponent(match[5]) };
+  } catch { return null; }
+}
+
+function artifactDigest(item, panel) {
+  if (panel === "changes") return item.patchDigest;
+  if (panel === "output") return item.outputDigest;
+  return item.digest;
+}
 
 // Preview code runs in an opaque frame with a separate response policy.
 export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
@@ -20,6 +35,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       <section class="workspace-preview-detail" aria-label="Selected preview">
         <h3 data-preview-heading>Open a shared preview</h3>
         <p data-preview-meta class="form-hint"></p>
+        <div class="workspace-link-actions">
+          <button type="button" data-workspace-link class="button ghost" hidden></button>
+          <button type="button" data-workspace-latest class="button secondary" hidden></button>
+          <span data-workspace-link-status class="form-hint" role="status"></span>
+        </div>
+        <input type="url" data-workspace-link-fallback readonly hidden>
         <div data-workspace-tabs role="tablist" aria-label="Attempt views" hidden>
           <button type="button" class="button ghost" role="tab" id="workspace-tab-preview" aria-controls="workspace-panel-preview" data-workspace-tab="preview">Preview</button>
           <button type="button" class="button ghost" role="tab" id="workspace-tab-changes" aria-controls="workspace-panel-changes" data-workspace-tab="changes">Changes</button>
@@ -50,6 +71,13 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const tabButtons = [...tabs.querySelectorAll("[role=tab]")];
   const output = dialog.querySelector("[data-workspace-output]");
   const outputStatus = dialog.querySelector("[data-workspace-output-status]");
+  const copyLink = dialog.querySelector("[data-workspace-link]");
+  const linkStatus = dialog.querySelector("[data-workspace-link-status]");
+  const linkFallback = dialog.querySelector("[data-workspace-link-fallback]");
+  const latest = dialog.querySelector("[data-workspace-latest]");
+  copyLink.textContent = uiText("workspace.share.copy");
+  linkFallback.setAttribute("aria-label", copyLink.textContent);
+  latest.textContent = uiText("workspace.share.openCurrent");
   const changesView = dialog.querySelector("[data-workspace-changes]");
   const compare = dialog.querySelector("[data-workspace-compare]");
   const changeStatus = dialog.querySelector("[data-workspace-change-status]");
@@ -58,9 +86,13 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const peer = dialog.querySelector("[data-workspace-peer]");
   const patchCache = new Map();
   let selected = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
-  let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview";
+  let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null;
 
   function choosePanel(name) {
+    if (activePanel !== name) {
+      linkFallback.hidden = true;
+      linkStatus.textContent = "";
+    }
     activePanel = name;
     for (const tab of tabButtons) {
       const active = tab.dataset.workspaceTab === name;
@@ -145,6 +177,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     tabs.hidden = true;
     choosePanel("preview");
     output.textContent = ""; outputStatus.textContent = "";
+    latest.hidden = true; copyLink.hidden = true; linkFallback.hidden = true; linkStatus.textContent = "";
     primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
     compare.value = ""; changeStatus.textContent = "";
     frame.removeAttribute("src");
@@ -152,12 +185,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     meta.textContent = "";
   }
   function reset() {
-    generation++; selected = null; clearPreview();
+    generation++; selected = null; linked = null; clearPreview();
     status.textContent = ""; list.replaceChildren(); items = []; patchCache.clear();
     if (dialog.open) dialog.close();
   }
   function select(id) {
-    selected = id;
+    selected = id; linked = null;
     clearPreview();
     return load();
   }
@@ -170,7 +203,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       if (!page || !owns(ticket, session)) return;
       items = page.items;
       const current = items.find(item => item.id === selected);
-      if (selected && !current) { selected = null; clearPreview(); }
+      if (selected && !current) { if (!linked) selected = null; clearPreview(); }
       const focused = document.activeElement?.dataset?.previewId;
       list.replaceChildren(...page.items.map(item => {
         const row = document.createElement("li");
@@ -188,6 +221,13 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       }));
       if (focused) list.querySelector(`[data-preview-id="${CSS.escape(focused)}"]`)?.focus();
       status.textContent = page.items.length ? "" : "No previews shared yet. An agent can publish one with room workspace.";
+      if (linked && (!current || current.revision !== linked.revision || current.publisherId !== linked.publisherId
+        || artifactDigest(current, linked.panel) !== linked.digest)) {
+        clearPreview();
+        linkStatus.textContent = uiText(current ? "workspace.share.stale" : "workspace.share.missing");
+        latest.hidden = !current;
+        return;
+      }
       if (!current) return;
       tabs.hidden = false;
       for (const tab of tabButtons) {
@@ -196,6 +236,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       }
       const activeTab = tabButtons.find(tab => tab.dataset.workspaceTab === activePanel);
       choosePanel(activeTab.hidden ? "preview" : activePanel);
+      copyLink.hidden = false;
       updateComparisons(current);
       void loadOutput();
       heading.textContent = current.title;
@@ -236,6 +277,27 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     activate(next);
   });
   compare.addEventListener("change", () => void loadChanges());
+  latest.addEventListener("click", () => void select(selected));
+  copyLink.addEventListener("click", async () => {
+    const current = items.find(item => item.id === selected), session = client.session;
+    if (!current || !session || copyLink.hidden) return;
+    const panel = activePanel;
+    const digest = artifactDigest(current, panel);
+    if (!digest) return;
+    const destination = new URL(location.pathname, location.origin);
+    destination.searchParams.set("room", session.roomId);
+    destination.hash = ["pr-workspace", current.id, current.revision, panel, digest, encodeURIComponent(current.publisherId)].join("/");
+    const result = await clipboard.copy(destination.href);
+    if (!dialog.open || client.session !== session || selected !== current.id || panel !== activePanel
+      || items.find(item => item.id === selected)?.revision !== current.revision) return;
+    if (result === "copied") linkStatus.textContent = uiText("workspace.share.copied");
+    else {
+      linkStatus.textContent = uiText("workspace.share.manual");
+      linkFallback.value = destination.href;
+      linkFallback.hidden = false;
+      linkFallback.select();
+    }
+  });
   button.addEventListener("click", () => {
     if (!client.session || dialog.open) return;
     dialog.showModal();
@@ -244,5 +306,17 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   dialog.querySelector("[data-preview-close]").addEventListener("click", reset);
   dialog.querySelector("[data-preview-refresh]").addEventListener("click", () => void load());
   dialog.addEventListener("close", () => { if (!dialog.open) reset(); });
-  return { reset, refresh() { if (dialog.open) void load(); } };
+  return {
+    reset,
+    refresh() { if (dialog.open) void load(); },
+    openLink(hash) {
+      const target = workspaceArtifactSelection(hash);
+      if (!target || !client.session) return;
+      clearPreview();
+      linked = target; selected = target.id; activePanel = target.panel;
+      if (!dialog.open) dialog.showModal();
+      void load();
+    },
+    closeLinked() { if (linked) reset(); },
+  };
 }

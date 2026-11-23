@@ -3896,6 +3896,7 @@ function retryPendingHashReveal() {
 }
 function revealLocationHash() {
   if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
+  if (!location.hash.startsWith("#pr-workspace/")) workspacePreviewsUI?.closeLinked();
   const exactResult = exactResultDestination(location);
   if (!exactResult) closeLinkedResult();
   if (!location.hash) return;
@@ -3928,6 +3929,10 @@ function revealLocationHash() {
     return;
   }
   // JDOT-COH-NAV end
+  if (hash.startsWith("#pr-workspace/")) {
+    workspacePreviewsUI?.openLink(hash);
+    return;
+  }
   if (hash.startsWith("#pr-record/result/")) {
     if (!exactResult || exactResult.roomId !== session?.roomId) {
       closeLinkedResult();
