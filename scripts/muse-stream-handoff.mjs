@@ -17,6 +17,8 @@ const integer = value => Number.isSafeInteger(value) && value >= 0;
 const ids = value => Array.isArray(value) && value.length <= 20 && new Set(value).size === value.length && value.every(validId);
 const receiverReceiptNote = "Receiving runtime read and verified this exact request; model acceptance is separate.";
 const fields = ["version", "origin", "roomId", "memberId", "requesters", "workItems", "requests", "bootstrapAfter", "windowSeconds"];
+const transientRoomError = error => error instanceof TypeError || error?.name === "TimeoutError"
+  || error?.status === 0 && error.code === "service_unavailable" || [429, 500, 502, 503, 504].includes(error?.status);
 
 export function museHandoffPolicy(policy, connection) {
   if (!policy || !Object.keys(policy).every(field => fields.includes(field) || field === "allowStandaloneRequests")
@@ -198,7 +200,7 @@ export async function runMuseHandoff({ mode, windowMs, stop, run, onRollover = (
           onRollover(facts());
           break; // Keep the same process and lock. No host completion wakes a model here.
         }
-        if (!(error instanceof TypeError) && error.name !== "TimeoutError" && ![429, 500, 502, 503, 504].includes(error.status)) throw error;
+        if (!transientRoomError(error)) throw error;
         resumeStream = false;
         await pause(1000, undefined, { signal }).catch(() => {});
       }
@@ -219,9 +221,21 @@ export async function recoverMuseHandoff({ client, policy, signal, offers, curre
   for await (const offer of offers) {
     if (!offer) continue;
     await delay(Math.max(0, Date.parse(offer.offeredAt) + graceMs - now()), undefined, { signal });
-    const pending = currentOffer();
-    if (!sameRecoveryOffer(offer, pending)) continue;
-    const context = await client.replyContextForHint(pending.requestMessageId, { signal });
+    let context, backoffMs = 1000;
+    while (sameRecoveryOffer(offer, currentOffer())) {
+      signal.throwIfAborted();
+      try {
+        context = await client.replyContextForHint(offer.requestMessageId, { signal });
+        break;
+      } catch (error) {
+        if (signal.aborted || !transientRoomError(error)) throw error;
+        const retryAfter = Number.isFinite(error.retryAfterMs) ? Math.min(error.retryAfterMs, 2_147_000_000) : 0;
+        await delay(Math.max(backoffMs, retryAfter), undefined, { signal });
+        backoffMs = Math.min(backoffMs * 2, 30000);
+      }
+    }
+    if (!context) continue;
+    const pending = offer;
     if (context.roomCreatedEventId !== pending.roomCreatedEventId) throw Error("muse_handoff_identity_changed");
     const receipt = pending.receiverAcknowledgment;
     const receiverAck = integer(receipt?.sequence) && receipt.sequence > pending.openingSequence;

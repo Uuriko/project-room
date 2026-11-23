@@ -287,6 +287,44 @@ test("interrupted delivery preserves the receiver’s ACK and still offers the w
   assert.equal(await recover(), undefined);
 });
 
+test("recovery keeps the same saved offer through a network failure and a temporary Room refusal", async () => {
+  const offer = { requestMessageId: "ready", openingEventId: "open-ready", openingSequence: 15,
+    roomCreatedEventId: "room-birth", offeredAt: "2026-11-20T19:48:01Z" };
+  const reads = [], waits = [], recorded = [];
+  const result = await recoverMuseHandoff({ policy, offers: [offer], currentOffer: () => offer,
+    signal: new AbortController().signal, now: () => Date.parse(offer.offeredAt) + 6500,
+    client: { replyContextForHint(id) {
+      reads.push(id);
+      if (reads.length === 1) throw new TypeError("connection interrupted");
+      if (reads.length === 2) throw Object.assign(new Error("Room unavailable"), { status: 503, retryAfterMs: 2500 });
+      return context(request(id), 15);
+    } },
+    delay: async ms => waits.push(ms), record: handoff => recorded.push(handoff.openingEventId)
+  });
+  assert.deepEqual(reads, ["ready", "ready", "ready"]);
+  assert.deepEqual(waits, [0, 1000, 2500]);
+  assert.deepEqual(recorded, [offer.openingEventId]);
+  assert.equal(result.originalOfferedAt, offer.offeredAt);
+});
+
+test("recovery leaves a replaced offer behind and stops on rejected access", async () => {
+  const offer = { requestMessageId: "ready", openingEventId: "open-ready", openingSequence: 15,
+    roomCreatedEventId: "room-birth", offeredAt: "2026-11-20T19:48:01Z" };
+  let pending = offer, reads = 0;
+  const args = { policy, offers: [offer], currentOffer: () => pending,
+    signal: new AbortController().signal, now: () => Date.parse(offer.offeredAt) + 6500,
+    record: () => assert.fail("must not replay this offer") };
+  assert.equal(await recoverMuseHandoff({ ...args,
+    delay: async ms => { if (ms > 0) pending = null; },
+    client: { replyContextForHint() { reads++; throw Object.assign(new Error("Room unavailable"), { status: 503 }); } }
+  }), undefined);
+  assert.equal(reads, 1);
+  pending = offer;
+  await assert.rejects(recoverMuseHandoff({ ...args, delay: async ms => assert.equal(ms, 0),
+    client: { replyContextForHint() { throw Object.assign(new Error("Access ended"), { status: 401 }); } }
+  }), { status: 401 });
+});
+
 test("interrupted recovery drops an offer cleared during its exact read", async () => {
   const selected = request("ready", { contextEventId: "ctx-ready", progressState: "acknowledged",
     progressNote: "Receiving runtime read and verified this exact request; model acceptance is separate." });

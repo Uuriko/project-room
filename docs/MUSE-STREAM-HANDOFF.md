@@ -226,6 +226,11 @@ and terminal checks protect the answer if offers overlap.
 
 The recovery waits on a local file event with a one-time deadline for that
 offer. It uses no scheduled task and starts no second Room subscription.
+If Room is temporarily unreachable at the verification read, the recovery
+process stays registered and retries the same saved offer with backoff. It
+rechecks the offer before each read. Access revocation stops recovery and a
+settled or replaced offer produces no replay. Reconnecting the Room transport
+this way requires the existing Muse host task to remain alive.
 The host must keep the second registration alive and deliver its completion
 to the same conversation. If both host tasks end, or a turn is interrupted
 after the one recovery offer, a fresh turn can pick up the saved request
