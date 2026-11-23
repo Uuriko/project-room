@@ -227,6 +227,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       showCorrection(null);
       showReleaseChecks(null);
       showOutcome(null);
+      showOutcome(null);
       resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = true;
       resultElement("result-original").hidden = true;
@@ -428,7 +429,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         : null;
       view.releaseChecks = value.workThread?.releaseChecks;
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
-      showOutcome(view.focused && !view.withdrawn ? value.workThread?.outcome : null);
+      showOutcome(view.withdrawn ? null : value.workThread?.outcome);
       resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
@@ -466,6 +467,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-verdict").hidden = true;
       showCorrection(null);
       showReleaseChecks(null);
+      showOutcome(null);
       resultElement("result-work-context")?.setAttribute("hidden", "");
       resultElement("result-work-action")?.setAttribute("hidden", "");
       resultElement("result-options").open = false;
