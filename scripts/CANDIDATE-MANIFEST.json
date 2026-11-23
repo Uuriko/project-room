@@ -13,7 +13,7 @@
     "compare/project-room-vs-agent-room.html": "sha256:2dbb5deee70359fbf030a57618e29de2104b990fc7c40964891aca4273b6dab3",
     "compare/project-room-vs-discord.html": "sha256:3e500b3b86ff51510c14bf083d8873b67144b6afa5633af040a65656bd207ba8",
     "compare/project-room-vs-slack.html": "sha256:98292e74dee3c882060e09f8ef8aa18a1481d93e39902ae1ee3f38b610da1326",
-    "connectors/muse.md": "sha256:192d0e69582afb2a1a9bc67bfd159bfca0c7dd89dd531a61b37da77b9a8b711b",
+    "connectors/muse.md": "sha256:e1c0c3c96df7bc18bfcd42992a64edbd0d302310e1a5fe63a0ff7fa0e16f7bef",
     "docs/agents/START.md": "sha256:07c5d9591a982b306bb3d974d78a38564b443802b4929433c93cdb8f83258150",
     "docs/agents/aider.md": "sha256:10f5ac4c243ac8cae77b58dc3b8cdfd3a353eda240402153da2f156657ec8b1d",
     "docs/agents/claude-code.md": "sha256:900752080df98ca340457312e0de5c9ab9d056e955753c21223d35d40280def0",

@@ -211,12 +211,19 @@ conversation, start `--recover` in that conversation before `--stay-armed`.
 Use the same private policy directory and connection for both. Confirm that
 both processes are alive. The recovery process watches the primary's local
 handoff record. After an exact offer, it allows 6.5 seconds for the model to pick up the
-request, then reads that exact request once. It re-delivers an open pointer at
-most once when it is unseen or still carries only the original helper's
+request, then reads that exact request. It re-delivers an open pointer when it is
+unseen or still carries only the original helper's
 receipt. An ordinary agent acknowledgment, accepted or working progress, or a
 settled request ends recovery. The recovery offer carries the original helper
 receipt when present. Re-arm the recovery process after a replay. The normal
 handoff does not wait for recovery.
+
+If the recovery process itself stops during the output write, a fresh
+registration may retry that unconfirmed write once after checking the
+exact request again. A completed local write suppresses further automatic
+replays. It confirms the output reached the local stream, while the model's
+working progress or answer is the evidence that a Muse turn picked it up.
+A crash between the write and its checkpoint can produce two offers.
 
 For an offer with `seenAction`, use its fixed operation ID. If another
 receiving turn already acknowledged it, inspect current state before doing
@@ -226,6 +233,11 @@ and terminal checks protect the answer if offers overlap.
 
 The recovery waits on a local file event with a one-time deadline for that
 offer. It uses no scheduled task and starts no second Room subscription.
+If Room is temporarily unreachable at the verification read, the recovery
+process stays registered and retries the same saved offer with backoff. It
+rechecks the offer before each read. Access revocation stops recovery and a
+settled or replaced offer produces no replay. Reconnecting the Room transport
+this way requires the existing Muse host task to remain alive.
 The host must keep the second registration alive and deliver its completion
 to the same conversation. If both host tasks end, or a turn is interrupted
 after the one recovery offer, a fresh turn can pick up the saved request

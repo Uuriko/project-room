@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { on } from "node:events";
-import { lstatSync, realpathSync, watch } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, lstatSync, realpathSync, watch } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { readAgentConnection, readConnectionInput } from "../client/agent-connection.mjs";
@@ -17,6 +17,8 @@ const integer = value => Number.isSafeInteger(value) && value >= 0;
 const ids = value => Array.isArray(value) && value.length <= 20 && new Set(value).size === value.length && value.every(validId);
 const receiverReceiptNote = "Receiving runtime read and verified this exact request; model acceptance is separate.";
 const fields = ["version", "origin", "roomId", "memberId", "requesters", "workItems", "requests", "bootstrapAfter", "windowSeconds"];
+const transientRoomError = error => error instanceof TypeError || error?.name === "TimeoutError"
+  || error?.status === 0 && error.code === "service_unavailable" || [429, 500, 502, 503, 504].includes(error?.status);
 
 export function museHandoffPolicy(policy, connection) {
   if (!policy || !Object.keys(policy).every(field => fields.includes(field) || field === "allowStandaloneRequests")
@@ -198,7 +200,7 @@ export async function runMuseHandoff({ mode, windowMs, stop, run, onRollover = (
           onRollover(facts());
           break; // Keep the same process and lock. No host completion wakes a model here.
         }
-        if (!(error instanceof TypeError) && error.name !== "TimeoutError" && ![429, 500, 502, 503, 504].includes(error.status)) throw error;
+        if (!transientRoomError(error)) throw error;
         resumeStream = false;
         await pause(1000, undefined, { signal }).catch(() => {});
       }
@@ -219,9 +221,21 @@ export async function recoverMuseHandoff({ client, policy, signal, offers, curre
   for await (const offer of offers) {
     if (!offer) continue;
     await delay(Math.max(0, Date.parse(offer.offeredAt) + graceMs - now()), undefined, { signal });
-    const pending = currentOffer();
-    if (!sameRecoveryOffer(offer, pending)) continue;
-    const context = await client.replyContextForHint(pending.requestMessageId, { signal });
+    let context, backoffMs = 1000;
+    while (sameRecoveryOffer(offer, currentOffer())) {
+      signal.throwIfAborted();
+      try {
+        context = await client.replyContextForHint(offer.requestMessageId, { signal });
+        break;
+      } catch (error) {
+        if (signal.aborted || !transientRoomError(error)) throw error;
+        const retryAfter = Number.isFinite(error.retryAfterMs) ? Math.min(error.retryAfterMs, 2_147_000_000) : 0;
+        await delay(Math.max(backoffMs, retryAfter), undefined, { signal });
+        backoffMs = Math.min(backoffMs * 2, 30000);
+      }
+    }
+    if (!context) continue;
+    const pending = offer;
     if (context.roomCreatedEventId !== pending.roomCreatedEventId) throw Error("muse_handoff_identity_changed");
     const receipt = pending.receiverAcknowledgment;
     const receiverAck = integer(receipt?.sequence) && receipt.sequence > pending.openingSequence;
@@ -230,11 +244,17 @@ export async function recoverMuseHandoff({ client, policy, signal, offers, curre
     if (!exact || exact.openingSequence !== pending.openingSequence || receiverAck && !exact.receiverSeen) continue;
     const { contextEventId, receiverSeen, ...handoff } = exact;
     if (!sameRecoveryOffer(pending, currentOffer())) continue;
-    record(handoff);
+    record(handoff, pending);
     return { status: "handoff", source: "interrupted_delivery", replay: true,
       after: exact.openingSequence, originalOfferedAt: pending.offeredAt, ...handoff,
       ...(receiverAck ? { receiverAcknowledgment: receipt } : {}) };
   }
+}
+
+async function writeHandoff(result) {
+  await new Promise((resolve, reject) => {
+    process.stdout.write(JSON.stringify(result) + "\n", error => error ? reject(error) : resolve());
+  });
 }
 
 function readOptionalPrivate(file) {
@@ -249,9 +269,16 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
     if (status?.status !== "handoff" || !Number.isFinite(Date.parse(status.offeredAt))) return null;
     const pending = loadCheckpoint(file, policy).checkpoint.inFlight;
     if (!pending || pending.openingEventId !== status.openingEventId
-      || pending.requestMessageId !== status.requestMessageId || pending.openingSequence !== status.openingSequence
-      || readOptionalPrivate(receiptFile)?.openingEventId === pending.openingEventId) return null;
-    return { ...pending, offeredAt: status.offeredAt, receiverAcknowledgment: status.receiverAcknowledgment };
+      || pending.requestMessageId !== status.requestMessageId || pending.openingSequence !== status.openingSequence) return null;
+    const receipt = readOptionalPrivate(receiptFile);
+    let attempt = 1;
+    if (receipt?.openingEventId === pending.openingEventId) {
+      // The recovery WatchJournal is exclusive. A prior writer cannot still
+      // own it. Its unconfirmed pipe write gets one more exact Room check.
+      if (receipt.phase !== "emitting" || receipt.attempt !== 1) return null;
+      attempt = 2;
+    }
+    return { ...pending, offeredAt: status.offeredAt, receiverAcknowledgment: status.receiverAcknowledgment, attempt };
   };
   const watcher = watch(directory);
   const changes = on(watcher, "change", { signal });
@@ -263,8 +290,17 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
       }
     })();
     atomicPrivateJson(join(directory, "recovery-status.json"), { pid: process.pid, armedAt: new Date().toISOString() });
-    return await recoverMuseHandoff({ client, policy, signal, offers, currentOffer,
-      record: exact => atomicPrivateJson(receiptFile, { openingEventId: exact.openingEventId, retriedAt: new Date().toISOString() }) });
+    let receipt;
+    const result = await recoverMuseHandoff({ client, policy, signal, offers, currentOffer,
+      record: (exact, pending) => {
+        receipt = { openingEventId: exact.openingEventId, attempt: pending.attempt, phase: "emitting" };
+        atomicPrivateJson(receiptFile, receipt);
+      } });
+    if (result?.status === "handoff") {
+      if (!result.receiverAcknowledgment) result.seenAction = museSeenAction(result, policy.roomId);
+      await writeHandoff(result);
+      atomicPrivateJson(receiptFile, { ...receipt, phase: "emitted", emittedAt: new Date().toISOString() });
+    }
   } finally { await changes.return(); watcher.close(); }
 }
 
@@ -296,9 +332,11 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   try {
     const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
     const statusFile = join(directory, "receiver-status.json");
-    const result = mode === "--recover"
-      ? await runRecovery({ client, directory, file, policy, statusFile, signal: stop.signal })
-      : await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
+    if (mode === "--recover") {
+      await runRecovery({ client, directory, file, policy, statusFile, signal: stop.signal });
+      return;
+    }
+    const result = await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
         onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
         run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
           signal, receiverAck, advertiseScope, wait: mode !== "--once" }) });
@@ -313,7 +351,7 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   } finally { process.removeListener("SIGINT", interrupt); process.removeListener("SIGTERM", interrupt); owner.close(); }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+if (process.argv[1] && existsSync(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
   main(process.argv.slice(2)).catch(error => {
     console.error(error.handoffStage ? `${error.handoffStage}: ${error.code ?? error.name}` : error.code ?? error.message);
     process.exitCode = 1;
