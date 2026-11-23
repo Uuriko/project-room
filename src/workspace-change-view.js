@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { fileLabel, parsePatch } from "./workspace-diff-parser.js";
 
 function node(tag, text, className) {
@@ -7,11 +8,20 @@ function node(tag, text, className) {
   return element;
 }
 
-export function renderWorkspaceChange(parent, item, patch) {
+function changePath(file) {
+  return file.newPath === "/dev/null" ? file.oldPath : file.newPath || file.oldPath;
+}
+
+export function renderWorkspaceChange(parent, item, patch, requestedFile) {
   const selected = parent.querySelector("[aria-current=true]")?.dataset.file;
   const focused = parent.contains(document.activeElement) ? document.activeElement?.dataset.file : null;
   parent.replaceChildren(node("h4", item.title));
   const files = patch === null ? null : parsePatch(patch);
+  const linkedIndex = requestedFile ? files?.findIndex(file => changePath(file) === requestedFile) ?? -1 : -1;
+  if (requestedFile && linkedIndex < 0) {
+    parent.append(node("p", uiText("workspace.share.fileMissing"), "form-hint"));
+    return;
+  }
   if (!files || files.length === 0) {
     if (patch) {
       parent.append(node("p", "Raw patch", "form-hint"), node("pre", patch, "workspace-change-lines"));
@@ -48,11 +58,12 @@ export function renderWorkspaceChange(parent, item, patch) {
   for (const [index, file] of files.entries()) {
     const label = fileLabel(file);
     const button = node("button", label, "button ghost");
-    button.type = "button"; button.dataset.file = label;
+    button.type = "button"; button.dataset.file = changePath(file);
     button.addEventListener("click", () => show(index));
     choices.append(button);
   }
   parent.append(choices, body);
-  const restored = files.findIndex(file => fileLabel(file) === selected);
-  show(Math.max(0, restored), Boolean(focused && focused === selected && restored >= 0));
+  const restored = [...choices.children].findIndex(button => button.dataset.file === selected);
+  const index = linkedIndex >= 0 ? linkedIndex : Math.max(0, restored);
+  show(index, Boolean(focused && choices.children[index].dataset.file === focused));
 }

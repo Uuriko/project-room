@@ -63,6 +63,11 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.equal(summary.patch, undefined);
   const detail = (await (await call(viewer, "GET", null, changesQuery + "&view=file&path=index.html")).json()).changes;
   assert.equal(detail.file.hunks[0].changes[1].content, "after");
+  const artifact = `#pr-workspace/${id}/1/changes/${first.patchDigest}/publisher/${preview.head}/index.html`;
+  const exact = changesQuery + "&view=file&path=index.html&artifact=";
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 200);
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact.replace("/publisher/", "/other-publisher/")))).status, 409);
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact.replace("/index.html", "/other.html")))).status, 422);
   assert.equal((await call(viewer, "GET", null, changesQuery + "&revision=2")).status, 409);
   assert.equal((await call(outside, "GET", null, changesQuery)).status, 403);
   assert.equal((await call(publisher, "POST", { ...preview, patch: "x".repeat(192 * 1024 + 1) })).status, 422);
@@ -73,6 +78,7 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   const { output: _initialOutput, ...withoutOutput } = preview;
   const second = await (await call(publisher, "POST", { ...withoutOutput, expectedRevision: 1, html: "<h1>Changed</h1>" })).json();
   assert.equal(second.revision, 2);
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 409);
   assert.equal((await (await call(viewer, "GET", null, outputQuery)).json()).run.output, null);
   const incomplete = "diff --git a/index.html b/index.html\n--- a/index.html\n+++ b/index.html\n@@ -1,3 +1,3 @@\n-before\n+after\n";
   const replacement = await (await call(publisher, "POST", { ...preview, expectedRevision: 2, patch: incomplete })).json();

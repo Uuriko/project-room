@@ -76,7 +76,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const peer = dialog.querySelector("[data-workspace-peer]");
   const patchCache = new Map();
   let selected = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
-  let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null;
+  let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null, pendingFile = null;
 
   function choosePanel(name) {
     if (activePanel !== name) {
@@ -120,7 +120,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     const ticket = ++changeGeneration, session = client.session;
     const stillOpen = () => dialog.open && !changesView.hidden && ticket === changeGeneration && client.session === session;
     const key = JSON.stringify([current.id, current.patchDigest, comparison?.id, comparison?.patchDigest]);
-    if (renderedChanges === key) return;
+    if (renderedChanges === key && !pendingFile) return;
     columns.hidden = true;
     changeStatus.textContent = "Loading changes…";
     try {
@@ -128,6 +128,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
         const cached = patchCache.get(item.id);
         if (cached?.digest === item.patchDigest) return cached.patch;
         const query = new URLSearchParams({ id: item.id, changes: "1", revision: String(item.revision) });
+        if (linked?.head && item.id === current.id) query.set("artifact", location.hash);
         const value = await client.roomRead(`/workspace-previews?${query}`);
         if (!value || !stillOpen()) return null;
         patchCache.set(item.id, { digest: item.patchDigest, patch: value.changes.patch });
@@ -137,7 +138,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
         import("./workspace-change-view.js"), getPatch(current), comparison ? getPatch(comparison) : null,
       ]);
       if (!stillOpen()) return;
-      renderWorkspaceChange(primary, current, a);
+      renderWorkspaceChange(primary, current, a, pendingFile);
+      pendingFile = null;
       peer.hidden = !comparison;
       if (comparison) renderWorkspaceChange(peer, comparison, b);
       else peer.replaceChildren();
@@ -175,12 +177,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     meta.textContent = "";
   }
   function reset() {
-    generation++; selected = null; linked = null; clearPreview();
+    generation++; selected = null; linked = null; pendingFile = null; clearPreview();
     status.textContent = ""; list.replaceChildren(); items = []; patchCache.clear();
     if (dialog.open) dialog.close();
   }
   function select(id) {
-    selected = id; linked = null;
+    selected = id; linked = null; pendingFile = null;
     clearPreview();
     return load();
   }
@@ -274,7 +276,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     const current = items.find(item => item.id === selected), session = client.session;
     if (!current || !session || copyLink.hidden) return;
     const panel = activePanel;
-    const link = workspaceArtifactLink(location.href, session.roomId, current, panel);
+    const file = panel === "changes" && !columns.hidden ? primary.querySelector("[aria-current=true]")?.dataset.file : undefined;
+    const link = workspaceArtifactLink(location.href, session.roomId, current, panel, file);
     if (!link) return;
     const copiedText = forAgent ? uiText("workspace.share.agentText", { link, head: current.head }) : link;
     const result = await clipboard.copy(copiedText);
@@ -307,7 +310,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       const target = workspaceArtifactSelection(hash);
       if (!target || !client.session) return;
       clearPreview();
-      linked = target; selected = target.id; activePanel = target.panel;
+      linked = target; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
       if (!dialog.open) dialog.showModal();
       void load();
     },

@@ -1,3 +1,4 @@
+import { workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 import { ownMember } from "../../src/events.js";
 import { fileLabel, parsePatch } from "../../src/workspace-diff-parser.js";
 import { readAccountRoomRow } from "../room-lifecycle.mjs";
@@ -72,13 +73,16 @@ async function serveWorkspacePreviews(ctx) {
   const needed = reading ? "rooms:read" : "rooms:write";
   const auth = authorize(ctx, place, needed), viewerId = auth.member.id;
   res.setHeader("Cache-Control", "no-store");
+  const exact = changeRead && params.has("artifact") ? workspaceArtifactSelection(params.get("artifact")) : null;
   const allowed = frame ? ["auth", "id", "frame", "binding"]
-    : changeRead ? ["auth", "id", "changes", "revision", "view", "path"]
+    : changeRead ? ["auth", "id", "changes", "revision", "view", "path", "artifact"]
       : outputRead ? ["auth", "id", "output", "revision"] : ["auth", "id"];
   if ([...params.keys()].some(name => !allowed.includes(name) || params.getAll(name).length !== 1)
     || id !== null && !validPreviewSelection(id)
     || changeRead && (!id || params.get("changes") !== "1" || params.has("revision") && !/^[1-9][0-9]*$/.test(params.get("revision"))
       || params.has("view") && !["summary", "file"].includes(params.get("view"))
+      || params.has("artifact") && (!exact?.head || exact.id !== id || exact.panel !== "changes"
+        || params.get("view") === "file" && (exact.file ?? null) !== params.get("path"))
       || (params.get("view") === "file" ? !params.get("path") || params.get("path").length > 4096 : params.has("path")))
     || outputRead && (!id || params.get("output") !== "1" || params.has("revision") && !/^[1-9][0-9]*$/.test(params.get("revision")))
     || frame && (selected.bearer || !id || !/^[1-9][0-9]*$/.test(frameRevision)))
@@ -91,6 +95,8 @@ async function serveWorkspacePreviews(ctx) {
     if (id === null) return ctx.json(res, 200, { ...viewer, items: previews?.list(roomId, viewerId) ?? [] });
     const item = previews?.get(roomId, id, viewerId, changeRead ? "changes" : outputRead ? "output" : undefined);
     if (!item) ctx.reject(404, "preview_not_found", "This preview is unavailable");
+    if (exact && (item.revision !== exact.revision || item.head !== exact.head || item.publisherId !== exact.publisherId
+      || item.patchDigest !== exact.digest)) ctx.reject(409, "preview_changed", "This preview changed. Open the latest version.");
     const { base, head, revision, patch, output } = item;
     if (changeRead) return changeResponse(ctx, params, { id, base, head, revision, patch }, viewer);
     if (outputRead) {

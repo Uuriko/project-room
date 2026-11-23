@@ -16,6 +16,7 @@ room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace changes --id ID [--file PATH | --raw yes]
+room workspace changes --link URL
 room workspace output --id ID
 room workspace remove --id ID
 Pass --connection NAME to choose a saved connection explicitly.`;
@@ -123,6 +124,16 @@ async function connect(io, cwd, name) {
   return { call, conn, inherited };
 }
 
+function artifactFromConnection(value, conn) {
+  const link = URL.parse(value ?? "");
+  const target = link && workspaceArtifactSelection(link.hash);
+  if (!target?.head) throw new Error("Copy a current artifact link from Workspace and pass it with --link");
+  if (link.username || link.password || link.origin !== new URL(conn.origin).origin
+    || link.searchParams.get("room") !== conn.roomId)
+    throw new Error("Choose the saved connection for the artifact's Room");
+  return { target, hash: link.hash };
+}
+
 export async function workspaceCommand(argv, io = {}) {
   const separator = argv.indexOf("--");
   const { positional, flags } = parseArgs(separator === -1 ? argv : argv.slice(0, separator));
@@ -148,12 +159,7 @@ export async function workspaceCommand(argv, io = {}) {
   if (action === "list") { out(await list()); return 0; }
   if (action === "continue") {
     if (!flags.path) throw new Error("--path is required");
-    const link = URL.parse(flags.link ?? "");
-    const target = link && workspaceArtifactSelection(link.hash);
-    if (!target?.head) throw new Error("Copy a current artifact link from Workspace and pass it with --link");
-    if (link.username || link.password || link.origin !== new URL(conn.origin).origin
-      || link.searchParams.get("room") !== conn.roomId)
-      throw new Error("Choose the saved connection for the artifact's Room");
+    const { target } = artifactFromConnection(flags.link, conn);
     if (existsSync(resolve(cwd, flags.path))) throw new Error("Choose a new worktree directory");
     const verify = async () => {
       const item = (await list()).find(row => row.id === target.id);
@@ -172,6 +178,16 @@ export async function workspaceCommand(argv, io = {}) {
     }
     const worktree = launch(cwd, { path: flags.path, base: target.head }, inherited && safeName(inherited));
     out({ ...worktree, source: target, fetched });
+    return 0;
+  }
+  if (action === "changes" && flags.link) {
+    if (flags.id || flags.file || flags.raw) throw new Error("Choose --link or the ID and file options");
+    const { target, hash } = artifactFromConnection(flags.link, conn);
+    if (target.panel !== "changes") throw new Error("Choose a Changes artifact link");
+    const query = new URLSearchParams({ id: target.id, changes: "1", artifact: hash, view: target.file ? "file" : "summary" });
+    if (target.file) query.set("path", target.file);
+    const { changes } = await call("GET", undefined, `?${query}`);
+    out(changes);
     return 0;
   }
   if (!validId.test(flags.id ?? "")) throw new Error("--id must be the ID from room workspace start");

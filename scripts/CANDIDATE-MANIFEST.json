@@ -193,13 +193,13 @@
     "src/work-selectors.js": "sha256:eeda5f25e3cbfd632c6b89387eadd96accbcc998a37fd7cf6cb2ef94889ec9c4",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:045a6de36b95f973493dc383fc266d764f1404a86836a00ad83e682276a0a0ce",
-    "src/workspace-artifact-link.js": "sha256:f81d41fdcb9cbdcc2f25063f9d3cd6e8dabf9ea53cdcd72f9651fd569114e766",
-    "src/workspace-change-view.js": "sha256:db5583a296d6876bcae2eccb0589050fc7dadec40f6908a5bcd88fd510aa2400",
+    "src/workspace-artifact-link.js": "sha256:159053999e4c24887ab3cd0a1d111b0682c86bc352b1af58b7e4b58a0ea34c53",
+    "src/workspace-change-view.js": "sha256:c1f6d22f1b0c84b71a80c02d96f3b97b8bec15dfd917d8874bb19a829562cbc7",
     "src/workspace-diff-parser.js": "sha256:c8e1a729a44dc83a023b403a89adc87ebe3288d4f9acafd1fb15513814fad835",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "src/workspace-previews-ui.js": "sha256:21d7711359957ec8a7146f157f482d103c64eb9568c4979ea52552731ed77879",
-    "strings/en.js": "sha256:0cb68a44330b498366f23e1a8bba3f136574561b05c3116d993d306d297b6dac",
-    "strings/en.json": "sha256:a6ee7b2925907062ec65517dd28322ea5b020a243a539a668d1056bb9bb54a22"
+    "src/workspace-previews-ui.js": "sha256:e5aa4f29f3f7f8724768122b5dcfa4d917bac34048bb2d06ba6b527fcd0586f3",
+    "strings/en.js": "sha256:605782a58317c5619d989fe87d68ee12fca728ac34ace99195aba9849ce68779",
+    "strings/en.json": "sha256:a848f9f49253de7192437bc8a1f0b43b5518a7fbe6b31f551a9011eb83a117a0"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

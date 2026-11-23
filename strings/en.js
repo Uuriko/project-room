@@ -837,6 +837,7 @@ export default {
   "workspace.share.copied": "Artifact link copied.",
   "workspace.share.manual": "Select the link to copy it.",
   "workspace.share.stale": "This preview revision changed. Open the current attempt to see its latest artifacts.",
+  "workspace.share.fileMissing": "This file is unavailable in the shared changes.",
   "workspace.share.missing": "This shared artifact is unavailable.",
   "workspace.share.openCurrent": "Open current attempt"
 };
