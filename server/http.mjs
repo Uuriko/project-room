@@ -1522,7 +1522,12 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         resolveChannelTransport, directSendFetch,
         publicAgentPages, jevShadowAdmission,
         streams, workspacePublisherGrants,
-        workspacePreviewChanged(roomId, audience) {
+        workspacePreviewChanged(roomId, audience, previous) {
+          const broker = server.workspacePreviewBroker;
+          if (broker && previous) {
+            const generation = broker.generationFor(previous);
+            if (generation !== undefined) broker.retire(previous, generation);
+          }
           for (const entry of streams) {
             const { res: transport } = entry;
             if (entry.roomId === roomId && (!audience || audience.includes(entry.memberId))

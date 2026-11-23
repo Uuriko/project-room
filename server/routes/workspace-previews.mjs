@@ -134,7 +134,10 @@ async function serveWorkspacePreviews(ctx) {
       : previews.publish(roomId, viewerId, input, Date.now(), ctx.reject);
   });
   const { changed, ...value } = result;
-  if (changed) ctx.workspacePreviewChanged?.(roomId, value.recipientId ? [value.publisherId, value.recipientId] : null);
+  if (changed) ctx.workspacePreviewChanged?.(roomId, value.recipientId ? [value.publisherId, value.recipientId] : null,
+    input.expectedRevision > 0
+      ? { roomId, id: input.id, revision: input.expectedRevision, publisherId: value.publisherId }
+      : null);
   return ctx.json(res, 200, removing ? { removed: true } : value);
 }
 
