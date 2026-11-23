@@ -1518,6 +1518,13 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         resolveChannelTransport, directSendFetch,
         publicAgentPages, jevShadowAdmission,
         streams,
+        workspacePreviewChanged(roomId) {
+          for (const entry of streams) {
+            const { res: transport } = entry;
+            if (entry.roomId === roomId && !transport.destroyed && !transport.writableEnded && transport.writableLength <= streamQueueCap)
+              transport.write('event: workspace-preview-changed\ndata: {}\n\n');
+          }
+        },
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField, ...(connectFunnel ? { connectFunnel: connectFunnel.summary() } : {}) }, req.method === "HEAD");
@@ -2791,6 +2798,10 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         const linkPath = canonical && reviewedPublicSearchPaths.includes(canonical) ? canonical : (gr1Alias ? url.pathname : null);
         const discovery = linkPath ? pageLinks(url, linkPath) : discoveryLinks(url);
         const shell = path === "index.html";
+        if (shell) {
+          const policy = res.getHeader("Content-Security-Policy");
+          res.setHeader("Content-Security-Policy", `${policy}; frame-src ${expectedOrigin()}/api/rooms/`);
+        }
         res.setHeader("Link", shell ? `${discovery}, </src/styles.css>; rel=preload; as=style` : discovery);
         if (shell && req.method === "GET" && typeof res.writeEarlyHints === "function") {
           try { res.writeEarlyHints({ link: ["</src/styles.css>; rel=preload; as=style"] }); }
