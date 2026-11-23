@@ -420,13 +420,22 @@ async function main() {
       .find(check => check.stage === "deploy" && check.status === "passed")?.evidenceMessageId !== assignment.sourceMessageId) {
       throw new Error("Post-deploy smoke handoff is waiting for the current deploy receipt.");
     }
-    const result = await call("room_propose_work", { ...assignment, title: "Run post-deploy smoke test",
-      definitionOfDone: `Candidate revision: ${candidateRevision}
-Release Work Thread: ${origin.origin}/#pr-record/work/${encodeURIComponent(parentWorkItemId)}
-
-${criteria}`,
-      mode: "read", independentVerificationRequired: true, ownerDecisionRequired: false });
-    return { workItemId: assignment.workItemId, eventId: result.eventId, duplicate: result.duplicate === true };
+    const { requestId, ...work } = assignment;
+    const data = { ...work, title: "Run post-deploy smoke test",
+      definitionOfDone: `Candidate revision: ${candidateRevision}\nRelease Work Thread: ${origin.origin}/#pr-record/work/${encodeURIComponent(parentWorkItemId)}\n\n${criteria}`,
+      mode: "read", independentVerificationRequired: true, ownerDecisionRequired: false };
+    const response = await fetch(new URL(`/api/rooms/${encodeURIComponent(roomId)}/commands`, origin), {
+      redirect: "error", signal: AbortSignal.timeout(15_000), method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + identitySecret },
+      body: JSON.stringify({ id: requestId, type: "work.proposed", data })
+    });
+    const saved = await response.json();
+    if (!response.ok || saved.event?.type !== "work.proposed" || saved.event?.data?.workItemId !== work.workItemId
+        || typeof saved.event?.id !== "string" || !integer(saved.sequence) || saved.sequence === 0
+        || typeof saved.duplicate !== "boolean") {
+      throw new Error("Smoke test assignment unconfirmed. Replay the same release binding.");
+    }
+    return { workItemId: work.workItemId, eventId: saved.event.id, sequence: saved.sequence, duplicate: saved.duplicate };
   }
   const output = await attachReleaseReceipts({ binding, inputs, requirePreparedEvidence: prepare && expectedBody === undefined, expectedBody,
     readResult: args => call("room_read_result", args), handoffSmoke,
