@@ -133,3 +133,42 @@ test("new worktrees keep the project selection outside the working copy", async 
     assert.deepEqual(JSON.parse(readFileSync(metadata, "utf8")), { connection: "first-room" });
   }
 });
+
+test("continuation rechecks the share after fetching its missing commit", async t => {
+  const { execFileSync } = await import("node:child_process");
+  const { existsSync, mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { workspaceCommand } = await import("../cli/commands/workspace.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "room-fetch-continuation-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const publisher = join(dir, "publisher"), receiver = join(dir, "receiver"), target = join(dir, "target");
+  const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const commit = (cwd, message) => git(cwd, "-c", "user.name=Room test", "-c", "user.email=room-test@localhost",
+    "-c", "commit.gpgsign=false", "commit", "-qam", message);
+  git(dir, "init", "-q", publisher);
+  writeFileSync(join(publisher, "page.html"), "base");
+  git(publisher, "add", "page.html");
+  commit(publisher, "base");
+  git(dir, "clone", "-q", publisher, receiver);
+  const base = git(receiver, "rev-parse", "HEAD");
+  writeFileSync(join(publisher, "page.html"), "alternate");
+  commit(publisher, "alternate");
+  const head = git(publisher, "rev-parse", "HEAD");
+  const id = "a".repeat(32), digest = "d".repeat(64), publisherId = "publisher";
+  const link = `https://room.example/?room=commons#pr-workspace/${id}/1/preview/${digest}/${publisherId}/${head}`;
+  let reads = 0;
+  const io = {
+    cwd: receiver, env: { ROOM_ORIGIN: "https://room.example", ROOM_ID: "commons", PROJECT_ROOM_SECRET: "fixture" },
+    fetch: async () => {
+      const revision = ++reads;
+      return Response.json({ items: [{ id, digest, publisherId, head, revision }] });
+    },
+  };
+  await assert.rejects(workspaceCommand(["continue", "--path", target, "--link", link, "--fetch-from", "origin"], io),
+    /artifact has changed/);
+  assert.equal(reads, 2);
+  assert.equal(git(receiver, "rev-parse", head + "^{commit}"), head);
+  assert.equal(git(receiver, "rev-parse", "HEAD"), base);
+  assert.equal(existsSync(target), false);
+});
