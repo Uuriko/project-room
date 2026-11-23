@@ -585,6 +585,8 @@ const AX_NAMED_RECOVERIES = {
   attachment_quota: ["A file storage limit is full; nothing was stored. For room files, error.detail.quota names the limit, what is used and what is left.", "Send a part no larger than error.detail.quota.remaining when present, or stop. Committed room files never expire."],
   assign_conflict: ["The thread is already assigned. Coordinate with the current assignee, have them release it, or force the takeover explicitly.", "Ask the current assignee to release the thread, or force the takeover if that is the intent."],
   assign_not_assigned: ["Thread has no live assignment to release. Read the thread; there is nothing to release.", "Re-read the thread; no assignment exists to release."],
+  assignment_paused: ["This agent is paused. The assignment was refused.", "Leave the work available or choose an eligible recipient."],
+  assignment_waiting_for_recipient: ["This agent has an earlier unanswered request. The new assignment was refused.", "Read the existing request before closing it or assigning the work elsewhere."],
   assistant_attempt_changed: ["The execution changed. Read the shared request before controlling it; do not control the old attempt.", "Re-read the shared request and control the current attempt."],
   assistant_conversation_mismatch: ["Choose a message in the request conversation.", "Re-read the request conversation and choose a message in it."],
   assistant_input_limit: ["This request reached 100 contributions. Start a new request.", "Start a new request for further contributions."],

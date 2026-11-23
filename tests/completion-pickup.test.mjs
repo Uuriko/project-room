@@ -10,7 +10,7 @@ import { startCompletionPickup } from "../server/completion-pickup.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
-test("a settled formal QA opens one scoped investigation, and catch-up cannot reopen it", async t => {
+async function checkScopedInvestigation(t, firstLine) {
   const f = createAcceptanceFixture(), roomId = "commons", workItemId = "qa-work", recipientId = "pickup-reviewer";
   const agent = f.store.identities.create("Pickup reviewer");
   linkWithProof(f.store, f.keys.owner, roomId, agent, { memberId: recipientId, permissions: ["accept_work","verify"] });
@@ -31,7 +31,7 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
     credentialPath = join(f.directory,"operator.json");
   chmodSync(f.directory,0o700);
   atomicPrivateJson(credentialPath,{ identitySecret:f.keys.owner });
-  atomicPrivateJson(config,{checkpointPath,routes:[{ roomId, requesterId, recipientId, workItemId, credentialPath, after }]});
+  atomicPrivateJson(config,{checkpointPath,routes:[{ roomId, requesterId, recipientId, workItemId, credentialPath, after, firstLine }]});
   const log=[];
   const start=()=>startCompletionPickup(f.store,config,msg=>log.push(JSON.parse(msg)));
   let stop=start();
@@ -45,6 +45,9 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
   assert.equal(read().length,2,JSON.stringify(log));
   const next=read().find(item=>item.id!==first.event.data.messageId);
   assert.equal(next.workItemId,workItemId);
+  const opened = f.store.replyRequests.selected(agent.secret,roomId,next.id,{view:"compact"}).page.items[0].message.body;
+  assert.ok(opened.startsWith(firstLine === undefined ? `@(${recipientId}) Room investigation pass.\n`
+    : `${firstLine}\nRoom investigation pass.\n`));
   stop();
   rmSync(checkpointPath);
   stop=start();
@@ -54,4 +57,9 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
   await setImmediate();
   assert.equal(read().length,2);
   assert.deepEqual(log.map(x=>x.event),["completion_pickup.posted"]);
-});
+}
+
+test("a settled formal QA opens one scoped investigation, and catch-up cannot reopen it",
+  t => checkScopedInvestigation(t));
+test("a completion route preserves the receiver's exact first line without chaining an investigation",
+  t => checkScopedInvestigation(t, "Claude Code QA"));
