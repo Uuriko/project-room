@@ -8,7 +8,7 @@ const changesIdentity = item => item && JSON.stringify([
 ]);
 
 // Preview code runs in an opaque frame with a separate response policy.
-export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft, workThreadLink }) {
+export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft, workThread }) {
   const button = document.createElement("button");
   button.type = "button"; button.className = "topbar-button workspace-open";
   button.setAttribute("aria-label", "Workspace");
@@ -70,20 +70,20 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   const startFallback = start.querySelector("textarea");
   startButton.textContent = uiText("workspace.start.copy");
   startFallback.setAttribute("aria-label", startButton.textContent);
-  let startLink = "";
-  function selectStart(link) {
-    startLink = link;
-    start.hidden = !link;
+  let selectedStart;
+  function selectStart(thread) {
+    selectedStart = thread;
+    start.hidden = !thread;
     startStatus.textContent = "";
     startFallback.hidden = true;
     startFallback.value = "";
   }
   startButton.addEventListener("click", async () => {
-    const link = startLink;
-    if (!link || link !== workThreadLink?.()) return;
-    const text = uiText("workspace.start.agentText", { link });
+    const thread = selectedStart;
+    if (!thread || thread.link !== workThread?.()?.link) return;
+    const text = uiText("workspace.start.agentText", { workId: thread.id, link: thread.link });
     const result = await clipboard.copy(text);
-    if (!dialog.open || startLink !== link || workThreadLink?.() !== link) return;
+    if (!dialog.open || selectedStart !== thread || workThread?.()?.link !== thread.link) return;
     startStatus.textContent = uiText(result === "copied" ? "workspace.share.agentCopied" : "workspace.share.agentManual");
     startFallback.hidden = result === "copied";
     if (result !== "copied") {
@@ -254,7 +254,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     meta.textContent = "";
   }
   function reset() {
-    selectStart("");
+    selectStart(null);
     generation++; selected = null; linked = null; pendingFile = null; threadDraft = null; clearPreview();
     status.textContent = ""; list.replaceChildren(); items = []; changeCache.clear();
     if (dialog.open) dialog.close();
@@ -428,7 +428,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   button.addEventListener("click", () => {
     if (!client.session || dialog.open) return;
     threadDraft = captureThreadDraft?.() ?? null;
-    selectStart(workThreadLink?.() ?? "");
+    selectStart(workThread?.());
     dialog.showModal();
     void load();
   });
@@ -442,7 +442,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       const target = workspaceArtifactSelection(hash);
       if (!target || !client.session) return;
       clearPreview();
-      selectStart("");
+      selectStart(null);
       threadDraft = null; linked = target; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
       if (!dialog.open) dialog.showModal();
       void load();
