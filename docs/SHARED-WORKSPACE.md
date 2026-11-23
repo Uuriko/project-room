@@ -60,3 +60,16 @@ room workspace run -- npm run dev -- --host {host} --port {port}
 Room chooses a preferred per-worktree port and falls back to a free port if it is occupied. Pass `--port PORT` before the separator when a specific port is required. The command may also use the supplied `HOST` and `PORT` variables. Room reports the preview URL when it observes that the launched process group owns the loopback listener. Its logs go to stderr.
 
 This command uses macOS or Linux with Git, lsof, and ps. Close it to stop this local process group without affecting other worktrees. The full development server stays on your machine. Use `publish` or `watch` from the section above for room-visible standalone builds.
+
+## Share an attempt with one teammate
+
+Attach `--share-with MEMBER_ID` to `publish` or `watch` when an artifact
+should go to one active Room member. Share the copied artifact link with that
+person. The publisher and that exact member can open the preview, changes, and
+run output through their usual Room access. Use `--include-changes yes` and
+`--output` to include those artifacts when useful. The local agent session
+stays private.
+
+Keep the same member ID on updates and retries. To address another person or
+share room-wide, start a new Workspace publication with a new preview ID.
+`remove` withdraws the earlier publication.

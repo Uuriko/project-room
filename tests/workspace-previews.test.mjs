@@ -85,6 +85,24 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.equal((await call(owner, "DELETE", { id, expectedRevision: 1 })).status, 409);
   assert.equal((await call(owner, "DELETE", { id, expectedRevision: 3 })).status, 200);
   assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 404);
+  const directed = { ...preview, recipientId: "viewer" };
+  assert.equal((await call(publisher, "POST", { ...directed, recipientId: "absent" })).status, 422);
+  const sent = await (await call(publisher, "POST", directed)).json();
+  assert.equal(sent.recipientId, "viewer");
+  assert.equal(store.db.prepare("SELECT id FROM room_workspace_previews WHERE id=?").get(id), undefined);
+  assert.deepEqual(await (await call(publisher, "POST", directed)).json(), sent);
+  assert.equal((await call(publisher, "POST", { ...preview, expectedRevision: 1 })).status, 409);
+  assert.equal((await call(publisher, "POST", { ...directed, recipientId: "other-publisher", expectedRevision: 1 })).status, 409);
+  assert.equal((await (await call(otherPublisher)).json()).items.length, 0);
+  for (const query of ["?id=" + id, changesQuery, outputQuery]) {
+    assert.equal((await call(otherPublisher, "GET", null, query)).status, 404);
+    assert.equal((await call(viewer, "GET", null, query)).status, 200);
+  }
+  assert.equal((await call(viewer, "DELETE", { id, expectedRevision: 1 })).status, 403);
+  assert.deepEqual(await (await call(owner, "DELETE", { id, expectedRevision: 1 })).json(), { removed: true });
+  assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 200);
+  assert.equal((await call(publisher, "DELETE", { id, expectedRevision: 1 })).status, 200);
+  assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 404);
 });
 
 test("new worktrees keep the project selection outside the working copy", async t => {

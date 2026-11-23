@@ -1,7 +1,7 @@
 import { uiText } from "./strings.js";
 import { clipboard } from "./clipboard.js";
 
-import { artifactDigest, workspaceArtifactSelection } from "./workspace-artifact-link.js";
+import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "./workspace-artifact-link.js";
 
 // Preview code runs in an opaque frame with a separate response policy.
 export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
@@ -271,18 +271,15 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     const current = items.find(item => item.id === selected), session = client.session;
     if (!current || !session || copyLink.hidden) return;
     const panel = activePanel;
-    const digest = artifactDigest(current, panel);
-    if (!digest) return;
-    const destination = new URL(location.pathname, location.origin);
-    destination.searchParams.set("room", session.roomId);
-    destination.hash = ["pr-workspace", current.id, current.revision, panel, digest, encodeURIComponent(current.publisherId), current.head].join("/");
-    const result = await clipboard.copy(destination.href);
+    const link = workspaceArtifactLink(location.href, session.roomId, current, panel);
+    if (!link) return;
+    const result = await clipboard.copy(link);
     if (!dialog.open || client.session !== session || selected !== current.id || panel !== activePanel
       || items.find(item => item.id === selected)?.revision !== current.revision) return;
     if (result === "copied") linkStatus.textContent = uiText("workspace.share.copied");
     else {
       linkStatus.textContent = uiText("workspace.share.manual");
-      linkFallback.value = destination.href;
+      linkFallback.value = link;
       linkFallback.hidden = false;
       linkFallback.select();
     }

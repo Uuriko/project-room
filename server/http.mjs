@@ -1518,10 +1518,11 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         resolveChannelTransport, directSendFetch,
         publicAgentPages, jevShadowAdmission,
         streams,
-        workspacePreviewChanged(roomId) {
+        workspacePreviewChanged(roomId, audience) {
           for (const entry of streams) {
             const { res: transport } = entry;
-            if (entry.roomId === roomId && !transport.destroyed && !transport.writableEnded && transport.writableLength <= streamQueueCap)
+            if (entry.roomId === roomId && (!audience || audience.includes(entry.memberId))
+              && !transport.destroyed && !transport.writableEnded && transport.writableLength <= streamQueueCap)
               transport.write('event: workspace-preview-changed\ndata: {}\n\n');
           }
         },

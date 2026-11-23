@@ -11,3 +11,13 @@ export function artifactDigest(item, panel) {
   if (panel === "output") return item.outputDigest;
   return item.digest;
 }
+
+export function workspaceArtifactLink(base, roomId, item, panel) {
+  const digest = artifactDigest(item, panel);
+  if (!digest) return null;
+  const url = new URL(base);
+  url.search = "";
+  url.searchParams.set("room", roomId);
+  url.hash = ["pr-workspace", item.id, item.revision, panel, digest, encodeURIComponent(item.publisherId), item.head].join("/");
+  return url.href;
+}
