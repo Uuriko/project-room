@@ -4,7 +4,7 @@ import { clipboard } from "./clipboard.js";
 import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "./workspace-artifact-link.js";
 
 // Preview code runs in an opaque frame with a separate response policy.
-export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft }) {
+export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft, workThreadLink }) {
   const button = document.createElement("button");
   button.type = "button"; button.className = "topbar-button"; button.textContent = "Workspace";
   button.setAttribute("aria-haspopup", "dialog");
@@ -17,6 +17,11 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     <div class="workspace-previews-layout">
       <section aria-label="Shared previews">
         <button type="button" data-preview-refresh class="button secondary">Refresh previews</button>
+        <div data-workspace-start hidden>
+          <button type="button" class="button secondary" aria-describedby="workspace-start-status"></button>
+          <p id="workspace-start-status" class="form-hint" role="status"></p>
+          <textarea rows="4" readonly hidden></textarea>
+        </div>
         <p data-preview-status role="status"></p>
         <ol data-preview-list></ol>
       </section>
@@ -50,6 +55,34 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       </section>
     </div>`;
   document.body.append(dialog);
+
+  const start = dialog.querySelector("[data-workspace-start]");
+  const startButton = start.querySelector("button");
+  const startStatus = start.querySelector("[role=status]");
+  const startFallback = start.querySelector("textarea");
+  startButton.textContent = uiText("workspace.start.copy");
+  startFallback.setAttribute("aria-label", startButton.textContent);
+  let startLink = "";
+  function selectStart(link) {
+    startLink = link;
+    start.hidden = !link;
+    startStatus.textContent = "";
+    startFallback.hidden = true;
+    startFallback.value = "";
+  }
+  startButton.addEventListener("click", async () => {
+    const link = startLink;
+    if (!link || link !== workThreadLink?.()) return;
+    const text = uiText("workspace.start.agentText", { link });
+    const result = await clipboard.copy(text);
+    if (!dialog.open || startLink !== link || workThreadLink?.() !== link) return;
+    startStatus.textContent = uiText(result === "copied" ? "workspace.share.agentCopied" : "workspace.share.agentManual");
+    startFallback.hidden = result === "copied";
+    if (result !== "copied") {
+      startFallback.value = text;
+      startFallback.select();
+    }
+  });
 
   const list = dialog.querySelector("[data-preview-list]");
   const heading = dialog.querySelector("[data-preview-heading]");
@@ -196,6 +229,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     meta.textContent = "";
   }
   function reset() {
+    selectStart("");
     generation++; selected = null; linked = null; pendingFile = null; threadDraft = null; clearPreview();
     status.textContent = ""; list.replaceChildren(); items = []; patchCache.clear();
     if (dialog.open) dialog.close();
@@ -341,6 +375,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   button.addEventListener("click", () => {
     if (!client.session || dialog.open) return;
     threadDraft = captureThreadDraft?.() ?? null;
+    selectStart(workThreadLink?.() ?? "");
     dialog.showModal();
     void load();
   });
@@ -354,6 +389,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       const target = workspaceArtifactSelection(hash);
       if (!target || !client.session) return;
       clearPreview();
+      selectStart("");
       threadDraft = null; linked = target; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
       if (!dialog.open) dialog.showModal();
       void load();

@@ -18,6 +18,20 @@ Anyone with access to the room can open **Workspace** and select the preview. On
 
 Use `room workspace watch` with the same arguments to publish again when a build replaces the selected file. Room pushes an update to open viewers on its existing connection. Stop the local watcher when the build session ends. To withdraw the shared preview use `room workspace remove --id PREVIEW_ID`. Remove or retain the local worktree separately using Git.
 
+From an open Work Thread, open **Workspace** and choose **Copy start
+instructions** to give a coding agent the same thread and a local setup
+command. The agent can also run it directly:
+
+```sh
+room workspace start --from-work 'WORK_THREAD_URL' --path ../preview-variant --base HEAD
+```
+
+The CLI reads the selected work through the current Room connection before
+creating the worktree, then returns the current brief and thread link. This
+local attempt does not claim the task or post to the room. Publishing the
+attempt prints the original thread link again so the publisher can open the
+thread and return just the result they choose to share.
+
 This release handles standalone HTML previews of up to 384 KiB. The frame isolates the Room session and permits inline scripts, inline styles and embedded media. It cannot use the builder's local API server, relative project assets, or external APIs. The command shares the selected file with current room members, so use a published build artifact without credentials or private inputs.
 
 ## Compare committed changes

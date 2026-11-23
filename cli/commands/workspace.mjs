@@ -7,9 +7,11 @@ import { bearerHeader } from "../auth.mjs";
 import { connection, parseArgs } from "./code.mjs";
 import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 import { runWorkspaceServer } from "../workspace-dev-server.mjs";
+import { RoomAgentClient } from "../../client/room-agent.mjs";
+import { agentSigninRecord } from "../../src/record-link.js";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
-const usage = `room workspace start --path DIRECTORY [--base REF] [--connection NAME]
+const usage = `room workspace start --path DIRECTORY [--base REF] [--from-work URL] [--connection NAME]
 room workspace continue --link URL --path DIRECTORY [--fetch-from REMOTE] [--connection NAME]
 room workspace run [--port PORT] [--log FILE.log] -- COMMAND [ARGS...]
 room workspace list
@@ -54,12 +56,27 @@ function savedWorkspaceConnection(cwd) {
   if (tree.status !== 0) return undefined;
   const atRoot = readProject(tree.stdout.trim())?.connection;
   if (atRoot) return atRoot;
-  const marker = resolve(git(cwd, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
-  if (existsSync(marker)) return safeName(JSON.parse(readFileSync(marker, "utf8")).connection);
+  const name = workspaceMarker(cwd)?.connection;
+  return name ? safeName(name) : undefined;
   return undefined;
 }
 
-function launch(cwd, flags, name) {
+function workspaceMarker(cwd) {
+  const marker = resolve(git(cwd, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
+  return existsSync(marker) ? JSON.parse(readFileSync(marker, "utf8")) : null;
+}
+
+function selectedWorkThread(value, conn) {
+  const link = URL.parse(value);
+  const record = link && agentSigninRecord(link);
+  if (!record?.hash.startsWith("#pr-record/work/") || link.username || link.password
+      || link.origin !== new URL(conn.origin).origin || link.searchParams.size !== 1 || record.roomId !== conn.roomId)
+    throw new Error("Choose a Work Thread link for the connected Room");
+  const workItemId = decodeURIComponent(record.hash.slice("#pr-record/work/".length));
+  return { workItemId, roomId: record.roomId, link: link.href };
+}
+
+function launch(cwd, flags, name, source) {
   if (!flags.path) throw new Error("--path is required");
   const path = resolve(cwd, flags.path);
   if (existsSync(path)) throw new Error("Choose a new worktree directory");
@@ -67,9 +84,9 @@ function launch(cwd, flags, name) {
   const id = randomBytes(16).toString("hex");
   const branch = "room/" + id;
   git(cwd, "worktree", "add", "-b", branch, "--", path, base);
-  if (name) {
+  if (name || source) {
     const marker = resolve(git(path, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
-    writeFileSync(marker, JSON.stringify({ connection: name }) + "\n", { mode: 0o600, flag: "wx" });
+    writeFileSync(marker, JSON.stringify({ connection: name, ...(source && { attemptId: id, source }) }) + "\n", { mode: 0o600, flag: "wx" });
   }
   return { id, branch, path, base, ...(name && { connection: name }) };
 }
@@ -140,6 +157,7 @@ export async function workspaceCommand(argv, io = {}) {
   const [action, ...extra] = positional;
   const out = data => (io.out ?? console.log)(JSON.stringify(data));
   const cwd = io.cwd ?? process.cwd();
+  if (flags["from-work"] !== undefined && action !== "start") throw new Error("--from-work is available with workspace start");
   if (action === "run" && !extra.length && separator !== -1 && argv[separator + 1]) {
     const gitDir = git(cwd, "rev-parse", "--absolute-git-dir");
     const commonDir = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
@@ -151,7 +169,18 @@ export async function workspaceCommand(argv, io = {}) {
   if (extra.length || separator !== -1 || !["start", "list", "publish", "watch", "remove", "changes", "output", "continue"].includes(action)) throw new Error(usage);
   if (action === "start") {
     const name = flags.connection ? safeName(flags.connection) : savedWorkspaceConnection(cwd);
-    out(launch(cwd, flags, name));
+    if (flags["from-work"] === undefined) {
+      out(launch(cwd, flags, name));
+      return 0;
+    }
+    const conn = await connection({ cwd, name, env: io.env });
+    const source = selectedWorkThread(flags["from-work"], conn);
+    const client = new RoomAgentClient({ ...conn, token: conn.secret, fetchImpl: io.fetch });
+    const { work, next } = await client.workContext(source.workItemId, { signal: AbortSignal.timeout(15000) });
+    if (next.action === "superseded") throw new Error("This Work Thread was superseded. Open its replacement before starting.");
+    source.revision = work.revision;
+    out({ ...launch(cwd, flags, name, source), workThread: source,
+      brief: { title: work.title, definitionOfDone: work.definitionOfDone, untrusted: true } });
     return 0;
   }
   const { call, conn, inherited } = await connect(io, cwd, flags.connection);
@@ -209,6 +238,9 @@ export async function workspaceCommand(argv, io = {}) {
   let expectedRevision = (await list()).find(row => row.id === flags.id)?.revision ?? 0;
   if (action === "remove") { out(await call("DELETE", { id: flags.id, expectedRevision })); return 0; }
   if (!flags.file || !flags.title || !flags.base) throw new Error("--file, --title, and --base are required");
+  const marker = workspaceMarker(cwd);
+  const workThread = marker?.attemptId === flags.id && marker.source?.roomId === conn.roomId
+    && URL.parse(marker.source.link)?.origin === new URL(conn.origin).origin ? marker.source : null;
   const publish = async () => {
     const value = await call("POST", { ...previewInput(cwd, flags), expectedRevision });
     expectedRevision = value.revision;
@@ -217,7 +249,7 @@ export async function workspaceCommand(argv, io = {}) {
       const link = workspaceArtifactLink(conn.origin, conn.roomId, value, panel);
       if (link) links[panel] = link;
     }
-    out({ ...value, links });
+    out({ ...value, links, ...(workThread && { workThread }) });
   };
   if (action === "publish") { await publish(); return 0; }
   // Watch the containing directory so build tools can atomically replace the file.

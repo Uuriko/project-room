@@ -866,7 +866,14 @@ updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), g
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
 // JDOT-COH-NAV end
 workspacePreviewsUI = installWorkspacePreviews({ client, toolbar: document.querySelector(".room-main .topbar-actions"),
-  memberLabel: id => state?.members[id]?.displayName, captureThreadDraft: captureWorkspaceThreadDraft });
+  memberLabel: id => state?.members[id]?.displayName, captureThreadDraft: captureWorkspaceThreadDraft,
+  workThreadLink: () => {
+    if (!session || !state?.workItems[activeWorkNavigationId]) return "";
+    const url = new URL(location.pathname, location.origin);
+    url.searchParams.set("room", session.roomId);
+    url.hash = workThreadHref(activeWorkNavigationId);
+    return url.href;
+  } });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
