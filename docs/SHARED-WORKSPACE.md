@@ -86,9 +86,18 @@ The Node server can start an optional Workspace publisher broker on loopback.
 Set `ROOM_WORKSPACE_PUBLISHER_PORT`, `ROOM_WORKSPACE_PUBLISHER_TLS_KEY` and
 `ROOM_WORKSPACE_PUBLISHER_TLS_CERT` together. Use a different port from the
 Room HTTP listener and absolute certificate paths. The broker accepts a
-short-lived grant for one exact publication over TLS 1.3. It is an internal
-publisher connection. A separate gateway with Room viewer authorization is
-needed before a teammate can open a running app in their browser.
+short-lived grant for one exact publication over TLS 1.3.
+
+To enable recipient live viewing, set `ROOM_WORKSPACE_VIEWER_ORIGIN` to a
+separate HTTPS origin and `ROOM_WORKSPACE_VIEWER_PORT` to a third, unused
+local port. Route wildcard DNS and TLS for the viewer domain to that
+loopback listener and preserve the HTTP Host, Origin and WebSocket upgrade.
+Use a dedicated domain for previews. Each live session uses a different
+hostname, a one-use handoff and its own host-only cookie. A publisher and
+the named recipient can use **Open live preview** when the exact directed
+publication has a registered publisher. The live page forwards GET/HEAD
+and the supported development-server hot reload connections. The saved
+preview is available separately.
 
 ## Share an attempt with one teammate
 

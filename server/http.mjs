@@ -1,6 +1,7 @@
 import { workResume } from "../src/workflow.js";
 import { createWorkspacePublisherGrants } from "./workspace-publisher-grants.mjs";
 import { createWorkspacePreviewBroker } from "./workspace-preview-broker.mjs";
+import { createWorkspacePreviewViewer } from "./workspace-preview-viewer.mjs";
 import { loadInstanceCardRuntime } from './instance-card-runtime.mjs';
 import { agentPages } from '../scripts/build-agent-docs.mjs';
 import { instanceDiscoveryBody, instanceCardSignatureState } from './node-discovery-origin.mjs';
@@ -440,7 +441,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
   operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
-  publicAgentPages = false, workspaceLivePublisherEnabled = false, workspaceBrokerConfig = null,
+  publicAgentPages = false, workspaceLivePublisherEnabled = false, workspaceBrokerConfig = null, workspaceViewerConfig = null,
   credentialReadBurst = CREDENTIAL_READ_BURST,
   credentialWriteBurst = CREDENTIAL_WRITE_BURST }) {
   const workspacePublisherGrants = workspaceLivePublisherEnabled || workspaceBrokerConfig
@@ -1521,13 +1522,14 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
         publicAgentPages, jevShadowAdmission,
-        streams, workspacePublisherGrants,
+        streams, workspacePublisherGrants, workspacePreviewViewer: server.workspacePreviewViewer,
         workspacePreviewChanged(roomId, audience, previous) {
           const broker = server.workspacePreviewBroker;
           if (previous) {
             workspacePublisherGrants?.revoke(previous);
             const generation = broker?.generationFor(previous);
             if (generation !== undefined) broker.retire(previous, generation);
+            server.workspacePreviewViewer?.revalidate(roomId);
           }
           for (const entry of streams) {
             const { res: transport } = entry;
@@ -2993,7 +2995,9 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["expectedSessionRevision"])) reject(422, "invalid_logout", "Current session revision required");
-          return json(res, 200, sessionAccountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
+          const session = store.logoutAccountSession(slotToken, data.expectedSessionRevision);
+          server.workspacePreviewViewer?.revalidate();
+          return json(res, 200, sessionAccountView(session));
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
@@ -3666,6 +3670,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           protectWrite(req, auth, isBearer);
           if (authMode === "account") store.logoutAccountSession(token, auth.sessionRevision);
           else store.revoke(token);
+          server.workspacePreviewViewer?.revalidate();
           return json(res, 200, { signedOut: true });
         }
         reject(405, "method_not_allowed", "Method not allowed");
@@ -6094,6 +6099,13 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   if (workspaceBrokerConfig) {
     server.workspacePreviewBroker = createWorkspacePreviewBroker(workspaceBrokerConfig, server.consumeWorkspacePublisherGrant);
     server.once("close", () => server.workspacePreviewBroker.close());
+  }
+  if (workspaceViewerConfig) {
+    if (!server.workspacePreviewBroker) throw Error("Workspace viewer requires a publisher broker");
+    const viewer = createWorkspacePreviewViewer(workspaceViewerConfig, server.workspacePreviewBroker);
+    server.workspacePreviewViewer = viewer;
+    const unsubscribe = store.onEventAppended(roomId => viewer.revalidate(roomId));
+    server.once("close", () => { unsubscribe(); viewer.close(); });
   }
   server.once("close", () => workspacePublisherGrants?.clear());
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
