@@ -4,6 +4,8 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { verifyCardJws } from "../server/agent-card-signing.mjs";
 
+import { releaseSmokePlan, releaseSmokeWorkId } from "../server/release-smoke.mjs";
+
 const revision = /^[a-f0-9]{40}$/;
 const digest = /^sha256:[a-f0-9]{64}$/;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -88,11 +90,15 @@ function stageEvidence(stage, value, candidate) {
   throw new Error(`Invalid or mismatched ${stage} receipt for the exact candidate.`);
 }
 
-export async function attachReleaseReceipts({ binding, inputs, readResult, lookup, post, requirePreparedEvidence = false, expectedBody }) {
+export async function attachReleaseReceipts({ binding, inputs, readResult, lookup, post, requirePreparedEvidence = false, expectedBody, handoffSmoke }) {
   const { workItemId, completionEventId, candidateRevision } = binding;
   if (typeof workItemId !== "string" || !workItemId || typeof completionEventId !== "string" || !completionEventId
       || !revision.test(candidateRevision)) throw new Error("Expected a work item, exact completion event and 40-hex candidate.");
 
+  const smokeTest = releaseSmokePlan(binding.smokeTest);
+  if (binding.smokeTest !== undefined && (!smokeTest || typeof handoffSmoke !== "function")) {
+    throw new Error("Expected a smoke criterion, distinct assignee and verifier, and a handoff connection.");
+  }
   const prepared = [];
   for (const stage of stages) {
     if (inputs[stage] === undefined) continue;
@@ -120,7 +126,18 @@ export async function attachReleaseReceipts({ binding, inputs, readResult, looku
       prepared.some(({ stage, check }) => !text.body.split("\n").includes(`${stage}: ${check.summary} ${check.evidenceDigest}`))) {
     throw new Error("The stage files no longer match the evidence in the submitted release result.");
   }
-  const previouslyAttached = selected.workThread?.releaseChecks?.checks ?? [];
+  if (smokeTest && selected.scope?.workVisibility !== "room") {
+    throw new Error("A release smoke handoff requires a room-visible Work Thread.");
+  }
+  const previousReport = selected.workThread?.releaseChecks;
+  if (previousReport?.smokeTest && JSON.stringify(previousReport.smokeTest) !== JSON.stringify(smokeTest)) {
+    throw new Error("The exact release already declares a different smoke test.");
+  }
+  const deploy = prepared.find(item => item.stage === "deploy")?.check;
+  if (smokeTest && deploy?.status === "passed" && selected.selection?.status !== "current") {
+    throw new Error("The exact deploy is no longer the current Work Thread result.");
+  }
+  const previouslyAttached = previousReport?.checks ?? [];
   if (previouslyAttached.some(check => check.evidenceMessageId && !prepared.some(item => item.stage === check.stage))) {
     throw new Error("Missing an already attached stage. Restore its original receipt file before publishing.");
   }
@@ -147,10 +164,16 @@ export async function attachReleaseReceipts({ binding, inputs, readResult, looku
     evidence.push({ stage, ...await send(id, body) });
   }
   const report = { candidateRevision, completionEventId, evidenceVersion: receipt.evidenceVersion,
-    checks: Object.fromEntries(prepared.map(({ stage, check }) => [stage, check])) };
+    checks: Object.fromEntries(prepared.map(({ stage, check }) => [stage, check])), ...(smokeTest ? { smokeTest } : {}) };
   const reportBody = "room-release-checks/1\n" + JSON.stringify(report);
   const published = await send("release-checks-" + hash(JSON.stringify([workItemId, reportBody])), reportBody);
-  return { candidateRevision, completionEventId, report: published, evidence };
+  let smoke;
+  if (smokeTest && deploy?.status === "passed") {
+    const id = releaseSmokeWorkId(workItemId, completionEventId, candidateRevision);
+    smoke = await handoffSmoke({ candidateRevision, parentWorkItemId: workItemId, completionEventId, sourceMessageId: deploy.evidenceMessageId,
+      workItemId: id, requestId: id, ...smokeTest });
+  }
+  return { candidateRevision, completionEventId, report: published, evidence, ...(smoke ? { smokeTest: smoke } : {}) };
 }
 
 export function confirmedReceipt(saved, id) {
@@ -387,8 +410,35 @@ async function main() {
     if (sourceProofPath !== undefined) expectedBody = body;
     binding = await submitReleaseReview({ binding, expectedRevision: Number(values["work-revision"]), producerId: memberId, body, call });
   }
+  async function handoffSmoke({ candidateRevision, parentWorkItemId, completionEventId, criteria, ...assignment }) {
+    const version = await fetch(new URL("/api/version", origin), { redirect: "error", signal: AbortSignal.timeout(10_000) });
+    if (!version.ok || (await version.json()).sourceRevision !== candidateRevision) {
+      throw new Error("Post-deploy smoke handoff is waiting for the exact serving revision.");
+    }
+    const selected = await call("room_read_result", { workItemId: parentWorkItemId, completionEventId });
+    if (selected.scope?.workVisibility !== "room" || selected.selection?.status !== "current" || selected.workThread?.releaseChecks?.checks
+      .find(check => check.stage === "deploy" && check.status === "passed")?.evidenceMessageId !== assignment.sourceMessageId) {
+      throw new Error("Post-deploy smoke handoff is waiting for the current deploy receipt.");
+    }
+    const { requestId, ...work } = assignment;
+    const data = { ...work, title: "Run post-deploy smoke test",
+      definitionOfDone: `Candidate revision: ${candidateRevision}\nRelease Work Thread: ${origin.origin}/#pr-record/work/${encodeURIComponent(parentWorkItemId)}\n\n${criteria}`,
+      mode: "read", independentVerificationRequired: true, ownerDecisionRequired: false };
+    const response = await fetch(new URL(`/api/rooms/${encodeURIComponent(roomId)}/commands`, origin), {
+      redirect: "error", signal: AbortSignal.timeout(15_000), method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + identitySecret },
+      body: JSON.stringify({ id: requestId, type: "work.proposed", data })
+    });
+    const saved = await response.json();
+    if (!response.ok || saved.event?.type !== "work.proposed" || saved.event?.data?.workItemId !== work.workItemId
+        || typeof saved.event?.id !== "string" || !integer(saved.sequence) || saved.sequence === 0
+        || typeof saved.duplicate !== "boolean") {
+      throw new Error("Smoke test assignment unconfirmed. Replay the same release binding.");
+    }
+    return { workItemId: work.workItemId, eventId: saved.event.id, sequence: saved.sequence, duplicate: saved.duplicate };
+  }
   const output = await attachReleaseReceipts({ binding, inputs, requirePreparedEvidence: prepare && expectedBody === undefined, expectedBody,
-    readResult: args => call("room_read_result", args),
+    readResult: args => call("room_read_result", args), handoffSmoke,
     lookup: values.recover || prepare ? args => call("room_receipt", args) : undefined,
     post: async args => confirmedReceipt(await call("room_post_message", args), args.id) });
   console.log(JSON.stringify(prepare ? { ...output, binding, ...(proofParts ? { proofParts } : {}) } : output));

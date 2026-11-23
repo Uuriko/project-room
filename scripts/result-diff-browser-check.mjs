@@ -215,11 +215,13 @@ test("the verdict links exact candidate release checks without claiming missing 
   f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId, messageId: evidenceMessageId,
     body: `room-release-receipt/1 build ${completed.event.id} ${candidateRevision} ${evidenceDigest}\nSigned archive manifest verified` });
   const report = { completionEventId: completed.event.id, evidenceVersion: receipt.evidenceVersion, candidateRevision,
+    smokeTest: { accountableMemberId: "producer", verifierMemberId: "human-checker", criteria: "Open the shared preview as a teammate." },
     checks: { build: { candidateRevision, status: "passed", summary: "Signed archive verified", evidenceDigest, evidenceMessageId } } };
   const note = f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
     messageId: "release-checks-evidence", body: "room-release-checks/1\n" + JSON.stringify(report) });
   const page = await f.login("owner");
   await openResult(page);
+  await page.locator("#result-outcome").getByText("Verify the deployment.", { exact: true }).waitFor();
   const link = page.getByRole("link", { name: "Release checks", exact: true });
   await link.waitFor();
   await link.press("Enter");
@@ -242,11 +244,11 @@ test("the verdict links exact candidate release checks without claiming missing 
   for (const [stage, digit] of [["browser", "2"], ["deploy", "3"]]) {
     const evidenceDigest = "sha256:" + digit.repeat(64), evidenceMessageId = `release-checks-${stage}-receipt`;
     const summary = `${stage} evidence checked`;
-    f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
+    f.send("owner", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
       messageId: evidenceMessageId, body: `room-release-receipt/1 ${stage} ${completed.event.id} ${candidateRevision} ${evidenceDigest}\n${summary}` });
     additionalChecks[stage] = { candidateRevision, status: "passed", summary, evidenceDigest, evidenceMessageId };
   }
-  f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
+  f.send("owner", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
     messageId: "release-checks-complete", body: "room-release-checks/1\n" + JSON.stringify({ ...report, checks: additionalChecks }) });
   const messageId = "release-verification-update";
   f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", messageId,
@@ -257,6 +259,8 @@ test("the verdict links exact candidate release checks without claiming missing 
   await message.waitFor();
   assert.equal(new URL(page.url()).hash, "#pr-record/message/" + messageId);
   await message.getByRole("link", { name: "Revise a short result", exact: true }).click();
+  assert.equal(f.store.workResult(f.keys.owner, "commons", "revision-journey").workThread.outcome?.remaining, "confirm_smoke_handoff");
+  await page.locator("#result-outcome").getByText("Confirm the smoke test assignment.", { exact: true }).waitFor();
   const stages = page.locator("#result-release-stages summary");
   await stages.first().waitFor();
   assert.equal(page.viewportSize().width, 390);
@@ -315,6 +319,26 @@ test("the verdict links exact candidate release checks without claiming missing 
     evidenceVersion: receipt.evidenceVersion, decision: "approved", reason: "All three candidate checks passed",
     sourceMessageId: acceptance.event.data.messageId,
   });
+  const updatesBeforeSmoke = await fetch(new URL("/api/rooms/commons/updates?state=all", page.url()), {
+    headers: { authorization: "Bearer " + f.keys.owner },
+  });
+  assert.equal((await updatesBeforeSmoke.json()).items.some(item => item.kind === "release_accepted"), false);
+  const { releaseSmokeWorkId } = await import("../server/release-smoke.mjs");
+  const smokeId = releaseSmokeWorkId("revision-journey", completed.event.id, candidateRevision);
+  f.send("owner", T.WORK_PROPOSED, { workItemId: smokeId, title: "Run post-deploy smoke test",
+    definitionOfDone: report.smokeTest.criteria, mode: "read", accountableMemberId: "producer",
+    verifierMemberId: "human-checker", independentVerificationRequired: true, ownerDecisionRequired: false,
+    sourceMessageId: additionalChecks.deploy.evidenceMessageId });
+  f.send("producer", T.WORK_ACCEPTED, { workItemId: smokeId, expectedRevision: 0 });
+  f.send("producer", T.WORK_STARTED, { workItemId: smokeId, expectedRevision: 1 });
+  const smokeText = f.send("producer", T.MESSAGE_POSTED, { workItemId: smokeId, messageId: "shared-preview-verified",
+    body: "Opened the exact shared preview in the teammate's session." });
+  const smokeVersion = textVersion(smokeText.event.data.body);
+  const smoke = f.send("producer", T.WORK_COMPLETED, { workItemId: smokeId, expectedRevision: 2, evidenceKind: "room_text",
+    evidenceMessageId: smokeText.event.data.messageId, evidenceMessageEventId: smokeText.event.id, evidenceVersion: smokeVersion,
+    previousCompletionEventId: null, producerId: "producer", summary: smokeText.event.data.body, nextAction: "Review preview smoke" });
+  f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: smokeId, expectedRevision: 3,
+    completionEventId: smoke.event.id, evidenceVersion: smokeVersion, result: "pass", summary: "Cross-account preview verified" });
   for (const viewport of [390, 1280]) {
     const updates = await f.login("owner");
     await updates.setViewportSize({ width: viewport, height: 900 });
@@ -335,6 +359,7 @@ test("the verdict links exact candidate release checks without claiming missing 
     await updates.locator("#result-release-stages summary").first().waitFor();
     assert.equal(new URL(updates.url()).hash, "#pr-record/work/revision-journey");
     assert.equal(await updates.locator("#result-verdict").innerText(), "Verification · Passed");
+    await updates.locator("#result-outcome").getByText("Outcome accepted.", { exact: true }).waitFor();
     assert.equal(await updates.locator("#result-release-candidate").innerText(), candidate);
     assert.deepEqual(await updates.locator("#result-release-stages summary").allInnerTexts(), labels);
     t.diagnostic(JSON.stringify({ viewport, route: "Accepted release in Updates All", actionsFromDefaultUpdates: 2,

@@ -6784,7 +6784,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!row) fail(404, "room_not_found", "Room not found");
       const work = readWorkItem(this.db, roomId, workItemId);
       if (!work) fail(404, "work_not_found", "Work item not found in this Room");
-      assertSelectedWorkVisible(this, roomId, workItemId, work, auth.member.id);
+      let parties;
+      try { parties = this.privateWorkParties(roomId, { workIds: [workItemId] })?.get(workItemId) ?? null; }
+      catch { parties = new Set(); }
+      assertSelectedWorkVisible(this, roomId, workItemId, work, auth.member.id, parties);
       // The full selected receipt history is needed for withdrawn historical
       // text. Unrelated work and conversation bodies are not result dependencies.
       const state = { room: isCurrentRoom(this.db,roomId) ? readCurrentRecord(this.db,roomId,'metadata','room') : JSON.parse(row.metadata), workItems: { [workItemId]: work } };
@@ -6793,14 +6796,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (!messages.has(id)) messages.set(id, selectedMessageRecord(this, roomId, id, row.archive_type === "object"));
         return messages.get(id);
       } };
+      const readOutcomeWork = id => {
+        const item = readWorkItem(this.db, roomId, id);
+        if (!item) return null;
+        try { assertSelectedWorkVisible(this, roomId, id, item, auth.member.id); }
+        catch (error) { if (error.code === "work_private") return null; throw error; }
+        return item;
+      };
       let value;
       try { value = selectedWorkResult({ db: this.db, state, workItemId, sequence: row.sequence, now: this.now(), completionEventId, draftMessageId,
-        viewerId: auth.member.id, reviewer: auth.member, floor: this.historyFloor(roomId, auth.member.id, row.sequence), messageRecords }); }
+        viewerId: auth.member.id, reviewer: auth.member, floor: this.historyFloor(roomId, auth.member.id, row.sequence), messageRecords, readOutcomeWork }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
       const runtime = value.result?.kind !== "draft" && value.result?.receipt?.eventId === value.current.completionEventId
         && value.result?.text?.body != null && reviewRuntimeFor(this, roomId, work, value.current.next, this.now(), { includeClaim: true });
-      return stampWorkResult({ ...value, ...(runtime ? { reviewRuntime: runtime } : {}), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+      return stampWorkResult({ ...value, scope: { ...value.scope, workVisibility: parties ? "participants" : "room" }, ...(runtime ? { reviewRuntime: runtime } : {}), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null }, auth.member.id);
     });
   }
