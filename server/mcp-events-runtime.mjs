@@ -49,11 +49,15 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
   const authorize = descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider, inviteProvider, resource, descriptor });
   const authorizeEvent = (descriptor, input) => authorizeNativeEvent(store, descriptor, input);
   const manager = createMcpEventSubscriptions({ store, authorize, authorizeEvent, transport, dnsResolvers });
-  const emit = ({ roomId, memberId, identityId, messageId, requestId, eventId = messageId, actorId, kind, workItemId, workRevision, workClaimId, claimBasis, nextRead }) => {
+  const emit = ({ roomId, memberId, identityId, messageId, requestId, eventId = messageId, actorId, kind, workItemId, workRevision, workClaimId, claimBasis, nextRead, openingContextEventId }) => {
     if (!memberId && identityId) memberId = store.db.prepare('SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?').get(roomId, identityId)?.member_id;
     if (!memberId) return 0;
     const hasRequest = /^[A-Za-z0-9_-]{1,128}$/.test(requestId ?? '');
-    return manager.enqueueRequested({ roomId, memberId,
+    const firstAck = hasRequest && /^[A-Za-z0-9_-]{1,128}$/.test(openingContextEventId ?? '')
+      ? { tool: 'room_progress_request', arguments: { roomId, requestId: 'native-first-ack-' + openingContextEventId,
+        requestMessageId: requestId, progress: 'acknowledged', expectedRequestRevision: 0,
+        ifUnacknowledgedContextEventId: openingContextEventId } } : undefined;
+    return manager.enqueueRequested({ roomId, memberId, firstAck,
       ...(/^[A-Za-z0-9_-]{1,128}$/.test(messageId ?? '') ? { messageId } : {}),
       ...(hasRequest ? { requestId } : {}),
       nextRead: hasRequest ? { tool: 'room_read_request', arguments: { roomId, requestMessageId: requestId, view: 'compact' } } : nextRead,
@@ -69,11 +73,17 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
         if (args.cursor !== undefined && args.cursor !== null) throw Object.assign(new Error('No event catalog pagination'), { code: -32602 });
         return result({ events: [{ name: 'room.requested', delivery: ['webhook'],
           payloadSchema: { type: 'object', properties: { roomId: { type: 'string' }, memberId: { type: 'string' }, messageId: { type: 'string' }, requestId: { type: 'string' },
+            firstAck: { type: 'object', properties: { tool: { const: 'room_progress_request' }, arguments: {
+              type: 'object', properties: { roomId: { type: 'string' }, requestId: { type: 'string' },
+                requestMessageId: { type: 'string' }, progress: { const: 'acknowledged' },
+                expectedRequestRevision: { const: 0 }, ifUnacknowledgedContextEventId: { type: 'string' } },
+              required: ['roomId', 'requestId', 'requestMessageId', 'progress', 'expectedRequestRevision', 'ifUnacknowledgedContextEventId'],
+              additionalProperties: false } }, required: ['tool', 'arguments'], additionalProperties: false },
             nextRead: { type: 'object', properties: { tool: { enum: ['room_read_request', 'room_read_work', 'room_read_result'] },
               arguments: { type: 'object', properties: { roomId: { type: 'string' }, requestMessageId: { type: 'string' },
                 workItemId: { type: 'string' }, completionEventId: { type: 'string' }, view: { const: 'compact' },
                 brief: { const: true } }, required: ['roomId'], additionalProperties: false } },
-              required: ['tool', 'arguments'], additionalProperties: false } }, required: ['roomId', 'memberId'], additionalProperties: false }, description: 'A permitted mention, direct request, or work transition needs this agent. When data.nextRead is present, use its read tool and arguments directly. Review only with the exact action returned by that read. Older hosts can still use data.requestId with room_read_request. Subscriptions cover future events, not earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room and follow every nextRead. Finish each selected room_read_request before responding with its current answerBasis; do not resend saved requests.' + (transport?.configurationPending ? ' Callback delivery is pending operator verification: subscriptions currently return callback_origin_not_allowed; provide only the returned origin to the operator, never the callback path or signing secret.' : ''),
+              required: ['tool', 'arguments'], additionalProperties: false } }, required: ['roomId', 'memberId'], additionalProperties: false }, description: 'A permitted mention, direct request, or work transition needs this agent. An authenticated receiver may call data.firstAck directly when provided, then use data.nextRead. The acknowledgment covers only the exact opening and does not accept the work. If the acknowledgment refuses, use data.nextRead to inspect the current request. Review only with the exact action returned by that read. Older hosts can still use data.requestId with room_read_request. Subscriptions cover future events, not earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room and follow every nextRead. Finish each selected room_read_request before responding with its current answerBasis; do not resend saved requests.' + (transport?.configurationPending ? ' Callback delivery is pending operator verification: subscriptions currently return callback_origin_not_allowed; provide only the returned origin to the operator, never the callback path or signing secret.' : ''),
           inputSchema: { type: 'object', properties: { roomId: { type: 'string', const: descriptor.roomId }, memberId: { type: 'string', const: descriptor.memberId } }, required: ['roomId', 'memberId'], additionalProperties: false } }], ttlMs: 0, cacheScope: 'private' });
       }
       if (message.method === 'events/subscribe') return result(await manager.subscribe({ ...args, principal: descriptor }));
