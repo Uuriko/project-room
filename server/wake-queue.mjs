@@ -118,6 +118,10 @@ export class WakeQueue {
     const row = this.db.prepare("SELECT * FROM wake_queue_pause WHERE room_id=? AND member_id=?").get(roomId, memberId);
     return row ? { pausedAt: row.paused_at, reason: row.reason, pausedBy: this.pausedBy(roomId, memberId), heldBy: this.heldByOf(roomId, memberId) } : null;
   }
+  lastResumeAt(roomId, memberId) {
+    return this.db.prepare(`SELECT MAX(json_extract(response, '$.resumedAt')) AS resumedAt
+      FROM wake_queue_commands WHERE room_id=? AND member_id=?`).get(roomId, memberId).resumedAt;
+  }
   // R327-1: who holds the pause, in the caller-facing vocabulary: "self" when
   // the member set it itself, "owner" when the room owner or a manage-members
   // member set it, or when the row predates holder recording (fail closed).
@@ -343,7 +347,8 @@ export class WakeQueue {
       }
       if (existing) this.db.prepare("DELETE FROM wake_queue_pause_by WHERE room_id=? AND member_id=?").run(roomId, subject);
       this.db.prepare("DELETE FROM wake_queue_pause WHERE room_id=? AND member_id=?").run(roomId, subject);
-      const receipt = { requestId: request.requestId, state: "active", wasPaused: Boolean(existing) };
+      const receipt = { requestId: request.requestId, state: "active", wasPaused: Boolean(existing),
+        ...(existing ? { resumedAt: this.store.now() } : {}) };
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, subject, request.requestId, fingerprint, JSON.stringify(receipt));
       if (existing) this.releasePauseWaiters(roomId, subject);
       return this.outcome(auth, roomId, subject, { receipt, duplicate: false });
