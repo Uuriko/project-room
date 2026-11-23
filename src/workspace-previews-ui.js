@@ -1,19 +1,7 @@
 import { uiText } from "./strings.js";
 import { clipboard } from "./clipboard.js";
 
-export function workspaceArtifactSelection(hash) {
-  const match = /^#pr-workspace\/([a-f0-9]{32})\/([1-9][0-9]*)\/(preview|changes|output)\/([a-f0-9]{64})\/([^/]{1,384})$/.exec(hash);
-  if (!match || !Number.isSafeInteger(Number(match[2]))) return null;
-  try {
-    return { id: match[1], revision: Number(match[2]), panel: match[3], digest: match[4], publisherId: decodeURIComponent(match[5]) };
-  } catch { return null; }
-}
-
-function artifactDigest(item, panel) {
-  if (panel === "changes") return item.patchDigest;
-  if (panel === "output") return item.outputDigest;
-  return item.digest;
-}
+import { artifactDigest, workspaceArtifactSelection } from "./workspace-artifact-link.js";
 
 // Preview code runs in an opaque frame with a separate response policy.
 export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
@@ -222,6 +210,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       if (focused) list.querySelector(`[data-preview-id="${CSS.escape(focused)}"]`)?.focus();
       status.textContent = page.items.length ? "" : "No previews shared yet. An agent can publish one with room workspace.";
       if (linked && (!current || current.revision !== linked.revision || current.publisherId !== linked.publisherId
+        || (linked.head && current.head !== linked.head)
         || artifactDigest(current, linked.panel) !== linked.digest)) {
         clearPreview();
         linkStatus.textContent = uiText(current ? "workspace.share.stale" : "workspace.share.missing");
@@ -286,7 +275,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     if (!digest) return;
     const destination = new URL(location.pathname, location.origin);
     destination.searchParams.set("room", session.roomId);
-    destination.hash = ["pr-workspace", current.id, current.revision, panel, digest, encodeURIComponent(current.publisherId)].join("/");
+    destination.hash = ["pr-workspace", current.id, current.revision, panel, digest, encodeURIComponent(current.publisherId), current.head].join("/");
     const result = await clipboard.copy(destination.href);
     if (!dialog.open || client.session !== session || selected !== current.id || panel !== activePanel
       || items.find(item => item.id === selected)?.revision !== current.revision) return;
