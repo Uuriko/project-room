@@ -73,17 +73,22 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       if (String(url).includes("/stream?")) opened.resolve(response.status);
       return response;
     });
-    const waiting = receiver.waitForChange(sequence, { requestHints: true, receiverScope: advertised });
+    const waiting = receiver.waitForChange(sequence, { requestHints: true, receiverScope: advertised, waitingForWork: true });
     assert.equal(await Promise.race([opened.promise, waiting.then(() => null)]), 200);
     const allowed = await preview(owner);
-    assert.deepEqual(allowed, {
+    const { receiver: availability, ...route } = allowed;
+    assert.equal(availability.state, "waiting_for_work");
+    assert.ok(Number.isFinite(Date.parse(availability.since)));
+    assert.deepEqual(route, {
       contractVersion: 1, roomId: "commons", requesterId: "owner", recipientId: "receiver",
       workItemId: "approved-work", requestMessageId: null, status: "matches_scope", liveness: "unknown",
     });
-    assert.equal((await preview(peer)).status, "outside_scope");
+    const outsider = await preview(peer);
+    assert.equal(outsider.status, "outside_scope");
+    assert.equal(outsider.receiver, undefined);
     if (representation === "normalized-current-v1") {
       assert.deepEqual(await previewCli(origin, keys.peer, { toMemberId: "receiver", workItemId: "approved-work" }), {
-        ...allowed, requesterId: "peer", status: "outside_scope",
+        ...route, requesterId: "peer", status: "outside_scope",
       });
     }
     assert.equal((await preview(owner, {})).status, "outside_scope");
@@ -99,7 +104,9 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(spoofed.status, 422);
     server.closeStreams();
     await waiting;
-    assert.equal((await preview(owner)).status, "unknown");
+    const closed = await preview(owner);
+    assert.equal(closed.status, "unknown");
+    assert.equal(closed.receiver, undefined);
     assert.equal(store.headSequence("commons"), sequence);
   });
 }

@@ -218,6 +218,12 @@ test("an empty work page advances, keeps ongoing work, and invalidates stale aut
   });
   f.send(f.reviewer.key, "work.accepted", { workItemId: id, expectedRevision: f.rev(id) });
   f.send(f.reviewer.key, "work.started", { workItemId: id, expectedRevision: f.rev(id) });
+  const indexed = await f.mcp(f.reviewer, "room_next", { view: "pickup" });
+  assert.equal(indexed.value.work.coverage, "complete");
+  assert.equal(indexed.value.work.items.find(item => item.id === id)?.reason, "in_progress");
+  // Exercise an adapter without native SQL functions as well.
+  Object.defineProperty(f.store.db, "function", { value: undefined, configurable: true });
+  t.after(() => delete f.store.db.function);
   const first = await f.mcp(f.reviewer, "room_next", { view: "pickup" });
   assert.equal(first.ok, true, first.text);
   assert.equal(first.value.work.coverage, "partial");
@@ -378,7 +384,7 @@ test("compare first useful entry with the existing three reads", async t => {
   assert.deepEqual(compact.value.work.items.map(row => row.id).sort(), calls[1].value.work.map(row => row.id).sort());
   assert.deepEqual(compact.value.requests.items.map(row => row.id), calls[2].value.requests.map(row => row.id));
   assert.equal(compact.value.work.coverage, calls[1].value.page.hasMore ? "partial" : "complete");
-  assert.equal(compact.value.requests.coverage, calls[2].value.page.hasMore ? "partial" : "complete");
+  assert.equal(compact.value.requests.coverage, "complete", "the addressed index covers all open incoming requests");
   t.diagnostic(JSON.stringify({
     control: { calls: calls.length, wireBytes: calls.reduce((sum, row) => sum + Buffer.byteLength(row.text), 0) },
     next: { calls: 1, wireBytes: Buffer.byteLength(compact.text) }
@@ -456,6 +462,14 @@ test("reviewer pickup drains settled work before offering a finding and honors a
     f.send(f.owner, "work.superseded", { workItemId, expectedRevision: f.rev(workItemId),
       supersededByWorkItemId: "open", reason: "Consolidated" });
   }
+  f.store.dmConsents.request("commons", "owner", f.observer.id, "fixture");
+  f.store.dmConsents.decide("commons", f.observer.id, "owner", "approve");
+  for (let i = 0; i < 24; i++) {
+    const requestMessageId = `closed-unrelated-${i}`;
+    f.send(f.owner, "message.posted", { messageId: requestMessageId, toMemberId: f.observer.id,
+      requestKind: "reply", body: "An unrelated request already handled" });
+    f.send(f.owner, "reply_request.cancelled", { requestMessageId, expectedRequestRevision: 0, reason: "Already handled." });
+  }
   const offerId = "review-after-settled";
   f.store.projectOffers.create("commons", "owner", { requestId: "create-discovery", offerId,
     reviewerMemberIds: ["owner", f.triage.id], terms: { kind: "project", title: "Review a finding", summary: "Check one result",
@@ -470,6 +484,17 @@ test("reviewer pickup drains settled work before offering a finding and honors a
 
   const follow = (who, pointer) => f.mcp(who, pointer.tool, pointer.arguments);
   const start = () => f.mcp(f.triage, "room_next", { view: "pickup" });
+  const indexed = await start();
+  assert.ok(indexed.ok, indexed.text);
+  validatePickup(indexed.value);
+  assert.equal(indexed.value.work.coverage, "complete");
+  assert.equal(indexed.value.requests.coverage, "complete");
+  assert.deepEqual(indexed.value.work.items, []);
+  assert.equal(preferredRead(indexed.value).tool, "room_read_project_discoveries");
+  assert.doesNotMatch(indexed.text, /Private finding text/);
+  // Preserve coverage of the bounded continuation on adapters without the filter.
+  Object.defineProperty(f.store.db, "function", { value: undefined, configurable: true });
+  t.after(() => delete f.store.db.function);
   const drain = async () => {
     let page = await start();
     for (let i = 0; i < 2; i++) {

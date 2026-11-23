@@ -62,6 +62,7 @@ const WORKITEMS_REFERENCE_SITES = [
   "server/notifications.mjs",
   "server/operator-legacy-session-repair.mjs",
   "server/operator-message-authority.mjs",
+  "server/operator-normalization.mjs",
   "server/opportunities.mjs",
   "server/orient.mjs",
   "server/owner-attention.mjs",

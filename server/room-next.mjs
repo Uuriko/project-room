@@ -4,10 +4,11 @@ import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { nextReviewerProject } from "./project-discoveries.mjs";
 import { activationObligations } from "./activation-obligations.mjs";
 import { conversationCursorCodec } from "./conversation-sync.mjs";
-import { addressedWorkWindow } from "./current-work-list.mjs";
+import { addressedRequestWindow, addressedWorkWindow } from "./current-work-list.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 import {
-  CurrentReadBudgetExceeded, currentVisibleHorizon, isCurrentRoom, readCurrentHead,
-  readCurrentRecord, readCurrentWorkItem, readCurrentWorkPrivacy, withCurrentReadContext
+  chargeCurrentReadBudget, CurrentReadBudgetExceeded, currentVisibleHorizon, isCurrentRoom, readCurrentHead,
+  readCurrentHistoryFloor, readCurrentRecord, readCurrentWorkItem, withCurrentReadContext
 } from "./current-room-repository.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { currentResult } from "../src/work-selectors.js";
@@ -96,10 +97,17 @@ function workRows(items, auth, room, roomId, now, blockerFor) {
 function scanWorkPage(roomId, position, loadWindow, rowsFor) {
   let after = position.after, hasMore = false, items = [];
   for (let n = 0; n < WORK_SEARCH_WINDOWS; n++) {
-    const window = loadWindow(after);
-    after = window.after;
-    hasMore = window.hasMore;
-    items = rowsFor(window.items);
+    try {
+      const window = loadWindow(after);
+      items = rowsFor(window.items);
+      after = window.after;
+      hasMore = window.hasMore;
+    } catch (error) {
+      // Keep the last completed window as the continuation boundary. An
+      // incomplete window is retried under the next request's read budget.
+      if (!(error instanceof CurrentReadBudgetExceeded) || after === position.after) throw error;
+      break;
+    }
     if (items.length || !hasMore) break;
   }
   return { coverage: hasMore ? "partial" : "complete", items,
@@ -113,13 +121,13 @@ function workPage(store, roomId, auth, room, cursor) {
     const position = pageCursor(store, cursorBinding(auth, roomId, "work", head.head_sha256), cursor);
     if (!position) return unavailable(roomId, "work", "cursor_changed");
 
+    const evaluatedThrough = currentVisibleHorizon(store, roomId, auth.member.id, head.sequence);
     const page = scanWorkPage(roomId, position,
-      after => addressedWorkWindow(store, roomId, auth.member.id, room.ownerId, after, PAGE_SIZE, budget),
-      items => workRows(items.filter(item => {
-        const privacy = readCurrentWorkPrivacy(db, roomId, item.id, budget);
-        return !privacy.requests || Object.hasOwn(privacy.parties, auth.member.id) || workRoleHolder(item, auth.member.id);
-      }), auth, room, roomId, position.at, item => readCurrentWorkItem(db, roomId, item.id, budget).blocker));
-    return { ...page, evaluatedThrough: currentVisibleHorizon(store, roomId, auth.member.id, head.sequence) };
+      after => addressedWorkWindow(store, roomId, auth.member.id, room.ownerId, after, PAGE_SIZE, budget, { actionableAt: position.at }),
+      // The canonical viewer summary already masks unauthorized work rows.
+      items => workRows(items.filter(item => item.title !== null),
+        auth, room, roomId, position.at, item => readCurrentWorkItem(db, roomId, item.id, budget).blocker));
+    return { ...page, evaluatedThrough };
   }, { maxRecords: 512 });
 }
 
@@ -165,7 +173,9 @@ const requestRead = (roomId, id) => ({
 function requestRows(requests, roomId) {
   return requests.map(row => ({
     id: row.id, revision: row.revision, savedAt: row.createdAt,
-    ...(row.progress ? { latestRecipientProgress: { state: row.progress.state, at: row.progress.at } } : {}),
+    ...(row.progress || row.progressState ? { latestRecipientProgress: {
+      state: row.progress?.state ?? row.progressState, at: row.progress?.at ?? row.lastActivityAt
+    } } : {}),
     nextRead: requestRead(roomId, row.id)
   }));
 }
@@ -190,24 +200,32 @@ function legacyRequestPage(store, secret, roomId, auth, room, cursor, preferReco
   };
 }
 
-function requestPage(store, secret, roomId, auth, cursor) {
-  // Keep the canonical request reader's current-per-page semantics while
-  // fencing permission changes the native request cursor does not bind.
-  const position = pageCursor(store, cursorBinding(auth, roomId, "requests", null), cursor);
+function requestPage(store, roomId, auth, cursor) {
+  // A pickup cursor walks the current open inbox, not the historical request journal.
+  const position = pageCursor(store, cursorBinding(auth, roomId, "incoming-open", null), cursor);
   if (!position) return unavailable(roomId, "requests", "cursor_changed");
-  const page = store.replyRequests.list(secret, roomId, {
-    direction: "incoming", status: "open", states: true, limit: PAGE_SIZE,
-    expectedSessionBinding: auth.sessionBinding, ...(position.after ? { cursor: position.after } : {})
-  });
-  if (page.viewerId !== auth.member.id || page.roomId !== roomId)
-    throw new ServiceError(403, "no_access", "Room request viewer changed");
-  return {
-    coverage: page.sourceWindow.complete ? "complete" : "partial",
-    evaluatedThrough: page.evaluatedThrough,
-    evaluationScope: page.evaluationScope,
-    items: requestRows(page.requests, roomId),
-    nextRead: page.page.nextCursor ? read(roomId, "requests", position.encode(page.page.nextCursor)) : null
-  };
+  return withCurrentReadContext(store.db, roomId, budget => {
+    const floor = readCurrentHistoryFloor(store.db, roomId, auth.member.id, budget);
+    const page = addressedRequestWindow(store, roomId, auth.member.id, position.after, PAGE_SIZE, budget);
+    const visible = page.requests.filter(request => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor));
+    const event = store.db.prepare('SELECT sequence FROM events WHERE room_id=? AND id=?');
+    let evaluatedThrough = 0;
+    for (const request of visible) {
+      for (const eventId of new Set([request.openingEventId, request.contextEventId].filter(Boolean))) {
+        const row = event.get(roomId, eventId);
+        chargeCurrentReadBudget(budget, 128);
+        if (!row) throw new ServiceError(409, 'reply_history_changed', 'Request history changed; reconcile before resuming');
+        evaluatedThrough = Math.max(evaluatedThrough, row.sequence);
+      }
+    }
+    return {
+      coverage: page.hasMore ? "partial" : "complete",
+      evaluatedThrough,
+      evaluationScope: "visible-encountered-anchors",
+      items: requestRows(visible, roomId),
+      nextRead: page.hasMore ? read(roomId, "requests", position.encode(page.examinedAfter)) : null
+    };
+  }, { maxRecords: 512 });
 }
 
 function boundedPage(roomId, source, getPage) {
@@ -329,7 +347,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
         ? unavailable(roomId, "requests", "legacy_projection_budget",
           { tool: "room_list_requests", arguments: { roomId, direction: "incoming", status: "open" } })
         : boundedPage(roomId, "requests", () => current
-          ? requestPage(store, secret, roomId, auth, cursor)
+          ? requestPage(store, roomId, auth, cursor)
           : legacyRequestPage(store, secret, roomId, auth, room, cursor, view === "pickup"));
       packet.requests = requests;
       recoveryRead = recovery;
