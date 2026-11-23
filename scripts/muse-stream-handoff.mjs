@@ -75,7 +75,32 @@ async function inspect(client, policy, after, signal, receiverAck = false) {
   return { next, through };
 }
 
-export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, setWaiting = () => {} }) {
+async function waitForSettlement({ client, policy, saved, requestId, signal }) {
+  if (saved?.requestMessageId !== requestId) throw Error("muse_settlement_checkpoint_mismatch");
+  for (;;) {
+    signal.throwIfAborted();
+    const current = await client.replyContext(requestId, { view: "compact", signal });
+    const request = current.request;
+    if (current.roomId !== policy.roomId || current.viewerId !== policy.memberId
+      || current.roomCreatedEventId !== saved.roomCreatedEventId || request.id !== saved.requestMessageId
+      || request.openingEventId !== saved.openingEventId || request.recipientId !== policy.memberId
+      || checkMuseRoute(policy, request) !== "matches_scope") throw Error("muse_handoff_identity_changed");
+    if (["answered", "declined", "cancelled"].includes(request.status)) return;
+    if (request.status !== "open") throw Error("muse_settlement_status_unknown");
+    // Do not advertise spare capacity or advance the saved cursor here.
+    // The queued successor may have opened while this work was still active.
+    let through = current.evaluatedThrough;
+    if (!integer(through) || through < saved.openingSequence) throw Error("muse_settlement_horizon_missing");
+    for (;;) {
+      const change = await client.waitForChange(through, { timeoutMs: 12000, signal })
+        .catch(error => { throw Object.assign(error, { handoffStage: "room_stream" }); });
+      if (change.changed) break;
+      if (integer(change.through) && change.through > through) through = change.through;
+    }
+  }
+}
+
+export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, afterSettlement, onSettlement = () => {}, setWaiting = () => {} }) {
   let state = checkpoint;
   const remember = (after, inFlight = null) => { state = { after, inFlight }; save(state); };
   const offer = async handoff => {
@@ -94,7 +119,12 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
   };
   // A process may stop after saving the pointer and before delivering stdout.
   // Read back the same request before replaying that exact pointer.
-  if (state.inFlight) {
+  if (afterSettlement) {
+    setWaiting(false);
+    await waitForSettlement({ client, policy, saved: state.inFlight, requestId: afterSettlement, signal });
+    remember(state.after);
+    onSettlement();
+  } else if (state.inFlight) {
     const saved = state.inFlight;
     const current = await client.replyContext(saved.requestMessageId, { view: "compact", signal });
     if (current.roomCreatedEventId !== saved.roomCreatedEventId || current.request.openingEventId !== saved.openingEventId)
@@ -271,11 +301,15 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
 async function main([configFile, connectionDirectory, mode, ...extra]) {
   const routeCheck = mode === "--check-route";
   const receiverAck = extra.includes("--receiver-ack"), advertiseScope = extra.includes("--advertise-scope");
+  const settlementPrefix = "--after-settlement=";
+  const settlementFlags = extra.filter(flag => flag.startsWith(settlementPrefix));
+  const afterSettlement = settlementFlags[0]?.slice(settlementPrefix.length);
   const armedFlags = mode === "--stay-armed" && new Set(extra).size === extra.length
-    && extra.every(flag => flag === "--receiver-ack" || flag === "--advertise-scope");
+    && settlementFlags.length <= 1 && (!settlementFlags.length || receiverAck && validId(afterSettlement))
+    && extra.every(flag => flag === "--receiver-ack" || flag === "--advertise-scope" || flag.startsWith(settlementPrefix));
   if (extra.length && !armedFlags && !routeCheck || mode !== undefined && !["--once", "--stay-armed", "--recover", "--check-route"].includes(mode) || !isAbsolute(configFile ?? "")
     || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack] [--advertise-scope] | --recover | --check-route REQUESTER WORK_ITEM_OR_DASH [REQUEST_ID]]");
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack [--after-settlement=REQUEST_ID]] [--advertise-scope] | --recover | --check-route REQUESTER WORK_ITEM_OR_DASH [REQUEST_ID]]");
   const directory = dirname(realpathSync(configFile));
   const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
   assertPrivatePath(directory, true);
@@ -296,12 +330,14 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   try {
     const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
     const statusFile = join(directory, "receiver-status.json");
+    let pendingSettlement = afterSettlement;
     const result = mode === "--recover"
       ? await runRecovery({ client, directory, file, policy, statusFile, signal: stop.signal })
       : await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
         onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
         run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
-          signal, receiverAck, advertiseScope, wait: mode !== "--once" }) });
+          signal, receiverAck, advertiseScope, afterSettlement: pendingSettlement,
+          onSettlement: () => { pendingSettlement = undefined; }, wait: mode !== "--once" }) });
     if (mode === "--stay-armed") {
       if (result.status === "handoff") result.offeredAt = new Date().toISOString();
       atomicPrivateJson(statusFile, { pid: process.pid, ...result });

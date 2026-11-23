@@ -15,6 +15,48 @@ const request = (id, patch = {}) => ({ id, status: "open", requesterId: "codex",
 const context = (row, sequence) => ({ roomId: "build", viewerId: "muse", roomCreatedEventId: "room-birth",
   request: row, page: { items: [{ kind: "opened", eventId: row.openingEventId, sequence, message: { body: "private QA details" } }] } });
 
+test("a prearmed successor waits for the exact settlement and retains work opened during it", async () => {
+  const first = request("first"), successor = request("successor");
+  const checkpoint = { after: 11, inFlight: { requestMessageId: first.id, openingEventId: first.openingEventId,
+    roomCreatedEventId: "room-birth", openingSequence: 11 } };
+  const saves = [], receipts = [];
+  let finished = false;
+  const result = await holdMuseHandoff({ policy, checkpoint, receiverAck: true, advertiseScope: true,
+    afterSettlement: first.id, signal: AbortSignal.timeout(3000), save: value => saves.push(value), client: {
+      async replyContext(id) {
+        if (id === first.id) return { ...context({ ...first, status: finished ? "answered" : "open" }, 11),
+          evaluatedThrough: finished ? 19 : 12 };
+        assert.equal(finished, true);
+        return context({ ...successor, contextEventId: "successor-basis" }, 15);
+      },
+      async waitForChange(after, options) {
+        assert.equal(after, 12);
+        assert.equal(options.waitingForWork, undefined);
+        assert.deepEqual(saves, []);
+        finished = true;
+        return { changed: true, sequence: 19 };
+      },
+      async replyRequests() {
+        assert.equal(finished, true);
+        return { requests: [successor], evaluatedThrough: 19 };
+      },
+      async command(command) {
+        receipts.push(command.data.requestMessageId);
+        return { event: { id: "seen-successor" }, sequence: 20 };
+      },
+    } });
+  assert.deepEqual(saves.map(value => value.after), [11, 15]);
+  assert.deepEqual(receipts, [successor.id]);
+  assert.equal(result.requestMessageId, successor.id);
+  assert.equal(result.replay, false);
+});
+
+test("prearming refuses a different request before opening a stream", async () => {
+  await assert.rejects(holdMuseHandoff({ policy, client: {}, checkpoint: { after: 11,
+    inFlight: { requestMessageId: "first" } }, signal: AbortSignal.timeout(3000), afterSettlement: "other" }),
+  /muse_settlement_checkpoint_mismatch/);
+});
+
 test("route check distinguishes requester, work and exact request scope without exposing configuration", t => {
   const directory = mkdtempSync(join(realpathSync(tmpdir()), "muse-route-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
