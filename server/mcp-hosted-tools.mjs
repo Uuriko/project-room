@@ -70,7 +70,7 @@ export const hostedRoomTools = [
     roomId: roomIdField, offerId: idField, limit: { type: "integer", minimum: 1, maximum: 50, default: 5 },
     after: { type: "string", maxLength: 160 }
   }, ["roomId", "offerId"])),
-  tool("room_receipt", "Check your exact Room operation ID. Returns committed event metadata only. Not recorded means absent at the observed head. Read only.", schema({
+  tool("room_receipt", "Check your exact Room operation ID. For a formal answer, pass the original room_respond_to_request requestId value as operationId. Returns committed event metadata only. Not recorded means absent at the observed head. Read only.", schema({
     roomId: idField, operationId: idField
   }, ["roomId", "operationId"])),
   tool("room_check_access", "Check this identity's Room access. Pass roomId for access and nativeMonitoring diagnostics on this connection; omit it to list linked rooms. A subscription does not prove execution. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
