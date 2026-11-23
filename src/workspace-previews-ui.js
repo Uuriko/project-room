@@ -3,6 +3,10 @@ import { clipboard } from "./clipboard.js";
 
 import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "./workspace-artifact-link.js";
 
+const changesIdentity = item => item && JSON.stringify([
+  item.id, item.revision, item.publisherId, item.recipientId, item.base, item.head, item.patchDigest,
+]);
+
 // Preview code runs in an opaque frame with a separate response policy.
 export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft, workThreadLink }) {
   const button = document.createElement("button");
@@ -165,28 +169,34 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     }
   }
   async function loadChanges() {
-    if (!dialog.open || changesView.hidden) return;
+    const session = client.session;
+    if (!session || !dialog.open || changesView.hidden) return;
     const current = items.find(item => item.id === selected);
     if (!current?.patchDigest) return;
     const comparison = items.find(item => item.id === compare.value && item.base === current.base && item.patchDigest);
-    const key = JSON.stringify([current.id, current.revision, comparison?.id, comparison?.revision]);
+    const key = JSON.stringify([changesIdentity(current), changesIdentity(comparison)]);
     if (renderedChanges === key && !pendingFile && !columns.hidden) return;
-    const ticket = ++changeGeneration, session = client.session;
+    const ticket = ++changeGeneration;
     const stillOpen = () => dialog.open && ticket === changeGeneration && client.session === session;
-    const readChanges = item => async (view, path) => {
-      if (!stillOpen() || items.find(entry => entry.id === item.id)?.revision !== item.revision) return null;
-      const query = new URLSearchParams({ id: item.id, changes: "1", revision: String(item.revision) });
-      if (view) query.set("view", view);
-      if (path) query.set("path", path);
-      if (linked?.head && item.id === current.id && (view !== "file" || linked.file === path))
-        query.set("artifact", location.hash);
-      const cacheKey = query.toString();
-      if (changeCache.has(cacheKey)) return changeCache.get(cacheKey);
-      const value = await client.roomRead(`/workspace-previews?${query}`);
-      if (!value || !stillOpen() || items.find(entry => entry.id === item.id)?.revision !== item.revision) return null;
-      changeCache.set(cacheKey, value.changes);
-      if (changeCache.size > 32) changeCache.delete(changeCache.keys().next().value);
-      return value.changes;
+    const readChanges = item => {
+      const identity = changesIdentity(item);
+      const ownsRead = () => stillOpen() && changesIdentity(items.find(entry => entry.id === item.id)) === identity;
+      const artifact = new URL(workspaceArtifactLink(location.href, session.roomId, item, "changes")).hash;
+      return async (view, path) => {
+        if (!ownsRead()) return null;
+        const pinned = view === "file" && linked?.head && item.id === current.id && linked.file === path;
+        const query = new URLSearchParams({ id: item.id, changes: "1", revision: String(item.revision),
+          artifact: pinned ? location.hash : artifact });
+        if (view) query.set("view", view);
+        if (path) query.set("path", path);
+        const cacheKey = JSON.stringify([identity, query.toString()]);
+        if (changeCache.has(cacheKey)) return changeCache.get(cacheKey);
+        const value = await client.roomRead(`/workspace-previews?${query}`);
+        if (!value || !ownsRead()) return null;
+        changeCache.set(cacheKey, value.changes);
+        if (changeCache.size > 32) changeCache.delete(changeCache.keys().next().value);
+        return value.changes;
+      };
     };
     columns.hidden = true;
     changeStatus.textContent = "Loading changes…";

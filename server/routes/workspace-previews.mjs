@@ -84,7 +84,7 @@ async function serveWorkspacePreviews(ctx) {
     || changeRead && (!id || params.get("changes") !== "1" || params.has("revision") && !/^[1-9][0-9]*$/.test(params.get("revision"))
       || params.has("view") && !["summary", "file"].includes(params.get("view"))
       || params.has("artifact") && (!exact?.head || exact.id !== id || exact.panel !== "changes"
-        || params.get("view") === "file" && (exact.file ?? null) !== params.get("path"))
+        || params.get("view") === "file" && exact.file && exact.file !== params.get("path"))
       || (params.get("view") === "file" ? !params.get("path") || params.get("path").length > 4096 : params.has("path")))
     || outputRead && (!id || params.get("output") !== "1" || params.has("revision") && !/^[1-9][0-9]*$/.test(params.get("revision")))
     || frame && (selected.bearer || !id || !/^[1-9][0-9]*$/.test(frameRevision)))

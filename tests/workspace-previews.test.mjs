@@ -72,6 +72,8 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   const artifact = `#pr-workspace/${id}/1/changes/${first.patchDigest}/publisher/${preview.head}/index.html`;
   const exact = changesQuery + "&view=file&path=index.html&artifact=";
   assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 200);
+  const patchArtifact = artifact.slice(0, artifact.lastIndexOf("/"));
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(patchArtifact))).status, 200);
   assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact.replace("/publisher/", "/other-publisher/")))).status, 409);
   assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact.replace("/index.html", "/other.html")))).status, 422);
   assert.equal((await call(viewer, "GET", null, changesQuery + "&revision=2")).status, 409);
@@ -97,6 +99,11 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.equal((await call(owner, "DELETE", { id, expectedRevision: 1 })).status, 409);
   assert.equal((await call(owner, "DELETE", { id, expectedRevision: 3 })).status, 200);
   assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 404);
+  const recreated = await (await call(publisher, "POST", { ...preview, patch: patch.replace("+after", "+replacement") })).json();
+  assert.equal(recreated.revision, first.revision);
+  assert.notEqual(recreated.patchDigest, first.patchDigest);
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(patchArtifact))).status, 409);
+  assert.equal((await call(publisher, "DELETE", { id, expectedRevision: 1 })).status, 200);
   const directed = { ...preview, recipientId: "viewer" };
   assert.equal((await call(publisher, "POST", { ...directed, recipientId: "absent" })).status, 422);
   const sent = await (await call(publisher, "POST", directed)).json();
