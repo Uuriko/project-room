@@ -80,6 +80,9 @@ export function fileLabel(file, fallback) {
     const newPath = file.newPath === "/dev/null" ? undefined : file.newPath;
     return oldPath && newPath && oldPath !== newPath ? [oldPath, newPath].join(" → ") : newPath || oldPath || fallback || "diff";
 }
+export function workspaceChangePath(file) {
+    return file.newPath === "/dev/null" ? file.oldPath : file.newPath || file.oldPath;
+}
 export function diffType(file) {
     return [
         "add",
