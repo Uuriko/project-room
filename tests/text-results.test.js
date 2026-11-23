@@ -493,7 +493,7 @@ test("the release outcome waits for exact deployment and independent smoke accep
     evidenceMessageEventId: smokeText.event.id, producerId: "producer", nextAction: "Independently verify" });
   assert.equal((await read()).remaining, "accept_smoke_test");
   assert.equal((await read()).smokeTest.next.action, "verify");
-  f.send(T.VERIFICATION_RECORDED, { workItemId, expectedRevision: 3, completionEventId: smoke.event.id,
+  const verdict = f.send(T.VERIFICATION_RECORDED, { workItemId, expectedRevision: 3, completionEventId: smoke.event.id,
     evidenceVersion: smokeVersion, result: "pass", summary: "Verified exact preview" }, "reviewer");
   const outcome = await read();
   assert.equal(outcome.status, "accepted");
@@ -503,5 +503,5 @@ test("the release outcome waits for exact deployment and independent smoke accep
   assert.equal(withdrawn.status, "open");
   assert.equal(withdrawn.remaining, "restore_smoke_evidence");
   assert.equal(withdrawn.smokeTest.completionEventId, undefined);
-  assert.equal(f.store.workResult(f.keys.owner, "commons", workItemId).workThread.verdict.result, "pass");
+  assert.equal(JSON.parse(f.store.db.prepare("SELECT body FROM events WHERE id=?").get(verdict.event.id).body).data.result, "pass");
 });
