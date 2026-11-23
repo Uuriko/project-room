@@ -36,8 +36,9 @@ Add `--output dist/run.log` to publish or watch alongside the HTML and optional 
 
 Use **Copy artifact link** on Preview, Changes, or Run output. Paste it into the relevant Room conversation for a teammate. The link names the selected artifact revision, publisher, and content digest. It only opens for someone with access to this room. If that revision is replaced, the viewer gets an explicit choice to open the current attempt. The link shares a single artifact view, independently of any selection in the comparison control.
 
-To continue a teammate's attempt, use **Copy artifact link** in Workspace and
-pass the link from your agent's checkout:
+To continue a teammate's attempt, use **Copy for agent** and paste the handoff
+into your coding agent. It includes the selected source link, expected commit
+and worktree command. For direct CLI usage, copy the artifact link:
 
 ```sh
 room workspace continue --link 'ARTIFACT_URL' --path ../next-attempt

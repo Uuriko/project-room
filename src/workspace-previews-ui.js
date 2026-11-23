@@ -25,10 +25,11 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
         <p data-preview-meta class="form-hint"></p>
         <div class="workspace-link-actions">
           <button type="button" data-workspace-link class="button ghost" hidden></button>
+          <button type="button" data-workspace-agent-copy class="button ghost" hidden></button>
           <button type="button" data-workspace-latest class="button secondary" hidden></button>
           <span data-workspace-link-status class="form-hint" role="status"></span>
         </div>
-        <input type="url" data-workspace-link-fallback readonly hidden>
+        <textarea data-workspace-link-fallback rows="3" readonly hidden></textarea>
         <div data-workspace-tabs role="tablist" aria-label="Attempt views" hidden>
           <button type="button" class="button ghost" role="tab" id="workspace-tab-preview" aria-controls="workspace-panel-preview" data-workspace-tab="preview">Preview</button>
           <button type="button" class="button ghost" role="tab" id="workspace-tab-changes" aria-controls="workspace-panel-changes" data-workspace-tab="changes">Changes</button>
@@ -60,11 +61,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const output = dialog.querySelector("[data-workspace-output]");
   const outputStatus = dialog.querySelector("[data-workspace-output-status]");
   const copyLink = dialog.querySelector("[data-workspace-link]");
+  const copyForAgent = dialog.querySelector("[data-workspace-agent-copy]");
   const linkStatus = dialog.querySelector("[data-workspace-link-status]");
   const linkFallback = dialog.querySelector("[data-workspace-link-fallback]");
   const latest = dialog.querySelector("[data-workspace-latest]");
   copyLink.textContent = uiText("workspace.share.copy");
-  linkFallback.setAttribute("aria-label", copyLink.textContent);
+  copyForAgent.textContent = uiText("workspace.share.copyForAgent");
   latest.textContent = uiText("workspace.share.openCurrent");
   const changesView = dialog.querySelector("[data-workspace-changes]");
   const compare = dialog.querySelector("[data-workspace-compare]");
@@ -165,7 +167,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     tabs.hidden = true;
     choosePanel("preview");
     output.textContent = ""; outputStatus.textContent = "";
-    latest.hidden = true; copyLink.hidden = true; linkFallback.hidden = true; linkStatus.textContent = "";
+    latest.hidden = true; copyLink.hidden = true; copyForAgent.hidden = true; linkFallback.hidden = true; linkStatus.textContent = "";
     primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
     compare.value = ""; changeStatus.textContent = "";
     frame.removeAttribute("src");
@@ -226,6 +228,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       const activeTab = tabButtons.find(tab => tab.dataset.workspaceTab === activePanel);
       choosePanel(activeTab.hidden ? "preview" : activePanel);
       copyLink.hidden = false;
+      copyForAgent.hidden = false;
       updateComparisons(current);
       void loadOutput();
       heading.textContent = current.title;
@@ -267,23 +270,28 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   });
   compare.addEventListener("change", () => void loadChanges());
   latest.addEventListener("click", () => void select(selected));
-  copyLink.addEventListener("click", async () => {
+  async function copySelection(forAgent) {
     const current = items.find(item => item.id === selected), session = client.session;
     if (!current || !session || copyLink.hidden) return;
     const panel = activePanel;
     const link = workspaceArtifactLink(location.href, session.roomId, current, panel);
     if (!link) return;
-    const result = await clipboard.copy(link);
+    const copiedText = forAgent ? uiText("workspace.share.agentText", { link, head: current.head }) : link;
+    const result = await clipboard.copy(copiedText);
     if (!dialog.open || client.session !== session || selected !== current.id || panel !== activePanel
       || items.find(item => item.id === selected)?.revision !== current.revision) return;
-    if (result === "copied") linkStatus.textContent = uiText("workspace.share.copied");
+    linkFallback.hidden = result === "copied";
+    if (result === "copied") linkStatus.textContent = uiText(forAgent ? "workspace.share.agentCopied" : "workspace.share.copied");
     else {
-      linkStatus.textContent = uiText("workspace.share.manual");
-      linkFallback.value = link;
+      linkStatus.textContent = uiText(forAgent ? "workspace.share.agentManual" : "workspace.share.manual");
+      linkFallback.setAttribute("aria-label", forAgent ? copyForAgent.textContent : copyLink.textContent);
+      linkFallback.value = copiedText;
       linkFallback.hidden = false;
       linkFallback.select();
     }
-  });
+  }
+  copyLink.addEventListener("click", () => void copySelection(false));
+  copyForAgent.addEventListener("click", () => void copySelection(true));
   button.addEventListener("click", () => {
     if (!client.session || dialog.open) return;
     dialog.showModal();
