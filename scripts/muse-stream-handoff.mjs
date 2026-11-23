@@ -244,11 +244,17 @@ export async function recoverMuseHandoff({ client, policy, signal, offers, curre
     if (!exact || exact.openingSequence !== pending.openingSequence || receiverAck && !exact.receiverSeen) continue;
     const { contextEventId, receiverSeen, ...handoff } = exact;
     if (!sameRecoveryOffer(pending, currentOffer())) continue;
-    record(handoff);
+    record(handoff, pending);
     return { status: "handoff", source: "interrupted_delivery", replay: true,
       after: exact.openingSequence, originalOfferedAt: pending.offeredAt, ...handoff,
       ...(receiverAck ? { receiverAcknowledgment: receipt } : {}) };
   }
+}
+
+async function writeHandoff(result) {
+  await new Promise((resolve, reject) => {
+    process.stdout.write(JSON.stringify(result) + "\n", error => error ? reject(error) : resolve());
+  });
 }
 
 function readOptionalPrivate(file) {
@@ -263,9 +269,16 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
     if (status?.status !== "handoff" || !Number.isFinite(Date.parse(status.offeredAt))) return null;
     const pending = loadCheckpoint(file, policy).checkpoint.inFlight;
     if (!pending || pending.openingEventId !== status.openingEventId
-      || pending.requestMessageId !== status.requestMessageId || pending.openingSequence !== status.openingSequence
-      || readOptionalPrivate(receiptFile)?.openingEventId === pending.openingEventId) return null;
-    return { ...pending, offeredAt: status.offeredAt, receiverAcknowledgment: status.receiverAcknowledgment };
+      || pending.requestMessageId !== status.requestMessageId || pending.openingSequence !== status.openingSequence) return null;
+    const receipt = readOptionalPrivate(receiptFile);
+    let attempt = 1;
+    if (receipt?.openingEventId === pending.openingEventId) {
+      // The recovery WatchJournal is exclusive. A prior writer cannot still
+      // own it. Its unconfirmed pipe write gets one more exact Room check.
+      if (receipt.phase !== "emitting" || receipt.attempt !== 1) return null;
+      attempt = 2;
+    }
+    return { ...pending, offeredAt: status.offeredAt, receiverAcknowledgment: status.receiverAcknowledgment, attempt };
   };
   const watcher = watch(directory);
   const changes = on(watcher, "change", { signal });
@@ -277,8 +290,17 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
       }
     })();
     atomicPrivateJson(join(directory, "recovery-status.json"), { pid: process.pid, armedAt: new Date().toISOString() });
-    return await recoverMuseHandoff({ client, policy, signal, offers, currentOffer,
-      record: exact => atomicPrivateJson(receiptFile, { openingEventId: exact.openingEventId, retriedAt: new Date().toISOString() }) });
+    let receipt;
+    const result = await recoverMuseHandoff({ client, policy, signal, offers, currentOffer,
+      record: (exact, pending) => {
+        receipt = { openingEventId: exact.openingEventId, attempt: pending.attempt, phase: "emitting" };
+        atomicPrivateJson(receiptFile, receipt);
+      } });
+    if (result?.status === "handoff") {
+      if (!result.receiverAcknowledgment) result.seenAction = museSeenAction(result, policy.roomId);
+      await writeHandoff(result);
+      atomicPrivateJson(receiptFile, { ...receipt, phase: "emitted", emittedAt: new Date().toISOString() });
+    }
   } finally { await changes.return(); watcher.close(); }
 }
 
@@ -310,9 +332,11 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   try {
     const file = join(directory, "stream-checkpoint.json"), client = new RoomAgentClient(connection);
     const statusFile = join(directory, "receiver-status.json");
-    const result = mode === "--recover"
-      ? await runRecovery({ client, directory, file, policy, statusFile, signal: stop.signal })
-      : await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
+    if (mode === "--recover") {
+      await runRecovery({ client, directory, file, policy, statusFile, signal: stop.signal });
+      return;
+    }
+    const result = await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
         onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
         run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
           signal, receiverAck, advertiseScope, wait: mode !== "--once" }) });
