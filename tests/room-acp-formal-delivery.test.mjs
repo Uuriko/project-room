@@ -276,12 +276,15 @@ for (const representation of [null, 'normalized-current-v1']) test(`guarded draf
 });
 
 for (const {closeBeforeRetry, oldClient, representation} of [
-  {closeBeforeRetry:false},
-  {closeBeforeRetry:true},
-  {closeBeforeRetry:true, oldClient:true},
+  {closeBeforeRetry:false, representation:null},
+  {closeBeforeRetry:true, representation:null},
+  {closeBeforeRetry:true, oldClient:true, representation:null},
   {closeBeforeRetry:true, oldClient:true, representation:'normalized-current-v1'}
 ]) test(`lost stale-draft response recovers the original write (closed: ${closeBeforeRetry}, old client: ${oldClient ?? false}, ${representation ?? 'legacy'})`, async t => {
-  const f=await fixture(t, {representation});let inject=true, lose=true, formalPosts=0;const drafts=[];
+  const f=await fixture(t, {representation});
+  const normalized = f.store.db.prepare("SELECT 1 FROM current_room_head WHERE room_id=?").get('commons');
+  assert.equal(Boolean(normalized), representation === 'normalized-current-v1');
+  let inject=true, lose=true, formalPosts=0;const drafts=[];
   let savedDraft, replayedDraft;
   const transport=async(url,options)=>{
     const command=options?.body ? JSON.parse(options.body) : null;
@@ -324,6 +327,9 @@ for (const {closeBeforeRetry, oldClient, representation} of [
     const replay=JSON.parse(drafts[1]);
     const snapshot=f.store.operationReceipt(f.seeded.token,'commons',replay.id);
     assert.equal(snapshot.sequence,savedDraft.sequence);
+    const outsider=f.store.issueAccessKey('commons','other');
+    assert.equal(f.store.operationReceipt(outsider,'commons',replay.id).status,'not_recorded');
+    assert.throws(() => f.store.command(outsider,'commons',replay), {status:404,code:'request_not_found'});
     assert.throws(() => f.store.command(f.seeded.token,'commons',
       {...replay,data:{...replay.data,body:'Different draft'}}), {status:409,code:'idempotency_conflict'});
     assert.throws(() => f.store.command(f.seeded.token,'commons',
