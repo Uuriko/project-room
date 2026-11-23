@@ -785,3 +785,64 @@ test("focused failed result shows the current correction and its authorized acti
   assert.equal(f.item().blocker, null);
   assert.equal(await f.page.locator("#result-work-action").isVisible(), false);
 });
+// Scenario adapted from Buzz desktop/src/features/forum/ui/ForumComposer.lifecycle.test.mjs
+// at 0e7fd48d41db0ea00f4baa60d36d4fdfce31df40. Room uses its own draft IDs and revisions.
+for (const replace of [false, true]) {
+  test(`Buzz delayed draft: ${replace ? "replacement owns the result" : "source remains readable and stale"}`, { timeout: 30000 }, async t => {
+    const f = await setup(t);
+    const corrected = "Replacement draft for the corrected work revision.";
+    const original = url => url.pathname.endsWith("/work-result") && url.searchParams.get("draftMessageId") === "native-draft";
+    const started = Promise.withResolvers();
+    const gate = Promise.withResolvers();
+    const released = Promise.withResolvers();
+    let deliverError;
+    t.after(() => gate.resolve());
+    await f.page.route("**/work-result?**", async route => {
+      if (!original(new URL(route.request().url()))) return route.continue();
+      try {
+        const response = await route.fetch();
+        assert.equal(response.ok(), true);
+        started.resolve();
+        await gate.promise;
+        await route.fulfill({ response });
+      } catch (error) {
+        deliverError = error;
+        started.reject(error);
+      } finally {
+        released.resolve();
+      }
+    });
+    await f.open();
+    await started.promise;
+    assert.equal(await f.save.isEnabled(), false);
+    f.mutate(T.WORK_BLOCKED, { reason: "Original finding superseded", nextAction: "Prepare the corrected draft" });
+    f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Scope superseded by the corrected work revision" });
+    await f.page.locator("#refresh-action").waitFor({ state: "visible" });
+    if (replace) {
+      await f.page.locator("#cancel-action").click();
+      f.send(T.MESSAGE_POSTED, { messageId: "corrected-draft", workItemId: f.workItemId,
+        packetId: "corrected-packet", basisRevision: f.item().revision, body: corrected });
+      await messageAction(f.page, "corrected-draft", "result");
+      await f.page.waitForFunction(text => document.querySelector("#action-text-body").textContent === text, corrected);
+      await f.fill();
+      assert.equal(await f.save.isEnabled(), true);
+    }
+    gate.resolve();
+    await released.promise;
+    assert.ifError(deliverError);
+    if (!replace) {
+      await f.textReady();
+      assert.equal(await f.save.isEnabled(), false);
+      assert.equal(f.item().receipt, null);
+      return;
+    }
+    await f.page.evaluate(() => new Promise(requestAnimationFrame));
+    assert.equal(await f.page.locator("#action-text-body").textContent(), corrected);
+    assert.equal(f.item().receipt, null, "a late response cannot publish");
+    assert.equal(await f.save.isEnabled(), true);
+    await f.save.click();
+    await f.page.locator("#action-dialog").waitFor({ state: "hidden" });
+    assert.equal(f.item().receipt.nativeText.messageId, "corrected-draft");
+    assert.equal(f.item().receipt.evidenceVersion, textVersion(corrected));
+  });
+}
