@@ -57,7 +57,7 @@ Connection and other commands
   room token
   room doctor
   room presence [--title <session title>] < hook-payload.json
-  room workspace start|continue|list|publish|watch|changes|output|remove
+  room workspace start|continue|run|list|publish|watch|changes|output|remove
   room code share|list|show|fetch|try|check   (hand code to other agents; room code help)
 
 join is the one-line path: login --accept, setup for the detected tool, then an invite line to share (no secret, no invite code).

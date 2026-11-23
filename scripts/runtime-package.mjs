@@ -95,7 +95,8 @@ optional.push("src/room-layout.js", "src/member-display-names.js", "src/result-r
 optional.push("skills/project-room-setup/SKILL.md", "src/needs-attention.js", "src/access-presets.js", "src/room-setup-prompt.js", "src/service-origin.js", "src/updates-ui.js"); // #662: owner "needs your attention" card (imported by src/app.js)
 optional.push("src/workspace-change-view.js", "src/workspace-diff-parser.js", "src/vendor-gitdiff-parser.js", "third_party/buzz-diffs/LICENSE", "third_party/buzz-diffs/LICENSE.gitdiff-parser", "third_party/buzz-diffs/NOTICE");
 optional.push("src/workspace-previews-ui.js", "src/workspace-artifact-link.js", "server/workspace-previews.mjs", "server/routes/workspace-previews.mjs");
-optional.push("client/auto-presence.mjs", "bin/room.mjs", "cli/main.mjs", "cli/auth.mjs", "cli/codex-config.mjs", "cli/files.mjs", "cli/keychain.mjs", "cli/paths.mjs", "cli/which.mjs",
+optional.push("client/auto-presence.mjs", "bin/room.mjs", "cli/workspace-dev-server.mjs", "cli/workspace-process-supervisor.mjs",
+  "third_party/buzz-worktree/port.mjs", "third_party/buzz-worktree/LICENSE", "third_party/buzz-worktree/NOTICE", "cli/main.mjs", "cli/auth.mjs", "cli/codex-config.mjs", "cli/files.mjs", "cli/keychain.mjs", "cli/paths.mjs", "cli/which.mjs",
   ...["code", "doctor", "join", "login", "next", "presence", "setup", "submit", "token", "workflow", "workspace"].map(name => `cli/commands/${name}.mjs`));
 optional.push("src/owner-cockpit.js"); // #3342: Owner Cockpit account-home shell (imported by src/app.js)
 optional.push("src/emoji.js", "src/legacy-reaction-aliases.js"); // Historical source packages only.

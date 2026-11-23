@@ -48,3 +48,15 @@ connection. The command creates a new branch and worktree from the exact
 published commit. Fetch that commit through the project's usual Git remote if
 it is missing locally. Private drafts, unpublished files, and run history stay
 with the original workspace unless their author shares them.
+
+## Run a development preview locally
+
+From the isolated worktree, run the project's trusted development command:
+
+```sh
+room workspace run -- npm run dev -- --host {host} --port {port}
+```
+
+Room chooses a preferred per-worktree port and falls back to a free port if it is occupied. Pass `--port PORT` before the separator when a specific port is required. The command may also use the supplied `HOST` and `PORT` variables. Room reports the preview URL when it observes that the launched process group owns the loopback listener. Its logs go to stderr.
+
+This command uses macOS or Linux with Git, lsof, and ps. Close it to stop this local process group without affecting other worktrees. The full development server stays on your machine. Use `publish` or `watch` from the section above for room-visible standalone builds.
