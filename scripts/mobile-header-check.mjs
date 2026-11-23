@@ -99,6 +99,9 @@ async function assertHeader(page, count) {
     const sharedBand = Math.min(...actions.map(box => box.y + box.height)) - Math.max(...actions.map(box => box.y));
     assert.ok(sharedBand >= Math.min(...actions.map(box => box.height)) * .75, `default-size actions share one compact row (shared ${sharedBand}px): ${JSON.stringify(actions)}`);
   }
+  const workspace = page.getByRole("button", { name: "Workspace", exact: true });
+  const workspaceBox = await workspace.boundingBox();
+  assert.ok(workspaceBox?.width >= 44 && workspaceBox.height >= 44, "Workspace retains a labeled 44px target");
   // Compare geometry before scrolling, then test each target's actual hit
   // area. Enlarged text may need vertical scrolling; it must remain usable.
   for (const selector of headerControls) {
@@ -136,6 +139,10 @@ async function exerciseHeader(page) {
     await activate("#topbar-search-toggle");
     assert.equal(await page.locator("#message-search").isVisible(), true);
     await activate("#topbar-search-toggle");
+    await activate(".workspace-open");
+    await page.getByRole("dialog", { name: "Workspace" }).waitFor();
+    await page.keyboard.press("Escape");
+    await page.getByRole("dialog", { name: "Workspace" }).waitFor({ state: "hidden" });
     await activate("#room-more > summary");
     assert.equal(await page.locator("#topbar-settings").isVisible(), true);
     const menu = await page.locator(".room-more-actions").boundingBox();

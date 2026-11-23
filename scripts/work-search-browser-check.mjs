@@ -257,6 +257,13 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(await fresh.locator('#work-navigation-return').textContent(), 'Back to room');
   await fresh.locator('#work-navigation-return').press('Enter');
   await fresh.locator('#main').waitFor({ state: 'visible' });
+  await clickChrome(fresh, '#topbar-updates');
+  await fresh.locator('#updates-dialog').waitFor({ state: 'visible' });
+  await fresh.goto(direct);
+  await fresh.locator('#updates-dialog').waitFor({ state: 'hidden' });
+  await fresh.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'search:same-id');
+  assert.equal(await fresh.locator('#work-navigation-return').textContent(), 'Back to room');
+  await fresh.locator('#work-navigation-return').press('Enter');
   await openSearch(fresh);
   await fresh.locator('#message-search').fill('telescope');
   await fresh.locator('#search-list [data-open-work="search:same-id"]').press('Enter');

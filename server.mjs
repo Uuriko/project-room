@@ -9,6 +9,7 @@ import { defaultServerArgs } from "./server/boot-options.mjs";
 import { wireNodeJobs } from "./server/jobs.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
+import { once } from "node:events";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
@@ -18,9 +19,16 @@ import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
 import { startCompletionPickup } from "./server/completion-pickup.mjs";
+import { workspacePreviewBrokerConfig } from "./server/workspace-preview-broker.mjs";
+import { workspacePreviewViewerConfig } from "./server/workspace-preview-viewer.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
+const workspaceBrokerConfig = paused ? null : workspacePreviewBrokerConfig(process.env);
+const workspaceViewerConfig = paused ? null : workspacePreviewViewerConfig(process.env, origin, Boolean(workspaceBrokerConfig));
+if (workspaceBrokerConfig?.port === port) throw Error("Workspace publisher port must differ from PORT");
+if (workspaceViewerConfig && [port, workspaceBrokerConfig.port].includes(workspaceViewerConfig.port))
+  throw Error("Workspace viewer needs a separate listener port");
 const instanceCard = paused ? undefined : readInstanceCardFiles(process.env);
 process.umask(0o077);
 let havePilotDb = false;
@@ -78,7 +86,8 @@ const growthHttp = paused ? null : createGrowthHttp({
     ? { running: nodeJobs.isRunning(), tickCount: nodeJobs.getGrowthTickCount(), intervalMs: growthIntervalMs }
     : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
 });
-const serverArgs = paused ? null : defaultServerArgs({ store, origin, instanceCard, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp, production });
+const serverArgs = paused ? null : defaultServerArgs({ store, origin, instanceCard, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp, production,
+  workspaceBrokerConfig, workspaceViewerConfig });
 const server = paused ? createServer((req, res) => {
   try {
     const url = new URL(req.url, origin);
@@ -97,6 +106,18 @@ const server = paused ? createServer((req, res) => {
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
 }) : createRoomServer({ ...serverArgs, gzipAsset: promisify(gzip) });
+const workspaceBroker = server.workspacePreviewBroker;
+if (workspaceBroker) {
+  const listening = once(workspaceBroker.server, "listening");
+  workspaceBroker.server.listen(workspaceBrokerConfig.port, "127.0.0.1");
+  await listening;
+}
+if (server.workspacePreviewViewer) {
+  const viewerServer = server.workspacePreviewViewer.server;
+  const listening = once(viewerServer, "listening");
+  viewerServer.listen(workspaceViewerConfig.port, "127.0.0.1");
+  await listening;
+}
 const pickupConfig = process.env.ROOM_COMPLETION_PICKUP_CONFIG ?? join(dirname(filename), "completion-pickup.json");
 const stopCompletionPickup = store && existsSync(pickupConfig) ? startCompletionPickup(store, pickupConfig) : () => {};
 server.on('close', () => { stopCompletionPickup(); nodeJobs?.stop(); });

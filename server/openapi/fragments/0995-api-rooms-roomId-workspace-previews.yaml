@@ -1,0 +1,140 @@
+  /api/rooms/{roomId}/workspace-previews:
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: List room-visible workspace previews or read one standalone HTML build
+      parameters:
+        - name: id
+          in: query
+          schema: { type: string }
+        - name: output
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: Read the preview's published plain-text run output
+        - name: changes
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: Read the selected preview's committed patch without downloading HTML
+        - name: revision
+          in: query
+          schema: { type: integer, minimum: 1 }
+          description: Require the specified revision for a changes read
+        - name: view
+          in: query
+          schema: { type: string, enum: [summary, file] }
+          description: Return only the file index or one file's hunks
+        - name: path
+          in: query
+          schema: { type: string }
+          description: Exact previous or current file path for the file view
+        - name: artifact
+          in: query
+          schema: { type: string }
+          description: Exact Workspace changes link binding the publisher, revision, commit and patch digest
+        - name: frame
+          in: query
+          schema: { type: integer, minimum: 1 }
+          description: Selected preview revision to render for a browser session in a sandboxed HTML frame
+        - name: binding
+          in: query
+          schema: { type: string }
+          description: Current account session binding for an account-mode frame
+      responses:
+        '200': { description: Preview metadata or the selected build, bound to the viewer session }
+        '404': { description: Selected preview unavailable }
+    post:
+      summary: Publish or update a local build preview as its publisher
+      x-room-permission: complete_work
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, title, base, head, html, expectedRevision]
+              properties:
+                id: { type: string }
+                title: { type: string, maxLength: 150 }
+                base: { type: string }
+                head: { type: string }
+                html: { type: string, description: Standalone HTML limited to 384 KiB UTF-8 }
+                patch: { type: string, description: Optional committed unified patch limited to 192 KiB UTF-8 }
+                output: { type: string, description: Optional plain-text run output limited to 24 KiB UTF-8 }
+                recipientId: { type: string, description: Optional active room member who can read the directed preview }
+                expectedRevision: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: Published preview metadata and revision }
+        '403': { description: Writer lacks work permission or does not hold the preview }
+        '409': { description: Preview revision or storage limit changed }
+    delete:
+      summary: Remove a preview as its publisher or the room owner
+      x-room-permission: member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, expectedRevision]
+              properties:
+                id: { type: string }
+                expectedRevision: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: Preview absent }
+        '409': { description: Preview revision changed }
+  /api/rooms/{roomId}/workspace-previews/publisher-grant:
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Issue a one-time grant to the publisher of an exact Workspace preview
+      description: Available only with in-process preview broker registration enabled. Requires a Room bearer credential with publisher work access. The grant expires in ten seconds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, revision]
+              properties:
+                id: { type: string }
+                revision: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: One-time grant and its Room, preview, revision, publisher, and expiry in Unix milliseconds }
+        '401': { description: Room bearer credential required }
+        '404': { description: Registration is disabled or the publisher preview is unavailable }
+        '409': { description: The selected preview revision was replaced }
+        '429': { description: Too many pending registrations }
+  /api/rooms/{roomId}/workspace-previews/open-live:
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Open a directed Workspace preview on its isolated viewer origin
+      description: Requires the current Room browser session, matching origin and CSRF token. Returns a short-lived one-use viewer address for the exact publication revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, revision]
+              properties:
+                id: { type: string }
+                revision: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Browser viewer binding and one-use open URL }
+        '401': { description: Room browser session required }
+        '403': { description: Browser origin or CSRF check failed }
+        '404': { description: Viewer is disabled or the exact directed live preview is unavailable }

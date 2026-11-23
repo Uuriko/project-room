@@ -125,11 +125,11 @@ const FRESH_OPEN_MS = 2000;
 const MAX_REFRESH_COOLDOWN_MS = 300000;
 
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, compactRequests = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onBondChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, compactRequests = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onBondChange = () => {}, onWorkspacePreviewChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
     if (!["full", "activity"].includes(auditView)) throw new RangeError(uiText("record.invalidView"));
     this.auditView = auditView;
     this.compactRequests = compactRequests;
-    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange, onBondChange, onOptimistic, onSendSettled });
+    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange, onBondChange, onWorkspacePreviewChange, onOptimistic, onSendSettled });
     this.getFlights = new Map();
     this.paging = false;
     this.session = null;
@@ -1345,6 +1345,7 @@ export class RoomClient {
     stream.addEventListener("open", () => {
       if (!ownsStream()) return;
       opens += 1;
+      this.onWorkspacePreviewChange();
       this.streamRetryDelay = 1000;
       if (!this.refreshInterrupted) {
         this.refreshRetryDelay = 1000;
@@ -1370,6 +1371,9 @@ export class RoomClient {
       if (receipt?.event?.type === "dm.consent_changed") this.onConsentChange?.();
       if ([T.BOND_PROPOSED, T.BOND_ACTIVATED, T.BOND_REVOKED].includes(receipt?.event?.type)) this.onBondChange?.();
       refreshStream(receipt);
+    });
+    stream.addEventListener("workspace-preview-changed", () => {
+      if (ownsStream()) this.onWorkspacePreviewChange();
     });
     stream.addEventListener("typing", message => {
       if (!ownsStream()) return;
