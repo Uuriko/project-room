@@ -5,9 +5,11 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { readProject, safeName } from "../paths.mjs";
 import { bearerHeader } from "../auth.mjs";
 import { connection, parseArgs } from "./code.mjs";
+import { runWorkspaceServer } from "../workspace-dev-server.mjs";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room workspace start --path DIRECTORY [--base REF] [--connection NAME]
+room workspace run [--port PORT] -- COMMAND [ARGS...]
 room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html
@@ -82,11 +84,20 @@ async function connect(io, cwd, name) {
 }
 
 export async function workspaceCommand(argv, io = {}) {
-  const { positional, flags } = parseArgs(argv);
+  const separator = argv.indexOf("--");
+  const { positional, flags } = parseArgs(separator === -1 ? argv : argv.slice(0, separator));
   const [action, ...extra] = positional;
   const out = data => (io.out ?? console.log)(JSON.stringify(data));
   const cwd = io.cwd ?? process.cwd();
-  if (extra.length || !["start", "list", "publish", "watch", "remove"].includes(action)) throw new Error(usage);
+  if (action === "run" && !extra.length && separator !== -1 && argv[separator + 1]) {
+    const gitDir = git(cwd, "rev-parse", "--absolute-git-dir");
+    const commonDir = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    if (realpathSync(gitDir) === realpathSync(commonDir)) throw new Error("Start a separate Git worktree before running a preview");
+    const root = realpathSync(git(cwd, "rev-parse", "--show-toplevel"));
+    const [command, ...args] = argv.slice(separator + 1);
+    return runWorkspaceServer({ cwd: root, command, args, requestedPort: flags.port, out, env: io.env });
+  }
+  if (extra.length || separator !== -1 || !["start", "list", "publish", "watch", "remove"].includes(action)) throw new Error(usage);
   if (action === "start") { out(launch(cwd, flags)); return 0; }
   const call = await connect(io, cwd, flags.connection);
   const list = async () => (await call()).items;
