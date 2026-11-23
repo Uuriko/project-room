@@ -15,7 +15,7 @@ const request = (id, patch = {}) => ({ id, status: "open", requesterId: "codex",
 const context = (row, sequence) => ({ roomId: "build", viewerId: "muse", roomCreatedEventId: "room-birth",
   request: row, page: { items: [{ kind: "opened", eventId: row.openingEventId, sequence, message: { body: "private QA details" } }] } });
 
-test("a prearmed successor waits for the exact settlement and retains work opened during it", async () => {
+async function checkSuccessorAfterSettlement(outcome) {
   const first = request("first"), successor = request("successor");
   const checkpoint = { after: 11, inFlight: { requestMessageId: first.id, openingEventId: first.openingEventId,
     roomCreatedEventId: "room-birth", openingSequence: 11 } };
@@ -24,7 +24,7 @@ test("a prearmed successor waits for the exact settlement and retains work opene
   const result = await holdMuseHandoff({ policy, checkpoint, receiverAck: true, advertiseScope: true,
     afterSettlement: first.id, signal: AbortSignal.timeout(3000), save: value => saves.push(value), client: {
       async replyContext(id) {
-        if (id === first.id) return { ...context({ ...first, status: finished ? "answered" : "open" }, 11),
+        if (id === first.id) return { ...context({ ...first, status: finished ? outcome : "open" }, 11),
           evaluatedThrough: finished ? 19 : 12 };
         assert.equal(finished, true);
         return context({ ...successor, contextEventId: "successor-basis" }, 15);
@@ -51,7 +51,12 @@ test("a prearmed successor waits for the exact settlement and retains work opene
   assert.deepEqual(receipts, [successor.id]);
   assert.equal(result.requestMessageId, successor.id);
   assert.equal(result.replay, false);
-});
+}
+
+for (const outcome of ["answered", "declined", "cancelled"]) {
+  test(`a prearmed successor retains work opened before the previous request is ${outcome}`,
+    () => checkSuccessorAfterSettlement(outcome));
+}
 
 test("prearming refuses a different request before opening a stream", async () => {
   await assert.rejects(holdMuseHandoff({ policy, client: {}, checkpoint: { after: 11,
