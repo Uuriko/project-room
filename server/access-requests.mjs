@@ -509,7 +509,7 @@ export class AccessRequests {
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "access_rejected", error.message); }
     const { projection, write } = accessProjection(this.store, roomId, room, state, incoming);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+    if (this.store.projectionExceedsWriteLimit(projection)) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     saveAccessEvent(this.store, roomId, room, incoming, projection, write);
   }
 
@@ -716,7 +716,7 @@ export class AccessRequests {
       return { approved: false, pendingNote: `Auto-approve was rejected (${error.message}); the request waits for an owner decision.` };
     }
     const { projection, write } = accessProjection(this.store, row.room_id, room, state, incoming);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) {
+    if (this.store.projectionExceedsWriteLimit(projection)) {
       return { approved: false, pendingNote: "Room projection limit reached; the request waits for an owner decision." };
     }
     saveAccessEvent(this.store, row.room_id, room, incoming, projection, write);

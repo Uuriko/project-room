@@ -8,7 +8,6 @@ import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { OAUTH_SCOPES } from './oauth-provider.mjs';
 import { ownMember } from '../src/events.js';
-import { PILOT_LIMITS } from './store.mjs';
 import { hasMessageAuthority } from './message-authority.mjs';
 import { assertProjectionWrite } from './write-integrity.mjs';
 
@@ -50,7 +49,7 @@ function canonicalOAuthBindingState(store, roomId, memberId, humanMemberId) {
       throw Error('projection_corrupt: invalid OAuth membership metadata proof');
     // Exceeding admission does not erase a present proof or excuse corruption.
     assertProjectionWrite(db, roomId);
-    if (Object.values(sizes).reduce((sum, size) => sum + size, 0) > PILOT_LIMITS.projectionBytes) return null;
+    if (Object.values(sizes).reduce((sum, size) => sum + size, 0) > store.projectionByteLimit) return null;
     const raw = JSON.parse(db.prepare('SELECT projection FROM rooms WHERE id=?').get(roomId).projection);
     if (!hasMessageAuthority(raw)) return null;
     if (Object.hasOwn(raw, 'messages')) throw Error('projection_corrupt: competing canonical message array');

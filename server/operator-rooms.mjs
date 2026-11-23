@@ -29,7 +29,6 @@ import { protectedRoomIds } from "./operator-purge.mjs";
 import { scrubEventTokens } from "./room-export.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventRows } from "./redact-read.mjs";
-import { PILOT_LIMITS } from "./store.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -63,7 +62,7 @@ function memberCounts(projection) {
 
 export function listOperatorRooms(store, rawLimit) {
   const limit = parseLimit(rawLimit);
-  const capBytes = PILOT_LIMITS.projectionBytes;
+  const capBytes = store.projectionByteLimit;
   const protectedIds = protectedRoomIds();
   const rows = store.db.prepare(`SELECT id, length(CAST(projection AS BLOB)) AS projectionBytes, sequence, archived_at,
       json_extract(projection, '$.room.title') AS title, projection
