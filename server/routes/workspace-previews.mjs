@@ -1,6 +1,6 @@
 import { workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 import { ownMember } from "../../src/events.js";
-import { fileLabel, parsePatch } from "../../src/workspace-diff-parser.js";
+import { fileLabel, parsePatch, workspaceChangePath } from "../../src/workspace-diff-parser.js";
 import { readAccountRoomRow } from "../room-lifecycle.mjs";
 import { previewJsonBytes, validatePreviewInput, validPreviewSelection, workspacePreviews } from "../workspace-previews.mjs";
 
@@ -40,13 +40,15 @@ function changeResponse(ctx, params, item, viewer) {
   if (!files) return ctx.json(ctx.res, 200, { ...viewer, changes: { ...source, status: "raw_available" } });
   if (view === "file") {
     const path = params.get("path");
-    const file = files.find(value => value.oldPath === path || value.newPath === path);
+    const file = files.find(value => workspaceChangePath(value) === path)
+      ?? files.find(value => path !== "/dev/null" && (value.oldPath === path || value.newPath === path));
     if (!file) ctx.reject(404, "preview_file_not_found", "This path is absent from the published changes");
     return ctx.json(ctx.res, 200, { ...viewer, changes: { ...source, file } });
   }
-  return ctx.json(ctx.res, 200, { ...viewer, changes: { ...source, files: files.map(file => ({
-    path: fileLabel(file), type: file.type, hunks: file.hunks.length,
-  })) } });
+  return ctx.json(ctx.res, 200, { ...viewer, changes: { ...source, files: files.map(file => {
+    const path = fileLabel(file), filePath = workspaceChangePath(file);
+    return { path, ...(filePath && filePath !== path ? { filePath } : {}), type: file.type, hunks: file.hunks.length };
+  }) } });
 }
 
 function authorize(ctx, place, needed) {
@@ -82,7 +84,7 @@ async function serveWorkspacePreviews(ctx) {
     || changeRead && (!id || params.get("changes") !== "1" || params.has("revision") && !/^[1-9][0-9]*$/.test(params.get("revision"))
       || params.has("view") && !["summary", "file"].includes(params.get("view"))
       || params.has("artifact") && (!exact?.head || exact.id !== id || exact.panel !== "changes"
-        || params.get("view") === "file" && (exact.file ?? null) !== params.get("path"))
+        || params.get("view") === "file" && exact.file && exact.file !== params.get("path"))
       || (params.get("view") === "file" ? !params.get("path") || params.get("path").length > 4096 : params.has("path")))
     || outputRead && (!id || params.get("output") !== "1" || params.has("revision") && !/^[1-9][0-9]*$/.test(params.get("revision")))
     || frame && (selected.bearer || !id || !/^[1-9][0-9]*$/.test(frameRevision)))

@@ -3,11 +3,18 @@ import { clipboard } from "./clipboard.js";
 
 import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "./workspace-artifact-link.js";
 
+const changesIdentity = item => item && JSON.stringify([
+  item.id, item.revision, item.publisherId, item.recipientId, item.base, item.head, item.patchDigest,
+]);
+
 // Preview code runs in an opaque frame with a separate response policy.
 export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft, workThreadLink }) {
   const button = document.createElement("button");
-  button.type = "button"; button.className = "topbar-button"; button.textContent = "Workspace";
+  button.type = "button"; button.className = "topbar-button workspace-open";
+  button.setAttribute("aria-label", "Workspace");
+  button.title = "Workspace";
   button.setAttribute("aria-haspopup", "dialog");
+  button.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18m-11 0v10"/></svg><span>Workspace</span>`;
   toolbar.prepend(button);
   const dialog = document.createElement("dialog");
   dialog.id = "room-project-workspace";
@@ -109,7 +116,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   const columns = dialog.querySelector(".workspace-change-columns");
   const primary = dialog.querySelector("[data-workspace-primary]");
   const peer = dialog.querySelector("[data-workspace-peer]");
-  const patchCache = new Map();
+  const changeCache = new Map();
   let selected = null, frame = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
   let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null, pendingFile = null, threadDraft = null;
 
@@ -165,35 +172,50 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     }
   }
   async function loadChanges() {
-    if (!dialog.open || changesView.hidden) return;
+    const session = client.session;
+    if (!session || !dialog.open || changesView.hidden) return;
     const current = items.find(item => item.id === selected);
     if (!current?.patchDigest) return;
     const comparison = items.find(item => item.id === compare.value && item.base === current.base && item.patchDigest);
-    const ticket = ++changeGeneration, session = client.session;
-    const stillOpen = () => dialog.open && !changesView.hidden && ticket === changeGeneration && client.session === session;
-    const key = JSON.stringify([current.id, current.patchDigest, comparison?.id, comparison?.patchDigest]);
-    if (renderedChanges === key && !pendingFile) return;
+    const key = JSON.stringify([changesIdentity(current), changesIdentity(comparison)]);
+    if (renderedChanges === key && !pendingFile && !columns.hidden) return;
+    const ticket = ++changeGeneration;
+    const stillOpen = () => dialog.open && ticket === changeGeneration && client.session === session;
+    const readChanges = item => {
+      const identity = changesIdentity(item);
+      const ownsRead = () => stillOpen() && changesIdentity(items.find(entry => entry.id === item.id)) === identity;
+      const artifact = new URL(workspaceArtifactLink(location.href, session.roomId, item, "changes")).hash;
+      return async (view, path) => {
+        if (!ownsRead()) return null;
+        const pinned = view === "file" && linked?.head && item.id === current.id && linked.file === path;
+        const query = new URLSearchParams({ id: item.id, changes: "1", revision: String(item.revision),
+          artifact: pinned ? location.hash : artifact });
+        if (view) query.set("view", view);
+        if (path) query.set("path", path);
+        const cacheKey = JSON.stringify([identity, query.toString()]);
+        if (changeCache.has(cacheKey)) return changeCache.get(cacheKey);
+        const value = await client.roomRead(`/workspace-previews?${query}`);
+        if (!value || !ownsRead()) return null;
+        changeCache.set(cacheKey, value.changes);
+        if (changeCache.size > 32) changeCache.delete(changeCache.keys().next().value);
+        return value.changes;
+      };
+    };
     columns.hidden = true;
     changeStatus.textContent = "Loading changes…";
     try {
-      const getPatch = async item => {
-        const cached = patchCache.get(item.id);
-        if (cached?.digest === item.patchDigest) return cached.patch;
-        const query = new URLSearchParams({ id: item.id, changes: "1", revision: String(item.revision) });
-        if (linked?.head && item.id === current.id) query.set("artifact", location.hash);
-        const value = await client.roomRead(`/workspace-previews?${query}`);
-        if (!value || !stillOpen()) return null;
-        patchCache.set(item.id, { digest: item.patchDigest, patch: value.changes.patch });
-        return value.changes.patch;
-      };
+      const file = pendingFile;
+      const readCurrent = readChanges(current), readPeer = comparison && readChanges(comparison);
       const [{ renderWorkspaceChange }, a, b] = await Promise.all([
-        import("./workspace-change-view.js"), getPatch(current), comparison ? getPatch(comparison) : null,
+        import("./workspace-change-view.js"),
+        file ? readCurrent("file", file) : readCurrent("summary"),
+        readPeer ? readPeer("summary") : null,
       ]);
-      if (!stillOpen()) return;
-      renderWorkspaceChange(primary, current, a, pendingFile);
+      if (!a || !stillOpen() || (comparison && !b)) return;
+      renderWorkspaceChange(primary, current, a, readCurrent, file);
       pendingFile = null;
       peer.hidden = !comparison;
-      if (comparison) renderWorkspaceChange(peer, comparison, b);
+      if (comparison) renderWorkspaceChange(peer, comparison, b, readPeer);
       else peer.replaceChildren();
       columns.hidden = false;
       changeStatus.textContent = "";
@@ -231,7 +253,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   function reset() {
     selectStart("");
     generation++; selected = null; linked = null; pendingFile = null; threadDraft = null; clearPreview();
-    status.textContent = ""; list.replaceChildren(); items = []; patchCache.clear();
+    status.textContent = ""; list.replaceChildren(); items = []; changeCache.clear();
     if (dialog.open) dialog.close();
   }
   function select(id) {
@@ -300,7 +322,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     }
   }
   function activate(tab) {
-    changeGeneration++; outputGeneration++;
+    outputGeneration++;
     choosePanel(tab.dataset.workspaceTab);
     if (activePanel === "changes") void loadChanges();
     if (activePanel === "output") void loadOutput();

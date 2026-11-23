@@ -36,7 +36,8 @@ test("workspace preview scope, publish authority, version binding and withdrawal
       body: input ? JSON.stringify(input) : undefined,
     });
   }
-  const patch = "diff --git a/index.html b/index.html\n--- a/index.html\n+++ b/index.html\n@@ -1 +1 @@\n-before\n+after\n";
+  const patch = "diff --git a/index.html b/index.html\n--- a/index.html\n+++ b/index.html\n@@ -1 +1 @@\n-before\n+after\n"
+    + "diff --git a/before.txt b/after.txt\nsimilarity index 100%\nrename from before.txt\nrename to after.txt\n";
   const runOutput = "Build passed for the initial preview";
   const preview = { id, title: "First preview", patch, output: runOutput, base: "b".repeat(40), head: "c".repeat(40),
     expectedRevision: 0, html: "<h1>Initial</h1>" };
@@ -59,13 +60,20 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.match(list.items[0].patchDigest, /^[a-f0-9]{64}$/);
   const changesQuery = "?changes=1&id=" + id;
   const summary = (await (await call(viewer, "GET", null, changesQuery + "&view=summary")).json()).changes;
-  assert.deepEqual(summary.files.map(file => file.path), ["index.html"]);
+  assert.deepEqual(summary.files, [
+    { path: "index.html", type: "modify", hunks: 1 },
+    { path: "before.txt → after.txt", filePath: "after.txt", type: "rename", hunks: 0 },
+  ]);
   assert.equal(summary.patch, undefined);
   const detail = (await (await call(viewer, "GET", null, changesQuery + "&view=file&path=index.html")).json()).changes;
   assert.equal(detail.file.hunks[0].changes[1].content, "after");
+  const renamed = (await (await call(viewer, "GET", null, changesQuery + "&view=file&path=after.txt")).json()).changes;
+  assert.equal(renamed.file.oldPath, "before.txt");
   const artifact = `#pr-workspace/${id}/1/changes/${first.patchDigest}/publisher/${preview.head}/index.html`;
   const exact = changesQuery + "&view=file&path=index.html&artifact=";
   assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 200);
+  const patchArtifact = artifact.slice(0, artifact.lastIndexOf("/"));
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(patchArtifact))).status, 200);
   assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact.replace("/publisher/", "/other-publisher/")))).status, 409);
   assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact.replace("/index.html", "/other.html")))).status, 422);
   assert.equal((await call(viewer, "GET", null, changesQuery + "&revision=2")).status, 409);
@@ -91,6 +99,11 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.equal((await call(owner, "DELETE", { id, expectedRevision: 1 })).status, 409);
   assert.equal((await call(owner, "DELETE", { id, expectedRevision: 3 })).status, 200);
   assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 404);
+  const recreated = await (await call(publisher, "POST", { ...preview, patch: patch.replace("+after", "+replacement") })).json();
+  assert.equal(recreated.revision, first.revision);
+  assert.notEqual(recreated.patchDigest, first.patchDigest);
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(patchArtifact))).status, 409);
+  assert.equal((await call(publisher, "DELETE", { id, expectedRevision: 1 })).status, 200);
   const directed = { ...preview, recipientId: "viewer" };
   assert.equal((await call(publisher, "POST", { ...directed, recipientId: "absent" })).status, 422);
   const sent = await (await call(publisher, "POST", directed)).json();
