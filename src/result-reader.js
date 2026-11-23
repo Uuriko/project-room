@@ -233,6 +233,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const runtime = reviewRuntimeLabel(view.reviewRuntime?.status, view.reviewRuntime?.webhook);
       if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
     }
+    const currentLink = resultElement("result-open-current");
+    const target = view.currentResultCompletionEventId;
+    const href = view.linked && earlier && usableText(view) && target && (!item || item.receipt?.eventId === target)
+      ? exactResultHref({ ...view, completionEventId: target }) : "";
+    currentLink.hidden = !href;
+    if (href) currentLink.href = href;
+    else currentLink.removeAttribute("href");
     const context = resultElement("result-work-context");
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
     if (context) context.hidden = !current || !item;
@@ -286,6 +293,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-verdict").hidden = true;
     resultElement("result-work-context")?.setAttribute("hidden", "");
     resultElement("result-work-action")?.setAttribute("hidden", "");
+    resultElement("result-open-current").hidden = true;
+    resultElement("result-open-current").removeAttribute("href");
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
@@ -308,6 +317,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   }
   resultElement("close-result").addEventListener("click", () => closeResult());
   resultElement("result-copy-link").textContent = uiText("result.copyLink");
+  resultElement("result-open-current").textContent = uiText("result.openCurrent");
   resultElement("result-copy-text").textContent = uiText("result.copyText");
   resultElement("result-download").textContent = uiText("result.download");
   async function copyResult(link) {
@@ -406,6 +416,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         || (view.receipt.evidenceVersion && value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion)) throw new Error("Pinned version changed");
       view.receipt.evidenceVersion = value.result.receipt.evidenceVersion;
       view.selectionStatus = value.selection.status;
+      view.currentResultCompletionEventId = value.workThread?.currentResultCompletionEventId;
       view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
@@ -462,6 +473,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       showReleaseChecks(null);
       resultElement("result-work-context")?.setAttribute("hidden", "");
       resultElement("result-work-action")?.setAttribute("hidden", "");
+      resultElement("result-open-current").hidden = true;
+      resultElement("result-open-current").removeAttribute("href");
       resultElement("result-options").open = false;
       resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
       resultElement("result-original").hidden = true;
