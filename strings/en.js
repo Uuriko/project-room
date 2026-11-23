@@ -495,6 +495,7 @@ export default {
   "entry.refresh": "Refresh connection",
   "result.copyText": "Copy",
   "result.copyLink": "Copy result link",
+  "result.openCurrent": "Open current result",
   "result.linkCopied": "Result link copied.",
   "result.copyLinkFailed": "Could not copy the result link. Try again.",
   "result.openEarlier": "Open earlier result",
