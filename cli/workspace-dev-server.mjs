@@ -145,6 +145,7 @@ export async function runWorkspaceServer({ cwd, command, args, requestedPort, lo
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+  let previewFailure;
   try {
     const deadline = performance.now() + 15000;
     while (!result && !stopping && performance.now() < deadline) {
@@ -161,6 +162,9 @@ export async function runWorkspaceServer({ cwd, command, args, requestedPort, lo
     throw new Error(result?.error ? "Preview command failed: " + result.error
       : result ? "Preview command exited before its loopback listener was ready"
         : "The command did not open the assigned loopback port");
+  } catch (error) {
+    previewFailure = error;
+    throw error;
   } finally {
     if (!stopping) disconnect();
     await exited;
@@ -168,6 +172,10 @@ export async function runWorkspaceServer({ cwd, command, args, requestedPort, lo
     process.removeListener("SIGINT", stop);
     process.removeListener("SIGTERM", stop);
     await outputClosed;
-    log?.finish();
+    try { log?.finish(); }
+    catch (error) {
+      if (!previewFailure) throw error;
+      previewFailure.cause ??= error;
+    }
   }
 }
