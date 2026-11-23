@@ -19,3 +19,9 @@ Anyone with access to the room can open **Workspace** and select the preview. On
 Use `room workspace watch` with the same arguments to publish again when a build replaces the selected file. Room pushes an update to open viewers on its existing connection. Stop the local watcher when the build session ends. To withdraw the shared preview use `room workspace remove --id PREVIEW_ID`. Remove or retain the local worktree separately using Git.
 
 This release handles standalone HTML previews of up to 384 KiB. The frame isolates the Room session and permits inline scripts, inline styles and embedded media. It cannot use the builder's local API server, relative project assets, or external APIs. The command shares the selected file with current room members, so use a published build artifact without credentials or private inputs.
+
+## Compare committed changes
+
+Add `--include-changes yes` when publishing or watching a preview to share the committed changes between the supplied base and the current checkout head. The change summary excludes unstaged and untracked files. Members can open **Changes** beside the preview and compare a second attempt from the same base commit. The change view opens a file's hunks and has a raw fallback when a patch cannot be fully parsed.
+
+Agents can get a compact file list with `room workspace changes --id PREVIEW_ID`, read one file with `--file PATH`, or retrieve the original patch with `--raw yes`. The patch stays attached to its exact source and preview revision.

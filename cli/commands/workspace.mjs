@@ -9,8 +9,9 @@ import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room workspace start --path DIRECTORY [--base REF] [--connection NAME]
 room workspace list
-room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html
-room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html
+room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes]
+room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes]
+room workspace changes --id ID [--file PATH | --raw yes]
 room workspace remove --id ID
 Pass --connection NAME to choose a saved connection explicitly.`;
 const validId = /^[a-f0-9]{32}$/;
@@ -61,7 +62,17 @@ function previewInput(cwd, flags) {
     throw new Error("Choose an HTML build artifact inside this worktree");
   const stat = statSync(file);
   if (!stat.isFile() || stat.size > 384 * 1024) throw new Error("Choose a standalone HTML file up to 384 KiB");
-  return { id: flags.id, title: flags.title, base: pinned(cwd, flags.base), head: pinned(cwd, "HEAD"), html: readFileSync(file, "utf8") };
+  const base = pinned(cwd, flags.base), head = pinned(cwd, "HEAD");
+  const input = { id: flags.id, title: flags.title, base, head, html: readFileSync(file, "utf8") };
+  if (flags["include-changes"] !== undefined) {
+    if (flags["include-changes"] !== "yes") throw new Error("Use --include-changes yes to share the committed patch");
+    const patch = spawnSync("git", ["diff", "--no-ext-diff", "--no-textconv", "--no-color", base, head, "--"], {
+      cwd: root, encoding: "utf8", maxBuffer: 192 * 1024, stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (patch.status !== 0) throw new Error("Could not read the committed patch within the 192 KiB limit");
+    input.patch = patch.stdout;
+  }
+  return input;
 }
 
 async function connect(io, cwd, name) {
@@ -69,8 +80,8 @@ async function connect(io, cwd, name) {
   const inherited = name ?? ((env.ROOM_ORIGIN && env.ROOM_ID && env.PROJECT_ROOM_SECRET) ? undefined : savedWorkspaceConnection(cwd));
   const conn = await connection({ env, cwd, name: inherited });
   const path = edgeDoorApiPath(conn.origin, `/api/rooms/${encodeURIComponent(conn.roomId)}/workspace-previews`);
-  return async (method = "GET", data) => {
-    const response = await (io.fetch ?? fetch)(conn.origin + path, {
+  return async (method = "GET", data, query = "") => {
+    const response = await (io.fetch ?? fetch)(conn.origin + path + query, {
       method, redirect: "error", signal: AbortSignal.timeout(15000),
       headers: { Authorization: bearerHeader(conn.secret), ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
@@ -86,12 +97,21 @@ export async function workspaceCommand(argv, io = {}) {
   const [action, ...extra] = positional;
   const out = data => (io.out ?? console.log)(JSON.stringify(data));
   const cwd = io.cwd ?? process.cwd();
-  if (extra.length || !["start", "list", "publish", "watch", "remove"].includes(action)) throw new Error(usage);
+  if (extra.length || !["start", "list", "publish", "watch", "remove", "changes"].includes(action)) throw new Error(usage);
   if (action === "start") { out(launch(cwd, flags)); return 0; }
   const call = await connect(io, cwd, flags.connection);
   const list = async () => (await call()).items;
   if (action === "list") { out(await list()); return 0; }
   if (!validId.test(flags.id ?? "")) throw new Error("--id must be the ID from room workspace start");
+  if (action === "changes") {
+    const query = new URLSearchParams({ id: flags.id, changes: "1" });
+    if (flags.raw !== undefined && (flags.raw !== "yes" || flags.file)) throw new Error("Choose --file PATH or --raw yes");
+    if (!flags.raw) query.set("view", flags.file ? "file" : "summary");
+    if (flags.file) query.set("path", flags.file);
+    const { changes } = await call("GET", undefined, `?${query}`);
+    out(changes);
+    return 0;
+  }
   let expectedRevision = (await list()).find(row => row.id === flags.id)?.revision ?? 0;
   if (action === "remove") { out(await call("DELETE", { id: flags.id, expectedRevision })); return 0; }
   if (!flags.file || !flags.title || !flags.base) throw new Error("--file, --title, and --base are required");
