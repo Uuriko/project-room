@@ -5,9 +5,11 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { readProject, safeName } from "../paths.mjs";
 import { bearerHeader } from "../auth.mjs";
 import { connection, parseArgs } from "./code.mjs";
+import { artifactDigest, workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room workspace start --path DIRECTORY [--base REF] [--connection NAME]
+room workspace continue --link URL --path DIRECTORY [--connection NAME]
 room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log]
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log]
@@ -39,12 +41,11 @@ function savedWorkspaceConnection(cwd) {
   return undefined;
 }
 
-function launch(cwd, flags) {
+function launch(cwd, flags, name) {
   if (!flags.path) throw new Error("--path is required");
   const path = resolve(cwd, flags.path);
   if (existsSync(path)) throw new Error("Choose a new worktree directory");
   const base = pinned(cwd, flags.base ?? "HEAD");
-  const name = flags.connection ? safeName(flags.connection) : savedWorkspaceConnection(cwd);
   const id = randomBytes(16).toString("hex");
   const branch = "room/" + id;
   git(cwd, "worktree", "add", "-b", branch, "--", path, base);
@@ -87,10 +88,11 @@ function previewInput(cwd, flags) {
 
 async function connect(io, cwd, name) {
   const env = io.env ?? process.env;
-  const inherited = name ?? ((env.ROOM_ORIGIN && env.ROOM_ID && env.PROJECT_ROOM_SECRET) ? undefined : savedWorkspaceConnection(cwd));
+  const fromEnvironment = env.ROOM_ORIGIN && env.ROOM_ID && env.PROJECT_ROOM_SECRET;
+  const inherited = fromEnvironment ? undefined : (name ?? savedWorkspaceConnection(cwd));
   const conn = await connection({ env, cwd, name: inherited });
   const path = edgeDoorApiPath(conn.origin, `/api/rooms/${encodeURIComponent(conn.roomId)}/workspace-previews`);
-  return async (method = "GET", data, query = "") => {
+  const call = async (method = "GET", data, query = "") => {
     const response = await (io.fetch ?? fetch)(conn.origin + path + query, {
       method, redirect: "error", signal: AbortSignal.timeout(15000),
       headers: { Authorization: bearerHeader(conn.secret), ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
@@ -100,6 +102,7 @@ async function connect(io, cwd, name) {
     if (!response.ok) throw new Error(value?.error?.message ?? `Room request failed (${response.status})`);
     return value;
   };
+  return { call, conn, inherited };
 }
 
 export async function workspaceCommand(argv, io = {}) {
@@ -107,11 +110,36 @@ export async function workspaceCommand(argv, io = {}) {
   const [action, ...extra] = positional;
   const out = data => (io.out ?? console.log)(JSON.stringify(data));
   const cwd = io.cwd ?? process.cwd();
-  if (extra.length || !["start", "list", "publish", "watch", "remove", "changes", "output"].includes(action)) throw new Error(usage);
-  if (action === "start") { out(launch(cwd, flags)); return 0; }
-  const call = await connect(io, cwd, flags.connection);
+  if (extra.length || !["start", "list", "publish", "watch", "remove", "changes", "output", "continue"].includes(action)) throw new Error(usage);
+  if (action === "start") {
+    const name = flags.connection ? safeName(flags.connection) : savedWorkspaceConnection(cwd);
+    out(launch(cwd, flags, name));
+    return 0;
+  }
+  const { call, conn, inherited } = await connect(io, cwd, flags.connection);
   const list = async () => (await call()).items;
   if (action === "list") { out(await list()); return 0; }
+  if (action === "continue") {
+    if (!flags.path) throw new Error("--path is required");
+    const link = URL.parse(flags.link ?? "");
+    const target = link && workspaceArtifactSelection(link.hash);
+    if (!target?.head) throw new Error("Copy a current artifact link from Workspace and pass it with --link");
+    if (link.username || link.password || link.origin !== new URL(conn.origin).origin
+      || link.searchParams.get("room") !== conn.roomId)
+      throw new Error("Choose the saved connection for the artifact's Room");
+    const item = (await list()).find(row => row.id === target.id);
+    if (!item || item.revision !== target.revision || item.publisherId !== target.publisherId
+      || item.head !== target.head || artifactDigest(item, target.panel) !== target.digest)
+      throw new Error("This workspace artifact has changed or is unavailable");
+    try {
+      if (pinned(cwd, target.head) !== target.head) throw new Error();
+    } catch {
+      throw new Error(`Commit ${target.head} is unavailable here. Get it from the repository or ask the publisher to push it.`);
+    }
+    const worktree = launch(cwd, { path: flags.path, base: target.head }, inherited && safeName(inherited));
+    out({ ...worktree, source: target });
+    return 0;
+  }
   if (!validId.test(flags.id ?? "")) throw new Error("--id must be the ID from room workspace start");
   if (action === "output") {
     const query = new URLSearchParams({ id: flags.id, output: "1" });

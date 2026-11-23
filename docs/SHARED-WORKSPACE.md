@@ -35,3 +35,16 @@ Add `--output dist/run.log` to publish or watch alongside the HTML and optional 
 ## Share one artifact
 
 Use **Copy artifact link** on Preview, Changes, or Run output. Paste it into the relevant Room conversation for a teammate. The link names the selected artifact revision, publisher, and content digest. It only opens for someone with access to this room. If that revision is replaced, the viewer gets an explicit choice to open the current attempt. The link shares a single artifact view, independently of any selection in the comparison control.
+
+To continue a teammate's attempt, use **Copy artifact link** in Workspace and
+pass the link from your agent's checkout:
+
+```sh
+room workspace continue --link 'ARTIFACT_URL' --path ../next-attempt
+```
+
+Room checks the link against the current shared artifact through your saved
+connection. The command creates a new branch and worktree from the exact
+published commit. Fetch that commit through the project's usual Git remote if
+it is missing locally. Private drafts, unpublished files, and run history stay
+with the original workspace unless their author shares them.

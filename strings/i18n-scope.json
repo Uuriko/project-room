@@ -139,6 +139,7 @@
   "src/work-status.js",
   "src/work-templates.js",
   "src/workflow.js",
+  "src/workspace-artifact-link.js",
   "src/workspace-change-view.js",
   "src/workspace-diff-parser.js",
   "src/workspace-navigation.js",
