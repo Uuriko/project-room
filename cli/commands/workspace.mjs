@@ -163,7 +163,14 @@ export async function workspaceCommand(argv, io = {}) {
     const commonDir = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
     if (realpathSync(gitDir) === realpathSync(commonDir)) throw new Error("Start a separate Git worktree before running a preview");
     const root = realpathSync(git(cwd, "rev-parse", "--show-toplevel"));
-    const workingDirectory = flags.cwd === undefined ? root : realpathSync(resolve(root, flags.cwd));
+    let workingDirectory = root;
+    if (flags.cwd !== undefined) {
+      try { workingDirectory = realpathSync(resolve(root, flags.cwd)); }
+      catch (error) {
+        if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
+        throw new Error(`--cwd ${JSON.stringify(flags.cwd)} does not name an existing directory. Choose a path relative to the worktree root.`);
+      }
+    }
     const within = relative(root, workingDirectory);
     if (within === ".." || within.startsWith(".." + sep) || within.startsWith(sep) || !statSync(workingDirectory).isDirectory())
       throw new Error("Choose a working directory inside this worktree");
