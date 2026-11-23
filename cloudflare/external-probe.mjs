@@ -1,7 +1,17 @@
 // External liveness for the public room. A separate Worker runs this every
-// 5 minutes so an outage is noticed without waiting for the 6-hour GitHub
+// minute so an outage is noticed without waiting for the 6-hour GitHub
 // probes. One failed run records a streak and stays quiet. The second failed
 // run in a row notifies once. A later pass sends one recovery notice.
+//
+// /api/health stayed ok on 2026-10-24 while room reads returned 503, and
+// this probe never opened a room. When PROBE_QA_TOKEN is set, each run
+// still checks ready, then opens the dedicated qa-external-probe room,
+// posts a nonce every PROBE_NONCE_EVERY runs (default 5), and reads that
+// message back. Latencies are kept on each step. The token is a Worker
+// secret: it is sent as a bearer header and never copied into a notice,
+// the KV value, or GET /status. Unset, the room path stays out of the run
+// so a Worker without the secret keeps the public checks. Invalid, the
+// run fails closed instead of looking healthy.
 //
 // A probe that cannot read or write its own streak state confesses loudly:
 // runExternalProbe throws a ProbeStateError, which the scheduled handler
@@ -13,7 +23,7 @@
 // Destinations are inert until their secrets exist:
 //   PROBE_ALERT_WEBHOOK_URL — HTTPS webhook (a Cloudflare notification URL
 //     is one option). http is accepted only for 127.0.0.1 and localhost.
-//   PROBE_ROOM_ORIGIN, PROBE_ROOM_ID, PROBE_ROOM_TOKEN — ops-room post.
+//   PROBE_ROOM_ORIGIN, PROBE_ROOM_ID, PROBE_ROOM_TOKEN — muse-room post.
 //     ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, and ROOM_AGENT_TOKEN are the
 //     existing connection names and are used when the PROBE_ROOM_* name is
 //     unset. The token and the webhook URL are never written into the notice.
@@ -26,6 +36,11 @@ export const FAILURES_BEFORE_ALERT = 2;
 export const DEFAULT_ORIGIN = "https://room.trydemigod.com";
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const STATE_KEY = "streak";
+export const LAST_KEY = "last";
+export const SYNTHETIC_KEY = "synthetic";
+export const STATUS_SCHEMA = "project-room.external-probe-status/1";
+export const QA_ROOM_ID = "qa-external-probe";
+export const NONCE_EVERY_RUNS = 5;
 export const PROBE_USER_AGENT = "project-room-external-probe";
 const BODY_LIMIT = 65_536;
 const LLMS_HEADING = "# Uuriko Project Room";
@@ -159,15 +174,17 @@ function fail(id, status, reason, detail = null) {
 }
 
 async function checkCall(id, run) {
+  const started = Date.now();
   try {
-    return await run();
+    const result = await run();
+    return { ...result, latencyMs: Math.max(0, Date.now() - started) };
   } catch (error) {
     const reason = error?.name === "TimeoutError" || error?.name === "AbortError" ? "timeout" : "network";
-    return fail(id, null, reason);
+    return { ...fail(id, null, reason), latencyMs: Math.max(0, Date.now() - started) };
   }
 }
 
-async function runChecks(origin, fetchImpl, limitMs) {
+async function runChecks(origin, fetchImpl, limitMs, afterReady = null) {
   const headers = { "user-agent": PROBE_USER_AGENT, accept: "application/json" };
   const signal = () => AbortSignal.timeout(limitMs);
   const ready = checkCall("ready", async () => {
@@ -261,8 +278,9 @@ async function runChecks(origin, fetchImpl, limitMs) {
     if (stale.length) return fail("jobs", response.status, "job_stale", stale.slice(0, 3).map(nameOf).join(", "));
     return response.status === 200 ? pass("jobs", 200) : fail("jobs", 503, "http_status");
   });
-  const checks = await Promise.all([ready, mcp, llms, jobs]);
-  return checks;
+  const extra = Promise.resolve(ready).then(() => (afterReady ? afterReady() : []));
+  const [readyResult, mcpResult, llmsResult, jobsResult, more] = await Promise.all([ready, mcp, llms, jobs, extra]);
+  return [readyResult, mcpResult, llmsResult, jobsResult, ...(Array.isArray(more) ? more : [])];
 }
 
 function describe(check) {
@@ -280,8 +298,12 @@ export function outageNotice(origin, checks, incidentId) {
   ].join(" ");
 }
 
-export function recoveryNotice(origin, incidentId) {
-  return `External probe: ${origin} is answering again. Incident ${incidentId}. ready, mcp, llms, and jobs passed.`;
+export function recoveryNotice(origin, incidentId, checks) {
+  const sentence = `External probe: ${origin} is answering again. Incident ${incidentId}. ready, mcp, llms, and jobs passed.`;
+  const extra = Array.isArray(checks)
+    ? checks.filter(check => check.ok && !["ready", "mcp", "llms", "jobs"].includes(check.id)).map(check => check.id)
+    : [];
+  return extra.length ? `${sentence} ${extra.join(", ")} passed.` : sentence;
 }
 
 async function postJson(fetchImpl, url, body, headers, limitMs) {
@@ -313,8 +335,53 @@ async function loadState(kv) {
   }
 }
 
-async function saveState(kv, state) {
+function publicCheck(check) {
+  const detail = typeof check?.detail === "string" && /^[A-Za-z0-9_:,() -]{1,120}$/.test(check.detail) ? check.detail : null;
+  return {
+    id: typeof check?.id === "string" && /^[a-z0-9-]{1,32}$/.test(check.id) ? check.id : "check",
+    ok: check?.ok === true,
+    status: Number.isInteger(check?.status) ? check.status : null,
+    reason: typeof check?.reason === "string" && /^[a-z0-9_]{1,64}$/.test(check.reason) ? check.reason : null,
+    detail,
+    latencyMs: Number.isSafeInteger(check?.latencyMs) && check.latencyMs >= 0 && check.latencyMs <= 120_000 ? check.latencyMs : null
+  };
+}
+
+function publicStatus(raw) {
+  const checks = Array.isArray(raw?.checks) ? raw.checks.slice(0, 16).map(publicCheck) : [];
+  return {
+    schema: STATUS_SCHEMA,
+    ok: raw?.ok === true,
+    at: typeof raw?.at === "string" && raw.at.length <= 40 ? raw.at : null,
+    origin: typeof raw?.origin === "string" && validProbeOrigin(raw.origin) ? new URL(raw.origin).origin : null,
+    consecutiveFailures: Number.isSafeInteger(raw?.consecutiveFailures) && raw.consecutiveFailures >= 0 && raw.consecutiveFailures <= 100_000
+      ? raw.consecutiveFailures : null,
+    incidentId: typeof raw?.incidentId === "string" && /^[a-f0-9]{32}$/.test(raw.incidentId) ? raw.incidentId : null,
+    checks
+  };
+}
+
+function statusSnapshot(origin, checks, state, at) {
+  return {
+    schema: STATUS_SCHEMA,
+    ok: checks.every(check => check.ok),
+    at,
+    origin,
+    consecutiveFailures: state.consecutiveFailures,
+    incidentId: state.incidentId,
+    checks
+  };
+}
+
+async function saveState(kv, state, extras = {}) {
   await kv.put(STATE_KEY, JSON.stringify(state));
+  if (extras.synthetic) {
+    await kv.put(SYNTHETIC_KEY, JSON.stringify({
+      runs: extras.synthetic.runs,
+      lastNonce: extras.synthetic.lastNonce
+    }));
+  }
+  if (extras.last) await kv.put(LAST_KEY, JSON.stringify(publicStatus(extras.last)));
 }
 
 function payload(kind, origin, state, checks, at) {
@@ -324,9 +391,129 @@ function payload(kind, origin, state, checks, at) {
     incidentId: state.incidentId,
     origin,
     consecutiveFailures: state.consecutiveFailures,
-    checks: checks.map(check => ({ id: check.id, ok: check.ok, status: check.status, reason: check.reason, detail: check.detail ?? null })),
+    checks: checks.map(check => ({
+      id: check.id,
+      ok: check.ok,
+      status: check.status,
+      reason: check.reason,
+      detail: check.detail ?? null,
+      latencyMs: Number.isSafeInteger(check.latencyMs) ? check.latencyMs : null
+    })),
     at
   };
+}
+
+function qaCredential(env) {
+  const credential = text(env.PROBE_QA_TOKEN);
+  if (!credential) return { token: null, inert: "unset" };
+  if (credential.length < 8 || credential.length > 512) return { token: null, inert: "invalid" };
+  return { token: credential, inert: null };
+}
+
+function nonceEveryRuns(env) {
+  const raw = text(env.PROBE_NONCE_EVERY);
+  if (!raw) return NONCE_EVERY_RUNS;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 60 ? parsed : NONCE_EVERY_RUNS;
+}
+
+async function loadSynthetic(kv) {
+  try {
+    const raw = await kv.get(SYNTHETIC_KEY, "json");
+    const runs = Number.isSafeInteger(raw?.runs) && raw.runs >= 0 && raw.runs <= 1_000_000 ? raw.runs : 0;
+    const lastNonce = typeof raw?.lastNonce === "string" && /^[a-f0-9]{32}$/.test(raw.lastNonce) ? raw.lastNonce : null;
+    return { runs, lastNonce };
+  } catch {
+    return { runs: 0, lastNonce: null };
+  }
+}
+
+function authHeaders(token) {
+  return {
+    "user-agent": PROBE_USER_AGENT,
+    accept: "application/json",
+    authorization: `Bearer ${token}`
+  };
+}
+
+function apiUrl(origin, path) {
+  return new URL(edgeDoorApiPath(origin, path), origin);
+}
+
+async function openProbeRoom(origin, fetchImpl, limitMs, token) {
+  const response = await fetchImpl(apiUrl(origin, "/api/agent-rooms"), {
+    method: "POST",
+    headers: { ...authHeaders(token), "content-type": "application/json" },
+    body: JSON.stringify({
+      roomId: QA_ROOM_ID,
+      title: "External probe",
+      purpose: "Minute synthetic read of the public room.",
+      starter: false
+    }),
+    redirect: "manual",
+    signal: AbortSignal.timeout(limitMs)
+  });
+  const body = await readLimited(response);
+  if (response.status !== 200 && response.status !== 201) return fail("room-open", response.status, "http_status");
+  let parsed;
+  try { parsed = JSON.parse(body); } catch { return fail("room-open", response.status, "invalid_json"); }
+  if (parsed?.roomId !== QA_ROOM_ID) return fail("room-open", response.status, "room_mismatch");
+  return pass("room-open", response.status);
+}
+
+async function postNonce(origin, fetchImpl, limitMs, token, nonce) {
+  const messageId = `probe-${nonce}`;
+  const response = await fetchImpl(apiUrl(origin, `/api/rooms/${encodeURIComponent(QA_ROOM_ID)}/commands`), {
+    method: "POST",
+    headers: { ...authHeaders(token), "content-type": "application/json" },
+    body: JSON.stringify({
+      id: messageId,
+      type: "message.posted",
+      data: { messageId, body: `probe-nonce ${nonce}` }
+    }),
+    redirect: "manual",
+    signal: AbortSignal.timeout(limitMs)
+  });
+  await readLimited(response);
+  if (response.status !== 200 && response.status !== 201) return fail("room-post", response.status, "http_status");
+  return pass("room-post", response.status);
+}
+
+async function readLatest(origin, fetchImpl, limitMs, token, nonce) {
+  const url = apiUrl(origin, `/api/rooms/${encodeURIComponent(QA_ROOM_ID)}/conversation`);
+  url.searchParams.set("limit", "1");
+  const response = await fetchImpl(url, {
+    method: "GET",
+    headers: authHeaders(token),
+    redirect: "manual",
+    signal: AbortSignal.timeout(limitMs)
+  });
+  const body = await readLimited(response);
+  if (response.status !== 200) return fail("room-read", response.status, "http_status");
+  let parsed;
+  try { parsed = JSON.parse(body); } catch { return fail("room-read", 200, "invalid_json"); }
+  if (!Array.isArray(parsed?.messages)) return fail("room-read", 200, "messages_missing");
+  if (nonce) {
+    const latest = parsed.messages.at(-1);
+    if (latest?.body !== `probe-nonce ${nonce}`) return fail("room-read", 200, "nonce_missing");
+  }
+  return pass("room-read", 200);
+}
+
+async function runUserPath(origin, fetchImpl, limitMs, token, synthetic, nonceEvery) {
+  const steps = [];
+  const open = await checkCall("room-open", () => openProbeRoom(origin, fetchImpl, limitMs, token));
+  steps.push(open);
+  const runs = Math.min(synthetic.runs + 1, 1_000_000);
+  let lastNonce = synthetic.lastNonce;
+  if (open.ok && runs % nonceEvery === 0) {
+    const nonce = crypto.randomUUID().replaceAll("-", "");
+    const posted = await checkCall("room-post", () => postNonce(origin, fetchImpl, limitMs, token, nonce));
+    steps.push(posted);
+    if (posted.ok) lastNonce = nonce;
+  }
+  steps.push(await checkCall("room-read", () => readLatest(origin, fetchImpl, limitMs, token, lastNonce)));
+  return { steps, synthetic: { runs, lastNonce } };
 }
 
 export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
@@ -335,7 +522,16 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
   if (!origin) return { ok: false, error: "invalid_origin", checks: [], alerts: [], consecutiveFailures: null };
   const loaded = await loadState(env.PROBE_STATE);
   if (loaded.error) throw new ProbeStateError(loaded.error);
-  const checks = await runChecks(origin, fetchImpl, limitMs);
+  const qa = qaCredential(env);
+  let syntheticState = null;
+  const checks = await runChecks(origin, fetchImpl, limitMs, async () => {
+    if (qa.inert === "invalid") return [{ ...fail("room-open", null, "token_invalid"), latencyMs: 0 }];
+    if (!qa.token) return [];
+    const prior = await loadSynthetic(env.PROBE_STATE);
+    const user = await runUserPath(origin, fetchImpl, limitMs, qa.token, prior, nonceEveryRuns(env));
+    syntheticState = user.synthetic;
+    return user.steps;
+  });
   const failed = checks.some(check => !check.ok);
   const at = new Date().toISOString();
   const previous = loaded.state;
@@ -353,8 +549,9 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
       alertedRoom: previous.alertedRoom,
       lastAt: at
     };
+  const persisted = () => ({ synthetic: syntheticState, last: statusSnapshot(origin, checks, state, at) });
   try {
-    await saveState(env.PROBE_STATE, state);
+    await saveState(env.PROBE_STATE, state, persisted());
   } catch (error) {
     throw new ProbeStateError("state_unwritable", { cause: error });
   }
@@ -367,7 +564,7 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
     return { ok: !failed, error: null, checks, alerts, consecutiveFailures: state.consecutiveFailures };
   }
   const kind = page ? "outage" : "recovery";
-  const notice = page ? outageNotice(origin, checks, state.incidentId) : recoveryNotice(origin, state.incidentId);
+  const notice = page ? outageNotice(origin, checks, state.incidentId) : recoveryNotice(origin, state.incidentId, checks);
   const body = payload(kind, origin, state, checks, at);
   const jobs = [];
   if (page ? !state.alertedWebhook : state.alertedWebhook) {
@@ -401,9 +598,50 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
   await Promise.all(jobs);
   if (recover && !state.alertedWebhook && !state.alertedRoom) state = { ...state, incidentId: null };
   try {
-    await saveState(env.PROBE_STATE, state);
+    await saveState(env.PROBE_STATE, state, persisted());
   } catch (error) {
     throw new ProbeStateError("state_unwritable", { cause: error });
   }
   return { ok: !failed, error: null, checks, alerts, consecutiveFailures: state.consecutiveFailures };
+}
+
+const STATUS_HEADERS = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store"
+};
+
+function redactStatus(json, env) {
+  let out = json;
+  for (const secret of [env?.PROBE_QA_TOKEN, env?.PROBE_ROOM_TOKEN, env?.ROOM_AGENT_TOKEN, env?.PROBE_ALERT_WEBHOOK_URL]) {
+    const value = text(secret);
+    if (value.length >= 8) out = out.split(value).join("[redacted]");
+  }
+  return out;
+}
+
+export async function probeStatusResponse(request, env = {}) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(JSON.stringify({ schema: STATUS_SCHEMA, error: "method_not_allowed" }), {
+      status: 405,
+      headers: { ...STATUS_HEADERS, allow: "GET, HEAD" }
+    });
+  }
+  const kv = env?.PROBE_STATE;
+  if (!kv || typeof kv.get !== "function") {
+    return new Response(redactStatus(JSON.stringify({
+      schema: STATUS_SCHEMA, ok: null, error: "state_unbound", checks: [], at: null
+    }), env), { status: 503, headers: STATUS_HEADERS });
+  }
+  let raw;
+  try {
+    raw = await kv.get(LAST_KEY, "json");
+  } catch {
+    return new Response(redactStatus(JSON.stringify({
+      schema: STATUS_SCHEMA, ok: null, error: "state_unreadable", checks: [], at: null
+    }), env), { status: 503, headers: STATUS_HEADERS });
+  }
+  const body = raw
+    ? publicStatus(raw)
+    : { schema: STATUS_SCHEMA, ok: null, error: "no_result", checks: [], at: null, consecutiveFailures: null };
+  return new Response(redactStatus(JSON.stringify(body), env), { status: 200, headers: STATUS_HEADERS });
 }
