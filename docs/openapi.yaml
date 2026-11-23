@@ -19789,6 +19789,10 @@ paths:
           in: query
           schema: { type: string }
           description: Exact previous or current file path for the file view
+        - name: artifact
+          in: query
+          schema: { type: string }
+          description: Exact Workspace changes link binding the publisher, revision, commit and patch digest
         - name: frame
           in: query
           schema: { type: integer, minimum: 1 }
@@ -19802,6 +19806,7 @@ paths:
         '404': { description: Selected preview unavailable }
     post:
       summary: Publish or update a local build preview as its publisher
+      x-room-permission: complete_work
       requestBody:
         required: true
         content:
@@ -19818,6 +19823,7 @@ paths:
                 html: { type: string, description: Standalone HTML limited to 384 KiB UTF-8 }
                 patch: { type: string, description: Optional committed unified patch limited to 192 KiB UTF-8 }
                 output: { type: string, description: Optional plain-text run output limited to 24 KiB UTF-8 }
+                recipientId: { type: string, description: Optional active room member who can read the directed preview }
                 expectedRevision: { type: integer, minimum: 0 }
       responses:
         '200': { description: Published preview metadata and revision }
@@ -19825,6 +19831,7 @@ paths:
         '409': { description: Preview revision or storage limit changed }
     delete:
       summary: Remove a preview as its publisher or the room owner
+      x-room-permission: member
       requestBody:
         required: true
         content:
