@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {Bridge} from '../room-acp/src/bridge.mjs';
 import {ThreadQueue} from '../room-acp/src/queue.mjs';
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 test('four refilled threads yield the next slot to an already-routed fresh thread without losing any batch',async()=>{
@@ -42,4 +43,27 @@ test('a failed batch still yields its slot and does not drop the next same-threa
  queue.push('a',{signalId:'a0'});await flush();queue.push('a',{signalId:'a1'});queue.push('b',{signalId:'b0'});
  rejectFirst(Error('Synthetic execution failure'));await queue.idle();
  assert.deepEqual(calls,[['a',['a0']],['b',['b0']],['a',['a1']]]);
+});
+
+test('an adapter closing an idle session cannot hold the next turn slot', async () => {
+  const close = Promise.withResolvers();
+  const cleanupStarted = Promise.withResolvers();
+  const calls = [];
+  const bridge = new Bridge({
+    connection: { apiBase: 'http://localhost', roomId: 'room', memberId: 'agent', hostId: 'fixture' },
+    persistSessions: false,
+    maxSessions: 1,
+    host: { trimIdleSessions: async () => { cleanupStarted.resolve(); await close.promise; } },
+  });
+  bridge.turn = async key => { calls.push(key); };
+  bridge.queue.push('finished', { signalId: 'first' });
+  bridge.queue.push('unrelated', { signalId: 'second' });
+  try {
+    await cleanupStarted.promise;
+    await flush();
+    assert.deepEqual([...calls], ['finished', 'unrelated']);
+  } finally {
+    close.resolve();
+    await bridge.queue.idle();
+  }
 });
