@@ -24,7 +24,7 @@ const syntheticAnswer4141 = Array.from({length:20}, (_, index) => `Step ${index 
 async function fixture(t, options = {}) {
   const home = mkdtempSync(join(tmpdir(), 'formal-bridge-'));
   const database = options.persist ? join(home,'room.sqlite') : ':memory:';
-  const store = new RoomStore(database), seeded = seedScopedInbox(store);
+  const store = new RoomStore(database), seeded = seedScopedInbox(store, { representation: options.representation });
   const server = createRoomServer({store});
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let closed = false;
@@ -224,16 +224,23 @@ test('a response prepared before new context cannot silently refresh its basis o
   assert.ok((await f.read(bridge)).page.items.some(item=>item.message?.body.includes('draft for review, not a completed answer')));
 });
 
-test('a cancelled request does not receive a stale draft on delivery or restart', async t => {
+for (const atDraft of [false, true]) test(`a cancellation before the ${atDraft ? 'draft' : 'answer'} write leaves the ACP draft local across restart`, async t => {
   const f = await fixture(t, {persist:true});
-  let formalPosts = 0, draftPosts = 0;
+  let formalPosts = 0, draftPosts = 0, draftWrites = 0;
+  const cancel = () => f.store.command(f.seeded.owner, 'commons', {id:'cancel-before-write',type:'reply_request.cancelled',
+    data:{requestMessageId:'dm',expectedRequestRevision:0,reason:'Assigned to a replacement'}});
   const transport = async (url, options) => {
     const command = options?.body ? JSON.parse(options.body) : null;
     if (command?.data?.responseToRequestId && ++formalPosts === 1) {
-      f.store.command(f.seeded.owner, 'commons', {id:'cancel-before-answer',type:'reply_request.cancelled',
-        data:{requestMessageId:'dm',expectedRequestRevision:0,reason:'Assigned to a replacement'}});
-    } else if (command?.type === 'message.posted') draftPosts++;
-    return fetch(url, options);
+      if (atDraft) f.store.command(f.seeded.owner, 'commons', {id:'correction-before-answer',type:'message.posted',
+        data:{messageId:'correction-before-answer',replyToId:'dm',toMemberId:'worker',body:'Use the corrected candidate'}});
+      else cancel();
+    }
+    const draft = command?.type === 'message.posted' && !command.data.responseToRequestId;
+    if (draft && ++draftPosts === 1 && atDraft) cancel();
+    const response = await fetch(url, options);
+    if (draft && response.ok) draftWrites++;
+    return response;
   };
   const first = f.make(transport); await f.ready(first); await first.turn('dm', [f.wake]);
   const second = f.make(transport); await f.ready(second); await second.turn('dm', [f.wake]);
@@ -241,15 +248,34 @@ test('a cancelled request does not receive a stale draft on delivery or restart'
   assert.equal(current.request.status, 'cancelled');
   assert.equal(current.page.items.find(item => item.kind === 'cancelled').reason, 'Assigned to a replacement');
   assert.equal(formalPosts, 1);
-  assert.equal(draftPosts, 0);
+  assert.equal(draftPosts, 1);
+  assert.equal(draftWrites, 0);
+  assert.equal(current.page.items.some(item => item.message?.body.includes('Useful verified answer')), false);
   assert.equal(f.counts.prompts, 1);
   const receipt = second.chatReceipts.read(second.chatReceipts.key(f.wake.signalId));
   assert.equal(receipt.phase, 'discarded');
-  assert.equal(receipt.disposition, 'request_cancelled');
+  assert.equal(receipt.disposition, 'formal_draft_request_closed');
   assert.match(receipt.body, /Useful verified answer/);
 });
 
-test('lost stale-draft response retries only that draft and never resends the rejected formal answer', async t => {
+for (const representation of [null, 'normalized-current-v1']) test(`guarded draft stays private and refuses an already closed request (${representation ?? 'legacy'})`, async t => {
+  const f = await fixture(t, {representation});
+  const data = {messageId:'guarded-draft',replyToId:'dm',toMemberId:'owner',body:'A draft',ifOpenReplyRequestId:'dm'};
+  const send = (key, changes, id = 'guarded-draft') =>
+    f.store.command(key, 'commons', {id,type:'message.posted',data:{...data,messageId:id,...changes}});
+  assert.throws(() => send(f.seeded.owner), {status:404,code:'request_not_found'});
+  assert.throws(() => send(f.seeded.token, {toMemberId:'other'}), {status:404,code:'request_not_found'});
+  assert.throws(() => send(f.seeded.token, {replyToId:'hidden'}), {status:422,code:'invalid_command'});
+  const saved = send(f.seeded.token);
+  assert.equal(saved.event.data.toMemberId, 'owner');
+  assert.equal(Object.hasOwn(saved.event.data, 'ifOpenReplyRequestId'), false);
+  f.store.command(f.seeded.owner, 'commons', {id:'cancel-guarded',type:'reply_request.cancelled',
+    data:{requestMessageId:'dm',expectedRequestRevision:0,reason:'Reassigned'}});
+  assert.throws(() => send(f.seeded.token, {}, 'late-draft'), {status:409,code:'formal_draft_request_closed'});
+  assert.equal(send(f.seeded.token).sequence, saved.sequence);
+});
+
+for (const closeBeforeRetry of [false, true]) test(`lost stale-draft response recovers the original write (closed before retry: ${closeBeforeRetry})`, async t => {
   const f=await fixture(t);let inject=true, lose=true, formalPosts=0;const drafts=[];
   const transport=async(url,options)=>{
     const command=options?.body ? JSON.parse(options.body) : null;
@@ -262,9 +288,11 @@ test('lost stale-draft response retries only that draft and never resends the re
     return response;
   };
   const first=f.make(transport);await f.ready(first);await first.turn('dm',[f.wake]);
+  if (closeBeforeRetry) f.store.command(f.seeded.owner,'commons',{id:'cancel-after-draft',type:'reply_request.cancelled',
+    data:{requestMessageId:'dm',expectedRequestRevision:0,reason:'Another reviewer took this'}});
   const second=f.make(transport);await f.ready(second);await second.turn('dm',[f.wake]);
   assert.equal(formalPosts,1);assert.equal(f.counts.prompts,1);assert.equal(drafts.length,2);assert.equal(new Set(drafts).size,1);
-  const current=await f.read(second);assert.equal(current.request.status,'open');
+  const current=await f.read(second);assert.equal(current.request.status,closeBeforeRetry?'cancelled':'open');
   assert.equal(current.page.items.filter(item=>item.message?.body.includes('draft for review, not a completed answer')).length,1);
   assert.equal(second.chatReceipts.read(second.chatReceipts.key(f.wake.signalId)).phase,'posted');
 });

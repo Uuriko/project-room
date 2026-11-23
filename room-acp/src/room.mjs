@@ -177,10 +177,10 @@ export class RoomClient {
     return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/reply-context?requestMessageId=${encodeURIComponent(requestMessageId)}`
       + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '') + (compact ? '&view=compact' : ''), { signal });
   }
-  async post({ body, replyToId = null, toMemberId: directTo = null, messageId = `acp-${randomUUID()}`, requestId = randomUUID(), listenerToken = this.listenerToken }) {
+  async post({ body, replyToId = null, toMemberId: directTo = null, messageId = `acp-${randomUUID()}`, requestId = randomUUID(), listenerToken = this.listenerToken, ifOpenReplyRequestId }) {
     const parent = replyToId ? (await this.thread(replyToId, {selected:true})).thread : null;
     const toMemberId = !parent && directTo ? directTo : parent?.toMemberId ? (parent.authorId === this.memberId ? parent.toMemberId : parent.authorId) : null;
-    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/commands`, { body: { id: requestId, type: "message.posted", data: { messageId, body, ...(replyToId ? { replyToId } : {}), ...(toMemberId ? { toMemberId } : {}) } }, listenerToken })
+    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/commands`, { body: { id: requestId, type: "message.posted", data: { messageId, body, ...(replyToId ? { replyToId } : {}), ...(toMemberId ? { toMemberId } : {}), ...(ifOpenReplyRequestId ? { ifOpenReplyRequestId } : {}) } }, listenerToken })
       .then(() => ({ messageId }));
   }
 }

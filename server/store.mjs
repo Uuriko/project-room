@@ -741,7 +741,7 @@ const shapes = {
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
-  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll ifOpenReplyRequestId ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -7355,6 +7355,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ?? this.canonicalMessageEditContext(roomId, command);
       let room = messageContext?.room ?? this.room(roomId);
       if(!isArchivedOwnerPrivacyEvent(room.state,{type:command.type,actorId:auth.member.id}))refuseArchivedWrite(room.state);
+      if (command.type === T.MESSAGE_POSTED && Object.hasOwn(command.data, "ifOpenReplyRequestId")) {
+        const { ifOpenReplyRequestId, ...data } = command.data;
+        if (!validId(ifOpenReplyRequestId) || data.replyToId !== ifOpenReplyRequestId
+          || REPLY_FIELDS.some(field => Object.hasOwn(data, field)))
+          fail(422, "invalid_command", "A guarded draft must be an ordinary reply to its exact request");
+        const requests = room.state.replyRequests ?? {};
+        const request = Object.hasOwn(requests, ifOpenReplyRequestId) ? requests[ifOpenReplyRequestId] : null;
+        if (request?.recipientId !== auth.member.id || data.toMemberId !== request.requesterId)
+          fail(404, "request_not_found", "No reply request addressed to this recipient");
+        if (request.status !== "open")
+          fail(409, "formal_draft_request_closed", "The addressed request is closed. Read it before taking another action.");
+        // The fingerprint includes this live precondition. The stored event does not.
+        command = { ...command, data };
+      }
       if (firstAck || exactProgress) {
         const { ifUnacknowledgedContextEventId, ifCurrentContextEventId, ...data } = command.data;
         const requests = room.state.replyRequests ?? {};
