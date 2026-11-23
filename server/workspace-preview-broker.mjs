@@ -55,6 +55,10 @@ const tokenMatches = (left, right) => typeof left === "string" && /^[a-f0-9]{64}
 export function createWorkspacePreviewBroker({ key, cert }, consumeGrant) {
   const publications = new Map(), generations = new Map(), sockets = new Set();
   let generation = 0;
+  function matchingPublisher(selection) {
+    const peer = publications.get(publicationKey(selection));
+    return peer && sameSelection(peer.selection, selection) ? peer : undefined;
+  }
 
   function retire(peer) {
     if (publications.get(peer.key) !== peer) return;
@@ -69,12 +73,13 @@ export function createWorkspacePreviewBroker({ key, cert }, consumeGrant) {
     if (!record(hello)) return socket.destroy();
     if (hello.type === "publisher") {
       if (!record(hello.selection)
+        || (hello.port !== undefined && (!Number.isInteger(hello.port) || hello.port < 1 || hello.port > 65535))
         || publications.size >= 64 && !publications.has(publicationKey(hello.selection))) return socket.destroy();
       const selection = consumeGrant(hello.grant, hello.selection);
       if (!selection) return socket.destroy();
       const key = publicationKey(selection), previous = publications.get(key);
       if (previous) retire(previous);
-      const peer = { key, selection, generation: ++generation, token: randomBytes(32).toString("hex"),
+      const peer = { key, selection, port: hello.port, generation: ++generation, token: randomBytes(32).toString("hex"),
         control: socket, pending: new Map(), lanes: new Set() };
       publications.set(key, peer);
       generations.set(peer.generation, peer);
@@ -107,9 +112,10 @@ export function createWorkspacePreviewBroker({ key, cert }, consumeGrant) {
 
   return {
     server,
-    generationFor(selection) {
-      const peer = publications.get(publicationKey(selection));
-      return peer && sameSelection(peer.selection, selection) ? peer.generation : undefined;
+    generationFor(selection) { return matchingPublisher(selection)?.generation; },
+    registrationFor(selection) {
+      const peer = matchingPublisher(selection);
+      return peer && { generation: peer.generation, port: peer.port };
     },
     retire(selection, generation) {
       const peer = generations.get(generation);
@@ -118,8 +124,8 @@ export function createWorkspacePreviewBroker({ key, cert }, consumeGrant) {
       return true;
     },
     openLane(selection, callback) {
-      const peer = publications.get(publicationKey(selection));
-      if (!peer || !sameSelection(peer.selection, selection) || peer.pending.size + peer.lanes.size >= 64) {
+      const peer = matchingPublisher(selection);
+      if (!peer || peer.pending.size + peer.lanes.size >= 64) {
         callback(Error("Workspace publisher unavailable"));
         return;
       }

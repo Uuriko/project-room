@@ -135,7 +135,7 @@ export function createWorkspacePreviewViewer({ origin }, broker) {
     if (url.pathname === bootstrapPath) return url.search ? denyNavigation(req, res) : claim(req, res, session);
     if (!["GET", "HEAD"].includes(req.method) || !hasSession(req, session) || !track(session, res)) return denyNavigation(req, res);
     const upstream = request({ hostname: "127.0.0.1", path: url.pathname + url.search, method: req.method,
-      agent: session.agent, headers: { Accept: req.headers.accept ?? "*/*" } }, reply => {
+      agent: session.agent, headers: { Host: session.upstreamHost, Accept: req.headers.accept ?? "*/*" } }, reply => {
       if (!current(session) || reply.statusCode !== 200) {
         reply.destroy();
         return res.destroyed ? undefined : denyNavigation(req, res);
@@ -158,7 +158,7 @@ export function createWorkspacePreviewViewer({ origin }, broker) {
       || req.headers["sec-websocket-version"] !== "13" || !/^[A-Za-z0-9+/]{22}==$/.test(req.headers["sec-websocket-key"] ?? "")
       || !track(session, socket)) return socket.destroy();
     const upstream = request({ hostname: "127.0.0.1", path: url.pathname + url.search, agent: session.agent,
-      headers: { Connection: "Upgrade", Upgrade: "websocket", Origin: session.origin, "Sec-WebSocket-Version": "13",
+      headers: { Host: session.upstreamHost, Connection: "Upgrade", Upgrade: "websocket", Origin: session.origin, "Sec-WebSocket-Version": "13",
         "Sec-WebSocket-Key": req.headers["sec-websocket-key"], ...(protocol && { "Sec-WebSocket-Protocol": protocol }) } });
     socket.once("close", () => upstream.destroy());
     upstream.once("error", () => socket.destroy());
@@ -187,13 +187,17 @@ export function createWorkspacePreviewViewer({ origin }, broker) {
     server,
     hasPublisher(selection) { return Boolean(broker.generationFor(selection)); },
     issue(selection, viewerKey, canRead) {
-      const generation = broker.generationFor(selection);
-      if (!generation || !canRead() || sessions.size >= sessionLimit) return null;
+      const registration = broker.registrationFor(selection);
+      if (!registration || !canRead() || sessions.size >= sessionLimit) return null;
       const active = [...sessions.values()].filter(session => session.viewerKey === viewerKey && current(session));
       if (active.length >= viewerSessionLimit) return null;
       const url = new URL(origin);
       url.hostname = "view-" + randomBytes(12).toString("hex") + "." + origin.hostname;
-      const session = { origin: url.origin, host: url.host, selection, generation, viewerKey, canRead, streams: new Set(),
+      // The advertised port only sets HTTP Host. The lane still uses the
+      // exact publisher selected by the authorized viewer.
+      const upstreamHost = registration.port === undefined ? "127.0.0.1" : `127.0.0.1:${registration.port}`;
+      const session = { origin: url.origin, host: url.host, upstreamHost, selection, generation: registration.generation,
+        viewerKey, canRead, streams: new Set(),
         ticket: token(), secret: token(), ticketExpires: Date.now() + ticketMs, claimed: false, agent: new Agent({ keepAlive: false }) };
       session.agent.createConnection = (_options, callback) => {
         if (!current(session)) return callback(Error("Workspace preview is unavailable"));
