@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -35,6 +35,20 @@ test("route check distinguishes requester, work and exact request scope without 
   assert.deepEqual(check("codex", "-", "approved"), { status: "matches_scope", liveness: "unknown" });
   assert.equal(checkMuseRoute({ ...policy, allowStandaloneRequests: true }, { requesterId: "codex", workItemId: null }), "matches_scope");
   assert.deepEqual(readdirSync(directory), ["handoff.json"]);
+});
+
+test("Muse handoff CLI starts through an alias to its script directory", t => {
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), "muse-cli-alias-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const alias = join(directory, "scripts");
+  const config = join(directory, "handoff.json");
+  writeFileSync(config, JSON.stringify(policy), { mode: 0o600 });
+  symlinkSync(fileURLToPath(new URL("../scripts/", import.meta.url)), alias, "junction");
+  const result = spawnSync(process.execPath, [join(alias, "muse-stream-handoff.mjs"), config, "-", "--check-route", "codex", "ready"], {
+    encoding: "utf8", input: JSON.stringify({ ...connection, version: 1, token: "T".repeat(43) }), timeout: 5000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { status: "matches_scope", liveness: "unknown" });
 });
 
 test("one handoff skips unrelated, acknowledged, closed and old requests and preserves the next ready request", async () => {

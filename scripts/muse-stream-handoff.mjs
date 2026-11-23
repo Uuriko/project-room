@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { on } from "node:events";
-import { lstatSync, realpathSync, watch } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, lstatSync, realpathSync, watch } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { readAgentConnection, readConnectionInput } from "../client/agent-connection.mjs";
@@ -351,7 +351,7 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   } finally { process.removeListener("SIGINT", interrupt); process.removeListener("SIGTERM", interrupt); owner.close(); }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+if (process.argv[1] && existsSync(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
   main(process.argv.slice(2)).catch(error => {
     console.error(error.handoffStage ? `${error.handoffStage}: ${error.code ?? error.name}` : error.code ?? error.message);
     process.exitCode = 1;
