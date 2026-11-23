@@ -208,7 +208,8 @@ async function openLivePreview(ctx) {
   const item = publication();
   if (!item?.recipientId || item.revision !== input.revision) ctx.reject(404, "preview_not_found", "This live preview is unavailable");
   const selection = { roomId, id: input.id, revision: input.revision, publisherId: item.publisherId };
-  const openUrl = workspacePreviewViewer.issue(selection, () => {
+  const viewerKey = JSON.stringify(auth.account ? ["account", auth.account.id] : ["member", roomId, viewerId]);
+  const openUrl = workspacePreviewViewer.issue(selection, viewerKey, () => {
     const current = authorize(ctx, place, "rooms:read");
     const preview = publication();
     return current.member.id === viewerId && !readAccountRoomRow(store, roomId)?.archived_at

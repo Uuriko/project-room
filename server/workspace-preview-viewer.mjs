@@ -4,6 +4,7 @@ import { pipeline } from "node:stream";
 
 const bootstrapPath = "/.room-preview";
 const ticketMs = 30_000, sessionMs = 30 * 60_000, sessionLimit = 64;
+const viewerSessionLimit = 4, authorizationIntervalMs = 5_000;
 const token = () => randomBytes(32).toString("hex");
 const matches = (value, expected) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)
   && timingSafeEqual(Buffer.from(value, "hex"), Buffer.from(expected, "hex"));
@@ -46,6 +47,7 @@ export function createWorkspacePreviewViewer({ origin }, broker) {
   function retire(session) {
     if (!sessions.delete(session.host)) return;
     clearTimeout(session.timer);
+    clearInterval(session.authorizationTimer);
     session.agent.destroy();
     for (const stream of session.streams) stream.destroy();
   }
@@ -71,8 +73,16 @@ export function createWorkspacePreviewViewer({ origin }, broker) {
   }
   function track(session, stream) {
     if (session.streams.size >= 24) return false;
+    if (session.streams.size === 0) {
+      // Credential changes need not emit a Room event. Revalidate only while
+      // a response or upgraded connection can keep delivering bytes.
+      session.authorizationTimer = setInterval(() => current(session), authorizationIntervalMs).unref();
+    }
     session.streams.add(stream);
-    stream.once("close", () => session.streams.delete(stream));
+    stream.once("close", () => {
+      session.streams.delete(stream);
+      if (session.streams.size === 0) clearInterval(session.authorizationTimer);
+    });
     return true;
   }
   function readHeaders(session) {
@@ -167,12 +177,14 @@ export function createWorkspacePreviewViewer({ origin }, broker) {
   return {
     server,
     hasPublisher(selection) { return Boolean(broker.generationFor(selection)); },
-    issue(selection, canRead) {
+    issue(selection, viewerKey, canRead) {
       const generation = broker.generationFor(selection);
       if (!generation || !canRead() || sessions.size >= sessionLimit) return null;
+      const active = [...sessions.values()].filter(session => session.viewerKey === viewerKey && current(session));
+      if (active.length >= viewerSessionLimit) return null;
       const url = new URL(origin);
       url.hostname = "view-" + randomBytes(12).toString("hex") + "." + origin.hostname;
-      const session = { origin: url.origin, host: url.host, selection, generation, canRead, streams: new Set(),
+      const session = { origin: url.origin, host: url.host, selection, generation, viewerKey, canRead, streams: new Set(),
         ticket: token(), secret: token(), ticketExpires: Date.now() + ticketMs, claimed: false, agent: new Agent({ keepAlive: false }) };
       session.agent.createConnection = (_options, callback) => {
         if (!current(session)) return callback(Error("Workspace preview is unavailable"));
