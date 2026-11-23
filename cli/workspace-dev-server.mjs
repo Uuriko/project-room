@@ -1,4 +1,4 @@
-import { execFileSync, fork } from "node:child_process";
+import { execFile, fork } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -7,10 +7,12 @@ import { outputBytes } from "../server/workspace-previews.mjs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 import { portForPath } from "../third_party/buzz-worktree/port.mjs";
 import { commandOnPath } from "./which.mjs";
 
 const host = "127.0.0.1";
+const execute = promisify(execFile);
 const supervisor = fileURLToPath(new URL("./workspace-process-supervisor.mjs", import.meta.url));
 
 function reservePort(port) {
@@ -36,27 +38,27 @@ async function choosePort(cwd, requested) {
   }
 }
 
-function ownsLoopback(lsof, ps, port, group) {
+async function ownsLoopback(lsof, ps, port, group, peerPort) {
+  if (!group) return false;
+  const expected = peerPort ? `n${host}:${port}->${host}:${peerPort}` : `n${host}:${port}`;
+  const state = peerPort ? "ESTABLISHED" : "LISTEN";
   let result;
   try {
-    result = execFileSync(lsof, ["-nP", "-a", "-i4TCP:" + port, "-sTCP:LISTEN", "-Fpn"], {
-      encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"],
-    });
+    ({ stdout: result } = await execute(lsof, ["-nP", "-a", "-i4TCP:" + port, "-sTCP:" + state, "-Fpn"],
+      { encoding: "utf8", timeout: 2000 }));
   } catch (error) {
-    if (error.status === 1 && !error.stdout) return false;
+    if (error.code === 1 && !error.stdout) return false;
     throw error;
   }
   let pid;
   for (const line of result.split("\n")) {
     if (/^p\d+$/.test(line)) pid = line.slice(1);
-    if (line !== `n${host}:${port}` || !pid) continue;
+    if (line !== expected || !pid) continue;
     try {
-      const actual = execFileSync(ps, ["-o", "pgid=", "-p", pid], {
-        encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"],
-      });
+      const { stdout: actual } = await execute(ps, ["-o", "pgid=", "-p", pid], { encoding: "utf8", timeout: 2000 });
       if (Number(actual.trim()) === group) return true;
     } catch (error) {
-      if (error.status !== 1) throw error;
+      if (error.code !== 1) throw error;
     }
   }
   return false;
@@ -106,9 +108,9 @@ function captureRunLog(cwd, file) {
   };
 }
 
-// Only invoked by a local operator with an explicit argv. It receives no
-// Room credentials and opens no remote port. Child output stays on stderr.
-export async function runWorkspaceServer({ cwd, command, args, requestedPort, logPath, out, env = process.env }) {
+// The supervised child receives no Room credentials and opens a local port.
+// An explicitly requested publisher is attached by the parent process only.
+export async function runWorkspaceServer({ cwd, workingDirectory = cwd, command, args, requestedPort, logPath, out, env = process.env, attach }) {
   const lsof = commandOnPath("lsof", env), ps = commandOnPath("ps", env);
   if (!["linux", "darwin"].includes(process.platform) || !lsof || !ps)
     throw new Error("Local preview ownership checks require macOS or Linux with lsof and ps");
@@ -118,7 +120,7 @@ export async function runWorkspaceServer({ cwd, command, args, requestedPort, lo
     .filter(key => typeof env[key] === "string").map(key => [key, env[key]]));
   const log = logPath === undefined ? null : captureRunLog(cwd, logPath);
   const child = fork(supervisor, [command, ...argv], {
-    cwd, env: { ...localEnv, PORT: String(port), HOST: host }, detached: true,
+    cwd: workingDirectory, env: { ...localEnv, PORT: String(port), HOST: host }, detached: true,
     stdio: ["ignore", log ? "pipe" : 2, log ? "pipe" : 2, "ipc"],
   });
   const outputClosed = log && new Promise(resolveClose => child.once("close", resolveClose));
@@ -133,10 +135,13 @@ export async function runWorkspaceServer({ cwd, command, args, requestedPort, lo
     child.once("exit", (code, signal) => { result ??= { code, signal }; resolve(); });
   });
   const disconnect = () => { if (child.connected) child.disconnect(); };
+  const publisherLifetime = new AbortController();
+  if (attach) exited.then(() => publisherLifetime.abort());
   let shutdownTimer;
   const stop = () => {
     if (stopping) return;
     stopping = true;
+    publisherLifetime.abort();
     if (child.connected && child.pid) {
       try { process.kill(-child.pid, "SIGTERM"); }
       catch { disconnect(); }
@@ -145,12 +150,29 @@ export async function runWorkspaceServer({ cwd, command, args, requestedPort, lo
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  let previewFailure;
+  let previewFailure, publisher;
+  const ownsPort = peerPort => ownsLoopback(lsof, ps, port, child.pid, peerPort);
+  const ownsConnection = async peerPort => {
+    const deadline = performance.now() + 1000;
+    do {
+      if (await ownsPort(peerPort)) return true;
+      if (publisherLifetime.signal.aborted || performance.now() >= deadline) return false;
+      // A TCP connect can complete before a busy dev server accepts it.
+      await delay(40, undefined, { signal: publisherLifetime.signal });
+    } while (performance.now() < deadline);
+    return false;
+  };
   try {
     const deadline = performance.now() + 15000;
     while (!result && !stopping && performance.now() < deadline) {
-      if (ownsLoopback(lsof, ps, port, child.pid)) {
-        out({ state: "ready", path: cwd, preferredPort: preferred, port, previewUrl: `http://${host}:${port}/`, ...(log && { log: log.path }) });
+      if (await ownsPort() && !result && !stopping) {
+        if (attach) {
+          publisher = await attach({ port, ownsPort: ownsConnection, signal: publisherLifetime.signal });
+          publisher.closed.then(() => {
+            if (!publisherLifetime.signal.aborted) process.stderr.write("Live Workspace sharing ended. The local preview is still running.\n");
+          });
+        }
+        out({ state: "ready", path: cwd, ...(workingDirectory !== cwd && { workingDirectory }), preferredPort: preferred, port, previewUrl: `http://${host}:${port}/`, ...(log && { log: log.path }), ...(publisher && { live: publisher.live }) });
         await exited;
         if (stopping) return 0;
         if (result.error) throw new Error("Preview command failed: " + result.error);
@@ -163,9 +185,11 @@ export async function runWorkspaceServer({ cwd, command, args, requestedPort, lo
       : result ? "Preview command exited before its loopback listener was ready"
         : "The command did not open the assigned loopback port");
   } catch (error) {
+    if (stopping) return 0;
     previewFailure = error;
     throw error;
   } finally {
+    publisherLifetime.abort();
     if (!stopping) disconnect();
     await exited;
     clearTimeout(shutdownTimer);

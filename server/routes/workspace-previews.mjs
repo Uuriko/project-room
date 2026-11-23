@@ -61,6 +61,12 @@ function authorize(ctx, place, needed) {
   return auth;
 }
 
+function viewerBinding(roomId, auth) {
+  return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
+    viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding ?? null,
+    viewerSessionRevision: auth.sessionRevision ?? null };
+}
+
 async function serveWorkspacePreviews(ctx) {
   const { req, res, store, url } = ctx;
   const roomId = ctx.params.roomId;
@@ -92,9 +98,14 @@ async function serveWorkspacePreviews(ctx) {
   if (reading) {
     ctx.rate(`read:${auth.credentialHash}`, 600);
     const previews = workspacePreviews(store.db, { create: false });
-    const viewer = { roomId, viewerId, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-      viewerSessionBinding: auth.sessionBinding ?? null, viewerSessionRevision: auth.sessionRevision ?? null };
-    if (id === null) return ctx.json(res, 200, { ...viewer, items: previews?.list(roomId, viewerId) ?? [] });
+    const viewer = viewerBinding(roomId, auth);
+    if (id === null) {
+      const items = previews?.list(roomId, viewerId) ?? [];
+      return ctx.json(res, 200, { ...viewer, items: ctx.workspacePreviewViewer
+        ? items.map(item => ({ ...item, liveAvailable: !!item.recipientId
+          && ctx.workspacePreviewViewer.hasPublisher({ ...item, roomId }) }))
+        : items });
+    }
     const item = previews?.get(roomId, id, viewerId, changeRead ? "changes" : outputRead ? "output" : undefined);
     if (!item) ctx.reject(404, "preview_not_found", "This preview is unavailable");
     if (exact && (item.revision !== exact.revision || item.head !== exact.head || item.publisherId !== exact.publisherId
@@ -136,15 +147,102 @@ async function serveWorkspacePreviews(ctx) {
       : previews.publish(roomId, viewerId, input, Date.now(), ctx.reject);
   });
   const { changed, ...value } = result;
-  if (changed) ctx.workspacePreviewChanged?.(roomId, value.recipientId ? [value.publisherId, value.recipientId] : null);
+  if (changed) ctx.workspacePreviewChanged?.(roomId, value.recipientId ? [value.publisherId, value.recipientId] : null,
+    input.expectedRevision > 0
+      ? { roomId, id: input.id, revision: input.expectedRevision, publisherId: value.publisherId }
+      : null);
   return ctx.json(res, 200, removing ? { removed: true } : value);
 }
 
-export const WORKSPACE_PREVIEW_ROUTES = Object.freeze(["GET", "POST", "DELETE"].map(method => Object.freeze({
+function mayRegisterPublisher(auth) {
+  return auth.credentialScope === "room" && auth.member.permissions.includes("complete_work")
+    && (auth.kind !== "api-key" || auth.apiKeyScopes?.some(scope => scope === "rooms:write" || scope === "rooms:*"));
+}
+
+async function issuePublisherGrant(ctx) {
+  const { req, res, store, url, workspacePublisherGrants, roomAuth } = ctx;
+  if (!workspacePublisherGrants) ctx.reject(404, "not_found", "Publisher registration is unavailable");
+  const roomId = ctx.params.roomId, selected = ctx.roomCredentials(req, url);
+  if (!selected.bearer) ctx.reject(401, "unauthenticated", "Room bearer credential required");
+  const fence = ctx.expectedBinding(req);
+  const place = { roomId, selected, fence };
+  const auth = authorize(ctx, place, "rooms:write");
+  ctx.protectWrite(req, auth, true);
+  res.setHeader("Cache-Control", "no-store");
+  ctx.rate(`write:${auth.credentialHash}`, 60);
+  const input = await ctx.body(req, { limit: 1024 });
+  if (url.search || !input || !ctx.exact(input, ["id", "revision"]) || !validPreviewSelection(input.id)
+      || !Number.isSafeInteger(input.revision) || input.revision < 1)
+    ctx.reject(422, "invalid_preview", "Choose an exact preview ID and revision");
+  const selection = Object.freeze({ roomId, id: input.id, revision: input.revision, publisherId: auth.member.id });
+  const currentPublication = () => {
+    const current = roomAuth(selected, roomId, fence);
+    if (current.member.id !== selection.publisherId || !mayRegisterPublisher(current)
+        || readAccountRoomRow(store, roomId)?.archived_at) return null;
+    const item = workspacePreviews(store.db, { create: false })?.get(roomId, selection.id, selection.publisherId, "metadata");
+    return item?.publisherId === selection.publisherId ? item : null;
+  };
+  const item = currentPublication();
+  if (!item) ctx.reject(404, "preview_not_found", "Publisher preview is unavailable");
+  if (item.revision !== selection.revision) ctx.reject(409, "preview_changed", "Read the current preview revision");
+  const result = workspacePublisherGrants.issue(selection, () => currentPublication()?.revision === selection.revision);
+  if (!result) ctx.reject(429, "preview_grant_limit", "Too many pending publisher grants");
+  return ctx.json(res, 200, { ...result, ...(ctx.workspacePublisherAddress && { publisherAddress: ctx.workspacePublisherAddress }) });
+}
+
+async function openLivePreview(ctx) {
+  const { req, res, url, store, workspacePreviewViewer } = ctx;
+  if (!workspacePreviewViewer) ctx.reject(404, "not_found", "Live previews are unavailable");
+  const roomId = ctx.params.roomId, selected = ctx.roomCredentials(req, url);
+  if (selected.bearer) ctx.reject(401, "unauthenticated", "Open live previews from your browser session");
+  const fence = selected.mode === "account" ? ctx.accountBinding(req) : ctx.expectedBinding(req);
+  const place = { roomId, selected, fence };
+  const auth = authorize(ctx, place, "rooms:read");
+  ctx.protectWrite(req, auth, false);
+  ctx.rate(`read:${auth.credentialHash}`, 600);
+  const input = await ctx.body(req, { limit: 1024 });
+  if ([...url.searchParams.keys()].some(key => key !== "auth" || url.searchParams.getAll(key).length !== 1)
+    || !input || !ctx.exact(input, ["id", "revision"]) || !validPreviewSelection(input.id)
+    || !Number.isSafeInteger(input.revision) || input.revision < 1)
+    ctx.reject(422, "invalid_preview", "Choose one preview ID and revision");
+  const viewerId = auth.member.id;
+  const publication = () => workspacePreviews(store.db, { create: false })?.get(roomId, input.id, viewerId, "metadata");
+  const item = publication();
+  if (!item?.recipientId || item.revision !== input.revision) ctx.reject(404, "preview_not_found", "This live preview is unavailable");
+  const selection = { roomId, id: input.id, revision: input.revision, publisherId: item.publisherId };
+  const viewerKey = JSON.stringify(auth.account ? ["account", auth.account.id] : ["member", roomId, viewerId]);
+  const openUrl = workspacePreviewViewer.issue(selection, viewerKey, () => {
+    const current = authorize(ctx, place, "rooms:read");
+    const preview = publication();
+    return current.member.id === viewerId && !readAccountRoomRow(store, roomId)?.archived_at
+      && preview?.publisherId === selection.publisherId && preview.revision === selection.revision && !!preview.recipientId;
+  });
+  if (!openUrl) ctx.reject(404, "preview_not_found", "This live preview is unavailable");
+  res.setHeader("Cache-Control", "no-store");
+  return ctx.json(res, 200, { ...viewerBinding(roomId, auth), openUrl });
+}
+
+export const WORKSPACE_PREVIEW_ROUTES = Object.freeze([...["GET", "POST", "DELETE"].map(method => Object.freeze({
   id: `workspace-previews-${method.toLowerCase()}`, method, path: "/api/rooms/{roomId}/workspace-previews",
   auth: "room", scope: "room", capability: null, handler: serveWorkspacePreviews,
   parity: "exempt:CLI transport for bounded room-visible local build previews",
   schema: { params: { type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } },
     response: { type: "object" } },
   events: [],
-})));
+})), Object.freeze({
+  id: "workspace-preview-publisher-grant", method: "POST", path: "/api/rooms/{roomId}/workspace-previews/publisher-grant",
+  auth: "room", scope: "room", capability: null, handler: issuePublisherGrant,
+  parity: "exempt:one-time local preview broker registration",
+  schema: { params: { type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } },
+    body: { type: "object", required: ["id", "revision"], properties: { id: { type: "string" }, revision: { type: "integer" } } },
+    response: { type: "object" } },
+  events: [],
+}), Object.freeze({
+  id: "workspace-preview-live-viewer", method: "POST", path: "/api/rooms/{roomId}/workspace-previews/open-live",
+  auth: "room", scope: "room", capability: null, handler: openLivePreview,
+  parity: "exempt:one-time viewer handoff from an authenticated browser",
+  schema: { params: { type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } },
+    body: { type: "object", required: ["id", "revision"], properties: { id: { type: "string" }, revision: { type: "integer" } } },
+    response: { type: "object" } },
+  events: [],
+})]);

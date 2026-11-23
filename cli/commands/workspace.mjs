@@ -7,13 +7,16 @@ import { bearerHeader } from "../auth.mjs";
 import { connection, parseArgs } from "./code.mjs";
 import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 import { runWorkspaceServer } from "../workspace-dev-server.mjs";
+import { attachWorkspacePublisher, workspacePublisherEndpoint } from "../workspace-preview-publisher.mjs";
+import { workspacePublisherAddress } from "../../server/workspace-publisher-address.mjs";
 import { RoomAgentClient } from "../../client/room-agent.mjs";
 import { agentSigninRecord } from "../../src/record-link.js";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room workspace start --path DIRECTORY [--base REF] [--from-work URL] [--connection NAME]
 room workspace continue --link URL --path DIRECTORY [--fetch-from REMOTE] [--connection NAME]
-room workspace run [--port PORT] [--log FILE.log] -- COMMAND [ARGS...]
+room workspace run [--cwd DIRECTORY] [--port PORT] [--log FILE.log] -- COMMAND [ARGS...]
+room workspace run --live ARTIFACT_URL [--publisher tls://HOST:PORT] [--publisher-ca FILE] -- COMMAND [ARGS...]
 room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
@@ -127,9 +130,10 @@ async function connect(io, cwd, name) {
   const inherited = fromEnvironment ? undefined : (name ?? savedWorkspaceConnection(cwd));
   const conn = await connection({ env, cwd, name: inherited });
   const path = edgeDoorApiPath(conn.origin, `/api/rooms/${encodeURIComponent(conn.roomId)}/workspace-previews`);
-  const call = async (method = "GET", data, query = "") => {
-    const response = await (io.fetch ?? fetch)(conn.origin + path + query, {
-      method, redirect: "error", signal: AbortSignal.timeout(15000),
+  const call = async (method = "GET", data, query = "", { suffix = "", signal } = {}) => {
+    const timeout = AbortSignal.timeout(15000);
+    const response = await (io.fetch ?? fetch)(conn.origin + path + suffix + query, {
+      method, redirect: "error", signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
       headers: { Authorization: bearerHeader(conn.secret), ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
     });
@@ -150,6 +154,40 @@ function artifactFromConnection(value, conn) {
   return { target, hash: link.hash };
 }
 
+async function livePublisher(io, cwd, root, flags) {
+  if (!flags.live) throw new Error("Pass a directed preview link with --live");
+  const suppliedAddress = flags.publisher === undefined ? undefined : workspacePublisherAddress(flags.publisher);
+  const caFile = flags["publisher-ca"] && resolve(cwd, flags["publisher-ca"]);
+  const { call, conn } = await connect(io, cwd, flags.connection);
+  const room = new URL(conn.origin);
+  if (room.protocol !== "https:" && !(room.protocol === "http:" && ["localhost", "127.0.0.1"].includes(room.hostname)))
+    throw new Error("Live Workspace sharing requires a secure Room connection");
+  const { target } = artifactFromConnection(flags.live, conn);
+  const { id, revision, publisherId, head, panel, digest } = target;
+  if (panel !== "preview" || pinned(root, "HEAD") !== head)
+    throw new Error("Choose the published preview link for this worktree's current commit");
+  const { item, viewerId } = await call("GET", undefined, "?id=" + id);
+  if (item?.id !== id || item.revision !== revision || item.publisherId !== publisherId || publisherId !== viewerId
+      || item.head !== head || item.digest !== digest || !item.recipientId)
+    throw new Error("Choose your current directed preview in this Room");
+  const link = workspaceArtifactLink(conn.origin, conn.roomId, item, "preview");
+  return async ({ port, ownsPort, signal }) => {
+    if (pinned(root, "HEAD") !== head) throw new Error("The worktree commit changed before publishing this preview");
+    const selection = { roomId: conn.roomId, id, revision, publisherId };
+    const grant = await call("POST", { id, revision }, "", { suffix: "/publisher-grant", signal });
+    if (!grant || !/^[a-f0-9]{64}$/.test(grant.grant ?? "")
+      || Object.entries(selection).some(([key, value]) => grant[key] !== value))
+      throw new Error("Room returned a grant for a different publication");
+    const roomAddress = grant.publisherAddress === undefined ? undefined : workspacePublisherAddress(grant.publisherAddress);
+    if (roomAddress && suppliedAddress && roomAddress !== suppliedAddress)
+      throw new Error("The publisher address differs from the one configured by this Room");
+    if (!roomAddress && !suppliedAddress) throw new Error("This Room does not advertise a publisher address. Use --publisher with the operator's address.");
+    const endpoint = workspacePublisherEndpoint(roomAddress ?? suppliedAddress, caFile);
+    const publisher = await attachWorkspacePublisher({ endpoint, selection, grant: grant.grant, port, ownsPort, signal });
+    return { ...publisher, live: { id, revision, link } };
+  };
+}
+
 export async function workspaceCommand(argv, io = {}) {
   const separator = argv.indexOf("--");
   const { positional, flags } = parseArgs(separator === -1 ? argv : argv.slice(0, separator));
@@ -157,13 +195,28 @@ export async function workspaceCommand(argv, io = {}) {
   const out = data => (io.out ?? console.log)(JSON.stringify(data));
   const cwd = io.cwd ?? process.cwd();
   if (flags["from-work"] !== undefined && action !== "start") throw new Error("--from-work is available with workspace start");
+  if (flags.cwd !== undefined && action !== "run") throw new Error("--cwd is available with workspace run");
+  const shareLive = ["live", "publisher", "publisher-ca"].some(flag => flags[flag] !== undefined);
+  if (shareLive && action !== "run") throw new Error("Live sharing is available with workspace run");
   if (action === "run" && !extra.length && separator !== -1 && argv[separator + 1]) {
     const gitDir = git(cwd, "rev-parse", "--absolute-git-dir");
     const commonDir = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
     if (realpathSync(gitDir) === realpathSync(commonDir)) throw new Error("Start a separate Git worktree before running a preview");
     const root = realpathSync(git(cwd, "rev-parse", "--show-toplevel"));
+    let workingDirectory = root;
+    if (flags.cwd !== undefined) {
+      try { workingDirectory = realpathSync(resolve(root, flags.cwd)); }
+      catch (error) {
+        if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
+        throw new Error(`--cwd ${JSON.stringify(flags.cwd)} does not name an existing directory. Choose a path relative to the worktree root.`);
+      }
+    }
+    const within = relative(root, workingDirectory);
+    if (within === ".." || within.startsWith(".." + sep) || within.startsWith(sep) || !statSync(workingDirectory).isDirectory())
+      throw new Error("Choose a working directory inside this worktree");
     const [command, ...args] = argv.slice(separator + 1);
-    return runWorkspaceServer({ cwd: root, command, args, requestedPort: flags.port, logPath: flags.log, out, env: io.env });
+    const attach = shareLive ? await livePublisher(io, cwd, root, flags) : undefined;
+    return runWorkspaceServer({ cwd: root, workingDirectory, command, args, requestedPort: flags.port, logPath: flags.log, out, env: io.env, attach });
   }
   if (extra.length || separator !== -1 || !["start", "list", "publish", "watch", "remove", "changes", "output", "continue"].includes(action)) throw new Error(usage);
   if (action === "start") {

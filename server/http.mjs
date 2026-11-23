@@ -1,4 +1,7 @@
 import { workResume } from "../src/workflow.js";
+import { createWorkspacePublisherGrants } from "./workspace-publisher-grants.mjs";
+import { createWorkspacePreviewBroker } from "./workspace-preview-broker.mjs";
+import { createWorkspacePreviewViewer } from "./workspace-preview-viewer.mjs";
 import { loadInstanceCardRuntime } from './instance-card-runtime.mjs';
 import { agentPages } from '../scripts/build-agent-docs.mjs';
 import { instanceDiscoveryBody, instanceCardSignatureState } from './node-discovery-origin.mjs';
@@ -438,9 +441,11 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
   operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
-  publicAgentPages = false,
+  publicAgentPages = false, workspaceLivePublisherEnabled = false, workspaceBrokerConfig = null, workspaceViewerConfig = null,
   credentialReadBurst = CREDENTIAL_READ_BURST,
   credentialWriteBurst = CREDENTIAL_WRITE_BURST }) {
+  const workspacePublisherGrants = workspaceLivePublisherEnabled || workspaceBrokerConfig
+    ? createWorkspacePublisherGrants(() => store.now()) : null;
   // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
   // (server/boot-config.mjs) runs here, in the shared boot path every entry
   // converges on — the node entry (server.mjs), the Worker entry
@@ -1517,8 +1522,16 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
         publicAgentPages, jevShadowAdmission,
-        streams,
-        workspacePreviewChanged(roomId, audience) {
+        streams, workspacePublisherGrants, workspacePreviewViewer: server.workspacePreviewViewer,
+        workspacePublisherAddress: workspaceBrokerConfig?.address,
+        workspacePreviewChanged(roomId, audience, previous) {
+          const broker = server.workspacePreviewBroker;
+          if (previous) {
+            workspacePublisherGrants?.revoke(previous);
+            const generation = broker?.generationFor(previous);
+            if (generation !== undefined) broker.retire(previous, generation);
+            server.workspacePreviewViewer?.revalidate(roomId);
+          }
           for (const entry of streams) {
             const { res: transport } = entry;
             if (entry.roomId === roomId && (!audience || audience.includes(entry.memberId))
@@ -2983,7 +2996,9 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["expectedSessionRevision"])) reject(422, "invalid_logout", "Current session revision required");
-          return json(res, 200, sessionAccountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
+          const session = store.logoutAccountSession(slotToken, data.expectedSessionRevision);
+          server.workspacePreviewViewer?.revalidate();
+          return json(res, 200, sessionAccountView(session));
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
@@ -3656,6 +3671,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           protectWrite(req, auth, isBearer);
           if (authMode === "account") store.logoutAccountSession(token, auth.sessionRevision);
           else store.revoke(token);
+          server.workspacePreviewViewer?.revalidate();
           return json(res, 200, { signedOut: true });
         }
         reject(405, "method_not_allowed", "Method not allowed");
@@ -6080,6 +6096,19 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;
+  server.consumeWorkspacePublisherGrant = (grant, expected) => workspacePublisherGrants?.consume(grant, expected) ?? null;
+  if (workspaceBrokerConfig) {
+    server.workspacePreviewBroker = createWorkspacePreviewBroker(workspaceBrokerConfig, server.consumeWorkspacePublisherGrant);
+    server.once("close", () => server.workspacePreviewBroker.close());
+  }
+  if (workspaceViewerConfig) {
+    if (!server.workspacePreviewBroker) throw Error("Workspace viewer requires a publisher broker");
+    const viewer = createWorkspacePreviewViewer(workspaceViewerConfig, server.workspacePreviewBroker);
+    server.workspacePreviewViewer = viewer;
+    const unsubscribe = store.onEventAppended(roomId => viewer.revalidate(roomId));
+    server.once("close", () => { unsubscribe(); viewer.close(); });
+  }
+  server.once("close", () => workspacePublisherGrants?.clear());
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
   server.rateLimitKeys = () => rates.size;
   return server;

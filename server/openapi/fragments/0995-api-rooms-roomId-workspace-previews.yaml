@@ -87,3 +87,56 @@
       responses:
         '200': { description: Preview absent }
         '409': { description: Preview revision changed }
+  /api/rooms/{roomId}/workspace-previews/publisher-grant:
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Issue a one-time grant to the publisher of an exact Workspace preview
+      x-room-permission: complete_work
+      description: Available only with in-process preview broker registration enabled. Requires a Room bearer credential with publisher work access. The grant expires in ten seconds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, revision]
+              properties:
+                id: { type: string }
+                revision: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: One-time grant and its Room, preview, revision, publisher, and expiry in Unix milliseconds }
+        '401': { description: Room bearer credential required }
+        '404': { description: Registration is disabled or the publisher preview is unavailable }
+        '409': { description: The selected preview revision was replaced }
+        '429': { description: Too many pending registrations }
+  /api/rooms/{roomId}/workspace-previews/open-live:
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Open a directed Workspace preview on its isolated viewer origin
+      x-room-permission: member
+      description: Requires the current Room browser session, matching origin and CSRF token. Returns a short-lived one-use viewer address for the exact publication revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, revision]
+              properties:
+                id: { type: string }
+                revision: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Browser viewer binding and one-use open URL }
+        '401': { description: Room browser session required }
+        '403': { description: Browser origin or CSRF check failed }
+        '404': { description: Viewer is disabled or the exact directed live preview is unavailable }
