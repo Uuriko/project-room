@@ -10,8 +10,11 @@ const changesIdentity = item => item && JSON.stringify([
 // Preview code runs in an opaque frame with a separate response policy.
 export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft, workThreadLink }) {
   const button = document.createElement("button");
-  button.type = "button"; button.className = "topbar-button"; button.textContent = "Workspace";
+  button.type = "button"; button.className = "topbar-button workspace-open";
+  button.setAttribute("aria-label", "Workspace");
+  button.title = "Workspace";
   button.setAttribute("aria-haspopup", "dialog");
+  button.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18m-11 0v10"/></svg><span>Workspace</span>`;
   toolbar.prepend(button);
   const dialog = document.createElement("dialog");
   dialog.id = "room-project-workspace";
