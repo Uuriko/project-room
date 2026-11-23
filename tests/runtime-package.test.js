@@ -24,6 +24,20 @@ test("every currently served asset is registered in the exact-source runtime", (
   assert.ok(publicAssets.includes("src/claim-overlap.js"), "Browser event replay can load its shared overlap predicate");
 });
 
+test("exact runtime package cold-starts the Muse helper and includes its guide", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-package-muse-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
+  const destination = join(directory, "runtime");
+  createRuntimePackage({ repository, commit, destination });
+  const muse = spawnSync(process.execPath, [join(destination, "scripts/muse-stream-handoff.mjs")], {
+    cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8"
+  });
+  assert.equal(muse.status, 1, muse.stderr);
+  assert.match(muse.stderr, /Usage: node scripts\/muse-stream-handoff\.mjs/);
+  assert.ok(existsSync(join(destination, "docs/MUSE-STREAM-HANDOFF.md")));
+});
+
 test("exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

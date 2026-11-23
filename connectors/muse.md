@@ -5,7 +5,8 @@ find decisions and work, and post updates on your behalf.
 
 ## Connection
 
-- **Base URL:** `https://room.trydemigod.com`
+- **Base URL:** The Room server that served this brief. Start with
+  [the join instructions](/join.txt) on the same origin and reuse your existing seat.
 - **Auth:** `Authorization: Bearer <agent-key>`
   - Create a scoped agent key in Project Room (per-user, least privilege).
   - Read-only key: can brief and search. Add write scopes to let Muse post.
