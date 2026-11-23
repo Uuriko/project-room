@@ -44,6 +44,7 @@ import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
 import { createNeedsAttentionCard, installMemberPermissions } from "./needs-attention.js";
 // JDOT-MEMBER-PERMS-UI end
+import { installWorkspacePreviews } from "./workspace-previews-ui.js";
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
@@ -359,7 +360,7 @@ let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let partialWorkSnapshot = false, inspectedWorkRecord = null;
 // JDOT-COH-NAV begin
-let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
+let workspacePreviewsUI = null, updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
@@ -485,6 +486,7 @@ const client = new RoomClient({
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
   onBondChange: () => { void refreshFriendBonds(); },
+  onWorkspacePreviewChange: () => workspacePreviewsUI?.refresh(),
   onOptimistic(command) {
     const data = command?.data;
     const authorId = session?.member?.id;
@@ -647,7 +649,7 @@ const client = new RoomClient({
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
-    clearWorkNavigation(); updatesUi?.reset();
+    clearWorkNavigation(); updatesUi?.reset(); workspacePreviewsUI?.reset();
     // JDOT-COH-NAV end
     mutedThreads = new Set(); threadMuteBusy = false;threadMuteKnown=new Set();threadMuteGeneration=-1;
     dmConsents = []; dmConsentSeq++;
@@ -863,6 +865,15 @@ updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), g
   onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin, presentation: "thread" }),
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
 // JDOT-COH-NAV end
+workspacePreviewsUI = installWorkspacePreviews({ client, toolbar: document.querySelector(".room-main .topbar-actions"),
+  memberLabel: id => state?.members[id]?.displayName, captureThreadDraft: captureWorkspaceThreadDraft,
+  workThreadLink: () => {
+    if (!session || !state?.workItems[activeWorkNavigationId]) return "";
+    const url = new URL(location.pathname, location.origin);
+    url.searchParams.set("room", session.roomId);
+    url.hash = workThreadHref(activeWorkNavigationId);
+    return url.href;
+  } });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
@@ -3384,6 +3395,43 @@ function switchThread(threadId, focusComposer = false, preserveWork = false) {
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
   if(partialWorkSnapshot)void refreshMutedThreads();
 }
+// Capture the existing discussion when Workspace opens. A failed return must
+// leave the destination draft alone.
+function captureWorkspaceThreadDraft() {
+  const workId = activeWorkNavigationId, threadId = currentThreadId;
+  const work = workId && state?.workItems[workId];
+  const sourceId = work ? work.sourceMessageId : threadId;
+  const root = conversation?.rootById.get(sourceId);
+  const identity = session, context = workNavigationContext();
+  function destination() {
+    const source = conversation?.byId.get(sourceId), thread = conversation?.byId.get(root);
+    if (!source || source.deletedAt || source.toMemberId || !thread || thread.deletedAt || thread.toMemberId
+      || !conversation.threads.has(root)) return null;
+    const channel = messageChannelId(thread);
+    return state?.channels[channel] && !state.channels[channel].archivedAt ? channel : null;
+  }
+  if (!context || !destination()) return null;
+  return link => {
+    const channel = destination();
+    if (!channel || session !== identity || workNavigationContext() !== context
+      || (work ? activeWorkNavigationId !== workId || state.workItems[workId]?.sourceMessageId !== sourceId
+        : currentThreadId !== threadId) || busy || requestReading
+      || isRoomArchived(state) || composerFiles.some(file => file.status === "uploading")) return false;
+    saveComposer();
+    const draft = drafts.get(root);
+    if (draft.pending || draft.toMemberId) return false;
+    const text = draft.body.split("\n").includes(link) ? draft.body : [draft.body, link].filter(Boolean).join("\n\n");
+    if (text.length > MAX_MESSAGE_BODY_CHARS) return false;
+    updatesUi?.close(); closeResult(false);
+    if (channel !== activeChannelId || activeDirectMemberId) setActiveChannel(channel);
+    switchThread(root);
+    if (activeChannelId !== channel || currentThreadId !== root || composerKey() !== root) return false;
+    $("#message-input").value = text;
+    replyToId = draft.body || draft.files?.length ? (draft.replyToId ?? sourceId) : sourceId;
+    updateReply(); syncRequestComposer(); autosizeComposer(); saveComposer();
+    return true;
+  };
+}
 function revealMessage(id) {
   if (state && !busy && !conversation.byId.has(id)) {
     activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
@@ -3892,6 +3940,7 @@ function retryPendingHashReveal() {
 }
 function revealLocationHash() {
   if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
+  if (!location.hash.startsWith("#pr-workspace/")) workspacePreviewsUI?.closeLinked();
   const exactResult = exactResultDestination(location);
   if (!exactResult) closeLinkedResult();
   if (!location.hash) return;
@@ -3924,6 +3973,10 @@ function revealLocationHash() {
     return;
   }
   // JDOT-COH-NAV end
+  if (hash.startsWith("#pr-workspace/")) {
+    workspacePreviewsUI?.openLink(hash);
+    return;
+  }
   if (hash.startsWith("#pr-record/result/")) {
     if (!exactResult || exactResult.roomId !== session?.roomId) {
       closeLinkedResult();
@@ -3953,8 +4006,8 @@ function revealLocationHash() {
       else pendHashReveal(id);
       return;
     }
-    if (current[1] === "work" && id !== null && (partialWorkSnapshot || state.workItems[id]?.receipt)) {
-      showWorkDestination("work", id, "thread");
+    if (current[1] === "work" && id !== null && (partialWorkSnapshot || Object.hasOwn(state.workItems, id))) {
+      showWorkDestination("work", id, partialWorkSnapshot || state.workItems[id]?.receipt ? "thread" : "focus");
     } else if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
     return;
   }

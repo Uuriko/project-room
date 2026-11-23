@@ -53,6 +53,7 @@ breaks the consumer that loads them. Generated output is not a second handbook.
 | Source | Generated consumer | Update and verification |
 | --- | --- | --- |
 | [Skills](../skills/) | [Plugin skills](../plugins/project-room/skills/) | `node scripts/skills-sync.mjs`; `node scripts/skills-sync-check.mjs` checks drift. |
+| [Shared workspace](SHARED-WORKSPACE.md) | Start an isolated Git worktree and share a local build preview with room members. |
 | [Procedures](ROOM-PROCEDURES.md), [lessons](ROOM-WIKI.md), `docs/*RUNBOOK*.md` | [Wiki API data](../server/wiki-data.mjs) | `node scripts/wiki-build.mjs`; append `--check` to verify without writing. |
 | [Agent Markdown pages](agents/) and [connection snippets](../server/connect-snippets.mjs) | Agent HTML pages served to browsers | `node scripts/build-agent-docs.mjs`; inspect the generated diff. |
 | [OpenAPI fragments](../server/openapi/fragments/) | [HTTP contract](openapi.yaml) | `node scripts/openapi-gen.mjs --write`; both `--write` and `--check` refresh the document before validation. |

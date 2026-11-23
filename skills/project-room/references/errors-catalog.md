@@ -683,6 +683,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_pin` | 422 | messageId and pinned are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_plan` | 422 | expectedSha256 and expectedSequence from the repair plan are required | fix+resend | Re-run the repair plan (POST /api/operator/projection/plan) and resubmit execute with the expectedSha256 and expectedSequence it returned; do not guess them. |
 | `invalid_policy` | 422 | AgentPluginError(422) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_preview` | 422 | Choose valid preview fields and a known revision | fix+resend | Read the current publication or recopy its exact link. Correct the refused input before retrying. |
 | `invalid_profile` | 422 | displayName must be a string | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_project_offer` | 422 | No detail query parameters accepted | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_proof_query` | 422 | cursor is not a receipt from this page | fix+resend | Restart the proof read from its first page and use only a cursor that page issued; do not carry a cursor across pages. |
@@ -947,6 +948,13 @@ response's own `hint`/`next` when it names something more specific.
 | `plan_changed` | 409 | Room changed during account deletion; request a fresh plan (${error.message}) | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `plugin_origin_unavailable` | 503 | The service has no HTTPS origin to describe itself with | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `pr_not_found` | 404 | Pull request was not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `preview_audience_changed` | 409 | Use a new workspace preview ID to change who can see it | no | Publish a new preview with the intended audience and give them its new link. |
+| `preview_changed` | 409 | This preview changed. Open the latest version. | re-read | Read the current revision before publishing or removing it. Open the current version explicitly when an exact link is stale. |
+| `preview_file_not_found` | 404 | This path is absent from the published changes | re-list | Read the changed-file summary for that exact revision and select a published path. |
+| `preview_limit` | 409 | Remove an earlier workspace preview before publishing a new one | no | Check which previews are still needed and remove an eligible one before republishing. |
+| `preview_not_found` | 404 | This preview is unavailable | re-list | Check the Workspace list for previews visible to you or ask the publisher for a current link. |
+| `preview_owner_required` | 403 | Only the publisher can update this preview | no | Ask the publisher to update it. The room owner can also remove it. |
+| `preview_recipient_unavailable` | 422 | Choose an active member of this room | fix+resend | Check the current room membership before choosing a recipient. |
 | `projection_corrupt` | 500 | A stored message body could not be restored | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `proof_required` | 428 | Identity mint proof required | fix | Do the SHA-256 proof-of-work from the 428 body, or redeem a member-issued invite code (no proof needed). |
 | `protected_room` | 403 | This room is protected and cannot be purged | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |

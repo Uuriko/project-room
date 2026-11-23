@@ -38,3 +38,11 @@ client/codex-runtime.mjs adapts exact triggering-event attribution from
 src/features/agents/request-work.ts in block/buzz-app.
 https://github.com/block/buzz-app/blob/cfbe4464fe329d64f73f6a0911f62aa80e0fcabf/src/features/agents/request-work.ts
 Room binds its receipt to the request opening event and a positive turn/start response.
+
+Buzz App diff validation and labeling, with gitdiff-parser
+See third_party/buzz-diffs/NOTICE and licenses for the pinned Buzz App and
+gitdiff-parser sources and packaging modifications.
+
+Block Buzz worktree-port helper
+Copyright 2026 Block, Inc. Licensed under the Apache License, Version 2.0.
+See third_party/buzz-worktree/NOTICE and LICENSE for the pinned source.

@@ -65,11 +65,11 @@ function gitOk(args, options) {
   return run.stdout;
 }
 
-export async function connection({ env = process.env, cwd = process.cwd() } = {}) {
+export async function connection({ env = process.env, cwd = process.cwd(), name } = {}) {
   if (env.ROOM_ORIGIN && env.ROOM_ID && env.PROJECT_ROOM_SECRET) {
     return { origin: env.ROOM_ORIGIN.replace(/\/$/, ""), roomId: env.ROOM_ID, secret: env.PROJECT_ROOM_SECRET };
   }
-  const loaded = loadConnection({ project: cwd, env });
+  const loaded = loadConnection({ project: cwd, env, name });
   const secret = await loadSecret(loaded.name, loaded.config.token, env);
   return { origin: String(loaded.config.origin).replace(/\/$/, ""), roomId: loaded.config.roomId, secret };
 }
