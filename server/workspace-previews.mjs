@@ -29,27 +29,46 @@ export function workspacePreviews(db, { create = true } = {}) {
     db.exec("ALTER TABLE room_workspace_previews ADD COLUMN run_output TEXT; ALTER TABLE room_workspace_previews ADD COLUMN output_digest TEXT");
     outputStorage = true;
   }
-  const projected = fields + (patchStorage ? ", patch_digest AS patchDigest" : ", NULL AS patchDigest")
+  // Earlier runtimes only know the shared table. A rollback must never turn a
+  // directed artifact into a room-wide one.
+  const shared = "room_workspace_previews", directed = "room_workspace_directed_previews";
+  if (create) db.exec(`CREATE TABLE IF NOT EXISTS ${directed} (
+    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, id TEXT NOT NULL,
+    publisher_id TEXT NOT NULL, title TEXT NOT NULL, base TEXT NOT NULL, head TEXT NOT NULL,
+    digest TEXT NOT NULL, html TEXT NOT NULL, revision INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    patch TEXT, patch_digest TEXT, run_output TEXT, output_digest TEXT, recipient_id TEXT NOT NULL,
+    PRIMARY KEY(room_id,id)
+  )`);
+  const hasDirected = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(directed));
+  const sharedFields = fields + ", NULL AS recipientId"
+    + (patchStorage ? ", patch_digest AS patchDigest" : ", NULL AS patchDigest")
     + (outputStorage ? ", output_digest AS outputDigest" : ", NULL AS outputDigest");
+  const directedFields = fields + ", recipient_id AS recipientId, patch_digest AS patchDigest, output_digest AS outputDigest";
   return {
-    list(roomId) {
-      return db.prepare(`SELECT ${projected} FROM room_workspace_previews WHERE room_id=?
-        ORDER BY updated_at DESC,id DESC LIMIT ${roomLimit}`).all(roomId);
+    list(roomId, viewerId) {
+      const first = `SELECT ${sharedFields} FROM ${shared} WHERE room_id=?`;
+      if (!hasDirected) return db.prepare(first + ` ORDER BY updatedAt DESC,id DESC LIMIT ${roomLimit}`).all(roomId);
+      return db.prepare(first + ` UNION ALL SELECT ${directedFields} FROM ${directed}
+        WHERE room_id=? AND (publisher_id=? OR recipient_id=?) ORDER BY updatedAt DESC,id DESC LIMIT ${roomLimit}`)
+        .all(roomId, roomId, viewerId, viewerId);
     },
-    get(roomId, id) {
-      return db.prepare(`SELECT ${projected},html,${patchStorage ? "patch" : "NULL AS patch"},${outputStorage ? "run_output AS output" : "NULL AS output"} FROM room_workspace_previews WHERE room_id=? AND id=?`).get(roomId, id);
-    },
-    changes(roomId, id) {
-      return db.prepare(`SELECT id, base, head, revision, ${patchStorage ? "patch" : "NULL AS patch"}
-        FROM room_workspace_previews WHERE room_id=? AND id=?`).get(roomId, id);
-    },
-    output(roomId, id) {
-      return db.prepare(`SELECT id, base, head, revision, ${outputStorage ? "run_output AS output" : "NULL AS output"}
-        FROM room_workspace_previews WHERE room_id=? AND id=?`).get(roomId, id);
+    get(roomId, id, viewerId, part) {
+      const patch = patchStorage ? "patch" : "NULL AS patch";
+      const output = outputStorage ? "run_output AS output" : "NULL AS output";
+      const body = part === "changes" ? patch : part === "output" ? output : `html,${patch},${output}`;
+      const visible = db.prepare(`SELECT ${sharedFields},${body} FROM ${shared} WHERE room_id=? AND id=?`).get(roomId, id);
+      if (visible || !hasDirected) return visible;
+      const scope = viewerId === undefined ? "" : " AND (publisher_id=? OR recipient_id=?)";
+      const directedBody = part === "changes" ? "patch" : part === "output" ? "run_output AS output" : "html,patch,run_output AS output";
+      return db.prepare(`SELECT ${directedFields},${directedBody} FROM ${directed} WHERE room_id=? AND id=?${scope}`)
+        .get(roomId, id, ...(viewerId === undefined ? [] : [viewerId, viewerId]));
     },
     publish(roomId, publisherId, input, now, reject) {
       const existing = this.get(roomId, input.id);
       if (existing && existing.publisherId !== publisherId) reject(403, "preview_owner_required", "Only the publisher can update this preview");
+      const recipientId = input.recipientId ?? null;
+      if (existing && existing.recipientId !== recipientId)
+        reject(409, "preview_audience_changed", "Use a new workspace preview ID to change who can see it");
       const html = input.html;
       const title = input.title.trim();
       const digest = createHash("sha256").update(html).digest("hex");
@@ -60,30 +79,34 @@ export function workspacePreviews(db, { create = true } = {}) {
       const outputDigest = output === null ? null : createHash("sha256").update(output).digest("hex");
       if (existing?.digest === digest && existing.title === title && sameSource && existing.patchDigest === patchDigest
         && existing.outputDigest === outputDigest)
-        return metadata(existing);
+        return { ...metadata(existing), changed: false };
       if ((existing?.revision ?? 0) !== input.expectedRevision)
         reject(409, "preview_changed", "Read the latest preview revision before publishing");
       if (!existing) {
-        const room = this.list(roomId);
-        if (room.length >= roomLimit || room.filter(row => row.publisherId === publisherId).length >= ownerLimit)
+        const counts = db.prepare(`SELECT count(*) AS total, sum(publisher_id=?) AS owned FROM (
+          SELECT publisher_id FROM ${shared} WHERE room_id=? UNION ALL SELECT publisher_id FROM ${directed} WHERE room_id=?
+        )`).get(publisherId, roomId, roomId);
+        if (counts.total >= roomLimit || counts.owned >= ownerLimit)
           reject(409, "preview_limit", "Remove an earlier workspace preview before publishing a new one");
       }
-      db.prepare(`INSERT INTO room_workspace_previews
-        (room_id,id,publisher_id,title,base,head,digest,html,revision,updated_at,patch,patch_digest,run_output,output_digest) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      const table = recipientId ? directed : shared;
+      db.prepare(`INSERT INTO ${table}
+        (room_id,id,publisher_id,title,base,head,digest,html,revision,updated_at,patch,patch_digest,run_output,output_digest${recipientId ? ",recipient_id" : ""}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?${recipientId ? ",?" : ""})
         ON CONFLICT(room_id,id) DO UPDATE SET title=excluded.title,base=excluded.base,head=excluded.head,
         digest=excluded.digest,html=excluded.html,revision=excluded.revision,updated_at=excluded.updated_at,
         patch=excluded.patch,patch_digest=excluded.patch_digest,run_output=excluded.run_output,output_digest=excluded.output_digest`)
-        .run(roomId, input.id, publisherId, title, input.base, input.head, digest, html, input.expectedRevision + 1, now, patch, patchDigest, output, outputDigest);
-      return metadata(this.get(roomId, input.id));
+        .run(roomId, input.id, publisherId, title, input.base, input.head, digest, html, input.expectedRevision + 1, now, patch, patchDigest, output, outputDigest, ...(recipientId ? [recipientId] : []));
+      return { ...metadata(this.get(roomId, input.id)), changed: true };
     },
     remove(roomId, publisherId, input, owner, reject) {
       const existing = this.get(roomId, input.id);
-      if (!existing) return { removed: true };
-      if (existing.publisherId !== publisherId && !owner)
+      if (!existing || (existing.recipientId && ![existing.publisherId, existing.recipientId].includes(publisherId)))
+        return { removed: true, changed: false };
+      if (existing.publisherId !== publisherId && (!owner || existing.recipientId))
         reject(403, "preview_owner_required", "Only the publisher or room owner can remove this preview");
       if (existing.revision !== input.expectedRevision) reject(409, "preview_changed", "Read the latest preview revision before removing it");
-      db.prepare("DELETE FROM room_workspace_previews WHERE room_id=? AND id=?").run(roomId, input.id);
-      return { removed: true };
+      db.prepare(`DELETE FROM ${existing.recipientId ? directed : shared} WHERE room_id=? AND id=?`).run(roomId, input.id);
+      return { removed: true, changed: true, publisherId: existing.publisherId, recipientId: existing.recipientId };
     },
   };
 }
@@ -98,10 +121,11 @@ export function validatePreviewInput(input, removing) {
   if (!input || !validPreviewSelection(input.id)
     || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) return false;
   if (removing) return Object.keys(input).length === 2;
-  const fields = ["id", "expectedRevision", "title", "html", "base", "head", "patch", "output"];
+  const fields = ["id", "expectedRevision", "title", "html", "base", "head", "patch", "output", "recipientId"];
   const bounded = (key, max) => !Object.hasOwn(input, key)
     || typeof input[key] === "string" && Buffer.byteLength(input[key]) <= max;
   return Object.keys(input).every(key => fields.includes(key))
+    && (!Object.hasOwn(input, "recipientId") || typeof input.recipientId === "string" && /^[a-zA-Z0-9_.:-]{1,160}$/.test(input.recipientId))
     && bounded("patch", patchBytes) && bounded("output", outputBytes) && typeof input.title === "string" && input.title.trim().length > 0
     && input.title.length <= 150 && typeof input.html === "string"
     && input.html.trim().length > 0 && Buffer.byteLength(input.html) <= previewBytes

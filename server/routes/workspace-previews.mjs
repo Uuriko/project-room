@@ -1,3 +1,4 @@
+import { ownMember } from "../../src/events.js";
 import { fileLabel, parsePatch } from "../../src/workspace-diff-parser.js";
 import { readAccountRoomRow } from "../room-lifecycle.mjs";
 import { previewJsonBytes, validatePreviewInput, validPreviewSelection, workspacePreviews } from "../workspace-previews.mjs";
@@ -87,15 +88,15 @@ async function serveWorkspacePreviews(ctx) {
     const previews = workspacePreviews(store.db, { create: false });
     const viewer = { roomId, viewerId, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
       viewerSessionBinding: auth.sessionBinding ?? null, viewerSessionRevision: auth.sessionRevision ?? null };
-    if (id === null) return ctx.json(res, 200, { ...viewer, items: previews?.list(roomId) ?? [] });
-    const item = changeRead ? previews?.changes(roomId, id)
-      : outputRead ? previews?.output(roomId, id) : previews?.get(roomId, id);
+    if (id === null) return ctx.json(res, 200, { ...viewer, items: previews?.list(roomId, viewerId) ?? [] });
+    const item = previews?.get(roomId, id, viewerId, changeRead ? "changes" : outputRead ? "output" : undefined);
     if (!item) ctx.reject(404, "preview_not_found", "This preview is unavailable");
-    if (changeRead) return changeResponse(ctx, params, item, viewer);
+    const { base, head, revision, patch, output } = item;
+    if (changeRead) return changeResponse(ctx, params, { id, base, head, revision, patch }, viewer);
     if (outputRead) {
       if (params.has("revision") && String(item.revision) !== params.get("revision"))
         ctx.reject(409, "preview_changed", "This preview changed. Open the latest version.");
-      return ctx.json(res, 200, { ...viewer, run: item });
+      return ctx.json(res, 200, { ...viewer, run: { id, base, head, revision, output } });
     }
     if (frame) {
       if (String(item.revision) !== frameRevision) ctx.reject(409, "preview_changed", "This preview changed. Open the latest version.");
@@ -115,13 +116,20 @@ async function serveWorkspacePreviews(ctx) {
     if (!removing) {
       if (readAccountRoomRow(store, roomId)?.archived_at) ctx.reject(409, "room_archived", "This room is archived");
       if (!current.member.permissions.includes("complete_work")) ctx.reject(403, "access_denied", "Publishing a preview requires work access");
+      if (input.recipientId) {
+        const { members } = store.roomAuthority(roomId, { memberId: input.recipientId });
+        const recipient = ownMember(members, input.recipientId);
+        if (!recipient || recipient.active === false)
+          ctx.reject(422, "preview_recipient_unavailable", "Choose an active member of this room");
+      }
     }
     const previews = workspacePreviews(store.db, { create: !removing });
     return removing ? previews?.remove(roomId, viewerId, input, store.roomOwnerId(roomId) === viewerId, ctx.reject) ?? { removed: true }
       : previews.publish(roomId, viewerId, input, Date.now(), ctx.reject);
   });
-  ctx.workspacePreviewChanged?.(roomId);
-  return ctx.json(res, 200, result);
+  const { changed, ...value } = result;
+  if (changed) ctx.workspacePreviewChanged?.(roomId, value.recipientId ? [value.publisherId, value.recipientId] : null);
+  return ctx.json(res, 200, removing ? { removed: true } : value);
 }
 
 export const WORKSPACE_PREVIEW_ROUTES = Object.freeze(["GET", "POST", "DELETE"].map(method => Object.freeze({

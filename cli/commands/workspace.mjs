@@ -5,7 +5,7 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { readProject, safeName } from "../paths.mjs";
 import { bearerHeader } from "../auth.mjs";
 import { connection, parseArgs } from "./code.mjs";
-import { artifactDigest, workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
+import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 import { runWorkspaceServer } from "../workspace-dev-server.mjs";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
@@ -13,8 +13,8 @@ const usage = `room workspace start --path DIRECTORY [--base REF] [--connection 
 room workspace continue --link URL --path DIRECTORY [--connection NAME]
 room workspace run [--port PORT] -- COMMAND [ARGS...]
 room workspace list
-room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log]
-room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log]
+room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
+room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace changes --id ID [--file PATH | --raw yes]
 room workspace output --id ID
 room workspace remove --id ID
@@ -68,6 +68,7 @@ function previewInput(cwd, flags) {
   if (!stat.isFile() || stat.size > 384 * 1024) throw new Error("Choose a standalone HTML file up to 384 KiB");
   const base = pinned(cwd, flags.base), head = pinned(cwd, "HEAD");
   const input = { id: flags.id, title: flags.title, base, head, html: readFileSync(file, "utf8") };
+  if (flags["share-with"] !== undefined) input.recipientId = flags["share-with"];
   if (flags["include-changes"] !== undefined) {
     if (flags["include-changes"] !== "yes") throw new Error("Use --include-changes yes to share the committed patch");
     const patch = spawnSync("git", ["diff", "--no-ext-diff", "--no-textconv", "--no-color", base, head, "--"], {
@@ -173,7 +174,12 @@ export async function workspaceCommand(argv, io = {}) {
   const publish = async () => {
     const value = await call("POST", { ...previewInput(cwd, flags), expectedRevision });
     expectedRevision = value.revision;
-    out(value);
+    const links = {};
+    for (const panel of ["preview", "changes", "output"]) {
+      const link = workspaceArtifactLink(conn.origin, conn.roomId, value, panel);
+      if (link) links[panel] = link;
+    }
+    out({ ...value, links });
   };
   if (action === "publish") { await publish(); return 0; }
   // Watch the containing directory so build tools can atomically replace the file.
