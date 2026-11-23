@@ -7967,7 +7967,7 @@ function briefEventTarget(event) {
   if (event.type === T.ROOM_CREATED) return { kind: "room", id: state.room.id };
   return { kind: "event", id: event.id };
 }
-function describeBriefEvent({ sequence, event }) {
+function describeBriefEvent({ sequence, event, nextRead }) {
   const actor = esc(memberLabel(event.actorId));
   const type = esc(humanize(event.type));
   const actorRole = event.type === T.WORK_COMPLETED ? `reporter ${actor}` : actor;
@@ -7983,7 +7983,11 @@ function describeBriefEvent({ sequence, event }) {
   }
   else if (event.type?.startsWith("work.")) detail = esc(state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "");
   else if (event.type === "land.updated") detail = esc(`#${event.data.pr ?? ""} ${(event.data.changed || []).join(", ")}`.trim());
-  const target = briefEventTarget(event);
+  const requestId = event.type === T.REPLY_REQUEST_CANCELLED && nextRead?.tool === "room_read_request"
+    && nextRead.arguments?.roomId === state.room.id && nextRead.arguments.requestMessageId === event.data.requestMessageId
+    ? event.data.requestMessageId : null;
+  const target = requestId ? { kind: "message", id: requestId } : briefEventTarget(event);
+  if (requestId) detail = "Open original request";
   const href = esc(recordHref(target.kind, target.id));
   const attribute = target.kind === "room" ? `data-open-room="${esc(target.id)}"`
     : `data-open-${target.kind}="${esc(target.id)}"`;

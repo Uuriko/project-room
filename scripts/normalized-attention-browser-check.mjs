@@ -1,5 +1,48 @@
 import {RETURN_BRIEF_DEFAULT_LIMIT} from '../server/return-brief.mjs';
 import test from'node:test';import assert from'node:assert/strict';import{chromium}from'playwright';import{RoomStore}from'../server/store.mjs';import{createRoomServer}from'../server/http.mjs';import{signInFixture}from'./auth-signin.mjs';
+import { openCatchUp } from './room-chrome.mjs';
+
+test('a cancellation in Catch up opens the original request', {timeout:60000}, async t => {
+  const store = new RoomStore(':memory:');
+  store.createAccount('cancel-brief-owner');
+  const slot = store.createAccountSessionSlot();
+  const session = store.loginAccountSession(slot.token, store.issueAccountAccessKey('cancel-brief-owner'), 0);
+  const roomId = 'cancel-brief', requestMessageId = 'original-review';
+  const {room} = store.createAccountRoom(slot.token, session.sessionBinding,
+    {roomId,title:'Cancellation recovery',purpose:'Recover a request',kind:'personal',displayName:'Owner'});
+  const owner = store.issueAccessKey(roomId, room.memberId);
+  store.command(owner, roomId, {id:'add-reviewer',type:'member.added',
+    data:{memberId:'worker',displayName:'Reviewer',kind:'agent',permissions:['accept_work'],accountableHumanId:room.memberId}});
+  const worker = store.issueAccessKey(roomId, 'worker');
+  const opening = store.command(worker, roomId, {id:'formal-opening',type:'message.posted',
+    data:{messageId:requestMessageId,body:'Review this exact candidate',toMemberId:room.memberId,requestKind:'reply'}});
+  store.markCaughtUp(owner, roomId, opening.sequence);
+  store.command(worker, roomId, {id:'cancel-opening',type:'reply_request.cancelled',
+    data:{requestMessageId,expectedRequestRevision:0,reason:'Another reviewer picked it up'}});
+  const server = createRoomServer({store});
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({headless:true,
+    ...(process.env.ROOM_TEST_CHROMIUM_PATH ? {executablePath:process.env.ROOM_TEST_CHROMIUM_PATH} : {})});
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); store.close();
+  });
+  const page = await browser.newPage({viewport:{width:390,height:900},reducedMotion:'reduce'});
+  await page.goto(`http://127.0.0.1:${server.address().port}/?room=${roomId}`);
+  await signInFixture(page, owner);
+  await openCatchUp(page);
+  const heading = page.locator('#rb-history-heading');
+  await heading.waitFor({state:'visible'});
+  if (!await page.locator('#rb-history-section').evaluate(node => node.open)) await heading.click();
+  const link = page.locator('#rb-history-list').getByRole('link', {name:/Open original request/});
+  await link.waitFor({state:'visible'});
+  assert.equal(await link.getAttribute('href'), `#pr-record/message/${requestMessageId}`);
+  await link.click();
+  const original = page.locator(`#message-list [data-message-record-id="${requestMessageId}"]`);
+  await original.waitFor({state:'visible'});
+  assert.match(await original.innerText(), /Review this exact candidate/);
+  assert.equal(store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get(roomId, room.memberId).sequence, opening.sequence);
+});
 for(const width of[1280,390])test('normalized Needs me and catch-up preserve keyboard/privacy at '+width,{timeout:60000},async t=>{
  const store=new RoomStore(':memory:');store.createAccount('attention-owner');const slot=store.createAccountSessionSlot(),session=store.loginAccountSession(slot.token,store.issueAccountAccessKey('attention-owner'),0),made=store.createAccountRoom(slot.token,session.sessionBinding,{roomId:'attention-native',title:'Attention',purpose:'Coordinate',kind:'personal',displayName:'Owner'}),ownerId=made.room.memberId,owner=store.issueAccessKey('attention-native',ownerId);for(const id of['worker','other'])store.command(owner,'attention-native',{id:'add-'+id,type:'member.added',data:{memberId:id,displayName:id==='worker'?'Worker':'Other',kind:'agent',permissions:['accept_work'],accountableHumanId:ownerId}});const worker=store.issueAccessKey('attention-native','worker');let clock=Date.now();store.now=()=>clock;const send=(id,body,extra={})=>{clock+=2100;store.command(worker,'attention-native',{id,type:'message.posted',data:{messageId:id,body,...extra}});};for(let n=0;n<RETURN_BRIEF_DEFAULT_LIMIT;n++)send('older-'+n,'Older public history');send('owner-mention','@Owner please review this visible note');send('private-other','PRIVATE OTHER MEMBERS ONLY',{toMemberId:'other'});for(let n=0;n<24;n++)send('plain-'+n,'Ordinary public context');
  const server=createRoomServer({store,credentialReadBurst:600});await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true,...(process.env.ROOM_TEST_CHROMIUM_PATH?{executablePath:process.env.ROOM_TEST_CHROMIUM_PATH}:{})});t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));store.close();});const page=await browser.newPage({viewport:{width,height:900},reducedMotion:'reduce'}),origin=`http://127.0.0.1:${server.address().port}`,marks=[],errors=[];page.setDefaultTimeout(10000);page.on('request',r=>{if(r.method()==='POST'&&r.url().includes('/updates/'))marks.push(r.url());});page.on('pageerror',e=>errors.push(e.message));await page.goto(origin+'/?room=attention-native');await signInFixture(page,owner);await page.locator('#topbar-updates').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('#topbar-updates')?.textContent.includes('Needs me'));await page.locator('#topbar-updates').click();await page.locator('#updates-dialog:not([hidden])').waitFor();await page.waitForFunction(()=>document.querySelector('#updates-page-announcement')?.textContent.includes('Page 1'));
