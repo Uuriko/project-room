@@ -216,6 +216,12 @@ test("confirmed request offers one link to its original record", { timeout: 3000
   assert.deepEqual(f.errors, []);
 });
 
+function receivedLabel(page, acknowledgedAt) {
+  return page.evaluate(at => `Received at ${new Intl.DateTimeFormat(undefined, {
+    hour: "numeric", minute: "2-digit",
+  }).format(Date.parse(at))}`, acknowledgedAt);
+}
+
 test("the original private request keeps receipt and acceptance separate from provider start", { timeout: 30000 }, async t => {
   const f = await setup(t, { width: 390, height: 844 });
   const id = "provider-start-unconfirmed";
@@ -229,11 +235,12 @@ test("the original private request keeps receipt and acceptance separate from pr
     requestMessageId: id, expectedRequestRevision: 0, progress: state
   });
   progress("acknowledged");
-  await run.filter({ hasText: /^Acknowledged · start unconfirmed$/ }).waitFor();
+  const received = await receivedLabel(owner, f.state().replyRequests[id].acknowledgedAt);
+  await run.filter({ hasText: `Acknowledged · start unconfirmed · ${received}` }).waitFor();
   assert.equal(await row.getByRole("button", { name: /retry/i }).count(), 0);
 
   progress("accepted");
-  await run.filter({ hasText: /^Accepted · start unconfirmed$/ }).waitFor();
+  await run.filter({ hasText: `Accepted · start unconfirmed · ${received}` }).waitFor();
   assert.equal(f.state().replyRequests[id].revision, 0);
 
   const selected = f.store.replyRequests.selected(f.keys.producer, "commons", id);
@@ -248,6 +255,9 @@ test("original conversation shows host progress and recovery without changing th
   const f = await setup(t, { width: 390, height: 844 }), requestMessageId = "host-visible";
   f.request(requestMessageId, "producer");
   const request = f.state().replyRequests[requestMessageId];
+  f.send("producer", "reply_request.progressed", {
+    requestMessageId, expectedRequestRevision: request.revision, progress: "acknowledged",
+  });
   const db = openRequestJournal(join(f.directory, "lost-claim.sqlite"));
   t.after(() => db.close());
   let providerCalls = 0, attemptId;
@@ -268,7 +278,8 @@ test("original conversation shows host progress and recovery without changing th
   }), /lost claim response/);
   assert.equal(providerCalls, 0);
   const owner = await f.login("owner"), row = (await record(owner, requestMessageId));
-  await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent === "Host reserved · start unconfirmed", requestMessageId, { timeout: 4000 });
+  const received = await receivedLabel(owner, f.state().replyRequests[requestMessageId].acknowledgedAt);
+  await row.getByText(`Host reserved · start unconfirmed · ${received}`, { exact: true }).waitFor();
   assert.equal(f.state().replyRequests[requestMessageId].revision, request.revision);
   assert.ok(attemptId);
   f.store.requestRuns.apply(f.keys.producer, "commons", { requestMessageId, attemptId, action: "needs_attention",

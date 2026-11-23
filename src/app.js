@@ -3204,15 +3204,21 @@ function requestRunLabel(id) {
   if (request?.status !== "open") return "";
   const unavailable = client.sectionAvailability("requestRuns")?.available === false;
   const run = unavailable ? undefined : requestRuns[id];
+  let label;
   if (!run) {
-    if (request.progressState === "acknowledged") return "Acknowledged · start unconfirmed";
-    if (request.progressState === "accepted") return "Accepted · start unconfirmed";
-    return unavailable ? uiText("currentRoom.executionUnavailable") : "";
+    label = ({ acknowledged: "Acknowledged · start unconfirmed",
+      accepted: "Accepted · start unconfirmed" })[request.progressState]
+      ?? (unavailable ? uiText("currentRoom.executionUnavailable") : "");
+  } else {
+    const status = run.state === "working" && Date.now() - run.updatedAt > 120000 ? "unknown" : run.state;
+    // The request-run row uses working for the initial reservation.
+    label = ({ working: "Host reserved · start unconfirmed", result_ready: "Result saved · delivery pending",
+      needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
   }
-  const status = run.state === "working" && Date.now() - run.updatedAt > 120000 ? "unknown" : run.state;
-  // The request-run row uses working for the initial reservation.
-  return ({ working: "Host reserved · start unconfirmed", result_ready: "Result saved · delivery pending",
-    needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
+  const acknowledgedAt = Date.parse(request.acknowledgedAt);
+  if (!Number.isFinite(acknowledgedAt)) return label;
+  const received = `Received at ${timeFormat.format(acknowledgedAt)}`;
+  return label ? `${label} · ${received}` : received;
 }
 async function refreshRequestRuns({ force = false } = {}) {
   if(client.sectionAvailability('requestRuns')?.available===false)return;
