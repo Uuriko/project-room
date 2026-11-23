@@ -65,6 +65,9 @@ or `continue` command with the same path and source. Room verifies the saved
 checkout and returns its original receipt without starting another one. For
 Room-linked commands it also rechecks the current revision and member. If the
 path cannot be verified, inspect it before choosing a new one.
+When the same publisher replaces an artifact, a stale continuation can
+return the currently visible link. Inspect that commit before running a new
+continuation. The refusal does not create a checkout or choose it for you.
 
 Room checks the link against the current shared artifact through your saved
 connection. The command creates a new branch and worktree from the exact

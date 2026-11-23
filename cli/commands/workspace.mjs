@@ -283,11 +283,16 @@ export async function workspaceCommand(argv, io = {}) {
     const path = resolve(cwd, flags.path);
     const verify = async () => {
       const packet = await call();
+      const room = roomCustody(packet, conn);
       const item = packet.items.find(row => row.id === target.id);
-      if (!item || item.revision !== target.revision || item.publisherId !== target.publisherId
-        || item.head !== target.head || artifactDigest(item, target.panel) !== target.digest)
+      if (!item || item.publisherId !== target.publisherId) throw new Error("This workspace artifact has changed or is unavailable");
+      if (item.revision !== target.revision || item.head !== target.head || artifactDigest(item, target.panel) !== target.digest) {
+        const current = workspaceArtifactLink(conn.origin, conn.roomId, item, target.panel)
+          ?? workspaceArtifactLink(conn.origin, conn.roomId, item, "preview");
+        if (current) throw new Error(`This workspace artifact has changed. Inspect commit ${item.head} or retry with current --link '${current}'`);
         throw new Error("This workspace artifact has changed or is unavailable");
-      return roomCustody(packet, conn);
+      }
+      return room;
     };
     const room = await verify();
     const scope = { action, connection: inherited ? safeName(inherited) : null, room, source: target };

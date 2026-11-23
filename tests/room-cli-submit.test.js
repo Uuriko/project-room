@@ -107,8 +107,10 @@ test(`${representation} commands cover pickup, correction, review, requests and 
     const begin = await cli([...step.command.slice(1), "-"], selected.value);
     assert.equal(begin.value.working, true, JSON.stringify(begin));
     const beforeRetry = store.headSequence("commons");
-    const staleBegin = await cli([...step.command.slice(1), "-"], selected.value);
-    assert.equal(staleBegin.value.stopped, "stale_revision");
+    const recovered = await cli([...step.command.slice(1), "-"], selected.value);
+    assert.equal(recovered.code, 0);
+    assert.equal(recovered.value.working, true);
+    assert.deepEqual(recovered.value.confirmed, begin.value.confirmed);
     assert.equal(store.headSequence("commons"), beforeRetry);
     const read = await cli(workItemId === "normal"
       ? ["work", workItemId, "--since", selected.value.briefVersion] : ["work", workItemId]);

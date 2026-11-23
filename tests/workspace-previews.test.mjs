@@ -215,7 +215,7 @@ test("continuation rechecks the share after fetching its missing commit", async 
     },
   };
   await assert.rejects(workspaceCommand(["continue", "--path", target, "--link", link, "--fetch-from", "origin"], io),
-    /artifact has changed/);
+    error => error.message.includes("artifact has changed") && error.message.includes(link.replace("/1/preview/", "/2/preview/")));
   assert.equal(reads, 2);
   assert.equal(git(receiver, "rev-parse", head + "^{commit}"), head);
   assert.equal(git(receiver, "rev-parse", "HEAD"), base);
