@@ -98,6 +98,23 @@ the bracketed paths locally. Keep credentials in the existing secure storage.
    qualifying work. Let the user or current agent decide when to re-arm.
    There is no scheduled poll or automatic turn on each empty wake.
 
+When the host can launch a background process during the work turn, stage
+the replacement immediately after the prior helper's completion:
+
+```sh
+node scripts/muse-stream-handoff.mjs /private/handoff.json /private/room-connection \
+  --stay-armed --receiver-ack --advertise-scope --after-settlement=EXACT_REQUEST_ID
+```
+
+Use the same private checkpoint and the exact ID from the prior handoff. The
+helper waits for that request's formal answer, decline or withdrawal before
+making itself available. It leaves the prior opening cursor in place so it
+can find a successor opened during the active turn. The existing lock
+keeps one primary process per checkpoint. A running wait needs no separate
+rearm after the result. This protects against the conversation failing after
+the result write. Recovery from a failure before settlement still needs a
+working host that can resume the original request.
+
 If the host has a working stream listener of its own, let that listener
 invoke the helper with `--once` after a matching event. The helper verifies
 the open scope and returns `handoff` or `no_work` without opening another
