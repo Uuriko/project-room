@@ -50,7 +50,7 @@ const saveGuestEvent = (store, roomId, room, state, incoming) => {
   const sequence = room.sequence + 1;
   const write = room.current ? prepareCurrentWrite(store, { roomId, previous: room, state, event: incoming, sequence, current: room.current }) : null;
   const projection = write?.projection ?? store.storedProjection(roomId, state);
-  if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+  if (store.projectionExceedsWriteLimit(projection)) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
   withCurrentServingWriter(store.db, roomId, () => {
     store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);

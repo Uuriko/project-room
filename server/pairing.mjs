@@ -266,7 +266,7 @@ export class Pairing {
     const sequence = room.sequence + 1;
     const write = context ? prepareCurrentWrite(this.store, { roomId, previous: room, state, event: incoming, sequence, current: context.current }) : null;
     const projection = write?.projection ?? this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+    if (this.store.projectionExceedsWriteLimit(projection)) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     withCurrentServingWriter(this.db, roomId, () => {
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);

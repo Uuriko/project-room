@@ -290,7 +290,7 @@ const saveInviteEvent = (store, roomId, room, context, state, incoming) => {
   const sequence = room.sequence + 1;
   const write = context ? prepareCurrentWrite(store, { roomId, previous: room, state, event: incoming, sequence, current: context.current }) : null;
   const projection = write?.projection ?? store.storedProjection(roomId, state);
-  if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, 'pilot_limit', 'Room projection limit reached; no data was changed. Ask the room owner to review storage capacity before retrying.');
+  if (store.projectionExceedsWriteLimit(projection)) fail(409, 'pilot_limit', 'Room projection limit reached; no data was changed. Ask the room owner to review storage capacity before retrying.');
   withCurrentServingWriter(store.db, roomId, () => {
     store.db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     store.db.prepare('UPDATE rooms SET sequence=?,projection=? WHERE id=?').run(sequence, projection, roomId);

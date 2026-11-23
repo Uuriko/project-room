@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import { EVENT_TYPES as T, event } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
-// Read at call time (store.mjs imports this module): one source for capacity.
-import { PILOT_LIMITS } from "./store.mjs";
 import { currentInviteContext, prepareCurrentWrite, withCurrentServingWriter } from "./current-room-repository.mjs";
 
 // Guest-agent tier primitives + seat machinery, shared by guest-invites v1
@@ -39,7 +37,7 @@ const saveGuestEvent = (store, roomId, room, state, incoming) => {
   const sequence = room.sequence + 1;
   const write = room.current ? prepareCurrentWrite(store, { roomId, previous: room, state, event: incoming, sequence, current: room.current }) : null;
   const projection = write?.projection ?? store.storedProjection(roomId, state);
-  if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+  if (store.projectionExceedsWriteLimit(projection)) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
   withCurrentServingWriter(store.db, roomId, () => {
     store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
