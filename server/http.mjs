@@ -1,5 +1,6 @@
 import { workResume } from "../src/workflow.js";
 import { createWorkspacePublisherGrants } from "./workspace-publisher-grants.mjs";
+import { createWorkspacePreviewBroker } from "./workspace-preview-broker.mjs";
 import { loadInstanceCardRuntime } from './instance-card-runtime.mjs';
 import { agentPages } from '../scripts/build-agent-docs.mjs';
 import { instanceDiscoveryBody, instanceCardSignatureState } from './node-discovery-origin.mjs';
@@ -439,10 +440,11 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
   operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
-  publicAgentPages = false, workspaceLivePublisherEnabled = false,
+  publicAgentPages = false, workspaceLivePublisherEnabled = false, workspaceBrokerConfig = null,
   credentialReadBurst = CREDENTIAL_READ_BURST,
   credentialWriteBurst = CREDENTIAL_WRITE_BURST }) {
-  const workspacePublisherGrants = workspaceLivePublisherEnabled ? createWorkspacePublisherGrants(() => store.now()) : null;
+  const workspacePublisherGrants = workspaceLivePublisherEnabled || workspaceBrokerConfig
+    ? createWorkspacePublisherGrants(() => store.now()) : null;
   // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
   // (server/boot-config.mjs) runs here, in the shared boot path every entry
   // converges on — the node entry (server.mjs), the Worker entry
@@ -6083,6 +6085,10 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;
   server.consumeWorkspacePublisherGrant = (grant, expected) => workspacePublisherGrants?.consume(grant, expected) ?? null;
+  if (workspaceBrokerConfig) {
+    server.workspacePreviewBroker = createWorkspacePreviewBroker(workspaceBrokerConfig, server.consumeWorkspacePublisherGrant);
+    server.once("close", () => server.workspacePreviewBroker.close());
+  }
   server.once("close", () => workspacePublisherGrants?.clear());
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
   server.rateLimitKeys = () => rates.size;
