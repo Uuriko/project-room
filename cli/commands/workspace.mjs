@@ -13,7 +13,7 @@ import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room workspace start --path DIRECTORY [--base REF] [--from-work URL] [--connection NAME]
 room workspace continue --link URL --path DIRECTORY [--fetch-from REMOTE] [--connection NAME]
-room workspace run [--port PORT] [--log FILE.log] -- COMMAND [ARGS...]
+room workspace run [--cwd DIRECTORY] [--port PORT] [--log FILE.log] -- COMMAND [ARGS...]
 room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
@@ -157,13 +157,18 @@ export async function workspaceCommand(argv, io = {}) {
   const out = data => (io.out ?? console.log)(JSON.stringify(data));
   const cwd = io.cwd ?? process.cwd();
   if (flags["from-work"] !== undefined && action !== "start") throw new Error("--from-work is available with workspace start");
+  if (flags.cwd !== undefined && action !== "run") throw new Error("--cwd is available with workspace run");
   if (action === "run" && !extra.length && separator !== -1 && argv[separator + 1]) {
     const gitDir = git(cwd, "rev-parse", "--absolute-git-dir");
     const commonDir = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
     if (realpathSync(gitDir) === realpathSync(commonDir)) throw new Error("Start a separate Git worktree before running a preview");
     const root = realpathSync(git(cwd, "rev-parse", "--show-toplevel"));
+    const workingDirectory = flags.cwd === undefined ? root : realpathSync(resolve(root, flags.cwd));
+    const within = relative(root, workingDirectory);
+    if (within === ".." || within.startsWith(".." + sep) || within.startsWith(sep) || !statSync(workingDirectory).isDirectory())
+      throw new Error("Choose a working directory inside this worktree");
     const [command, ...args] = argv.slice(separator + 1);
-    return runWorkspaceServer({ cwd: root, command, args, requestedPort: flags.port, logPath: flags.log, out, env: io.env });
+    return runWorkspaceServer({ cwd: root, workingDirectory, command, args, requestedPort: flags.port, logPath: flags.log, out, env: io.env });
   }
   if (extra.length || separator !== -1 || !["start", "list", "publish", "watch", "remove", "changes", "output", "continue"].includes(action)) throw new Error(usage);
   if (action === "start") {
