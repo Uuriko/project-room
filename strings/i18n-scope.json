@@ -138,5 +138,6 @@
   "src/work-status.js",
   "src/work-templates.js",
   "src/workflow.js",
-  "src/workspace-navigation.js"
+  "src/workspace-navigation.js",
+  "src/workspace-previews-ui.js"
 ]
