@@ -95,6 +95,7 @@
         schema: { type: string }
     post:
       summary: Issue a one-time grant to the publisher of an exact Workspace preview
+      x-room-permission: complete_work
       description: Available only with in-process preview broker registration enabled. Requires a Room bearer credential with publisher work access. The grant expires in ten seconds.
       requestBody:
         required: true
@@ -121,6 +122,7 @@
         schema: { type: string }
     post:
       summary: Open a directed Workspace preview on its isolated viewer origin
+      x-room-permission: member
       description: Requires the current Room browser session, matching origin and CSRF token. Returns a short-lived one-use viewer address for the exact publication revision.
       requestBody:
         required: true

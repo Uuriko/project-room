@@ -560,6 +560,7 @@ const AX_NAMED_RECOVERIES = {
   preview_audience_changed: ["An existing preview keeps its sharing audience.", "Publish a new preview with the intended audience and use its new link."],
   preview_changed: ["The requested preview revision is stale.", "Read the current revision before editing or removing it, or explicitly open the latest preview."],
   preview_file_not_found: ["This file is absent from the selected revision's changes.", "Read the file summary for that revision and select a published path."],
+  preview_grant_limit: ["Too many publisher grants are waiting to connect.", "Let an existing grant connect or expire, then request one grant for the current publication."],
   preview_limit: ["The Workspace preview limit has been reached.", "Check which previews are still needed and remove an eligible one before publishing again."],
   preview_not_found: ["This preview is unavailable to you.", "Check the previews visible in Workspace or ask the publisher for a current link."],
   preview_owner_required: ["This preview requires its publisher to update it.", "Ask the publisher to update it. The room owner can also remove it."],
