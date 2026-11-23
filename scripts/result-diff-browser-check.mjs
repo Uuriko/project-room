@@ -244,7 +244,7 @@ test("the verdict links exact candidate release checks without claiming missing 
   for (const [stage, digit] of [["browser", "2"], ["deploy", "3"]]) {
     const evidenceDigest = "sha256:" + digit.repeat(64), evidenceMessageId = `release-checks-${stage}-receipt`;
     const summary = `${stage} evidence checked`;
-    f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
+    f.send("owner", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
       messageId: evidenceMessageId, body: `room-release-receipt/1 ${stage} ${completed.event.id} ${candidateRevision} ${evidenceDigest}\n${summary}` });
     additionalChecks[stage] = { candidateRevision, status: "passed", summary, evidenceDigest, evidenceMessageId };
   }
@@ -259,6 +259,7 @@ test("the verdict links exact candidate release checks without claiming missing 
   await message.waitFor();
   assert.equal(new URL(page.url()).hash, "#pr-record/message/" + messageId);
   await message.getByRole("link", { name: "Revise a short result", exact: true }).click();
+  assert.equal(f.store.workResult(f.keys.owner, "commons", "revision-journey").workThread.outcome?.remaining, "confirm_smoke_handoff");
   await page.locator("#result-outcome").getByText("Confirm the smoke test assignment.", { exact: true }).waitFor();
   const stages = page.locator("#result-release-stages summary");
   await stages.first().waitFor();
