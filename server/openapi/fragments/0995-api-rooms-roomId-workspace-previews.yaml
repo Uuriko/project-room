@@ -80,3 +80,29 @@
       responses:
         '200': { description: Preview absent }
         '409': { description: Preview revision changed }
+  /api/rooms/{roomId}/workspace-previews/publisher-grant:
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Issue a one-time grant to the publisher of an exact Workspace preview
+      description: Available only with in-process preview broker registration enabled. Requires a Room bearer credential with publisher work access. The grant expires in ten seconds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, revision]
+              properties:
+                id: { type: string }
+                revision: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: One-time grant and its Room, preview, revision, publisher, and expiry in Unix milliseconds }
+        '401': { description: Room bearer credential required }
+        '404': { description: Registration is disabled or the publisher preview is unavailable }
+        '409': { description: The selected preview revision was replaced }
+        '429': { description: Too many pending registrations }
