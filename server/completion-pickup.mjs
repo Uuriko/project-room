@@ -9,7 +9,7 @@ const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
   JSON.stringify([roomId, requesterId, recipientId, workItemId]);
 
 export function dispatchCompletionPickup(store, route, secret, event, sequence) {
-  const { roomId, requesterId, recipientId, workItemId } = route;
+  const { roomId, requesterId, recipientId, workItemId, firstLine } = route;
   const requestMessageId = event.data?.responseToRequestId;
   if (event.type !== "message.posted" || event.actorId !== recipientId
       || event.data.responseOutcome !== "answered" || event.data.workItemId !== workItemId
@@ -35,7 +35,7 @@ export function dispatchCompletionPickup(store, route, secret, event, sequence) 
   const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
     requestId, workItemId, toMemberId: recipientId,
     body: [
-      `@(${recipientId}) ${investigation}`,
+      ...(firstLine === undefined ? [`@(${recipientId}) ${investigation}`] : [firstLine, investigation]),
       `The authorized QA request ${requestMessageId} settled at room sequence ${sequence}.`,
       "Check your actionable pickup first, excluding this request itself. If a different actionable assignment exists, report it and stop this investigation.",
       "Otherwise take one bounded evidence lead from pickup, or use your last result to investigate a distinct, currently observable problem within the same scope.",
@@ -59,9 +59,11 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
     throw Error("Invalid completion pickup configuration");
   const bindings = new Map();
   for (const route of routes) {
-    const { roomId, requesterId, recipientId, workItemId, credentialPath, after } = route;
+    const { roomId, requesterId, recipientId, workItemId, credentialPath, after, firstLine } = route;
     if (![roomId, requesterId, recipientId, workItemId].every(validId) || requesterId === recipientId
         || typeof credentialPath !== "string" || !Number.isSafeInteger(after) || after < 0
+        || firstLine !== undefined && (typeof firstLine !== "string" || !firstLine.length || firstLine.length > 120
+          || firstLine.trim() !== firstLine || /[\r\n\u2028\u2029]/.test(firstLine))
         || bindings.has(routeKey(route))) throw Error("Invalid completion pickup route");
     const credential = readPrivateJson(credentialPath);
     const secret = credential.identitySecret ?? credential.token;
