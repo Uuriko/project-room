@@ -6,7 +6,7 @@ import { createServer } from "node:tls";
 const handshakeLimit = 2048;
 const handshakeTimeoutMs = 5000;
 const fields = ["roomId", "id", "revision", "publisherId"];
-const publicationKey = selection => JSON.stringify([selection.roomId, selection.id]);
+const publicationKey = selection => JSON.stringify([selection.roomId, selection.id, selection.publisherId]);
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const sameSelection = (left, right) => fields.every(field => left[field] === right[field]);
 
