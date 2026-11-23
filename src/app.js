@@ -866,7 +866,7 @@ updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), g
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
 // JDOT-COH-NAV end
 workspacePreviewsUI = installWorkspacePreviews({ client, toolbar: document.querySelector(".room-main .topbar-actions"),
-  memberLabel: id => state?.members[id]?.displayName });
+  memberLabel: id => state?.members[id]?.displayName, captureThreadDraft: captureWorkspaceThreadDraft });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
@@ -3387,6 +3387,43 @@ function switchThread(threadId, focusComposer = false, preserveWork = false) {
   if (focusComposer) $("#message-input").focus();
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
   if(partialWorkSnapshot)void refreshMutedThreads();
+}
+// Capture the existing discussion when Workspace opens. A failed return must
+// leave the destination draft alone.
+function captureWorkspaceThreadDraft() {
+  const workId = activeWorkNavigationId, threadId = currentThreadId;
+  const work = workId && state?.workItems[workId];
+  const sourceId = work ? work.sourceMessageId : threadId;
+  const root = conversation?.rootById.get(sourceId);
+  const identity = session, context = workNavigationContext();
+  function destination() {
+    const source = conversation?.byId.get(sourceId), thread = conversation?.byId.get(root);
+    if (!source || source.deletedAt || source.toMemberId || !thread || thread.deletedAt || thread.toMemberId
+      || !conversation.threads.has(root)) return null;
+    const channel = messageChannelId(thread);
+    return state?.channels[channel] && !state.channels[channel].archivedAt ? channel : null;
+  }
+  if (!context || !destination()) return null;
+  return link => {
+    const channel = destination();
+    if (!channel || session !== identity || workNavigationContext() !== context
+      || (work ? activeWorkNavigationId !== workId || state.workItems[workId]?.sourceMessageId !== sourceId
+        : currentThreadId !== threadId) || busy || requestReading
+      || isRoomArchived(state) || composerFiles.some(file => file.status === "uploading")) return false;
+    saveComposer();
+    const draft = drafts.get(root);
+    if (draft.pending || draft.toMemberId) return false;
+    const text = draft.body.split("\n").includes(link) ? draft.body : [draft.body, link].filter(Boolean).join("\n\n");
+    if (text.length > MAX_MESSAGE_BODY_CHARS) return false;
+    updatesUi?.close(); closeResult(false);
+    if (channel !== activeChannelId || activeDirectMemberId) setActiveChannel(channel);
+    switchThread(root);
+    if (activeChannelId !== channel || currentThreadId !== root || composerKey() !== root) return false;
+    $("#message-input").value = text;
+    replyToId = draft.body || draft.files?.length ? (draft.replyToId ?? sourceId) : sourceId;
+    updateReply(); syncRequestComposer(); autosizeComposer(); saveComposer();
+    return true;
+  };
 }
 function revealMessage(id) {
   if (state && !busy && !conversation.byId.has(id)) {

@@ -4,7 +4,7 @@ import { clipboard } from "./clipboard.js";
 import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "./workspace-artifact-link.js";
 
 // Preview code runs in an opaque frame with a separate response policy.
-export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
+export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft }) {
   const button = document.createElement("button");
   button.type = "button"; button.className = "topbar-button"; button.textContent = "Workspace";
   button.setAttribute("aria-haspopup", "dialog");
@@ -26,6 +26,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
         <div class="workspace-link-actions">
           <button type="button" data-workspace-link class="button ghost" hidden></button>
           <button type="button" data-workspace-agent-copy class="button ghost" hidden></button>
+          <button type="button" data-workspace-thread-draft class="button ghost" hidden></button>
           <button type="button" data-workspace-latest class="button secondary" hidden></button>
           <span data-workspace-link-status class="form-hint" role="status"></span>
         </div>
@@ -61,10 +62,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const outputStatus = dialog.querySelector("[data-workspace-output-status]");
   const copyLink = dialog.querySelector("[data-workspace-link]");
   const copyForAgent = dialog.querySelector("[data-workspace-agent-copy]");
+  const addToThread = dialog.querySelector("[data-workspace-thread-draft]");
   const linkStatus = dialog.querySelector("[data-workspace-link-status]");
   const linkFallback = dialog.querySelector("[data-workspace-link-fallback]");
   const latest = dialog.querySelector("[data-workspace-latest]");
   copyLink.textContent = uiText("workspace.share.copy");
+  addToThread.textContent = uiText("workspace.share.threadDraft");
   copyForAgent.textContent = uiText("workspace.share.copyForAgent");
   latest.textContent = uiText("workspace.share.openCurrent");
   const changesView = dialog.querySelector("[data-workspace-changes]");
@@ -75,7 +78,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const peer = dialog.querySelector("[data-workspace-peer]");
   const patchCache = new Map();
   let selected = null, frame = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
-  let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null, pendingFile = null;
+  let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null, pendingFile = null, threadDraft = null;
 
   function choosePanel(name) {
     if (activePanel !== name) {
@@ -185,7 +188,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     tabs.hidden = true;
     choosePanel("preview");
     output.textContent = ""; outputStatus.textContent = "";
-    latest.hidden = true; copyLink.hidden = true; copyForAgent.hidden = true; linkFallback.hidden = true; linkStatus.textContent = "";
+    latest.hidden = true; copyLink.hidden = true; copyForAgent.hidden = true; addToThread.hidden = true; linkFallback.hidden = true; linkStatus.textContent = "";
     primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
     compare.value = ""; changeStatus.textContent = "";
     frame?.remove(); frame = null;
@@ -193,7 +196,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     meta.textContent = "";
   }
   function reset() {
-    generation++; selected = null; linked = null; pendingFile = null; clearPreview();
+    generation++; selected = null; linked = null; pendingFile = null; threadDraft = null; clearPreview();
     status.textContent = ""; list.replaceChildren(); items = []; patchCache.clear();
     if (dialog.open) dialog.close();
   }
@@ -247,6 +250,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       choosePanel(activeTab.hidden ? "preview" : activePanel);
       copyLink.hidden = false;
       copyForAgent.hidden = false;
+      addToThread.hidden = !threadDraft || Boolean(current.recipientId);
       updateComparisons(current);
       void loadOutput();
       heading.textContent = current.title;
@@ -282,13 +286,19 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   });
   compare.addEventListener("change", () => void loadChanges());
   latest.addEventListener("click", () => void select(selected));
-  async function copySelection(forAgent) {
+  function shareSelection() {
     const current = items.find(item => item.id === selected), session = client.session;
-    if (!current || !session || copyLink.hidden) return;
+    if (!current || !session || copyLink.hidden) return null;
     const panel = activePanel;
     const file = panel === "changes" && !columns.hidden ? primary.querySelector("[aria-current=true]")?.dataset.file : undefined;
     const link = workspaceArtifactLink(location.href, session.roomId, current, panel, file);
-    if (!link) return;
+    return link ? { current, session, panel, link } : null;
+  }
+
+  async function copySelection(forAgent) {
+    const snapshot = shareSelection();
+    if (!snapshot) return;
+    const { current, session, panel, link } = snapshot;
     const copiedText = forAgent ? uiText("workspace.share.agentText", { link, head: current.head }) : link;
     const result = await clipboard.copy(copiedText);
     if (!dialog.open || client.session !== session || selected !== current.id || panel !== activePanel
@@ -305,8 +315,32 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   }
   copyLink.addEventListener("click", () => void copySelection(false));
   copyForAgent.addEventListener("click", () => void copySelection(true));
+  addToThread.addEventListener("click", async () => {
+    const snapshot = shareSelection(), destination = threadDraft;
+    if (!snapshot || addToThread.hidden || addToThread.disabled || !destination) return;
+    addToThread.disabled = true;
+    try {
+      const { current, session, panel, link } = snapshot;
+      const query = new URLSearchParams({ id: current.id });
+      const observed = await client.roomRead(`/workspace-previews?${query}`);
+      if (!dialog.open || threadDraft !== destination || client.session !== session || shareSelection()?.link !== link) return;
+      const item = observed?.item;
+      if (!item || item.recipientId || item.revision !== current.revision || item.head !== current.head
+        || item.publisherId !== current.publisherId || artifactDigest(item, panel) !== artifactDigest(current, panel)) {
+        linkStatus.textContent = uiText("workspace.share.stale"); return;
+      }
+      if (!destination(link)) {
+        linkStatus.textContent = uiText("workspace.share.threadUnavailable"); return;
+      }
+      reset();
+      document.querySelector("#message-input")?.focus();
+    } catch {
+      if (dialog.open && threadDraft === destination) linkStatus.textContent = uiText("workspace.share.threadUnavailable");
+    } finally { addToThread.disabled = false; }
+  });
   button.addEventListener("click", () => {
     if (!client.session || dialog.open) return;
+    threadDraft = captureThreadDraft?.() ?? null;
     dialog.showModal();
     void load();
   });
@@ -320,7 +354,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       const target = workspaceArtifactSelection(hash);
       if (!target || !client.session) return;
       clearPreview();
-      linked = target; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
+      threadDraft = null; linked = target; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
       if (!dialog.open) dialog.showModal();
       void load();
     },

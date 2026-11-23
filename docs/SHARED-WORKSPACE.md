@@ -82,3 +82,8 @@ Add `--log dist/run.log` before the separator to keep the latest 24 KiB of
 combined output in a new local log file. The directory must already exist and
 the file is private to your local user. Choose it later with `publish --output`
 or `watch --output` when you want to share that output.
+
+When you open Workspace from a Room thread or from a Work Thread with a visible
+source discussion, choose **Add to thread draft** to bring the selected
+room-wide artifact back to that discussion. Room preserves any text you already
+typed. Review the draft and use Send when ready.
