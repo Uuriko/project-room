@@ -45,7 +45,6 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
           <pre data-workspace-output tabindex="0"></pre>
         </section>
         <section id="workspace-panel-preview" role="tabpanel" aria-labelledby="workspace-tab-preview" hidden>
-          <iframe title="Shared project preview" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
         </section>
       </section>
     </div>`;
@@ -55,7 +54,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const heading = dialog.querySelector("[data-preview-heading]");
   const meta = dialog.querySelector("[data-preview-meta]");
   const status = dialog.querySelector("[data-preview-status]");
-  const frame = dialog.querySelector("iframe");
+  const previewPanel = dialog.querySelector("#workspace-panel-preview");
   const tabs = dialog.querySelector("[data-workspace-tabs]");
   const tabButtons = [...tabs.querySelectorAll("[role=tab]")];
   const output = dialog.querySelector("[data-workspace-output]");
@@ -75,7 +74,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const primary = dialog.querySelector("[data-workspace-primary]");
   const peer = dialog.querySelector("[data-workspace-peer]");
   const patchCache = new Map();
-  let selected = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
+  let selected = null, frame = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
   let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null, pendingFile = null;
 
   function choosePanel(name) {
@@ -90,6 +89,23 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       tab.tabIndex = active ? 0 : -1;
       document.getElementById(tab.getAttribute("aria-controls")).hidden = !active || tabs.hidden;
     }
+  }
+  function showPreview(current, session) {
+    if (activePanel !== "preview" || !current || !session || frameDigest === current.digest) return;
+    const query = new URLSearchParams({ id: current.id, frame: String(current.revision) });
+    if (session.authMode === "account") {
+      query.set("auth", "account");
+      query.set("binding", session.sessionBinding);
+    }
+    if (!frame) {
+      frame = document.createElement("iframe");
+      frame.title = uiText("workspace.preview.frameTitle");
+      frame.setAttribute("sandbox", "allow-scripts");
+      frame.referrerPolicy = "no-referrer";
+    }
+    frame.src = client.path(`/workspace-previews?${query}`);
+    if (!frame.isConnected) previewPanel.append(frame);
+    frameDigest = current.digest;
   }
   async function loadOutput() {
     const current = items.find(item => item.id === selected);
@@ -172,7 +188,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     latest.hidden = true; copyLink.hidden = true; copyForAgent.hidden = true; linkFallback.hidden = true; linkStatus.textContent = "";
     primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
     compare.value = ""; changeStatus.textContent = "";
-    frame.removeAttribute("src");
+    frame?.remove(); frame = null;
     heading.textContent = "Open a shared preview";
     meta.textContent = "";
   }
@@ -238,14 +254,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
         name: memberLabel(current.publisherId) || current.publisherId,
         head: current.head.slice(0, 12), revision: current.revision,
       });
-      if (frameDigest === current.digest) return;
-      const query = new URLSearchParams({ id: current.id, frame: String(current.revision) });
-      if (session.authMode === "account") {
-        query.set("auth", "account");
-        query.set("binding", session.sessionBinding);
-      }
-      frame.src = client.path(`/workspace-previews?${query}`);
-      frameDigest = current.digest;
+      showPreview(current, session);
     } catch (error) {
       if (!owns(ticket, session)) return;
       clearPreview();
@@ -257,6 +266,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     choosePanel(tab.dataset.workspaceTab);
     if (activePanel === "changes") void loadChanges();
     if (activePanel === "output") void loadOutput();
+    showPreview(items.find(item => item.id === selected), client.session);
   }
   for (const tab of tabButtons) tab.addEventListener("click", () => activate(tab));
   tabs.addEventListener("keydown", event => {
