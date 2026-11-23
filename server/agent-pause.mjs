@@ -5,10 +5,12 @@ import { ACK_WINDOW_MS, STALE_AFTER_MS } from "./request-states.mjs";
 const REPEATED_MISS_HOLD_MS = 2 * 60 * 60 * 1000;
 
 export function assignmentHold(store, roomId, actorId, member) {
-  if (!store.wakeQueue || !member || member.kind === "human" || member.id === actorId) return null;
+  if (!store.wakeQueue || !member || member.kind === "human") return null;
   if (store.wakeQueue.pauseStatus(roomId, member.id)) {
     return new ServiceError(423, "assignment_paused", "This agent is paused. Leave the work available or choose an eligible member.");
   }
+
+  if (member.id === actorId) return null;
 
   // Infer silence only from the requester's own open asks. Another sender's
   // private activity must not affect the observable result of this write.

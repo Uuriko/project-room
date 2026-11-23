@@ -82,7 +82,14 @@ test("Board reassign leaves available work claimable while its suggested owner i
   });
   const created = await call("create", "owner", { id: "board-work", title: "Verify evidence" });
   assert.equal(created.value.state, "unclaimed");
+  const held = await call("create", "owner", { id: "held-work", title: "Existing work", assignee: grok });
   f.pause();
+  const round = { expectedClaimedAt: held.value.claimedAt, expectedHistoryLength: held.value.history.length };
+  for (const sender of ["owner", grok]) {
+    await assert.rejects(call("reassign", sender, { newOwner: grok, ...round }, "held-work"),
+      { code: "assignment_paused" });
+  }
+  assert.deepEqual(f.store.workClaims.get(roomId, "held-work"), held.value);
   await assert.rejects(call("reassign", "owner", { newOwner: grok,
     expectedClaimedAt: null, expectedHistoryLength: created.value.history.length }, "board-work"),
   { code: "assignment_paused" });

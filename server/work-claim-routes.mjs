@@ -1900,7 +1900,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // QA200 ch-2037: reassign moves a lease to a new holder (and a fresh
     // unclaimed item lands claimed) without touching the claim route — run
     // the exclusivity check here too.
-    if (target !== item.owner) assertAssignmentAvailable(store, roomId, caller, targetMember);
+    assertAssignmentAvailable(store, roomId, caller, targetMember);
     refuseFileLeaseConflict(reassigned);
     commit(reassigned, "reassigned", {
       previousOwnerId,
