@@ -15,7 +15,7 @@ import { listRoomWork } from "../server/mcp-room-profile.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
-test("a settled formal QA opens one scoped investigation, and catch-up cannot reopen it", async t => {
+async function checkScopedInvestigation(t, firstLine) {
   const f = createAcceptanceFixture(), roomId = "commons", workItemId = "qa-work", recipientId = "pickup-reviewer";
   const agent = f.store.identities.create("Pickup reviewer");
   linkWithProof(f.store, f.keys.owner, roomId, agent, { memberId: recipientId, permissions: ["accept_work","verify"] });
@@ -36,7 +36,7 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
     credentialPath = join(f.directory,"operator.json");
   chmodSync(f.directory,0o700);
   atomicPrivateJson(credentialPath,{ identitySecret:f.keys.owner });
-  atomicPrivateJson(config,{checkpointPath,routes:[{ roomId, requesterId, recipientId, workItemId, credentialPath, after }]});
+  atomicPrivateJson(config,{checkpointPath,routes:[{ roomId, requesterId, recipientId, workItemId, credentialPath, after, firstLine }]});
   const log=[];
   const start=()=>startCompletionPickup(f.store,config,msg=>log.push(JSON.parse(msg)));
   let stop=start();
@@ -50,6 +50,8 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
   assert.equal(read().length,2,JSON.stringify(log));
   const next=read().find(item=>item.id!==first.event.data.messageId);
   assert.equal(next.workItemId,workItemId);
+  const opened = f.store.replyRequests.selected(agent.secret,roomId,next.id,{view:"compact"}).page.items[0].message.body;
+  assert.equal(opened.split("\n")[0], firstLine ?? `@(${recipientId}) Room investigation pass.`);
   stop();
   rmSync(checkpointPath);
   stop=start();
@@ -59,7 +61,12 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
   await setImmediate();
   assert.equal(read().length,2);
   assert.deepEqual(log.map(x=>x.event),["completion_pickup.posted"]);
-});
+}
+
+test("a settled formal QA opens one scoped investigation, and catch-up cannot reopen it",
+  t => checkScopedInvestigation(t));
+test("a configured opener preserves the one-probe settlement behavior",
+  t => checkScopedInvestigation(t, "Claude Code QA"));
 
 for (const ready of [false, true]) {
   test(`a scoped ACP idle report ${ready ? "prioritizes assigned work" : "opens one investigation on a dry queue"}`, async t => {
@@ -77,7 +84,8 @@ for (const ready of [false, true]) {
       credentialPath = join(f.directory, "idle-operator.json");
     chmodSync(f.directory, 0o700);
     atomicPrivateJson(credentialPath, { identitySecret: f.keys.owner });
-    atomicPrivateJson(config, { checkpointPath, routes: [{ roomId, requesterId, recipientId, workItemId, credentialPath, after, onIdle: true }] });
+    const firstLine = "Claude Code QA";
+    atomicPrivateJson(config, { checkpointPath, routes: [{ roomId, requesterId, recipientId, workItemId, credentialPath, after, onIdle: true, firstLine }] });
     let stop = startCompletionPickup(f.store, config);
     const server = createRoomServer({ store: f.store });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -154,6 +162,7 @@ for (const ready of [false, true]) {
     const [request] = list();
     const record = f.store.replyRequests.selected(agent.secret, roomId, request.id);
     const opening = record.page.items.find(item => item.kind === "opened");
+    assert.equal(opening.message.body.split("\n")[0], firstLine);
     assert.equal(opening.message.body.includes("Room investigation pass."), !ready);
     assert.equal(opening.message.body.includes("Room found a next step"), ready);
 
@@ -202,6 +211,10 @@ for (const ready of [false, true]) {
       assert.equal(bridge.idleReportedVersion, idleVersion);
       assert.ok(bridge.idleReportedThrough > idleThrough);
       assert.equal(list().length, 2);
+      const [newRequest] = list().filter(item => item.id !== request.id);
+      const newOpening = f.store.replyRequests.selected(agent.secret, roomId, newRequest.id).page.items.find(item => item.kind === "opened");
+      assert.equal(newOpening.message.body.split("\n")[0], firstLine);
+      assert.ok(newOpening.message.body.includes("Room found a next step"));
       await bridge.pollOnce();
       await bridge.queue.idle();
       assert.equal(prompts, 2);
