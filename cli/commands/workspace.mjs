@@ -11,7 +11,7 @@ import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room workspace start --path DIRECTORY [--base REF] [--connection NAME]
 room workspace continue --link URL --path DIRECTORY [--fetch-from REMOTE] [--connection NAME]
-room workspace run [--port PORT] -- COMMAND [ARGS...]
+room workspace run [--port PORT] [--log FILE.log] -- COMMAND [ARGS...]
 room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
@@ -135,7 +135,7 @@ export async function workspaceCommand(argv, io = {}) {
     if (realpathSync(gitDir) === realpathSync(commonDir)) throw new Error("Start a separate Git worktree before running a preview");
     const root = realpathSync(git(cwd, "rev-parse", "--show-toplevel"));
     const [command, ...args] = argv.slice(separator + 1);
-    return runWorkspaceServer({ cwd: root, command, args, requestedPort: flags.port, out, env: io.env });
+    return runWorkspaceServer({ cwd: root, command, args, requestedPort: flags.port, logPath: flags.log, out, env: io.env });
   }
   if (extra.length || separator !== -1 || !["start", "list", "publish", "watch", "remove", "changes", "output", "continue"].includes(action)) throw new Error(usage);
   if (action === "start") {

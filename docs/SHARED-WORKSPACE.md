@@ -75,3 +75,8 @@ stays private.
 Keep the same member ID on updates and retries. To address another person or
 share room-wide, start a new Workspace publication with a new preview ID.
 `remove` withdraws the earlier publication.
+
+Add `--log dist/run.log` before the separator to keep the latest 24 KiB of
+combined output in a new local log file. The directory must already exist and
+the file is private to your local user. Choose it later with `publish --output`
+or `watch --output` when you want to share that output.
