@@ -127,6 +127,38 @@ test("existing fake ACP subprocess accepts mode on a new and recovered session",
   assert.equal(renderTurn((await resumed.prompt("thread", prompt)).recorder), "echo: synthetic task");
 });
 
+test("idle eviction waits for close before loading the same saved thread", async () => {
+  const f = mockHost({ saved: "older-session", mode: null });
+  f.savedSessions.set("warm", "warm-session");
+  f.savedSessions.set("busy", "busy-session");
+  await f.host.session("thread");
+  await f.host.session("warm");
+  await f.host.session("busy");
+  const idle = key => key === "busy";
+  await f.host.trimIdleSessions(1, idle);
+  assert.equal(f.calls.some(call => call.method === "session/close"), false, "unsupported close is never called");
+  f.host.capabilities.closeSession = true;
+  const close = Promise.withResolvers();
+  const request = f.host.process.peer.request;
+  f.host.process.peer.request = (method, params, options) => {
+    if (method !== "session/close") return request(method, params, options);
+    f.calls.push({ method, params, options });
+    return close.promise;
+  };
+  const trim = f.host.trimIdleSessions(1, idle);
+  const reenter = f.host.session("thread");
+  await Promise.resolve();
+  assert.deepEqual(f.calls.map(call => call.method), ["session/load", "session/load", "session/load", "session/close"]);
+  assert.deepEqual(f.calls.at(-1).params, { sessionId: "older-session" });
+  assert.equal(f.host.sessions.get("busy"), "busy-session");
+  assert.equal(f.host.sessions.get("warm"), "warm-session");
+  assert.equal(f.savedSessions.get("thread"), "older-session");
+  close.resolve({});
+  await trim;
+  assert.deepEqual(await reenter, { sessionId: "older-session", created: false, loaded: true });
+  assert.equal(f.calls.at(-1).method, "session/load");
+});
+
 test("established session reuse does not reload or reset mode", async () => {
   const f = mockHost({ saved: "saved-session" });
   await f.host.prompt("thread", prompt);

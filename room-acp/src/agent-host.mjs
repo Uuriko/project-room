@@ -7,6 +7,7 @@ export class AgentHost {
   constructor({ candidate, cwd = process.cwd(), env = process.env, mode = null, onPermission = null, log = () => {}, savedSessions = null }) {
     Object.assign(this, { candidate, cwd, env, mode, onPermission, log, savedSessions });
     this.sessions = new Map(); // threadKey -> sessionId
+    this.closing = new Map(); // threadKey -> pending provider close
     this.recorders = new Map(); // sessionId -> TurnRecorder (one turn in flight per session)
     this.threadOf = new Map(); // sessionId -> threadKey
     this.process = null; this.capabilities = null; this.exitListeners = new Set();
@@ -46,7 +47,13 @@ export class AgentHost {
   }
 
   async session(threadKey, { timeoutMs = 60000 } = {}) {
-    if (this.sessions.has(threadKey)) return { sessionId: this.sessions.get(threadKey), created: false };
+    await this.closing.get(threadKey);
+    if (this.sessions.has(threadKey)) {
+      const sessionId = this.sessions.get(threadKey);
+      this.sessions.delete(threadKey);
+      this.sessions.set(threadKey, sessionId);
+      return { sessionId, created: false };
+    }
     if (!this.process) throw new Error("agent is not running");
     // After a restart, resume the thread's saved session when the agent can.
     const saved = this.savedSessions?.get(threadKey);
@@ -72,6 +79,26 @@ export class AgentHost {
     this.sessions.set(threadKey, sessionId); this.threadOf.set(sessionId, threadKey);
     this.savedSessions?.set(threadKey, sessionId);
     return { sessionId, created: true };
+  }
+
+  // Free idle provider resources while keeping the saved thread binding.
+  // Closing without load support would lose the conversation on the next turn.
+  async trimIdleSessions(limit, isBusy) {
+    const peer = this.process?.peer;
+    if (!peer || !this.capabilities?.closeSession || !this.capabilities.loadSession) return;
+    const idle = [...this.sessions].filter(([threadKey, sessionId]) =>
+      !isBusy(threadKey) && !this.recorders.has(sessionId) && this.savedSessions?.get(threadKey) === sessionId);
+    await Promise.all(idle.slice(0, Math.max(0, idle.length - limit)).map(([threadKey, sessionId]) => {
+      this.sessions.delete(threadKey);
+      this.threadOf.delete(sessionId);
+      // A new turn for this thread waits for close and then loads the saved ID,
+      // including when the close response itself was lost.
+      const close = peer.request("session/close", { sessionId }, { timeoutMs: 5000 })
+        .catch(() => this.log("Could not confirm idle ACP session close"))
+        .finally(() => this.closing.delete(threadKey));
+      this.closing.set(threadKey, close);
+      return close;
+    }));
   }
 
   // Run one prompt turn on the thread's session. Returns the recorder and stopReason.
