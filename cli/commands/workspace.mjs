@@ -58,7 +58,6 @@ function savedWorkspaceConnection(cwd) {
   if (atRoot) return atRoot;
   const name = workspaceMarker(cwd)?.connection;
   return name ? safeName(name) : undefined;
-  return undefined;
 }
 
 function workspaceMarker(cwd) {
