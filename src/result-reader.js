@@ -163,7 +163,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     panel.hidden = !outcome;
     if (!outcome) return;
     const labels = { fix_deployment: "Fix the deployment.", verify_deployment: "Verify the deployment.",
-      confirm_smoke_handoff: "Confirm the smoke test assignment.", accept_smoke_test: "Smoke test acceptance pending.", accept_release: "Release acceptance pending." };
+      confirm_smoke_handoff: "Confirm the smoke test assignment.", accept_smoke_test: "Smoke test acceptance pending.", accept_release: "Release acceptance pending.", restore_smoke_evidence: "Smoke test evidence unavailable." };
     resultElement("result-outcome-status").textContent = outcome.status === "accepted"
       ? "Outcome accepted." : labels[outcome.remaining];
     resultElement("result-outcome-criterion").textContent = outcome.criterion;

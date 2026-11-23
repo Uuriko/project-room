@@ -15,7 +15,7 @@ export function releaseSmokeWorkId(workItemId, completionEventId, candidateRevis
   return `release-smoke-${key}`;
 }
 
-export function releaseOutcome({ releaseChecks, work, readWork, now, ownerId }) {
+export function releaseOutcome({ releaseChecks, work, readWork, visibleSmokeEvidence, now, ownerId }) {
   const plan = releaseChecks?.smokeTest;
   if (!plan) return null;
   const { candidateRevision, completionEventId, checks } = releaseChecks;
@@ -33,10 +33,11 @@ export function releaseOutcome({ releaseChecks, work, readWork, now, ownerId }) 
     return { ...base, status: "open", remaining: "confirm_smoke_handoff" };
   }
   const next = nextWorkStep(smoke, now, ownerId);
-  const smokeAccepted = nativePrerequisiteState(smoke, now).satisfied;
+  const smokePassed = nativePrerequisiteState(smoke, now).satisfied;
+  const smokeAccepted = smokePassed && visibleSmokeEvidence(smoke);
   const accepted = smokeAccepted && nativePrerequisiteState(work, now).satisfied;
   return { ...base, status: accepted ? "accepted" : "open",
-    ...(accepted ? {} : { remaining: smokeAccepted ? "accept_release" : "accept_smoke_test" }),
+    ...(accepted ? {} : { remaining: smokeAccepted ? "accept_release" : smokePassed ? "restore_smoke_evidence" : "accept_smoke_test" }),
     smokeTest: { workItemId: id, href: workThreadHref(id), state: smoke.state,
       next, nextRead: { tool: "room_read_work", arguments: { workItemId: id, brief: true } },
       ...(smokeAccepted ? { completionEventId: smoke.receipt.eventId } : {}) } };
