@@ -23,6 +23,7 @@ import { isWriteSql } from './sql-write-classification.mjs';
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems, readWorkItem } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
+import { assertAssignmentAvailable } from "./agent-pause.mjs";
 import { readCurrentMessageThread } from './conversation-sync.mjs';
 import { selectedMessageRecord, messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput, invokeFromPlainPost } from './room-assistant.mjs';
@@ -7634,6 +7635,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(422, "payload_too_large", `${tooLongField[1]} must be at most 4096 characters`);
         }
         fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message);
+      }
+      if (requestMode === "open" || incoming.type === T.WORK_HANDOFF_RECORDED) {
+        assertAssignmentAvailable(this, roomId, auth.member.id, ownMember(state.members, command.data.toMemberId));
+      } else if (incoming.type === T.WORK_PROPOSED) {
+        assertAssignmentAvailable(this, roomId, auth.member.id, ownMember(state.members, command.data.accountableMemberId));
       }
       // Integration map slice 5: the external path is only as strong as
       // its signature. Room_text is unchanged above; every other completion

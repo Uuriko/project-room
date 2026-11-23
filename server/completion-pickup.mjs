@@ -42,7 +42,12 @@ export function dispatchCompletionPickup(store, route, secret, event, sequence) 
       "Return your exact source or revision, one observed result, and one checkable next action with an intended recipient. A clean check is useful. Read-only QA; keep evidence within its authorized audience."
     ].join("\n")
   });
-  return store.command(secret, roomId, command).duplicate ? "replayed" : "posted";
+  try {
+    return store.command(secret, roomId, command).duplicate ? "replayed" : "posted";
+  } catch (error) {
+    if (error.code === "assignment_paused" || error.code === "assignment_waiting_for_recipient") return "recipient_unavailable";
+    throw error;
+  }
 }
 
 // The Node app owns this subscriber. The only trigger is a committed event
