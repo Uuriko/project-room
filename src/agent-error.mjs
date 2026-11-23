@@ -561,6 +561,14 @@ export function errorRegistryAx(code, { httpStatus = 0, message = "", roomId, wo
 // covered by axFamilyRecovery() below; tests/errors-catalog-drift.test.js
 // fails if a catalogued code loses either kind of coverage.
 const AX_NAMED_RECOVERIES = {
+  invalid_preview: ["Room refused the preview input or link.", "Read the current publication or recopy the exact link before retrying."],
+  preview_audience_changed: ["An existing preview keeps its sharing audience.", "Publish a new preview with the intended audience and use its new link."],
+  preview_changed: ["The requested preview revision is stale.", "Read the current revision before editing or removing it, or explicitly open the latest preview."],
+  preview_file_not_found: ["This file is absent from the selected revision's changes.", "Read the file summary for that revision and select a published path."],
+  preview_limit: ["The Workspace preview limit has been reached.", "Check which previews are still needed and remove an eligible one before publishing again."],
+  preview_not_found: ["This preview is unavailable to you.", "Check the previews visible in Workspace or ask the publisher for a current link."],
+  preview_owner_required: ["This preview requires its publisher to update it.", "Ask the publisher to update it. The room owner can also remove it."],
+  preview_recipient_unavailable: ["The selected recipient is unavailable in this room.", "Check current room membership and choose an active recipient."],
   reconnect_scope_mismatch: [uiText("agentError.reconnect_scope_mismatch.hint"), uiText("agentError.reconnect_scope_mismatch.recovery")],
   review_runtime_attempt_conflict: [uiText("agentError.review_runtime_attempt_conflict.hint"), uiText("agentError.review_runtime_attempt_conflict.recovery")],
   // Current-room refusals retain their qualified recovery and existing grants.
