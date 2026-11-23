@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { createServer, request } from "node:http";
+import { connect } from "node:net";
 import test from "node:test";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { createWorkspacePreviewViewer } from "../server/workspace-preview-viewer.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -278,4 +281,51 @@ test("only the current publisher can register an exact preview through the local
   const expired = await (await issue(owner, 2)).json();
   now += 10_001;
   assert.equal(server.consumeWorkspacePublisherGrant(expired.grant, exact(2)), null);
+});
+
+test("Workspace viewer forwards the publisher's loopback Host without changing viewer authorization", async t => {
+  const seen = [];
+  const app = createServer((req, res) => {
+    seen.push(req.headers.host);
+    res.end();
+  });
+  app.listen(0, "127.0.0.1");
+  await once(app, "listening");
+  const { port } = app.address();
+  const viewer = createWorkspacePreviewViewer({ origin: new URL("http://localhost") }, {
+    generationFor: () => 1,
+    registrationFor: selection => ({ generation: 1, port: selection.id === "legacy" ? undefined : port }),
+    openLane: (_selection, callback) => {
+      const lane = connect({ host: "127.0.0.1", port });
+      lane.once("connect", () => callback(null, lane));
+    },
+  });
+  t.after(() => { viewer.close(); app.closeAllConnections(); app.close(); });
+  viewer.server.listen(0, "127.0.0.1");
+  await once(viewer.server, "listening");
+  function read(url, method, headers, body) {
+    return new Promise((resolve, reject) => {
+      const req = request({ hostname: "127.0.0.1", port: viewer.server.address().port,
+        path: url.pathname, method, headers: { Host: url.host, ...headers } }, res => {
+        res.resume();
+        res.once("end", () => resolve(res));
+      });
+      req.once("error", reject);
+      req.end(body);
+    });
+  }
+  for (const [id, expected] of [["current", `127.0.0.1:${port}`], ["legacy", "127.0.0.1"]]) {
+    const ticket = new URL(viewer.issue({ id }, id, () => true));
+    const page = new URL("/", ticket);
+    const before = seen.length;
+    assert.equal((await read(page, "GET")).statusCode, 404);
+    assert.equal(seen.length, before);
+    const claim = await read(ticket, "POST", { Origin: ticket.origin }, ticket.hash.slice(1));
+    assert.equal(claim.statusCode, 204);
+    const cookie = claim.headers["set-cookie"][0].split(";")[0];
+    for (const method of ["GET", "HEAD"]) {
+      assert.equal((await read(page, method, { Cookie: cookie })).statusCode, 200);
+      assert.equal(seen.at(-1), expected);
+    }
+  }
 });

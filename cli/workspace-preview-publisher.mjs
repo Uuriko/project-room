@@ -88,7 +88,7 @@ export function attachWorkspacePublisher({ endpoint, selection, grant, port, own
   return new Promise((resolve, reject) => {
     control.once("close", () => reject(new Error("Could not attach the live Workspace publisher")));
     control.once("error", reject);
-    control.once("secureConnect", () => writeFrame(control, { type: "publisher", grant, selection }));
+    control.once("secureConnect", () => writeFrame(control, { type: "publisher", grant, selection, port }));
     control.setEncoding("utf8");
     control.on("data", chunk => {
       while (chunk.length) {
