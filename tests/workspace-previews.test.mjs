@@ -138,6 +138,12 @@ test("new worktrees keep the project selection outside the working copy", async 
     const metadata = join(git(receipt.path, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
     assert.deepEqual(JSON.parse(readFileSync(metadata, "utf8")), { connection: "first-room" });
   }
+  await assert.rejects(workspaceCommand(["run", "--cwd", "apps/absent", "--", process.execPath, "-v"],
+    { cwd: receipts[0].path }), /--cwd "apps\/absent".*existing directory/);
+  for (const directory of ["..", "page.html"]) {
+    await assert.rejects(workspaceCommand(["run", "--cwd", directory, "--", process.execPath, "-v"],
+      { cwd: receipts[0].path }), /working directory inside this worktree/);
+  }
 });
 
 test("continuation rechecks the share after fetching its missing commit", async t => {

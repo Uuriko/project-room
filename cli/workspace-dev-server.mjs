@@ -108,7 +108,7 @@ function captureRunLog(cwd, file) {
 
 // Only invoked by a local operator with an explicit argv. It receives no
 // Room credentials and opens no remote port. Child output stays on stderr.
-export async function runWorkspaceServer({ cwd, command, args, requestedPort, logPath, out, env = process.env }) {
+export async function runWorkspaceServer({ cwd, workingDirectory = cwd, command, args, requestedPort, logPath, out, env = process.env }) {
   const lsof = commandOnPath("lsof", env), ps = commandOnPath("ps", env);
   if (!["linux", "darwin"].includes(process.platform) || !lsof || !ps)
     throw new Error("Local preview ownership checks require macOS or Linux with lsof and ps");
@@ -118,7 +118,7 @@ export async function runWorkspaceServer({ cwd, command, args, requestedPort, lo
     .filter(key => typeof env[key] === "string").map(key => [key, env[key]]));
   const log = logPath === undefined ? null : captureRunLog(cwd, logPath);
   const child = fork(supervisor, [command, ...argv], {
-    cwd, env: { ...localEnv, PORT: String(port), HOST: host }, detached: true,
+    cwd: workingDirectory, env: { ...localEnv, PORT: String(port), HOST: host }, detached: true,
     stdio: ["ignore", log ? "pipe" : 2, log ? "pipe" : 2, "ipc"],
   });
   const outputClosed = log && new Promise(resolveClose => child.once("close", resolveClose));
@@ -150,7 +150,7 @@ export async function runWorkspaceServer({ cwd, command, args, requestedPort, lo
     const deadline = performance.now() + 15000;
     while (!result && !stopping && performance.now() < deadline) {
       if (ownsLoopback(lsof, ps, port, child.pid)) {
-        out({ state: "ready", path: cwd, preferredPort: preferred, port, previewUrl: `http://${host}:${port}/`, ...(log && { log: log.path }) });
+        out({ state: "ready", path: cwd, ...(workingDirectory !== cwd && { workingDirectory }), preferredPort: preferred, port, previewUrl: `http://${host}:${port}/`, ...(log && { log: log.path }) });
         await exited;
         if (stopping) return 0;
         if (result.error) throw new Error("Preview command failed: " + result.error);
