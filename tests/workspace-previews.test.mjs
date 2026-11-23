@@ -57,3 +57,32 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.equal((await call(owner, "DELETE", { id, expectedRevision: 2 })).status, 200);
   assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 404);
 });
+
+test("new worktrees keep the project selection outside the working copy", async t => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, readFileSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { workspaceCommand } = await import("../cli/commands/workspace.mjs");
+  const { writeProject } = await import("../cli/paths.mjs");
+  const base = mkdtempSync(join(tmpdir(), "room-cli-worktrees-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git(base, "init", "-q");
+  writeFileSync(join(base, "page.html"), "<h1>Start</h1>");
+  git(base, "add", "page.html");
+  git(base, "-c", "user.name=Room test", "-c", "user.email=room-test@localhost", "-c", "commit.gpgsign=false", "commit", "-qm", "base");
+  writeProject(base, { connection: "first-room" });
+  const receipts = [];
+  for (const target of [join(base, "first"), join(base, "second")]) {
+    const code = await workspaceCommand(["start", "--path", target], { cwd: base, out: line => receipts.push(JSON.parse(line)) });
+    assert.equal(code, 0);
+  }
+  assert.notEqual(receipts[0].branch, receipts[1].branch);
+  for (const receipt of receipts) {
+    assert.equal(receipt.base, git(base, "rev-parse", "HEAD"));
+    assert.equal(git(receipt.path, "status", "--porcelain"), "");
+    const metadata = join(git(receipt.path, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
+    assert.deepEqual(JSON.parse(readFileSync(metadata, "utf8")), { connection: "first-room" });
+  }
+});

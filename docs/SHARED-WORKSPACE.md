@@ -8,7 +8,7 @@ From an existing checkout, ask either agent to prepare an isolated worktree at a
 room workspace start --path ../preview-variant --base HEAD
 ```
 
-The command returns the path, branch, preview ID, and full base commit. Run the usual agent and build in that path. Choose a standalone HTML build artifact whose styles and assets are inline. When it is ready to share, run:
+The command returns the path, branch, preview ID, and full base commit. Run the usual agent and build in that path. A workspace created from a checkout with a saved Room selection inherits that selection. Use `--connection NAME` to choose a different saved connection explicitly. Choose a standalone HTML build artifact whose styles and assets are inline. When it is ready to share, run:
 
 ```sh
 room workspace publish --id PREVIEW_ID --title "Preview variant" --base BASE_COMMIT --file dist/preview.html
