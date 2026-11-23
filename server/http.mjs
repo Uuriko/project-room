@@ -1524,8 +1524,9 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         streams, workspacePublisherGrants,
         workspacePreviewChanged(roomId, audience, previous) {
           const broker = server.workspacePreviewBroker;
-          if (broker && previous) {
-            const generation = broker.generationFor(previous);
+          if (previous) {
+            workspacePublisherGrants?.revoke(previous);
+            const generation = broker?.generationFor(previous);
             if (generation !== undefined) broker.retire(previous, generation);
           }
           for (const entry of streams) {

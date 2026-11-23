@@ -26,6 +26,12 @@ export function createWorkspacePublisherGrants(now = Date.now) {
       try { return issued.isCurrent() ? issued.selection : null; }
       catch { return null; }
     },
+    revoke(selection) {
+      for (const [key, issued] of grants) {
+        if (Object.entries(selection).every(([field, value]) => issued.selection[field] === value))
+          grants.delete(key);
+      }
+    },
     clear() { grants.clear(); },
   };
 }
