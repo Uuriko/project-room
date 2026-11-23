@@ -8056,7 +8056,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         delivery.push({ memberId, status: "no_receiver" });
         continue;
       }
-      const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, requestId, eventId, actorId: senderMemberId, kind });
+      const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, requestId, eventId, actorId: senderMemberId, kind,
+        openingContextEventId: requestId && memberId === data.toMemberId ? eventId : undefined });
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       // Formal-request no-host fallback, addressee only. Existing connected

@@ -141,7 +141,7 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
     return {};
   }
   // Call inside the same transaction that commits the durable Room wake signal.
-  function enqueueRequested({ roomId, memberId, requestId, messageId, eventId, context, nextRead, timestamp = new Date(now()).toISOString() }) {
+  function enqueueRequested({ roomId, memberId, requestId, messageId, eventId, context, nextRead, firstAck, timestamp = new Date(now()).toISOString() }) {
     const data = { roomId: thinId(roomId), memberId: thinId(memberId) };
     if (requestId !== undefined) data.requestId = thinId(requestId);
     if (messageId !== undefined) data.messageId = thinId(messageId);
@@ -160,8 +160,10 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
           door: "native-mcp", kind: "native-mcp", subjectId: memberId, reason: "native_callback_capacity" });
         continue;
       }
-      const visibleEvent = nextRead && mcpOAuthToolAllowed(nextRead.tool, JSON.parse(row.principal).scopes)
-        ? { ...event, data: { ...data, nextRead } } : event;
+      const { scopes } = JSON.parse(row.principal);
+      const visibleEvent = { ...event, data: { ...data,
+        ...(nextRead && mcpOAuthToolAllowed(nextRead.tool, scopes) ? { nextRead } : {}),
+        ...(firstAck && mcpOAuthToolAllowed(firstAck.tool, scopes) ? { firstAck } : {}) } };
       queued += Number(db.prepare("INSERT OR IGNORE INTO mcp_event_outbox(subscription_id,event_id,document,next_at) VALUES(?,?,?,?)").run(row.id, eventId, JSON.stringify(visibleEvent), now()).changes);
     }
     return queued;

@@ -236,6 +236,12 @@ export function confirmsAgentCommand(receipt, command, { roomId, memberId }) {
   const entry = receipt?.event;
   let data = command.data;
   try {
+    if (command.type === T.REPLY_REQUEST_PROGRESSED) {
+      // The server fingerprints these write preconditions, then removes them
+      // from the persisted progress event.
+      const { ifUnacknowledgedContextEventId: _first, ifCurrentContextEventId: _current, ...progress } = data;
+      data = progress;
+    }
     const mode = command.type === T.MESSAGE_POSTED ? replyPostMode(data) : null;
     if (mode) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
     // The server stamps which credential answered; it is never in the command.

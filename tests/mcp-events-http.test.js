@@ -98,17 +98,44 @@ for (const normalized of [false, true]) test(`native request wake carries the ex
   assert.equal(selected.request.status, 'open');
   assert.equal(selected.page.hasMore, false);
   assert.ok(selected.current.answerBasis, 'saved request can be answered after a complete selected read');
-  ask('after-subscription');
+  const opening = ask('after-subscription');
   await f.server.drainMcpEvents();
   assert.equal(f.deliveries.length, 1);
   const pointer = JSON.parse(f.deliveries[0].body).data;
   assert.deepEqual(pointer, { roomId: 'commons', memberId: f.grant.member_id,
     messageId: 'after-subscription', requestId: 'after-subscription',
+    firstAck: { tool: 'room_progress_request', arguments: {
+      roomId: 'commons', requestMessageId: 'after-subscription', requestId: 'native-first-ack-' + opening.event.id,
+      expectedRequestRevision: 0, progress: 'acknowledged', ifUnacknowledgedContextEventId: opening.event.id } },
     nextRead: { tool: 'room_read_request', arguments: { roomId: 'commons', requestMessageId: 'after-subscription', view: 'compact' } } });
+  const received = await call(pointer.firstAck.tool, pointer.firstAck.arguments);
+  const replay = await call(pointer.firstAck.tool, pointer.firstAck.arguments);
+  assert.equal(received.duplicate, false);
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.sequence, received.sequence);
+  const { roomId: _roomId, requestId, ...progress } = pointer.firstAck.arguments;
+  assert.throws(() => f.store.command(f.owner, 'commons', {
+    id: requestId, type: 'reply_request.progressed', data: progress
+  }), error => error.code === 'request_not_found');
+  const conflictingAck = await f.rpc('tools/call', { name: pointer.firstAck.tool,
+    arguments: { ...pointer.firstAck.arguments, requestId: 'ack-again' } });
+  assert.equal(conflictingAck.result?.isError, true);
   const fromWake = await call(pointer.nextRead.tool, pointer.nextRead.arguments);
   assert.equal(fromWake.request.id, 'after-subscription');
   assert.equal(fromWake.request.status, 'open');
+  assert.equal(fromWake.request.revision, 0);
+  assert.ok(fromWake.request.acknowledgedAt);
   assert.equal(fromWake.page.hasMore, false);
+  const stale = ask('corrected-before-receipt');
+  await f.server.drainMcpEvents();
+  const earlier = JSON.parse(f.deliveries.at(-1).body).data.firstAck;
+  assert.equal(earlier.arguments.ifUnacknowledgedContextEventId, stale.event.id);
+  f.store.command(f.owner, 'commons', { id: 'correct-in-flight-wake', type: 'message.posted',
+    data: { body: 'Correction: review the current version.', replyToId: 'corrected-before-receipt',
+      messageId: 'correction-message', toMemberId: f.grant.member_id } });
+  const refused = await f.rpc('tools/call', { name: earlier.tool, arguments: earlier.arguments });
+  assert.equal(refused.result?.isError, true);
+  assert.equal((await call('room_read_request', { requestMessageId: 'corrected-before-receipt' })).request.acknowledgedAt ?? null, null);
   assert.ok(fromWake.current.answerBasis);
   assert.equal((await call('room_read_request', { requestMessageId: 'before-subscription' })).request.status, 'open',
     'reading and callback delivery do not answer a request');

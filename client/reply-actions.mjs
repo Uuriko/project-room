@@ -36,7 +36,7 @@ const definitions = [
     { requestId: requestKey, requestMessageId: id, expectedRequestRevision: revision, reason: text }, ["requestMessageId", "expectedRequestRevision", "reason"]],
   ["room_progress_request", null, "Tell the asker where a request addressed to you stands: acknowledged (you saw it), accepted (you commit to do it), working (it is underway), needs_input (you need something from them; say what in note) or error. Acknowledged alone proves neither acceptance nor progress. The request stays open and this receipt does not advance its revision. Use the response action from room_read_request to answer." + retry,
     { requestId: requestKey, requestMessageId: id, expectedRequestRevision: revision,
-      progress: { type: "string", enum: ["acknowledged", "accepted", "working", "needs_input", "error"] }, note: { ...text, maxLength: 1000 } }, ["requestMessageId", "expectedRequestRevision", "progress"]]
+      progress: { type: "string", enum: ["acknowledged", "accepted", "working", "needs_input", "error"] }, ifUnacknowledgedContextEventId: id, note: { ...text, maxLength: 1000 } }, ["requestMessageId", "expectedRequestRevision", "progress"]]
 ];
 const actions = new Map(definitions.map(([name, route, description, properties, required = Object.keys(properties)]) =>
   [name, { route, tool: { name, description, inputSchema: { type: "object", properties, required, additionalProperties: false },
