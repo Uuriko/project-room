@@ -10,7 +10,7 @@ import { runWorkspaceServer } from "../workspace-dev-server.mjs";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room workspace start --path DIRECTORY [--base REF] [--connection NAME]
-room workspace continue --link URL --path DIRECTORY [--connection NAME]
+room workspace continue --link URL --path DIRECTORY [--fetch-from REMOTE] [--connection NAME]
 room workspace run [--port PORT] -- COMMAND [ARGS...]
 room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
@@ -29,6 +29,21 @@ function git(cwd, ...args) {
 }
 function pinned(cwd, ref) {
   return git(cwd, "rev-parse", "--verify", "--end-of-options", ref + "^{commit}");
+}
+
+function hasCommit(cwd, head) {
+  try { return pinned(cwd, head) === head; }
+  catch { return false; }
+}
+
+function fetchWorkspaceCommit(cwd, remote, head) {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,99}$/.test(remote) || !git(cwd, "remote").split("\n").includes(remote))
+    throw new Error("Choose a configured Git remote with --fetch-from");
+  const fetched = spawnSync("git", [
+    "fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--refmap=", "--", remote, head,
+  ], { cwd, timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, stdio: "ignore" });
+  if (fetched.status !== 0 || !hasCommit(cwd, head))
+    throw new Error(`Could not fetch commit ${head} from ${remote}. Check repository access or ask the publisher to push it.`);
 }
 
 function savedWorkspaceConnection(cwd) {
@@ -139,17 +154,24 @@ export async function workspaceCommand(argv, io = {}) {
     if (link.username || link.password || link.origin !== new URL(conn.origin).origin
       || link.searchParams.get("room") !== conn.roomId)
       throw new Error("Choose the saved connection for the artifact's Room");
-    const item = (await list()).find(row => row.id === target.id);
-    if (!item || item.revision !== target.revision || item.publisherId !== target.publisherId
-      || item.head !== target.head || artifactDigest(item, target.panel) !== target.digest)
-      throw new Error("This workspace artifact has changed or is unavailable");
-    try {
-      if (pinned(cwd, target.head) !== target.head) throw new Error();
-    } catch {
-      throw new Error(`Commit ${target.head} is unavailable here. Get it from the repository or ask the publisher to push it.`);
+    if (existsSync(resolve(cwd, flags.path))) throw new Error("Choose a new worktree directory");
+    const verify = async () => {
+      const item = (await list()).find(row => row.id === target.id);
+      if (!item || item.revision !== target.revision || item.publisherId !== target.publisherId
+        || item.head !== target.head || artifactDigest(item, target.panel) !== target.digest)
+        throw new Error("This workspace artifact has changed or is unavailable");
+    };
+    await verify();
+    const fetched = !hasCommit(cwd, target.head);
+    if (fetched) {
+      const remote = flags["fetch-from"];
+      if (!remote)
+        throw new Error(`Commit ${target.head} is unavailable here. Run again with --fetch-from and a configured Git remote, or ask the publisher to push it.`);
+      fetchWorkspaceCommit(cwd, remote, target.head);
+      await verify();
     }
     const worktree = launch(cwd, { path: flags.path, base: target.head }, inherited && safeName(inherited));
-    out({ ...worktree, source: target });
+    out({ ...worktree, source: target, fetched });
     return 0;
   }
   if (!validId.test(flags.id ?? "")) throw new Error("--id must be the ID from room workspace start");

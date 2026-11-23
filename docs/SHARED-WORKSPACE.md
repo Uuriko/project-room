@@ -45,8 +45,9 @@ room workspace continue --link 'ARTIFACT_URL' --path ../next-attempt
 
 Room checks the link against the current shared artifact through your saved
 connection. The command creates a new branch and worktree from the exact
-published commit. Fetch that commit through the project's usual Git remote if
-it is missing locally. Private drafts, unpublished files, and run history stay
+published commit. When the commit is missing, add `--fetch-from origin` or
+name another configured remote. Room fetches only the selected commit and
+rechecks the artifact before creating the worktree. Private drafts, unpublished files, and run history stay
 with the original workspace unless their author shares them.
 
 ## Run a development preview locally
