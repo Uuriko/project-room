@@ -1080,6 +1080,21 @@ export class Bridge {
             this.chatReceipts.save(key, receipt);
           }
         }
+        if (receipt.formalReview && receipt.formalDelivery) {
+          const requestId = receipt.formalDelivery.recipe.command.data.responseToRequestId;
+          const context = await this.room.requestContext(requestId, null, { compact: true });
+          if (context.roomId !== this.connection.roomId || context.viewerId !== this.room.memberId
+            || context.request?.id !== requestId || context.request.recipientId !== this.room.memberId
+            || !['open', 'answered', 'declined', 'cancelled'].includes(context.request.status))
+            throw new RoomError(409, 'formal_context_invalid', 'Draft fallback needs a current, recipient-bound request');
+          if (context.request.status !== 'open') {
+            receipt = { ...receipt, phase: 'discarded', disposition: `request_${context.request.status}` };
+            this.chatReceipts.save(key, receipt);
+            this.log(`Formal request ${requestId} is ${context.request.status}. Draft retained locally. Read the request for its current outcome.`);
+            await this.ack(receipt.signalIds);
+            return;
+          }
+        }
         if (!receipt.formalDelivery || receipt.formalReview) await this.room.post({ body: receipt.body, replyToId: receipt.threadKey,
           messageId: `acp-${receipt.requestId}`, requestId: receipt.requestId, listenerToken: this.fencingToken });
         this.stats.posted++;

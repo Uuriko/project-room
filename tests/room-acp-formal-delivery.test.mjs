@@ -224,6 +224,31 @@ test('a response prepared before new context cannot silently refresh its basis o
   assert.ok((await f.read(bridge)).page.items.some(item=>item.message?.body.includes('draft for review, not a completed answer')));
 });
 
+test('a cancelled request does not receive a stale draft on delivery or restart', async t => {
+  const f = await fixture(t, {persist:true});
+  let formalPosts = 0, draftPosts = 0;
+  const transport = async (url, options) => {
+    const command = options?.body ? JSON.parse(options.body) : null;
+    if (command?.data?.responseToRequestId && ++formalPosts === 1) {
+      f.store.command(f.seeded.owner, 'commons', {id:'cancel-before-answer',type:'reply_request.cancelled',
+        data:{requestMessageId:'dm',expectedRequestRevision:0,reason:'Assigned to a replacement'}});
+    } else if (command?.type === 'message.posted') draftPosts++;
+    return fetch(url, options);
+  };
+  const first = f.make(transport); await f.ready(first); await first.turn('dm', [f.wake]);
+  const second = f.make(transport); await f.ready(second); await second.turn('dm', [f.wake]);
+  const current = await f.read(second);
+  assert.equal(current.request.status, 'cancelled');
+  assert.equal(current.page.items.find(item => item.kind === 'cancelled').reason, 'Assigned to a replacement');
+  assert.equal(formalPosts, 1);
+  assert.equal(draftPosts, 0);
+  assert.equal(f.counts.prompts, 1);
+  const receipt = second.chatReceipts.read(second.chatReceipts.key(f.wake.signalId));
+  assert.equal(receipt.phase, 'discarded');
+  assert.equal(receipt.disposition, 'request_cancelled');
+  assert.match(receipt.body, /Useful verified answer/);
+});
+
 test('lost stale-draft response retries only that draft and never resends the rejected formal answer', async t => {
   const f=await fixture(t);let inject=true, lose=true, formalPosts=0;const drafts=[];
   const transport=async(url,options)=>{
