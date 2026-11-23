@@ -126,6 +126,7 @@
   "src/spend-pricing-ui.js",
   "src/strings.js",
   "src/updates-ui.js",
+  "src/vendor-gitdiff-parser.js",
   "src/webmcp.js",
   "src/work-announcements.js",
   "src/work-dependencies.js",
@@ -138,5 +139,8 @@
   "src/work-status.js",
   "src/work-templates.js",
   "src/workflow.js",
-  "src/workspace-navigation.js"
+  "src/workspace-change-view.js",
+  "src/workspace-diff-parser.js",
+  "src/workspace-navigation.js",
+  "src/workspace-previews-ui.js"
 ]

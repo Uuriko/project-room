@@ -827,5 +827,6 @@ export default {
   "work.thread.nextFor": "{name} · {action}",
   "work.focus.briefHelp": "Name one output, the allowed scope and how to check it. Choose who will do the work and review it.",
   "work.focus.goalHtml": "<p class=\"definition work-focus-summary\" data-work-focus-goal>Done when: {definition}</p>",
-  "work.focus.resultHtml": "<p class=\"definition work-focus-summary\" data-work-focus-result>Current result: {summary}</p>"
+  "work.focus.resultHtml": "<p class=\"definition work-focus-summary\" data-work-focus-result>Current result: {summary}</p>",
+  "workspace.preview.source": "{name} · {head} · Preview {revision}"
 };

@@ -37,7 +37,7 @@ export function renderWorkspaceChange(parent, item, patch) {
       for (const line of hunk.changes) {
         const kind = line.type === "insert" ? "add" : line.type === "delete" ? "remove" : "context";
         const prefix = kind === "add" ? "+" : kind === "remove" ? "-" : " ";
-        lines.append(node("span", prefix + line.content + "\n", `workspace-line-${kind}`));
+        lines.append(node("span", [prefix, line.content, "\n"].join(""), `workspace-line-${kind}`));
       }
       chunk.append(lines);
       group.append(chunk);

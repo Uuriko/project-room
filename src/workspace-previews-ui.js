@@ -1,3 +1,5 @@
+import { uiText } from "./strings.js";
+
 // Preview code runs in an opaque frame with a separate response policy.
 export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const button = document.createElement("button");
@@ -64,13 +66,13 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       const active = tab.dataset.workspaceTab === name;
       tab.setAttribute("aria-selected", String(active));
       tab.tabIndex = active ? 0 : -1;
-      dialog.querySelector("#" + tab.getAttribute("aria-controls")).hidden = !active || tabs.hidden;
+      document.getElementById(tab.getAttribute("aria-controls")).hidden = !active || tabs.hidden;
     }
   }
   async function loadOutput() {
     const current = items.find(item => item.id === selected);
     if (!dialog.open || activePanel !== "output" || !current?.outputDigest) return;
-    const key = current.id + ":" + current.outputDigest;
+    const key = [current.id, current.outputDigest].join(":");
     if (renderedOutput === key) return;
     const ticket = ++outputGeneration, session = client.session;
     const ownsOutput = () => dialog.open && activePanel === "output" && selected === current.id
@@ -79,7 +81,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     outputStatus.textContent = "Loading run output…";
     try {
       const query = new URLSearchParams({ output: "1", id: current.id, revision: String(current.revision) });
-      const value = await client.roomRead("/workspace-previews?" + query);
+      const value = await client.roomRead(`/workspace-previews?${query}`);
       if (!value || !ownsOutput()) return;
       output.textContent = value.run.output ?? "";
       outputStatus.textContent = "";
@@ -197,7 +199,10 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       updateComparisons(current);
       void loadOutput();
       heading.textContent = current.title;
-      meta.textContent = [memberLabel(current.publisherId) || current.publisherId, current.head.slice(0, 12), "Preview " + current.revision].join(" · ");
+      meta.textContent = uiText("workspace.preview.source", {
+        name: memberLabel(current.publisherId) || current.publisherId,
+        head: current.head.slice(0, 12), revision: current.revision,
+      });
       if (frameDigest === current.digest) return;
       const query = new URLSearchParams({ id: current.id, frame: String(current.revision) });
       if (session.authMode === "account") {
