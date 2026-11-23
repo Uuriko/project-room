@@ -13,7 +13,7 @@ export function gitPatch(text) {
     const added = oldPath === "/dev/null";
     const deleted = newPath === "/dev/null";
     return [
-        `diff --git a/${added ? newPath : oldPath} b/${deleted ? oldPath : newPath}`,
+        ["diff --git a/", added ? newPath : oldPath, " b/", deleted ? oldPath : newPath].join(""),
         ...added ? [
             "new file mode 100644"
         ] : [],
@@ -58,7 +58,7 @@ function consumesPatch(content, files) {
             if (changes && changeIndex !== changes.length) return false;
             const hunk = hunks[hunkIndex++];
             if (!hunk || line !== hunk.content) return false;
-            changes = hunk.changes.map((change)=>`${change.type === "insert" ? "+" : change.type === "delete" ? "-" : " "}${change.content}`);
+            changes = hunk.changes.map((change)=>[change.type === "insert" ? "+" : change.type === "delete" ? "-" : " ", change.content].join(""));
             changeIndex = 0;
         } else if (changes) {
             if (line === "\\ No newline at end of file" && canMarkNewline) {
@@ -78,7 +78,7 @@ function consumesPatch(content, files) {
 export function fileLabel(file, fallback) {
     const oldPath = file.oldPath === "/dev/null" ? undefined : file.oldPath;
     const newPath = file.newPath === "/dev/null" ? undefined : file.newPath;
-    return oldPath && newPath && oldPath !== newPath ? `${oldPath} → ${newPath}` : newPath || oldPath || fallback || "diff";
+    return oldPath && newPath && oldPath !== newPath ? [oldPath, newPath].join(" → ") : newPath || oldPath || fallback || "diff";
 }
 export function diffType(file) {
     return [

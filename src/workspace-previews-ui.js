@@ -1,3 +1,5 @@
+import { uiText } from "./strings.js";
+
 // Preview code runs in an opaque frame with a separate response policy.
 export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const button = document.createElement("button");
@@ -151,7 +153,10 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       frame.src = client.path(`/workspace-previews?${query}`);
       frame.hidden = false;
       heading.textContent = current.title;
-      meta.textContent = `${memberLabel(current.publisherId) || current.publisherId} · ${current.head.slice(0, 12)} · Preview ${current.revision}`;
+      meta.textContent = uiText("workspace.preview.source", {
+        name: memberLabel(current.publisherId) || current.publisherId,
+        head: current.head.slice(0, 12), revision: current.revision,
+      });
       revision = current.revision;
     } catch (error) {
       if (!owns(ticket, session)) return;
