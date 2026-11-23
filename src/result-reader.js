@@ -179,6 +179,25 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
     body.append(text.slice(offset));
   }
+  function showOutcome(outcome) {
+    const panel = resultElement("result-outcome");
+    panel.hidden = !outcome;
+    if (!outcome) return;
+    const labels = { fix_deployment: "Fix the deployment.", verify_deployment: "Verify the deployment.",
+      confirm_smoke_handoff: "Confirm the smoke test assignment.", accept_smoke_test: "Smoke test acceptance pending.", accept_release: "Release acceptance pending." };
+    resultElement("result-outcome-status").textContent = outcome.status === "accepted"
+      ? "Outcome accepted." : labels[outcome.remaining];
+    resultElement("result-outcome-criterion").textContent = outcome.criterion;
+    const link = resultElement("result-outcome-next");
+    link.hidden = !outcome.smokeTest;
+    if (outcome.smokeTest) {
+      link.href = outcome.smokeTest.href;
+      const next = outcome.smokeTest.next;
+      link.textContent = outcome.smokeTest.completionEventId ? "See smoke test result"
+        : next?.memberId ? uiText("work.thread.nextFor", { name: memberLabel(next.memberId), action: next.label }) : "Open smoke test";
+    }
+  }
+
   function showReleaseChecks(report) {
     if (!releaseLink || !releasePanel) return;
     const focused = resultView?.focused === true;
@@ -229,6 +248,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (view.linked) resultElement("result-title").textContent = "Result";
       showCorrection(null);
       showReleaseChecks(null);
+      showOutcome(null);
       resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = true;
       resultElement("result-original").hidden = true;
@@ -303,6 +323,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultView = null; resultReader.classList.remove("result-docked", "result-mobile", "result-focused"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
     showCorrection(null);
     showReleaseChecks(null);
+    showOutcome(null);
     resultElement("result-verdict").hidden = true;
     resultElement("result-work-context")?.setAttribute("hidden", "");
     resultElement("result-work-action")?.setAttribute("hidden", "");
@@ -443,6 +464,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         : null;
       view.releaseChecks = value.workThread?.releaseChecks;
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
+      showOutcome(view.focused && !view.withdrawn ? value.workThread?.outcome : null);
       showResultBody(view.withdrawn ? "" : value.result.text.body);
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId

@@ -41,6 +41,19 @@ work. A connection alone does not execute a task.
    that next action. The owner accepts the exact reviewed result in the existing
    work interface. Review alone does not record owner acceptance.
 
+### Post-deploy smoke test
+
+For a room-visible release with a user-facing smoke check, add `smokeTest` to
+the release publisher's existing binding. Supply `criteria`,
+`accountableMemberId`, and an independent `verifierMemberId`. Keep the criteria
+safe for the room audience, and give the assignee the access needed to exercise
+the real flow. The publisher checks the exact live revision and current
+deployment receipt before proposing the smoke work. Replay the same binding and
+stage files after an interrupted publication. The same completion and candidate
+produce the same work ID. The Work Thread shows the outstanding smoke action
+until both the release and the smoke result meet their existing acceptance
+requirements.
+
 If you cannot continue, `room_handoff` records what is done, why you stopped and
 the next action. It does not claim completion or silently reassign the task.
 

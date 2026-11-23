@@ -215,11 +215,13 @@ test("the verdict links exact candidate release checks without claiming missing 
   f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId, messageId: evidenceMessageId,
     body: `room-release-receipt/1 build ${completed.event.id} ${candidateRevision} ${evidenceDigest}\nSigned archive manifest verified` });
   const report = { completionEventId: completed.event.id, evidenceVersion: receipt.evidenceVersion, candidateRevision,
+    smokeTest: { accountableMemberId: "producer", verifierMemberId: "human-checker", criteria: "Open the shared preview as a teammate." },
     checks: { build: { candidateRevision, status: "passed", summary: "Signed archive verified", evidenceDigest, evidenceMessageId } } };
   const note = f.send("producer", T.MESSAGE_POSTED, { workItemId: "revision-journey", replyToId: receipt.nativeText.messageId,
     messageId: "release-checks-evidence", body: "room-release-checks/1\n" + JSON.stringify(report) });
   const page = await f.login("owner");
   await openResult(page);
+  await page.locator("#result-outcome").getByText("Verify the deployment.", { exact: true }).waitFor();
   const link = page.getByRole("link", { name: "Release checks", exact: true });
   await link.waitFor();
   await link.press("Enter");
@@ -257,6 +259,7 @@ test("the verdict links exact candidate release checks without claiming missing 
   await message.waitFor();
   assert.equal(new URL(page.url()).hash, "#pr-record/message/" + messageId);
   await message.getByRole("link", { name: "Revise a short result", exact: true }).click();
+  await page.locator("#result-outcome").getByText("Confirm the smoke test assignment.", { exact: true }).waitFor();
   const stages = page.locator("#result-release-stages summary");
   await stages.first().waitFor();
   assert.equal(page.viewportSize().width, 390);
