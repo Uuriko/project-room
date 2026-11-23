@@ -10,6 +10,22 @@
         - name: id
           in: query
           schema: { type: string }
+        - name: changes
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: Read the selected preview's committed patch without downloading HTML
+        - name: revision
+          in: query
+          schema: { type: integer, minimum: 1 }
+          description: Require the specified revision for a changes read
+        - name: view
+          in: query
+          schema: { type: string, enum: [summary, file] }
+          description: Return only the file index or one file's hunks
+        - name: path
+          in: query
+          schema: { type: string }
+          description: Exact previous or current file path for the file view
         - name: frame
           in: query
           schema: { type: integer, minimum: 1 }
@@ -37,6 +53,7 @@
                 base: { type: string }
                 head: { type: string }
                 html: { type: string, description: Standalone HTML limited to 384 KiB UTF-8 }
+                patch: { type: string, description: Optional committed unified patch limited to 192 KiB UTF-8 }
                 expectedRevision: { type: integer, minimum: 0 }
       responses:
         '200': { description: Published preview metadata and revision }

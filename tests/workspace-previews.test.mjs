@@ -36,7 +36,8 @@ test("workspace preview scope, publish authority, version binding and withdrawal
       body: input ? JSON.stringify(input) : undefined,
     });
   }
-  const preview = { id, title: "First preview", base: "b".repeat(40), head: "c".repeat(40),
+  const patch = "diff --git a/index.html b/index.html\n--- a/index.html\n+++ b/index.html\n@@ -1 +1 @@\n-before\n+after\n";
+  const preview = { id, title: "First preview", patch, base: "b".repeat(40), head: "c".repeat(40),
     expectedRevision: 0, html: "<h1>Initial</h1>" };
   assert.deepEqual((await (await call(viewer)).json()).items, []);
   assert.equal((await call(viewer, "POST", preview)).status, 403);
@@ -46,15 +47,33 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.equal(first.publisherId, "publisher");
   const list = await (await call(viewer)).json();
   assert.equal(list.items[0].html, undefined);
+  assert.equal(list.items[0].patch, undefined);
+  assert.match(list.items[0].patchDigest, /^[a-f0-9]{64}$/);
+  const changesQuery = "?changes=1&id=" + id;
+  const summary = (await (await call(viewer, "GET", null, changesQuery + "&view=summary")).json()).changes;
+  assert.deepEqual(summary.files.map(file => file.path), ["index.html"]);
+  assert.equal(summary.patch, undefined);
+  const detail = (await (await call(viewer, "GET", null, changesQuery + "&view=file&path=index.html")).json()).changes;
+  assert.equal(detail.file.hunks[0].changes[1].content, "after");
+  assert.equal((await call(viewer, "GET", null, changesQuery + "&revision=2")).status, 409);
+  assert.equal((await call(outside, "GET", null, changesQuery)).status, 403);
+  assert.equal((await call(publisher, "POST", { ...preview, patch: "x".repeat(192 * 1024 + 1) })).status, 422);
   assert.equal((await (await call(viewer, "GET", null, "?id=" + id)).json()).item.html, preview.html);
   assert.equal((await call(otherPublisher, "POST", { ...preview, expectedRevision: 1 })).status, 403);
   assert.equal((await (await call(publisher, "POST", preview)).json()).revision, 1);
   assert.equal((await call(publisher, "POST", { ...preview, html: "<h1>Changed</h1>" })).status, 409);
   const second = await (await call(publisher, "POST", { ...preview, expectedRevision: 1, html: "<h1>Changed</h1>" })).json();
   assert.equal(second.revision, 2);
+  const incomplete = "diff --git a/index.html b/index.html\n--- a/index.html\n+++ b/index.html\n@@ -1,3 +1,3 @@\n-before\n+after\n";
+  const replacement = await (await call(publisher, "POST", { ...preview, expectedRevision: 2, patch: incomplete })).json();
+  assert.equal(replacement.revision, 3);
+  const fallback = (await (await call(viewer, "GET", null, changesQuery + "&view=summary")).json()).changes;
+  assert.equal(fallback.status, "raw_available");
+  assert.equal(fallback.patch, undefined);
+  assert.equal((await (await call(viewer, "GET", null, changesQuery)).json()).changes.patch, incomplete);
   assert.equal((await call(otherPublisher, "DELETE", { id, expectedRevision: 2 })).status, 403);
   assert.equal((await call(owner, "DELETE", { id, expectedRevision: 1 })).status, 409);
-  assert.equal((await call(owner, "DELETE", { id, expectedRevision: 2 })).status, 200);
+  assert.equal((await call(owner, "DELETE", { id, expectedRevision: 3 })).status, 200);
   assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 404);
 });
 

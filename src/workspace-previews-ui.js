@@ -18,6 +18,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       <section class="workspace-preview-detail" aria-label="Selected preview">
         <h3 data-preview-heading>Open a shared preview</h3>
         <p data-preview-meta class="form-hint"></p>
+        <details data-workspace-changes hidden>
+          <summary>Changes</summary>
+          <label>Compare with <select data-workspace-compare><option value="">Choose another attempt</option></select></label>
+          <p data-workspace-change-status class="form-hint" role="status"></p>
+          <div class="workspace-change-columns"><section data-workspace-primary></section><section data-workspace-peer hidden></section></div>
+        </details>
         <iframe title="Shared project preview" sandbox="allow-scripts" referrerpolicy="no-referrer" hidden></iframe>
       </section>
     </div>`;
@@ -28,10 +34,70 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   const meta = dialog.querySelector("[data-preview-meta]");
   const status = dialog.querySelector("[data-preview-status]");
   const frame = dialog.querySelector("iframe");
-  let selected = null, revision = null, generation = 0;
+  const changesView = dialog.querySelector("[data-workspace-changes]");
+  const compare = dialog.querySelector("[data-workspace-compare]");
+  const changeStatus = dialog.querySelector("[data-workspace-change-status]");
+  const columns = dialog.querySelector(".workspace-change-columns");
+  const primary = dialog.querySelector("[data-workspace-primary]");
+  const peer = dialog.querySelector("[data-workspace-peer]");
+  const patchCache = new Map();
+  let selected = null, revision = null, generation = 0, changeGeneration = 0, items = [], renderedChanges = null;
+  async function loadChanges() {
+    if (!dialog.open || !changesView.open) return;
+    const current = items.find(item => item.id === selected);
+    if (!current?.patchDigest) return;
+    const comparison = items.find(item => item.id === compare.value && item.base === current.base && item.patchDigest);
+    const ticket = ++changeGeneration, session = client.session;
+    const stillOpen = () => dialog.open && changesView.open && ticket === changeGeneration && client.session === session;
+    const key = JSON.stringify([current.id, current.revision, comparison?.id, comparison?.revision]);
+    if (renderedChanges === key) return;
+    columns.hidden = true;
+    changeStatus.textContent = "Loading changes…";
+    try {
+      const getPatch = async item => {
+        const cached = patchCache.get(item.id);
+        if (cached?.revision === item.revision) return cached.patch;
+        const query = new URLSearchParams({ id: item.id, changes: "1", revision: String(item.revision) });
+        const value = await client.roomRead(`/workspace-previews?${query}`);
+        if (!value || !stillOpen()) return null;
+        patchCache.set(item.id, value.changes);
+        return value.changes.patch;
+      };
+      const [{ renderWorkspaceChange }, a, b] = await Promise.all([
+        import("./workspace-change-view.js"), getPatch(current), comparison ? getPatch(comparison) : null,
+      ]);
+      if (!stillOpen()) return;
+      renderWorkspaceChange(primary, current, a);
+      peer.hidden = !comparison;
+      if (comparison) renderWorkspaceChange(peer, comparison, b);
+      else peer.replaceChildren();
+      columns.hidden = false;
+      changeStatus.textContent = "";
+      renderedChanges = key;
+    } catch (error) {
+      if (!stillOpen()) return;
+      primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
+      renderedChanges = null;
+      changeStatus.textContent = error.message || "Could not read changes.";
+    }
+  }
+  function updateComparisons(current) {
+    changesView.hidden = !current.patchDigest;
+    if (changesView.hidden) return;
+    const previous = compare.value;
+    const eligible = items.filter(item => item.id !== current.id && item.base === current.base && item.patchDigest);
+    compare.replaceChildren(new Option("Choose another attempt", ""), ...eligible.map(item => new Option(item.title, item.id)));
+    compare.disabled = eligible.length === 0;
+    if (eligible.some(item => item.id === previous)) compare.value = previous;
+    void loadChanges();
+  }
   const owns = (ticket, session) => dialog.open && generation === ticket && client.session === session;
   function clearPreview() {
-    revision = null;
+    revision = null; changeGeneration++;
+    renderedChanges = null;
+    changesView.open = false; changesView.hidden = true;
+    primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
+    compare.value = ""; changeStatus.textContent = "";
     frame.removeAttribute("src");
     frame.hidden = true;
     heading.textContent = "Open a shared preview";
@@ -39,7 +105,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
   }
   function reset() {
     generation++; selected = null; clearPreview();
-    status.textContent = ""; list.replaceChildren();
+    status.textContent = ""; list.replaceChildren(); items = []; patchCache.clear();
     if (dialog.open) dialog.close();
   }
   function select(id) {
@@ -54,7 +120,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
     try {
       const page = await client.roomRead("/workspace-previews");
       if (!page || !owns(ticket, session)) return;
-      const current = page.items.find(item => item.id === selected);
+      items = page.items;
+      const current = items.find(item => item.id === selected);
       if (selected && !current) { selected = null; clearPreview(); }
       const focused = document.activeElement?.dataset?.previewId;
       list.replaceChildren(...page.items.map(item => {
@@ -73,7 +140,9 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       }));
       if (focused) list.querySelector(`[data-preview-id="${CSS.escape(focused)}"]`)?.focus();
       status.textContent = page.items.length ? "" : "No previews shared yet. An agent can publish one with room workspace.";
-      if (!current || revision === current.revision) return;
+      if (!current) return;
+      updateComparisons(current);
+      if (revision === current.revision) return;
       const query = new URLSearchParams({ id: current.id, frame: String(current.revision) });
       if (session.authMode === "account") {
         query.set("auth", "account");
@@ -90,6 +159,11 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel }) {
       status.textContent = error.message || "Could not open previews.";
     }
   }
+  changesView.addEventListener("toggle", () => {
+    if (changesView.open) void loadChanges();
+    else changeGeneration++;
+  });
+  compare.addEventListener("change", () => void loadChanges());
   button.addEventListener("click", () => {
     if (!client.session || dialog.open) return;
     dialog.showModal();

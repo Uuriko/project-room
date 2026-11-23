@@ -1,0 +1,7 @@
+Buzz App diff validation and labeling, Apache-2.0, Copyright 2026 Block, Inc.
+Source: https://github.com/block/buzz-app/blob/352f46e77e4eb0682fe2c29b7139f823f2effc74/src/bundled/diffs/parse.ts
+Changes: Types removed for the browser, and import redirected to the locally vendored ESM adapter.
+
+gitdiff-parser 0.3.1, MIT, Copyright (c) 2020 Baidu EFE.
+Source: npm gitdiff-parser version 0.3.1, https://github.com/ecomfe/gitdiff-parser
+Changes: CommonJS/AMD/browser-global wrapper replaced by an ESM export. Parsing body retained. Removed an unused state constant.
