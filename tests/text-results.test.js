@@ -498,4 +498,10 @@ test("the release outcome waits for exact deployment and independent smoke accep
   const outcome = await read();
   assert.equal(outcome.status, "accepted");
   assert.equal(outcome.smokeTest.completionEventId, smoke.event.id);
+  f.send(T.MESSAGE_DELETED, { messageId: smokeText.event.data.messageId, expectedMessageRevision: 0 }, "owner");
+  const withdrawn = await read();
+  assert.equal(withdrawn.status, "open");
+  assert.equal(withdrawn.remaining, "restore_smoke_evidence");
+  assert.equal(withdrawn.smokeTest.completionEventId, undefined);
+  assert.equal(f.store.workResult(f.keys.owner, "commons", workItemId).workThread.verdict.result, "pass");
 });

@@ -249,7 +249,13 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
     : precedingCorrection(db, state, work, result.receipt, viewerId, floor, messageRecords);
   const releaseChecks = selectedReleaseChecks(db, state, work, result, viewerId, floor, messageRecords);
   const outcome = readOutcomeWork && selectionStatus === "current"
-    ? releaseOutcome({ releaseChecks, work, readWork: readOutcomeWork, now, ownerId: state.room.ownerId }) : null;
+    ? releaseOutcome({ releaseChecks, work, readWork: readOutcomeWork, now, ownerId: state.room.ownerId,
+        visibleSmokeEvidence: smoke => {
+          const id = smoke.receipt?.nativeText?.messageId;
+          const message = id && (messageRecords ?? messageRepository({ db }, state.room.id, state)).get(id);
+          return Boolean(message && message.workItemId === smoke.id && !message.deletedAt && !message.editedAt
+            && textVisibleToViewer(db, state, id, viewerId, floor, messageRecords));
+        } }) : null;
   const visibleReceipt = result.text?.body === null ? null : result.receipt;
   const start = visibleReceipt ? selectedStart(db, state.room.id, workItemId, visibleReceipt.eventId, floor) : null;
   const verdict = visibleReceipt ? selectedVerdict(db, state.room.id, work, visibleReceipt, floor) : null;
