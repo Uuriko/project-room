@@ -136,6 +136,8 @@ the address from your Room operator.
 The command checks the link against the local commit and the current Room
 publication, starts the app on its owned loopback port, and registers that
 exact publication. Give your teammate the same Room link.
+For apps that check the loopback Host header, update both the publisher CLI
+and the Room server so the relay includes the app's exact local port.
 Stopping the command closes the live view. Withdrawing the publication
 also closes it and leaves the local process available to the publisher.
 
