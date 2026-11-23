@@ -243,7 +243,7 @@
       }
     },
     "room_progress_request": {
-      "inputSchema": "16ffcbb9cafc7d9e",
+      "inputSchema": "2e36906c20bdc256",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1215,7 +1215,7 @@
       }
     },
     "room_progress_request": {
-      "inputSchema": "16ffcbb9cafc7d9e",
+      "inputSchema": "2e36906c20bdc256",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1987,7 +1987,7 @@
       }
     },
     "room_progress_request": {
-      "inputSchema": "16ffcbb9cafc7d9e",
+      "inputSchema": "2e36906c20bdc256",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2389,7 +2389,7 @@
       }
     },
     "room_progress_request": {
-      "inputSchema": "16ffcbb9cafc7d9e",
+      "inputSchema": "2e36906c20bdc256",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2681,7 +2681,7 @@
       }
     },
     "room_progress_request": {
-      "inputSchema": "16ffcbb9cafc7d9e",
+      "inputSchema": "2e36906c20bdc256",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2993,7 +2993,7 @@
       }
     },
     "room_progress_request": {
-      "inputSchema": "16ffcbb9cafc7d9e",
+      "inputSchema": "2e36906c20bdc256",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -3437,7 +3437,7 @@
       }
     },
     "room_progress_request": {
-      "inputSchema": "16ffcbb9cafc7d9e",
+      "inputSchema": "2e36906c20bdc256",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
