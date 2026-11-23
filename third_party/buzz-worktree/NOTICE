@@ -1,0 +1,7 @@
+Buzz App worktree-port.mjs
+Copyright 2026 Block, Inc.
+Licensed under Apache License 2.0.
+
+Copied without source changes from
+https://github.com/block/buzz-app/blob/352f46e77e4eb0682fe2c29b7139f823f2effc74/scripts/worktree-port.mjs.
+Room uses the reported value as a preferred port and checks which process group actually owns the listener.

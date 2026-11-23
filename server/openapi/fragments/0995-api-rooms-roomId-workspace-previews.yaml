@@ -1,0 +1,82 @@
+  /api/rooms/{roomId}/workspace-previews:
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: List room-visible workspace previews or read one standalone HTML build
+      parameters:
+        - name: id
+          in: query
+          schema: { type: string }
+        - name: output
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: Read the preview's published plain-text run output
+        - name: changes
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: Read the selected preview's committed patch without downloading HTML
+        - name: revision
+          in: query
+          schema: { type: integer, minimum: 1 }
+          description: Require the specified revision for a changes read
+        - name: view
+          in: query
+          schema: { type: string, enum: [summary, file] }
+          description: Return only the file index or one file's hunks
+        - name: path
+          in: query
+          schema: { type: string }
+          description: Exact previous or current file path for the file view
+        - name: frame
+          in: query
+          schema: { type: integer, minimum: 1 }
+          description: Selected preview revision to render for a browser session in a sandboxed HTML frame
+        - name: binding
+          in: query
+          schema: { type: string }
+          description: Current account session binding for an account-mode frame
+      responses:
+        '200': { description: Preview metadata or the selected build, bound to the viewer session }
+        '404': { description: Selected preview unavailable }
+    post:
+      summary: Publish or update a local build preview as its publisher
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, title, base, head, html, expectedRevision]
+              properties:
+                id: { type: string }
+                title: { type: string, maxLength: 150 }
+                base: { type: string }
+                head: { type: string }
+                html: { type: string, description: Standalone HTML limited to 384 KiB UTF-8 }
+                patch: { type: string, description: Optional committed unified patch limited to 192 KiB UTF-8 }
+                output: { type: string, description: Optional plain-text run output limited to 24 KiB UTF-8 }
+                expectedRevision: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: Published preview metadata and revision }
+        '403': { description: Writer lacks work permission or does not hold the preview }
+        '409': { description: Preview revision or storage limit changed }
+    delete:
+      summary: Remove a preview as its publisher or the room owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, expectedRevision]
+              properties:
+                id: { type: string }
+                expectedRevision: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: Preview absent }
+        '409': { description: Preview revision changed }

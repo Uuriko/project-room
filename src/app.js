@@ -44,6 +44,7 @@ import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
 import { createNeedsAttentionCard, installMemberPermissions } from "./needs-attention.js";
 // JDOT-MEMBER-PERMS-UI end
+import { installWorkspacePreviews } from "./workspace-previews-ui.js";
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
@@ -359,7 +360,7 @@ let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let partialWorkSnapshot = false, inspectedWorkRecord = null;
 // JDOT-COH-NAV begin
-let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
+let workspacePreviewsUI = null, updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
@@ -485,6 +486,7 @@ const client = new RoomClient({
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
   onBondChange: () => { void refreshFriendBonds(); },
+  onWorkspacePreviewChange: () => workspacePreviewsUI?.refresh(),
   onOptimistic(command) {
     const data = command?.data;
     const authorId = session?.member?.id;
@@ -647,7 +649,7 @@ const client = new RoomClient({
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
-    clearWorkNavigation(); updatesUi?.reset();
+    clearWorkNavigation(); updatesUi?.reset(); workspacePreviewsUI?.reset();
     // JDOT-COH-NAV end
     mutedThreads = new Set(); threadMuteBusy = false;threadMuteKnown=new Set();threadMuteGeneration=-1;
     dmConsents = []; dmConsentSeq++;
@@ -863,6 +865,8 @@ updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), g
   onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin, presentation: "thread" }),
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
 // JDOT-COH-NAV end
+workspacePreviewsUI = installWorkspacePreviews({ client, toolbar: document.querySelector(".room-main .topbar-actions"),
+  memberLabel: id => state?.members[id]?.displayName });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
@@ -3892,6 +3896,7 @@ function retryPendingHashReveal() {
 }
 function revealLocationHash() {
   if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
+  if (!location.hash.startsWith("#pr-workspace/")) workspacePreviewsUI?.closeLinked();
   const exactResult = exactResultDestination(location);
   if (!exactResult) closeLinkedResult();
   if (!location.hash) return;
@@ -3924,6 +3929,10 @@ function revealLocationHash() {
     return;
   }
   // JDOT-COH-NAV end
+  if (hash.startsWith("#pr-workspace/")) {
+    workspacePreviewsUI?.openLink(hash);
+    return;
+  }
   if (hash.startsWith("#pr-record/result/")) {
     if (!exactResult || exactResult.roomId !== session?.roomId) {
       closeLinkedResult();

@@ -7,10 +7,12 @@ import { presenceCommand } from "./commands/presence.mjs";
 import { submitCommand } from "./commands/submit.mjs";
 import { nextCommand } from "./commands/next.mjs";
 import { actCommand, answerCommand, namedCommand, readCommand, receiptCommand, requestCommand, resultCommand, workCommand } from "./commands/workflow.mjs";
+import { workspaceCommand } from "./commands/workspace.mjs";
 import { joinCommand } from "./commands/join.mjs";
 
 export const commands = Object.freeze({
   join: joinCommand,
+  workspace: workspaceCommand,
   next: nextCommand,
   work: workCommand,
   result: resultCommand,
@@ -55,6 +57,7 @@ Connection and other commands
   room token
   room doctor
   room presence [--title <session title>] < hook-payload.json
+  room workspace start|continue|run|list|publish|watch|changes|output|remove
   room code share|list|show|fetch|try|check   (hand code to other agents; room code help)
 
 join is the one-line path: login --accept, setup for the detected tool, then an invite line to share (no secret, no invite code).
