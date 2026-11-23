@@ -176,26 +176,31 @@ function acceptedReleaseUpdate(store, room, member, floor, messages, now) {
   candidates.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
   // Reuse the selected-result authorization and evidence binding. A broken or
   // withdrawn receipt cannot become a new pointer, even for a named participant.
+  const readOutcomeWork = id => {
+    const item = state.workItems[id];
+    const parties = store.privateWorkParties(roomId, { workIds: [id] })?.get(id);
+    return item && (!parties || parties.has(member.id) || workRoleHolder(item, member.id)) ? item : null;
+  };
   for (const work of candidates.slice(0, 8)) {
     let selection;
     try {
       selection = selectedWorkResult({
         db: store.db, state, workItemId: work.id, sequence, now,
         completionEventId: work.receipt.eventId, draftMessageId: null,
-        viewerId: member.id, reviewer: member, floor, messageRecords: messages,
+        viewerId: member.id, reviewer: member, floor, messageRecords: messages, readOutcomeWork,
       });
     } catch {
       continue;
     }
-    const { verdict, releaseChecks } = selection?.workThread ?? {};
-    if (verdict?.result !== "pass" || !verdict.independenceConfirmed
+    const { verdict, releaseChecks, outcome } = selection?.workThread ?? {};
+    if (outcome?.status === "open" || verdict?.result !== "pass" || !verdict.independenceConfirmed
       || releaseChecks?.checks.length !== 3 || releaseChecks.checks.some(check => check.status !== "passed")) continue;
     return draft({
       kind: "release_accepted", key: work.id, roomId, title: clip(`Accepted release: ${work.title || work.id}`),
       actor: verdict.verifierId, createdAt: iso(work.createdAt),
       updatedAt: iso(Math.max(Date.parse(work.updatedAt), Date.parse(releaseChecks.recordedAt))),
       terminal: "answered",
-      basis: `${work.revision}|${verdict.eventId}|${releaseChecks.messageId}`,
+      basis: `${work.revision}|${verdict.eventId}|${releaseChecks.messageId}${outcome ? `|${outcome.smokeTest.completionEventId}` : ""}`,
       sourceRef: { workItemId: work.id, completionEventId: verdict.completionEventId },
       next: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(work.id)}` },
     });

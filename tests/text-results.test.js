@@ -450,3 +450,52 @@ test("an already-stored lone-surrogate body cannot become completion evidence", 
   // The same store still accepts a clean body, so the refusal is about the body.
   assert.doesNotThrow(() => f.mutate(T.WORK_COMPLETED, f.input(clean)));
 });
+
+test("the release outcome waits for exact deployment and independent smoke acceptance", async t => {
+  const f = await setup(t);
+  const { releaseSmokeWorkId } = await import("../server/release-smoke.mjs");
+  const candidateRevision = "a".repeat(40);
+  const draft = f.post(`Candidate revision: ${candidateRevision}`);
+  const completionEventId = f.mutate(T.WORK_COMPLETED, f.input(draft)).event.id;
+  const evidenceVersion = textVersion(draft.event.data.body);
+  f.mutate(T.VERIFICATION_RECORDED, { result: "pass", completionEventId, evidenceVersion, summary: "Release reviewed" }, "reviewer");
+  const approval = f.post("Accept the release evidence.", {}, "owner");
+  f.mutate(T.OWNER_DECISION_RECORDED, { completionEventId, evidenceVersion, decision: "approved",
+    reason: "Qualified", sourceMessageId: approval.event.data.messageId }, "owner");
+  const smokeTest = { accountableMemberId: "producer", verifierMemberId: "reviewer",
+    criteria: "Open the exact shared preview from the recipient account." };
+  const publish = checks => f.post("room-release-checks/1\n" + JSON.stringify({ candidateRevision, completionEventId,
+    evidenceVersion, checks, smokeTest }), { replyToId: draft.event.data.messageId }, "owner");
+  const read = async () => (await f.client.workResult(f.workItemId)).workThread.outcome;
+  publish({});
+  assert.equal((await read()).remaining, "verify_deployment");
+  const evidenceDigest = "sha256:" + "b".repeat(64);
+  const deploy = f.post(`room-release-receipt/1 deploy ${completionEventId} ${candidateRevision} ${evidenceDigest}\nVerified serving version`,
+    { replyToId: draft.event.data.messageId }, "owner");
+  const evidenceMessageId = deploy.event.data.messageId;
+  publish({ deploy: { candidateRevision, status: "passed", summary: "Deployment verified", evidenceDigest, evidenceMessageId } });
+  assert.equal((await read()).remaining, "confirm_smoke_handoff");
+  const workItemId = releaseSmokeWorkId(f.workItemId, completionEventId, candidateRevision);
+  const proposal = { workItemId, title: "Run smoke test", definitionOfDone: smokeTest.criteria, mode: "read",
+    accountableMemberId: "producer", verifierMemberId: "reviewer", independentVerificationRequired: true,
+    ownerDecisionRequired: false, sourceMessageId: evidenceMessageId };
+  const first = f.send(T.WORK_PROPOSED, proposal, "owner", workItemId);
+  const replay = f.send(T.WORK_PROPOSED, proposal, "owner", workItemId);
+  assert.equal(replay.event.id, first.event.id);
+  assert.equal((await read()).smokeTest.next.action, "accept");
+  f.send(T.WORK_ACCEPTED, { workItemId, expectedRevision: 0 });
+  f.send(T.WORK_STARTED, { workItemId, expectedRevision: 1 });
+  const smokeText = f.send(T.MESSAGE_POSTED, { workItemId, messageId: "smoke-result", body: "Preview opened on the recipient account" });
+  const smokeVersion = textVersion(smokeText.event.data.body);
+  const smoke = f.send(T.WORK_COMPLETED, { workItemId, expectedRevision: 2,
+    summary: smokeText.event.data.body, evidenceKind: "room_text", evidenceVersion: smokeVersion,
+    previousCompletionEventId: null, evidenceMessageId: smokeText.event.data.messageId,
+    evidenceMessageEventId: smokeText.event.id, producerId: "producer", nextAction: "Independently verify" });
+  assert.equal((await read()).remaining, "accept_smoke_test");
+  assert.equal((await read()).smokeTest.next.action, "verify");
+  f.send(T.VERIFICATION_RECORDED, { workItemId, expectedRevision: 3, completionEventId: smoke.event.id,
+    evidenceVersion: smokeVersion, result: "pass", summary: "Verified exact preview" }, "reviewer");
+  const outcome = await read();
+  assert.equal(outcome.status, "accepted");
+  assert.equal(outcome.smokeTest.completionEventId, smoke.event.id);
+});

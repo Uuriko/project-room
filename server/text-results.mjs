@@ -1,3 +1,4 @@
+import { releaseSmokePlan, releaseOutcome } from "./release-smoke.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -142,7 +143,7 @@ function selectedReleaseChecks(db, state, work, result, viewerId, floor, message
       RELEASE_CHECKS_PREFIX.length, RELEASE_CHECKS_PREFIX);
   const messages = messageRecords ?? messageRepository({ db }, state.room.id, state);
   const checks = new Map();
-  let latest = null;
+  let latest = null, smokeTest = null;
   for (const row of rows) {
     const posted = JSON.parse(row.body);
     const messageId = posted.data.messageId || row.id;
@@ -161,6 +162,7 @@ function selectedReleaseChecks(db, state, work, result, viewerId, floor, message
         || !/^sha256:[a-f0-9]{64}$/.test(check.evidenceDigest ?? "");
     })) continue;
     latest ??= { messageId, recordedAt: message.createdAt, reportedById: message.authorId };
+    smokeTest ??= releaseSmokePlan(report.smokeTest);
     // An omitted stage does not supersede an earlier report for that stage.
     for (const stage of entries) {
       if (checks.has(stage)) continue;
@@ -175,11 +177,11 @@ function selectedReleaseChecks(db, state, work, result, viewerId, floor, message
         continue;
       }
       checks.set(stage, { stage, status: check.status, summary: check.summary, evidenceDigest: check.evidenceDigest,
-        reportMessageId: messageId, evidenceMessageId: evidenceId, href: `#pr-record/message/${encodeURIComponent(evidenceId)}` });
+        reportedById: message.authorId, reportMessageId: messageId, evidenceMessageId: evidenceId, href: `#pr-record/message/${encodeURIComponent(evidenceId)}` });
     }
-    if (checks.size === RELEASE_STAGES.length) break;
+    if (checks.size === RELEASE_STAGES.length && smokeTest) break;
   }
-  return latest ? { ...latest, candidateRevision,
+  return latest ? { ...latest, candidateRevision, ...(smokeTest ? { smokeTest } : {}),
     checks: RELEASE_STAGES.map(stage => checks.get(stage) ?? { stage, status: "pending" }),
     completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion, untrusted: true } : null;
 }
@@ -212,7 +214,7 @@ function selectedVerdict(db, roomId, work, receipt, floor) {
   return { eventId, result, verifierId, completionEventId, evidenceVersion, independenceConfirmed };
 }
 
-export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null }) {
+export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null, readOutcomeWork = null }) {
   const work = state.workItems[workItemId];
   let result;
   const deny = () => { throw new Error("Result text is hidden from this viewer"); };
@@ -246,6 +248,8 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const correction = result.text?.body === null ? null
     : precedingCorrection(db, state, work, result.receipt, viewerId, floor, messageRecords);
   const releaseChecks = selectedReleaseChecks(db, state, work, result, viewerId, floor, messageRecords);
+  const outcome = readOutcomeWork && selectionStatus === "current"
+    ? releaseOutcome({ releaseChecks, work, readWork: readOutcomeWork, now, ownerId: state.room.ownerId }) : null;
   const visibleReceipt = result.text?.body === null ? null : result.receipt;
   const start = visibleReceipt ? selectedStart(db, state.room.id, workItemId, visibleReceipt.eventId, floor) : null;
   const verdict = visibleReceipt ? selectedVerdict(db, state.room.id, work, visibleReceipt, floor) : null;
@@ -262,7 +266,7 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
       ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
-      ...(releaseChecks ? { releaseChecks } : {}) },
+      ...(releaseChecks ? { releaseChecks } : {}), ...(outcome ? { outcome } : {}) },
     selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
