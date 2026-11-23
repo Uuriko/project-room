@@ -125,10 +125,12 @@ test("workspace preview scope, publish authority, version binding and withdrawal
 });
 
 test("new worktrees keep the project selection outside the working copy", async t => {
-  const { execFileSync } = await import("node:child_process");
+  const { execFile, execFileSync } = await import("node:child_process");
   const { mkdtempSync, readFileSync, rmSync, writeFileSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const { promisify } = await import("node:util");
   const { workspaceCommand } = await import("../cli/commands/workspace.mjs");
   const { writeProject } = await import("../cli/paths.mjs");
   const base = mkdtempSync(join(tmpdir(), "room-cli-worktrees-"));
@@ -149,8 +151,29 @@ test("new worktrees keep the project selection outside the working copy", async 
     assert.equal(receipt.base, git(base, "rev-parse", "HEAD"));
     assert.equal(git(receipt.path, "status", "--porcelain"), "");
     const metadata = join(git(receipt.path, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
-    assert.deepEqual(JSON.parse(readFileSync(metadata, "utf8")), { connection: "first-room" });
+    const marker = JSON.parse(readFileSync(metadata, "utf8"));
+    assert.equal(marker.connection, "first-room");
+    assert.deepEqual(marker.launch.receipt, receipt);
   }
+  const branches = git(base, "for-each-ref", "--format=%(refname)", "refs/heads/room/");
+  await workspaceCommand(["start", "--path", receipts[0].path], { cwd: base, out: line => receipts.push(JSON.parse(line)) });
+  assert.deepEqual(receipts[2], receipts[0]);
+  assert.equal(git(base, "for-each-ref", "--format=%(refname)", "refs/heads/room/"), branches);
+  const metadata = join(git(receipts[1].path, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
+  writeFileSync(metadata, "{\"launch\":");
+  await assert.rejects(workspaceCommand(["start", "--path", receipts[1].path], { cwd: base }), /original Workspace checkout could not be verified/);
+  assert.equal(readFileSync(metadata, "utf8"), "{\"launch\":");
+  const cli = fileURLToPath(new URL("../bin/room.mjs", import.meta.url));
+  const concurrentPath = join(base, "concurrent");
+  const retry = () => promisify(execFile)(process.execPath, [cli, "workspace", "start", "--path", concurrentPath], { cwd: base });
+  const competing = await Promise.allSettled([retry(), retry()]);
+  const recovered = JSON.parse((await retry()).stdout);
+  assert.ok(competing.some(result => result.status === "fulfilled"));
+  for (const result of competing) {
+    if (result.status === "fulfilled") assert.deepEqual(JSON.parse(result.value.stdout), recovered);
+  }
+  const branchList = git(base, "for-each-ref", "--format=%(refname)", "refs/heads/room/").split("\n");
+  assert.deepEqual(new Set(branchList), new Set([...branches.split("\n"), `refs/heads/${recovered.branch}`]));
   await assert.rejects(workspaceCommand(["run", "--cwd", "apps/absent", "--", process.execPath, "-v"],
     { cwd: receipts[0].path }), /--cwd "apps\/absent".*existing directory/);
   for (const directory of ["..", "page.html"]) {
@@ -182,20 +205,34 @@ test("continuation rechecks the share after fetching its missing commit", async 
   const head = git(publisher, "rev-parse", "HEAD");
   const id = "a".repeat(32), digest = "d".repeat(64), publisherId = "publisher";
   const link = `https://room.example/?room=commons#pr-workspace/${id}/1/preview/${digest}/${publisherId}/${head}`;
-  let reads = 0;
+  let reads = 0, revisionChanges = true, viewerId = "receiver";
   const io = {
     cwd: receiver, env: { ROOM_ORIGIN: "https://room.example", ROOM_ID: "commons", PROJECT_ROOM_SECRET: "fixture" },
     fetch: async () => {
-      const revision = ++reads;
-      return Response.json({ items: [{ id, digest, publisherId, head, revision }] });
+      reads++;
+      const revision = revisionChanges ? reads : 1;
+      return Response.json({ roomId: "commons", viewerId, items: [{ id, digest, publisherId, head, revision }] });
     },
   };
   await assert.rejects(workspaceCommand(["continue", "--path", target, "--link", link, "--fetch-from", "origin"], io),
-    /artifact has changed/);
+    error => error.message.includes("artifact has changed") && error.message.includes(link.replace("/1/preview/", "/2/preview/")));
   assert.equal(reads, 2);
   assert.equal(git(receiver, "rev-parse", head + "^{commit}"), head);
   assert.equal(git(receiver, "rev-parse", "HEAD"), base);
   assert.equal(existsSync(target), false);
+  revisionChanges = false;
+  const args = ["continue", "--path", target, "--link", link];
+  const receipts = [];
+  const run = () => workspaceCommand(args, { ...io, out: line => receipts.push(JSON.parse(line)) });
+  await run();
+  await run();
+  assert.equal(reads, 4);
+  assert.deepEqual(receipts[1], receipts[0]);
+  assert.equal(git(receiver, "for-each-ref", "--format=%(refname)", "refs/heads/room/"), `refs/heads/${receipts[0].branch}`);
+  viewerId = "different-room-member";
+  await assert.rejects(run(), /original Workspace checkout could not be verified/);
+  assert.equal(reads, 5);
+  assert.equal(git(receiver, "for-each-ref", "--format=%(refname)", "refs/heads/room/"), `refs/heads/${receipts[0].branch}`);
 });
 
 test("only the current publisher can register an exact preview through the local broker", async t => {

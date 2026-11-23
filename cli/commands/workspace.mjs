@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, statSync, watch, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { readProject, safeName } from "../paths.mjs";
 import { bearerHeader } from "../auth.mjs";
 import { connection, parseArgs } from "./code.mjs";
@@ -63,8 +64,12 @@ function savedWorkspaceConnection(cwd) {
   return name ? safeName(name) : undefined;
 }
 
+function workspaceMarkerPath(cwd) {
+  return resolve(git(cwd, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
+}
+
 function workspaceMarker(cwd) {
-  const marker = resolve(git(cwd, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
+  const marker = workspaceMarkerPath(cwd);
   return existsSync(marker) ? JSON.parse(readFileSync(marker, "utf8")) : null;
 }
 
@@ -78,19 +83,48 @@ function selectedWorkThread(value, conn) {
   return { workItemId, roomId: record.roomId, link: link.href };
 }
 
-function launch(cwd, flags, name, source) {
-  if (!flags.path) throw new Error("--path is required");
-  const path = resolve(cwd, flags.path);
-  if (existsSync(path)) throw new Error("Choose a new worktree directory");
-  const base = pinned(cwd, flags.base ?? "HEAD");
+function recoverLaunch(cwd, path, base, scope) {
+  const entry = lstatSync(path, { throwIfNoEntry: false });
+  if (!entry) return null;
+  const gitRoot = realpathSync(git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"));
+  try {
+    if (entry.isDirectory() && realpathSync(git(path, "rev-parse", "--show-toplevel")) === realpathSync(path)
+      && realpathSync(git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")) === gitRoot) {
+      const launch = workspaceMarker(path)?.launch;
+      const receipt = launch?.receipt;
+      if (launch?.version === 1 && isDeepStrictEqual(launch.scope, scope) && receipt?.base === base
+        && receipt.path === path && validId.test(receipt.id) && receipt.branch === `room/${receipt.id}`
+        && git(path, "symbolic-ref", "--quiet", "HEAD") === `refs/heads/${receipt.branch}`
+        && pinned(path, "HEAD") === base) return receipt;
+    }
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+  }
+  throw new Error("The worktree path is already in use and its original Workspace checkout could not be verified. Inspect it before choosing a different path.");
+}
+
+function launch(cwd, path, base, scope, details = {}) {
+  // Reserve the directory before Git can create a branch. Concurrent launches
+  // for the same path must never each reach `git worktree add`.
+  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(path);
   const id = randomBytes(16).toString("hex");
   const branch = "room/" + id;
   git(cwd, "worktree", "add", "-b", branch, "--", path, base);
-  if (name || source) {
-    const marker = resolve(git(path, "rev-parse", "--absolute-git-dir"), "project-room-workspace.json");
-    writeFileSync(marker, JSON.stringify({ connection: name, ...(source && { attemptId: id, source }) }) + "\n", { mode: 0o600, flag: "wx" });
-  }
-  return { id, branch, path, base, ...(name && { connection: name }) };
+  const { connection: name } = scope;
+  const receipt = { id, branch, path, base, ...(name && { connection: name }), ...details };
+  const marker = workspaceMarkerPath(path), pending = `${marker}.${id}.tmp`;
+  writeFileSync(pending, JSON.stringify({ connection: name, launch: { version: 1, scope, receipt } }) + "\n",
+    { mode: 0o600, flag: "wx", flush: true });
+  renameSync(pending, marker);
+  return receipt;
+}
+
+function roomCustody(packet, conn) {
+  if (packet?.roomId !== conn.roomId || typeof packet.viewerId !== "string" || !packet.viewerId)
+    throw new Error("Room did not confirm the identity for this Workspace checkout");
+  return { origin: new URL(conn.origin).origin, roomId: packet.roomId, memberId: packet.viewerId,
+    accountId: packet.viewerAccountId ?? null };
 }
 
 function previewInput(cwd, flags) {
@@ -220,19 +254,24 @@ export async function workspaceCommand(argv, io = {}) {
   }
   if (extra.length || separator !== -1 || !["start", "list", "publish", "watch", "remove", "changes", "output", "continue"].includes(action)) throw new Error(usage);
   if (action === "start") {
+    if (!flags.path) throw new Error("--path is required");
+    const path = resolve(cwd, flags.path), base = pinned(cwd, flags.base ?? "HEAD");
     const name = flags.connection ? safeName(flags.connection) : savedWorkspaceConnection(cwd);
+    const scope = { action, connection: name ?? null };
     if (flags["from-work"] === undefined) {
-      out(launch(cwd, flags, name));
+      out(recoverLaunch(cwd, path, base, scope) ?? launch(cwd, path, base, scope));
       return 0;
     }
     const conn = await connection({ cwd, name, env: io.env });
     const source = selectedWorkThread(flags["from-work"], conn);
     const client = new RoomAgentClient({ ...conn, token: conn.secret, fetchImpl: io.fetch });
-    const { work, next } = await client.workContext(source.workItemId, { signal: AbortSignal.timeout(15000) });
+    const packet = await client.workContext(source.workItemId, { signal: AbortSignal.timeout(15000) });
+    const { work, next } = packet;
     if (next.action === "superseded") throw new Error("This Work Thread was superseded. Open its replacement before starting.");
     source.revision = work.revision;
-    out({ ...launch(cwd, flags, name, source), workThread: source,
-      brief: { title: work.title, definitionOfDone: work.definitionOfDone, untrusted: true } });
+    Object.assign(scope, { room: roomCustody(packet, conn), source });
+    const receipt = recoverLaunch(cwd, path, base, scope) ?? launch(cwd, path, base, scope, { workThread: source });
+    out({ ...receipt, brief: { title: work.title, definitionOfDone: work.definitionOfDone, untrusted: true } });
     return 0;
   }
   const { call, conn, inherited } = await connect(io, cwd, flags.connection);
@@ -241,24 +280,33 @@ export async function workspaceCommand(argv, io = {}) {
   if (action === "continue") {
     if (!flags.path) throw new Error("--path is required");
     const { target } = artifactFromConnection(flags.link, conn);
-    if (existsSync(resolve(cwd, flags.path))) throw new Error("Choose a new worktree directory");
+    const path = resolve(cwd, flags.path);
     const verify = async () => {
-      const item = (await list()).find(row => row.id === target.id);
-      if (!item || item.revision !== target.revision || item.publisherId !== target.publisherId
-        || item.head !== target.head || artifactDigest(item, target.panel) !== target.digest)
+      const packet = await call();
+      const room = roomCustody(packet, conn);
+      const item = packet.items.find(row => row.id === target.id);
+      if (!item || item.publisherId !== target.publisherId) throw new Error("This workspace artifact has changed or is unavailable");
+      if (item.revision !== target.revision || item.head !== target.head || artifactDigest(item, target.panel) !== target.digest) {
+        const current = workspaceArtifactLink(conn.origin, conn.roomId, item, target.panel)
+          ?? workspaceArtifactLink(conn.origin, conn.roomId, item, "preview");
+        if (current) throw new Error(`This workspace artifact has changed. Inspect commit ${item.head} or retry with current --link '${current}'`);
         throw new Error("This workspace artifact has changed or is unavailable");
+      }
+      return room;
     };
-    await verify();
+    const room = await verify();
+    const scope = { action, connection: inherited ? safeName(inherited) : null, room, source: target };
+    const recovered = recoverLaunch(cwd, path, target.head, scope);
+    if (recovered) { out(recovered); return 0; }
     const fetched = !hasCommit(cwd, target.head);
     if (fetched) {
       const remote = flags["fetch-from"];
       if (!remote)
         throw new Error(`Commit ${target.head} is unavailable here. Run again with --fetch-from and a configured Git remote, or ask the publisher to push it.`);
       fetchWorkspaceCommit(cwd, remote, target.head);
-      await verify();
+      if (!isDeepStrictEqual(await verify(), room)) throw new Error("The Room identity changed while fetching this Workspace checkout");
     }
-    const worktree = launch(cwd, { path: flags.path, base: target.head }, inherited && safeName(inherited));
-    out({ ...worktree, source: target, fetched });
+    out(launch(cwd, path, target.head, scope, { source: target, fetched }));
     return 0;
   }
   if (action === "changes" && flags.link) {
@@ -291,8 +339,10 @@ export async function workspaceCommand(argv, io = {}) {
   if (action === "remove") { out(await call("DELETE", { id: flags.id, expectedRevision })); return 0; }
   if (!flags.file || !flags.title || !flags.base) throw new Error("--file, --title, and --base are required");
   const marker = workspaceMarker(cwd);
-  const workThread = marker?.attemptId === flags.id && marker.source?.roomId === conn.roomId
-    && URL.parse(marker.source.link)?.origin === new URL(conn.origin).origin ? marker.source : null;
+  const starter = marker?.launch?.receipt;
+  const source = starter?.workThread ?? marker?.source;
+  const workThread = (starter?.id ?? marker?.attemptId) === flags.id && source?.roomId === conn.roomId
+    && URL.parse(source.link)?.origin === new URL(conn.origin).origin ? source : null;
   const publish = async () => {
     const value = await call("POST", { ...previewInput(cwd, flags), expectedRevision });
     expectedRevision = value.revision;
