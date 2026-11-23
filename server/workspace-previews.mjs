@@ -56,11 +56,11 @@ export function workspacePreviews(db, { create = true } = {}) {
       const patch = patchStorage ? "patch" : "NULL AS patch";
       const output = outputStorage ? "run_output AS output" : "NULL AS output";
       const body = part === "changes" ? patch : part === "output" ? output : `html,${patch},${output}`;
-      const visible = db.prepare(`SELECT ${sharedFields},${body} FROM ${shared} WHERE room_id=? AND id=?`).get(roomId, id);
+      const visible = db.prepare(`SELECT ${sharedFields}${part === "metadata" ? "" : "," + body} FROM ${shared} WHERE room_id=? AND id=?`).get(roomId, id);
       if (visible || !hasDirected) return visible;
       const scope = viewerId === undefined ? "" : " AND (publisher_id=? OR recipient_id=?)";
       const directedBody = part === "changes" ? "patch" : part === "output" ? "run_output AS output" : "html,patch,run_output AS output";
-      return db.prepare(`SELECT ${directedFields},${directedBody} FROM ${directed} WHERE room_id=? AND id=?${scope}`)
+      return db.prepare(`SELECT ${directedFields}${part === "metadata" ? "" : "," + directedBody} FROM ${directed} WHERE room_id=? AND id=?${scope}`)
         .get(roomId, id, ...(viewerId === undefined ? [] : [viewerId, viewerId]));
     },
     publish(roomId, publisherId, input, now, reject) {

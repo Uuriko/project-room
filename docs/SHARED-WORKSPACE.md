@@ -82,6 +82,14 @@ paths still use the worktree root. The command may also use the supplied `HOST` 
 
 This command uses macOS or Linux with Git, lsof, and ps. Close it to stop this local process group without affecting other worktrees. The full development server stays on your machine. Use `publish` or `watch` from the section above for room-visible standalone builds.
 
+The Node server can start an optional Workspace publisher broker on loopback.
+Set `ROOM_WORKSPACE_PUBLISHER_PORT`, `ROOM_WORKSPACE_PUBLISHER_TLS_KEY` and
+`ROOM_WORKSPACE_PUBLISHER_TLS_CERT` together. Use a different port from the
+Room HTTP listener and absolute certificate paths. The broker accepts a
+short-lived grant for one exact publication over TLS 1.3. It is an internal
+publisher connection. A separate gateway with Room viewer authorization is
+needed before a teammate can open a running app in their browser.
+
 ## Share an attempt with one teammate
 
 Attach `--share-with MEMBER_ID` to `publish` or `watch` when an artifact
