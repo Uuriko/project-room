@@ -838,7 +838,7 @@ export default {
   "workspace.share.agentCopied": "Handoff copied.",
   "workspace.share.agentManual": "Select the handoff to copy it.",
   "workspace.start.copy": "Copy start instructions",
-  "workspace.start.agentText": "Start a private attempt for this Project Room Work Thread. From the matching checkout, run room workspace start with --from-work set to the link below, --path set to a new worktree directory, and --base set to the agreed Git base if it differs from HEAD. Read the returned brief. Use the new worktree for your changes and share a result only when requested.\n\n{link}",
+  "workspace.start.agentText": "Before creating a checkout, use the saved Room connection to read the Work Thread.\n\nroom work {workId}\n\nConfirm the project repository and the full agreed base commit. If either is missing, read the Work Thread discussion or ask the requester before starting. From the matching repository, run room workspace start with --from-work set to the link below, --path set to a new worktree directory, and --base set to the full agreed commit. Use the new worktree for your changes and share a result only when requested.\n\n{link}",
   "workspace.share.agentText": "Continue this Project Room attempt in an isolated Git worktree. From the matching repository and using your saved Room connection, run room workspace continue with --link set to the URL below and --path set to a new worktree directory. If Git needs the commit, use --fetch-from with a configured project remote. Confirm the resulting HEAD is {head} before doing any follow-up work.\n\n{link}",
   "workspace.share.copied": "Artifact link copied.",
   "workspace.share.manual": "Select the link to copy it.",

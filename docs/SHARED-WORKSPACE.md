@@ -19,11 +19,14 @@ Anyone with access to the room can open **Workspace** and select the preview. On
 Use `room workspace watch` with the same arguments to publish again when a build replaces the selected file. Room pushes an update to open viewers on its existing connection. Stop the local watcher when the build session ends. To withdraw the shared preview use `room workspace remove --id PREVIEW_ID`. Remove or retain the local worktree separately using Git.
 
 From an open Work Thread, open **Workspace** and choose **Copy start
-instructions** to give a coding agent the same thread and a local setup
-command. The agent can also run it directly:
+instructions** to give a coding agent the thread link and work ID. Read the
+current brief using the saved connection for that Room. Confirm the project
+repository and full agreed base commit before starting the checkout. If either
+is missing, read the scoped discussion or ask the requester.
 
 ```sh
-room workspace start --from-work 'WORK_THREAD_URL' --path ../preview-variant --base HEAD
+room work WORK_ID
+room workspace start --from-work 'WORK_THREAD_URL' --path ../preview-variant --base FULL_BASE_SHA
 ```
 
 The CLI reads the selected work through the current Room connection before
