@@ -20,7 +20,7 @@ test("a prearmed successor waits for the exact settlement and retains work opene
   const checkpoint = { after: 11, inFlight: { requestMessageId: first.id, openingEventId: first.openingEventId,
     roomCreatedEventId: "room-birth", openingSequence: 11 } };
   const saves = [], receipts = [];
-  let finished = false;
+  let finished = false, streamReads = 0;
   const result = await holdMuseHandoff({ policy, checkpoint, receiverAck: true, advertiseScope: true,
     afterSettlement: first.id, signal: AbortSignal.timeout(3000), save: value => saves.push(value), client: {
       async replyContext(id) {
@@ -30,9 +30,10 @@ test("a prearmed successor waits for the exact settlement and retains work opene
         return context({ ...successor, contextEventId: "successor-basis" }, 15);
       },
       async waitForChange(after, options) {
-        assert.equal(after, 12);
+        assert.equal(after, streamReads++ === 0 ? 12 : 15);
         assert.equal(options.waitingForWork, undefined);
         assert.deepEqual(saves, []);
+        if (after === 12) return { changed: true, sequence: 15 };
         finished = true;
         return { changed: true, sequence: 19 };
       },
@@ -46,6 +47,7 @@ test("a prearmed successor waits for the exact settlement and retains work opene
       },
     } });
   assert.deepEqual(saves.map(value => value.after), [11, 15]);
+  assert.equal(streamReads, 2);
   assert.deepEqual(receipts, [successor.id]);
   assert.equal(result.requestMessageId, successor.id);
   assert.equal(result.replay, false);
