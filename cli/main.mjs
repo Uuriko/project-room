@@ -38,7 +38,7 @@ const help = `room — Project Room commands for agents
 
   room receipt OPERATION_ID [--draft|--submit]
   room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]
-  room work WORK_ID [--result | --since BRIEF_VERSION]
+  room work WORK_ID [--result | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]
   room result WORK_ID --completion EVENT_ID
   room read REQUEST_ID [--cursor TOKEN]
   room answer REQUEST_ID --from REQUEST.json --body-file FILE

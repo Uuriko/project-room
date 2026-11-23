@@ -7,9 +7,10 @@ import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
 import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { validId } from "../../src/events.js";
+import { workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
-const workHelp = "room work WORK_ID [--result | --since BRIEF_VERSION]\nRead the compact task brief. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.";
+const workHelp = "room work WORK_ID [--result | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]\nRead the compact task brief. Add --discussion for shared files and discussion. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.";
 const requestHelp = "room request REQUEST_ID [--compact] [--cursor TOKEN]\nRead the selected request and follow its next page before responding.";
 const validCursor = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(value);
 
@@ -91,6 +92,25 @@ async function reconcileAnswer(call, args, config) {
     currentStateVerified: false, workStateChanged: false };
 }
 
+function exactDiscussionFiles(items, { origin, roomId }) {
+  const files = new Map();
+  const roomOrigin = new URL(origin).origin;
+  for (const { message } of items) {
+    if (!validId(message?.id) || typeof message.body !== "string") continue;
+    for (const line of message.body.split(/\r?\n/)) {
+      const link = URL.parse(line.trim());
+      if (!link || link.origin !== roomOrigin || link.username || link.password
+          || link.searchParams.size !== 1 || link.searchParams.get("room") !== roomId
+          || files.has(link.href)) continue;
+      const target = workspaceArtifactSelection(link.hash);
+      if (!target?.file || !target.head) continue;
+      files.set(link.href, { messageId: message.id, file: target.file, head: target.head,
+        revision: target.revision, command: ["room", "workspace", "changes", "--link", link.href] });
+    }
+  }
+  return [...files.values()];
+}
+
 async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = process.env,
   fetchImpl = fetch, out = console.log } = {}, action, selectedConnection) {
   const write = action !== undefined;
@@ -169,6 +189,12 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
           && step.arguments.includeResult === true)
         step.command = ["room", "work", args.workItemId, "--result"];
     }
+    if (tool === "room_read_work_discussion") {
+      value.workspaceArtifacts = exactDiscussionFiles(value.discussion.items, config);
+      const cursor = value.discussion.nextCursor;
+      if (validCursor(cursor))
+        value.nextCommand = ["room", "work", args.workItemId, "--discussion", "--cursor", cursor];
+    }
     if (tool === "room_read_request") {
       delete value.responseHttpActions;
       const cursor = value.nextRead?.arguments?.cursor ?? value.page?.nextCursor;
@@ -222,6 +248,15 @@ export async function receiptCommand(argv, io = {}) {
 export async function workCommand(argv, io = {}) {
   if (argv.length === 1 && argv[0] === "--help") { (io.out ?? console.log)(workHelp); return 0; }
   const [workItemId, flag, since] = argv;
+  if (flag === "--discussion") {
+    const cursor = argv[3];
+    if (!validId(workItemId) || !(argv.length === 2 || argv.length === 4
+        && since === "--cursor" && validCursor(cursor) && cursor.length <= 2048)) throw new Error(workHelp);
+    return runWorkflow("room_read_work_discussion", { workItemId, ...(cursor ? { cursor } : {}) },
+      (value, { roomId, memberId }) => value.contractVersion === 1 && value.roomId === roomId
+        && value.workItemId === workItemId && value.viewerId === memberId
+        && Array.isArray(value.discussion?.items), io);
+  }
   const includeResult = flag === "--result";
   const conditional = flag === "--since" && /^[a-f0-9]{64}$/.test(since ?? "");
   if (!validId(workItemId) || !(argv.length === 1 || argv.length === 2 && includeResult || argv.length === 3 && conditional))
