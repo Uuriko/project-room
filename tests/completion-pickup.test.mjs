@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
-import { buildReplyCommand } from "../client/reply-actions.mjs";
+import { buildReplyCommand, declineAlternativeOperationId, recordedReplyAction } from "../client/reply-actions.mjs";
+import { confirmsAgentCommand } from "../client/work-actions.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { startCompletionPickup } from "../server/completion-pickup.mjs";
 import { RoomStore } from "../server/store.mjs";
@@ -195,16 +196,19 @@ test("normalized Room advances three explicit lanes through restart, refusal and
   t => checkPlannedContinuation(t, "normalized-current-v1"));
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
-  test(`an approved alternative waits for a fresh scoped receiver after decline (${representation})`, async t => {
+  test(`planned and request-authored alternatives wait for a fresh receiver (${representation})`, async t => {
     const directory = mkdtempSync(join(tmpdir(), "room-decline-continuation-"));
     chmodSync(directory, 0o700);
     const store = new RoomStore(join(directory, "room.sqlite"));
-    const roomId = "commons", requesterId = "owner", recipientId = "reviewer", workItemId = "qa";
+    const roomId = "commons", requesterId = "requester", recipientId = "reviewer", workItemId = "qa";
     store.initialize(initialRoom(roomId), representation === "legacy" ? {} : { representation });
-    const owner = store.issueAccessKey(roomId, requesterId);
+    const admin = store.issueAccessKey(roomId, "owner");
+    const requester = store.identities.create("Requester");
+    linkWithProof(store, admin, roomId, requester, { memberId: requesterId, permissions: ["steer", "accept_work"] });
+    const owner = requester.secret;
     const agent = store.identities.create("Reviewer");
-    linkWithProof(store, owner, roomId, agent, { memberId: recipientId, permissions: [] });
-    store.command(owner, roomId, { id: "create-qa", type: "work.proposed",
+    linkWithProof(store, admin, roomId, agent, { memberId: recipientId, permissions: [] });
+    store.command(admin, roomId, { id: "create-qa", type: "work.proposed",
       data: { workItemId, title: "QA", definitionOfDone: "Review the given evidence.", accountableMemberId: requesterId, mode: "read" } });
     const server = createRoomServer({ store });
     server.listen(0, "127.0.0.1");
@@ -218,6 +222,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     atomicPrivateJson(config, { checkpointPath, routes: [{
       roomId, requesterId, recipientId, workItemId, credentialPath, after: store.headSequence(roomId),
       allowUnadvertisedReceiver: representation === "legacy",
+      allowRequestAlternatives: true,
       continuation: { seedRequestId: "seed-review", steps: [
         { requestId: "separate-review", body: replacement, afterOutcome: "declined" },
       ] },
@@ -284,5 +289,85 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(receipt().eventId, recorded.eventId);
     assert.equal(store.headSequence(roomId), after);
     assert.deepEqual(log.map(row => row.opening), [recorded.sequence]);
+
+    const respond = (id, outcome, operationId) => {
+      const request = store.replyRequests.selected(agent.secret, roomId, id);
+      const action = request.responseActions.find(option => option.arguments.responseOutcome === outcome);
+      const { roomId: _roomId, ...args } = action.arguments;
+      return fire(agent.secret, recipientId, action.tool, { ...args, requestId: operationId, body: "Reviewed the exact request." });
+    };
+    respond(opened.id, "answered", "answer-static");
+    server.closeStreams();
+    const postDraft = (actor, id, body, work = workItemId) => store.command(actor, roomId, {
+      id, type: "message.posted", data: { messageId: id, body, workItemId: work },
+    });
+    const dynamicBody = "Review the empty-state wording for a dismissed note.";
+    postDraft(owner, "replacement-draft", dynamicBody);
+    postDraft(owner, "unlinked-draft", "Outside this Work Thread.", null);
+    const makeSeed = (requestId, declineAlternativeMessageId) => buildReplyCommand(
+      { roomId, memberId: requesterId }, "room_request_reply",
+      { requestId, toMemberId: recipientId, workItemId, body: "Check whether the exact hunk can be seen.", declineAlternativeMessageId },
+    );
+    assert.throws(() => store.command(owner, roomId, makeSeed("outside-scope", "unlinked-draft")), { code: "invalid_arguments" });
+    const command = makeSeed("room-authored-seed", "replacement-draft");
+    const dynamic = store.command(owner, roomId, command);
+    assert.ok(confirmsAgentCommand(dynamic, command, { roomId, memberId: requesterId }));
+    const operationId = declineAlternativeOperationId(dynamic.event.id);
+    const recovery = { sourceMessageId: "replacement-draft", operationId,
+      nextRead: { tool: "room_receipt", arguments: { roomId, operationId } } };
+    assert.deepEqual(recordedReplyAction("room_request_reply", {}, command, dynamic).declineAlternative, recovery);
+    assert.equal(store.command(owner, roomId, command).duplicate, true);
+    const retry = await fetch(origin + "/mcp", {
+      method: "POST", headers: { Authorization: "Bearer " + owner, "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "room_request_reply",
+        arguments: { roomId, requestId: command.id, toMemberId: recipientId, workItemId, body: command.data.body,
+          declineAlternativeMessageId: "replacement-draft" } } }),
+    });
+    const rpc = await retry.json();
+    assert.equal(rpc.result?.structuredContent?.duplicate, true, JSON.stringify(rpc));
+    assert.deepEqual(rpc.result.structuredContent.declineAlternative, recovery);
+    assert.equal(dynamic.event.data.body, command.data.body);
+    assert.ok(!JSON.stringify(dynamic.event).includes(dynamicBody));
+    respond(dynamic.event.data.messageId, "declined", "decline-room-authored");
+    await setImmediate();
+    const dynamicReceipt = () => store.operationReceipt(owner, roomId, operationId);
+    assert.equal(dynamicReceipt().status, "not_recorded");
+    stop();
+    stop = start();
+    await connect(scope);
+    await setImmediate();
+    const alternative = dynamicReceipt();
+    assert.equal(alternative.status, "recorded", JSON.stringify(log));
+    const published = store.replyRequests.list(owner, roomId, { direction: "outgoing", status: "open" }).requests;
+    assert.equal(published.length, 1);
+    const task = store.replyRequests.selected(agent.secret, roomId, published[0].id).page.items[0].message;
+    assert.equal(task.body, `@(${recipientId})\n${dynamicBody}`);
+    respond(task.id, "answered", "answer-dynamic");
+    server.closeStreams();
+
+    const edited = store.command(owner, roomId, makeSeed("edited-draft-seed", "replacement-draft"));
+    const editedDecline = respond(edited.event.data.messageId, "declined", "decline-edited-draft");
+    store.command(owner, roomId, { id: "edit-approved-draft", type: "message.edited",
+      data: { messageId: "replacement-draft", body: "Different evidence and a different request.", expectedMessageRevision: 0 } });
+    await connect(scope);
+    await setImmediate();
+    assert.equal(store.operationReceipt(owner, roomId, declineAlternativeOperationId(edited.event.id)).status, "not_recorded");
+    assert.equal(log.filter(row => row.event === "completion_pickup.decline_alternative").length, 1);
+    assert.equal(log.some(row => row.decline === editedDecline.sequence), false);
+    server.closeStreams();
+    const withdrawn = store.command(owner, roomId, makeSeed("cancelled-dynamic-seed", "replacement-draft"));
+    fire(owner, requesterId, "room_cancel_request", { requestId: "cancel-dynamic", requestMessageId: withdrawn.event.data.messageId,
+      expectedRequestRevision: 0, reason: "The requester no longer needs this check." });
+    const answered = store.command(owner, roomId, makeSeed("answered-dynamic-seed", "replacement-draft"));
+    respond(answered.event.data.messageId, "answered", "answer-pending");
+    stop();
+    rmSync(checkpointPath);
+    stop = start();
+    await connect(scope);
+    await setImmediate();
+    assert.equal(store.operationReceipt(owner, roomId, declineAlternativeOperationId(withdrawn.event.id)).status, "not_recorded");
+    assert.equal(store.operationReceipt(owner, roomId, declineAlternativeOperationId(answered.event.id)).status, "not_recorded");
+    assert.equal(dynamicReceipt().eventId, alternative.eventId);
+    assert.equal(log.filter(row => row.event === "completion_pickup.decline_alternative").length, 1);
   });
 }

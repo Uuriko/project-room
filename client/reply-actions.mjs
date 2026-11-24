@@ -25,8 +25,8 @@ const definitions = [
     { requestMessageId: id, cursor: token, limit, view: { type: "string", enum: ["compact", "full"] } }, ["requestMessageId"]],
   ["room_request_history", "/reply-history", "Read an anchored incoming/outgoing request history, including requests answered between polls. Follow nextCursor; retain completedCheckpoint only after draining the window. Never mix cursor/checkpoint or silently reset on changed history/identity. Reading does not acknowledge anything.",
     { direction, cursor: token, checkpoint: token, limit }, []],
-  ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. Does not start a model or grant permission." + retry,
-    { requestId: requestKey, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["toMemberId", "body"]],
+  ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. On an enabled Node route, declineAlternativeMessageId can name your separate draft in the same Work Thread. Room can issue that draft only after the recipient formally declines and its receiver returns." + retry,
+    { requestId: requestKey, toMemberId: id, body: text, workItemId: id, replyToId: id, declineAlternativeMessageId: id }, ["toMemberId", "body"]],
   ["room_reply", null, "Post an ordinary clarification under a message. This does not answer or close a reply request, even when addressed to someone." + retry,
     { requestId: requestKey, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
@@ -88,14 +88,21 @@ export function buildReplyCommand(identity, name, args) {
 export function recordedReplyAction(name, args, command, receipt) {
   const requestMessageId = name === "room_request_reply" ? command.data.messageId
     : command.data.responseToRequestId ?? command.data.requestMessageId ?? null;
+  const sourceMessageId = name === "room_request_reply" && command.data.declineAlternativeMessageId;
+  const operationId = sourceMessageId ? declineAlternativeOperationId(receipt.event.id) : null;
   return { contractVersion: 1, status: "recorded", requestId: command.id, requestMessageId,
     messageId: command.data.messageId ?? null, sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
     appliedRequestRevision: name === "room_request_reply" ? 0 : name === "room_reply" ? null
       : args.expectedRequestRevision + (name === "room_progress_request" ? 0 : 1),
     currentStateVerified: false, workStateChanged: false,
+    ...(operationId ? { declineAlternative: { sourceMessageId, operationId,
+      nextRead: { tool: "room_receipt", arguments: { roomId: receipt.event.roomId, operationId } } } } : {}),
     ...(receipt.wakeDelivery ? { wakeDelivery: receipt.wakeDelivery } : {}),
     ...(receipt.wakeDeliveryEvidence ? { wakeDeliveryEvidence: receipt.wakeDeliveryEvidence } : {}),
     next: requestMessageId ? { tool: "room_read_request", arguments: { requestMessageId } } : null };
+}
+export function declineAlternativeOperationId(openingEventId) {
+  return "decline-alternative-" + createHash("sha256").update(openingEventId).digest("hex");
 }
 export async function submitReplyAction(client, identity, name, args, { signal } = {}) {
   const command = buildReplyCommand(identity, name, args), receipt = await client.command(command, { signal });

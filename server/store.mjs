@@ -743,7 +743,7 @@ const shapes = {
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
-  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll declineAlternativeMessageId ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -3932,6 +3932,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   onEventAppended(listener) {
     this._appendListeners.add(listener);
     return () => this._appendListeners.delete(listener);
+  }
+  declineAlternativeDraft(roomId, requesterId, recipientId, workItemId, messageId) {
+    return this.readTransaction(() => {
+      const message = selectedMessageRecord(this, roomId, messageId);
+      if (!message || message.authorId !== requesterId || message.workItemId !== workItemId
+          || message.toMemberId && message.toMemberId !== recipientId
+          || message.deletedAt || message.redacted || typeof message.body !== "string" || !message.body.trim()) return null;
+      return { body: message.body.trim(),
+        digest: hash(canonical([message.createdAt, message.editedAt ?? null, message.body])) };
+    });
   }
   // The room's committed head sequence in one primary-key read — the stream
   // probe's change check, three orders of magnitude cheaper than a page read.
@@ -7403,6 +7413,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
+      let declineAlternative, replyData = command.data;
+      if (requestMode === "open" && Object.hasOwn(command.data, "declineAlternativeMessageId")) {
+        const { declineAlternativeMessageId: messageId, ...opening } = command.data;
+        const draft = this.declineAlternativeDraft(roomId, auth.member.id, command.data.toMemberId,
+          command.data.workItemId, messageId);
+        if (!draft || !this.admitDeclineAlternative?.(roomId, auth.member.id, command, draft.body))
+          fail(422, "invalid_arguments", "Choose a distinct draft you authored in this Work Thread on an enabled decline recovery route");
+        declineAlternative = { messageId, digest: draft.digest };
+        replyData = opening;
+      }
       const endingRequest = (requestMode === "respond" || command.type === T.REPLY_REQUEST_CANCELLED)
         && room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId]?.status === "open";
       const endingHelp = command.type === T.WORK_HELP_UPDATED && command.data.status === "withdrawn"
@@ -7559,7 +7579,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             ...(agentConnectionSponsor ? { selfSponsorshipVersion: 1 } : {}),
             ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
           }
-          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION,
+          : requestMode ? { ...replyData, requestPolicyVersion: REPLY_POLICY_VERSION,
             // Server-derived (callers cannot send it): the credential route this
             // response arrived on. See ANSWER_CREDENTIALS in src/reply-requests.js.
             ...(requestMode === "respond" ? { answerCredential: auth.kind === "session" && auth.credentialScope === "account-session"
@@ -7571,6 +7591,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : command.type === T.WORK_PROPOSED ? { ...command.data, writeGrantPolicyVersion: WRITE_GRANT_POLICY_VERSION }
           : command.data
       });
+      // Keep automation metadata outside reply data and the recipient's
+      // message body. Older reducers can still replay the ordinary request.
+      if (declineAlternative) incoming.declineAlternative = declineAlternative;
       // Observed transport only, never a runner/capability or ownership claim.
       // Public command validation rejects this reserved top-level field. Keep
       // it outside data and projected messages; exact retries returned above

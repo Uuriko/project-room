@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
-import { replyPostMode, REPLY_POLICY_VERSION, ANSWER_CREDENTIALS } from "../src/reply-requests.js";
+import { replyPostMode, REPLY_POLICY_VERSION, ANSWER_CREDENTIALS, matchesDeclineAlternative } from "../src/reply-requests.js";
 import { reportedProducer } from "../src/work-packet.js";
 import { WRITE_GRANT_POLICY_VERSION } from "../src/work-reducers.js";
 import { agentErrorAx } from "../src/agent-error.mjs";
@@ -244,6 +244,11 @@ export function confirmsAgentCommand(receipt, command, { roomId, memberId }) {
     }
     const mode = command.type === T.MESSAGE_POSTED ? replyPostMode(data) : null;
     if (mode) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
+    if (!matchesDeclineAlternative(entry, data)) return false;
+    if (mode === "open" && Object.hasOwn(data, "declineAlternativeMessageId")) {
+      const { declineAlternativeMessageId: _draft, ...opening } = data;
+      data = opening;
+    }
     // The server stamps which credential answered; it is never in the command.
     if (mode === "respond" && ANSWER_CREDENTIALS.includes(entry?.data?.answerCredential)) data = { ...data, answerCredential: entry.data.answerCredential };
     // Proposals admitted under the item write grant policy carry its version (#5960).
