@@ -958,7 +958,7 @@ test('the preview inspection connector preserves audience and OAuth consent', as
       body: JSON.stringify(input)
     });
     assert.equal(result.status, 200);
-    return new URL(workspaceArtifactLink(origin, 'commons', await result.json(), 'preview')).hash;
+    return workspaceArtifactLink(origin, 'commons', await result.json(), 'preview');
   };
   const selection = await published(preview);
   const tool = 'room_inspect_workspace_preview';
@@ -969,6 +969,11 @@ test('the preview inspection connector preserves audience and OAuth consent', as
   assert.equal(granted.body.result?.structuredContent?.status, 'visible', JSON.stringify(granted.body));
   assert.equal(granted.body.result.structuredContent.viewerId, 'friend-dot');
   assert.equal(granted.body.result.structuredContent.head, preview.head);
+  assert.deepEqual((await invoke(new URL(selection).hash)).body.result.structuredContent, granted.body.result.structuredContent);
+  const foreign = await invoke(selection.replace('room.example', 'other.example'));
+  assert.equal(foreign.body.result?.structuredContent?.code, 'invalid_preview_selection');
+  const differentRoom = await invoke(selection.replace('room=commons', 'room=elsewhere'));
+  assert.equal(differentRoom.body.result?.structuredContent?.code, 'invalid_preview_selection');
   assert.doesNotMatch(JSON.stringify(granted.body), /Visitor preview/);
   const another = f.store.invites.redeem(f.store.invites.create(f.ownerKey, 'commons', { profile: 'chat' }).code,
     { displayName: 'Other reviewer' });

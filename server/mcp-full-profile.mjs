@@ -57,7 +57,7 @@ const publicReviewVersion = { type: "integer", minimum: 1 };
 const publicReviewOutcomes = ["PASS", "FAIL", "accepted", "rejected", "revision_requested"];
 const hostedSelectedTools = [
   { name: PREVIEW_INSPECTION,
-    description: "Check exact published Workspace preview visibility from your own Room seat. Copy the artifact hash (starting #pr-workspace/) and supply your expected member ID. Returns only visibility and exact artifact identity. Unavailable covers hidden and absent previews. Does not render or inspect a running dev server.",
+    description: "Check exact published Workspace preview visibility from your own Room seat. Paste the exact Preview link or its #pr-workspace/ hash and supply your expected member ID. Returns only visibility and exact artifact identity. Unavailable covers hidden and absent previews. Does not render or inspect a running dev server.",
     inputSchema: { properties: { selection: { type: "string", minLength: 1, maxLength: 512 },
       expectedViewerId: { type: "string", minLength: 1, maxLength: 128 } }, required: ["selection", "expectedViewerId"] },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
@@ -275,7 +275,7 @@ function enforceHostedStdioApiKeyScope(store, secret, name) {
   if (!granted) throw new ServiceError(403, "insufficient_scope", `API key lacks the ${required} scope`);
 }
 
-export async function callHostedStdioTool(store, secret, name, args) {
+export async function callHostedStdioTool(store, secret, name, args, { origin } = {}) {
   args = withDefaultRoomId(store, secret, name, args, { properties: { roomId: roomIdField }, required: ["roomId"] });
   // Spend-primitive MVP (charge-then-forward): same boundary as callRoomTool
   // in mcp-room-profile.mjs, adapted to this path's { value, isError }
@@ -303,13 +303,13 @@ export async function callHostedStdioTool(store, secret, name, args) {
     // sees agents the autonomy system already admits to writes.
     const tier = getTier(store.db, roomId, auth.member.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
     if (tier === "t1_readonly" || isGuestAgentMemberId(auth.member.id))
-      return dispatchHostedStdioTool(store, secret, name, args);
+      return dispatchHostedStdioTool(store, secret, name, args, origin);
   }
   // The settle/void contract itself is withSpendCharge (spend-grants.mjs),
   // shared with callRoomTool and the REST doors (#3269); this profile only
   // adapts its { value, isError } outcome envelope to it.
   return withSpendCharge(store, secret, name, args,
-    () => dispatchHostedStdioTool(store, secret, name, args),
+    () => dispatchHostedStdioTool(store, secret, name, args, origin),
     { unwrap: outcome => outcome?.value, isErrorOutcome: outcome => outcome?.isError === true });
 }
 
@@ -327,7 +327,7 @@ async function currentWorkRevision(store, secret, roomId, name, args, usesRevisi
   return context.work.revision;
 }
 
-async function dispatchHostedStdioTool(store, secret, name, args) {
+async function dispatchHostedStdioTool(store, secret, name, args, origin) {
   const { roomId, ...rest } = args;
   const auth = store.authenticate(secret, roomId);
   enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
@@ -461,7 +461,11 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       receipt => withWorkDeprecation(name, recordedWorkAction(name, command, receipt)));
   }
   if (name === PREVIEW_INSPECTION) {
-    const target = workspaceArtifactSelection(rest.selection);
+    const link = rest.selection.startsWith("#") ? null : URL.parse(rest.selection);
+    if (!rest.selection.startsWith("#") && (!link || link.origin !== origin || link.username || link.password
+        || link.searchParams.getAll("room").length !== 1 || link.searchParams.get("room") !== roomId))
+      throw new ServiceError(422, "invalid_preview_selection", "Choose a Preview link for this Room.");
+    const target = workspaceArtifactSelection(link?.hash ?? rest.selection);
     if (!target?.head || target.panel !== "preview")
       throw new ServiceError(422, "invalid_preview_selection", "Choose an exact Preview artifact hash.");
     const viewerId = auth.member.id;
