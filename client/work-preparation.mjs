@@ -207,8 +207,8 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     if (args.knownBriefVersion === brief.version) return { ...identity, briefUnchanged: true,
       evaluatedAt: context.evaluatedAt,
       guidance: "Reuse your retained brief for this identity and task. Authority and continuation were freshly read; omitted source, discussion and external evidence are not certified unchanged. Read without knownBriefVersion if that brief is unavailable." };
-    const { publishedVerdicts } = brief.sections.evidence;
-    return { ...identity, ...(publishedVerdicts ? { publishedVerdicts } : {}),
+    const { publishedVerdicts, pullRequest } = brief.sections.evidence;
+    return { ...identity, ...(publishedVerdicts ? { publishedVerdicts } : {}), ...(pullRequest ? { pullRequest } : {}),
       brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } }),
       ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) };
 

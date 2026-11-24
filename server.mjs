@@ -1,3 +1,4 @@
+import { recoverAttachedGithubWork } from "./server/github-review-webhook.mjs";
 import { readInstanceCardFiles } from './server/instance-card-runtime.mjs';
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -145,6 +146,7 @@ if (!paused) {
 // so the C14 surface can close over them via a per-request status getter.)
 server.listen(port, host, () => {
   console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
+  if (!paused) void recoverAttachedGithubWork(store).catch(() => console.warn("[github] pending PR handoff recovery failed"));
   // C13 readiness note: the listen line above must stay the first stdout write,
   // because packaging tests treat first stdout data as "server ready".
   if (!paused) console.log(nodeJobs?.growthEnabled && nodeJobs.isRunning()

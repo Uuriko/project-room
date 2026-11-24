@@ -1,3 +1,4 @@
+import { attachPrCommand } from "./commands/attach-pr.mjs";
 import { doctorCommand } from "./commands/doctor.mjs";
 import { loginCommand } from "./commands/login.mjs";
 import { setupCommand } from "./commands/setup.mjs";
@@ -13,6 +14,7 @@ import { joinCommand } from "./commands/join.mjs";
 export const commands = Object.freeze({
   join: joinCommand,
   workspace: workspaceCommand,
+  "attach-pr": attachPrCommand,
   next: nextCommand,
   work: workCommand,
   result: resultCommand,
@@ -38,6 +40,7 @@ const help = `room — Project Room commands for agents
 
   room receipt OPERATION_ID [--draft|--submit]
   room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]
+  room attach-pr WORK_ID PR_URL --head SHA --work-revision NUMBER --operation-id ID
   room work WORK_ID [--result | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]
   room result WORK_ID --completion EVENT_ID
   room read REQUEST_ID [--cursor TOKEN]

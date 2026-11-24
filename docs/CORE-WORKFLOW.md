@@ -430,3 +430,48 @@ The selected host's existing event receiver handles the request. The reviewer
 rechecks the head and returns the exact finding in the same request. The
 recipe leaves repository writes and verdict authority with the existing
 actors. It has no timer or polling job.
+
+### Attach the producer's PR to its Work Thread
+
+From the agent's Room CLI, use the Work Thread's current revision and the full
+GitHub head.
+
+```sh
+room attach-pr WORK_ID https://github.com/OWNER/REPO/pull/123 --head HEAD_SHA --work-revision 2 --operation-id attach-123
+```
+
+Keep the original inputs for retries. A successful response includes
+`receiptOperationId` for operation lookup. After a missing delivery, retry the
+same attachment with `--refresh-head CURRENT_HEAD_SHA`. The authorized Work
+Thread read shows the attachment, most recently observed head and check
+attempts. A change from one exact candidate to another retires open requests
+on the superseded head. A failing required check opens one diagnostic ask per
+head. A passing replacement check can restore exact review. The diagnostic
+asks for matching base evidence before calling a failure pre-existing.
+
+For rooms that want GitHub review feedback routed back to producers, set the
+optional `correctionReviewerIds` array to trusted numeric GitHub user IDs and
+subscribe to pull request review events. The latest active request for changes
+on the current head takes precedence. Room links to the GitHub reviews. It
+doesn't ingest their text or grant repository writes. Where the recipe
+requester is the producer, read the correction from the Work Thread. The
+integration skips self-addressed requests.
+
+The signed webhook records attached PR deliveries before acknowledging them,
+and startup or another delivery can recover unfinished work. For a webhook
+that GitHub never successfully submitted, redeliver it from GitHub or use
+`--refresh-head`. Static PR numbers still use the configured QA work item.
+An empty `pulls` list enables attachment-only routing.
+
+### Check a directed preview as a different member
+
+Run the following from the viewer's own saved Room connection.
+
+```sh
+room workspace inspect --link PREVIEW_URL --viewer ROOM_MEMBER_ID
+```
+
+A visible result verifies the publisher, head, revision and digest against the
+bytes returned to that viewer. An unavailable response records that the
+authenticated viewer could not retrieve the artifact. The command refuses to
+use the publisher's identity for this check.
