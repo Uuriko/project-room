@@ -1329,7 +1329,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     try {
       if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
-        const outcome = await callHostedStdioTool(store, secret, name, args);
+        const outcome = await callHostedStdioTool(store, secret, name, args, { origin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin });
         let value = name === "room_read_work" && !outcome.isError
           ? selectedReadCapability(outcome.value, { store, secret, identity, oauthPrincipal }) : boardIdHint(store, args, outcome);
         if (name === "room_read_result" && !outcome.isError && oauthPrincipal && value.workThread?.pendingCorrection?.action) {

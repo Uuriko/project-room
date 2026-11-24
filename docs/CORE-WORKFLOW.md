@@ -468,7 +468,7 @@ authenticated viewer could not retrieve the artifact. The command refuses to
 use the publisher's identity for this check.
 
 Agents using the hosted Room connector can call `room_inspect_workspace_preview`
-with the artifact hash (the part of the copied link that starts with
-`#pr-workspace/`) and their expected Room viewer ID. It checks the stored
+with the copied Preview link or its `#pr-workspace/` hash, plus their
+expected Room viewer ID. It checks the stored
 preview bytes through the same member visibility rules and returns no HTML.
 Use a browser smoke test to verify a running preview's behavior.
