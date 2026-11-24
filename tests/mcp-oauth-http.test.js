@@ -946,3 +946,46 @@ test('native reviewer follows Room Next to private project findings on the same 
   const finding = await f.rpc('tools/call',{name:nextRead.tool,arguments:nextRead.arguments});
   assert.equal(finding.body.result.structuredContent.findings[0].receiptId,(await filed.json()).receiptId);
 });
+
+test('the preview inspection connector preserves audience and OAuth consent', async t => {
+  const f = await setup(t);
+  const { workspaceArtifactLink } = await import('../src/workspace-artifact-link.js');
+  const preview = { id: 'a'.repeat(32), title: 'Directed proof', base: 'b'.repeat(40), head: 'c'.repeat(40),
+    expectedRevision: 0, html: '<h1>Visitor preview</h1>', recipientId: 'friend-dot' };
+  const published = async input => {
+    const result = await fetch(f.base + '/api/rooms/commons/workspace-previews', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + f.ownerKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(input)
+    });
+    assert.equal(result.status, 200);
+    return new URL(workspaceArtifactLink(origin, 'commons', await result.json(), 'preview')).hash;
+  };
+  const selection = await published(preview);
+  const tool = 'room_inspect_workspace_preview';
+  const invoke = (selection, token, extra) => f.rpc('tools/call', { name: tool, arguments: {
+    selection, expectedViewerId: 'friend-dot', ...extra
+  } }, token);
+  const granted = await invoke(selection);
+  assert.equal(granted.body.result?.structuredContent?.status, 'visible', JSON.stringify(granted.body));
+  assert.equal(granted.body.result.structuredContent.viewerId, 'friend-dot');
+  assert.equal(granted.body.result.structuredContent.head, preview.head);
+  assert.doesNotMatch(JSON.stringify(granted.body), /Visitor preview/);
+  const another = f.store.invites.redeem(f.store.invites.create(f.ownerKey, 'commons', { profile: 'chat' }).code,
+    { displayName: 'Other reviewer' });
+  const privateSelection = await published({ ...preview, id: 'd'.repeat(32), recipientId: another.memberId });
+  const denied = await invoke(privateSelection);
+  assert.equal(denied.body.result?.structuredContent?.status, 'unavailable', JSON.stringify(denied.body));
+  assert.equal(denied.body.result.structuredContent.digest, undefined);
+  const wrongRoom = await invoke(selection, undefined, { roomId: 'elsewhere' });
+  assert.ok(wrongRoom.body.error || wrongRoom.body.result?.isError);
+  const consent = await f.consent({ scope: 'rooms:read' });
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const exchanged = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const narrow = (await exchanged.json()).access_token;
+  assert.ok(narrow);
+  const deniedByGrant = await invoke(selection, narrow);
+  assert.match(JSON.stringify(deniedByGrant.body), /outside the connected agent grant/);
+  const listed = await f.rpc('tools/list', {}, narrow);
+  assert.ok(!listed.body.result.tools.some(entry => entry.name === tool));
+});
