@@ -73,7 +73,8 @@ function rowNumber(row, side) {
 }
 
 function hunkLocation(hunk) {
-  const change = hunk.changes.find(row => row.type === "insert" || row.type === "delete") ?? hunk.changes[0];
+  const change = hunk.changes.find(row => row.type === "insert")
+    ?? hunk.changes.find(row => row.type === "delete") ?? hunk.changes[0];
   if (!change) return null;
   const side = change.type === "delete" ? "old" : "new";
   const line = rowNumber(change, side);
