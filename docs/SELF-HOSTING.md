@@ -89,9 +89,22 @@ Give each step a concrete, independently useful outcome. Room opens one step
 after the previous request receives a formal answer from the named recipient.
 A formal answer is distinct from independent acceptance. For work that depends
 on independent acceptance, start a new list from a request issued after that
-decision. A corrected, declined, or cancelled predecessor stops the list. A
+decision. By default, a corrected, declined, or cancelled predecessor stops the list. A
 recipient pause or another current request from this requester defers admission.
 An acknowledged request still holds the lane after its progress becomes stale.
+For an independently useful alternative approved in advance, set
+`"afterOutcome": "declined"` on the following step. Room waits for a formal
+decline from the assigned recipient and an authenticated stream that advertises
+matching scope and `waiting_for_work` after that decline. Muse's existing
+`--stay-armed --receiver-ack --advertise-scope` receiver reports that state
+after it recovers its checkpoint. Room opens the alternative once and uses
+only the configured task body. A cancellation, an old connection, and a
+receiver without matching scope do not authorize an alternative.
+For a dedicated legacy receiver that cannot advertise scope, the operator
+can set `"allowUnadvertisedReceiver": true` on its specific route. In that
+case the same authenticated recipient must open a new stream with a cursor
+at or beyond the decline. An explicitly advertised scope always takes
+precedence over the legacy connection check.
 Committed Room activity and startup drive catch-up. The existing operation
 receipt prevents reopening a recorded step. Use new operation IDs if the scope
 or body changes. A list can contain up to 32 follow-ups and ends when it runs
