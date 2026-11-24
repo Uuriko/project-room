@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { chmodSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 import { startCompletionPickup } from "../server/completion-pickup.mjs";
+import { RoomStore } from "../server/store.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -63,3 +66,128 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
   t => checkScopedInvestigation(t));
 test("a completion route preserves the receiver's exact first line without chaining an investigation",
   t => checkScopedInvestigation(t, "Claude Code QA"));
+
+async function checkPlannedContinuation(t, representation) {
+  const directory = mkdtempSync(join(tmpdir(), "room-planned-continuation-"));
+  const db = join(directory, "room.sqlite");
+  const roomId = "commons", workItemId = "qa-work";
+  const wallClock = Date.now;
+  let now = wallClock();
+  const openStore = () => new RoomStore(db, { now: () => now });
+  const f = { directory, store: openStore() };
+  let stop = () => {};
+  t.after(() => { Date.now = wallClock; stop(); f.store.close(); rmSync(directory, { recursive: true, force: true }); });
+  f.store.initialize(initialRoom(roomId), representation ? { representation } : {});
+  f.keys = { owner: f.store.issueAccessKey(roomId, "owner") };
+  const requesterId = f.store.authenticate(f.keys.owner, roomId).member.id;
+  const identity = { roomId, memberId: requesterId };
+  const lanes = ["claude", "dot", "muse"].map(name => {
+    const agent = f.store.identities.create(name);
+    linkWithProof(f.store, f.keys.owner, roomId, agent, { memberId: name, permissions: ["accept_work", "verify"] });
+    return { name, agent };
+  });
+  f.store.command(f.keys.owner, roomId, { id: randomUUID(), type: "work.proposed",
+    data: { workItemId, title: "QA lane", definitionOfDone: "Return source evidence.", accountableMemberId: requesterId, mode: "read" } });
+  const after = f.store.headSequence(roomId);
+  chmodSync(f.directory, 0o700);
+  const checkpointPath = join(f.directory, "checkpoint.json");
+  const config = join(f.directory, "pickup.json");
+  const credentialPath = join(f.directory, "operator.json");
+  atomicPrivateJson(credentialPath, { identitySecret: f.keys.owner });
+  atomicPrivateJson(config, {
+    checkpointPath,
+    routes: lanes.map(({ name }) => ({
+      roomId, requesterId, recipientId: name, workItemId, credentialPath, after,
+      firstLine: name === "claude" ? "Claude Code QA" : `@(${name})`,
+      continuation: { seedRequestId: `${name}-seed`, steps: [
+        { requestId: `${name}-second`, body: "Check the pinned source and report the observed result." },
+        { requestId: `${name}-third`, body: "Verify the next exact candidate and record a result." },
+      ] },
+    })),
+  });
+  const request = (name, id) => f.store.command(f.keys.owner, roomId,
+    buildReplyCommand(identity, "room_request_reply", {
+      requestId: id, toMemberId: name, workItemId, body: "Read-only QA seed.",
+    })).event.data.messageId;
+  const requestId = operationId => {
+    const receipt = f.store.operationReceipt(f.keys.owner, roomId, operationId);
+    assert.equal(receipt.status, "recorded", operationId);
+    return JSON.parse(f.store.db.prepare("SELECT body FROM events WHERE room_id=? AND sequence=?")
+      .get(roomId, receipt.sequence).body).data.messageId;
+  };
+  const record = (operationId, name, outcome = "answered") => {
+    const { agent } = lanes.find(lane => lane.name === name);
+    const exact = f.store.replyRequests.selected(agent.secret, roomId, requestId(operationId));
+    const template = exact.responseActions.find(action => action.arguments.responseOutcome === outcome);
+    const { roomId: _roomId, ...args } = template.arguments;
+    f.store.command(agent.secret, roomId, buildReplyCommand({ roomId, memberId: name }, template.tool,
+      { ...args, requestId: randomUUID(), body: "Exact result for this check." }));
+  };
+  const status = id => f.store.operationReceipt(f.keys.owner, roomId, id).status;
+  const log = [];
+  const start = () => startCompletionPickup(f.store, config, message => log.push(JSON.parse(message)));
+  stop = start();
+  for (const { name } of lanes) request(name, `${name}-seed`);
+  const competing = request("dot", "dot-other-work");
+  const dot = lanes.find(lane => lane.name === "dot");
+  f.store.command(dot.agent.secret, roomId, buildReplyCommand({ roomId, memberId: "dot" }, "room_progress_request", {
+    requestId: "dot-other-acknowledged", requestMessageId: competing, expectedRequestRevision: 0, progress: "acknowledged",
+  }));
+  await setImmediate();
+  for (const { name } of lanes) assert.equal(status(`${name}-second`), "not_recorded");
+  record("claude-seed", "claude");
+  record("dot-seed", "dot");
+  record("muse-seed", "muse", "declined");
+  await setImmediate();
+  assert.equal(status("claude-second"), "recorded", JSON.stringify(log));
+  assert.equal(status("claude-third"), "not_recorded");
+  assert.equal(status("dot-second"), "not_recorded");
+  assert.equal(status("muse-second"), "not_recorded");
+  const claudeSecond = f.store.replyRequests.selected(lanes[0].agent.secret, roomId, requestId("claude-second"));
+  assert.equal(claudeSecond.page.items[0].message.body, "Claude Code QA\nCheck the pinned source and report the observed result.");
+  const originalSecond = f.store.operationReceipt(f.keys.owner, roomId, "claude-second").eventId;
+
+  now += 31 * 60 * 1000;
+  Date.now = () => now;
+  const aged = f.store.replyRequests.list(f.keys.owner, roomId, { direction: "outgoing", status: "open", states: true })
+    .requests.find(item => item.id === competing);
+  assert.equal(aged.lifecycle.state, "stale");
+  assert.equal(aged.lifecycle.unresponsive, false);
+  stop();
+  stop = start();
+  await setImmediate();
+  assert.equal(status("dot-second"), "not_recorded");
+
+  stop();
+  record("claude-second", "claude");
+  record("dot-other-work", "dot");
+  f.store.close();
+  f.store = openStore();
+  stop = start();
+  await setImmediate();
+  assert.equal(status("claude-third"), "recorded", JSON.stringify(log));
+  assert.equal(status("dot-second"), "recorded");
+  assert.equal(status("dot-third"), "not_recorded");
+  assert.equal(status("muse-second"), "not_recorded");
+  assert.equal(f.store.operationReceipt(f.keys.owner, roomId, "claude-second").eventId, originalSecond);
+
+  record("dot-second", "dot");
+  record("claude-third", "claude");
+  await setImmediate();
+  assert.equal(status("dot-third"), "recorded");
+  record("dot-third", "dot");
+  await setImmediate();
+  const before = f.store.headSequence(roomId);
+  stop();
+  rmSync(checkpointPath);
+  stop = start();
+  await setImmediate();
+  assert.equal(f.store.headSequence(roomId), before);
+  assert.equal(log.filter(row => row.event === "completion_pickup.continued").length, 4);
+  assert.equal(log.filter(row => row.event === "completion_pickup.posted").length, 0);
+}
+
+test("legacy Room advances three explicit lanes through restart, refusal and competing work",
+  t => checkPlannedContinuation(t));
+test("normalized Room advances three explicit lanes through restart, refusal and competing work",
+  t => checkPlannedContinuation(t, "normalized-current-v1"));

@@ -61,6 +61,43 @@ For a self-hosted Room that only needs Claude Code, Codex or another desktop MCP
 
 Native automatic wake delivery currently runs on the Node service with its persistent SQLite database and HTTPS origin. On Workers, missing `ROOM_MCP_EVENT_CALLBACK_ORIGINS` disables Events; an explicit JSON `[]` enables discovery but denies all callbacks; independently verified exact HTTPS origins enable the restricted provider transport and durable alarm delivery. This adapter trusts the approved provider origin rather than providing arbitrary callback DNS pinning. Actual Dot wake remains unproven until the live subscription and response are observed. A local HTTP success is not a ChatGPT installation or wake test. Qualify the actual host with the [agent onboarding acceptance checks](AGENT-ONBOARDING-ACCEPTANCE.md) before inviting external collaborators. The Codex ACP adapter starts a separate runtime and cannot attach an existing ChatGPT Dot.
 
+### Continue a reviewed list of tasks in a Work Thread
+
+On the Node service, an operator can add `continuation` to a route in the
+private `ROOM_COMPLETION_PICKUP_CONFIG` file. Keep the route's existing Room,
+requester, recipient, Work Thread, credential path and receiver opener. Set the
+route's `after` sequence before the seed opening. `seedRequestId` is the stable
+operation ID used to send that first formal request.
+
+```json
+{
+  "seedRequestId": "widget-review-seed",
+  "steps": [
+    {
+      "requestId": "widget-reopen-check",
+      "body": "At the pinned candidate, verify reopening the saved widget on a clean start. Record the command, observed result, and candidate."
+    },
+    {
+      "requestId": "widget-release-readback",
+      "body": "Inspect the exact release candidate's saved build evidence. Record the matching source and check outcome."
+    }
+  ]
+}
+```
+
+Give each step a concrete, independently useful outcome. Room opens one step
+after the previous request receives a formal answer from the named recipient.
+A formal answer is distinct from independent acceptance. For work that depends
+on independent acceptance, start a new list from a request issued after that
+decision. A corrected, declined, or cancelled predecessor stops the list. A
+recipient pause or another current request from this requester defers admission.
+An acknowledged request still holds the lane after its progress becomes stale.
+Committed Room activity and startup drive catch-up. The existing operation
+receipt prevents reopening a recorded step. Use new operation IDs if the scope
+or body changes. A list can contain up to 32 follow-ups and ends when it runs
+out of explicit tasks. Its route uses these steps in place of the generic
+one-off investigation.
+
 ## Back up and verify
 
 Keep backups private and outside the source checkout. For a first local check:

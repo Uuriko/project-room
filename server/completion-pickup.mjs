@@ -8,6 +8,77 @@ const investigation = "Room investigation pass.";
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
   JSON.stringify([roomId, requesterId, recipientId, workItemId]);
 
+function compileContinuation(route) {
+  if (route.continuation === undefined) return null;
+  const { seedRequestId, steps } = route.continuation ?? {};
+  if (!validId(seedRequestId) || !Array.isArray(steps) || !steps.length || steps.length > 32)
+    throw Error("Invalid completion continuation");
+  const { roomId, requesterId, recipientId, workItemId, firstLine = `@(${route.recipientId})` } = route;
+  const command = (requestId, body) => buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
+    requestId, workItemId, toMemberId: recipientId, body,
+  });
+  const seed = command(seedRequestId, firstLine);
+  const ids = new Set([seedRequestId]);
+  const requests = [seed];
+  for (const { requestId, body } of steps) {
+    if (!validId(requestId) || ids.has(requestId) || typeof body !== "string" || !body.trim())
+      throw Error("Invalid completion continuation step");
+    ids.add(requestId);
+    requests.push(command(requestId, `${firstLine}\n${body.trim()}`));
+  }
+  return { requests, position: 0 };
+}
+
+function recipientHasOpenRequest(store, secret, { roomId, recipientId }) {
+  let cursor;
+  do {
+    const open = store.replyRequests.list(secret, roomId, { direction: "outgoing", status: "open", states: true,
+      ...(cursor ? { cursor } : {}),
+    });
+    // Staleness measures time since progress. An acknowledged request may
+    // still be executing, even when the receiver has stopped reporting.
+    if (open.requests.some(item => item.recipientId === recipientId &&
+        (item.lifecycle?.state !== "stale" || item.lifecycle.unresponsive !== true))) return true;
+    if (!open.page?.hasMore) return false;
+    if (!open.page.nextCursor || open.page.nextCursor === cursor) return true;
+    cursor = open.page.nextCursor;
+  } while (cursor);
+}
+
+function advanceContinuation(store, { route, secret, continuation }) {
+  const { roomId, requesterId, recipientId, workItemId, after } = route;
+  const { requests } = continuation;
+  if (continuation.position >= requests.length - 1 || store.wakeQueue.pauseStatus(roomId, recipientId)) return;
+  if (store.authenticate(secret, roomId).member.id !== requesterId) throw Error("Pickup requester identity changed");
+  // Recover the current step from Room's receipts, including a write that
+  // committed just before the subscriber stopped. A changed plan must use new IDs.
+  while (continuation.position < requests.length - 1) {
+    const current = requests[continuation.position];
+    const receipt = store.operationReceipt(secret, roomId, current.id);
+    if (receipt.status !== "recorded" || receipt.sequence <= after || receipt.eventType !== "message.posted") return;
+    const { request, page } = store.replyRequests.selected(secret, roomId, current.data.messageId, { view: "compact" });
+    if (request.requesterId !== requesterId || request.recipientId !== recipientId || request.workItemId !== workItemId
+        || request.openingEventId !== receipt.eventId || request.contextEventId !== request.openingEventId
+        || request.status !== "answered" || request.terminalActorId !== recipientId) return;
+    if (continuation.position > 0 && page.items.find(item => item.kind === "opened")?.message?.body !== current.data.body) return;
+
+    const next = requests[continuation.position + 1];
+    if (store.operationReceipt(secret, roomId, next.id).status === "recorded") {
+      continuation.position++;
+      continue;
+    }
+    if (recipientHasOpenRequest(store, secret, route)) return;
+    try {
+      const result = store.command(secret, roomId, next);
+      continuation.position++;
+      return result.duplicate ? undefined : result.sequence;
+    } catch (error) {
+      if (error.code === "assignment_paused" || error.code === "assignment_waiting_for_recipient") return;
+      throw error;
+    }
+  }
+}
+
 export function dispatchCompletionPickup(store, route, secret, event, sequence) {
   const { roomId, requesterId, recipientId, workItemId, firstLine } = route;
   const requestMessageId = event.data?.responseToRequestId;
@@ -68,7 +139,7 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
     const credential = readPrivateJson(credentialPath);
     const secret = credential.identitySecret ?? credential.token;
     if (store.authenticate(secret, roomId).member.id !== requesterId) throw Error("Invalid completion pickup requester");
-    bindings.set(routeKey(route), { route, secret });
+    bindings.set(routeKey(route), { route, secret, continuation: compileContinuation(route) });
   }
   let checkpoints;
   try { checkpoints = readPrivateJson(checkpointPath); }
@@ -95,7 +166,7 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
           const { toMemberId, workItemId, responseOutcome } = event.data ?? {};
           if (event.type !== "message.posted" || responseOutcome !== "answered") continue;
           const binding = bindings.get(routeKey({ roomId, requesterId: toMemberId, recipientId: event.actorId, workItemId }));
-          if (binding && row.sequence > binding.route.after) {
+          if (binding && !binding.continuation && row.sequence > binding.route.after) {
             const status = dispatchCompletionPickup(store, binding.route, binding.secret, event, row.sequence);
             if (status === "posted") log(JSON.stringify({ event: "completion_pickup.posted", roomId, settlement: row.sequence }));
           }
@@ -110,6 +181,15 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
         if (rows.length === 64) wake(roomId);
       } catch (error) {
         log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+      }
+      for (const binding of bindings.values()) {
+        if (binding.route.roomId !== roomId || !binding.continuation) continue;
+        try {
+          const opening = advanceContinuation(store, binding);
+          if (opening !== undefined) log(JSON.stringify({ event: "completion_pickup.continued", roomId, opening }));
+        } catch (error) {
+          log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+        }
       }
     });
   }
