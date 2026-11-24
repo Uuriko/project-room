@@ -189,3 +189,18 @@ test("the exact failing attempt resumes after draft and reopen with one current 
   assert.equal(third.length, 1);
   assert.notEqual(third[0].id, second.id);
 });
+
+test("distinct buffered deliveries for one head share one authoritative read", async t => {
+  const f = await fixture(t);
+  await f.attach();
+  for (const id of ["delivery-a", "delivery-b", "delivery-c"])
+    saveAttachedGithubDelivery(f.store, f.binding, { ...event(head, id), delivery: id });
+  let githubReads = 0;
+  const outcomes = await drainAttachedGithubDeliveries(f.store, f.binding, { credential: () => f.owner, observe: async () => {
+    githubReads++;
+    return { snapshot: f.snapshot(head) };
+  } });
+  assert.equal(githubReads, 1);
+  assert.deepEqual(outcomes, Array(3).fill({ status: "observed" }));
+  assert.equal(f.store.replyRequests.list(f.reviewer.identitySecret, roomId, { direction: "incoming", status: "open" }).requests.length, 1);
+});
