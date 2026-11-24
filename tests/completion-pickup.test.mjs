@@ -71,9 +71,12 @@ async function checkPlannedContinuation(t, representation) {
   const directory = mkdtempSync(join(tmpdir(), "room-planned-continuation-"));
   const db = join(directory, "room.sqlite");
   const roomId = "commons", workItemId = "qa-work";
-  const f = { directory, store: new RoomStore(db) };
+  const wallClock = Date.now;
+  let now = wallClock();
+  const openStore = () => new RoomStore(db, { now: () => now });
+  const f = { directory, store: openStore() };
   let stop = () => {};
-  t.after(() => { stop(); f.store.close(); rmSync(directory, { recursive: true, force: true }); });
+  t.after(() => { Date.now = wallClock; stop(); f.store.close(); rmSync(directory, { recursive: true, force: true }); });
   f.store.initialize(initialRoom(roomId), representation ? { representation } : {});
   f.keys = { owner: f.store.issueAccessKey(roomId, "owner") };
   const requesterId = f.store.authenticate(f.keys.owner, roomId).member.id;
@@ -125,7 +128,11 @@ async function checkPlannedContinuation(t, representation) {
   const start = () => startCompletionPickup(f.store, config, message => log.push(JSON.parse(message)));
   stop = start();
   for (const { name } of lanes) request(name, `${name}-seed`);
-  request("dot", "dot-other-work");
+  const competing = request("dot", "dot-other-work");
+  const dot = lanes.find(lane => lane.name === "dot");
+  f.store.command(dot.agent.secret, roomId, buildReplyCommand({ roomId, memberId: "dot" }, "room_progress_request", {
+    requestId: "dot-other-acknowledged", requestMessageId: competing, expectedRequestRevision: 0, progress: "acknowledged",
+  }));
   await setImmediate();
   for (const { name } of lanes) assert.equal(status(`${name}-second`), "not_recorded");
   record("claude-seed", "claude");
@@ -140,11 +147,22 @@ async function checkPlannedContinuation(t, representation) {
   assert.equal(claudeSecond.page.items[0].message.body, "Claude Code QA\nCheck the pinned source and report the observed result.");
   const originalSecond = f.store.operationReceipt(f.keys.owner, roomId, "claude-second").eventId;
 
+  now += 31 * 60 * 1000;
+  Date.now = () => now;
+  const aged = f.store.replyRequests.list(f.keys.owner, roomId, { direction: "outgoing", status: "open", states: true })
+    .requests.find(item => item.id === competing);
+  assert.equal(aged.lifecycle.state, "stale");
+  assert.equal(aged.lifecycle.unresponsive, false);
+  stop();
+  stop = start();
+  await setImmediate();
+  assert.equal(status("dot-second"), "not_recorded");
+
   stop();
   record("claude-second", "claude");
   record("dot-other-work", "dot");
   f.store.close();
-  f.store = new RoomStore(db);
+  f.store = openStore();
   stop = start();
   await setImmediate();
   assert.equal(status("claude-third"), "recorded", JSON.stringify(log));
