@@ -125,6 +125,13 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.deepEqual(await inspect(viewer, "viewer"), { roomId: "commons", viewerId: "viewer", id, head: sent.head,
     revision: sent.revision, publisherId: "publisher", digest: sent.digest, status: "visible" });
   assert.equal((await inspect(otherPublisher, "other-publisher")).status, "unavailable");
+  const { callHostedStdioTool } = await import("../server/mcp-full-profile.mjs");
+  const check = (secret, expectedViewerId) => callHostedStdioTool(store, secret, "room_inspect_workspace_preview",
+    { roomId: "commons", selection: new URL(link).hash, expectedViewerId });
+  assert.deepEqual((await check(viewer, "viewer")).value, await inspect(viewer, "viewer"));
+  assert.equal((await check(otherPublisher, "other-publisher")).value.status, "unavailable");
+  await assert.rejects(check(otherPublisher, "viewer"), { code: "independent_preview_viewer_required" });
+  await assert.rejects(check(publisher, "publisher"), { code: "independent_preview_viewer_required" });
   await assert.rejects(inspect(otherPublisher, "viewer"), /independent saved Room connection/);
   await assert.rejects(inspect(publisher, "publisher"), /independent saved Room connection/);
   await assert.rejects(inspect(viewer, "viewer", link.replace(sent.head, "d".repeat(40))), /no longer matches/);
