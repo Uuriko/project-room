@@ -81,7 +81,7 @@ function hunkLocation(hunk) {
   return Number.isSafeInteger(line) && line > 0 ? { side, line } : null;
 }
 
-function renderFile(body, file, review) {
+function renderFile(body, file, review, shareHunks) {
   body.replaceChildren();
   if (!file.hunks.length) body.append(node("p", "No text hunks in this file.", "form-hint"));
   let target;
@@ -119,7 +119,7 @@ function renderFile(body, file, review) {
       lines.append(node("span", [prefix, line.content, "\n"].join(""), `workspace-line-${kind}`));
     }
     chunk.append(range);
-    const location = hunkLocation(hunk);
+    const location = shareHunks && hunkLocation(hunk);
     if (location) {
       const button = node("button", "Select hunk for review link", "button ghost");
       button.type = "button";
@@ -142,7 +142,7 @@ function renderFile(body, file, review) {
   }
 }
 
-export function renderWorkspaceChange(parent, item, changes, read, requestedFile, review) {
+export function renderWorkspaceChange(parent, item, changes, read, { file: requestedFile, review, shareHunks = true } = {}) {
   const selected = parent.querySelector("[aria-current=true]")?.dataset.file;
   const focused = parent.contains(document.activeElement) ? document.activeElement?.dataset.file : null;
   parent.replaceChildren(node("h4", item.title));
@@ -172,7 +172,7 @@ export function renderWorkspaceChange(parent, item, changes, read, requestedFile
       const value = available ? { file: available } : await read("file", button.dataset.file);
       if (!value || ticket !== choice || !parent.contains(body)) return;
       status.textContent = value.file ? "" : uiText("workspace.share.fileMissing");
-      if (value.file) renderFile(body, value.file, button.dataset.file === review?.file ? review : null);
+      if (value.file) renderFile(body, value.file, button.dataset.file === review?.file ? review : null, shareHunks);
     } catch (error) {
       if (ticket === choice && parent.contains(body)) status.textContent = error.message || uiText("workspace.changes.fileError");
     }

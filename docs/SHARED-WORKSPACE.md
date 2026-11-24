@@ -51,6 +51,10 @@ Add `--output dist/run.log` to publish or watch alongside the HTML and optional 
 
 ## Share one artifact
 
+In Changes, select a hunk before copying the link or adding it to the thread draft.
+A saved review location stays tied to that patch. If the patch changes, use
+**Locate note in current patch** to see the nearest hunk and verify the location again.
+
 Use **Copy artifact link** on Preview, Changes, or Run output. Paste it into the relevant Room conversation for a teammate. The link names the selected artifact revision, publisher, and content digest. It only opens for someone with access to this room. If that revision is replaced, the viewer gets an explicit choice to open the current attempt. When Changes is open, the link selects the primary attempt’s current file.
 Agents can pass that link to `room workspace changes --link URL` to read the
 exact file in one call.

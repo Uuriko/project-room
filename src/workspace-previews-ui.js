@@ -220,11 +220,13 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       if (!a || !stillOpen() || (comparison && !b)) return;
       const exact = note?.revision === current.revision && note.head === current.head && note.digest === current.patchDigest;
       const selectedFile = a.file ? (a.file.newPath === "/dev/null" ? a.file.oldPath : a.file.newPath || a.file.oldPath) : undefined;
-      renderWorkspaceChange(primary, current, a, readCurrent, !note || a.file ? file : undefined,
-        note && selectedFile ? { file: selectedFile, anchor: note.anchor, exact } : null);
+      renderWorkspaceChange(primary, current, a, readCurrent, {
+        file: !note || a.file ? file : undefined,
+        review: note && selectedFile ? { file: selectedFile, anchor: note.anchor, exact } : null,
+      });
       pendingFile = null;
       peer.hidden = !comparison;
-      if (comparison) renderWorkspaceChange(peer, comparison, b, readPeer);
+      if (comparison) renderWorkspaceChange(peer, comparison, b, readPeer, { shareHunks: false });
       else peer.replaceChildren();
       columns.hidden = false;
       changeStatus.textContent = note && file && !a.file ? "The original review file is absent from the current patch." : "";
