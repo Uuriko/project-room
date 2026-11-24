@@ -309,7 +309,7 @@ export function saveAttachedGithubDelivery(store, binding, delivery) {
 }
 
 export async function reconcileAttachedGithubDelivery(store, binding, entry, options) {
-  const { recipe, requesterId, reviewerId } = binding;
+  const { recipe, requesterId } = binding;
   const { number, head } = entry.candidate;
   const linked = githubWorkAttachment(store, recipe.roomId, recipe.repository, number);
   if (!linked) return;
@@ -320,15 +320,19 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
     if (observed.reason === "stale_head") return;
     throw new Error("Current GitHub PR evidence could not be verified.");
   }
-  const target = { ...binding, pulls: [number], workItemId: linked.workItemId };
   const secret = await options.credential();
   if (store.authenticate(secret, recipe.roomId).member.id !== requesterId)
     throw new Error("GitHub review requester does not match the saved identity");
   const { work } = store.workContext(secret, recipe.roomId, linked.workItemId);
+  const reviewerId = work.verifierMemberId || binding.reviewerId;
+  const previousReviewerId = linked.next?.reviewerId ?? reviewerId;
+  const target = { ...binding, reviewerId, workItemId: linked.workItemId };
+  const previousTarget = { ...target, reviewerId: previousReviewerId };
+  if (reviewerId === requesterId) throw new Error("The Work Thread reviewer must be independent of the recipe requester");
   const decision = evaluateGithubReview(recipe, observed.snapshot);
   const inactive = observed.snapshot.state !== "open" || observed.snapshot.draft;
   const correction = linked.observedHead !== head || inactive;
-  const original = reviewId(recipe, number, linked.observedHead, reviewerId, linked.workItemId);
+  const original = reviewId(recipe, number, linked.observedHead, previousReviewerId, linked.workItemId);
   const diagnosisId = (sha, check) => {
     const original = reviewId(recipe, number, sha, reviewerId, linked.workItemId);
     return original + "-ci-" + createHash("sha256").update(JSON.stringify([check.app, check.name, check.id])).digest("hex").slice(0, 16);
@@ -345,10 +349,10 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
     store.command(secret, recipe.roomId, command);
   };
   const resume = store.transaction(() => {
-    if (correction) {
-      const reason = "GitHub changed the candidate or the pull request is no longer ready.";
-      cancel(latestReviewOperation(store, recipe.roomId, requesterId, original), reason, "-stale");
-      if (previousDiagnosis) cancel(previousDiagnosis, reason, "-stale");
+    if (correction || previousReviewerId !== reviewerId) {
+      const reason = "The GitHub candidate, readiness or Work Thread reviewer changed.";
+      cancel(latestReviewOperation(store, recipe.roomId, requesterId, original), reason, "-stale", previousTarget);
+      if (previousDiagnosis) cancel(previousDiagnosis, reason, "-stale", previousTarget);
     }
     const reviews = inactive ? [] : observed.snapshot.correctionIds ?? [];
     const correctionLinks = reviews.map(id => decision.pullRequest + "#pullrequestreview-" + id);
@@ -366,7 +370,7 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
       const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
       cancel(latestReviewOperation(store, recipe.roomId, requesterId, current),
         "A trusted GitHub review requested changes on this candidate.", "-feedback");
-      if (previousDiagnosis) cancel(previousDiagnosis, "The candidate is awaiting a GitHub review correction.", "-feedback");
+      if (previousDiagnosis) cancel(previousDiagnosis, "The candidate is awaiting a GitHub review correction.", "-feedback", previousTarget);
       const operation = feedbackOperation(head, reviews, recipient.reviewerId);
       if (recipient.reviewerId && recipient.reviewerId !== requesterId
         && store.operationReceipt(secret, recipe.roomId, operation).status !== "recorded") {
@@ -381,7 +385,7 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
         }));
       }
       updateGithubWorkObservation(store, recipe.roomId, recipe.repository, number, { ...observed.snapshot,
-        next: { reason: "github_changes_requested", correctionIds: reviews, correctionLinks, correctionProducerId: recipient.reviewerId, checks: decision.checks } });
+        next: { reviewerId, reason: "github_changes_requested", correctionIds: reviews, correctionLinks, correctionProducerId: recipient.reviewerId, checks: decision.checks } });
       return null;
     }
     const failure = decision.checks?.find(check => check.status === "failed");
@@ -393,7 +397,7 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
       if (interrupted.status === "recorded")
         diagnosisOperation = initialDiagnosis + "-r-" + createHash("sha256").update(interrupted.eventId).digest("hex").slice(0, 24);
       if (previousDiagnosis && previousDiagnosis !== diagnosisOperation)
-        cancel(previousDiagnosis, "GitHub is reporting a different failing check attempt.", "-replaced");
+        cancel(previousDiagnosis, "GitHub is reporting a different failing check attempt.", "-replaced", previousTarget);
       const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
       const operation = latestReviewOperation(store, recipe.roomId, requesterId, current);
       cancel(operation, FAILURE_REASON + JSON.stringify({ app: failure.app, name: failure.name, id: failure.id }), "-withdraw");
@@ -411,7 +415,7 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
       }
     }
     if (!inactive && !failure && previousDiagnosis)
-      cancel(previousDiagnosis, "The reported failed check is no longer the current attempt.", "-cleared");
+      cancel(previousDiagnosis, "The reported failed check is no longer the current attempt.", "-cleared", previousTarget);
     if (!inactive && decision.action === "review_ready") {
       const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
       const operation = latestReviewOperation(store, recipe.roomId, requesterId, current);
@@ -436,7 +440,7 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
       }
     }
     updateGithubWorkObservation(store, recipe.roomId, recipe.repository, number, { ...observed.snapshot,
-      next: { reason: decision.reason, ...(decision.checks ? { checks: decision.checks } : {}),
+      next: { reviewerId, reason: decision.reason, ...(decision.checks ? { checks: decision.checks } : {}),
         ...(diagnosisOperation ? { diagnosisOperation } : {}) } });
     return null;
   });
@@ -448,7 +452,7 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
     await recoverPassingReview(store, target, entry.candidate, null, current, operation, request,
       withdrawal, secret, async () => observed, options.token);
     updateGithubWorkObservation(store, recipe.roomId, recipe.repository, number, { ...observed.snapshot,
-      next: { reason: decision.reason, checks: decision.checks } });
+      next: { reviewerId, reason: decision.reason, checks: decision.checks } });
   }
 }
 

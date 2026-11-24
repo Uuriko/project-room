@@ -445,7 +445,8 @@ Keep the original inputs for retries. A successful response includes
 same attachment with `--refresh-head CURRENT_HEAD_SHA`. The authorized Work
 Thread read shows the attachment, most recently observed head and check
 attempts. A change from one exact candidate to another retires open requests
-on the superseded head. A failing required check opens one diagnostic ask for the current
+on the superseded head. A named Work Thread verifier receives these requests.
+Threads without one use the configured reviewer. A failing required check opens one diagnostic ask for the current
 failed attempt. A passing replacement check can restore exact review. The diagnostic
 asks for matching base evidence before calling a failure pre-existing.
 
