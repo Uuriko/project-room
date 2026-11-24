@@ -161,3 +161,31 @@ test("trusted GitHub corrections wake the producer once and suppress obsolete re
   assert.equal(open(f.producer).length, 0);
   assert.equal(open(f.reviewer).length, 1);
 });
+
+test("the exact failing attempt resumes after draft and reopen with one current request", async t => {
+  const f = await fixture(t);
+  await f.attach();
+  let state = "open", draft = false;
+  const options = { credential: () => f.owner, observe: async () => {
+    const snapshot = { ...f.snapshot(head), state, draft };
+    snapshot.checks[0].conclusion = "failure";
+    return { snapshot };
+  } };
+  const drain = async suffix => {
+    saveAttachedGithubDelivery(f.store, f.binding, event(head, suffix.replaceAll("_", "-"), suffix));
+    assert.deepEqual(await drainAttachedGithubDeliveries(f.store, f.binding, options), [{ status: "observed" }]);
+    return f.store.replyRequests.list(f.reviewer.identitySecret, roomId, { direction: "incoming", status: "open" }).requests;
+  };
+  const [first] = await drain("opened");
+  draft = true;
+  assert.deepEqual(await drain("converted_to_draft"), []);
+  draft = false;
+  const [second] = await drain("ready_for_review");
+  assert.ok(first && second && first.id !== second.id);
+  state = "closed";
+  assert.deepEqual(await drain("closed"), []);
+  state = "open";
+  const third = await drain("reopened");
+  assert.equal(third.length, 1);
+  assert.notEqual(third[0].id, second.id);
+});
