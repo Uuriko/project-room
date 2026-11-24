@@ -19,12 +19,13 @@ function compileContinuation(route) {
   });
   const seed = command(seedRequestId, firstLine);
   const ids = new Set([seedRequestId]);
-  const requests = [seed];
-  for (const { requestId, body } of steps) {
-    if (!validId(requestId) || ids.has(requestId) || typeof body !== "string" || !body.trim())
+  const requests = [{ command: seed }];
+  for (const { requestId, body, afterOutcome = "answered" } of steps) {
+    if (!validId(requestId) || ids.has(requestId) || typeof body !== "string" || !body.trim()
+        || !["answered", "declined"].includes(afterOutcome))
       throw Error("Invalid completion continuation step");
     ids.add(requestId);
-    requests.push(command(requestId, `${firstLine}\n${body.trim()}`));
+    requests.push({ command: command(requestId, `${firstLine}\n${body.trim()}`), afterOutcome });
   }
   return { requests, position: 0 };
 }
@@ -45,7 +46,7 @@ function recipientHasOpenRequest(store, secret, { roomId, recipientId }) {
   } while (cursor);
 }
 
-function advanceContinuation(store, { route, secret, continuation }) {
+function advanceContinuation(store, { route, secret, continuation }, receiverServer) {
   const { roomId, requesterId, recipientId, workItemId, after } = route;
   const { requests } = continuation;
   if (continuation.position >= requests.length - 1 || store.wakeQueue.pauseStatus(roomId, recipientId)) return;
@@ -53,19 +54,27 @@ function advanceContinuation(store, { route, secret, continuation }) {
   // Recover the current step from Room's receipts, including a write that
   // committed just before the subscriber stopped. A changed plan must use new IDs.
   while (continuation.position < requests.length - 1) {
-    const current = requests[continuation.position];
+    const current = requests[continuation.position].command;
+    const { command: next, afterOutcome } = requests[continuation.position + 1];
     const receipt = store.operationReceipt(secret, roomId, current.id);
     if (receipt.status !== "recorded" || receipt.sequence <= after || receipt.eventType !== "message.posted") return;
     const { request, page } = store.replyRequests.selected(secret, roomId, current.data.messageId, { view: "compact" });
     if (request.requesterId !== requesterId || request.recipientId !== recipientId || request.workItemId !== workItemId
-        || request.openingEventId !== receipt.eventId || request.contextEventId !== request.openingEventId
-        || request.status !== "answered" || request.terminalActorId !== recipientId) return;
-    if (continuation.position > 0 && page.items.find(item => item.kind === "opened")?.message?.body !== current.data.body) return;
+        || request.openingEventId !== receipt.eventId || request.status !== afterOutcome
+        || request.terminalActorId !== recipientId) return;
+    const openingBody = page.items.find(item => item.kind === "opened")?.message?.body;
+    if (continuation.position > 0 && openingBody !== current.data.body) return;
+    if (afterOutcome === "answered" && request.contextEventId !== request.openingEventId) return;
 
-    const next = requests[continuation.position + 1];
     if (store.operationReceipt(secret, roomId, next.id).status === "recorded") {
       continuation.position++;
       continue;
+    }
+    if (afterOutcome === "declined") {
+      const decline = page.items.find(item => item.kind === "declined");
+      if (!decline || !openingBody || openingBody.trim() === next.data.body
+          || !receiverServer?.hasRecoveryReceiver({ roomId, recipientId, requesterId, workItemId,
+            id: next.data.messageId }, decline.sequence, route.allowUnadvertisedReceiver === true)) return;
     }
     if (recipientHasOpenRequest(store, secret, route)) return;
     try {
@@ -121,9 +130,9 @@ export function dispatchCompletionPickup(store, route, secret, event, sequence) 
   }
 }
 
-// The Node app owns this subscriber. The only trigger is a committed event
-// (including catch-up on restart); the SQLite operation receipt owns deduplication.
-export function startCompletionPickup(store, configPath, log = console.warn) {
+// A declined step waits for a fresh scoped receiver connection. The SQLite
+// operation receipt owns deduplication for both settlement paths.
+export function startCompletionPickup(store, configPath, log = console.warn, receiverServer) {
   if (!configPath) return () => {};
   const { routes, checkpointPath } = readPrivateJson(configPath);
   if (!Array.isArray(routes) || !routes.length || routes.length > 50 || typeof checkpointPath !== "string")
@@ -133,6 +142,7 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
     const { roomId, requesterId, recipientId, workItemId, credentialPath, after, firstLine } = route;
     if (![roomId, requesterId, recipientId, workItemId].every(validId) || requesterId === recipientId
         || typeof credentialPath !== "string" || !Number.isSafeInteger(after) || after < 0
+        || route.allowUnadvertisedReceiver !== undefined && typeof route.allowUnadvertisedReceiver !== "boolean"
         || firstLine !== undefined && (typeof firstLine !== "string" || !firstLine.length || firstLine.length > 120
           || firstLine.trim() !== firstLine || /[\r\n\u2028\u2029]/.test(firstLine))
         || bindings.has(routeKey(route))) throw Error("Invalid completion pickup route");
@@ -185,7 +195,7 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
       for (const binding of bindings.values()) {
         if (binding.route.roomId !== roomId || !binding.continuation) continue;
         try {
-          const opening = advanceContinuation(store, binding);
+          const opening = advanceContinuation(store, binding, receiverServer);
           if (opening !== undefined) log(JSON.stringify({ event: "completion_pickup.continued", roomId, opening }));
         } catch (error) {
           log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
@@ -194,6 +204,7 @@ export function startCompletionPickup(store, configPath, log = console.warn) {
     });
   }
   const unsubscribe = store.onEventAppended(wake);
+  receiverServer?.on("agentReceiverConnected", wake);
   for (const roomId of rooms.keys()) wake(roomId);
-  return () => { stopped = true; unsubscribe(); };
+  return () => { stopped = true; unsubscribe(); receiverServer?.off("agentReceiverConnected", wake); };
 }
