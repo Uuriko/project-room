@@ -21,7 +21,6 @@ const CORRECTION_CHARS = 400;
 const CORRECTION_FIELD_BYTES = 650;
 const MAX_BYTES = 16 * 1024;
 const LEGACY_WORK_BYTES = 256 * 1024;
-const LEGACY_REQUEST_BYTES = 1024 * 1024;
 const CURSOR_ERRORS = new Set([
   "invalid_reply_cursor", "reply_cursor_identity_changed", "stale_reply_cursor"
 ]);
@@ -213,7 +212,8 @@ function requestPage(store, secret, roomId, auth, cursor) {
 function boundedPage(roomId, source, getPage) {
   try { return getPage(); }
   catch (error) {
-    if (error instanceof CurrentReadBudgetExceeded) return unavailable(roomId, source, "read_budget_exceeded");
+    if (error instanceof CurrentReadBudgetExceeded || error?.code === "reply_list_too_large")
+      return unavailable(roomId, source, "read_budget_exceeded");
     if (error instanceof ServiceError && CURSOR_ERRORS.has(error.code))
       return unavailable(roomId, source, "cursor_changed");
     throw error;
@@ -307,7 +307,6 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
       ? withCurrentReadContext(store.db, roomId, budget => readCurrentRecord(store.db, roomId, "metadata", "room", budget))
       : store.db.prepare(`SELECT sequence,
           length(CAST(json_extract(projection,'$.workItems') AS BLOB)) AS workBytes,
-          length(CAST(json_extract(projection,'$.replyRequests') AS BLOB)) AS requestBytes,
           json_extract(projection,'$.room.ownerId') AS ownerId, json_extract(projection,'$.room.purpose') AS purpose,
           json_extract(projection,'$.room.archivedAt') AS archivedAt,
           json_extract(projection,'$.room.charter') AS charter FROM rooms WHERE id=?`).get(roomId);
@@ -316,21 +315,17 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
     packet.charterRevision = charter?.revision ?? null;
 
     // Archived discussion and unrelated projections never enter these readers.
-    // Work visibility still depends on the private-request slice.
-    const requestsOverBudget = !current && room.requestBytes > LEGACY_REQUEST_BYTES;
-    if (includeWork) packet.work = !current && (room.workBytes > LEGACY_WORK_BYTES || requestsOverBudget)
+    // Private request membership is resolved only for the selected work IDs.
+    if (includeWork) packet.work = !current && room.workBytes > LEGACY_WORK_BYTES
       ? unavailable(roomId, "work", "legacy_projection_budget",
         { tool: "room_activation_pack", arguments: { roomId, view: "brief" } })
       : boundedPage(roomId, "work", () => current
         ? workPage(store, roomId, auth, room, cursor) : legacyWorkPage(store, roomId, auth, room, cursor));
     let recoveryRead;
     if (includeRequests) {
-      const { recoveryRead: recovery, ...requests } = requestsOverBudget
-        ? unavailable(roomId, "requests", "legacy_projection_budget",
-          { tool: "room_list_requests", arguments: { roomId, direction: "incoming", status: "open" } })
-        : boundedPage(roomId, "requests", () => current
-          ? requestPage(store, secret, roomId, auth, cursor)
-          : legacyRequestPage(store, secret, roomId, auth, room, cursor, view === "pickup"));
+      const { recoveryRead: recovery, ...requests } = boundedPage(roomId, "requests", () => current
+        ? requestPage(store, secret, roomId, auth, cursor)
+        : legacyRequestPage(store, secret, roomId, auth, room, cursor, view === "pickup"));
       packet.requests = requests;
       recoveryRead = recovery;
     }

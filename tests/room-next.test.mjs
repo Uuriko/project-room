@@ -96,9 +96,11 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     f.send(f.producer.key, "reply_request.progressed", { requestMessageId: "private-ask",
       expectedRequestRevision: 0, progress: "acknowledged", note: "zq-private-progress-note-zq" });
     if (representation === "legacy") {
-      // A large unrelated projection slice must not hide addressed work or requests.
-      f.store.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.roomNextTestPadding',?) WHERE id=?")
-        .run("x".repeat(300 * 1024), "commons");
+      // Room-wide request history may be large even when the viewer has only one open ask.
+      f.store.db.prepare(`UPDATE rooms SET projection=json_set(projection,
+        '$.replyRequests.unrelated_history',json(?)) WHERE id=?`).run(JSON.stringify({
+        requesterId: f.triage.id, recipientId: f.observer.id, status: "answered", progressNote: "x".repeat(1100 * 1024)
+      }), "commons");
     }
     const before = f.stored();
     const room = f.store.room;
