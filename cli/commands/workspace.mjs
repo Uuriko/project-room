@@ -325,7 +325,8 @@ export async function workspaceCommand(argv, io = {}) {
       return room;
     };
     const room = await verify();
-    const scope = { action, connection: inherited ? safeName(inherited) : null, room, source: target };
+    const { anchor: _reviewPosition, ...source } = target;
+    const scope = { action, connection: inherited ? safeName(inherited) : null, room, source };
     const recovered = recoverLaunch(cwd, path, target.head, scope);
     if (recovered) { out(recovered); return 0; }
     const fetched = !hasCommit(cwd, target.head);
@@ -336,7 +337,7 @@ export async function workspaceCommand(argv, io = {}) {
       fetchWorkspaceCommit(cwd, remote, target.head);
       if (!isDeepStrictEqual(await verify(), room)) throw new Error("The Room identity changed while fetching this Workspace checkout");
     }
-    out(launch(cwd, path, target.head, scope, { source: target, fetched }));
+    out(launch(cwd, path, target.head, scope, { source, fetched }));
     return 0;
   }
   if (action === "changes" && flags.link) {
