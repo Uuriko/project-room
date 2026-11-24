@@ -93,6 +93,7 @@ optional.push("src/friend-bond.js"); // Friend / Bond People chrome (imported by
 optional.push("src/error-copy.js"); // Human error copy (imported by src/client.js, src/friend-bond.js, src/operator-ui.js)
 optional.push("src/room-layout.js", "src/member-display-names.js", "src/result-reader.js", "src/clipboard.js", "src/result-comparison.js", "src/result-feedback.js", "src/result-availability.js");
 optional.push("skills/project-room-setup/SKILL.md", "src/needs-attention.js", "src/access-presets.js", "src/room-setup-prompt.js", "src/service-origin.js", "src/updates-ui.js"); // #662: owner "needs your attention" card (imported by src/app.js)
+optional.push("third_party/hunk-review/LICENSE");
 optional.push("src/workspace-change-view.js", "src/workspace-diff-parser.js", "src/vendor-gitdiff-parser.js", "third_party/buzz-diffs/LICENSE", "third_party/buzz-diffs/LICENSE.gitdiff-parser", "third_party/buzz-diffs/NOTICE");
 optional.push("src/workspace-previews-ui.js", "src/workspace-artifact-link.js", "src/record-link.js", "server/workspace-previews.mjs", "server/workspace-publisher-grants.mjs", "server/workspace-preview-broker.mjs", "server/routes/workspace-previews.mjs");
 optional.push("server/workspace-preview-viewer.mjs", "server/workspace-publisher-address.mjs");

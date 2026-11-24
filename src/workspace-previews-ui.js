@@ -121,7 +121,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   const peer = dialog.querySelector("[data-workspace-peer]");
   const changeCache = new Map();
   let selected = null, frame = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
-  let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null, pendingFile = null, threadDraft = null;
+  let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null, pendingFile = null, reviewLocation = null, threadDraft = null;
 
   function choosePanel(name) {
     if (activePanel !== name) {
@@ -187,12 +187,11 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     const readChanges = item => {
       const identity = changesIdentity(item);
       const ownsRead = () => stillOpen() && changesIdentity(items.find(entry => entry.id === item.id)) === identity;
-      const artifact = new URL(workspaceArtifactLink(location.href, session.roomId, item, "changes")).hash;
       return async (view, path) => {
         if (!ownsRead()) return null;
-        const pinned = view === "file" && linked?.head && item.id === current.id && linked.file === path;
+        const artifact = new URL(workspaceArtifactLink(location.href, session.roomId, item, "changes", path)).hash;
         const query = new URLSearchParams({ id: item.id, changes: "1", revision: String(item.revision),
-          artifact: pinned ? location.hash : artifact });
+          artifact });
         if (view) query.set("view", view);
         if (path) query.set("path", path);
         const cacheKey = JSON.stringify([identity, query.toString()]);
@@ -208,20 +207,27 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     changeStatus.textContent = "Loading changes…";
     try {
       const file = pendingFile;
+      const note = reviewLocation?.publisherId === current.publisherId ? reviewLocation : null;
       const readCurrent = readChanges(current), readPeer = comparison && readChanges(comparison);
       const [{ renderWorkspaceChange }, a, b] = await Promise.all([
         import("./workspace-change-view.js"),
-        file ? readCurrent("file", file) : readCurrent("summary"),
+        file ? readCurrent("file", file).catch(error => {
+          if (!note || error.status !== 404) throw error;
+          return readCurrent("summary");
+        }) : readCurrent("summary"),
         readPeer ? readPeer("summary") : null,
       ]);
       if (!a || !stillOpen() || (comparison && !b)) return;
-      renderWorkspaceChange(primary, current, a, readCurrent, file);
+      const exact = note?.revision === current.revision && note.head === current.head && note.digest === current.patchDigest;
+      const selectedFile = a.file ? (a.file.newPath === "/dev/null" ? a.file.oldPath : a.file.newPath || a.file.oldPath) : undefined;
+      renderWorkspaceChange(primary, current, a, readCurrent, !note || a.file ? file : undefined,
+        note && selectedFile ? { file: selectedFile, anchor: note.anchor, exact } : null);
       pendingFile = null;
       peer.hidden = !comparison;
       if (comparison) renderWorkspaceChange(peer, comparison, b, readPeer);
       else peer.replaceChildren();
       columns.hidden = false;
-      changeStatus.textContent = "";
+      changeStatus.textContent = note && file && !a.file ? "The original review file is absent from the current patch." : "";
       renderedChanges = key;
     } catch (error) {
       if (!stillOpen()) return;
@@ -255,12 +261,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   }
   function reset() {
     selectStart(null);
-    generation++; selected = null; linked = null; pendingFile = null; threadDraft = null; clearPreview();
+    generation++; selected = null; linked = null; pendingFile = null; reviewLocation = null; threadDraft = null; clearPreview();
     status.textContent = ""; list.replaceChildren(); items = []; changeCache.clear();
     if (dialog.open) dialog.close();
   }
   function select(id) {
-    selected = id; linked = null; pendingFile = null;
+    selected = id; linked = null; pendingFile = null; reviewLocation = null;
     clearPreview();
     return load();
   }
@@ -297,6 +303,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         clearPreview();
         linkStatus.textContent = uiText(current ? "workspace.share.stale" : "workspace.share.missing");
         latest.hidden = !current;
+        latest.textContent = linked.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
+          ? "Locate note in current patch" : uiText("workspace.share.openCurrent");
         return;
       }
       if (!current) return;
@@ -345,13 +353,27 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     activate(next);
   });
   compare.addEventListener("change", () => void loadChanges());
-  latest.addEventListener("click", () => void select(selected));
+  latest.addEventListener("click", () => {
+    const current = items.find(item => item.id === selected);
+    if (!linked?.anchor || !current?.patchDigest || current.publisherId !== linked.publisherId) {
+      void select(selected);
+      return;
+    }
+    reviewLocation = linked;
+    linked = null;
+    pendingFile = reviewLocation.file;
+    latest.hidden = true;
+    activePanel = "changes";
+    void load();
+  });
   function shareSelection() {
     const current = items.find(item => item.id === selected), session = client.session;
     if (!current || !session || copyLink.hidden) return null;
     const panel = activePanel;
     const file = panel === "changes" && !columns.hidden ? primary.querySelector("[aria-current=true]")?.dataset.file : undefined;
-    const link = workspaceArtifactLink(location.href, session.roomId, current, panel, file);
+    const marked = file && primary.querySelector("[data-review-side][aria-pressed=true]");
+    const anchor = marked ? { side: marked.dataset.reviewSide, line: Number(marked.dataset.reviewLine) } : undefined;
+    const link = workspaceArtifactLink(location.href, session.roomId, current, panel, file, anchor);
     return link ? { current, session, panel, link } : null;
   }
 
@@ -443,7 +465,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       if (!target || !client.session) return;
       clearPreview();
       selectStart(null);
-      threadDraft = null; linked = target; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
+      threadDraft = null; linked = target; reviewLocation = target.anchor ? target : null; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
       if (!dialog.open) dialog.showModal();
       void load();
     },
