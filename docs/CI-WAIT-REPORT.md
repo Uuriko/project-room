@@ -58,14 +58,18 @@ that cohort. Keep PR, main, and local measurements separate.
 
 ## Verify the result
 
-Use the same pinned upstream script:
+Use the same pinned upstream timing script and Room’s JUnit adapter:
 
 ```sh
 python3 /path/to/joggernaut/skills/ci-measure/scripts/measure.py compare \
   --before /tmp/before.jsonl --after /tmp/after.jsonl --base main --min-runs 20
-python3 /path/to/joggernaut/skills/ci-measure/scripts/measure.py tests \
+python3 scripts/ci-junit-parity.py \
+  --measure /path/to/joggernaut/skills/ci-measure/scripts/measure.py \
   --before /tmp/before-junit --after /tmp/after-junit
 ```
+
+The adapter preserves test identities, failures and report paths. It includes
+loose Node JUnit cases that the pinned upstream reader misses in a mixed report.
 
 Record the median, slow tail, sample size, runner time, and failure rate.
 Report timing and coverage as separate conclusions. Check each discovered
