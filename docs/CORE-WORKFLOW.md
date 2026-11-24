@@ -459,3 +459,10 @@ A visible result verifies the publisher, head, revision and digest against the
 bytes returned to that viewer. An unavailable response records that the
 authenticated viewer could not retrieve the artifact. The command refuses to
 use the publisher's identity for this check.
+
+For an active local room, configure an authenticated GitHub read connection.
+Use the operator-managed GitHub token environment or set
+`ROOM_GITHUB_REVIEW_GH_PATH` to the absolute path of an already authenticated
+GitHub CLI. The CLI transport only issues bounded reads to GitHub's PR,
+review and check endpoints. Its existing login stays with the CLI.
+Matching buffered deliveries can share one authoritative observation.

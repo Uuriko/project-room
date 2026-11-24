@@ -41,6 +41,35 @@ export function readGithubReviewWebhookBinding(value) {
   return { recipe, pulls, requesterId, reviewerId, workItemId, correctionReviewerIds };
 }
 
+export function githubReviewReadOptions(env = process.env) {
+  const token = env.GH_TOKEN || env.GITHUB_TOKEN;
+  const binary = env.ROOM_GITHUB_REVIEW_GH_PATH;
+  if (token || !binary) return { token };
+  if (!binary.startsWith("/") || /[\r\n\x00]/.test(binary)) throw new Error("Expected an absolute GitHub CLI path");
+  return { fetchImpl: async (value, { signal }) => {
+    const url = new URL(value);
+    if (url.origin !== "https://api.github.com" || url.username || url.password
+      || !/^\/repos\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/(?:pulls\/[1-9][0-9]*(?:\/reviews)?|commits\/[a-f0-9]{40}\/check-runs)$/.test(url.pathname))
+      throw new Error("GitHub review requires a supported read endpoint");
+    const { execFile } = await import("node:child_process");
+    const output = await new Promise((resolve, reject) => {
+      execFile(binary, ["api", "--hostname", "github.com", "--method", "GET", "--include",
+        "-H", "Accept: application/vnd.github+json", "-H", "X-GitHub-Api-Version: 2022-11-28", "--",
+        url.pathname.slice(1) + url.search], { maxBuffer: 2 * 1024 * 1024 + 16384, signal,
+        env: { ...env, GH_PROMPT_DISABLED: "1", GH_DEBUG: "" } }, (error, stdout) => {
+        if (error) reject(new Error("Authenticated GitHub review read failed"));
+        else resolve(stdout);
+      });
+    });
+    const boundary = /\r?\n\r?\n/.exec(output);
+    const status = Number(/^HTTP\S* (\d{3})/.exec(output)?.[1]);
+    if (!boundary || status !== 200) throw new Error("GitHub review returned an invalid response");
+    const lines = output.slice(0, boundary.index).split(/\r?\n/);
+    const link = lines.find(line => line.toLowerCase().startsWith("link:"))?.slice(5).trim();
+    return new Response(output.slice(boundary.index + boundary[0].length), { headers: link ? { Link: link } : {} });
+  } };
+}
+
 async function readGithubJson(path, { fetchImpl, token, signal }) {
   const response = await fetchImpl(`https://api.github.com/${path}`, {
     signal, redirect: "error", headers: { Accept: "application/vnd.github+json",
@@ -236,8 +265,9 @@ function postReview(store, {recipe, requesterId, reviewerId, workItemId}, {head}
 
 // The caller verifies the signature before invoking this path. A posted Room
 // command is the durable deduplication record, across processes and redeliveries.
-export async function dispatchGithubReview(store, binding, delivery, { credential, observe = observeWebhookPull, token } = {}) {
+export async function dispatchGithubReview(store, binding, delivery, { credential, observe = observeWebhookPull, token, fetchImpl } = {}) {
   if (!binding) return [];
+  const read = (recipe, candidate, options) => observe(recipe, candidate, { ...options, fetchImpl });
   const { recipe, requesterId, reviewerId } = binding;
   const candidates = selectedCandidates(binding, delivery)
     .filter(({ number, head }) => binding.pulls.includes(number) && typeof head === "string" && SHA.test(head));
@@ -270,12 +300,12 @@ export async function dispatchGithubReview(store, binding, delivery, { credentia
       }
       const request = readOpenedReview(store, binding, receipt, secret);
       const status = withdrawal
-        ? await recoverPassingReview(store, binding, candidate, check, original, operation, request, withdrawal, secret, observe, token)
-        : await withdrawFailedReview(store, binding, candidate, check, operation, request, secret, observe, token);
+        ? await recoverPassingReview(store, binding, candidate, check, original, operation, request, withdrawal, secret, read, token)
+        : await withdrawFailedReview(store, binding, candidate, check, operation, request, secret, read, token);
       outcomes.push({ number, status });
       continue;
     }
-    const { snapshot, reason } = await observe(recipe, candidate, { token });
+    const { snapshot, reason } = await read(recipe, candidate, { token });
     if (!snapshot || snapshot.head !== head || snapshot.number !== number) {
       outcomes.push({ number, status: reason ?? "stale_head" });
       continue;
@@ -294,7 +324,7 @@ const inboxPrefix = "_github-work-pending:";
 const drains = new WeakMap();
 
 function workWebhookOptions(env) {
-  return { token: env.GH_TOKEN || env.GITHUB_TOKEN,
+  return { ...githubReviewReadOptions(env),
     async credential() {
       const { readPrivateJson } = await import("../room-acp/src/private-files.mjs");
       const value = readPrivateJson(env.ROOM_GITHUB_REVIEW_CREDENTIAL_PATH);
@@ -330,7 +360,7 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
   const linked = githubWorkAttachment(store, recipe.roomId, recipe.repository, number);
   if (!linked) return;
   const observe = options.observe ?? observeWebhookPull;
-  const observed = await observe(recipe, entry.candidate, { token: options.token, includeInactive: true, correctionReviewerIds: binding.correctionReviewerIds });
+  const observed = await observe(recipe, entry.candidate, { token: options.token, fetchImpl: options.fetchImpl, includeInactive: true, correctionReviewerIds: binding.correctionReviewerIds });
   if (!observed.snapshot) {
     // A stale event is a routing hint only; uncertainty remains recoverable.
     if (observed.reason === "stale_head") return;
@@ -487,18 +517,28 @@ export function drainAttachedGithubDeliveries(store, binding, options) {
       let cursor = prefix, page;
       do {
         page = rows.all(prefix, prefix.slice(0, -1) + ";", cursor);
+        const grouped = new Map();
         for (const row of page) {
           cursor = row.room_id;
           if (attempted.has(cursor)) continue;
           attempted.add(cursor);
+          const entry = JSON.parse(row.config_json);
+          const key = JSON.stringify(entry.candidate);
+          const group = grouped.get(key) ?? { entry, rows: [] };
+          group.rows.push(row);
+          grouped.set(key, group);
+        }
+        for (const { entry, rows: deliveries } of grouped.values()) {
           try {
-            await reconcileAttachedGithubDelivery(store, binding, JSON.parse(row.config_json), options);
-            store.transaction(() => store.db.prepare("DELETE FROM work_claim_config WHERE room_id=? AND config_json=?")
-              .run(row.room_id, row.config_json));
-            outcomes.push({ status: "observed" });
+            await reconcileAttachedGithubDelivery(store, binding, entry, options);
+            const remove = store.db.prepare("DELETE FROM work_claim_config WHERE room_id=? AND config_json=?");
+            store.transaction(() => {
+              for (const row of deliveries) remove.run(row.room_id, row.config_json);
+            });
+            for (const row of deliveries) outcomes.push({ status: "observed" });
           } catch (error) {
             options.onPending?.(error);
-            outcomes.push({ status: "pending" });
+            for (const row of deliveries) outcomes.push({ status: "pending" });
           }
         }
       } while (page.length === 32);
