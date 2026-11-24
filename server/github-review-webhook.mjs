@@ -140,6 +140,22 @@ function readOpenedReview(store, binding, receipt, secret) {
   return request;
 }
 
+function resumedOperation(store, binding, initial, secret, cancellationReasons) {
+  const { recipe, requesterId } = binding;
+  const current = latestReviewOperation(store, recipe.roomId, requesterId, initial);
+  const receipt = store.operationReceipt(secret, recipe.roomId, current);
+  if (receipt.status !== "recorded") return { id: current };
+  const cancellations = cancellationReasons.map(suffix => store.operationReceipt(secret, recipe.roomId, current + suffix))
+    .filter(cancellation => cancellation.status === "recorded");
+  if (cancellations.length) {
+    const request = readOpenedReview(store, binding, receipt, secret);
+    if (request.status === "cancelled" && cancellations.some(cancellation => cancellation.eventId === request.terminalEventId)) {
+      return { id: initial + "-r-" + createHash("sha256").update(request.terminalEventId).digest("hex").slice(0, 24), previous: request.id };
+    }
+  }
+  return { id: current, recorded: true };
+}
+
 async function withdrawFailedReview(store, binding, candidate, check, operation, request, secret, observe, token) {
   const { recipe, requesterId } = binding;
   const { roomId } = recipe;
@@ -333,10 +349,9 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
   const inactive = observed.snapshot.state !== "open" || observed.snapshot.draft;
   const correction = linked.observedHead !== head || inactive;
   const original = reviewId(recipe, number, linked.observedHead, previousReviewerId, linked.workItemId);
-  const diagnosisId = (sha, check) => {
-    const original = reviewId(recipe, number, sha, reviewerId, linked.workItemId);
-    return original + "-ci-" + createHash("sha256").update(JSON.stringify([check.app, check.name, check.id])).digest("hex").slice(0, 16);
-  };
+  const diagnosisId = (sha, check) => "github-ci-" + createHash("sha256").update(JSON.stringify([
+    reviewId(recipe, number, sha, reviewerId, linked.workItemId), check.app, check.name, check.id
+  ])).digest("hex");
   const previousDiagnosis = linked.next?.diagnosisOperation ?? null;
   const cancel = (operation, reason, suffix, recipient = target) => {
     const prior = store.operationReceipt(secret, recipe.roomId, operation);
@@ -357,13 +372,15 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
     const reviews = inactive ? [] : observed.snapshot.correctionIds ?? [];
     const correctionLinks = reviews.map(id => decision.pullRequest + "#pullrequestreview-" + id);
     const recipient = { ...target, reviewerId: work.accountableMemberId };
-    const feedbackOperation = (sha, ids, producerId) => reviewId(recipe, number, sha, producerId, linked.workItemId) + "-fix-"
-      + createHash("sha256").update(JSON.stringify(ids)).digest("hex").slice(0, 16);
+    const feedbackOperation = (sha, ids, producerId) => "github-correction-" + createHash("sha256").update(JSON.stringify([
+      reviewId(recipe, number, sha, producerId, linked.workItemId), ids
+    ])).digest("hex");
     const priorFeedback = linked.next?.correctionIds ?? [];
     const previousProducerId = linked.next?.correctionProducerId;
     if (priorFeedback.length && previousProducerId
         && (correction || previousProducerId !== recipient.reviewerId || JSON.stringify(priorFeedback) !== JSON.stringify(reviews))) {
-      cancel(feedbackOperation(linked.observedHead, priorFeedback, previousProducerId),
+      const initial = feedbackOperation(linked.observedHead, priorFeedback, previousProducerId);
+      cancel(latestReviewOperation(store, recipe.roomId, requesterId, initial),
         "The GitHub correction changed or was resolved.", "-end", { ...target, reviewerId: previousProducerId });
     }
     if (reviews.length) {
@@ -371,11 +388,12 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
       cancel(latestReviewOperation(store, recipe.roomId, requesterId, current),
         "A trusted GitHub review requested changes on this candidate.", "-feedback");
       if (previousDiagnosis) cancel(previousDiagnosis, "The candidate is awaiting a GitHub review correction.", "-feedback", previousTarget);
-      const operation = feedbackOperation(head, reviews, recipient.reviewerId);
-      if (recipient.reviewerId && recipient.reviewerId !== requesterId
-        && store.operationReceipt(secret, recipe.roomId, operation).status !== "recorded") {
-        store.command(secret, recipe.roomId, buildReplyCommand({ roomId: recipe.roomId, memberId: requesterId }, "room_request_reply", {
-          requestId: operation, toMemberId: recipient.reviewerId, workItemId: linked.workItemId,
+      if (recipient.reviewerId && recipient.reviewerId !== requesterId) {
+        const initial = feedbackOperation(head, reviews, recipient.reviewerId);
+        const operation = resumedOperation(store, recipient, initial, secret, ["-end"]);
+        if (!operation.recorded) store.command(secret, recipe.roomId, buildReplyCommand({ roomId: recipe.roomId, memberId: requesterId }, "room_request_reply", {
+          requestId: operation.id, toMemberId: recipient.reviewerId, workItemId: linked.workItemId,
+          ...(operation.previous && { replyToId: operation.previous }),
           body: [
             `Review the requested GitHub changes on ${decision.pullRequest} at ${head}.`,
             ...correctionLinks,
@@ -391,19 +409,18 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
     const failure = decision.checks?.find(check => check.status === "failed");
     let diagnosisOperation = null;
     if (!inactive && failure) {
-      const initialDiagnosis = diagnosisId(head, failure);
-      diagnosisOperation = latestReviewOperation(store, recipe.roomId, requesterId, initialDiagnosis);
-      const interrupted = store.operationReceipt(secret, recipe.roomId, diagnosisOperation + "-feedback");
-      if (interrupted.status === "recorded")
-        diagnosisOperation = initialDiagnosis + "-r-" + createHash("sha256").update(interrupted.eventId).digest("hex").slice(0, 24);
+      const diagnosis = resumedOperation(store, target, diagnosisId(head, failure), secret,
+        ["-feedback", "-stale", "-replaced", "-cleared"]);
+      diagnosisOperation = diagnosis.id;
       if (previousDiagnosis && previousDiagnosis !== diagnosisOperation)
         cancel(previousDiagnosis, "GitHub is reporting a different failing check attempt.", "-replaced", previousTarget);
       const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
       const operation = latestReviewOperation(store, recipe.roomId, requesterId, current);
       cancel(operation, FAILURE_REASON + JSON.stringify({ app: failure.app, name: failure.name, id: failure.id }), "-withdraw");
-      if (store.operationReceipt(secret, recipe.roomId, diagnosisOperation).status !== "recorded") {
+      if (!diagnosis.recorded) {
         store.command(secret, recipe.roomId, buildReplyCommand({ roomId: recipe.roomId, memberId: requesterId }, "room_request_reply", {
           requestId: diagnosisOperation, toMemberId: reviewerId, workItemId: linked.workItemId,
+          ...(diagnosis.previous && { replyToId: diagnosis.previous }),
           body: [
             `Diagnose the required GitHub check on ${decision.pullRequest} at ${head}.`,
             `Exact check: ${failure.app} / ${failure.name} / attempt ${failure.id}.`,
@@ -418,20 +435,14 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
       cancel(previousDiagnosis, "The reported failed check is no longer the current attempt.", "-cleared", previousTarget);
     if (!inactive && decision.action === "review_ready") {
       const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
-      const operation = latestReviewOperation(store, recipe.roomId, requesterId, current);
-      const receipt = store.operationReceipt(secret, recipe.roomId, operation);
-      if (receipt.status !== "recorded") {
-        postReview(store, target, entry.candidate, current, decision, secret);
+      const selection = resumedOperation(store, target, current, secret, ["-feedback", "-stale"]);
+      if (!selection.recorded) {
+        postReview(store, target, entry.candidate, selection.id, decision, secret, selection.previous);
       } else {
+        const operation = selection.id;
+        const receipt = store.operationReceipt(secret, recipe.roomId, operation);
         const withdrawal = store.operationReceipt(secret, recipe.roomId, operation + "-withdraw");
         const request = readOpenedReview(store, target, receipt, secret);
-        for (const suffix of ["-feedback", "-stale"]) {
-          const cancelled = store.operationReceipt(secret, recipe.roomId, operation + suffix);
-          if (cancelled.status === "recorded" && request.status === "cancelled" && request.terminalEventId === cancelled.eventId) {
-            const resumed = current + "-r-" + createHash("sha256").update(cancelled.eventId).digest("hex").slice(0, 24);
-            postReview(store, target, entry.candidate, resumed, decision, secret, request.id);
-          }
-        }
         if (withdrawal.status === "recorded") {
           // This function reads GitHub through the immutable observation supplied here.
           // Awaiting it after the transaction keeps the store transaction synchronous.
