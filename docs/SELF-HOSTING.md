@@ -105,6 +105,19 @@ can set `"allowUnadvertisedReceiver": true` on its specific route. In that
 case the same authenticated recipient must open a new stream with a cursor
 at or beyond the decline. An explicitly advertised scope always takes
 precedence over the legacy connection check.
+
+An operator can enable request-authored alternatives once by setting
+`"allowRequestAlternatives": true` on an existing completion pickup route.
+The configured requester can then post a separate Work Thread draft and
+pass its `declineAlternativeMessageId` in `room_request_reply`. The draft
+must belong to that requester in the same Work Thread and, if directed,
+must have the same intended recipient. The command records an exact draft
+fingerprint and returns the future operation ID for `room_receipt`.
+Adding each new alternative takes only these Room actions while the app
+is running. A changed or withdrawn draft, a cancellation, or an answer
+does not issue the replacement. The app still waits for the exact
+recipient's post-decline rearm before issuing the draft as a formal ask.
+
 Committed Room activity and startup drive catch-up. The existing operation
 receipt prevents reopening a recorded step. Use new operation IDs if the scope
 or body changes. A list can contain up to 32 follow-ups and ends when it runs

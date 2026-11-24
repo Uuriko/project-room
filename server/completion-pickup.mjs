@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { buildReplyCommand } from "../client/reply-actions.mjs";
+import { buildReplyCommand, declineAlternativeOperationId } from "../client/reply-actions.mjs";
 import { atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
 import { validId } from "../src/events.js";
 import { listRoomWork } from "./mcp-room-profile.mjs";
@@ -7,6 +7,7 @@ import { listRoomWork } from "./mcp-room-profile.mjs";
 const investigation = "Room investigation pass.";
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
   JSON.stringify([roomId, requesterId, recipientId, workItemId]);
+const directedBody = (route, body) => `${route.firstLine ?? `@(${route.recipientId})`}\n${body}`;
 
 function compileContinuation(route) {
   if (route.continuation === undefined) return null;
@@ -44,6 +45,34 @@ function recipientHasOpenRequest(store, secret, { roomId, recipientId }) {
     if (!open.page.nextCursor || open.page.nextCursor === cursor) return true;
     cursor = open.page.nextCursor;
   } while (cursor);
+}
+
+function issueDeclineAlternative(store, binding, pending, receiverServer) {
+  const { route, secret } = binding;
+  const { roomId, requesterId, recipientId, workItemId } = route;
+  const { request, page } = store.replyRequests.selected(secret, roomId, pending.requestMessageId, { view: "compact" });
+  if (request.requesterId !== requesterId || request.recipientId !== recipientId || request.workItemId !== workItemId
+      || request.status !== "declined" || request.terminalActorId !== recipientId || request.terminalEventId !== pending.eventId) return { done: true };
+  const requestId = declineAlternativeOperationId(request.openingEventId);
+  if (store.operationReceipt(secret, roomId, requestId).status === "recorded") return { done: true };
+  const opening = store.db.prepare(`SELECT sequence,
+    json_extract(body, '$.declineAlternative.messageId') AS sourceId,
+    json_extract(body, '$.declineAlternative.digest') AS digest
+    FROM events WHERE room_id=? AND id=?`).get(roomId, request.openingEventId);
+  if (!opening || opening.sequence <= route.after || !validId(opening.sourceId) || !opening.digest) return { done: true };
+  const draft = store.declineAlternativeDraft(roomId, requesterId, recipientId, workItemId, opening.sourceId);
+  const original = page.items.find(item => item.kind === "opened")?.message?.body;
+  if (!draft || draft.digest !== opening.digest || !original
+      || original.trim() === draft.body || original.trim() === directedBody(route, draft.body)) return { done: true };
+  const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
+    requestId, workItemId, toMemberId: recipientId, body: directedBody(route, draft.body),
+  });
+  if (store.wakeQueue.pauseStatus(roomId, recipientId)
+      || !receiverServer?.hasRecoveryReceiver({ roomId, requesterId, recipientId, workItemId, id: command.data.messageId },
+        pending.sequence, route.allowUnadvertisedReceiver === true)
+      || recipientHasOpenRequest(store, secret, route)) return { done: false };
+  const result = store.command(secret, roomId, { ...command, causationId: pending.eventId });
+  return { done: true, opening: result.duplicate ? undefined : result.sequence };
 }
 
 function advanceContinuation(store, { route, secret, continuation }, receiverServer) {
@@ -142,6 +171,7 @@ export function startCompletionPickup(store, configPath, log = console.warn, rec
     const { roomId, requesterId, recipientId, workItemId, credentialPath, after, firstLine } = route;
     if (![roomId, requesterId, recipientId, workItemId].every(validId) || requesterId === recipientId
         || typeof credentialPath !== "string" || !Number.isSafeInteger(after) || after < 0
+        || route.allowRequestAlternatives !== undefined && typeof route.allowRequestAlternatives !== "boolean"
         || route.allowUnadvertisedReceiver !== undefined && typeof route.allowUnadvertisedReceiver !== "boolean"
         || firstLine !== undefined && (typeof firstLine !== "string" || !firstLine.length || firstLine.length > 120
           || firstLine.trim() !== firstLine || /[\r\n\u2028\u2029]/.test(firstLine))
@@ -155,11 +185,25 @@ export function startCompletionPickup(store, configPath, log = console.warn, rec
   try { checkpoints = readPrivateJson(checkpointPath); }
   catch (error) { if (error.code !== "ENOENT") throw error; checkpoints = {}; }
   const rooms = new Map();
+  const alternatives = new Map();
   for (const { route } of bindings.values()) {
     const saved = checkpoints[route.roomId];
-    const start = Number.isSafeInteger(saved) ? Math.max(route.after, saved) : route.after;
+    const through = Number.isSafeInteger(saved) ? saved : saved?.through;
+    const start = Number.isSafeInteger(through) ? Math.max(route.after, through) : route.after;
     rooms.set(route.roomId, Math.min(start, rooms.get(route.roomId) ?? start));
+    if (!alternatives.has(route.roomId))
+      alternatives.set(route.roomId, new Map((saved?.alternatives ?? []).map(item => [item.requestMessageId, item])));
   }
+  const admit = (roomId, requesterId, command, body) => {
+    const { data } = command;
+    const binding = bindings.get(routeKey({ roomId, requesterId, recipientId: data.toMemberId, workItemId: data.workItemId }));
+    if (binding?.route.allowRequestAlternatives !== true || typeof receiverServer?.hasRecoveryReceiver !== "function"
+        || binding.continuation?.requests.some(step => step.command.id === command.id)
+        || data.messageId === data.declineAlternativeMessageId) return false;
+    const replacement = directedBody(binding.route, body);
+    return replacement.length <= 4096 && data.body.trim() !== body && data.body.trim() !== replacement;
+  };
+  store.admitDeclineAlternative = admit;
   const pending = new Set();
   let stopped = false;
   function wake(roomId) {
@@ -171,19 +215,43 @@ export function startCompletionPickup(store, configPath, log = console.warn, rec
       try {
         const rows = store.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 64")
           .all(roomId, rooms.get(roomId));
+        const queued = alternatives.get(roomId);
         for (const row of rows) {
           const event = JSON.parse(row.body);
           const { toMemberId, workItemId, responseOutcome } = event.data ?? {};
-          if (event.type !== "message.posted" || responseOutcome !== "answered") continue;
+          if (event.type !== "message.posted" || !["answered", "declined"].includes(responseOutcome)) continue;
           const binding = bindings.get(routeKey({ roomId, requesterId: toMemberId, recipientId: event.actorId, workItemId }));
-          if (binding && !binding.continuation && row.sequence > binding.route.after) {
+          if (!binding || row.sequence <= binding.route.after) continue;
+          if (responseOutcome === "declined" && binding.route.allowRequestAlternatives && validId(event.data.responseToRequestId)) {
+            const requestMessageId = event.data.responseToRequestId;
+            queued.set(requestMessageId, { requestMessageId, requesterId: toMemberId, recipientId: event.actorId,
+              workItemId, sequence: row.sequence, eventId: event.id });
+          }
+          if (responseOutcome === "answered" && !binding.continuation) {
             const status = dispatchCompletionPickup(store, binding.route, binding.secret, event, row.sequence);
             if (status === "posted") log(JSON.stringify({ event: "completion_pickup.posted", roomId, settlement: row.sequence }));
           }
         }
-        if (rows.length) {
-          const through = rows.at(-1).sequence;
-          const next = { ...checkpoints, [roomId]: through };
+        let changed = rows.length > 0;
+        for (const [id, task] of queued) {
+          try {
+            const binding = bindings.get(routeKey({ roomId, ...task }));
+            // The pinned draft read and replacement append share one SQLite
+            // writer boundary, so a concurrent edit can't change the approval.
+            const result = binding?.route.allowRequestAlternatives
+              ? store.transaction(() => issueDeclineAlternative(store, binding, task, receiverServer)) : { done: true };
+            if (result.done) { queued.delete(id); changed = true; }
+            if (result.opening !== undefined) log(JSON.stringify({ event: "completion_pickup.decline_alternative",
+              roomId, decline: task.sequence, opening: result.opening }));
+          } catch (error) {
+            if (error.code === "reply_request_not_found") { queued.delete(id); changed = true; }
+            else if (!["assignment_paused", "assignment_waiting_for_recipient", "agent_paused"].includes(error.code))
+              log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+          }
+        }
+        if (changed) {
+          const through = rows.at(-1)?.sequence ?? rooms.get(roomId);
+          const next = { ...checkpoints, [roomId]: queued.size ? { through, alternatives: [...queued.values()] } : through };
           atomicPrivateJson(checkpointPath, next);
           checkpoints = next;
           rooms.set(roomId, through);
@@ -206,5 +274,10 @@ export function startCompletionPickup(store, configPath, log = console.warn, rec
   const unsubscribe = store.onEventAppended(wake);
   receiverServer?.on("agentReceiverConnected", wake);
   for (const roomId of rooms.keys()) wake(roomId);
-  return () => { stopped = true; unsubscribe(); receiverServer?.off("agentReceiverConnected", wake); };
+  return () => {
+    stopped = true;
+    unsubscribe();
+    receiverServer?.off("agentReceiverConnected", wake);
+    if (store.admitDeclineAlternative === admit) delete store.admitDeclineAlternative;
+  };
 }

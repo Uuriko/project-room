@@ -121,6 +121,8 @@ export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, c
 export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
   const event = receipt?.event, expected = { ...command.data };
   if (command.type === "message.posted") expected.requestPolicyVersion = REPLY_POLICY_VERSION;
+  if (!matchesDeclineAlternative(event, expected)) return false;
+  delete expected.declineAlternativeMessageId;
   if (command.type === "message.posted" && own(command.data, "responseToRequestId") && own(event?.data ?? {}, "answerCredential")
     && ANSWER_CREDENTIALS.includes(event.data.answerCredential)) expected.answerCredential = event.data.answerCredential;
   if (!Number.isSafeInteger(receipt?.sequence) || receipt.sequence < 1 || typeof receipt.duplicate !== "boolean"
@@ -132,9 +134,19 @@ export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
   return event.idempotencyKey === [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
+export function matchesDeclineAlternative(event, data) {
+  const messageId = data.declineAlternativeMessageId, binding = event?.declineAlternative;
+  return messageId === undefined ? binding === undefined
+    : binding?.messageId === messageId && /^[a-f0-9]{64}$/.test(binding.digest ?? "");
+}
+
 // Commands use this strict validator before the service stamps the event. Old
 // unmarked events may contain ignored fields; they must remain ordinary messages.
 export function replyPostMode(data) {
+  if (own(data, "declineAlternativeMessageId")) {
+    requireValid(data.requestKind === "reply" && id(data.workItemId) && id(data.declineAlternativeMessageId),
+      "An approved decline alternative requires a formal request, an exact draft, and the same Work Thread");
+  }
   const fields = REPLY_FIELDS.filter(key => own(data, key));
   if (!fields.length) return null;
   const bodyKept = text(data.body, own(data, "responseToRequestId") ? MAX_REPLY_RESPONSE_CHARS : 4096) || (data.redacted === true && data.body == null);
