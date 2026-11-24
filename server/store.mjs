@@ -7783,7 +7783,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MESSAGE_POSTED) {
         recordReceiptSignal(this.db, { roomId, at: incoming.at, actorId: auth.member.id, body: command.data.body,
           eventId: incoming.id, journalSeq: sequence, toMemberId: command.data.toMemberId });
-        wakeDelivery = this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id, requestMode === "open" ? command.data.messageId : undefined);
+        const clarified = !requestMode && command.data.replyToId && Object.values(state.replyRequests ?? {}).find(request =>
+          request.status === "open" && request.contextEventId === incoming.id && request.requesterId === auth.member.id
+          && (!command.data.toMemberId || command.data.toMemberId === request.recipientId));
+        const formal = requestMode === "open"
+          ? { id: command.data.messageId, recipientId: command.data.toMemberId, opening: true }
+          : clarified ? { id: clarified.id, recipientId: clarified.recipientId, opening: false } : null;
+        wakeDelivery = this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id, formal);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
         this.humanPush.notifyPosted({
           roomId, state, senderMemberId: auth.member.id,
@@ -8077,8 +8083,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return { memberId, status: subscribed ? "not_queued" : "no_receiver" };
   }
 
-  maybeWakeOnMention(roomId, state, senderMemberId, data, eventId, requestId) {
-    const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
+  maybeWakeOnMention(roomId, state, senderMemberId, data, eventId, formal) {
+    // The selected request owns the wake audience. This does not change the
+    // posted message or inherit its audience into the underlying event.
+    const targetData = formal && !formal.opening ? { ...data, toMemberId: formal.recipientId } : data;
+    const targets = agentWakeTargets(state, senderMemberId, targetData, this.db, roomId);
     const delivery = [];
     // Decision #25: trial seats receive mention wakes in their room. Guest
     // members are seated through guest_members, never identity_links, so
@@ -8113,8 +8122,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         delivery.push({ memberId, status: "no_receiver" });
         continue;
       }
-      const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, requestId, eventId, actorId: senderMemberId, kind,
-        openingContextEventId: requestId && memberId === data.toMemberId ? eventId : undefined });
+      const addressedRequest = formal?.recipientId === memberId ? formal : null;
+      const nativeQueued = this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId,
+        requestId: addressedRequest?.id, eventId, actorId: senderMemberId, kind,
+        openingContextEventId: addressedRequest?.opening ? eventId : undefined });
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       // Formal-request no-host fallback, addressee only. Existing connected
@@ -8125,8 +8136,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // and would silently skip ask. Mentioned non-addressees are not queued.
       // Retaining a pull pointer does not authorize an outbound delivery.
       let pullQueued = false;
-      if (!woken && !(nativeQueued > 0)
-          && data.requestKind === "reply" && data.toMemberId === memberId) {
+      if (!woken && !(nativeQueued > 0) && addressedRequest) {
         const fallbackKind = kind === "mention" ? "mention" : "dm";
         const fallback = this.agentHeartbeats.enqueueWake({
           agentId: identityId, kind: fallbackKind, roomId, messageId: data.messageId ?? eventId
