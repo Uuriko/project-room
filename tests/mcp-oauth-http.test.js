@@ -207,7 +207,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 39, 'audit every advertised native tool, including designated project finding reads');
+  assert.equal(tools.length, 40, 'audit every advertised native tool, including designated project findings and preview inspection');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -813,12 +813,14 @@ test('room next and receipt discovery distinguish server availability from a nar
   assert.deepEqual(discovery.tools, {
     room_next: 'available_on_server', room_receipt: 'available_on_server',
     room_record_verification: 'available_on_server',
-    room_read_public_review: 'available_on_server', room_record_public_review: 'available_on_server'
+    room_read_public_review: 'available_on_server', room_record_public_review: 'available_on_server',
+    room_inspect_workspace_preview: 'available_on_server'
   });
   for (const name of Object.keys(discovery.tools)) assert.ok(list.body.result.tools.some(entry => entry.name === name));
   assert.deepEqual(discovery.requiredOAuthScope, { room_record_verification: 'work:write' });
   assert.deepEqual(discovery.requiredOAuthScopes, {
-    room_read_public_review: ['work:read'], room_record_public_review: ['work:read', 'work:write']
+    room_read_public_review: ['work:read'], room_record_public_review: ['work:read', 'work:write'],
+    room_inspect_workspace_preview: ['rooms:read', 'work:read']
   });
   assert.match(discovery.next, /refresh the existing connection's tool catalog/);
   assert.deepEqual(discovery.whenMissingFromHost, {
@@ -851,7 +853,8 @@ test('room next and receipt discovery distinguish server availability from a nar
   assert.deepEqual(narrowAccess.body.result.structuredContent.commandDiscovery.tools, {
     room_next: 'outside_connected_grant', room_receipt: 'outside_connected_grant',
     room_record_verification: 'outside_connected_grant',
-    room_read_public_review: 'outside_connected_grant', room_record_public_review: 'outside_connected_grant'
+    room_read_public_review: 'outside_connected_grant', room_record_public_review: 'outside_connected_grant',
+    room_inspect_workspace_preview: 'outside_connected_grant'
   });
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
@@ -945,4 +948,52 @@ test('native reviewer follows Room Next to private project findings on the same 
   assert.equal(nextRead.tool,'room_read_project_discoveries');
   const finding = await f.rpc('tools/call',{name:nextRead.tool,arguments:nextRead.arguments});
   assert.equal(finding.body.result.structuredContent.findings[0].receiptId,(await filed.json()).receiptId);
+});
+
+test('the preview inspection connector preserves audience and OAuth consent', async t => {
+  const f = await setup(t);
+  const { workspaceArtifactLink } = await import('../src/workspace-artifact-link.js');
+  const preview = { id: 'a'.repeat(32), title: 'Directed proof', base: 'b'.repeat(40), head: 'c'.repeat(40),
+    expectedRevision: 0, html: '<h1>Visitor preview</h1>', recipientId: 'friend-dot' };
+  const published = async input => {
+    const result = await fetch(f.base + '/api/rooms/commons/workspace-previews', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + f.ownerKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(input)
+    });
+    assert.equal(result.status, 200);
+    return workspaceArtifactLink(origin, 'commons', await result.json(), 'preview');
+  };
+  const selection = await published(preview);
+  const tool = 'room_inspect_workspace_preview';
+  const invoke = (selection, token, extra) => f.rpc('tools/call', { name: tool, arguments: {
+    selection, expectedViewerId: 'friend-dot', ...extra
+  } }, token);
+  const granted = await invoke(selection);
+  assert.equal(granted.body.result?.structuredContent?.status, 'visible', JSON.stringify(granted.body));
+  assert.equal(granted.body.result.structuredContent.viewerId, 'friend-dot');
+  assert.equal(granted.body.result.structuredContent.head, preview.head);
+  assert.deepEqual((await invoke(new URL(selection).hash)).body.result.structuredContent, granted.body.result.structuredContent);
+  const foreign = await invoke(selection.replace('room.example', 'other.example'));
+  assert.equal(foreign.body.result?.structuredContent?.code, 'invalid_preview_selection');
+  const differentRoom = await invoke(selection.replace('room=commons', 'room=elsewhere'));
+  assert.equal(differentRoom.body.result?.structuredContent?.code, 'invalid_preview_selection');
+  assert.doesNotMatch(JSON.stringify(granted.body), /Visitor preview/);
+  const another = f.store.invites.redeem(f.store.invites.create(f.ownerKey, 'commons', { profile: 'chat' }).code,
+    { displayName: 'Other reviewer' });
+  const privateSelection = await published({ ...preview, id: 'd'.repeat(32), recipientId: another.memberId });
+  const denied = await invoke(privateSelection);
+  assert.equal(denied.body.result?.structuredContent?.status, 'unavailable', JSON.stringify(denied.body));
+  assert.equal(denied.body.result.structuredContent.digest, undefined);
+  const wrongRoom = await invoke(selection, undefined, { roomId: 'elsewhere' });
+  assert.ok(wrongRoom.body.error || wrongRoom.body.result?.isError);
+  const consent = await f.consent({ scope: 'rooms:read' });
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const exchanged = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const narrow = (await exchanged.json()).access_token;
+  assert.ok(narrow);
+  const deniedByGrant = await invoke(selection, narrow);
+  assert.match(JSON.stringify(deniedByGrant.body), /outside the connected agent grant/);
+  const listed = await f.rpc('tools/list', {}, narrow);
+  assert.ok(!listed.body.result.tools.some(entry => entry.name === tool));
 });

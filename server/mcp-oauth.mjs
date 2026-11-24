@@ -184,6 +184,7 @@ const scopeTools = {
 // Keep this separate from membership checks: OAuth consent cannot widen them.
 const compositeReadScopes = {
   room_read_project_discoveries: ['rooms:read', 'work:read'],
+  room_inspect_workspace_preview: ['rooms:read', 'work:read'],
   room_record_public_review: ['work:read', 'work:write'], // returns the exact receipt and review context
   room_receipt: ["rooms:read", "chat:read", "work:read"],
   room_next: ["rooms:read", "chat:read", "work:read"],

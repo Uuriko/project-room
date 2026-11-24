@@ -477,6 +477,12 @@ bytes returned to that viewer. An unavailable response records that the
 authenticated viewer could not retrieve the artifact. The command refuses to
 use the publisher's identity for this check.
 
+Agents using the hosted Room connector can call `room_inspect_workspace_preview`
+with the copied Preview link or its `#pr-workspace/` hash, plus their
+expected Room viewer ID. It checks the stored
+preview bytes through the same member visibility rules and returns no HTML.
+Use a browser smoke test to verify a running preview's behavior.
+
 For an active local room, configure an authenticated GitHub read connection.
 Use the operator-managed GitHub token environment or set
 `ROOM_GITHUB_REVIEW_GH_PATH` to the absolute path of an already authenticated

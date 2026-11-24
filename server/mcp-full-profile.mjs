@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { workspaceArtifactSelection } from "../src/workspace-artifact-link.js";
+import { workspacePreviews } from "./workspace-previews.mjs";
 import { digestMessagePage } from "../src/message-digest.js";
 import { experimentArm } from "./experiments.mjs";
 import { filterMessagePage } from "../src/message-query.js";
@@ -46,12 +49,19 @@ import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work", "room_map", "room_receipt"]);
 const roomIdField = { type: "string", minLength: 1, maxLength: 128, description: "Room id this identity is linked to." };
 
+const PREVIEW_INSPECTION = "room_inspect_workspace_preview";
 const PUBLIC_REVIEW_READ = "room_read_public_review";
 const PUBLIC_REVIEW_WRITE = "room_record_public_review";
 const publicReviewId = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" };
 const publicReviewVersion = { type: "integer", minimum: 1 };
 const publicReviewOutcomes = ["PASS", "FAIL", "accepted", "rejected", "revision_requested"];
-const publicReviewTools = [
+const hostedSelectedTools = [
+  { name: PREVIEW_INSPECTION,
+    description: "Check exact published Workspace preview visibility from your own Room seat. Paste the exact Preview link or its #pr-workspace/ hash and supply your expected member ID. Returns only visibility and exact artifact identity. Unavailable covers hidden and absent previews. Does not render or inspect a running dev server.",
+    inputSchema: { properties: { selection: { type: "string", minLength: 1, maxLength: 512 },
+      expectedViewerId: { type: "string", minLength: 1, maxLength: 128 } }, required: ["selection", "expectedViewerId"] },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+
   { name: PUBLIC_REVIEW_READ, description: "Read one exact public contribution receipt, its artifact bytes and review actions. Owner or designated reviewer only.",
     inputSchema: { properties: { receiptId: publicReviewId }, required: ["receiptId"] },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
@@ -97,11 +107,11 @@ function withRoomId(entry) {
 export function hostedStdioToolDefinitions() {
   // The bounty tools are hosted-only: the escrow lives in RoomStore, so there
   // is no stdio equivalent to filter against.
-  return [...roomTools.filter(entry => !ALREADY_HOSTED.has(entry.name)), ...bountyTools, ...trustTools, ...publicReviewTools].map(withRoomId);
+  return [...roomTools.filter(entry => !ALREADY_HOSTED.has(entry.name)), ...bountyTools, ...trustTools, ...hostedSelectedTools].map(withRoomId);
 }
 
 export function isHostedStdioTool(name) {
-  if (isBountyTool(name) || isTrustTool(name) || publicReviewTools.some(tool => tool.name === name)) return true;
+  if (isBountyTool(name) || isTrustTool(name) || hostedSelectedTools.some(tool => tool.name === name)) return true;
   return typeof name === "string" && !ALREADY_HOSTED.has(name) && roomTools.some(entry => entry.name === name);
 }
 
@@ -111,8 +121,8 @@ export function validHostedStdioArgs(name, args) {
   const { roomId, ...rest } = args;
   if (isBountyTool(name)) return validBountyToolArguments(name, rest);
   if (isTrustTool(name)) return validTrustToolArguments(name, rest);
-  const review = publicReviewTools.find(tool => tool.name === name);
-  if (review) return !diagnoseArguments(withRoomId(review).inputSchema, args);
+  const selected = hostedSelectedTools.find(tool => tool.name === name);
+  if (selected) return !diagnoseArguments(withRoomId(selected).inputSchema, args);
   return validRoomToolArguments(name, rest);
 }
 
@@ -265,7 +275,7 @@ function enforceHostedStdioApiKeyScope(store, secret, name) {
   if (!granted) throw new ServiceError(403, "insufficient_scope", `API key lacks the ${required} scope`);
 }
 
-export async function callHostedStdioTool(store, secret, name, args) {
+export async function callHostedStdioTool(store, secret, name, args, { origin } = {}) {
   args = withDefaultRoomId(store, secret, name, args, { properties: { roomId: roomIdField }, required: ["roomId"] });
   // Spend-primitive MVP (charge-then-forward): same boundary as callRoomTool
   // in mcp-room-profile.mjs, adapted to this path's { value, isError }
@@ -293,13 +303,13 @@ export async function callHostedStdioTool(store, secret, name, args) {
     // sees agents the autonomy system already admits to writes.
     const tier = getTier(store.db, roomId, auth.member.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
     if (tier === "t1_readonly" || isGuestAgentMemberId(auth.member.id))
-      return dispatchHostedStdioTool(store, secret, name, args);
+      return dispatchHostedStdioTool(store, secret, name, args, origin);
   }
   // The settle/void contract itself is withSpendCharge (spend-grants.mjs),
   // shared with callRoomTool and the REST doors (#3269); this profile only
   // adapts its { value, isError } outcome envelope to it.
   return withSpendCharge(store, secret, name, args,
-    () => dispatchHostedStdioTool(store, secret, name, args),
+    () => dispatchHostedStdioTool(store, secret, name, args, origin),
     { unwrap: outcome => outcome?.value, isErrorOutcome: outcome => outcome?.isError === true });
 }
 
@@ -317,7 +327,7 @@ async function currentWorkRevision(store, secret, roomId, name, args, usesRevisi
   return context.work.revision;
 }
 
-async function dispatchHostedStdioTool(store, secret, name, args) {
+async function dispatchHostedStdioTool(store, secret, name, args, origin) {
   const { roomId, ...rest } = args;
   const auth = store.authenticate(secret, roomId);
   enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
@@ -449,6 +459,27 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     const command = buildWorkCommand(name, rest, identity, { expectedRevision });
     return recorded(store, secret, roomId, identity, command,
       receipt => withWorkDeprecation(name, recordedWorkAction(name, command, receipt)));
+  }
+  if (name === PREVIEW_INSPECTION) {
+    const link = rest.selection.startsWith("#") ? null : URL.parse(rest.selection);
+    if (!rest.selection.startsWith("#") && (!link || link.origin !== origin || link.username || link.password
+        || link.searchParams.getAll("room").length !== 1 || link.searchParams.get("room") !== roomId))
+      throw new ServiceError(422, "invalid_preview_selection", "Choose a Preview link for this Room.");
+    const target = workspaceArtifactSelection(link?.hash ?? rest.selection);
+    if (!target?.head || target.panel !== "preview")
+      throw new ServiceError(422, "invalid_preview_selection", "Choose an exact Preview artifact hash.");
+    const viewerId = auth.member.id;
+    if (viewerId !== rest.expectedViewerId || viewerId === target.publisherId)
+      throw new ServiceError(403, "independent_preview_viewer_required", "Use the named independent viewer's Room connection.");
+    const { id, revision, head } = target;
+    const binding = { roomId, viewerId, id, revision, head };
+    const item = workspacePreviews(store.db, { create: false })?.get(roomId, id, viewerId, "preview");
+    if (!item) return { value: { ...binding, status: "unavailable" }, isError: false };
+    if (item.revision !== revision || item.head !== head || item.publisherId !== target.publisherId
+        || item.digest !== target.digest || typeof item.html !== "string"
+        || createHash("sha256").update(item.html).digest("hex") !== target.digest)
+      throw new ServiceError(409, "preview_changed", "This preview no longer matches the exact artifact.");
+    return { value: { ...binding, publisherId: item.publisherId, digest: item.digest, status: "visible" }, isError: false };
   }
   if (name === PUBLIC_REVIEW_READ) {
     const value = store.readTransaction(() => {
