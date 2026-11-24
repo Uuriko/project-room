@@ -1,0 +1,29 @@
+  /api/rooms/{roomId}/github-work-attachment:
+    post:
+      operationId: attachGitHubPullRequest
+      summary: Attach an exact GitHub pull request to a Work Thread
+      description: Requires a Room bearer identity for the assigned producer and an enabled recipe for the repository. Retry the original input after an unknown outcome. Use the returned receipt operation ID to look up the write.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [workItemId, operationId, pullRequest, expectedHead, expectedRevision]
+              properties:
+                workItemId: { type: string }
+                operationId: { type: string }
+                pullRequest: { type: string, format: uri }
+                expectedHead: { type: string, pattern: '^[a-f0-9]{40}$' }
+                expectedRevision: { type: integer, minimum: 0 }
+                refreshHead: { type: string, pattern: '^[a-f0-9]{40}$', description: Exact head to reconcile after a missed delivery. }
+      responses:
+        '200': { description: The attachment was already recorded }
+        '201': { description: The attachment was recorded }
+        '401': { description: Unauthenticated }
+        '403': { description: The identity cannot attach this PR }
+        '409': { description: Stale selection or conflicting attachment }
+        '422': { description: Invalid attachment input }

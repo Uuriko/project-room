@@ -1,3 +1,4 @@
+import { threadGithubAttachment } from "./github-work-attachment.mjs";
 import {readCurrentReturnBrief} from './current-return-brief.mjs';
 import {inboxNext} from './inbox-next.mjs';
 import {readCurrentSearch} from './current-search.mjs';
@@ -6689,7 +6690,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Omit its versioned capability contract rather than fabricate false v1 data.
         delete value.helpContextVersion;
         delete value.help;
-        return {...value,dependencies,viewerId:auth.member.id,viewerAccountId:auth.account?.id??null,viewerAuthEpoch:auth.account?.authEpoch??null,
+        const pullRequest = threadGithubAttachment(this, roomId, workItemId);
+        return {...value,...(pullRequest ? { pullRequest } : {}),dependencies,viewerId:auth.member.id,viewerAccountId:auth.account?.id??null,viewerAuthEpoch:auth.account?.authEpoch??null,
           viewerSessionBinding:auth.sessionBinding,viewerSessionRevision:auth.sessionRevision??null};
       }
       // Default selected reads hydrate only the selected work payload. Offers
@@ -6720,6 +6722,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           ? { state: "unknown", satisfied: false } : boardPrerequisiteState(dep);
         return { id, ...state };
       });
+      const pullRequest = threadGithubAttachment(this, roomId, workItemId);
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, sourceObservation, dependencies, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
         floor: this.historyFloor(roomId, auth.member.id, room.sequence),
         replacementAvailable: (() => {
@@ -6727,7 +6730,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           return validId(target) && target !== workItemId && Boolean(readWorkItem(this.db, roomId, target));
         })() }),
         dependencies,
-        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        ...(pullRequest ? { pullRequest } : {}), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     // Selected work shares this reservation with OAuth, protected participants,
     // privacy, history floor and evidence reads; byte and source bounds remain unchanged.

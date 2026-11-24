@@ -1,3 +1,4 @@
+import { githubWorkAttachment, readGithubWorkRecord, updateGithubWorkObservation, writeGithubWorkRecord } from "./github-work-attachment.mjs";
 import { createHash } from "node:crypto";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { evaluateGithubReview, readGithubReviewRecipe } from "../client/github-review-recipe.mjs";
@@ -7,11 +8,15 @@ const SHA = /^[0-9a-f]{40}$/;
 const PR_ACTIONS = new Set(["opened", "reopened", "ready_for_review", "synchronize"]);
 const FAILURE_REASON = "A current required GitHub check failed on this exact candidate. Failed check: ";
 
-function selectedCandidates(binding, delivery) {
+function selectedCandidates(binding, delivery, attached = false) {
   const { event, action, payload } = delivery;
   const repository = payload?.repository?.full_name;
   if (typeof repository !== "string" || repository.toLowerCase() !== binding.recipe.repository) return [];
-  if (event === "pull_request" && PR_ACTIONS.has(action)) {
+  if (event === "pull_request" && (PR_ACTIONS.has(action) || attached && ["closed", "converted_to_draft"].includes(action))) {
+    return [{ number: payload.pull_request?.number, head: payload.pull_request?.head?.sha }];
+  }
+  if (attached && event === "pull_request_review" && binding.correctionReviewerIds.length
+      && ["submitted", "dismissed"].includes(action)) {
     return [{ number: payload.pull_request?.number, head: payload.pull_request?.head?.sha }];
   }
   if (action !== "completed" || !["check_suite", "check_run"].includes(event)) return [];
@@ -20,18 +25,20 @@ function selectedCandidates(binding, delivery) {
     check.app === checks?.app?.slug && check.name === checks?.name)) return [];
   if (!Array.isArray(checks?.pull_requests)) return [];
   const numbers = new Set(checks.pull_requests.map(pull => pull?.number));
-  return binding.pulls.filter(number => numbers.has(number)).map(number => ({ number, head: checks.head_sha }));
+  return [...numbers].filter(number => attached || binding.pulls.includes(number)).map(number => ({ number, head: checks.head_sha }));
 }
 
 export function readGithubReviewWebhookBinding(value) {
   const recipe = readGithubReviewRecipe(value);
   if (!recipe) return null;
-  const { pulls, requesterId, reviewerId, workItemId } = value;
-  if (!Array.isArray(pulls) || !pulls.length || pulls.length > 20 || new Set(pulls).size !== pulls.length
+  const { pulls = [], requesterId, reviewerId, workItemId, correctionReviewerIds = [] } = value;
+  if (!Array.isArray(pulls) || pulls.length > 20 || new Set(pulls).size !== pulls.length
     || !pulls.every(number => Number.isSafeInteger(number) && number > 0)
+    || !Array.isArray(correctionReviewerIds) || correctionReviewerIds.length > 10
+    || !correctionReviewerIds.every(id => Number.isSafeInteger(id) && id > 0)
     || ![requesterId, reviewerId, workItemId].every(validId) || requesterId === reviewerId)
     throw new Error("Invalid GitHub review webhook binding");
-  return { recipe, pulls, requesterId, reviewerId, workItemId };
+  return { recipe, pulls, requesterId, reviewerId, workItemId, correctionReviewerIds };
 }
 
 async function readGithubJson(path, { fetchImpl, token, signal }) {
@@ -55,11 +62,14 @@ export async function observeWebhookPull(recipe, { number, head }, options = {})
     const repository = value.base?.repo?.full_name;
     if (typeof repository !== "string" || repository.toLowerCase() !== recipe.repository || value.number !== number)
       throw new Error("GitHub review pull binding changed");
-    return { repository, number, head: value.head?.sha, state: value.state, draft: value.draft, merged: value.merged };
+    return { repository: repository.toLowerCase(), number, head: value.head?.sha, state: value.state, draft: value.draft, merged: value.merged };
   };
   const first = await readPull();
   if (first.head !== head) return { reason: "stale_head" };
-  if (first.state !== "open" || first.draft) return { reason: first.draft ? "draft" : "closed" };
+  if (first.state !== "open" || first.draft) {
+    if (options.includeInactive) return { snapshot: { ...first, checks: [], observedAt: Date.now() } };
+    return { reason: first.draft ? "draft" : "closed" };
+  }
   const checks = [];
   const checkIds = new Set();
   let expectedCount;
@@ -80,9 +90,33 @@ export async function observeWebhookPull(recipe, { number, head }, options = {})
     more = reply.more;
   }
   if (more || checks.length !== expectedCount) return { reason: "incomplete_checks" };
+  const trusted = new Set(options.correctionReviewerIds ?? []);
+  const corrections = new Map();
+  if (trusted.size) {
+    let remaining = true;
+    for (let page = 1; remaining && page <= 4; page++) {
+      const reply = await readGithubJson(pullPath + `/reviews?per_page=100&page=${page}`, request);
+      if (!Array.isArray(reply.value)) return { reason: "incomplete_reviews" };
+      for (const review of reply.value) {
+        if (!trusted.has(review.user?.id) || !Number.isSafeInteger(review.id) || review.id <= 0) continue;
+        if (["APPROVED", "DISMISSED", "CHANGES_REQUESTED"].includes(review.state))
+          corrections.set(review.user.id, review);
+      }
+      remaining = reply.more;
+    }
+    if (remaining) return { reason: "incomplete_reviews" };
+  }
+  const correctionIds = [...corrections.values()].filter(review => review.state === "CHANGES_REQUESTED" && review.commit_id === head)
+    .map(review => review.id).sort((a, b) => a - b);
   const verified = await readPull();
   if (Object.keys(first).some(key => first[key] !== verified[key])) return { reason: "pull_changed" };
-  return { snapshot: { ...verified, checks, observedAt: Date.now() } };
+  return { snapshot: { ...verified, checks, correctionIds, observedAt: Date.now() } };
+}
+
+function reviewId(recipe, number, head, reviewerId, workItemId) {
+  return `github-review-${createHash("sha256").update(JSON.stringify([
+    recipe.roomId, recipe.repository, number, head, reviewerId, ...(workItemId ? [workItemId] : [])
+  ])).digest("hex")}`;
 }
 
 function latestReviewOperation(store, roomId, requesterId, original) {
@@ -104,6 +138,22 @@ function readOpenedReview(store, binding, receipt, secret) {
       || request.recipientId !== reviewerId || request.workItemId !== workItemId)
     throw new Error("GitHub review receipt does not match the configured request");
   return request;
+}
+
+function resumedOperation(store, binding, initial, secret, cancellationReasons) {
+  const { recipe, requesterId } = binding;
+  const current = latestReviewOperation(store, recipe.roomId, requesterId, initial);
+  const receipt = store.operationReceipt(secret, recipe.roomId, current);
+  if (receipt.status !== "recorded") return { id: current };
+  const cancellations = cancellationReasons.map(suffix => store.operationReceipt(secret, recipe.roomId, current + suffix))
+    .filter(cancellation => cancellation.status === "recorded");
+  if (cancellations.length) {
+    const request = readOpenedReview(store, binding, receipt, secret);
+    if (request.status === "cancelled" && cancellations.some(cancellation => cancellation.eventId === request.terminalEventId)) {
+      return { id: initial + "-r-" + createHash("sha256").update(request.terminalEventId).digest("hex").slice(0, 24), previous: request.id };
+    }
+  }
+  return { id: current, recorded: true };
 }
 
 async function withdrawFailedReview(store, binding, candidate, check, operation, request, secret, observe, token) {
@@ -198,9 +248,7 @@ export async function dispatchGithubReview(store, binding, delivery, { credentia
   const outcomes = [];
   for (const candidate of candidates) {
     const { number, head } = candidate;
-    const original = `github-review-${createHash("sha256").update(JSON.stringify([
-      recipe.roomId, recipe.repository, number, head, reviewerId
-    ])).digest("hex")}`;
+    const original = reviewId(recipe, number, head, reviewerId);
     const operation = latestReviewOperation(store, recipe.roomId, requesterId, original);
     const receipt = store.operationReceipt(secret, recipe.roomId, operation);
     if (receipt.status === "recorded") {
@@ -242,15 +290,244 @@ export async function dispatchGithubReview(store, binding, delivery, { credentia
   return outcomes;
 }
 
-export async function maybeDispatchGithubReview(store, delivery, env) {
-  if (!env.ROOM_GITHUB_REVIEW_RECIPE) return [];
-  const binding = readGithubReviewWebhookBinding(JSON.parse(env.ROOM_GITHUB_REVIEW_RECIPE));
-  return dispatchGithubReview(store, binding, delivery, {
-    token: env.GH_TOKEN || env.GITHUB_TOKEN,
+const inboxPrefix = "_github-work-pending:";
+const drains = new WeakMap();
+
+function workWebhookOptions(env) {
+  return { token: env.GH_TOKEN || env.GITHUB_TOKEN,
     async credential() {
       const { readPrivateJson } = await import("../room-acp/src/private-files.mjs");
       const value = readPrivateJson(env.ROOM_GITHUB_REVIEW_CREDENTIAL_PATH);
       return value.identitySecret ?? value.token;
+    } };
+}
+
+export function saveAttachedGithubDelivery(store, binding, delivery) {
+  if (!binding || typeof delivery.delivery !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(delivery.delivery)) return [];
+  const { recipe } = binding;
+  const candidates = selectedCandidates(binding, delivery, true).filter(({ number, head }) =>
+    Number.isSafeInteger(number) && number > 0 && SHA.test(head ?? "")
+    && githubWorkAttachment(store, recipe.roomId, recipe.repository, number));
+  if (!candidates.length) return [];
+  return store.transaction(() => candidates.map(candidate => {
+    const key = inboxPrefix + recipe.roomId + ":" + recipe.repository + ":" + delivery.delivery + ":" + candidate.number;
+    if (!readGithubWorkRecord(store, key)) {
+      const { event, action } = delivery;
+      const original = delivery.payload[event];
+      const payload = { repository: { full_name: recipe.repository } };
+      if (event === "pull_request" || event === "pull_request_review") payload.pull_request = { number: candidate.number, head: { sha: candidate.head } };
+      else payload[event] = { id: original.id, name: original.name, conclusion: original.conclusion, app: { slug: original.app?.slug },
+        head_sha: candidate.head, pull_requests: [{ number: candidate.number }] };
+      writeGithubWorkRecord(store, key, { candidate, delivery: { event, action, payload } });
     }
+    return candidate.number;
+  }));
+}
+
+export async function reconcileAttachedGithubDelivery(store, binding, entry, options) {
+  const { recipe, requesterId } = binding;
+  const { number, head } = entry.candidate;
+  const linked = githubWorkAttachment(store, recipe.roomId, recipe.repository, number);
+  if (!linked) return;
+  const observe = options.observe ?? observeWebhookPull;
+  const observed = await observe(recipe, entry.candidate, { token: options.token, includeInactive: true, correctionReviewerIds: binding.correctionReviewerIds });
+  if (!observed.snapshot) {
+    // A stale event is a routing hint only; uncertainty remains recoverable.
+    if (observed.reason === "stale_head") return;
+    throw new Error("Current GitHub PR evidence could not be verified.");
+  }
+  const secret = await options.credential();
+  if (store.authenticate(secret, recipe.roomId).member.id !== requesterId)
+    throw new Error("GitHub review requester does not match the saved identity");
+  const { work } = store.workContext(secret, recipe.roomId, linked.workItemId);
+  const reviewerId = work.verifierMemberId || binding.reviewerId;
+  const previousReviewerId = linked.next?.reviewerId ?? reviewerId;
+  const target = { ...binding, reviewerId, workItemId: linked.workItemId };
+  const previousTarget = { ...target, reviewerId: previousReviewerId };
+  if (reviewerId === requesterId) throw new Error("The Work Thread reviewer must be independent of the recipe requester");
+  const decision = evaluateGithubReview(recipe, observed.snapshot);
+  const inactive = observed.snapshot.state !== "open" || observed.snapshot.draft;
+  const correction = linked.observedHead !== head || inactive;
+  const original = reviewId(recipe, number, linked.observedHead, previousReviewerId, linked.workItemId);
+  const diagnosisId = (sha, check) => "github-ci-" + createHash("sha256").update(JSON.stringify([
+    reviewId(recipe, number, sha, reviewerId, linked.workItemId), check.app, check.name, check.id
+  ])).digest("hex");
+  const previousDiagnosis = linked.next?.diagnosisOperation ?? null;
+  const cancel = (operation, reason, suffix, recipient = target) => {
+    const prior = store.operationReceipt(secret, recipe.roomId, operation);
+    if (prior.status !== "recorded") return;
+    const request = readOpenedReview(store, recipient, prior, secret);
+    if (request.status !== "open") return;
+    const command = buildReplyCommand({ roomId: recipe.roomId, memberId: requesterId }, "room_cancel_request", {
+      requestId: operation + suffix, requestMessageId: request.id, expectedRequestRevision: request.revision, reason
+    });
+    store.command(secret, recipe.roomId, command);
+  };
+  const resume = store.transaction(() => {
+    if (correction || previousReviewerId !== reviewerId) {
+      const reason = "The GitHub candidate, readiness or Work Thread reviewer changed.";
+      cancel(latestReviewOperation(store, recipe.roomId, requesterId, original), reason, "-stale", previousTarget);
+      if (previousDiagnosis) cancel(previousDiagnosis, reason, "-stale", previousTarget);
+    }
+    const reviews = inactive ? [] : observed.snapshot.correctionIds ?? [];
+    const correctionLinks = reviews.map(id => decision.pullRequest + "#pullrequestreview-" + id);
+    const recipient = { ...target, reviewerId: work.accountableMemberId };
+    const feedbackOperation = (sha, ids, producerId) => "github-correction-" + createHash("sha256").update(JSON.stringify([
+      reviewId(recipe, number, sha, producerId, linked.workItemId), ids
+    ])).digest("hex");
+    const priorFeedback = linked.next?.correctionIds ?? [];
+    const previousProducerId = linked.next?.correctionProducerId;
+    if (priorFeedback.length && previousProducerId
+        && (correction || previousProducerId !== recipient.reviewerId || JSON.stringify(priorFeedback) !== JSON.stringify(reviews))) {
+      const initial = feedbackOperation(linked.observedHead, priorFeedback, previousProducerId);
+      cancel(latestReviewOperation(store, recipe.roomId, requesterId, initial),
+        "The GitHub correction changed or was resolved.", "-end", { ...target, reviewerId: previousProducerId });
+    }
+    if (reviews.length) {
+      const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
+      cancel(latestReviewOperation(store, recipe.roomId, requesterId, current),
+        "A trusted GitHub review requested changes on this candidate.", "-feedback");
+      if (previousDiagnosis) cancel(previousDiagnosis, "The candidate is awaiting a GitHub review correction.", "-feedback", previousTarget);
+      if (recipient.reviewerId && recipient.reviewerId !== requesterId) {
+        const initial = feedbackOperation(head, reviews, recipient.reviewerId);
+        const operation = resumedOperation(store, recipient, initial, secret, ["-end"]);
+        if (!operation.recorded) store.command(secret, recipe.roomId, buildReplyCommand({ roomId: recipe.roomId, memberId: requesterId }, "room_request_reply", {
+          requestId: operation.id, toMemberId: recipient.reviewerId, workItemId: linked.workItemId,
+          ...(operation.previous && { replyToId: operation.previous }),
+          body: [
+            `Review the requested GitHub changes on ${decision.pullRequest} at ${head}.`,
+            ...correctionLinks,
+            "Verify the current head and review state, then report the smallest justified change and its evidence.",
+            "Follow the existing Work Thread write scope. This request grants no new permissions."
+          ].join("\n")
+        }));
+      }
+      updateGithubWorkObservation(store, recipe.roomId, recipe.repository, number, { ...observed.snapshot,
+        next: { reviewerId, reason: "github_changes_requested", correctionIds: reviews, correctionLinks, correctionProducerId: recipient.reviewerId, checks: decision.checks } });
+      return null;
+    }
+    const failure = decision.checks?.find(check => check.status === "failed");
+    let diagnosisOperation = null;
+    if (!inactive && failure) {
+      const diagnosis = resumedOperation(store, target, diagnosisId(head, failure), secret,
+        ["-feedback", "-stale", "-replaced", "-cleared"]);
+      diagnosisOperation = diagnosis.id;
+      if (previousDiagnosis && previousDiagnosis !== diagnosisOperation)
+        cancel(previousDiagnosis, "GitHub is reporting a different failing check attempt.", "-replaced", previousTarget);
+      const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
+      const operation = latestReviewOperation(store, recipe.roomId, requesterId, current);
+      cancel(operation, FAILURE_REASON + JSON.stringify({ app: failure.app, name: failure.name, id: failure.id }), "-withdraw");
+      if (!diagnosis.recorded) {
+        store.command(secret, recipe.roomId, buildReplyCommand({ roomId: recipe.roomId, memberId: requesterId }, "room_request_reply", {
+          requestId: diagnosisOperation, toMemberId: reviewerId, workItemId: linked.workItemId,
+          ...(diagnosis.previous && { replyToId: diagnosis.previous }),
+          body: [
+            `Diagnose the required GitHub check on ${decision.pullRequest} at ${head}.`,
+            `Exact check: ${failure.app} / ${failure.name} / attempt ${failure.id}.`,
+            "Confirm the current PR head and check attempt. Compare the failing job and test signatures with equivalent base evidence.",
+            "Report candidate-specific, matching base failure, or unknown, with links and the smallest next action.",
+            "If the candidate or check has changed, report the request as superseded. Read-only QA. Do not push, rerun checks, merge, or deploy."
+          ].join("\n")
+        }));
+      }
+    }
+    if (!inactive && !failure && previousDiagnosis)
+      cancel(previousDiagnosis, "The reported failed check is no longer the current attempt.", "-cleared", previousTarget);
+    if (!inactive && decision.action === "review_ready") {
+      const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
+      const selection = resumedOperation(store, target, current, secret, ["-feedback", "-stale"]);
+      if (!selection.recorded) {
+        postReview(store, target, entry.candidate, selection.id, decision, secret, selection.previous);
+      } else {
+        const operation = selection.id;
+        const receipt = store.operationReceipt(secret, recipe.roomId, operation);
+        const withdrawal = store.operationReceipt(secret, recipe.roomId, operation + "-withdraw");
+        const request = readOpenedReview(store, target, receipt, secret);
+        if (withdrawal.status === "recorded") {
+          // This function reads GitHub through the immutable observation supplied here.
+          // Awaiting it after the transaction keeps the store transaction synchronous.
+          return { request, withdrawal, operation, current };
+        }
+      }
+    }
+    updateGithubWorkObservation(store, recipe.roomId, recipe.repository, number, { ...observed.snapshot,
+      next: { reviewerId, reason: decision.reason, ...(decision.checks ? { checks: decision.checks } : {}),
+        ...(diagnosisOperation ? { diagnosisOperation } : {}) } });
+    return null;
   });
+
+  if (resume) {
+    // The command journal ensures both the check withdrawal and its replacement
+    // retain their exact revisions across an interrupted delivery.
+    const { request, withdrawal, operation, current } = resume;
+    await recoverPassingReview(store, target, entry.candidate, null, current, operation, request,
+      withdrawal, secret, async () => observed, options.token);
+    updateGithubWorkObservation(store, recipe.roomId, recipe.repository, number, { ...observed.snapshot,
+      next: { reviewerId, reason: decision.reason, checks: decision.checks } });
+  }
+}
+
+export function drainAttachedGithubDeliveries(store, binding, options) {
+  if (!binding) return Promise.resolve([]);
+  const current = drains.get(store);
+  if (current) {
+    current.again = true;
+    return current.task;
+  }
+  const drain = { again: false };
+  const run = async () => {
+    const { roomId, repository } = binding.recipe;
+    const prefix = inboxPrefix + roomId + ":" + repository + ":";
+    const rows = store.db.prepare(`SELECT room_id,config_json FROM work_claim_config
+      WHERE room_id>=? AND room_id<? AND room_id>? ORDER BY room_id LIMIT 32`);
+    const outcomes = [];
+    const attempted = new Set();
+    do {
+      drain.again = false;
+      let cursor = prefix, page;
+      do {
+        page = rows.all(prefix, prefix.slice(0, -1) + ";", cursor);
+        for (const row of page) {
+          cursor = row.room_id;
+          if (attempted.has(cursor)) continue;
+          attempted.add(cursor);
+          try {
+            await reconcileAttachedGithubDelivery(store, binding, JSON.parse(row.config_json), options);
+            store.transaction(() => store.db.prepare("DELETE FROM work_claim_config WHERE room_id=? AND config_json=?")
+              .run(row.room_id, row.config_json));
+            outcomes.push({ status: "observed" });
+          } catch (error) {
+            options.onPending?.(error);
+            outcomes.push({ status: "pending" });
+          }
+        }
+      } while (page.length === 32);
+    } while (drain.again);
+    return outcomes;
+  };
+  drain.task = Promise.resolve().then(run).finally(() => drains.delete(store));
+  drains.set(store, drain);
+  return drain.task;
+}
+
+export function recoverAttachedGithubWork(store, env = process.env) {
+  if (!env.ROOM_GITHUB_REVIEW_RECIPE) return Promise.resolve([]);
+  const binding = readGithubReviewWebhookBinding(JSON.parse(env.ROOM_GITHUB_REVIEW_RECIPE));
+  return drainAttachedGithubDeliveries(store, binding, workWebhookOptions(env));
+}
+
+export function queueAttachedGithubReview(store, delivery, env) {
+  if (!env.ROOM_GITHUB_REVIEW_RECIPE) return [];
+  const binding = readGithubReviewWebhookBinding(JSON.parse(env.ROOM_GITHUB_REVIEW_RECIPE));
+  const queued = saveAttachedGithubDelivery(store, binding, delivery);
+  if (queued.length) setImmediate(() => { void drainAttachedGithubDeliveries(store, binding, workWebhookOptions(env)).catch(() => {}); });
+  return queued;
+}
+
+export async function maybeDispatchGithubReview(store, delivery, env, attachedPulls = []) {
+  if (!env.ROOM_GITHUB_REVIEW_RECIPE) return [];
+  const binding = readGithubReviewWebhookBinding(JSON.parse(env.ROOM_GITHUB_REVIEW_RECIPE));
+  if (!binding) return [];
+  const pulls = binding.pulls.filter(number => !attachedPulls.includes(number));
+  return dispatchGithubReview(store, { ...binding, pulls }, delivery, workWebhookOptions(env));
 }
