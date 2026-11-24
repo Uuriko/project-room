@@ -355,6 +355,15 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(log.filter(row => row.event === "completion_pickup.decline_alternative").length, 1);
     assert.equal(log.some(row => row.decline === editedDecline.sequence), false);
     server.closeStreams();
+    postDraft(owner, "draft-to-remove", "Review the wording for a closed hunk.");
+    const deleted = store.command(owner, roomId, makeSeed("deleted-draft-seed", "draft-to-remove"));
+    respond(deleted.event.data.messageId, "declined", "decline-deleted-draft");
+    store.command(owner, roomId, { id: "delete-approved-draft", type: "message.deleted",
+      data: { messageId: "draft-to-remove", expectedMessageRevision: 0 } });
+    await connect(scope);
+    await setImmediate();
+    assert.equal(store.operationReceipt(owner, roomId, declineAlternativeOperationId(deleted.event.id)).status, "not_recorded");
+    server.closeStreams();
     const withdrawn = store.command(owner, roomId, makeSeed("cancelled-dynamic-seed", "replacement-draft"));
     fire(owner, requesterId, "room_cancel_request", { requestId: "cancel-dynamic", requestMessageId: withdrawn.event.data.messageId,
       expectedRequestRevision: 0, reason: "The requester no longer needs this check." });

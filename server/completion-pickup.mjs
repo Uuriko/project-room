@@ -71,13 +71,8 @@ function issueDeclineAlternative(store, binding, pending, receiverServer) {
       || !receiverServer?.hasRecoveryReceiver({ roomId, requesterId, recipientId, workItemId, id: command.data.messageId },
         pending.sequence, route.allowUnadvertisedReceiver === true)
       || recipientHasOpenRequest(store, secret, route)) return { done: false };
-  try {
-    const result = store.command(secret, roomId, { ...command, causationId: pending.eventId });
-    return { done: true, opening: result.duplicate ? undefined : result.sequence };
-  } catch (error) {
-    if (["assignment_paused", "assignment_waiting_for_recipient", "agent_paused"].includes(error.code)) return { done: false };
-    throw error;
-  }
+  const result = store.command(secret, roomId, { ...command, causationId: pending.eventId });
+  return { done: true, opening: result.duplicate ? undefined : result.sequence };
 }
 
 function advanceContinuation(store, { route, secret, continuation }, receiverServer) {
@@ -241,14 +236,17 @@ export function startCompletionPickup(store, configPath, log = console.warn, rec
         for (const [id, task] of queued) {
           try {
             const binding = bindings.get(routeKey({ roomId, ...task }));
+            // The pinned draft read and replacement append share one SQLite
+            // writer boundary, so a concurrent edit can't change the approval.
             const result = binding?.route.allowRequestAlternatives
-              ? issueDeclineAlternative(store, binding, task, receiverServer) : { done: true };
+              ? store.transaction(() => issueDeclineAlternative(store, binding, task, receiverServer)) : { done: true };
             if (result.done) { queued.delete(id); changed = true; }
             if (result.opening !== undefined) log(JSON.stringify({ event: "completion_pickup.decline_alternative",
               roomId, decline: task.sequence, opening: result.opening }));
           } catch (error) {
             if (error.code === "reply_request_not_found") { queued.delete(id); changed = true; }
-            else log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+            else if (!["assignment_paused", "assignment_waiting_for_recipient", "agent_paused"].includes(error.code))
+              log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
           }
         }
         if (changed) {
