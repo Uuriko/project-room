@@ -111,6 +111,23 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.equal((await call(publisher, "POST", { ...directed, recipientId: "absent" })).status, 422);
   const sent = await (await call(publisher, "POST", directed)).json();
   assert.equal(sent.recipientId, "viewer");
+  const { workspaceArtifactLink } = await import("../src/workspace-artifact-link.js");
+  const { workspaceCommand } = await import("../cli/commands/workspace.mjs");
+  const link = workspaceArtifactLink(origin, "commons", sent, "preview");
+  const inspect = async (secret, member, selection = link) => {
+    let evidence;
+    await workspaceCommand(["inspect", "--link", selection, "--viewer", member], {
+      env: { ROOM_ORIGIN: origin, ROOM_ID: "commons", PROJECT_ROOM_SECRET: secret },
+      out: value => { evidence = JSON.parse(value); }
+    });
+    return evidence;
+  };
+  assert.deepEqual(await inspect(viewer, "viewer"), { roomId: "commons", viewerId: "viewer", id, head: sent.head,
+    revision: sent.revision, publisherId: "publisher", digest: sent.digest, status: "visible" });
+  assert.equal((await inspect(otherPublisher, "other-publisher")).status, "unavailable");
+  await assert.rejects(inspect(otherPublisher, "viewer"), /independent saved Room connection/);
+  await assert.rejects(inspect(publisher, "publisher"), /independent saved Room connection/);
+  await assert.rejects(inspect(viewer, "viewer", link.replace(sent.head, "d".repeat(40))), /no longer matches/);
   assert.equal(store.db.prepare("SELECT id FROM room_workspace_previews WHERE id=?").get(id), undefined);
   assert.deepEqual(await (await call(publisher, "POST", directed)).json(), sent);
   assert.equal((await call(publisher, "POST", { ...preview, expectedRevision: 1 })).status, 409);

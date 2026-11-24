@@ -33,6 +33,7 @@ export async function createWorkBrief(context) {
       budget: structuredClone(context.accessSummary.budget) },
     evidence: { receipt: pick(work.receipt, 'eventId reportedById producerId summary evidenceUrl evidenceVersion nextAction'),
       verification: pick(work.verification, 'eventId verifierId result completionEventId evidenceVersion summary independenceConfirmed'),
+      ...(context.pullRequest ? { pullRequest: structuredClone(context.pullRequest) } : {}),
       ...(publishedVerdicts.length ? { publishedVerdicts } : {}),
       decision: pick(work.decision, 'eventId actorId decision completionEventId evidenceVersion reason'),
       references: structuredClone(context.accessSummary.evidence.records), retrieved: false },

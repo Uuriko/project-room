@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -23,6 +23,7 @@ room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace changes --id ID [--file PATH | --raw yes]
 room workspace changes --link URL
+room workspace inspect --link URL --viewer MEMBER_ID [--connection NAME]
 room workspace output --id ID
 room workspace remove --id ID
 Pass --connection NAME to choose a saved connection explicitly.`;
@@ -172,7 +173,8 @@ async function connect(io, cwd, name) {
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
     });
     const value = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(value?.error?.message ?? `Room request failed (${response.status})`);
+    if (!response.ok) throw Object.assign(new Error(value?.error?.message ?? `Room request failed (${response.status})`),
+      { status: response.status, code: value?.error?.code });
     return value;
   };
   return { call, conn, inherited };
@@ -252,7 +254,7 @@ export async function workspaceCommand(argv, io = {}) {
     const attach = shareLive ? await livePublisher(io, cwd, root, flags) : undefined;
     return runWorkspaceServer({ cwd: root, workingDirectory, command, args, requestedPort: flags.port, logPath: flags.log, out, env: io.env, attach });
   }
-  if (extra.length || separator !== -1 || !["start", "list", "publish", "watch", "remove", "changes", "output", "continue"].includes(action)) throw new Error(usage);
+  if (extra.length || separator !== -1 || !["start", "list", "publish", "watch", "remove", "changes", "output", "continue", "inspect"].includes(action)) throw new Error(usage);
   if (action === "start") {
     if (!flags.path) throw new Error("--path is required");
     const path = resolve(cwd, flags.path), base = pinned(cwd, flags.base ?? "HEAD");
@@ -277,6 +279,34 @@ export async function workspaceCommand(argv, io = {}) {
   const { call, conn, inherited } = await connect(io, cwd, flags.connection);
   const list = async () => (await call()).items;
   if (action === "list") { out(await list()); return 0; }
+  if (action === "inspect") {
+    if (!flags.viewer) throw new Error("Supply the expected Room member ID with --viewer");
+    const { target } = artifactFromConnection(flags.link, conn);
+    if (target.panel !== "preview") throw new Error("Choose a Preview artifact link");
+    const { id, head, revision, publisherId, digest } = target;
+    const verifyViewer = value => {
+      if (value?.roomId !== conn.roomId || value.viewerId !== flags.viewer || value.viewerId === publisherId)
+        throw new Error("Use the named viewer's independent saved Room connection.");
+    };
+    let read;
+    try { read = await call("GET", undefined, "?" + new URLSearchParams({ id })); }
+    catch (error) {
+      if (error.status !== 404 || error.code !== "preview_not_found") throw error;
+      // Verify the acting identity on an authorized Room response before
+      // reporting that this selection was unavailable to it.
+      verifyViewer(await call());
+      out({ roomId: conn.roomId, viewerId: flags.viewer, id, head, revision, status: "unavailable" });
+      return 0;
+    }
+    verifyViewer(read);
+    const { item } = read;
+    if (item?.id !== id || item.head !== head || item.revision !== revision || item.publisherId !== publisherId
+        || item.digest !== digest || typeof item.html !== "string"
+        || createHash("sha256").update(item.html).digest("hex") !== digest)
+      throw new Error("This preview no longer matches the exact artifact link.");
+    out({ roomId: conn.roomId, viewerId: flags.viewer, id, head, revision, publisherId, digest, status: "visible" });
+    return 0;
+  }
   if (action === "continue") {
     if (!flags.path) throw new Error("--path is required");
     const { target } = artifactFromConnection(flags.link, conn);
