@@ -49,7 +49,8 @@ without timing data. Step categories use names as hints. An install time is
 evidence of waiting in that step, with cache misses or downloads diagnosed
 from separate logs.
 
-Add `--terminal NAME` to time a specific check and `--require-job NAME` to
+Use `--head FULL_SHA` for a specific PR revision. Add `--terminal NAME` to time
+a specific check and `--require-job NAME` to
 filter to comparable runs where a named job actually started. A run that
 lacks the required job is counted in the report. When using a report to
 compare full checks, require the coverage job or full shard set that defines

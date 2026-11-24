@@ -151,10 +151,13 @@ function graphAtHead(run) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { positionals, values } = parseArgs({ allowPositionals: true,
-    options: { terminal: { type: "string" }, "require-job": { type: "string", multiple: true } } });
-  if (positionals.length !== 1) throw new Error("Usage: ci-wait-report.mjs RUNS.jsonl [--terminal NAME] [--require-job NAME]...");
+    options: { head: { type: "string" }, terminal: { type: "string" }, "require-job": { type: "string", multiple: true } } });
+  if (positionals.length !== 1) throw new Error("Usage: ci-wait-report.mjs RUNS.jsonl [--head SHA] [--terminal NAME] [--require-job NAME]...");
   const runs = readFileSync(positionals[0], "utf8").split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line));
   if (!runs.length || runs.some(run => !Number.isSafeInteger(run.id) || !Array.isArray(run.jobs))
       || new Set(runs.map(run => run.id)).size !== runs.length) throw new Error("Expected a nonempty Joggernaut run history with distinct run IDs.");
-  console.log(JSON.stringify(summarize(runs, { terminal: values.terminal, required: values["require-job"] }, graphAtHead), null, 2));
+  if (values.head && !/^[a-f0-9]{40}$/.test(values.head)) throw new Error("Expected the full Git commit SHA.");
+  const selected = values.head ? runs.filter(run => run.head_sha === values.head) : runs;
+  if (!selected.length) throw new Error("No run in this snapshot has the selected head.");
+  console.log(JSON.stringify(summarize(selected, { terminal: values.terminal, required: values["require-job"] }, graphAtHead), null, 2));
 }
