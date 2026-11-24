@@ -44,6 +44,8 @@ A stale generated copy is repaired from its source below. A removed feature's
 code can still protect old data or obligations: retire it only after caller,
 persistence and recovery checks. Documentation cleanup does not authorize deletion.
 
+[CI wait report](CI-WAIT-REPORT.md) explains how to diagnose a slow check and verify a change against hosted timing and named test evidence.
+
 ## Source and generated copies
 
 Edit the source below, then regenerate its published or packaged copy. Matching
