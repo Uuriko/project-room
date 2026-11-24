@@ -183,6 +183,14 @@ finding and a link to the earlier evidence when the viewer can read it. Use the
 review action bound to the new completion. For an uncertain verdict write,
 look up its original operation ID before retrying.
 
+A managed Codex host records a runtime receipt against the formal request's
+opening event and execution attempt. A positive App Server turn-start response
+identifies the fresh thread, exact turn, and local observation time. Use that
+receipt to measure runtime admission, separately from event-service delivery
+and the saved answer. Hosts that do not report those fields leave admission
+and session freshness unknown. A lost start response does not justify a new
+turn or a synthesized receipt.
+
 ### Link release checks after a verdict
 
 For post-deployment review, collect the build, browser and deploy receipts before
@@ -218,6 +226,15 @@ run the same publisher with `--recover` or the Commons operator's `publish SHA`
 step, using the saved files including any deploy receipt. Recovery checks each
 original operation ID with `room_receipt` and posts only an absent operation.
 Keep all previously attached stage files so a recovery cannot hide their checks.
+
+For a signed release, run
+`node scripts/verify-release-evidence.mjs WORK_ITEM_ID COMPLETION_EVENT_ID`
+with your existing Room connection to verify the exact signed proof and its
+three stage receipt digests. The command accepts inline and linked proof,
+checks the serving origin's signing key, and returns the selected completion
+and receipt IDs. A historical selection still needs a separate check of the
+current deployment. Record the review verdict through the normal exact result
+action after checking the task's acceptance criteria.
 
 For a release result, name its full 40-hex candidate revision in the native
 text as `Candidate revision: SHA` on its own line. An exact `sourceRevision`
@@ -447,13 +464,6 @@ that GitHub never successfully submitted, redeliver it from GitHub or use
 `--refresh-head`. Static PR numbers still use the configured QA work item.
 A PR already listed there keeps its static review lane. An empty `pulls` list enables attachment-only routing.
 
-For an active local room, configure an authenticated GitHub read connection.
-Use the operator-managed GitHub token environment or set
-`ROOM_GITHUB_REVIEW_GH_PATH` to the absolute path of an already authenticated
-GitHub CLI. The CLI transport only issues bounded reads to GitHub's PR,
-review and check endpoints. Its existing login stays with the CLI.
-Matching buffered deliveries can share one authoritative observation.
-
 ### Check a directed preview as a different member
 
 Run the following from the viewer's own saved Room connection.
@@ -472,3 +482,10 @@ with the copied Preview link or its `#pr-workspace/` hash, plus their
 expected Room viewer ID. It checks the stored
 preview bytes through the same member visibility rules and returns no HTML.
 Use a browser smoke test to verify a running preview's behavior.
+
+For an active local room, configure an authenticated GitHub read connection.
+Use the operator-managed GitHub token environment or set
+`ROOM_GITHUB_REVIEW_GH_PATH` to the absolute path of an already authenticated
+GitHub CLI. The CLI transport only issues bounded reads to GitHub's PR,
+review and check endpoints. Its existing login stays with the CLI.
+Matching buffered deliveries can share one authoritative observation.
