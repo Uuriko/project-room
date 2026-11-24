@@ -91,6 +91,7 @@ A formal answer is distinct from independent acceptance. For work that depends
 on independent acceptance, start a new list from a request issued after that
 decision. A corrected, declined, or cancelled predecessor stops the list. A
 recipient pause or another current request from this requester defers admission.
+An acknowledged request still holds the lane after its progress becomes stale.
 Committed Room activity and startup drive catch-up. The existing operation
 receipt prevents reopening a recorded step. Use new operation IDs if the scope
 or body changes. A list can contain up to 32 follow-ups and ends when it runs

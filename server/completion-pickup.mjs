@@ -35,7 +35,10 @@ function recipientHasOpenRequest(store, secret, { roomId, recipientId }) {
     const open = store.replyRequests.list(secret, roomId, { direction: "outgoing", status: "open", states: true,
       ...(cursor ? { cursor } : {}),
     });
-    if (open.requests.some(item => item.recipientId === recipientId && item.lifecycle?.state !== "stale")) return true;
+    // Staleness measures time since progress. An acknowledged request may
+    // still be executing, even when the receiver has stopped reporting.
+    if (open.requests.some(item => item.recipientId === recipientId &&
+        (item.lifecycle?.state !== "stale" || item.lifecycle.unresponsive !== true))) return true;
     if (!open.page?.hasMore) return false;
     if (!open.page.nextCursor || open.page.nextCursor === cursor) return true;
     cursor = open.page.nextCursor;
