@@ -79,7 +79,12 @@ for (const normalized of [false, true]) test(`native request wake carries the ex
     messageId: id, body: 'Please review the saved handoff.', toMemberId: f.grant.member_id, requestKind: 'reply'
   } });
   ask('before-subscription');
+  f.store.command(f.owner, 'commons', { id: 'offline-correction', type: 'message.posted', data: {
+    messageId: 'offline-correction', replyToId: 'before-subscription', body: 'Use the revised acceptance check.'
+  } });
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox').get().n, 0);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_wake_signals WHERE message_id=? AND agent_id=?')
+    .get('offline-correction', f.grant.identity_id).n, 1);
   const before = await call('room_check_access');
   assert.equal(before.nativeMonitoring.state, 'not_subscribed');
   assert.match(before.nativeMonitoring.next, /room_list_requests.*direction=incoming.*status=open/);
@@ -130,12 +135,34 @@ for (const normalized of [false, true]) test(`native request wake carries the ex
   await f.server.drainMcpEvents();
   const earlier = JSON.parse(f.deliveries.at(-1).body).data.firstAck;
   assert.equal(earlier.arguments.ifUnacknowledgedContextEventId, stale.event.id);
-  f.store.command(f.owner, 'commons', { id: 'correct-in-flight-wake', type: 'message.posted',
+  const old = await call('room_read_request', { requestMessageId: 'corrected-before-receipt' });
+  const correction = { id: 'correct-in-flight-wake', type: 'message.posted',
     data: { body: 'Correction: review the current version.', replyToId: 'corrected-before-receipt',
-      messageId: 'correction-message', toMemberId: f.grant.member_id } });
+      messageId: 'correction-message' } };
+  const corrected = f.store.command(f.owner, 'commons', correction);
+  assert.equal(f.store.command(f.owner, 'commons', correction).duplicate, true);
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 3);
+  const correctionPointer = JSON.parse(f.deliveries.at(-1).body).data;
+  assert.deepEqual(correctionPointer, { roomId: 'commons', memberId: f.grant.member_id,
+    messageId: 'correction-message', requestId: 'corrected-before-receipt',
+    nextRead: { tool: 'room_read_request', arguments: { roomId: 'commons', requestMessageId: 'corrected-before-receipt', view: 'compact' } } });
   const refused = await f.rpc('tools/call', { name: earlier.tool, arguments: earlier.arguments });
   assert.equal(refused.result?.isError, true);
-  assert.equal((await call('room_read_request', { requestMessageId: 'corrected-before-receipt' })).request.acknowledgedAt ?? null, null);
+  const current = await call(correctionPointer.nextRead.tool, correctionPointer.nextRead.arguments);
+  assert.equal(current.request.acknowledgedAt ?? null, null);
+  assert.equal(current.current.answerBasis.contextEventId, corrected.event.id);
+  const response = selected => selected.responseActions.find(action => action.arguments.responseOutcome === 'answered');
+  const oldAction = response(old);
+  const staleAnswer = await f.rpc('tools/call', { name: oldAction.tool,
+    arguments: { ...oldAction.arguments, requestId: 'answer-old-clarification', body: 'Old answer.' } });
+  assert.equal(staleAnswer.result?.isError, true);
+  const action = response(current);
+  await call(action.tool, { ...action.arguments, requestId: 'answer-current-clarification', body: 'Current answer.' });
+  const final = await call(correctionPointer.nextRead.tool, correctionPointer.nextRead.arguments);
+  assert.equal(final.request.status, 'answered');
+  assert.equal(final.page.items.filter(item => item.kind === 'answered').length, 1);
+  assert.equal(final.request.responseContextSequence, corrected.sequence);
   assert.ok(fromWake.current.answerBasis);
   assert.equal((await call('room_read_request', { requestMessageId: 'before-subscription' })).request.status, 'open',
     'reading and callback delivery do not answer a request');
