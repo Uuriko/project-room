@@ -44,7 +44,7 @@ import { peerEventVisible } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { isWorkersRuntime } from "./ip-blocklist.mjs";
 import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
-import { validReceiverRouteScope } from "../src/reply-requests.js";
+import { checkReceiverRoute, validReceiverRouteScope } from "../src/reply-requests.js";
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
@@ -1167,11 +1167,22 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       if (item.roomId === roomId) sameRoom++;
     }
     if (streams.size >= STREAM_POOL_LIMIT || sameRoom >= STREAM_PER_ROOM_LIMIT || sameCredential >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
+    const agentReceiver = auth.member.kind === "agent";
+    const connectedThrough = agentReceiver ? store.headSequence(roomId) : null;
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
     const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res, receiverScope,
-      ...(receiverState ? { receiverWaitingSince: new Date().toISOString() } : {}) };
+      ...(receiverState ? { receiverWaitingSince: new Date().toISOString() } : {}),
+      ...(agentReceiver ? { connectedThrough, receiverCursor: after,
+        stillAuthorized: () => {
+          try { return store.authenticate(token, roomId, binding).member.id === auth.member.id; }
+          catch (error) {
+            if ([401, 403].includes(error.status) || error.code === "session_binding_changed") return false;
+            throw error;
+          }
+        } } : {}) };
     streams.add(entry);
+    if (agentReceiver) server.emit("agentReceiverConnected", roomId);
     let cursor = after;
     let timer;
     const signal = resolveRequestSignal(req);
@@ -6110,6 +6121,17 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   }
   server.once("close", () => workspacePublisherGrants?.clear());
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
+  server.hasRecoveryReceiver = ({ roomId, recipientId, ...request }, sequence, allowUnadvertised) => {
+    for (const entry of streams) {
+      if (entry.roomId !== roomId || entry.memberId !== recipientId || !(entry.connectedThrough >= sequence)
+          || entry.res.destroyed || entry.res.writableEnded) continue;
+      const matches = entry.receiverScope
+        ? entry.receiverWaitingSince && checkReceiverRoute(entry.receiverScope, request) === "matches_scope"
+        : allowUnadvertised && entry.receiverCursor >= sequence && entry.receiverCursor <= entry.connectedThrough;
+      if (matches && entry.stillAuthorized()) return true;
+    }
+    return false;
+  };
   server.rateLimitKeys = () => rates.size;
   return server;
 }

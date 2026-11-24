@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
@@ -10,6 +11,7 @@ import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { startCompletionPickup } from "../server/completion-pickup.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -191,3 +193,96 @@ test("legacy Room advances three explicit lanes through restart, refusal and com
   t => checkPlannedContinuation(t));
 test("normalized Room advances three explicit lanes through restart, refusal and competing work",
   t => checkPlannedContinuation(t, "normalized-current-v1"));
+
+for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`an approved alternative waits for a fresh scoped receiver after decline (${representation})`, async t => {
+    const directory = mkdtempSync(join(tmpdir(), "room-decline-continuation-"));
+    chmodSync(directory, 0o700);
+    const store = new RoomStore(join(directory, "room.sqlite"));
+    const roomId = "commons", requesterId = "owner", recipientId = "reviewer", workItemId = "qa";
+    store.initialize(initialRoom(roomId), representation === "legacy" ? {} : { representation });
+    const owner = store.issueAccessKey(roomId, requesterId);
+    const agent = store.identities.create("Reviewer");
+    linkWithProof(store, owner, roomId, agent, { memberId: recipientId, permissions: [] });
+    store.command(owner, roomId, { id: "create-qa", type: "work.proposed",
+      data: { workItemId, title: "QA", definitionOfDone: "Review the given evidence.", accountableMemberId: requesterId, mode: "read" } });
+    const server = createRoomServer({ store });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const checkpointPath = join(directory, "checkpoint.json");
+    const config = join(directory, "pickup.json");
+    const credentialPath = join(directory, "operator.json");
+    const replacement = "Review the separate Changes label and give one concrete improvement.";
+    atomicPrivateJson(credentialPath, { identitySecret: owner });
+    atomicPrivateJson(config, { checkpointPath, routes: [{
+      roomId, requesterId, recipientId, workItemId, credentialPath, after: store.headSequence(roomId),
+      allowUnadvertisedReceiver: representation === "legacy",
+      continuation: { seedRequestId: "seed-review", steps: [
+        { requestId: "separate-review", body: replacement, afterOutcome: "declined" },
+      ] },
+    }] });
+    const log = [];
+    const start = () => startCompletionPickup(store, config, message => log.push(JSON.parse(message)), server);
+    let stop = start();
+    t.after(async () => {
+      stop();
+      server.closeStreams();
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+      store.close();
+      rmSync(directory, { recursive: true, force: true });
+    });
+    const fire = (token, memberId, name, args) =>
+      store.command(token, roomId, buildReplyCommand({ roomId, memberId }, name, args));
+    const seed = fire(owner, requesterId, "room_request_reply", { requestId: "seed-review",
+      toMemberId: recipientId, workItemId, body: "Decline if this sketch cannot establish exact width." });
+    const scope = { requesters: [requesterId], workItems: [workItemId], requests: [] };
+    const connect = async (receiverScope, waiting = true, after = store.headSequence(roomId)) => {
+      const response = await fetch(`${origin}/api/rooms/${roomId}/stream?after=${after}`, { headers: {
+        Authorization: "Bearer " + agent.secret,
+        ...(receiverScope ? { "X-Project-Room-Receiver-Scope": JSON.stringify(receiverScope) } : {}),
+        ...(waiting ? { "X-Project-Room-Receiver-State": "waiting_for_work" } : {}),
+      } });
+      assert.equal(response.status, 200);
+    };
+    const receipt = () => store.operationReceipt(owner, roomId, "separate-review");
+    await connect(scope);
+    assert.equal(receipt().status, "not_recorded");
+    const selected = store.replyRequests.selected(agent.secret, roomId, seed.event.data.messageId);
+    const { tool, arguments: { roomId: _roomId, ...decline } } =
+      selected.responseActions.find(action => action.arguments.responseOutcome === "declined");
+    fire(agent.secret, recipientId, tool, { ...decline, requestId: "decline-review", body: "The exact width is unavailable." });
+    await setImmediate();
+    assert.equal(receipt().status, "not_recorded", "a stream opened before decline does not show rearm");
+    await connect({ ...scope, workItems: ["other-work"] });
+    await connect(scope, false);
+    await setImmediate();
+    assert.equal(receipt().status, "not_recorded", "wrong scope and scope without waiting cannot trigger pickup");
+    server.closeStreams();
+    await connect(undefined, false, seed.sequence);
+    assert.equal(receipt().status, "not_recorded", "a legacy connection must have caught up through the decline");
+    if (representation === "legacy") {
+      await connect(undefined, false);
+    } else {
+      await connect(undefined, false);
+      assert.equal(receipt().status, "not_recorded", "legacy readiness requires route opt-in");
+      await connect(scope);
+    }
+    await setImmediate();
+    assert.equal(receipt().status, "recorded", JSON.stringify(log));
+    const after = store.headSequence(roomId), recorded = receipt();
+    const next = store.replyRequests.list(owner, roomId, { direction: "outgoing", status: "open" }).requests;
+    assert.equal(next.length, 1);
+    const opened = store.replyRequests.selected(agent.secret, roomId, next[0].id).page.items[0].message;
+    assert.equal(opened.body, `@(${recipientId})\n${replacement}`);
+    stop();
+    stop = start();
+    server.closeStreams();
+    await connect(scope);
+    await setImmediate();
+    assert.equal(receipt().eventId, recorded.eventId);
+    assert.equal(store.headSequence(roomId), after);
+    assert.deepEqual(log.map(row => row.opening), [recorded.sequence]);
+  });
+}

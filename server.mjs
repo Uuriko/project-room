@@ -120,7 +120,8 @@ if (server.workspacePreviewViewer) {
   await listening;
 }
 const pickupConfig = process.env.ROOM_COMPLETION_PICKUP_CONFIG ?? join(dirname(filename), "completion-pickup.json");
-const stopCompletionPickup = store && existsSync(pickupConfig) ? startCompletionPickup(store, pickupConfig) : () => {};
+const stopCompletionPickup = store && existsSync(pickupConfig)
+  ? startCompletionPickup(store, pickupConfig, console.warn, server) : () => {};
 server.on('close', () => { stopCompletionPickup(); nodeJobs?.stop(); });
 // Track C C11 — growth collector persistence. The snapshot lives in its own
 // JSON file next to the store file; it never touches the store schema. Any
