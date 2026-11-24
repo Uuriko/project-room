@@ -813,12 +813,14 @@ test('room next and receipt discovery distinguish server availability from a nar
   assert.deepEqual(discovery.tools, {
     room_next: 'available_on_server', room_receipt: 'available_on_server',
     room_record_verification: 'available_on_server',
-    room_read_public_review: 'available_on_server', room_record_public_review: 'available_on_server'
+    room_read_public_review: 'available_on_server', room_record_public_review: 'available_on_server',
+    room_inspect_workspace_preview: 'available_on_server'
   });
   for (const name of Object.keys(discovery.tools)) assert.ok(list.body.result.tools.some(entry => entry.name === name));
   assert.deepEqual(discovery.requiredOAuthScope, { room_record_verification: 'work:write' });
   assert.deepEqual(discovery.requiredOAuthScopes, {
-    room_read_public_review: ['work:read'], room_record_public_review: ['work:read', 'work:write']
+    room_read_public_review: ['work:read'], room_record_public_review: ['work:read', 'work:write'],
+    room_inspect_workspace_preview: ['rooms:read', 'work:read']
   });
   assert.match(discovery.next, /refresh the existing connection's tool catalog/);
   assert.deepEqual(discovery.whenMissingFromHost, {
@@ -851,7 +853,8 @@ test('room next and receipt discovery distinguish server availability from a nar
   assert.deepEqual(narrowAccess.body.result.structuredContent.commandDiscovery.tools, {
     room_next: 'outside_connected_grant', room_receipt: 'outside_connected_grant',
     room_record_verification: 'outside_connected_grant',
-    room_read_public_review: 'outside_connected_grant', room_record_public_review: 'outside_connected_grant'
+    room_read_public_review: 'outside_connected_grant', room_record_public_review: 'outside_connected_grant',
+    room_inspect_workspace_preview: 'outside_connected_grant'
   });
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
