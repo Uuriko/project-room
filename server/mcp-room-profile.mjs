@@ -1379,7 +1379,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           value.commandDiscovery = {
             tools: Object.fromEntries([
               "room_next", "room_receipt", "room_record_verification",
-              "room_read_public_review", "room_record_public_review"
+              "room_read_public_review", "room_record_public_review", "room_inspect_workspace_preview"
             ].map(tool => [tool,
               tool === "room_record_verification" && !value.permissions?.includes("verify") ? "withheld_by_room_policy"
                 : !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes) ? "outside_connected_grant"
@@ -1396,6 +1396,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             } : {}),
             requiredOAuthScope: { room_record_verification: "work:write" },
             requiredOAuthScopes: {
+              room_inspect_workspace_preview: ["rooms:read", "work:read"],
               room_read_public_review: ["work:read"],
               room_record_public_review: ["work:read", "work:write"]
             },

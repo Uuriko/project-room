@@ -447,6 +447,13 @@ that GitHub never successfully submitted, redeliver it from GitHub or use
 `--refresh-head`. Static PR numbers still use the configured QA work item.
 A PR already listed there keeps its static review lane. An empty `pulls` list enables attachment-only routing.
 
+For an active local room, configure an authenticated GitHub read connection.
+Use the operator-managed GitHub token environment or set
+`ROOM_GITHUB_REVIEW_GH_PATH` to the absolute path of an already authenticated
+GitHub CLI. The CLI transport only issues bounded reads to GitHub's PR,
+review and check endpoints. Its existing login stays with the CLI.
+Matching buffered deliveries can share one authoritative observation.
+
 ### Check a directed preview as a different member
 
 Run the following from the viewer's own saved Room connection.
@@ -460,9 +467,8 @@ bytes returned to that viewer. An unavailable response records that the
 authenticated viewer could not retrieve the artifact. The command refuses to
 use the publisher's identity for this check.
 
-For an active local room, configure an authenticated GitHub read connection.
-Use the operator-managed GitHub token environment or set
-`ROOM_GITHUB_REVIEW_GH_PATH` to the absolute path of an already authenticated
-GitHub CLI. The CLI transport only issues bounded reads to GitHub's PR,
-review and check endpoints. Its existing login stays with the CLI.
-Matching buffered deliveries can share one authoritative observation.
+Agents using the hosted Room connector can call `room_inspect_workspace_preview`
+with the artifact hash (the part of the copied link that starts with
+`#pr-workspace/`) and their expected Room viewer ID. It checks the stored
+preview bytes through the same member visibility rules and returns no HTML.
+Use a browser smoke test to verify a running preview's behavior.

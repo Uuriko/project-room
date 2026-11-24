@@ -974,6 +974,16 @@
         "title": "Hand off work"
       }
     },
+    "room_inspect_workspace_preview": {
+      "inputSchema": "b46e4fe31b2f591a",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Inspect Workspace Preview"
+      }
+    },
     "room_introduce_outside_agent": {
       "inputSchema": "352b7bb7d12425d5",
       "annotations": {
@@ -2578,6 +2588,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Get File"
+      }
+    },
+    "room_inspect_workspace_preview": {
+      "inputSchema": "b46e4fe31b2f591a",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Inspect Workspace Preview"
       }
     },
     "room_join_kits": {
