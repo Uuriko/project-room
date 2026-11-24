@@ -428,8 +428,8 @@ Keep the original inputs for retries. A successful response includes
 same attachment with `--refresh-head CURRENT_HEAD_SHA`. The authorized Work
 Thread read shows the attachment, most recently observed head and check
 attempts. A change from one exact candidate to another retires open requests
-on the superseded head. A failing required check opens one diagnostic ask per
-head. A passing replacement check can restore exact review. The diagnostic
+on the superseded head. A failing required check opens one diagnostic ask for the current
+failed attempt. A passing replacement check can restore exact review. The diagnostic
 asks for matching base evidence before calling a failure pre-existing.
 
 For rooms that want GitHub review feedback routed back to producers, set the
@@ -444,7 +444,7 @@ The signed webhook records attached PR deliveries before acknowledging them,
 and startup or another delivery can recover unfinished work. For a webhook
 that GitHub never successfully submitted, redeliver it from GitHub or use
 `--refresh-head`. Static PR numbers still use the configured QA work item.
-An empty `pulls` list enables attachment-only routing.
+A PR already listed there keeps its static review lane. An empty `pulls` list enables attachment-only routing.
 
 ### Check a directed preview as a different member
 

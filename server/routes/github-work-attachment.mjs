@@ -1,3 +1,4 @@
+import { parsePullRequestUrl } from "../claim-coordination.mjs";
 import { attachGithubWork } from "../github-work-attachment.mjs";
 import { observeWebhookPull, queueAttachedGithubReview, readGithubReviewWebhookBinding } from "../github-review-webhook.mjs";
 
@@ -21,6 +22,8 @@ async function attach(ctx) {
   const env = process.env;
   const binding = env.ROOM_GITHUB_REVIEW_RECIPE
     ? readGithubReviewWebhookBinding(JSON.parse(env.ROOM_GITHUB_REVIEW_RECIPE)) : null;
+  if (binding?.pulls.includes(parsePullRequestUrl(input.pullRequest)?.number))
+    ctx.reject(409, "static_review_binding", "This PR already uses the room's static review lane.");
   const reply = await attachGithubWork(store, { token: selected.token, roomId, input, fence, recipe: binding?.recipe,
     observe: (recipe, candidate) => observeWebhookPull(recipe, candidate, { token: env.GH_TOKEN || env.GITHUB_TOKEN, includeInactive: true }) });
   // Reconcile even when check completion preceded the attachment. An explicit

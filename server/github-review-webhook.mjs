@@ -113,9 +113,9 @@ export async function observeWebhookPull(recipe, { number, head }, options = {})
   return { snapshot: { ...verified, checks, correctionIds, observedAt: Date.now() } };
 }
 
-function reviewId(recipe, number, head, reviewerId) {
+function reviewId(recipe, number, head, reviewerId, workItemId) {
   return `github-review-${createHash("sha256").update(JSON.stringify([
-    recipe.roomId, recipe.repository, number, head, reviewerId
+    recipe.roomId, recipe.repository, number, head, reviewerId, ...(workItemId ? [workItemId] : [])
   ])).digest("hex")}`;
 }
 
@@ -324,12 +324,16 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
   const secret = await options.credential();
   if (store.authenticate(secret, recipe.roomId).member.id !== requesterId)
     throw new Error("GitHub review requester does not match the saved identity");
-  store.workContext(secret, recipe.roomId, linked.workItemId);
+  const { work } = store.workContext(secret, recipe.roomId, linked.workItemId);
   const decision = evaluateGithubReview(recipe, observed.snapshot);
   const inactive = observed.snapshot.state !== "open" || observed.snapshot.draft;
   const correction = linked.observedHead !== head || inactive;
-  const original = reviewId(recipe, number, linked.observedHead, reviewerId);
-  const diagnosis = reviewId(recipe, number, head, reviewerId) + "-ci";
+  const original = reviewId(recipe, number, linked.observedHead, reviewerId, linked.workItemId);
+  const diagnosisId = (sha, check) => {
+    const original = reviewId(recipe, number, sha, reviewerId, linked.workItemId);
+    return original + "-ci-" + createHash("sha256").update(JSON.stringify([check.app, check.name, check.id])).digest("hex").slice(0, 16);
+  };
+  const previousDiagnosis = linked.next?.diagnosisOperation ?? null;
   const cancel = (operation, reason, suffix, recipient = target) => {
     const prior = store.operationReceipt(secret, recipe.roomId, operation);
     if (prior.status !== "recorded") return;
@@ -344,27 +348,30 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
     if (correction) {
       const reason = "GitHub changed the candidate or the pull request is no longer ready.";
       cancel(latestReviewOperation(store, recipe.roomId, requesterId, original), reason, "-stale");
-      cancel(original + "-ci", reason, "-stale");
+      if (previousDiagnosis) cancel(previousDiagnosis, reason, "-stale");
     }
     const reviews = inactive ? [] : observed.snapshot.correctionIds ?? [];
     const correctionLinks = reviews.map(id => decision.pullRequest + "#pullrequestreview-" + id);
-    const recipient = { ...target, reviewerId: linked.producerId };
-    const feedbackOperation = (sha, ids) => reviewId(recipe, number, sha, linked.producerId) + "-fix-"
+    const recipient = { ...target, reviewerId: work.accountableMemberId };
+    const feedbackOperation = (sha, ids, producerId) => reviewId(recipe, number, sha, producerId, linked.workItemId) + "-fix-"
       + createHash("sha256").update(JSON.stringify(ids)).digest("hex").slice(0, 16);
     const priorFeedback = linked.next?.correctionIds ?? [];
-    if (priorFeedback.length && (correction || JSON.stringify(priorFeedback) !== JSON.stringify(reviews))) {
-      cancel(feedbackOperation(linked.observedHead, priorFeedback), "The GitHub correction changed or was resolved.", "-end", recipient);
+    const previousProducerId = linked.next?.correctionProducerId;
+    if (priorFeedback.length && previousProducerId
+        && (correction || previousProducerId !== recipient.reviewerId || JSON.stringify(priorFeedback) !== JSON.stringify(reviews))) {
+      cancel(feedbackOperation(linked.observedHead, priorFeedback, previousProducerId),
+        "The GitHub correction changed or was resolved.", "-end", { ...target, reviewerId: previousProducerId });
     }
     if (reviews.length) {
-      const current = reviewId(recipe, number, head, reviewerId);
+      const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
       cancel(latestReviewOperation(store, recipe.roomId, requesterId, current),
         "A trusted GitHub review requested changes on this candidate.", "-feedback");
-      cancel(diagnosis, "The candidate is awaiting a GitHub review correction.", "-feedback");
-      const operation = feedbackOperation(head, reviews);
-      if (linked.producerId && linked.producerId !== requesterId
+      if (previousDiagnosis) cancel(previousDiagnosis, "The candidate is awaiting a GitHub review correction.", "-feedback");
+      const operation = feedbackOperation(head, reviews, recipient.reviewerId);
+      if (recipient.reviewerId && recipient.reviewerId !== requesterId
         && store.operationReceipt(secret, recipe.roomId, operation).status !== "recorded") {
         store.command(secret, recipe.roomId, buildReplyCommand({ roomId: recipe.roomId, memberId: requesterId }, "room_request_reply", {
-          requestId: operation, toMemberId: linked.producerId, workItemId: linked.workItemId,
+          requestId: operation, toMemberId: recipient.reviewerId, workItemId: linked.workItemId,
           body: [
             `Review the requested GitHub changes on ${decision.pullRequest} at ${head}.`,
             ...correctionLinks,
@@ -374,17 +381,25 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
         }));
       }
       updateGithubWorkObservation(store, recipe.roomId, recipe.repository, number, { ...observed.snapshot,
-        next: { reason: "github_changes_requested", correctionIds: reviews, correctionLinks, checks: decision.checks } });
+        next: { reason: "github_changes_requested", correctionIds: reviews, correctionLinks, correctionProducerId: recipient.reviewerId, checks: decision.checks } });
       return null;
     }
     const failure = decision.checks?.find(check => check.status === "failed");
+    let diagnosisOperation = null;
     if (!inactive && failure) {
-      const current = reviewId(recipe, number, head, reviewerId);
+      const initialDiagnosis = diagnosisId(head, failure);
+      diagnosisOperation = latestReviewOperation(store, recipe.roomId, requesterId, initialDiagnosis);
+      const interrupted = store.operationReceipt(secret, recipe.roomId, diagnosisOperation + "-feedback");
+      if (interrupted.status === "recorded")
+        diagnosisOperation = initialDiagnosis + "-r-" + createHash("sha256").update(interrupted.eventId).digest("hex").slice(0, 24);
+      if (previousDiagnosis && previousDiagnosis !== diagnosisOperation)
+        cancel(previousDiagnosis, "GitHub is reporting a different failing check attempt.", "-replaced");
+      const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
       const operation = latestReviewOperation(store, recipe.roomId, requesterId, current);
       cancel(operation, FAILURE_REASON + JSON.stringify({ app: failure.app, name: failure.name, id: failure.id }), "-withdraw");
-      if (store.operationReceipt(secret, recipe.roomId, diagnosis).status !== "recorded") {
+      if (store.operationReceipt(secret, recipe.roomId, diagnosisOperation).status !== "recorded") {
         store.command(secret, recipe.roomId, buildReplyCommand({ roomId: recipe.roomId, memberId: requesterId }, "room_request_reply", {
-          requestId: diagnosis, toMemberId: reviewerId, workItemId: linked.workItemId,
+          requestId: diagnosisOperation, toMemberId: reviewerId, workItemId: linked.workItemId,
           body: [
             `Diagnose the required GitHub check on ${decision.pullRequest} at ${head}.`,
             `Exact check: ${failure.app} / ${failure.name} / attempt ${failure.id}.`,
@@ -395,9 +410,10 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
         }));
       }
     }
+    if (!inactive && !failure && previousDiagnosis)
+      cancel(previousDiagnosis, "The reported failed check is no longer the current attempt.", "-cleared");
     if (!inactive && decision.action === "review_ready") {
-      cancel(diagnosis, "The exact candidate now has passing required checks.", "-passed");
-      const current = reviewId(recipe, number, head, reviewerId);
+      const current = reviewId(recipe, number, head, reviewerId, linked.workItemId);
       const operation = latestReviewOperation(store, recipe.roomId, requesterId, current);
       const receipt = store.operationReceipt(secret, recipe.roomId, operation);
       if (receipt.status !== "recorded") {
@@ -420,7 +436,8 @@ export async function reconcileAttachedGithubDelivery(store, binding, entry, opt
       }
     }
     updateGithubWorkObservation(store, recipe.roomId, recipe.repository, number, { ...observed.snapshot,
-      next: { reason: decision.reason, ...(decision.checks ? { checks: decision.checks } : {}) } });
+      next: { reason: decision.reason, ...(decision.checks ? { checks: decision.checks } : {}),
+        ...(diagnosisOperation ? { diagnosisOperation } : {}) } });
     return null;
   });
 
@@ -492,8 +509,10 @@ export function queueAttachedGithubReview(store, delivery, env) {
   return queued;
 }
 
-export async function maybeDispatchGithubReview(store, delivery, env) {
+export async function maybeDispatchGithubReview(store, delivery, env, attachedPulls = []) {
   if (!env.ROOM_GITHUB_REVIEW_RECIPE) return [];
   const binding = readGithubReviewWebhookBinding(JSON.parse(env.ROOM_GITHUB_REVIEW_RECIPE));
-  return dispatchGithubReview(store, binding, delivery, workWebhookOptions(env));
+  if (!binding) return [];
+  const pulls = binding.pulls.filter(number => !attachedPulls.includes(number));
+  return dispatchGithubReview(store, { ...binding, pulls }, delivery, workWebhookOptions(env));
 }

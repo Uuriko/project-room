@@ -107,6 +107,14 @@ test("a failing candidate yields one diagnosis and passing checks restore exact 
   assert.notEqual(open()[0].id, diagnosis.id);
   assert.notEqual(open()[0].id, review.id);
   assert.equal(f.store.workContext(f.owner, roomId, input.workItemId).pullRequest.next.checks[0].id, 3);
+  check = { id: 4, conclusion: "failure" };
+  await drain("second-failure");
+  assert.equal(open().length, 1);
+  assert.notEqual(open()[0].id, diagnosis.id);
+  check = { id: 5, conclusion: "success" };
+  await drain("second-recovery");
+  assert.equal(open().length, 1);
+  assert.equal(f.store.workContext(f.owner, roomId, input.workItemId).pullRequest.next.checks[0].id, 5);
 });
 
 test("delivery admitted during an in-flight observation drains without a timer", async t => {

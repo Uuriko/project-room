@@ -489,7 +489,14 @@ export async function postPrWebhook(ctx) {
     nowMs: Date.now(),
     webhook: { rawBody: text, signature256: ctx.req.headers["x-hub-signature-256"], env },
   }) : null;
-  if (queued.length) return ctx.json(ctx.res, 202, { ok: true, queued });
+  if (queued.length) {
+    // Other PRs in the same check-suite delivery can still have a static
+    // binding. Keep their existing success/failure response guarantees.
+    let review;
+    try { review = await maybeDispatchGithubReview(ctx.store, parsedEvent, env, queued); }
+    catch { return ctx.json(ctx.res, 503, { ok: false, reason: "review_evidence_unavailable" }); }
+    return ctx.json(ctx.res, 202, { ok: true, queued, ...(review.length ? { review } : {}) });
+  }
   let review;
   try { review = await maybeDispatchGithubReview(ctx.store, parsedEvent, env); }
   catch { return ctx.json(ctx.res, 503, { ok: false, reason: "review_evidence_unavailable" }); }
