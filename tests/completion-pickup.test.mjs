@@ -328,12 +328,21 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.deepEqual(rpc.result.structuredContent.declineAlternative, recovery);
     assert.equal(dynamic.event.data.body, command.data.body);
     assert.ok(!JSON.stringify(dynamic.event).includes(dynamicBody));
-    respond(dynamic.event.data.messageId, "declined", "decline-room-authored");
+    const competing = fire(owner, requesterId, "room_request_reply", {
+      requestId: "competing-dynamic-review", toMemberId: recipientId, workItemId,
+      body: "Check the separate summary before opening another review.",
+    });
+    const dynamicDecline = respond(dynamic.event.data.messageId, "declined", "decline-room-authored");
     await setImmediate();
     const dynamicReceipt = () => store.operationReceipt(owner, roomId, operationId);
     assert.equal(dynamicReceipt().status, "not_recorded");
     stop();
     stop = start();
+    await connect(scope);
+    await setImmediate();
+    assert.equal(dynamicReceipt().status, "not_recorded", "the other open request blocks the alternative after restart");
+    server.closeStreams();
+    respond(competing.event.data.messageId, "answered", "answer-competing-dynamic");
     await connect(scope);
     await setImmediate();
     const alternative = dynamicReceipt();
@@ -357,12 +366,27 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     server.closeStreams();
     postDraft(owner, "draft-to-remove", "Review the wording for a closed hunk.");
     const deleted = store.command(owner, roomId, makeSeed("deleted-draft-seed", "draft-to-remove"));
-    respond(deleted.event.data.messageId, "declined", "decline-deleted-draft");
-    store.command(owner, roomId, { id: "delete-approved-draft", type: "message.deleted",
+    const deletedDecline = respond(deleted.event.data.messageId, "declined", "decline-deleted-draft");
+    const removal = store.command(owner, roomId, { id: "delete-approved-draft", type: "message.deleted",
       data: { messageId: "draft-to-remove", expectedMessageRevision: 0 } });
+    assert.equal(removal.event.type, "message.deleted");
+    assert.ok(removal.sequence > deletedDecline.sequence);
+    assert.equal(store.declineAlternativeDraft(roomId, requesterId, recipientId, workItemId, "draft-to-remove"), null);
+
+    // An eligible decline proves that reconnect drives the subscriber.
+    const control = store.command(owner, roomId, makeSeed("reconnect-control-seed", "replacement-draft"));
+    const controlDecline = respond(control.event.data.messageId, "declined", "decline-reconnect-control");
+    const controlReceipt = () => store.operationReceipt(owner, roomId, declineAlternativeOperationId(control.event.id));
+    await setImmediate();
+    assert.equal(controlReceipt().status, "not_recorded");
     await connect(scope);
     await setImmediate();
     assert.equal(store.operationReceipt(owner, roomId, declineAlternativeOperationId(deleted.event.id)).status, "not_recorded");
+    const controlAlternative = controlReceipt();
+    assert.equal(controlAlternative.status, "recorded", JSON.stringify(log));
+    const controlRequest = store.replyRequests.list(owner, roomId, { direction: "outgoing", status: "open" }).requests;
+    assert.equal(controlRequest.length, 1);
+    respond(controlRequest[0].id, "answered", "answer-reconnect-control");
     server.closeStreams();
     const withdrawn = store.command(owner, roomId, makeSeed("cancelled-dynamic-seed", "replacement-draft"));
     fire(owner, requesterId, "room_cancel_request", { requestId: "cancel-dynamic", requestMessageId: withdrawn.event.data.messageId,
@@ -377,6 +401,8 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(store.operationReceipt(owner, roomId, declineAlternativeOperationId(withdrawn.event.id)).status, "not_recorded");
     assert.equal(store.operationReceipt(owner, roomId, declineAlternativeOperationId(answered.event.id)).status, "not_recorded");
     assert.equal(dynamicReceipt().eventId, alternative.eventId);
-    assert.equal(log.filter(row => row.event === "completion_pickup.decline_alternative").length, 1);
+    assert.equal(controlReceipt().eventId, controlAlternative.eventId);
+    assert.deepEqual(log.filter(row => row.event === "completion_pickup.decline_alternative").map(row => row.decline),
+      [dynamicDecline.sequence, controlDecline.sequence]);
   });
 }
