@@ -96,6 +96,18 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     f.send(f.producer.key, "reply_request.progressed", { requestMessageId: "private-ask",
       expectedRequestRevision: 0, progress: "acknowledged", note: "zq-private-progress-note-zq" });
     if (representation === "legacy") {
+      f.send(f.owner, "work.proposed", { workItemId: "private-role-work", title: "zq-private-role-zq",
+        definitionOfDone: "Review the evidence", accountableMemberId: f.broad.id, mode: "read" });
+      f.store.dmConsents.request("commons", "owner", f.observer.id, "fixture");
+      f.store.dmConsents.decide("commons", f.observer.id, "owner", "approve");
+      f.send(f.owner, "message.posted", { messageId: "closed-private-ask", toMemberId: f.observer.id,
+        workItemId: "private-role-work", requestKind: "reply", body: "zq-private-terminal-zq" });
+      f.send(f.owner, "reply_request.cancelled", { requestMessageId: "closed-private-ask",
+        expectedRequestRevision: 0, reason: "The evidence is already available." });
+      for (let n = 0; n < 5; n++) {
+        f.send(f.owner, "work.proposed", { workItemId: `z-producer-${n}`, title: "Producer follow-up",
+          definitionOfDone: "Review one item", accountableMemberId: f.producer.id, mode: "read" });
+      }
       // Room-wide request history may be large even when the viewer has only one open ask.
       f.store.db.prepare(`UPDATE rooms SET projection=json_set(projection,
         '$.replyRequests.unrelated_history',json(?)) WHERE id=?`).run(JSON.stringify({
@@ -130,6 +142,31 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.deepEqual(observer.value.requests.items, []);
     assert.deepEqual(privateMarkers(observer.text), []);
     assert.ok(!observer.text.includes("private-ask"));
+    assert.ok(!observer.text.includes('"secret"'));
+
+    if (representation === "legacy") {
+      const parties = f.store.privateWorkParties("commons", { workIds: ["private-role-work"] });
+      assert.deepEqual(parties, new Map([["private-role-work", new Set(["owner", f.observer.id])]]));
+      const roleHolder = await f.mcp(f.broad, "room_next");
+      assert.equal(roleHolder.ok, true, roleHolder.text);
+      assert.ok(roleHolder.value.work.items.some(item => item.id === "private-role-work" && item.reason === "accept"));
+      assert.ok(!roleHolder.text.includes("closed-private-ask"));
+      assert.ok(!observer.text.includes("private-role-work"));
+
+      assert.equal(owner.value.work.coverage, "partial");
+      const args = owner.value.work.nextRead.arguments;
+      const continued = await f.mcp(f.producer, "room_next", args);
+      assert.equal(continued.ok, true, continued.text);
+      assert.ok(continued.value.work.items.length > 0);
+      const wrongViewer = await f.mcp(f.triage, "room_next", args);
+      assert.equal(wrongViewer.ok, true, wrongViewer.text);
+      assert.equal(wrongViewer.value.work.reason, "cursor_changed");
+      assert.deepEqual(wrongViewer.value.work.items, []);
+      assert.deepEqual(wrongViewer.value.work.nextRead,
+        { tool: "room_next", arguments: { roomId: "commons", source: "work" } });
+      assert.ok(!wrongViewer.text.includes('"secret"'));
+      assert.deepEqual(privateMarkers(wrongViewer.text), []);
+    }
 
     const directory = await mkdtemp(join(tmpdir(), "room-next-cli-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
