@@ -535,10 +535,10 @@ export function drainAttachedGithubDeliveries(store, binding, options) {
             store.transaction(() => {
               for (const row of deliveries) remove.run(row.room_id, row.config_json);
             });
-            for (const row of deliveries) outcomes.push({ status: "observed" });
+            outcomes.push(...deliveries.map(() => ({ status: "observed" })));
           } catch (error) {
             options.onPending?.(error);
-            for (const row of deliveries) outcomes.push({ status: "pending" });
+            outcomes.push(...deliveries.map(() => ({ status: "pending" })));
           }
         }
       } while (page.length === 32);
