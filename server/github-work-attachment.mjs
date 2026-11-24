@@ -27,7 +27,8 @@ export function threadGithubAttachment(store, roomId, workItemId) {
   const attachment = index && githubWorkAttachment(store, roomId, index.repository, index.number);
   if (!attachment) return null;
   const { repository, number, attachedHead, observedHead, state, sequence, next } = attachment;
-  return { repository, number, attachedHead, observedHead, state, sequence, ...(next ? { next } : {}) };
+  const projected = next && { reason: next.reason, checks: next.checks, correctionLinks: next.correctionLinks };
+  return { repository, number, attachedHead, observedHead, state, sequence, ...(projected ? { next: projected } : {}) };
 }
 
 function attachmentReply(roomId, attachment, replayed) {
@@ -83,7 +84,7 @@ export async function attachGithubWork(store, { token, roomId, input, fence, rec
     const result = store.command(token, roomId, { id, type: "message.posted", data: {
       messageId: id, workItemId, body: `Attached PR ${parsed.url}\nCandidate revision: ${expectedHead}`,
     } }, fence);
-    const attachment = { id: operationId, workItemId, producerId: member.id, repository, number: parsed.number, attachedHead: expectedHead,
+    const attachment = { id: operationId, workItemId, repository, number: parsed.number, attachedHead: expectedHead,
       receiptOperationId: id, attachedRevision: expectedRevision, observedHead: expectedHead, state: observation.snapshot.draft ? "draft" : "open",
       attachedState: observation.snapshot.draft ? "draft" : "open", eventId: result.event.id, sequence: result.sequence };
     writeGithubWorkRecord(store, key, attachment);
