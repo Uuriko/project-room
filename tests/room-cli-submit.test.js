@@ -79,6 +79,39 @@ async function fixture(t, representation) {
   return { home, env, origin, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
 }
 
+// Session heartbeats are a legacy writer operation.
+test("a returning agent submits from the fresh revision after a heartbeat", async t => {
+  const { store, owner, producer, cli } = await fixture(t, "legacy");
+  const workItemId = "retained-after-heartbeat";
+  store.command(owner, "commons", { id: "propose", type: "work.proposed", data: {
+    workItemId, title: "Share the revised document", definitionOfDone: "Post the final text",
+    accountableMemberId: producer.identityId, mode: "read",
+  } });
+  const read = async (...args) => {
+    const result = await cli(["work", workItemId, ...args]);
+    assert.equal(result.code, 0, JSON.stringify(result));
+    return result.value;
+  };
+  assert.equal((await cli(["begin", "--from", "-"], await read())).code, 0);
+  const start = (id, expectedRevision) => store.command(producer.secret, "commons", {
+    id, type: "session.started", data: { workItemId, expectedRevision },
+  });
+  start("first-start", (await read()).revision);
+  const saved = await read();
+  start("heartbeat", saved.revision);
+  const fresh = await read("--since", saved.briefVersion);
+  assert.equal(fresh.briefUnchanged, true);
+  assert.equal(fresh.brief, undefined);
+  assert.ok(fresh.revision > saved.revision);
+  assert.equal(fresh.cliBasis.actions.submit.expectedRevision, fresh.revision);
+  assert.match(fresh.guidance, /use this response.s revision and continuation/i);
+  const submission = await cli(["submit", workItemId, "--operation", "after-heartbeat"], {
+    expectedRevision: fresh.cliBasis.actions.submit.expectedRevision, producerId: producer.identityId,
+    body: "The revised document.", summary: "Ready for review", nextAction: "Read the revision",
+  });
+  assert.equal(submission.code, 0, JSON.stringify(submission));
+});
+
 for (const representation of ["legacy", "normalized-current-v1"]) {
 test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {
   const { env, origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
@@ -272,6 +305,7 @@ test(`${representation} commands cover pickup, correction, review, requests and 
       const prior = selected.value;
       const refreshed = (await cli(["work", workItemId, "--since", prior.briefVersion])).value;
       assert.equal(refreshed.briefUnchanged, true);
+      assert.match(refreshed.guidance, /use this response.s revision and continuation/i);
       assert.equal(refreshed.briefVersion, prior.briefVersion);
       assert.equal(refreshed.brief, undefined);
       assert.deepEqual(refreshed.continuation, prior.continuation);

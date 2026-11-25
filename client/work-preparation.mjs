@@ -206,7 +206,7 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
       continuation: workContinuation(context, { hosted }), briefVersion: brief.version };
     if (args.knownBriefVersion === brief.version) return { ...identity, briefUnchanged: true,
       evaluatedAt: context.evaluatedAt,
-      guidance: "Reuse your retained brief for this identity and task. Authority and continuation were freshly read; omitted source, discussion and external evidence are not certified unchanged. Read without knownBriefVersion if that brief is unavailable." };
+      guidance: "Reuse your retained brief for this identity and task. Use this response’s revision and continuation for your next action. Read omitted source, discussion or external evidence separately when you need their current contents. Read without knownBriefVersion if that brief is unavailable." };
     const { publishedVerdicts, pullRequest } = brief.sections.evidence;
     return { ...identity, ...(publishedVerdicts ? { publishedVerdicts } : {}), ...(pullRequest ? { pullRequest } : {}),
       brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } }),
