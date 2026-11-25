@@ -3563,7 +3563,7 @@ function revealWork(id, expandDetails = false) {
   syncWorkReturnControl();
   return card;
 }
-async function readSelectedWorkRecord(id, expandDetails) {
+async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = false } = {}) {
   const context = workNavigationContext();
   if (!context || busy) return null;
   const generation = client.generation, identity = session, held = state;
@@ -3584,6 +3584,10 @@ async function readSelectedWorkRecord(id, expandDetails) {
     // summary window and completeness metadata remain unchanged.
     inspectedWorkRecord = structuredClone(item);
     state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
+    if (restoreInPlace) {
+      renderMessages();
+      return workRecord(id);
+    }
     return revealWork(id, expandDetails);
   } catch (error) {
     if (current()) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
@@ -3802,10 +3806,18 @@ async function restoreWorkOrigin(ticket) {
   activeWorkNavigationId = priorWorkId;
   renderMessages();
   let priorCard = priorWorkId && workRecord(priorWorkId);
+  const input = $("#message-input");
+  let interactionContinued = false;
   if (coldWork && priorWorkId && !priorCard && partialWorkSnapshot) {
-    // A newer compact snapshot may have dropped the previously inspected card.
-    priorCard = await revealWork(priorWorkId);
+    // Read the dropped card into the restored conversation. Opening it as a
+    // new destination would focus it even if the reviewer has started typing.
+    const focused = document.activeElement;
+    const draft = input.value;
+    const selection = [input.selectionStart, input.selectionEnd, input.selectionDirection];
+    priorCard = await readSelectedWorkRecord(priorWorkId, false, { restoreInPlace: true });
     if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
+    interactionContinued = focused !== document.activeElement || draft !== input.value
+      || selection[0] !== input.selectionStart || selection[1] !== input.selectionEnd || selection[2] !== input.selectionDirection;
   }
   if (priorCard) {
     const presentation = priorOrigin?.presentation ?? "focus";
@@ -3813,7 +3825,7 @@ async function restoreWorkOrigin(ticket) {
     const section = priorCard.querySelector(drafts ? ".work-drafts" : ".work-details");
     if (section) section.open = (drafts ? origin.workDraftsOpen : origin.workDetailsOpen) ?? presentation !== "focus";
   }
-  const input = $("#message-input");
+  if (interactionContinued) { syncWorkReturnControl(); return; }
   input.setSelectionRange(...origin.selection); input.scrollTop = origin.composerScroll;
   $("#message-list").scrollTop = origin.listScroll;
   if (origin.type === "updates") {
