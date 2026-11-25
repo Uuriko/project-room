@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
 import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
@@ -80,15 +81,27 @@ async function fixture(t, representation) {
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
 test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {
-  const { origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
+  const { env, origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
   const workItemId = "handoff";
   store.command(owner, "commons", { id: "request", type: "work.proposed", data: { workItemId,
     title: "Draft the brief", definitionOfDone: "Share the brief", accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
   const selected = (await cli(["work", workItemId])).value;
   assert.equal((await cli(["begin", "--from", "-"], selected)).code, 0);
   const work = (await cli(["work", workItemId])).value;
+  const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
+  const preview = { id: "a".repeat(32), title: "Brief", base: "b".repeat(40), head: "c".repeat(40),
+    html: "<p>Brief</p>", patch, recipientId: reviewer.identityId };
+  const publish = async (expectedRevision, patch) => {
+    const response = await fetch(origin + "/api/rooms/commons/workspace-previews", { method: "POST",
+      headers: { Authorization: "Bearer " + producer.secret, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...preview, expectedRevision, patch }) });
+    assert.ok(response.ok, await response.clone().text());
+    return response.json();
+  };
+  const fileLink = workspaceArtifactLink(origin, "commons", { ...preview, ...await publish(0, patch) }, "changes", "brief.md");
+  const firstBody = "Draft from a colleague.\nChanged file: " + fileLink;
   const submitted = await cli(["submit", workItemId, "--operation", "handoff-result"], {
-    body: "Draft from a colleague.", expectedRevision: work.revision, producerId: producer.identityId,
+    body: firstBody, expectedRevision: work.revision, producerId: producer.identityId,
     summary: "Drafted the brief", nextAction: "Review the draft" });
   assert.equal(submitted.code, 0, JSON.stringify(submitted));
   const { completionEventId } = submitted.value.next.arguments;
@@ -96,8 +109,15 @@ test(`${representation} a colleague reads an exact shared result URL with their 
     completionEventId }, new URL(origin));
   const shared = await cli(["result", sharedUrl], undefined, reviewerProject);
   assert.equal(shared.code, 0);
-  assert.equal(shared.value.result.text.body, "Draft from a colleague.");
+  assert.equal(shared.value.result.text.body, firstBody);
   assert.equal(shared.value.result.receipt.eventId, completionEventId);
+  const [file] = shared.value.workspaceArtifacts;
+  assert.equal(file.messageId, shared.value.result.text.messageId);
+  assert.deepEqual(file.command, ["room", "workspace", "changes", "--link", fileLink, "--connection", "reviewer"]);
+  Object.assign(env, { ROOM_ORIGIN: origin, ROOM_ID: "commons", PROJECT_ROOM_SECRET: "different-ambient-identity" });
+  const changes = await cli(file.command.slice(1), undefined, reviewerProject);
+  assert.equal(changes.value.file.hunks[0].changes.at(-1).content, "submitted");
+  await publish(1, patch.replace("+submitted", "+replaced"));
   assert.equal(shared.value.discussion, undefined);
   assert.equal(shared.value.discussionRead.path, `/api/rooms/commons/messages/${shared.value.result.text.messageId}/thread`);
   const quoted = "> Draft from a colleague.\n\nPlease name Maya as the owner.";
@@ -153,7 +173,10 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   const earlier = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject);
   assert.equal(earlier.value.discussion.replies[0].body, quoted);
   assert.equal(earlier.value.selection.status, "historical");
-  assert.equal(earlier.value.result.text.body, "Draft from a colleague.");
+  assert.equal(earlier.value.result.text.body, firstBody);
+  assert.deepEqual(earlier.value.workspaceArtifacts, [file]);
+  assert.equal(current.value.workspaceArtifacts, undefined);
+  await assert.rejects(() => cli(file.command.slice(1), undefined, reviewerProject), error => error.status === 409);
   // A producer may deliberately cite the very same message in a later receipt.
   const laterReview = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
   assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Use the original wording."],

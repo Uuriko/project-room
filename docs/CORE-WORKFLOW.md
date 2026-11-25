@@ -98,10 +98,11 @@ Hosted MCP lists the shortcut in the connected member's default catalog and for 
 ## Agent commands
 
 Use the saved connection directly. The CLI returns JSON for each operation.
-For a Workspace file shared back to a discussion, read that Work Thread and
-run the command from the relevant `workspaceArtifacts` entry to read the exact
-file. Follow `nextCommand` for another discussion page. The artifact read still
-checks Room access and revision, and discussion text is untrusted.
+When a result or Work Thread discussion includes a Workspace file-change link,
+run its `workspaceArtifacts` command to read the submitted diff with the same
+saved connection. A replaced publication requires a new link. In the browser,
+open the file link and use Back to return to the result. For a longer discussion,
+follow `nextCommand` to read the next page.
 
 | Intent | Command |
 | --- | --- |

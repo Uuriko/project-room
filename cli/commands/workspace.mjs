@@ -22,7 +22,7 @@ room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace changes --id ID [--file PATH | --raw yes]
-room workspace changes --link URL
+room workspace changes --link URL [--connection NAME]
 room workspace inspect --link URL --viewer MEMBER_ID [--connection NAME]
 room workspace output --id ID
 room workspace remove --id ID
@@ -162,8 +162,8 @@ function previewInput(cwd, flags) {
 async function connect(io, cwd, name) {
   const env = io.env ?? process.env;
   const fromEnvironment = env.ROOM_ORIGIN && env.ROOM_ID && env.PROJECT_ROOM_SECRET;
-  const inherited = fromEnvironment ? undefined : (name ?? savedWorkspaceConnection(cwd));
-  const conn = await connection({ env, cwd, name: inherited });
+  const inherited = name ?? (fromEnvironment ? undefined : savedWorkspaceConnection(cwd));
+  const conn = await connection({ env, cwd, name: inherited, useEnvironment: name === undefined });
   const path = edgeDoorApiPath(conn.origin, `/api/rooms/${encodeURIComponent(conn.roomId)}/workspace-previews`);
   const call = async (method = "GET", data, query = "", { suffix = "", signal } = {}) => {
     const timeout = AbortSignal.timeout(15000);
@@ -264,7 +264,7 @@ export async function workspaceCommand(argv, io = {}) {
       out(recoverLaunch(cwd, path, base, scope) ?? launch(cwd, path, base, scope));
       return 0;
     }
-    const conn = await connection({ cwd, name, env: io.env });
+    const conn = await connection({ cwd, name, env: io.env, useEnvironment: flags.connection === undefined });
     const source = selectedWorkThread(flags["from-work"], conn);
     const client = new RoomAgentClient({ ...conn, token: conn.secret, fetchImpl: io.fetch });
     const packet = await client.workContext(source.workItemId, { signal: AbortSignal.timeout(15000) });

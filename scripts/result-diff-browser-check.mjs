@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { rmSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -58,9 +58,10 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
   send("owner", T.WORK_PROPOSED, { workItemId: "calm-result", title: "A first result", definitionOfDone: "One version", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
   lifecycle("calm-result");
   completeWithText("calm-result", "Only version of this result");
-  const first = completeWithText("revision-journey", firstBody ?? (retained ? retainedBody : "Result A\nKeep this line\nMissing named owner"), firstDirectTo, firstCredit);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
+  const body = typeof firstBody === "function" ? firstBody(origin) : firstBody;
+  const first = completeWithText("revision-journey", body ?? (retained ? retainedBody : "Result A\nKeep this line\nMissing named owner"), firstDirectTo, firstCredit);
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const errors = [];
   async function login(actor, destination = origin) {
@@ -417,6 +418,36 @@ test("the verdict links exact candidate release checks without claiming missing 
     t.diagnostic(JSON.stringify({ viewport, route: "Accepted release in Updates All", actionsFromDefaultUpdates: 2,
       exactCompletion: completed.event.id, candidate: candidateRevision, labels }));
   }
+});
+
+test("a submitted file change opens in the reviewer’s room and reports a replaced publication", { timeout: 45000 }, async t => {
+  const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
+  const id = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
+  const href = origin => origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
+  const text = origin => [href(origin), href(origin).replace("/?", "/other?"), href(origin).replace("commons#", "other#")].join("\n");
+  const f = await setup(t, 1440, { firstBody: text });
+  const publish = async (expectedRevision, patch) => {
+    const res = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+      method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+      body: JSON.stringify({ id, expectedRevision, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+    });
+    assert.ok(res.ok, await res.text());
+  };
+  await publish(0, patch);
+  const reviewer = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
+  const body = reviewer.locator("#result-body");
+  const link = body.getByRole("link", { name: href(f.origin), exact: true });
+  await link.waitFor();
+  assert.equal(await body.textContent(), text(f.origin));
+  assert.equal(await body.locator("a").count(), 1);
+  await link.click();
+  await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
+  await reviewer.goBack();
+  await link.waitFor();
+  await publish(1, patch.replace("+submitted", "+replacement"));
+  await link.click();
+  await reviewer.getByText("This preview revision changed. Open the current attempt to see its latest artifacts.", { exact: true }).waitFor();
+  assert.equal(await reviewer.getByRole("button", { name: "Open current attempt" }).isVisible(), true);
 });
 
 test("shared result links keep identical old and new text bound to different verdicts", { timeout: 45000 }, async t => {

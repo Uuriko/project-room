@@ -1,4 +1,5 @@
 import { exactResultHref } from "./room-deep-link.js";
+import { roomFileChangeSelection } from "./workspace-artifact-link.js";
 import { clipboard } from "./clipboard.js";
 import { canReplyToResult, exactResultRecovery } from "./result-availability.js";
 import { uiText } from "./strings.js";
@@ -164,17 +165,21 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function showResultBody(text) {
     const body = resultElement("result-body");
     body.replaceChildren();
-    // Keep exact text for copy, comparison, and passage selection. Only
-    // canonical GitHub file links at a full commit SHA become navigable.
-    const sourceLink = /(?<!\S)https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?(?=$|\s)/gi;
+    // Preserve the submitted characters, including punctuation around plain URLs.
+    const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
     let offset = 0;
-    for (const match of text.matchAll(sourceLink)) {
+    for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
       const href = match[0];
-      if (new URL(href).href !== href) continue;
+      const url = URL.parse(href);
+      if (!url || url.href !== href) continue;
+      if (!githubFile.test(href) && !(url.pathname === location.pathname
+          && roomFileChangeSelection(url, location.origin, getSession().roomId))) continue;
       const link = document.createElement("a");
       link.href = href;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
+      if (url.origin !== location.origin) {
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+      }
       link.textContent = href;
       body.append(text.slice(offset, match.index), link);
       offset = match.index + href.length;
