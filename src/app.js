@@ -474,6 +474,7 @@ let composerReselectId = null;
 let roomFilesByMessage = new Map();
 let roomFilesSelection = [], roomFilesNextCursor = null, roomFilesLoading = false, roomFilesAttempt = null, roomFilesFlight = null;
 const messageFileDownloads = new Map();
+let answerFileCheck = null;
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
@@ -726,7 +727,7 @@ const client = new RoomClient({
     clearStoredPasswords();
     composerFiles = [];
     roomFilesByMessage = new Map();roomFilesSelection=[];roomFilesNextCursor=null;roomFilesLoading=false;roomFilesAttempt=null;roomFilesFlight=null;
-    messageFileDownloads.clear();
+    messageFileDownloads.clear(); answerFileCheck = null;
     renderComposerFiles();
     $("#work-dialog").close();
     $("#room-overview-dialog").close();
@@ -2915,11 +2916,13 @@ function messageFileChips(messageId) {
   const more=partialWorkSnapshot&&roomFilesNextCursor&&roomFilesSelection[0]===messageId?`<button type="button" data-more-message-files${roomFilesLoading?" disabled":""}>${esc(uiText("currentRoom.moreFiles"))}</button>`:"";
   const message = conversation.byId.get(messageId);
   const inspect=partialWorkSnapshot&&!roomFilesSelection.includes(messageId)&&!(message&&receivedFormalAnswer(message))?`<button type="button" data-check-message-files="${esc(messageId)}">${esc(uiText("currentRoom.checkFiles"))}</button>`:"";
-  if (!files.length&&!more&&!inspect) return "";
+  const checked = !files.length && answerFileCheck?.messageId === messageId ? answerFileCheck.text : "";
+  if (!files.length&&!more&&!inspect&&!checked) return "";
+  const feedback = checked ? `<span class="form-hint" role="status">${esc(checked)}</span>` : "";
   return `<div class="message-files">${files.map(file => {
     const download = messageFileDownloads.get(file.id);
     return `<span class="file-chip"><button type="button" data-download-file="${esc(file.id)}" data-file-message="${esc(messageId)}" data-focus-key="file-download:${esc(file.id)}" aria-label="${esc(uiText("file.download.action", { filename: fileChipLabel(file.filename) }))}"${download?.busy ? ' aria-disabled="true" aria-busy="true"' : ""}>${esc(fileChipLabel(file.filename))}</button>${download?.status ? `<span role="status">${esc(download.status)}</span>` : ""}</span>`;
-  }).join("")}${more}${inspect}</div>`;
+  }).join("")}${more}${inspect}${feedback}</div>`;
 }
 async function downloadMessageFile(id, messageId) {
   const file = roomFilesByMessage.get(messageId)?.find(entry => entry.id === id);
@@ -3040,10 +3043,13 @@ async function checkAnswerFiles(messageId) {
   const message = conversation.byId.get(messageId);
   if (!message || !receivedFormalAnswer(message)) return;
   const generation = client.generation, viewKey = conversationViewKey();
+  answerFileCheck = null;
   const checked = await refreshRoomFiles(false, [messageId]);
   if (generation !== client.generation || conversationViewKey() !== viewKey) return;
-  if (!checked) notice(uiText("file.answer.checkFailed"), true);
-  else if (!roomFilesByMessage.get(messageId)?.length && !roomFilesNextCursor) notice(uiText("file.answer.none"));
+  const text = !checked ? uiText("file.answer.checkFailed")
+    : roomFilesByMessage.get(messageId)?.length || roomFilesNextCursor ? "" : uiText("file.answer.none");
+  answerFileCheck = text ? { messageId, text } : null;
+  renderMessages();
 }
 function composerFileOwner(file) {
   const authSession = client.session, generation = client.generation, roomId = state?.room?.id;
