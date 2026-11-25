@@ -20,7 +20,7 @@ import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
-import { startCompletionPickup } from "./server/completion-pickup.mjs";
+import { startReloadableCompletionPickup } from "./server/completion-pickup.mjs";
 import { workspacePreviewBrokerConfig } from "./server/workspace-preview-broker.mjs";
 import { workspacePreviewViewerConfig } from "./server/workspace-preview-viewer.mjs";
 
@@ -121,9 +121,10 @@ if (server.workspacePreviewViewer) {
   await listening;
 }
 const pickupConfig = process.env.ROOM_COMPLETION_PICKUP_CONFIG ?? join(dirname(filename), "completion-pickup.json");
-const stopCompletionPickup = store && existsSync(pickupConfig)
-  ? startCompletionPickup(store, pickupConfig, console.warn, server) : () => {};
-server.on('close', () => { stopCompletionPickup(); nodeJobs?.stop(); });
+const completionPickup = store && existsSync(pickupConfig)
+  ? startReloadableCompletionPickup(store, pickupConfig, console.warn, server) : null;
+if (completionPickup && process.platform !== "win32") process.on("SIGHUP", completionPickup.reload);
+server.on('close', () => { completionPickup?.stop(); nodeJobs?.stop(); });
 // Track C C11 — growth collector persistence. The snapshot lives in its own
 // JSON file next to the store file; it never touches the store schema. Any
 // failure here only costs analytics history, never boot or shutdown.
@@ -181,6 +182,7 @@ let closing = false;
 function close() {
   if (closing) return;
   closing = true;
+  completionPickup?.stop();
   if (!paused) {
     try { nodeJobs?.stop(); }
     catch (error) { console.warn(`[jobs] scheduler stop failed: ${error?.message ?? error}`); }

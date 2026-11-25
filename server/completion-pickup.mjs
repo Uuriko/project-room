@@ -130,11 +130,9 @@ export function dispatchCompletionPickup(store, route, secret, event, sequence) 
   }
 }
 
-// A declined step waits for a fresh scoped receiver connection. The SQLite
-// operation receipt owns deduplication for both settlement paths.
-export function startCompletionPickup(store, configPath, log = console.warn, receiverServer) {
-  if (!configPath) return () => {};
-  const { routes, checkpointPath } = readPrivateJson(configPath);
+function readCompletionPickupPlan(store, configPath) {
+  const config = readPrivateJson(configPath);
+  const { routes, checkpointPath } = config;
   if (!Array.isArray(routes) || !routes.length || routes.length > 50 || typeof checkpointPath !== "string")
     throw Error("Invalid completion pickup configuration");
   const bindings = new Map();
@@ -151,6 +149,13 @@ export function startCompletionPickup(store, configPath, log = console.warn, rec
     if (store.authenticate(secret, roomId).member.id !== requesterId) throw Error("Invalid completion pickup requester");
     bindings.set(routeKey(route), { route, secret, continuation: compileContinuation(route) });
   }
+  const configDigest = createHash("sha256").update(JSON.stringify(config)).digest("hex");
+  return { bindings, checkpointPath, configDigest };
+}
+
+// A declined step waits for a fresh scoped receiver connection. The SQLite
+// operation receipt owns deduplication for both settlement paths.
+function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, receiverServer) {
   let checkpoints;
   try { checkpoints = readPrivateJson(checkpointPath); }
   catch (error) { if (error.code !== "ENOENT") throw error; checkpoints = {}; }
@@ -207,4 +212,42 @@ export function startCompletionPickup(store, configPath, log = console.warn, rec
   receiverServer?.on("agentReceiverConnected", wake);
   for (const roomId of rooms.keys()) wake(roomId);
   return () => { stopped = true; unsubscribe(); receiverServer?.off("agentReceiverConnected", wake); };
+}
+
+export function startCompletionPickup(store, configPath, log = console.warn, receiverServer) {
+  if (!configPath) return () => {};
+  return subscribeCompletionPickup(store, readCompletionPickupPlan(store, configPath), log, receiverServer);
+}
+
+export function startReloadableCompletionPickup(store, configPath, log, receiverServer) {
+  let plan = readCompletionPickupPlan(store, configPath);
+  let stop = subscribeCompletionPickup(store, plan, log, receiverServer);
+  const logPlan = event => log(JSON.stringify({ event, configDigest: plan.configDigest, routes: plan.bindings.size }));
+  logPlan("completion_pickup.loaded");
+
+  return {
+    reload() {
+      if (!stop) return;
+      try {
+        const candidate = readCompletionPickupPlan(store, configPath);
+        if (candidate.checkpointPath !== plan.checkpointPath)
+          throw Object.assign(new Error("Changing the completion checkpoint requires a restart"), { code: "checkpoint_path_changed" });
+        // The new subscription only queues callbacks. Swap synchronously so
+        // none of the old callbacks can run against the same checkpoint.
+        const stopCandidate = subscribeCompletionPickup(store, candidate, log, receiverServer);
+        stop();
+        stop = stopCandidate;
+        plan = candidate;
+      } catch (error) {
+        log(JSON.stringify({ event: "completion_pickup.reload_rejected", configDigest: plan.configDigest,
+          code: error.code ?? "invalid_plan" }));
+        return;
+      }
+      logPlan("completion_pickup.reloaded");
+    },
+    stop() {
+      stop?.();
+      stop = null;
+    }
+  };
 }
