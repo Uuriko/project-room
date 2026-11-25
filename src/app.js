@@ -3564,6 +3564,13 @@ function revealWork(id, expandDetails = false) {
   syncWorkReturnControl();
   return card;
 }
+function addressedWorkRecord(selected, id, knownRevision, identity) {
+  const item = selected?.work;
+  return selected && client.ownsResponse(selected, identity) && selected.roomId === identity.roomId
+    && selected.viewerId === identity.member.id && item?.id === id && typeof item.title === "string"
+    && typeof item.definitionOfDone === "string" && Number.isSafeInteger(item.revision) && item.revision >= 0
+    && (!Number.isSafeInteger(knownRevision) || item.revision >= knownRevision) ? item : null;
+}
 async function readSelectedWorkRecord(id, expandDetails) {
   const context = workNavigationContext();
   if (!context || busy) return null;
@@ -3574,11 +3581,8 @@ async function readSelectedWorkRecord(id, expandDetails) {
   try {
     const selected = await client.workContext(id);
     if (!current()) return null;
-    const item = selected?.work;
-    if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
-      || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
-      || typeof item.definitionOfDone !== "string" || !Number.isSafeInteger(item.revision) || item.revision < 0
-      || Number.isSafeInteger(held.workItems[id]?.revision) && item.revision < held.workItems[id].revision) {
+    const item = addressedWorkRecord(selected, id, held.workItems[id]?.revision, identity);
+    if (!item) {
       notice(SOURCE_UNAVAILABLE_NOTICE, true); return null;
     }
     // Mount only this independently selected current record. The room's
@@ -7175,7 +7179,9 @@ function syncActionForm() {
   if (busy) return;
   const changed = actionChanged(entry);
   const available = actionAvailable(entry), save = $("#action-form button[type='submit']");
-  for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) field.disabled = entry.uncertain;
+  for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) {
+    field.disabled = entry.uncertain || (entry.textRequired && !entry.text && ["result", "decision"].includes(field.name));
+  }
   if (entry.action === "complete") {
     const external = $("#action-fields [name=producerId]").value === "__external__", input = $("#action-fields [name=externalProducer]");
     $("#action-fields").querySelector("#external-producer-field").hidden = !external; input.required = external; input.disabled = entry.uncertain || !external;
@@ -7208,8 +7214,18 @@ $("#refresh-action").addEventListener("click", () => {
   const epoch = actionEpoch, generation = client.generation, roomId = session.roomId, memberId = session.member.id;
   const owns = () => pendingAction === entry && actionEpoch === epoch && sameSession(generation, roomId, memberId);
   submit($("#action-form"), async current => {
-    try { await client.refresh(); }
-    catch (error) {
+    try {
+      await client.refresh();
+      if (!current() || !owns()) return;
+      if (partialWorkSnapshot && ["verify", "decide"].includes(entry.action)) {
+        const selected = await client.workContext(entry.workId);
+        if (!current() || !owns()) return;
+        const item = addressedWorkRecord(selected, entry.workId, state.workItems[entry.workId]?.revision, session);
+        if (!item) throw new Error("Could not verify the current work");
+        inspectedWorkRecord = structuredClone(item);
+        state = { ...state, workItems: { ...state.workItems, [item.id]: inspectedWorkRecord } };
+      }
+    } catch (error) {
       if (current() && owns()) {
         client.handleFailure(error);
         if (owns()) { clearNotice(); entry.error = "Could not load current work. Try again."; entry.needsReview = true; }

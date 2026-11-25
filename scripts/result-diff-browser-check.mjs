@@ -4,6 +4,7 @@ import { clickChrome, openCatchUp, openWorkFromSearch, clickWorkAction } from ".
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
+import { isCurrentRoom, readCurrentWorkItem } from "../server/current-room-repository.mjs";
 import { operatorNormalization } from "../server/operator-normalization.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { rmSync } from "node:fs";
@@ -41,7 +42,9 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
     rmSync(f.directory, { recursive: true, force: true });
   });
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
-  const item = id => f.store.room("commons").state.workItems[id];
+  const item = id => isCurrentRoom(f.store.db,"commons")
+    ? f.store.readTransaction(() => readCurrentWorkItem(f.store.db,"commons",id))
+    : f.store.room("commons").state.workItems[id];
   const completeWithText = (workItemId, body, toMemberId, credit = { producerId: "producer" }) => {
     const posted = send("producer", T.MESSAGE_POSTED, { messageId: randomUUID(), workItemId, body, ...(toMemberId ? { toMemberId } : {}) });
     return send("producer", T.WORK_COMPLETED, { workItemId, expectedRevision: item(workItemId).revision,
@@ -411,6 +414,66 @@ test("Needs Me opens the exact verification form for external evidence", { timeo
     && request.postDataJSON().type === T.VERIFICATION_RECORDED);
   await review(reviewer, "pass", "Checked the linked change");
   assert.equal((await check).postDataJSON().data.completionEventId, completed.event.id);
+});
+
+test("a stale review keeps its note and loads the exact replacement before saving", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const selection = { roomId: "commons", discardLegacyAssignments: true };
+  const plan = operatorNormalization(f.store, selection);
+  operatorNormalization(f.store, { ...selection, planHash: plan.planHash, requestId: randomUUID(), reason: "Isolated stale review fixture" }, true);
+  const reviewer = await f.login("human-checker");
+  await clickWorkAction(await openWorkFromSearch(reviewer, "revision-journey", "Revise a short result"), "verify");
+  await reviewer.locator("#action-text-body").getByText(/Result A/).waitFor();
+  const note = reviewer.locator('#action-fields [name="summary"]');
+  const verdict = reviewer.locator('#action-fields [name="result"]');
+  const save = reviewer.locator('#action-form button[type="submit"]');
+  await note.fill("The Friday deadline agrees with the planning brief.");
+  await verdict.selectOption("pass");
+
+  let replacement;
+  const sent = [];
+  await reviewer.route("**/api/rooms/commons/commands", async route => {
+    const command = route.request().postDataJSON();
+    if (command.type === T.VERIFICATION_RECORDED) {
+      sent.push(command.data.completionEventId);
+      if (sent.length === 1) {
+        f.mutate(T.WORK_BLOCKED, { reason: "The deadline changed", nextAction: "Replace the result" });
+        f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Updated the deadline" });
+        f.mutate(T.WORK_STARTED, {});
+        replacement = f.complete("Result B\nDeadline: Monday");
+      }
+    }
+    await route.continue();
+  });
+  await save.click();
+  await reviewer.locator("#refresh-action").waitFor();
+  assert.deepEqual(sent,[f.first.event.id]);
+  assert.equal(await note.inputValue(),"The Friday deadline agrees with the planning brief.");
+  assert.equal(await save.isEnabled(),false);
+
+  const exactRead = Promise.withResolvers(), deliverReplacement = Promise.withResolvers();
+  await reviewer.route(url => new URL(url).searchParams.get("completionEventId") === replacement.event.id, async route => {
+    exactRead.resolve();
+    await deliverReplacement.promise;
+    await route.continue();
+  });
+  try {
+    await reviewer.locator("#refresh-action").press("Enter");
+    await exactRead.promise;
+    await reviewer.waitForFunction(() => document.querySelector("#action-form").getAttribute("aria-busy") !== "true");
+    assert.equal(await save.isEnabled(),false);
+    assert.equal(await verdict.isEnabled(),false);
+    assert.equal(await note.isEnabled(),true);
+    assert.equal(await note.inputValue(),"The Friday deadline agrees with the planning brief.");
+  } finally {
+    deliverReplacement.resolve();
+  }
+  await reviewer.locator("#action-text-body").getByText(/Deadline: Monday/).waitFor();
+  assert.equal(await note.inputValue(),"The Friday deadline agrees with the planning brief.");
+  assert.equal(await verdict.inputValue(),"");
+  assert.deepEqual(sent,[f.first.event.id]);
+  await review(reviewer,"fail","The replacement needs a source for Monday.");
+  assert.deepEqual(sent,[f.first.event.id,replacement.event.id]);
 });
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
