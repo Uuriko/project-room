@@ -5,6 +5,7 @@ import { validId } from "../src/events.js";
 import { listRoomWork } from "./mcp-room-profile.mjs";
 
 const investigation = "Room investigation pass.";
+const pickupRetryDelaysMs = [1000, 2000, 4000, 8000, 16000, 32000];
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
   JSON.stringify([roomId, requesterId, recipientId, workItemId]);
 
@@ -163,19 +164,26 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
   for (const { route } of bindings.values()) {
     const saved = checkpoints[route.roomId];
     const start = Number.isSafeInteger(saved) ? Math.max(route.after, saved) : route.after;
-    rooms.set(route.roomId, Math.min(start, rooms.get(route.roomId) ?? start));
+    const through = Math.min(start, rooms.get(route.roomId)?.through ?? start);
+    rooms.set(route.roomId, { through, retry: null, attempts: 0 });
   }
   const pending = new Set();
   let stopped = false;
   function wake(roomId) {
-    if (stopped || !rooms.has(roomId) || pending.has(roomId)) return;
+    const room = rooms.get(roomId);
+    if (stopped || !room || pending.has(roomId)) return;
     pending.add(roomId);
     setImmediate(() => {
       pending.delete(roomId);
       if (stopped) return;
+      let failed = false;
+      const deferred = error => {
+        failed = true;
+        log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+      };
       try {
         const rows = store.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 64")
-          .all(roomId, rooms.get(roomId));
+          .all(roomId, room.through);
         for (const row of rows) {
           const event = JSON.parse(row.body);
           const { toMemberId, workItemId, responseOutcome } = event.data ?? {};
@@ -191,11 +199,11 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
           const next = { ...checkpoints, [roomId]: through };
           atomicPrivateJson(checkpointPath, next);
           checkpoints = next;
-          rooms.set(roomId, through);
+          room.through = through;
         }
         if (rows.length === 64) wake(roomId);
       } catch (error) {
-        log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+        deferred(error);
       }
       for (const binding of bindings.values()) {
         if (binding.route.roomId !== roomId || !binding.continuation) continue;
@@ -203,15 +211,32 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
           const opening = advanceContinuation(store, binding, receiverServer);
           if (opening !== undefined) log(JSON.stringify({ event: "completion_pickup.continued", roomId, opening }));
         } catch (error) {
-          log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+          deferred(error);
         }
+      }
+      if (!failed) {
+        clearTimeout(room.retry);
+        room.retry = null;
+        room.attempts = 0;
+      } else if (!room.retry && room.attempts < pickupRetryDelaysMs.length) {
+        // An otherwise quiet room may never emit another wake after a failure.
+        room.retry = setTimeout(() => {
+          room.retry = null;
+          wake(roomId);
+        }, pickupRetryDelaysMs[room.attempts++]);
+        room.retry.unref();
       }
     });
   }
   const unsubscribe = store.onEventAppended(wake);
   receiverServer?.on("agentReceiverConnected", wake);
   for (const roomId of rooms.keys()) wake(roomId);
-  return () => { stopped = true; unsubscribe(); receiverServer?.off("agentReceiverConnected", wake); };
+  return () => {
+    stopped = true;
+    for (const room of rooms.values()) clearTimeout(room.retry);
+    unsubscribe();
+    receiverServer?.off("agentReceiverConnected", wake);
+  };
 }
 
 export function startCompletionPickup(store, configPath, log = console.warn, receiverServer) {
