@@ -3648,6 +3648,7 @@ function sameWorkOrigin(a, b) {
   if (a.type === "updates") return ["itemId", "filter", "pageBudget", "scrollTop", "listScrollTop", "completionEventId"]
     .every(key => a.updates?.[key] === b.updates?.[key]);
   // JDOT-COH-UPDATES-PAGE end
+  if (a.type === "result") return a.result.completionEventId === b.result.completionEventId;
   if (a.type === "board") return a.claimId === b.claimId && a.focusKey === b.focusKey;
   const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
   return key(a) ? key(a) === key(b) : a.focus === b.focus;
@@ -3823,7 +3824,9 @@ async function restoreWorkOrigin(ticket) {
   }
   if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
   window.scrollTo(...origin.windowScroll);
-  if (origin.type !== "updates") {
+  if (origin.type === "result") {
+    openLinkedResult(origin.result);
+  } else if (origin.type !== "updates") {
     const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
     const keyed = origin.focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === origin.focusKey) : null;
     const claim = origin.claimId ? $(`#work-board [data-claim-id="${CSS.escape(origin.claimId)}"] h4`) : null;
@@ -6945,7 +6948,7 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
     return selectedMessage.sync(client.sequence);
   },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
-  onOpenDecision(messageId) { return navigateWorkRecord("message", messageId); },
+  onOpenDecision(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result }); },
   onOpenWorkspace(url, message, artifactId) {
     const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;
     history.pushState(workHistoryState(), "", url.href);

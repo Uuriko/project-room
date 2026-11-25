@@ -267,7 +267,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const source = resultView?.decisionSource;
       if (!usableText(resultView) || decisionLink.hidden || !source || isBusy()) { event.preventDefault(); return; }
-      if (onOpenDecision(source.messageId)) event.preventDefault();
+      const { roomId, workItemId, receipt } = resultView;
+      if (onOpenDecision(source.messageId, { roomId, workItemId, completionEventId: receipt.completionEventId })) event.preventDefault();
     });
   }
   function resultStatus() {
