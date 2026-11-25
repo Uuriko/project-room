@@ -69,7 +69,7 @@ async function setup(t, { current = false, mobile = false, review = false, viewp
   for (let i = 0; i < 102; i++) { chatAt += 2000; send(T.MESSAGE_POSTED, { body: "Synthetic background activity", replyToId: "test-welcome" }); }
   const complete = () => mutate(T.WORK_COMPLETED, { evidenceKind: "room_text", evidenceMessageId: "native-draft", evidenceMessageEventId: posted.event.id,
     evidenceVersion: textVersion(body), previousCompletionEventId: item().receipt?.eventId ?? null, producerId: "owner", summary: "A quiet room", nextAction: "Review" });
-  if (review) complete();
+  const reviewEventId = review ? complete().event.id : null;
   const server = createRoomServer({ store: f.store, streamInterval: 40 }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
@@ -93,7 +93,7 @@ async function setup(t, { current = false, mobile = false, review = false, viewp
   };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/native-result-${name}.png` }); };
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
-  return { ...f, browser, page, workItemId, body, item, send, mutate, complete, open, fill, textReady, capture, save: page.locator("#action-form button[type=submit]") };
+  return { ...f, browser, page, workItemId, reviewEventId, body, item, send, mutate, complete, open, fill, textReady, capture, save: page.locator("#action-form button[type=submit]") };
 }
 
 test("a fresh exact result defers catch-up until the reader opens it", { timeout: 25000 }, async t => {
@@ -565,12 +565,15 @@ for (const mobile of [false, true]) test(`selected result feedback ${mobile ? "m
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
   });
   await f.page.locator("#result-discuss").click();
-  assert.equal(await f.page.locator("#message-input").inputValue(), "> A quiet room\n\nPlease clarify this.");
+  const source = new URL("/?room=commons", f.page.url());
+  source.hash = "#pr-record/result/" + f.workItemId + "/" + f.item().receipt.eventId;
+  const feedback = "> A quiet room\n" + source.href + "\n\nPlease clarify this.";
+  assert.equal(await f.page.locator("#message-input").inputValue(), feedback);
   assert.equal(await f.page.locator("#message-input").evaluate(el => el === document.activeElement), true);
   await f.capture(`selected-feedback-${mobile ? "mobile" : "desktop"}`);
   await f.page.locator("#message-form button[type=submit]").click();
   await f.page.waitForFunction(() => document.querySelector("#message-input").value === "");
-  const posted = f.store.room("commons").state.messages.find(message => message.body === "> A quiet room\n\nPlease clarify this.");
+  const posted = f.store.room("commons").state.messages.find(message => message.body === feedback);
   assert.equal(posted?.replyToId, "native-draft", "posted feedback references the exact inspected source message");
   if (!mobile) await f.page.locator("#close-result").click();
   await f.page.locator("#thread-back").click();
@@ -827,7 +830,9 @@ for (const current of [false, true]) test(`reply with an old result passage whil
       selection.addRange(range);
     });
     await f.page.locator("#result-discuss").click();
-    await f.page.waitForFunction(() => document.querySelector("#message-input").value === "> A quiet room\n\n", null, { timeout: 4500 });
+    const source = new URL("/?room=commons", f.page.url());
+    source.hash = "#pr-record/result/" + f.workItemId + "/" + f.reviewEventId;
+    await f.page.waitForFunction(href => document.querySelector("#message-input").value === "> A quiet room\n" + href + "\n\n", source.href, { timeout: 4500 });
     assert.ok(selected.includes("native-draft"));
     assert.match(await f.page.locator("#reply-context").textContent(), /A quiet room/);
     const input = f.page.locator("#message-input");

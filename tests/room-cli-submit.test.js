@@ -120,7 +120,7 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   await publish(1, patch.replace("+submitted", "+replaced"));
   assert.equal(shared.value.discussion, undefined);
   assert.equal(shared.value.discussionRead.path, `/api/rooms/commons/messages/${shared.value.result.text.messageId}/thread`);
-  const quoted = "> Draft from a colleague.\n\nPlease name Maya as the owner.";
+  const quoted = "> Draft from a colleague.\n" + sharedUrl + "\n\nPlease name Maya as the owner.";
   const feedback = store.command(reviewer.secret, "commons", { id: "feedback", type: "message.posted",
     data: { messageId: "quoted-feedback", replyToId: shared.value.result.text.messageId, body: quoted } });
   store.command(reviewer.secret, "commons", { id: "private-feedback", type: "message.posted",
@@ -193,6 +193,11 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   const reusedRead = await cli(["result", workItemId, "--completion", reused.event.id, "--discussion"]);
   assert.equal(reusedRead.code, 0);
   assert.deepEqual(reusedRead.value.discussion, producerRead.value.discussion);
+  const quotedSource = reusedRead.value.discussion.replies[0].body.split("\n").find(line => line.startsWith(origin));
+  const fromFeedback = await cli(["result", quotedSource]);
+  assert.equal(fromFeedback.code, 0);
+  assert.equal(fromFeedback.value.result.receipt.eventId, completionEventId);
+  assert.equal(fromFeedback.value.selection.status, "historical");
   for (const other of [sharedUrl.replace("room=commons", "room=other"), sharedUrl.replace(origin, "https://other.example")]) {
     let calls = 0;
     const refused = await cli(["result", other], undefined, reviewerProject, () => { calls++; throw new Error("unexpected call"); });

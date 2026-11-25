@@ -18,7 +18,8 @@ export function createResultFeedback({ getState, getConversation, isBlocked,
       // Bind the quote to the exact source inspected, before any navigation.
       if (typeof body !== "string" || body !== message.body || !Number.isSafeInteger(start) || !Number.isSafeInteger(end)
         || start < 0 || end <= start || end > body.length) return false;
-      quote = body.slice(start, end).split("\n").map(line => `> ${line}`).join("\n") + "\n\n";
+      const passage = body.slice(start, end).split("\n").map(line => `> ${line}`).join("\n");
+      quote = [passage, selection.sourceHref].filter(Boolean).join("\n") + "\n\n";
     }
     const hasContent = Boolean(draft?.body?.trim() || draft?.files?.length);
     const differentReply = hasContent && draft.replyToId && draft.replyToId !== message.id;

@@ -295,6 +295,41 @@ test("returning from the first submission compares all changes across two revisi
   await page.locator("#result-diff").getByText("- Owner: undecided", { exact: true }).waitFor();
 });
 
+test("a passage reply identifies the reviewed submission when two receipts cite one message", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const original = f.first.event.data;
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Confirm who owns this" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Confirmed" });
+  f.mutate(T.WORK_STARTED, {});
+  const second = f.mutate(T.WORK_COMPLETED, { ...original, expectedRevision: f.item().revision,
+    previousCompletionEventId: f.first.event.id });
+  const url = id => f.origin + "/?room=commons#pr-record/result/revision-journey/" + id;
+  const page = await f.login("human-checker", url(f.first.event.id));
+  await page.locator("#result-body").getByText(/Result A/).waitFor();
+  await page.locator("#result-body").evaluate(body => {
+    const range = document.createRange();
+    range.setStart(body.firstChild, 0); range.setEnd(body.firstChild, 8);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  });
+  await page.locator("#result-discuss").click();
+  const draft = page.locator("#message-input");
+  const feedback = await draft.inputValue();
+  assert.ok(feedback.includes(url(f.first.event.id)), "the editable feedback names the selected completion");
+  assert.ok(!feedback.includes(url(second.event.id)));
+  await draft.fill(feedback + "Please revisit this wording.");
+  await page.locator("#message-form button[type=submit]").click();
+  await page.waitForFunction(() => document.querySelector("#message-input").value === "");
+  const reply = f.store.room("commons").state.messages.find(message => message.body?.includes("Please revisit this wording."));
+  assert.equal(reply.replyToId, original.evidenceMessageId);
+  const pointer = reply.body.split("\n").find(line => line.startsWith(f.origin));
+  const publishedLink = page.locator('a[href="' + pointer + '"]').first();
+  await publishedLink.waitFor();
+  const recipient = await f.login("owner", await publishedLink.getAttribute("href"));
+  await recipient.locator("#result-body").getByText(/Result A/).waitFor();
+  assert.match(await recipient.locator("#result-status").textContent(), /Earlier result/);
+  assert.equal(await recipient.locator("#result-current-version").getAttribute("href"), url(second.event.id));
+});
+
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
   const f = await setup(t, 390);
   const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;

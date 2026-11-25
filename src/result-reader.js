@@ -425,7 +425,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     prefix.selectNodeContents(body);
     prefix.setEnd(range.startContainer, range.startOffset);
     const start = prefix.toString().length;
-    return { body: view.body, start, end: start + range.toString().length };
+    return { body: view.body, start, end: start + range.toString().length,
+      sourceHref: exactResultHref({ ...view, completionEventId: view.receipt.completionEventId }) };
   }
   // Pointer focus may collapse a text selection before click is dispatched.
   resultElement("result-discuss").addEventListener("pointerdown", () => {
