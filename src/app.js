@@ -7047,7 +7047,7 @@ function loadActionText(item, action) {
     if (!owns() || !value) return;
     if (!entry.draftMessageId && (value.result.receipt?.eventId !== entry.receipt.completionEventId || value.result.receipt?.evidenceVersion !== entry.receipt.evidenceVersion)) throw new Error("Pinned evidence changed");
     entry.text = value.result.text;
-    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns, value.workThread?.correction, entry.compareFrom);
+    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns, value.workThread?.correction, entry.compareFrom, true);
     $("#action-text-body").textContent = entry.text.body;
     const proposal = entry.text.proposal;
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;

@@ -101,7 +101,7 @@ test("newline-only edits remain visible and a large rewrite stays bounded", asyn
   const f = fixture();
   f.load("final line\n"); f.respond(0, "final line"); await settle();
   assert.match(f.box.innerHTML, /Final line break added/);
-  assert.match(f.box.innerHTML, /Previous approval never carries over/);
+  assert.doesNotMatch(f.box.innerHTML, /Previous approval never carries over/);
   assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)|No text changes/);
   f.load("a\n\nend"); f.respond(1, "a\nend"); await settle();
   assert.match(f.box.innerHTML, /0 lines removed, 1 added/);
@@ -134,6 +134,6 @@ test("a line-ending conversion explains the change without showing identical wor
   const f = fixture();
   f.load("One line\r\nAnother line\r\n"); f.respond(0, "One line\nAnother line\n"); await settle();
   assert.match(f.box.innerHTML, /Line-ending style changed/);
-  assert.match(f.box.innerHTML, /Previous approval never carries over/);
+  assert.doesNotMatch(f.box.innerHTML, /Previous approval never carries over/);
   assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)|No text changes/);
 });
