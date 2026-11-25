@@ -187,7 +187,16 @@ export class Bridge {
     this.permissionApproverId = permissionApproverId;
     this.permissionTimeoutMs = permissionTimeoutMs; this.permissionPollMs = permissionPollMs;
     this.restartDelayMs = restartDelayMs; this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0; this.wakeCursor = null; this.freshWakeDiscovery = false; this.crashes = []; this.pausedUntil = 0; this.ready = null;
-    this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
+    this.queue = new ThreadQueue({
+      concurrency: maxSessions,
+      run: (threadKey, batch) => this.turn(threadKey, batch),
+      // A provider close can be slow. Release the turn slot first, and
+      // protect any thread the queue has since scheduled or started.
+      onSettled: () => {
+        this.host.trimIdleSessions?.(maxSessions, key => this.queue.depth(key) > 0)
+          .catch(() => this.log("Could not trim idle ACP sessions"));
+      },
+    });
     this.host.onExit?.(info => this.onAgentExit(info));
     this.approverController = new AbortController();
     this.fencingToken = null; this.seen = new Set(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0, stale: 0 };

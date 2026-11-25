@@ -3,10 +3,10 @@
 // up to `concurrency`. A bounded optional reservation keeps discovered
 // priority work from waiting behind every recovery slot.
 export class ThreadQueue {
-  constructor({ run, concurrency = 4, reservedPriority = 0 }) {
+  constructor({ run, onSettled = null, concurrency = 4, reservedPriority = 0 }) {
     if (!Number.isInteger(reservedPriority) || reservedPriority < 0 || reservedPriority >= concurrency)
       throw Error('Priority reservation must leave at least one recovery slot');
-    Object.assign(this, {run, concurrency, reservedPriority});
+    Object.assign(this, {run, onSettled, concurrency, reservedPriority});
     this.threads = new Map(); this.active = 0; this.normalActive = 0; this.priorityActive = 0; this.pendingPriorityKey = null;
     this.waiting = []; this.idleWaiters = [];
   }
@@ -64,6 +64,7 @@ export class ThreadQueue {
         if (!thread.items.length) this.threads.delete(threadKey);
         else this.waiting.push(threadKey);
         this.#drain();
+        this.onSettled?.();
         if (!this.active && !this.waiting.length) for (const resolve of this.idleWaiters.splice(0)) resolve();
       });
     }
