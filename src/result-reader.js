@@ -397,8 +397,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const previousSource = visibleDecisionNote(previousApproval?.source) ? previousApproval.source : null;
     if (historicalDecisionRow) {
       historicalDecisionRow.hidden = !previousApproval;
-      historicalDecisionRow.firstElementChild.textContent = uiText("result.previouslyApproved") + " · "
-        + (previousSource ? "" : uiText("result.decisionNoteUnavailable"));
+      historicalDecisionRow.firstElementChild.textContent = uiText(previousSource
+        ? "result.previouslyApprovedLinkPrefix" : "result.previouslyApprovedNoteUnavailable");
     }
     if (decisionLink) {
       const row = previousSource ? historicalDecisionRow : activeDecisionRow;

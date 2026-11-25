@@ -162,7 +162,7 @@
     "src/result-availability.js": "sha256:2a8b09755dcc1ad32e84b5f68715ff71abbafa83c95a0343b86cdc1031cebdee",
     "src/result-comparison.js": "sha256:ce7c128eee9b7d4d9f0b66e3e4b4e47388fdc190db28aa74659c4ffa96ad9565",
     "src/result-feedback.js": "sha256:16a54ba9531d5f37fc2cf1a1f6f19dd86cf8fa523296709d3a79078b1f8c8d57",
-    "src/result-reader.js": "sha256:be7542987245ab243efda2dc0ca9638fcb53391a18465aa6da5b8a7e33cab5bc",
+    "src/result-reader.js": "sha256:fa3c5611e1b4d71a85e57f806cb10d5fd0c57b62269187b020731cbd9991fa0d",
     "src/return-brief.js": "sha256:60fe009414d994d445baca3e7c36b36c8b6fce6490c7a0e0ab38bd674371e712",
     "src/room-administration.js": "sha256:27e9d03dfaef3247fc02bec3a98db79db18c8fe53bef026fd94f7b38ee1c0fd1",
     "src/room-charter.js": "sha256:a4d4ef0881a7e31541141ab583df5d59fa771f4259c859d9050fcb1c5dd6615e",
@@ -199,8 +199,8 @@
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
     "src/workspace-previews-ui.js": "sha256:235b3e326b8dd9db15d9218f78910daee65dc1b98f6e2a9dd85652827b11fdc9",
-    "strings/en.js": "sha256:336db39d92adfce5e7f07788de775f1e91e5c90d202415be313183f878f64a86",
-    "strings/en.json": "sha256:a66c9f2e71f97daa2ab4a9578f51b127b4a1ffa802b110fa2f23c565a081f123"
+    "strings/en.js": "sha256:93058f9a0c3c2bd6f6bee277f5f1dc7cefcb7cfc0bdc941ec16f70f6b5676982",
+    "strings/en.json": "sha256:68198a69c63f7f1614a7b3825c520c331be1f8fc0ff2c4592a6005553fa24e86"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",
