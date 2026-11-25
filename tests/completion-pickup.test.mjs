@@ -15,7 +15,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
-async function checkScopedInvestigation(t, firstLine) {
+async function checkScopedInvestigation(t, firstLine, { paged = false, competing = false, changedHorizon = false, missingPage = false } = {}) {
   const f = createAcceptanceFixture(), roomId = "commons", workItemId = "qa-work", recipientId = "pickup-reviewer";
   const agent = f.store.identities.create("Pickup reviewer");
   linkWithProof(f.store, f.keys.owner, roomId, agent, { memberId: recipientId, permissions: ["accept_work","verify"] });
@@ -45,8 +45,30 @@ async function checkScopedInvestigation(t, firstLine) {
   const first = request("Verify current evidence", "initial-qa");
   await setImmediate();
   assert.equal(read().length,1);
+  let competingId;
+  if (competing) competingId = request("Review another result first", "competing-qa").event.data.messageId;
+  if (paged) {
+    const list = f.store.replyRequests.list.bind(f.store.replyRequests);
+    t.mock.method(f.store.replyRequests, "list", (secret, room, { cursor, ...options }) => {
+      const result = list(secret, room, options);
+      if (options.direction !== "outgoing" || options.status !== "open") return result;
+      assert.ok(cursor === undefined || cursor === "later-page");
+      if (cursor) return {
+        ...result,
+        evaluatedThrough: changedHorizon ? result.evaluatedThrough + 1 : result.evaluatedThrough,
+        page: missingPage ? undefined : { hasMore: false },
+      };
+      return { ...result, requests: [], page: { hasMore: true, nextCursor: "later-page" } };
+    });
+  }
   answer(first.event.data.messageId);
   await setImmediate();
+  if (competing || changedHorizon || missingPage) {
+    const expected = competing ? [first.event.data.messageId, competingId] : [first.event.data.messageId];
+    assert.deepEqual(read().map(item => item.id).sort(), expected.sort());
+    assert.deepEqual(log, []);
+    return;
+  }
   assert.equal(read().length,2,JSON.stringify(log));
   const next=read().find(item=>item.id!==first.event.data.messageId);
   assert.equal(next.workItemId,workItemId);
@@ -69,7 +91,16 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
 test("a completion route preserves the receiver's exact first line without chaining an investigation",
   t => checkScopedInvestigation(t, "Claude Code QA"));
 
-async function checkPlannedContinuation(t, representation) {
+test("a complete outgoing scan can open one investigation after an empty partial page",
+  t => checkScopedInvestigation(t, undefined, { paged: true }));
+test("an actionable request after an empty page takes priority over an investigation",
+  t => checkScopedInvestigation(t, undefined, { paged: true, competing: true }));
+test("an outgoing continuation at a different observation cannot start an investigation",
+  t => checkScopedInvestigation(t, undefined, { paged: true, changedHorizon: true }));
+test("an outgoing continuation missing its completion metadata cannot start an investigation",
+  t => checkScopedInvestigation(t, undefined, { paged: true, missingPage: true }));
+
+async function checkPlannedContinuation(t, representation, { missingFirstPage = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-planned-continuation-"));
   const db = join(directory, "room.sqlite");
   const roomId = "commons", workItemId = "qa-work";
@@ -137,10 +168,23 @@ async function checkPlannedContinuation(t, representation) {
   }));
   await setImmediate();
   for (const { name } of lanes) assert.equal(status(`${name}-second`), "not_recorded");
+  if (missingFirstPage) {
+    const list = f.store.replyRequests.list.bind(f.store.replyRequests);
+    t.mock.method(f.store.replyRequests, "list", (secret, room, options) => {
+      const result = list(secret, room, options);
+      return options.direction === "outgoing" && options.status === "open"
+        ? { ...result, page: undefined }
+        : result;
+    });
+  }
   record("claude-seed", "claude");
   record("dot-seed", "dot");
   record("muse-seed", "muse", "declined");
   await setImmediate();
+  if (missingFirstPage) {
+    for (const { name } of lanes) assert.equal(status(`${name}-second`), "not_recorded");
+    return;
+  }
   assert.equal(status("claude-second"), "recorded", JSON.stringify(log));
   assert.equal(status("claude-third"), "not_recorded");
   assert.equal(status("dot-second"), "not_recorded");
@@ -193,6 +237,8 @@ test("legacy Room advances three explicit lanes through restart, refusal and com
   t => checkPlannedContinuation(t));
 test("normalized Room advances three explicit lanes through restart, refusal and competing work",
   t => checkPlannedContinuation(t, "normalized-current-v1"));
+test("normalized Room cannot continue a plan when its first outgoing page omits completion metadata",
+  t => checkPlannedContinuation(t, "normalized-current-v1", { missingFirstPage: true }));
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
   test(`an approved alternative waits for a fresh scoped receiver after decline (${representation})`, async t => {

@@ -3,6 +3,7 @@ import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
 import { validId } from "../src/events.js";
 import { listRoomWork } from "./mcp-room-profile.mjs";
+import { isCurrentRoom } from "./current-room-repository.mjs";
 
 const investigation = "Room investigation pass.";
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
@@ -30,19 +31,27 @@ function compileContinuation(route) {
   return { requests, position: 0 };
 }
 
-function recipientHasOpenRequest(store, secret, { roomId, recipientId }) {
+function recipientHasOpenRequest(store, secret, { roomId, recipientId }, observation) {
+  const visited = new Set();
   let cursor;
   do {
     const open = store.replyRequests.list(secret, roomId, { direction: "outgoing", status: "open", states: true,
       ...(cursor ? { cursor } : {}),
     });
+    if (observation && open.evaluatedThrough !== observation.evaluatedThrough) return true;
     // Staleness measures time since progress. An acknowledged request may
     // still be executing, even when the receiver has stopped reporting.
     if (open.requests.some(item => item.recipientId === recipientId &&
+        (!observation || item.workItemId === observation.workItemId) &&
         (item.lifecycle?.state !== "stale" || item.lifecycle.unresponsive !== true))) return true;
-    if (!open.page?.hasMore) return false;
-    if (!open.page.nextCursor || open.page.nextCursor === cursor) return true;
+    // Legacy lists are unpaged. Once a cursor is offered, only explicit
+    // terminal metadata can establish that the scan is complete.
+    if (!cursor && open.page === undefined) return isCurrentRoom(store.db, roomId);
+    if (open.page?.hasMore === false) return Boolean(open.page.nextCursor);
+    if (open.page?.hasMore !== true) return true;
     cursor = open.page.nextCursor;
+    if (!cursor || visited.has(cursor)) return true;
+    visited.add(cursor);
   } while (cursor);
 }
 
@@ -106,12 +115,11 @@ export function dispatchCompletionPickup(store, route, secret, event, sequence) 
   const requestId = "investigate-" + createHash("sha256").update(roomId + "/" + event.id).digest("hex").slice(0, 32);
   if (store.operationReceipt(secret, roomId, requestId).status === "recorded") return "replayed";
   if (store.wakeQueue.pauseStatus(roomId, recipientId)) return "paused";
-  const requests = store.replyRequests.list(secret, roomId, { direction: "outgoing", status: "open", states: true });
-  if (requests.page?.hasMore || requests.requests.some(item => item.recipientId === recipientId
-      && item.workItemId === workItemId && item.lifecycle?.state !== "stale")) return "ready_or_unknown";
   const offers = listRoomWork(store, secret, { roomId, focus: "help_wanted", limit: 1 });
   if (offers.selection?.available === false || offers.work.length || offers.page?.hasMore
-      || offers.evaluatedThrough !== requests.evaluatedThrough) return "ready_or_unknown";
+      || !Number.isSafeInteger(offers.evaluatedThrough)) return "ready_or_unknown";
+  if (recipientHasOpenRequest(store, secret, route, { workItemId, evaluatedThrough: offers.evaluatedThrough }))
+    return "ready_or_unknown";
   const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
     requestId, workItemId, toMemberId: recipientId,
     body: [
