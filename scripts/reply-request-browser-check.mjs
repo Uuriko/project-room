@@ -27,7 +27,7 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
     const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await signInFixture(page, fixture.keys[who]);
+    await signInFixture(page, fixture.keys[who], { landing: "default" });
     await page.locator("#main").waitFor({ state: "visible" });
     return page;
   }

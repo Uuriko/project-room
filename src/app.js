@@ -5012,8 +5012,16 @@ function submitRequest(form) {
   let command = pendingMessage?.command;
   submit(form, async current => {
     try {
-      if (!command) {
-        if (mode.aboutResult) {
+      if (mode.aboutResult) {
+        let recorded = false;
+        if (command) {
+          const prior = await client.operationReceipt(command.id);
+          if (!current() || session !== identity || !state || composerKey() !== key) return;
+          if (!prior || (prior.status === "recorded" && prior.eventType !== command.type))
+            throw new Error("Room could not confirm the original request");
+          recorded = prior.status === "recorded";
+        }
+        if (!recorded) {
           const anchor = resultReplyMode(conversation?.byId.get(mode.resultMessageId), mode.resultEventId);
           if (anchor?.workItemId !== mode.workItemId) throw new Error("This result is no longer available");
           const exact = await client.workResult(mode.workItemId, { completionEventId: mode.resultEventId });
@@ -5021,6 +5029,8 @@ function submitRequest(form) {
           const text = exact?.result?.text;
           if (text?.messageId !== mode.resultMessageId || text.withdrawnAt) throw new Error("This result is no longer available");
         }
+      }
+      if (!command) {
         const data = replyDraftData(mode, { ...target, messageId: crypto.randomUUID(), roomId: identity.roomId });
         pendingMessage = draftCommand(null, mode.kind === "cancelled" ? REPLY_CANCELLED : T.MESSAGE_POSTED, data);
         command = pendingMessage.command;

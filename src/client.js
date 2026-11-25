@@ -1229,6 +1229,21 @@ export class RoomClient {
       throw error;
     }
   }
+  async operationReceipt(operationId) {
+    const session = this.session, generation = this.generation;
+    if (!session || !this.ownsAccountSession()) throw new Error("Sign in again to check this operation");
+    const query = new URLSearchParams({ operationId, limit: "1" });
+    const value = await this.request(this.path(`/events?${query}`), { fresh: true });
+    if (generation !== this.generation || session !== this.session || !this.ownsAccountSession()) return null;
+    const checked = value?.checkedThrough;
+    if (value?.contractVersion !== 1 || value.roomId !== session.roomId || value.viewerId !== session.member.id
+      || value.operationId !== operationId || !Number.isSafeInteger(checked) || checked < 0 || value.currentStateVerified !== false
+      || !(value.status === "recorded" ? validId(value.eventId) && Number.isSafeInteger(value.sequence)
+        && value.sequence > 0 && value.sequence <= checked && typeof value.eventType === "string"
+        : value.status === "not_recorded" && value.eventId === undefined && value.sequence === undefined && value.eventType === undefined))
+      throw new Error("Room returned an unconfirmed operation receipt");
+    return value;
+  }
   async workResult(workItemId, { completionEventId = null, draftMessageId = null } = {}) {
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }

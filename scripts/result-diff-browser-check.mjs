@@ -428,6 +428,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       else await route.continue();
     });
     await submit.click();
+    await requester.locator("#composer-status.error").waitFor();
     await requester.getByRole("button", { name: "Retry original", exact: true }).waitFor();
     assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 1);
     requester.once("dialog", dialog => dialog.accept());
@@ -463,6 +464,32 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     const { work } = await producer.workContext(workItemId);
     assert.equal(work.receipt.eventId, second.event.id);
     assert.equal(work.verification ?? null, null);
+
+    const interrupted = await f.login("human-checker", original);
+    await interrupted.locator("#result-body").getByText(/Owner: Maya/).waitFor();
+    await interrupted.locator("#result-discuss").click();
+    await interrupted.locator("#request-reply").click();
+    const uncommitted = "Keep this question if its source is withdrawn.";
+    await interrupted.locator("#message-input").fill(uncommitted);
+    await interrupted.locator("#message-to-select").selectOption("producer");
+    let attempted = 0;
+    await interrupted.route("**/api/rooms/commons/commands", async route => {
+      attempted++;
+      await route.abort("failed");
+    });
+    await interrupted.getByRole("button", { name: "Send request", exact: true }).click();
+    await interrupted.locator("#composer-status.error").waitFor();
+    await interrupted.getByRole("button", { name: "Retry original", exact: true }).waitFor();
+    assert.equal(attempted, 1);
+    assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
+    f.send("producer", T.MESSAGE_DELETED, { messageId: f.first.event.data.evidenceMessageId, expectedMessageRevision: 0 });
+    interrupted.once("dialog", dialog => dialog.accept());
+    await interrupted.reload();
+    await interrupted.getByRole("button", { name: "Retry original", exact: true }).click();
+    await interrupted.locator("#composer-status").getByText(/result is no longer available/i).waitFor();
+    assert.equal(await interrupted.locator("#message-input").inputValue(), uncommitted);
+    assert.equal(attempted, 1, "no command posts after an unrecorded operation fails the source check");
+    assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
   });
 }
 
