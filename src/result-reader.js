@@ -381,14 +381,14 @@ export function installResultReader({ client, getState, getSession, sameSession,
         ? `Verification · ${finding.result === "pass" ? "Passed" : finding.result === "fail" ? "Failed" : "Recorded"}`
         : "Verification · Pending";
     }
-    const laterCompletion = item?.receipt?.eventId;
-    if (earlier && laterCompletion && view.selectionStatus === "current" && usableText(view) && view.historicalDecisionRead !== laterCompletion) {
-      view.historicalDecisionRead = laterCompletion;
+    const revision = item?.revision;
+    if (earlier && revision !== undefined && view.selectionStatus === "current" && usableText(view) && view.historicalDecisionRead !== revision) {
+      view.historicalDecisionRead = revision;
       client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
-        if (!usableText(view) || view.historicalDecisionRead !== laterCompletion
-          || getState().workItems[view.workItemId]?.receipt?.eventId !== laterCompletion
-          || value?.selection.status !== "historical" || !matchesReceipt(view.receipt, value.result.receipt)) return;
-        view.selectionStatus = "historical";
+        if (!usableText(view) || view.historicalDecisionRead !== revision
+          || getState().workItems[view.workItemId]?.revision !== revision
+          || value?.current.workRevision !== revision || !matchesReceipt(view.receipt, value.result.receipt)) return;
+        view.selectionStatus = value.selection.status;
         view.historicalApproval = value.workThread?.historicalApproval;
         resultStatus();
       }).catch(() => {});
@@ -596,6 +596,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         || (view.receipt.evidenceVersion && value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion)) throw new Error("Pinned version changed");
       view.receipt.evidenceVersion = value.result.receipt.evidenceVersion;
       view.selectionStatus = value.selection.status;
+      view.historicalDecisionRead = value.current.workRevision;
       view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
       view.decisionSource = value.workThread?.decisionSource;
       view.historicalApproval = value.workThread?.historicalApproval;

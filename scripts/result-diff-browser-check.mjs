@@ -840,6 +840,13 @@ test("an earlier approval keeps its own decision note after a new submission", a
   assert.equal(await opened.locator("#result-work-next").textContent(), "Accepted");
 
   f.mutate(T.WORK_BLOCKED, { reason: "The consumer moved to a new contract.", nextAction: "Update the contract." });
+  await opened.locator("#result-historical-decision").waitFor();
+  await decisionLink(opened).waitFor();
+  const reopened = await f.login("guest", firstUrl);
+  await reopened.locator("#result-historical-decision").waitFor();
+  assert.equal(await decisionLink(reopened).getAttribute("href"), "#pr-record/message/" + messageId);
+  assert.equal(await reopened.locator("#result-work-context").isVisible(), false);
+  await reopened.close();
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Located the new contract." });
   f.mutate(T.WORK_STARTED, {});
   const later = f.complete("New result for the consumer repository.");
@@ -848,6 +855,7 @@ test("an earlier approval keeps its own decision note after a new submission", a
   assert.equal(approvedBefore.workThread.decisionSource, undefined);
   assert.equal(f.store.workResult(f.keys.guest, "commons", workItemId, { completionEventId: later.event.id }).workThread.historicalApproval, undefined);
   await opened.locator("#result-historical-decision").waitFor();
+  await f.restart();
   const old = await f.login("guest", firstUrl);
   const openEarlierNote = decisionLink(old);
   const screenshot = process.env.ROOM_HISTORICAL_DECISION_SCREENSHOT;
@@ -866,6 +874,7 @@ test("an earlier approval keeps its own decision note after a new submission", a
   await old.goBack();
   await openEarlierNote.waitFor();
   await old.waitForFunction(() => document.activeElement?.id === "result-decision-source");
+  assert.equal(await old.locator("#result-historical-decision").isVisible(), true);
   const current = await f.login("guest", f.origin + "/?room=commons#pr-record/result/" + workItemId + "/" + later.event.id);
   await current.locator("#result-body").getByText("New result for the consumer repository.", { exact: true }).waitFor();
   assert.equal(await current.locator("#result-historical-decision").isVisible(), false);

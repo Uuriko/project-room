@@ -144,7 +144,8 @@ export async function verifyWorkResult(value, { roomId, workItemId, completionEv
     check(selection.status === "current" && current.next.action === "complete" && exactDecision(decisionSource) && noteLink(decisionSource));
   const historicalApproval = value.workThread?.historicalApproval;
   if (historicalApproval !== undefined)
-    check(selection.status === "historical" && exactDecision(historicalApproval)
+    check((selection.status === "historical" || (selection.status === "current" && current.next.action !== "complete"))
+      && exactDecision(historicalApproval)
       && (historicalApproval.source === undefined || noteLink(historicalApproval.source)));
   if (value.workThread?.pendingCorrection !== undefined) {
     const correction = value.workThread.pendingCorrection;

@@ -291,7 +291,7 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const noteFor = decision => selectedDecisionSource(db, state, decision, textReceipt, viewerId, floor, messageRecords);
   const decisionSource = textReceipt && selectionStatus === "current" && currentApproval(work)
     && decisionInHistory(db, state.room.id, work.decision, floor) ? noteFor(work.decision) : null;
-  const pastDecision = textReceipt && selectionStatus === "historical"
+  const pastDecision = textReceipt && (selectionStatus === "historical" || next.action !== "complete")
     ? work.decisionHistory?.findLast(decision => decision.decision === "approved" && matchesReceipt(decision, textReceipt)) : null;
   const pastApproval = decisionInHistory(db, state.room.id, pastDecision, floor);
   const pastNote = pastApproval ? noteFor(pastDecision) : null;
