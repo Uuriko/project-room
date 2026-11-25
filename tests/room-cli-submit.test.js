@@ -4,9 +4,13 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
+import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { mcpCallError } from "../server/mcp-arg-errors.mjs";
+import { textVersion } from "../server/text-results.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -73,18 +77,346 @@ async function fixture(t, representation) {
     assert.equal(lines.length, 1);
     return { code, value: lines[0] };
   };
-  return { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
+  return { home, env, origin, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
 }
 
+// Session heartbeats are a legacy writer operation.
+test("a returning agent submits from the fresh revision after a heartbeat", async t => {
+  const { store, owner, producer, cli } = await fixture(t, "legacy");
+  const workItemId = "retained-after-heartbeat";
+  store.command(owner, "commons", { id: "propose", type: "work.proposed", data: {
+    workItemId, title: "Share the revised document", definitionOfDone: "Post the final text",
+    accountableMemberId: producer.identityId, mode: "read",
+  } });
+  const read = async (...args) => {
+    const result = await cli(["work", workItemId, ...args]);
+    assert.equal(result.code, 0, JSON.stringify(result));
+    return result.value;
+  };
+  assert.equal((await cli(["begin", "--from", "-"], await read())).code, 0);
+  const start = (id, expectedRevision) => store.command(producer.secret, "commons", {
+    id, type: "session.started", data: { workItemId, expectedRevision },
+  });
+  start("first-start", (await read()).revision);
+  const saved = await read();
+  start("heartbeat", saved.revision);
+  const fresh = await read("--since", saved.briefVersion);
+  assert.equal(fresh.briefUnchanged, true);
+  assert.equal(fresh.brief, undefined);
+  assert.ok(fresh.revision > saved.revision);
+  assert.equal(fresh.cliBasis.actions.submit.expectedRevision, fresh.revision);
+  assert.match(fresh.guidance, /use this response.s revision and continuation/i);
+  const submission = await cli(["submit", workItemId, "--operation", "after-heartbeat"], {
+    expectedRevision: fresh.cliBasis.actions.submit.expectedRevision, producerId: producer.identityId,
+    body: "The revised document.", summary: "Ready for review", nextAction: "Read the revision",
+  });
+  assert.equal(submission.code, 0, JSON.stringify(submission));
+});
+
 for (const representation of ["legacy", "normalized-current-v1"]) {
+test(`${representation} pickup opens only the linked assignment source with the project connection`, async t => {
+  const { store, owner, producer, reviewer, reviewerProject, origin, cli } = await fixture(t, representation);
+  const workItemId = "first-assignment", body = "The agreed contract is https://docs.example.test/contract.";
+  store.command(owner, "commons", { id: "assignment-source", type: "message.posted",
+    data: { messageId: "assignment-source", body } });
+  store.command(owner, "commons", { id: "other-message", type: "message.posted",
+    data: { messageId: "other-message", body: "Unrelated project discussion." } });
+  store.command(owner, "commons", { id: "propose-first", type: "work.proposed", data: {
+    workItemId, title: "Implement the client", definitionOfDone: "Use the agreed contract",
+    accountableMemberId: producer.identityId, sourceMessageId: "assignment-source", mode: "read",
+  } });
+  const head = store.headSequence("commons");
+  const pickup = await cli(["next"]);
+  assert.equal(pickup.code, 0, JSON.stringify(pickup));
+  const row = pickup.value.work.items.find(item => item.id === workItemId);
+  assert.ok(row, JSON.stringify(pickup));
+  const brief = await cli(row.nextRead.command.slice(1));
+  assert.equal(brief.code, 0, JSON.stringify(brief));
+  assert.doesNotMatch(JSON.stringify(brief), /docs.example.test/);
+  assert.deepEqual(brief.value.sourceRead.command, ["room", "work", workItemId, "--include-source"]);
+  const retained = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
+  assert.equal(retained.value.briefUnchanged, true);
+  assert.deepEqual(retained.value.sourceRead, brief.value.sourceRead);
+  const read = await cli(brief.value.sourceRead.command.slice(1), undefined, undefined, async (url, options) => {
+    assert.equal(new URL(url).origin, origin, "the Room read must never open the external document");
+    return fetch(url, options);
+  });
+  assert.equal(read.code, 0, JSON.stringify(read));
+  assert.equal(read.value.viewerId, producer.identityId);
+  assert.equal(read.value.context.source.message.body, body);
+  assert.match(read.value.context.source.guidance, /external link.*own account.*request access/i);
+  assert.doesNotMatch(JSON.stringify(read), /Unrelated project discussion/);
+  const refresh = ["work", workItemId, "--include-source", "--from", "-"];
+  assert.deepEqual(read.value.context.source.cliRefresh.command, ["room", ...refresh]);
+  const unchanged = await cli(refresh, read.value);
+  assert.equal(unchanged.code, 0, JSON.stringify(unchanged));
+  assert.equal(unchanged.value.context.source.status, "not_modified");
+  assert.equal(unchanged.value.context.source.message, null);
+  assert.doesNotMatch(JSON.stringify(unchanged), /docs.example.test/);
+  const interrupted = await cli(refresh, read.value, undefined, async (_url, { body: request }) =>
+    Response.json({ jsonrpc: "2.0", id: JSON.parse(request).id, result: { isError: true, structuredContent: {
+      stopped: "unknown", roomId: "another-room", viewerId: "another-member", body: "unverified source",
+    } } }));
+  assert.deepEqual(interrupted, { code: 1, value: { status: "unavailable", code: "room_read_unavailable" } });
+  const wrongViewer = await cli(refresh, read.value, reviewerProject, async () => {
+    assert.fail("a cached observation may not be sent under another member");
+  });
+  assert.deepEqual(wrongViewer, { code: 1, value: { status: "refused", code: "source_selection_mismatch" } });
+  const wrongOrigin = structuredClone(read.value);
+  wrongOrigin.context.source.cliRefresh.origin = "https://other-room.example.test";
+  assert.deepEqual(await cli(refresh, wrongOrigin, undefined, async () => {
+    assert.fail("a cached observation may not be sent to a different origin");
+  }), wrongViewer);
+  assert.equal(store.headSequence("commons"), head);
+  store.command(owner, "commons", { id: "edit-source", type: "message.edited",
+    data: { messageId: "assignment-source", expectedMessageRevision: 0, body: "Use the new document instead." } });
+  const retainedAfterEdit = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
+  assert.equal(retainedAfterEdit.value.briefUnchanged, true);
+  assert.match(retainedAfterEdit.value.guidance, /sourceRead.*linked source/i);
+  const changed = await cli(refresh, unchanged.value);
+  assert.equal(changed.code, 0, JSON.stringify(changed));
+  assert.equal(changed.value.context.source.freshness, "changed");
+  assert.equal(changed.value.context.source.message.body, "Use the new document instead.");
+  const otherRead = await cli(["work", workItemId, "--include-source"], undefined, reviewerProject);
+  assert.equal(otherRead.code, 0, JSON.stringify(otherRead));
+  assert.equal(otherRead.value.viewerId, reviewer.identityId);
+  const privateId = "private-assignment-reference";
+  const privateBody = "Restricted reference at https://docs.example.test/reviewers-only.";
+  store.command(owner, "commons", { id: privateId, type: "message.posted",
+    data: { messageId: privateId, toMemberId: reviewer.identityId, body: privateBody } });
+  const hiddenWorkId = "hidden-assignment";
+  store.command(owner, "commons", { id: "hidden-proposal", type: "work.proposed", data: {
+    workItemId: hiddenWorkId, title: "Review the fallback", definitionOfDone: "Use an accessible reference",
+    accountableMemberId: producer.identityId, sourceMessageId: privateId, mode: "read",
+  } });
+  const hidden = await cli(["work", hiddenWorkId, "--include-source"]);
+  assert.equal(hidden.code, 0, JSON.stringify(hidden));
+  assert.equal(hidden.value.context.source.message, null);
+  assert.equal(hidden.value.context.source.observation, null);
+  assert.equal(hidden.value.context.source.status, "unavailable");
+  assert.doesNotMatch(JSON.stringify(hidden), /reviewers-only/);
+  const hiddenBrief = await cli(["work", hiddenWorkId]);
+  assert.equal(hiddenBrief.value.sourceRead, undefined);
+  assert.ok(hiddenBrief.value.brief.includes(hidden.value.context.source.guidance));
+  assert.match(hiddenBrief.value.brief, /Review the fallback/);
+  store.identities.unlink(owner, "commons", reviewer.identityId);
+  const revoked = await cli(refresh, otherRead.value, reviewerProject);
+  assert.equal(revoked.code, 1);
+  assert.doesNotMatch(JSON.stringify(revoked), /Use the new document|not_modified/);
+  const mismatch = await cli(brief.value.sourceRead.command.slice(1), undefined, undefined, async (...args) => {
+    const response = await fetch(...args);
+    const result = await response.json();
+    result.result.structuredContent.viewerId = "another-agent";
+    return Response.json(result);
+  });
+  assert.equal(mismatch.code, 1);
+  assert.doesNotMatch(JSON.stringify(mismatch), /docs.example.test|Use the new document/);
+  store.command(owner, "commons", { id: "delete-source", type: "message.deleted",
+    data: { messageId: "assignment-source", expectedMessageRevision: 1 } });
+  const updated = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
+  assert.equal(updated.code, 0);
+  assert.equal(updated.value.sourceRead, undefined);
+  assert.match(updated.value.brief, /assignment brief is still available.*accessible reference/i);
+  assert.doesNotMatch(JSON.stringify(updated), /docs.example.test|Use the new document/);
+  const retainedWithoutSource = await cli(["work", workItemId, "--since", updated.value.briefVersion]);
+  assert.equal(retainedWithoutSource.value.briefUnchanged, true);
+  assert.equal(retainedWithoutSource.value.sourceRead, undefined);
+  assert.match(retainedWithoutSource.value.guidance, /assignment brief is still available.*accessible reference/i);
+  assert.doesNotMatch(retainedWithoutSource.value.guidance, /Follow sourceRead/i);
+  const deleted = await cli(refresh, changed.value);
+  assert.equal(deleted.code, 0);
+  assert.equal(deleted.value.context.source.status, "unavailable");
+  assert.equal(deleted.value.context.source.cliRefresh, undefined);
+  assert.ok(updated.value.brief.includes(deleted.value.context.source.guidance));
+  assert.equal(deleted.value.context.source.guidance, hidden.value.context.source.guidance);
+  assert.doesNotMatch(JSON.stringify(deleted), /docs.example.test|Use the new document/);
+});
+
+test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {
+  const { env, origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
+  const workItemId = "handoff";
+  store.command(owner, "commons", { id: "request", type: "work.proposed", data: { workItemId,
+    title: "Draft the brief", definitionOfDone: "Share the brief", accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
+  const selected = (await cli(["work", workItemId])).value;
+  assert.equal((await cli(["begin", "--from", "-"], selected)).code, 0);
+  const work = (await cli(["work", workItemId])).value;
+  const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
+  const preview = { id: "a".repeat(32), title: "Brief", base: "b".repeat(40), head: "c".repeat(40),
+    html: "<p>Brief</p>", patch, recipientId: reviewer.identityId };
+  const publish = async (expectedRevision, patch) => {
+    const response = await fetch(origin + "/api/rooms/commons/workspace-previews", { method: "POST",
+      headers: { Authorization: "Bearer " + producer.secret, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...preview, expectedRevision, patch }) });
+    assert.ok(response.ok, await response.clone().text());
+    return response.json();
+  };
+  const fileLink = workspaceArtifactLink(origin, "commons", { ...preview, ...await publish(0, patch) }, "changes", "brief.md");
+  const firstBody = "Draft from a colleague.\nChanged file: " + fileLink;
+  const submitted = await cli(["submit", workItemId, "--operation", "handoff-result"], {
+    body: firstBody, expectedRevision: work.revision, producerId: producer.identityId,
+    summary: "Drafted the brief", nextAction: "Review the draft" });
+  assert.equal(submitted.code, 0, JSON.stringify(submitted));
+  const { completionEventId } = submitted.value.next.arguments;
+  const sharedUrl = exactResultHref({ roomId: "commons", workItemId,
+    completionEventId }, new URL(origin));
+  const shared = await cli(["result", sharedUrl], undefined, reviewerProject);
+  assert.equal(shared.code, 0);
+  assert.equal(shared.value.result.text.body, firstBody);
+  assert.equal(shared.value.result.receipt.eventId, completionEventId);
+  const [file] = shared.value.workspaceArtifacts;
+  assert.equal(file.messageId, shared.value.result.text.messageId);
+  assert.deepEqual(file.command, ["room", "workspace", "changes", "--link", fileLink, "--connection", "reviewer"]);
+  Object.assign(env, { ROOM_ORIGIN: origin, ROOM_ID: "commons", PROJECT_ROOM_SECRET: "different-ambient-identity" });
+  const changes = await cli(file.command.slice(1), undefined, reviewerProject);
+  assert.equal(changes.value.file.hunks[0].changes.at(-1).content, "submitted");
+  const updated = await publish(1, patch.replace("+submitted", "+replaced"));
+  assert.equal(shared.value.discussion, undefined);
+  assert.equal(shared.value.discussionRead.path, `/api/rooms/commons/messages/${shared.value.result.text.messageId}/thread`);
+  const quoted = "> Draft from a colleague.\n" + sharedUrl + "\n\nPlease name Maya as the owner.";
+  const feedback = store.command(reviewer.secret, "commons", { id: "feedback", type: "message.posted",
+    data: { messageId: "quoted-feedback", replyToId: shared.value.result.text.messageId, body: quoted } });
+  store.command(reviewer.secret, "commons", { id: "private-feedback", type: "message.posted",
+    data: { messageId: "private-feedback", replyToId: shared.value.result.text.messageId, body: "Private aside", toMemberId: "owner" } });
+  const exact = await rpc("room_read_result", { workItemId, completionEventId });
+  const connectorRead = await rpc(exact.discussionRead.tool, exact.discussionRead.arguments);
+  assert.equal(connectorRead.completionEventId, completionEventId);
+  assert.equal(connectorRead.discussion.messageId, shared.value.result.text.messageId);
+  assert.deepEqual(connectorRead.discussion.replies.map(reply => reply.body), [quoted]);
+  assert.equal(connectorRead.discussion.replies[0].untrusted, true);
+  const producerRead = await cli(shared.value.discussionRead.command.slice(1));
+  assert.equal(producerRead.code, 0, JSON.stringify(producerRead));
+  assert.equal(producerRead.value.discussion.replies[0].id, feedback.event.data.messageId);
+  assert.equal(producerRead.value.discussion.replies[0].body, quoted);
+  assert.equal(producerRead.value.discussion.replies[0].untrusted, true);
+  assert.equal(producerRead.value.discussion.replies.length, 1);
+  assert.deepEqual(producerRead.value.current.next, shared.value.current.next);
+  assert.equal(producerRead.value.result.receipt.eventId, completionEventId);
+  assert.equal(producerRead.value.current.workRevision, shared.value.current.workRevision);
+  for (const [threadResponse, code] of [
+    [() => new Response(null, { status: 413 }), "result_discussion_too_large"],
+    [() => Response.json({ roomId: "commons", thread: { id: shared.value.result.text.messageId, workItemId,
+      authorId: producer.identityId, body: null, deletedAt: Date.now(), replies: [] } }), "result_discussion_unavailable"]
+  ]) {
+    const partial = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject, (url, options) =>
+      options.method === "POST" ? fetch(url, options) : threadResponse());
+    assert.equal(partial.code, 1);
+    assert.equal(partial.value.code, code);
+    assert.equal(partial.value.result, undefined);
+  }
+  const review = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
+  assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Name the owner."],
+    review.value, reviewerProject)).code, 0);
+  const blocked = await cli(["work", workItemId]);
+  assert.equal((await cli(["resolve", "--from", "-", "--resolution", "Added the owner."], blocked.value)).code, 0);
+  const resumed = await cli(["work", workItemId]);
+  assert.equal((await cli(["begin", "--from", "-"], resumed.value)).code, 0);
+  const working = await cli(["work", workItemId]);
+  const revised = await cli(["submit", workItemId, "--operation", "revised-handoff"], {
+    body: "Owner: Maya.", expectedRevision: working.value.revision, producerId: producer.identityId,
+    summary: "Named the owner", nextAction: "Check the revised brief" });
+  assert.equal(revised.code, 0);
+  const revisedUrl = exactResultHref({ roomId: "commons", workItemId,
+    completionEventId: revised.value.next.arguments.completionEventId }, new URL(origin));
+  const current = await cli(["result", revisedUrl], undefined, reviewerProject);
+  assert.equal(current.value.result.text.body, "Owner: Maya.");
+  assert.equal(current.value.workThread.correction.summary, "Name the owner.");
+  const revisedDiscussion = await cli(["result", revisedUrl, "--discussion"]);
+  assert.deepEqual(revisedDiscussion.value.discussion.replies, []);
+  const lateLink = workspaceArtifactLink(origin, "commons", { ...preview, ...updated }, "changes", "brief.md");
+  const replyToId = current.value.result.text.messageId;
+  store.command(producer.secret, "commons", { id: "send-late-file", type: "message.posted",
+    data: { messageId: "late-file", replyToId, body: "Here is the revised brief.\n" + lateLink } });
+  store.command(producer.secret, "commons", { id: "send-private-file", type: "message.posted",
+    data: { messageId: "private-file", replyToId, toMemberId: "owner", body: fileLink } });
+  const followUp = await cli(["result", revisedUrl, "--discussion"], undefined, reviewerProject);
+  assert.equal(followUp.value.workspaceArtifacts, undefined);
+  assert.equal(followUp.value.discussion.replies.length, 1);
+  assert.equal(followUp.value.discussion.workspaceArtifacts.length, 1);
+  const [lateFile] = followUp.value.discussion.workspaceArtifacts;
+  assert.equal(lateFile.messageId, "late-file");
+  assert.deepEqual(lateFile.command, ["room", "workspace", "changes", "--link", lateLink, "--connection", "reviewer"]);
+  const lateChanges = await cli(lateFile.command.slice(1), undefined, reviewerProject);
+  assert.equal(lateChanges.value.file.hunks[0].changes.at(-1).content, "replaced");
+  await publish(updated.revision, patch.replace("+submitted", "+latest"));
+  await assert.rejects(() => cli(lateFile.command.slice(1), undefined, reviewerProject), error => error.status === 409);
+  const earlier = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject);
+  assert.equal(earlier.value.discussion.replies[0].body, quoted);
+  assert.equal(earlier.value.selection.status, "historical");
+  assert.equal(earlier.value.result.text.body, firstBody);
+  assert.deepEqual(earlier.value.workspaceArtifacts, [file]);
+  assert.equal(current.value.workspaceArtifacts, undefined);
+  await assert.rejects(() => cli(file.command.slice(1), undefined, reviewerProject), error => error.status === 409);
+  // A producer may deliberately cite the very same message in a later receipt.
+  const laterReview = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
+  assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Use the original wording."],
+    laterReview.value, reviewerProject)).code, 0);
+  assert.equal((await cli(["resolve", "--from", "-", "--resolution", "Reusing the original wording."],
+    (await cli(["work", workItemId])).value)).code, 0);
+  assert.equal((await cli(["begin", "--from", "-"], (await cli(["work", workItemId])).value)).code, 0);
+  const source = shared.value.result.text;
+  const reused = store.command(producer.secret, "commons", { id: "cite-original", type: "work.completed", data: {
+    workItemId, expectedRevision: (await cli(["work", workItemId])).value.revision, evidenceKind: "room_text",
+    evidenceMessageId: source.messageId, evidenceMessageEventId: source.messageEventId, evidenceVersion: source.evidenceVersion,
+    previousCompletionEventId: revised.value.next.arguments.completionEventId, producerId: producer.identityId,
+    summary: "Restored wording", nextAction: "Review the original wording" } });
+  const reusedRead = await cli(["result", workItemId, "--completion", reused.event.id, "--discussion"]);
+  assert.equal(reusedRead.code, 0);
+  assert.deepEqual(reusedRead.value.discussion, producerRead.value.discussion);
+  const quotedSource = reusedRead.value.discussion.replies[0].body.split("\n").find(line => line.startsWith(origin));
+  const fromFeedback = await cli(["result", quotedSource]);
+  assert.equal(fromFeedback.code, 0);
+  assert.equal(fromFeedback.value.result.receipt.eventId, completionEventId);
+  assert.equal(fromFeedback.value.selection.status, "historical");
+  for (const other of [sharedUrl.replace("room=commons", "room=other"), sharedUrl.replace(origin, "https://other.example")]) {
+    let calls = 0;
+    const refused = await cli(["result", other], undefined, reviewerProject, () => { calls++; throw new Error("unexpected call"); });
+    assert.equal(refused.value.code, "room_selection_mismatch");
+    assert.equal(calls, 0);
+  }
+});
+
+test(`${representation} unavailable shared result gives the reviewer a safe next step`, async t => {
+  const { origin, store, owner, producer, reviewer, reviewerProject, cli } = await fixture(t, representation);
+  const workItemId = "refused-result", body = "Private reviewer fixture text";
+  store.command(owner, "commons", { id: "propose", type: "work.proposed", data: { workItemId,
+    title: "Draft a brief", definitionOfDone: "Review the draft", accountableMemberId: producer.identityId,
+    verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
+  const selected = await cli(["work", workItemId]);
+  assert.equal((await cli(["begin", "--from", "-"], selected.value)).code, 0);
+  const work = await cli(["work", workItemId]);
+  const messageId = "private-result-message";
+  const posted = store.command(producer.secret, "commons", { id: "post-private", type: "message.posted",
+    data: { messageId, workItemId, toMemberId: "owner", body } });
+  const receipt = store.command(producer.secret, "commons", { id: "complete-private", type: "work.completed",
+    data: { workItemId, expectedRevision: work.value.revision, evidenceKind: "room_text", evidenceMessageId: messageId,
+      evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body), previousCompletionEventId: null,
+      producerId: producer.identityId, summary: "Drafted", nextAction: "Review" } });
+  for (const [completionEventId, code] of [[receipt.event.id, "result_unavailable"], ["missing-completion", "result_not_found"]]) {
+    const url = exactResultHref({ roomId: "commons", workItemId, completionEventId }, new URL(origin));
+    const envelopes = [];
+    const refused = await cli(["result", url], undefined, reviewerProject, async (...args) => {
+      const response = await fetch(...args);
+      envelopes.push((await response.clone().json()).result.structuredContent);
+      return response;
+    });
+    assert.equal(refused.code, 1);
+    assert.equal(refused.value.code, code);
+    assert.match(refused.value.hint, /ask the sender/i);
+    assert.equal(JSON.stringify(refused.value).includes(body), false);
+    assert.equal(envelopes.length, 1);
+    assert.equal(envelopes[0].reason, code);
+    assert.equal(envelopes[0].hint, refused.value.hint);
+  }
+});
+
 test(`${representation} commands cover pickup, correction, review, requests and submission recovery`, async t => {
-  const { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli } = await fixture(t, representation);
+  const { origin, home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli } = await fixture(t, representation);
   const prepare = async (workItemId, review = false) => {
     store.command(owner, "commons", { id: "propose-" + workItemId, type: "work.proposed", data: {
       workItemId, title: "Review the evidence", definitionOfDone: "Test the exact pickup",
       accountableMemberId: producer.identityId, mode: "read",
-      independentVerificationRequired: review, ownerDecisionRequired: false,
-      ...(review ? { verifierMemberId: reviewer.identityId } : {})
+      independentVerificationRequired: review, ownerDecisionRequired: review,
+      ...(review ? { verifierMemberId: reviewer.identityId, humanDecisionMakerId: "owner" } : {})
     } });
     const selected = await cli(["work", workItemId]);
     assert.equal(selected.code, 0, JSON.stringify(selected));
@@ -92,6 +424,7 @@ test(`${representation} commands cover pickup, correction, review, requests and 
       const prior = selected.value;
       const refreshed = (await cli(["work", workItemId, "--since", prior.briefVersion])).value;
       assert.equal(refreshed.briefUnchanged, true);
+      assert.match(refreshed.guidance, /use this response.s revision and continuation/i);
       assert.equal(refreshed.briefVersion, prior.briefVersion);
       assert.equal(refreshed.brief, undefined);
       assert.deepEqual(refreshed.continuation, prior.continuation);
@@ -265,10 +598,22 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   const replacement = await cli(["submit", "--from", save("replacement.json", work.value)],
     { ...result, body: "The exact contribution with the reconnect instructions." });
   assert.equal(replacement.code, 0, JSON.stringify(replacement));
+  const nativeReviewAction = async token => {
+    const response = await fetch(`${origin}/api/rooms/commons/needs-me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(response.status, 200);
+    return (await response.json()).items.find(item => item.id === "needs-review")?.reviewAction;
+  };
+  if (representation !== "legacy") assert.equal(await nativeReviewAction(reviewer.secret), "verify");
   const followup = await cli(["work", "needs-review", "--result"], undefined, reviewerProject);
   const accepted = await cli(["review", "--from", "-", "--pass", "--summary", "Includes reconnect instructions"],
     followup.value, reviewerProject);
   assert.equal(accepted.code, 0, JSON.stringify(accepted));
+  if (representation !== "legacy") {
+    assert.equal(await nativeReviewAction(reviewer.secret), undefined);
+    assert.equal(await nativeReviewAction(owner), "decide");
+  }
 
   const requested = await rpc("room_request_reply", { toMemberId: producer.identityId,
     requestId: "fixture-ask", body: "What did the reconnect check show?" }, reviewer);
@@ -286,6 +631,129 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   assert.equal(answered.code, 0, JSON.stringify(answered));
   assert.doesNotMatch(JSON.stringify([accepted, answered]), new RegExp(producer.secret));
 
+});
+
+test(`${representation} a newly attempted stale or closed submit is refused before any draft is posted`, async t => {
+  const { home, env, store, owner, producer, rpc, cli } = await fixture(t, representation);
+
+  const propose = workItemId => store.command(owner, "commons", { id: "propose-" + workItemId, type: "work.proposed", data: {
+    workItemId, title: "Ship the fix", definitionOfDone: "Land the patch",
+    accountableMemberId: producer.identityId, mode: "read",
+    independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
+  const begin = async workItemId => {
+    propose(workItemId);
+    const selected = (await cli(["work", workItemId])).value;
+    assert.equal((await cli(["begin", "--from", "-"], selected)).value.working, true);
+    return (await cli(["work", workItemId])).value;
+  };
+  const attempt = async (workItemId, operation, expectedRevision, fetchImpl = fetch) => {
+    const calls = [];
+    const outputs = [];
+    const code = await main(["submit", workItemId, "--operation", operation], {
+      cwd: home, env, out: value => outputs.push(JSON.parse(value)),
+      stdin: Readable.from([JSON.stringify({ body: "Late contribution.", summary: "Did the work",
+        nextAction: "Review it", producerId: producer.identityId, expectedRevision })]),
+      fetchImpl: async (url, init) => { calls.push(JSON.parse(init.body).params.name); return fetchImpl(url, init); }
+    });
+    assert.equal(outputs.length, 1);
+    return { code, output: outputs[0], calls };
+  };
+
+  // Stale: a different operation (room_block_work) moves the item on after
+  // this attempt's basis was read. The never-before-posted draft must be
+  // refused, not recorded, and not left around for later reconciliation.
+  const stale = await begin("stale-new-op");
+  await rpc("room_block_work", { workItemId: "stale-new-op", reason: "Scope changed", nextAction: "Re-plan" });
+  const beforeStale = store.headSequence("commons");
+  const staleAttempt = await attempt("stale-new-op", "stale-new-op-attempt", stale.revision);
+  assert.equal(staleAttempt.code, 1, JSON.stringify(staleAttempt));
+  assert.equal(staleAttempt.output.status, "refused");
+  assert.equal(staleAttempt.output.code, "stale_revision");
+  assert.deepEqual(staleAttempt.calls, ["room_post_message"]);
+  assert.equal(store.headSequence("commons"), beforeStale, "a stale new draft must not be recorded");
+  assert.equal((await cli(["receipt", "stale-new-op-attempt", "--draft"])).value.status, "not_recorded");
+
+  // Lost response: retrying the identical stale attempt (as if the first
+  // reply never arrived) must stay refused on both storage backends, never
+  // posting a draft merely because the client retried.
+  const lostReplyStale = await attempt("stale-new-op", "stale-new-op-attempt", stale.revision,
+    async (url, init) => { const response = await fetch(url, init); await response.arrayBuffer();
+      throw new Error("simulated lost reply after server handled request"); });
+  assert.equal(lostReplyStale.output.status, "unknown");
+  assert.equal(store.headSequence("commons"), beforeStale, "the uncertain stale attempt recorded nothing either");
+  const recoveredStale = await attempt("stale-new-op", "stale-new-op-attempt", stale.revision);
+  assert.equal(recoveredStale.output.status, "refused");
+  assert.equal(recoveredStale.output.code, "stale_revision");
+  assert.equal(store.headSequence("commons"), beforeStale, "the retried stale attempt still recorded nothing");
+
+  // Closed: a different, already-recorded operation completes the item
+  // first. A second, brand-new operation holding the pre-completion
+  // revision is a newly attempted result against a closed item, and must
+  // not post a draft either.
+  const closed = await begin("closed-new-op");
+  const finishedFirst = await attempt("closed-new-op", "closed-new-op-first", closed.revision);
+  assert.equal(finishedFirst.code, 0, JSON.stringify(finishedFirst));
+  assert.deepEqual(finishedFirst.calls, ["room_post_message", "room_submit_text_result"]);
+  const beforeClosed = store.headSequence("commons");
+  const closedAttempt = await attempt("closed-new-op", "closed-new-op-second", closed.revision);
+  assert.equal(closedAttempt.output.status, "refused");
+  assert.equal(closedAttempt.output.code, "stale_revision");
+  assert.deepEqual(closedAttempt.calls, ["room_post_message"]);
+  assert.equal(store.headSequence("commons"), beforeClosed, "a closed item must not accept a fresh draft");
+  assert.equal((await cli(["receipt", "closed-new-op-second", "--draft"])).value.status, "not_recorded");
+
+  const upgraded = await begin("upgrade-during-retry");
+  const lostLegacyPost = await attempt("upgrade-during-retry", "legacy-retry", upgraded.revision, async (url, init) => {
+    const request = JSON.parse(init.body);
+    delete request.params.arguments.expectedRevision;
+    const response = await fetch(url, { ...init, body: JSON.stringify(request) });
+    await response.arrayBuffer();
+    throw new Error("Lost legacy draft receipt");
+  });
+  assert.equal(lostLegacyPost.output.status, "unknown");
+  const originalPost = (await cli(["receipt", "legacy-retry", "--draft"])).value;
+  assert.equal(originalPost.status, "recorded");
+  const resumed = await attempt("upgrade-during-retry", "legacy-retry", upgraded.revision);
+  assert.equal(resumed.output.status, "recorded");
+  assert.deepEqual(resumed.calls, ["room_post_message", "room_read_result", "room_submit_text_result"]);
+  assert.equal((await cli(["receipt", "legacy-retry", "--draft"])).value.eventId, originalPost.eventId);
+
+  const legacy = await begin("previous-room");
+  const oldServer = async (url, init) => {
+    const frame = JSON.parse(init.body);
+    if (frame.params.name === "room_post_message" && frame.params.arguments.expectedRevision !== undefined)
+      return Response.json(mcpCallError(frame.id, { tool: frame.params.name, reason: "invalid_arguments", unexpected: ["expectedRevision"] }));
+    return fetch(url, init);
+  };
+  const beforeAmbiguous = store.headSequence("commons");
+  const ambiguous = await attempt("previous-room", "ambiguous-frame", legacy.revision, async (url, init) => {
+    const frame = await (await oldServer(url, init)).json();
+    return Response.json({ ...frame, result: { structuredContent: { contractVersion: 1, status: "posted" } } });
+  });
+  assert.equal(ambiguous.output.status, "unknown");
+  assert.deepEqual(ambiguous.calls, ["room_post_message"]);
+  assert.equal(store.headSequence("commons"), beforeAmbiguous);
+
+  const oldValid = await attempt("previous-room", "old-valid", legacy.revision, oldServer);
+  assert.equal(oldValid.output.status, "recorded", JSON.stringify(oldValid));
+  const oldHead = store.headSequence("commons");
+  const oldStale = await attempt("previous-room", "old-stale", legacy.revision, oldServer);
+  assert.equal(oldStale.output.code, "result_draft_unavailable");
+  assert.equal(store.headSequence("commons"), oldHead);
+
+  const currentClosed = (await cli(["work", "closed-new-op"])).value;
+  const beforeLate = store.headSequence("commons");
+  const late = await attempt("closed-new-op", "closed-at-current", currentClosed.revision);
+  assert.equal(late.output.status, "refused");
+  assert.equal(store.headSequence("commons"), beforeLate, JSON.stringify(late.output));
+  assert.equal((await cli(["receipt", "closed-at-current", "--draft"])).value.status, "not_recorded");
+
+  // Ordinary room chat (no workItemId, so no expectedRevision applies) keeps
+  // posting normally, even right after the refusals above.
+  const chat = await rpc("room_post_message", { id: "plain-chat-1", body: "Status update for everyone." });
+  assert.equal(chat.status, "posted");
+  assert.equal(chat.event.data.workItemId, undefined);
 });
 
 test(`${representation} answers use the saved request, stop at a correction and recover a lost response`, async t => {

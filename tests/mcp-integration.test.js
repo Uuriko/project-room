@@ -73,7 +73,11 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.equal(batch.readOnly, true);
   assert.equal(batch.atomicSnapshot, false);
   const hosted = await callHostedStdioTool(f.store, token, "room_read_work", { roomId: "commons", workItemIds: batchIds });
-  assert.deepEqual(hosted.value.items.map(withoutReadTime), batch.items.map(withoutReadTime));
+  assert.equal(hosted.value.items[0].sourceRead.arguments.roomId, "commons");
+  assert.equal(batch.items[0].sourceRead.arguments.roomId, undefined);
+  const hostedItems = structuredClone(hosted.value.items);
+  delete hostedItems[0].sourceRead.arguments.roomId;
+  assert.deepEqual(hostedItems.map(withoutReadTime), batch.items.map(withoutReadTime));
   assert.equal(validHostedStdioArgs("room_read_work", { roomId: "commons", workItemIds: ["test-handoff", "test-handoff"] }), false);
   const refusedBatch = (await mcp.call("room_read_work", { workItemIds: ["test-handoff", "missing-task"] })).result;
   assert.equal(refusedBatch.isError, true);

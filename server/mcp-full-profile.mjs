@@ -516,7 +516,7 @@ async function dispatchHostedStdioTool(store, secret, name, args, origin) {
   }
   if (name === "room_read_work_discussion") {
     return { value: store.workDiscussion(secret, roomId, rest.workItemId, {
-      cursor: rest.cursor ?? null,
+      completionEventId: rest.completionEventId ?? null, cursor: rest.cursor ?? null,
       ...(rest.since === undefined ? {} : { since: rest.since }),
       ...(rest.limit === undefined ? {} : { limit: rest.limit })
     }), isError: false };

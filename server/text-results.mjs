@@ -1,9 +1,10 @@
+import { resultDiscussionPath } from "../src/record-link.js";
 import { releaseSmokePlan, releaseOutcome } from "./release-smoke.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer, validateResultSegments } from "../src/work-packet.js";
-import { nextWorkStep, workActions, workThreadHref } from "../src/workflow.js";
+import { currentApproval, matchesReceipt, nextWorkStep, workActions, workThreadHref } from "../src/workflow.js";
 import { messageInHistory } from "./history-visibility.mjs";
 import { WORK_REVISION_TYPES } from "../src/events.js";
 
@@ -99,6 +100,19 @@ function textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecor
   return messageInHistory(message, floor);
 }
 
+// The decision note is a separate read with its own audience and history floor.
+function selectedDecisionSource(db, state, work, receipt, viewerId, floor, messageRecords) {
+  const decision = work.decision;
+  const messageId = decision?.sourceMessageId;
+  if (!messageId || messageId === receipt.nativeText?.messageId || !currentApproval(work) || !matchesReceipt(decision, receipt)) return null;
+  const messages = messageRecords ?? messageRepository({ db }, state.room.id, state);
+  const message = messages.get(messageId);
+  if (!message?.body || message.deletedAt || message.editedAt || message.toMemberId
+    || !textVisibleToViewer(db, state, messageId, viewerId, floor, messages)) return null;
+  return { messageId, decisionEventId: decision.eventId, completionEventId: receipt.eventId,
+    evidenceVersion: receipt.evidenceVersion, href: `#pr-record/message/${encodeURIComponent(messageId)}` };
+}
+
 // A correction is grounded in the failed verdict on the immediately preceding
 // result. Historical-only checks never drove a correction. Reuse the selected
 // result's audience rules for the old text before exposing a review of it.
@@ -114,7 +128,15 @@ function precedingCorrection(db, state, work, receipt, viewerId, floor, messageR
     const oldMessage = (messageRecords ?? messageRepository({ db }, state.room.id, state)).get(messageId);
     if (oldMessage?.deletedAt || !textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecords)) return null;
   }
+  // The blocker disappears on resolution. Its verifier-authored instruction
+  // remains on the exact verdict event, including for older saved rooms.
+  const verdict = db.prepare(`SELECT sequence, json_extract(body,'$.data.nextAction') AS nextAction
+    FROM events WHERE room_id=? AND id=?`).get(state.room.id, finding.eventId);
+  if (!verdict || verdict.sequence < (floor?.sequence ?? 0)) return null;
   return {
+    ...(previous.nativeText ? { sourceMessageId: previous.nativeText.messageId } : {}),
+    ...(finding.reworkRequested !== false && typeof verdict.nextAction === "string" && verdict.nextAction.trim()
+      ? { nextAction: verdict.nextAction } : {}),
     verificationEventId: finding.eventId, verifierId: finding.verifierId,
     completionEventId: previous.eventId, summary: finding.summary, untrusted: true,
     nextRead: { tool: "room_read_result", arguments: { roomId: state.room.id, workItemId: work.id, completionEventId: previous.eventId } }
@@ -259,6 +281,8 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const visibleReceipt = result.text?.body === null ? null : result.receipt;
   const start = visibleReceipt ? selectedStart(db, state.room.id, workItemId, visibleReceipt.eventId, floor) : null;
   const verdict = visibleReceipt ? selectedVerdict(db, state.room.id, work, visibleReceipt, floor) : null;
+  const decisionSource = selectionStatus === "current" && visibleReceipt && result.kind === "room_text"
+    ? selectedDecisionSource(db, state, work, visibleReceipt, viewerId, floor, messageRecords) : null;
   const pendingCorrection = selectionStatus === "current" && next.action === "revise"
     && verdict?.result === "fail" && work.blocker?.eventId === verdict.eventId
     ? { verificationEventId: verdict.eventId, completionEventId: verdict.completionEventId,
@@ -272,8 +296,12 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
       ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
+      ...(decisionSource ? { decisionSource } : {}),
       ...(releaseChecks ? { releaseChecks } : {}), ...(outcome ? { outcome } : {}) },
     selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
+    ...(result.kind === "room_text" && typeof result.text?.body === "string"
+      ? { discussionRead: { method: "GET", path: resultDiscussionPath(state.room.id, result.text.messageId),
+        tool: "room_read_work_discussion", arguments: { roomId: state.room.id, workItemId, completionEventId: result.receipt.eventId } } } : {}),
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
       completionEventId: work.receipt?.eventId ?? null, next },

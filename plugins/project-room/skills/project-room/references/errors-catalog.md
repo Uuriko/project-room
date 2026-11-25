@@ -1006,8 +1006,9 @@ response's own `hint`/`next` when it names something more specific.
 | `restore_refused_nonempty` | 409 | Restore refuses a store that already holds rooms | no | Operator only. Restore never overwrites live data. Restore into a fresh, empty Durable Object. |
 | `restore_verification_failed` | 422 | The restored data did not match the export's watermark or trailer, or a torn export was refused | no | Operator only. Nothing was written (rolled back). Re-take the export and retry. |
 | `result_draft_invalid` | 422 | The draft failed the requested UTF-16 size or text check; no new message was posted. | fix+resend | Use detail.codeUnits, maxCodeUnits, and targetCodeUnits when present. Shorten the draft while retaining required checks, or repair invalid text. Reconcile any earlier uncertain post before changing input. |
-| `result_not_found` | 404 | Completion not found on this work; no other result was substituted | re-list | Re-list the resource and use a current id. Do not guess ids. |
-| `result_unavailable` | 422 | Exact text evidence is unavailable; no other result was substituted | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `result_draft_unavailable` | 409 | This member cannot submit a new result draft at the selected work revision. | no | Read the current work and its next action. Reconcile an uncertain submission using its original operation ID before making a new attempt. |
+| `result_not_found` | 404 | Completion not found on this work; no other result was substituted | no | Ask the sender to copy the link to the intended result version again. |
+| `result_unavailable` | 422 | Exact text evidence is unavailable; no other result was substituted | no | Ask the sender to share the intended result version somewhere you can read it. |
 | `review_final` | 409 | Review decision is final | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `review_forbidden` | 403 | Current non-guest room membership required | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `review_not_found` | 404 | Contribution not found in this room | re-list | Re-list the resource and use a current id. Do not guess ids. |
@@ -1199,6 +1200,36 @@ response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | Meaning | Retry | Recovery |
 |---|---|---|---|---|
+| `independent_preview_viewer_required` | 403 | Use the named independent viewer’s Room connection. | no | Have the named viewer open the exact preview using their own saved Room connection. |
+| `invalid_pr_attachment` | 422 | Supply the documented exact PR attachment fields. | fix+resend | Use the Work Thread ID and revision, pull request URL, expected head and operation ID. |
+| `invalid_preview_selection` | 422 | Choose an exact Preview link for this Room. | fix+resend | Copy the file link from the intended preview revision in this Room. |
+| `invalid_receiver_scope` | 422 | Receiver scope is missing, malformed, or exceeds its bounds | fix+resend | Use the connected receiver's configured requester and work identifiers on the existing scoped stream. |
+| `invalid_receiver_state` | 422 | A waiting report requires a valid receiver scope | fix+resend | Advertise waiting only with the valid scope of the receiving stream. |
+| `invalid_operation_selection` | 422 | Provide one operation ID without an event cursor | fix+resend | Check the receipt using the original operation ID alone. Preserve the original write input if its outcome is unknown. |
+| `invalid_reconnect` | 422 | Choose the precise existing seat and pending connector request | fix+resend | Read the pending pairing and select the saved room seat with its exact client and scopes. |
+| `invalid_refresh_head` | 422 | Supply an exact head for refresh. | fix+resend | Supply the full 40-character lowercase hexadecimal commit SHA as refreshHead. |
+| `reconnect_requires_owner` | 403 | Use the existing Room owner credential | no | Ask the current owner to pair the intended seat. |
+| `reconnect_unavailable` | 409 | Restart the connector to obtain a pending pairing | re-read | Restart the intended connector and read its new pending pairing before trying again. |
+| `reconnect_scope_mismatch` | 409 | The selected client or scopes changed | re-read | Compare the current pairing’s client and scopes with the intended connector before proceeding. |
+| `reconnect_seat_unavailable` | 409 | No active owner-sponsored invitation grant for this seat | no | Ask the owner to verify the existing grant and seat before attempting a reconnect. |
+| `reconnect_already_paired` | 409 | This pending connector is paired to a different seat | no | Read the active pairing and have the owner reconcile the seat choice before any further change. |
+| `invalid_project_discovery` | 422 | Discovery input or query is invalid | fix+resend | Use the published offer's exact discovery action and fields, or the supported reviewer query. |
+| `discovery_unavailable` | 404 | The project has no native discovery destination or designated reviewers | no | Read the published project again for an available contribution path. |
+| `stale_project_offer` | 409 | Read the current published offer before filing | re-read | Recheck the finding against the current offer and use its exact submission template. |
+| `discovery_capacity` | 429 | Discovery filing limit reached for the rolling 24-hour window | backoff | Wait for the filing budget to reopen. Preserve the original submission ID if a prior response was lost. |
+| `invalid_discovery_checkpoint` | 422 | Omit the stale checkpoint to restart finding review | fix+resend | Start the authorized review read again without the stale checkpoint. |
+| `discovery_review_denied` | 403 | A designated project reviewer is required | no | Ask a designated reviewer to inspect or act on the finding. |
+| `invalid_review_runtime` | 422 | The work item or exact review attempt fields are invalid | fix+resend | Read the selected result and use its authorized runtime action with the current revision, completion and attempt. |
+| `review_runtime_denied` | 403 | The caller is outside the assigned verifier runtime scope | no | Use the assigned verifier with the required permission. |
+| `review_runtime_stale` | 409 | The room or exact review target is no longer current | re-read | Open the current Work Thread and follow its current action. Leave the old completion and verdict intact. |
+| `review_runtime_attempt_conflict` | 409 | This selected review already has another attempt | re-read | Read the existing attempt and recover its status before considering another dispatch. |
+| `invalid_request_route` | 422 | Use the exact recipient, linked work and request binding | fix+resend | Read the current request and supply the original requester context, recipient and optional work or request. |
+| `invalid_first_ack` | 422 | First acknowledgment requires the exact context event and live lease when present | fix+resend | Read the exact addressed request and use its context event. A live listener must make the fenced write. |
+| `invalid_progress_context` | 422 | Progress needs one exact context event | fix+resend | Read the current addressed request and use one current-context precondition. |
+| `request_not_found` | 404 | No reply request addressed to this recipient | no | Confirm the exact request and recipient through the current room access. |
+| `request_context_changed` | 409 | Read the current addressed request before acknowledging or reporting progress | re-read | Use the updated request context. For an uncertain prior write, look up its operation receipt first. |
+| `request_already_acknowledged` | 409 | The request already has recipient progress | re-read | Read current progress or look up the original operation receipt. Do not send another first acknowledgment. |
+| `static_review_binding` | 409 | This PR already uses the Room’s static review lane. | no | Continue the review through the existing configured PR binding. |
 | `invalid_work_page` | 422 | Use limit 1–100 and a returned cursor. | fix+resend | Restart room_list_work with a valid limit and without cursor. |
 | `invalid_work_cursor` | 422 | The work cursor is invalid for this connection. | fix+resend | Restart the same room_list_work selection without cursor; do not edit or reuse cursors from another connection. |
 | `stale_work_cursor` | 409 | Work, access, or selection changed between pages. | fix+resend | Discard the partial listing and restart the same room_list_work selection without cursor. |

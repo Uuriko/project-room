@@ -16,6 +16,9 @@ import { assertCodexConfigSafe, planCodexConfig, codexConfigPath, writeCodexConf
 // Copyright (c) 2026 the tincan contributors. See THIRD_PARTY_NOTICES.md. Room registers its hosted
 // HTTP MCP server instead of a local stdio binary, and installs no hooks.
 export const SETUP_TOOLS = Object.freeze(["claude-code", "codex", "cursor", "cline", "vscode", "aider", "gemini", "copilot", "opencode", "grok", "command-code", "generic"]);
+export const SETUP_SHELL_ONLY = 2;
+
+const CLAUDE_SHELL_ONLY = "Shell pickup is configured for this project. Use /mcp in Claude Code to check its Project Room connection before using it.";
 
 function parse(argv) {
   const flags = { "dry-run": false };
@@ -55,7 +58,7 @@ export function planTool(tool, { project, home, url, platform, claude, env = {} 
   if (tool === "claude-code") {
     if (claude) {
       command = ["mcp", "add", "--transport", "http", SERVER_NAME, url, "--header", "Authorization: " + claudeHeaderValue()];
-      next = "Claude Code is registered. Open this repo in Claude Code.";
+      next = "Claude Code registration saved. Open this repo in Claude Code and verify Room access.";
     } else {
       const path = join(project, ".mcp.json");
       files.push({ path, contents: planJson(path, readOrNull(path), data => {
@@ -199,14 +202,21 @@ export async function setupCommand(argv, { env = process.env, cwd = process.cwd(
   }
   const via = plan.command ? "command" : "file";
   if (alreadyApplied(project, tool, via) && plan.files.every(file => readOrNull(file.path) === file.contents)) {
+    if (connectionName && readProject(project)?.connection !== connectionName) writeProject(project, { connection: connectionName, tool, via });
+    if (plan.command) {
+      out(CLAUDE_SHELL_ONLY);
+      return SETUP_SHELL_ONLY;
+    }
     out(plan.next);
     return 0;
   }
   if (plan.command) {
-    const result = spawnSync(claude, plan.command, { cwd: project, env, encoding: "utf8" });
+    const result = spawnSync(claude, plan.command, { cwd: project, env, stdio: "ignore" });
     if (result.error || result.status !== 0) {
-      err(result.stderr || result.stdout || "claude mcp add failed");
-      return 1;
+      if (connectionName) writeProject(project, { connection: connectionName, tool, via: "connection" });
+      err("Could not register Project Room in Claude Code.");
+      out(CLAUDE_SHELL_ONLY);
+      return SETUP_SHELL_ONLY;
     }
   }
   writeFiles(plan.files);

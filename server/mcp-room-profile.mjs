@@ -44,6 +44,7 @@ import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { claimThreadForViewer } from "./claim-thread.mjs";
 import { randomUUID, createHash } from "node:crypto";
+import { agentErrorAx } from "../src/agent-error.mjs";
 import { validId, ownMember, publicPage, joinLink, isRoomArchived, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep, workActions } from "../src/workflow.js";
 import { completedResults, currentResult, searchWorkMatches as searchWork } from "../src/work-selectors.js";
@@ -265,6 +266,7 @@ function validRoomArgs(name, args) {
     const draftOk = limit === undefined || validId(args.workItemId) && validId(args.id)
       && Number.isSafeInteger(limit) && limit >= 1 && limit <= 4096;
     return idOk && messageOk && replyOk && workOk && draftOk
+      && (args.expectedRevision === undefined || limit !== undefined && Number.isSafeInteger(args.expectedRevision) && args.expectedRevision >= 0)
       && (args.compact === undefined || typeof args.compact === "boolean")
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
@@ -869,7 +871,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
     const messageId = args.messageId ?? id;
     const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }),
       ...(args.workItemId === undefined ? {} : { workItemId: args.workItemId }) };
-    const posted = commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
+    const posted = commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted", { resultDraftRevision: args.expectedRevision });
     const hint = statusHint(data);
     const receipt = hint ? { ...posted, statusHint: hint } : posted;
     if (args.compact !== true && limit === undefined) return receipt;
@@ -987,8 +989,8 @@ function callInboxTool(store, identity, name, args) {
   throw new ServiceError(500, "internal", "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.");
 }
 
-function commandReceipt(store, secret, roomId, command, status) {
-  const result = store.command(secret, roomId, command);
+function commandReceipt(store, secret, roomId, command, status, options) {
+  const result = store.command(secret, roomId, command, null, options);
   return { status: result.duplicate ? "duplicate" : status, command, ...result };
 }
 
@@ -1332,6 +1334,12 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         const outcome = await callHostedStdioTool(store, secret, name, args, { origin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin });
         let value = name === "room_read_work" && !outcome.isError
           ? selectedReadCapability(outcome.value, { store, secret, identity, oauthPrincipal }) : boardIdHint(store, args, outcome);
+        if (name === "room_read_result" && value.discussionRead?.tool) {
+          const tool = value.discussionRead.tool;
+          const definition = HOSTED_TOOLS.find(entry => entry.name === tool);
+          if (!definition || (oauthPrincipal && !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes))
+              || catalogCallDenial(resolveCatalogAgent(store, identity), definition)) delete value.discussionRead;
+        }
         if (name === "room_read_result" && !outcome.isError && oauthPrincipal && value.workThread?.pendingCorrection?.action) {
           const { tool } = value.workThread.pendingCorrection.action;
           const definition = HOSTED_TOOLS.find(entry => entry.name === tool);
@@ -1422,6 +1430,12 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       const mapped = notMemberPair(store, secret, args, error) ?? error;
       let value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(mapped) : failureValue(mapped);
       if (mapped.next) value.next = mapped.next;
+      else if (name === "room_read_result" && ["result_not_found", "result_unavailable"].includes(value.code)) {
+        const { reason, hint, next } = agentErrorAx({
+          httpStatus: value.status, code: value.code, message: value.message, roomId: args.roomId, workItemId: args.workItemId
+        });
+        value = { ...value, reason, hint, next };
+      }
       if (mapped === error && error?.status === 409 && /stale/i.test(String(error?.message ?? "")) && typeof args?.roomId === "string") {
         value = { ...value, reason: "stale_revision", next: [{ tool: "room_read_work", arguments: {
           roomId: args.roomId, ...(typeof args.workItemId === "string" ? { workItemId: args.workItemId } : {})

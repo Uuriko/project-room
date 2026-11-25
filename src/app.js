@@ -55,7 +55,7 @@ import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-nav
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -358,12 +358,13 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
-let partialWorkSnapshot = false, inspectedWorkRecord = null;
+let partialWorkSnapshot = false, inspectedWorkRecord = null, inspectedWorkReplacementId = null;
 // JDOT-COH-NAV begin
 let workspacePreviewsUI = null, updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
+let pendingWorkReturn = null;
 let navigationBoardEpoch = 0;
 // #3892: a cold deep link reaches revealClaimRecord before the lazy board
 // module has installed navigationBoardReady; wait for installation (or its
@@ -519,7 +520,7 @@ const client = new RoomClient({
     if (presenceBoundary) stopPresencePoll();
     const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
     partialWorkSnapshot = snapshot.snapshotVersion === 2;
-    inspectedWorkRecord = null;
+    inspectedWorkRecord = null; inspectedWorkReplacementId = null;
     state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
     session = identity;
     // A successful room snapshot supersedes a denied deep link from an
@@ -606,13 +607,16 @@ const client = new RoomClient({
       }
       if (!location.hash) restoreResultSelection();
     }
-    if (!briefView.owns(briefView.chain)) loadReturnBrief();
+    if (!briefView.owns(briefView.chain) && (!exactResultDestination(location) || $("#return-brief-panel").open)) loadReturnBrief();
     if (firstSnapshot) {
       revealLocationHash();
       if (session.member.kind !== "agent" && !savedRoomDestination() && $("#result-dialog").hidden
         && !$("#board-dialog").open && !$("#message-input").value) updatesUi?.open("needs", false);
     }
-    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
+    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId
+      && !(pendingWorkReturn?.id === activeWorkNavigationId && pendingWorkReturn.epoch === workNavigationEpoch)) {
+      void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
+    }
     retryPendingHashReveal();
     resumeConfirmedWorkNavigation();
   },
@@ -643,7 +647,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
-    partialWorkSnapshot = false; inspectedWorkRecord = null;
+    partialWorkSnapshot = false; inspectedWorkRecord = null; inspectedWorkReplacementId = null;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
@@ -1032,6 +1036,14 @@ const initialSignin = signinUI.mount($("#auth-signin-ui"));
 // (GET /agent-signin, decision #37): src/agent-signin-page.js hosts
 // the same component and endpoints; the wall keeps only the labeled
 // link (#agent-signin-button).
+const agentSigninLink = $("#agent-signin-button");
+const agentSigninTarget = agentSigninRecord(location);
+if (agentSigninLink && agentSigninTarget) {
+  const signIn = new URL(agentSigninLink.href);
+  signIn.searchParams.set("room", agentSigninTarget.roomId);
+  signIn.searchParams.set("record", agentSigninTarget.hash);
+  agentSigninLink.href = signIn.href;
+}
 async function openAccountSettings() {
   setSessionMenuOpen(false);
   const owned = accountClient.session;
@@ -2593,6 +2605,7 @@ function renderTyping(typists) {
   el.hidden = false;
 }
 function renderMessages() {
+  workspacePreviewsUI?.refreshDiscussion();
   directWindow.select(activeDirectMemberId, client.generation);
   directWindow.pin(activeDirectMemberId ? currentThreadId : null);
   if (activeDirectMemberId) directWindow.sync(client.sequence);
@@ -3378,30 +3391,49 @@ function switchThread(threadId, focusComposer = false, preserveWork = false) {
 }
 // Capture the existing discussion when Workspace opens. A failed return must
 // leave the destination draft alone.
-function captureWorkspaceThreadDraft() {
+function captureWorkspaceThreadDraft(messageId, exactSource) {
   const workId = activeWorkNavigationId, threadId = currentThreadId;
   const work = workId && state?.workItems[workId];
-  const sourceId = work ? work.sourceMessageId : threadId;
+  const sourceId = messageId ?? (work ? work.sourceMessageId : threadId);
   const root = conversation?.rootById.get(sourceId);
   const identity = session, context = workNavigationContext();
   function destination() {
     const source = conversation?.byId.get(sourceId), thread = conversation?.byId.get(root);
     if (!source || source.deletedAt || source.toMemberId || !thread || thread.deletedAt || thread.toMemberId
-      || !conversation.threads.has(root)) return null;
+      || !conversation.threads.has(root)
+      || (exactSource && (source.workItemId !== exactSource.workItemId || source.body !== exactSource.body))) return null;
     const channel = messageChannelId(thread);
     return state?.channels[channel] && !state.channels[channel].archivedAt ? channel : null;
   }
   if (!context || !destination()) return null;
-  return link => {
+  function stillSelected() {
+    return session === identity && workNavigationContext() === context && destination()
+      && (work ? activeWorkNavigationId === workId && state.workItems[workId]?.sourceMessageId === work.sourceMessageId
+        : currentThreadId === threadId);
+  }
+  function discussion() {
+    if (!stillSelected()) return null;
+    const url = new URL(location.pathname, location.origin);
+    url.searchParams.set("room", identity.roomId);
+    url.hash = recordHref("message", sourceId);
+    const thread = conversation.threads.get(root), messages = [];
+    for (let index = thread.length - 1; index >= 0 && messages.length < 4; index--) {
+      const message = thread[index];
+      if (message.toMemberId || message.deletedAt || message.redacted || typeof message.body !== "string"
+        || isMutedBy(state, identity.member.id, message.authorId)) continue;
+      const excerpt = clipGraphemes(message.body, 240);
+      messages.unshift({ author: name(message.authorId), excerpt: excerpt.length < message.body.length ? excerpt + "…" : excerpt });
+    }
+    return { link: url.href, messages };
+  }
+  function append(link, note) {
     const channel = destination();
-    if (!channel || session !== identity || workNavigationContext() !== context
-      || (work ? activeWorkNavigationId !== workId || state.workItems[workId]?.sourceMessageId !== sourceId
-        : currentThreadId !== threadId) || busy || requestReading
+    if (!stillSelected() || busy || requestReading
       || isRoomArchived(state) || composerFiles.some(file => file.status === "uploading")) return false;
     saveComposer();
     const draft = drafts.get(root);
     if (draft.pending || draft.toMemberId) return false;
-    const text = draft.body.split("\n").includes(link) ? draft.body : [draft.body, link].filter(Boolean).join("\n\n");
+    const text = [draft.body, note, draft.body.split("\n").includes(link) ? "" : link].filter(Boolean).join("\n\n");
     if (text.length > MAX_MESSAGE_BODY_CHARS) return false;
     updatesUi?.close(); closeResult(false);
     if (channel !== activeChannelId || activeDirectMemberId) setActiveChannel(channel);
@@ -3411,13 +3443,25 @@ function captureWorkspaceThreadDraft() {
     replyToId = draft.body || draft.files?.length ? (draft.replyToId ?? sourceId) : sourceId;
     updateReply(); syncRequestComposer(); autosizeComposer(); saveComposer();
     return true;
-  };
+  }
+  function openDiscussion(closePreview) {
+    if (!stillSelected()) return false;
+    const blocked = roomDestinationBlockedReason();
+    if (blocked) { notice(blocked, true); return false; }
+    closePreview();
+    closeResult(false);
+    revealMessage(sourceId, true);
+    return true;
+  }
+  return { discussion, openDiscussion, ...(exactSource ? {} : { append }) };
 }
-function revealMessage(id) {
+function revealMessage(id, openThread = false) {
   if (state && !busy && !conversation.byId.has(id)) {
     activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
   }
   if (!state || busy || !conversation.byId.has(id)) return;
+  const blocked = roomDestinationBlockedReason();
+  if (blocked) { notice(blocked, true); return; }
   activeWorkNavigationId = null;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
@@ -3436,7 +3480,7 @@ function revealMessage(id) {
   }
   else {
     if (activeDirectMemberId || messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
-    switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+    switchThread(message.replyToId || openThread ? conversation.rootById.get(id) : null);
   }
   expandTimelineTo(id);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
@@ -3444,6 +3488,7 @@ function revealMessage(id) {
   // Scroll first: content-visibility: auto skips off-screen rows, and focusing
   // a skipped row is a no-op. Scrolling makes it relevant (rendered), so the
   // subsequent focus lands.
+  if (row) updatesUi?.close();
   row?.scrollIntoView({ block: "nearest", behavior: "instant" });
   row?.focus({ preventScroll: true });
   // Nearest can leave a tall message clipped at its bottom. Align its beginning
@@ -3511,32 +3556,48 @@ function revealWork(id, expandDetails = false) {
   syncWorkReturnControl();
   return card;
 }
-async function readSelectedWorkRecord(id, expandDetails) {
+async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = false } = {}) {
   const context = workNavigationContext();
   if (!context || busy) return null;
-  const generation = client.generation, identity = session, held = state;
+  const generation = client.generation, identity = session;
   const epoch = workNavigationEpoch, url = location.href;
   const current = () => context === workNavigationContext() && generation === client.generation
-    && identity === session && held === state && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
-  try {
-    const selected = await client.workContext(id);
-    if (!current()) return null;
-    const item = selected?.work;
-    if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
-      || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
-      || typeof item.definitionOfDone !== "string" || !Number.isSafeInteger(item.revision) || item.revision < 0
-      || Number.isSafeInteger(held.workItems[id]?.revision) && item.revision < held.workItems[id].revision) {
-      notice(SOURCE_UNAVAILABLE_NOTICE, true); return null;
+    && identity === session && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
+  const attempts = restoreInPlace ? 2 : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const held = state;
+    try {
+      const selected = await client.workContext(id);
+      if (!current()) return null;
+      if (held !== state) continue;
+      const item = selected?.work;
+      if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
+        || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
+        || typeof item.definitionOfDone !== "string" || !Number.isSafeInteger(item.revision) || item.revision < 0
+        || Number.isSafeInteger(held.workItems[id]?.revision) && item.revision < held.workItems[id].revision) {
+        notice(SOURCE_UNAVAILABLE_NOTICE, true); return null;
+      }
+      // Mount only this independently selected current record. The room's
+      // summary window and completeness metadata remain unchanged.
+      const replacement = selected.next?.replacement;
+      inspectedWorkReplacementId = replacement?.status === "available" && replacement.workItemId === item.supersededBy
+        && replacement.nextRead?.tool === "room_read_work" && replacement.nextRead.arguments?.workItemId === item.supersededBy
+        ? item.supersededBy : null;
+      inspectedWorkRecord = structuredClone(item);
+      state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
+      if (restoreInPlace) {
+        renderMessages();
+        return workRecord(id);
+      }
+      return revealWork(id, expandDetails);
+    } catch (error) {
+      if (!current()) return null;
+      if (held !== state) continue;
+      notice(error.code === "work_private" ? SOURCE_UNAVAILABLE_NOTICE : error.message || SOURCE_UNAVAILABLE_NOTICE, true);
+      return null;
     }
-    // Mount only this independently selected current record. The room's
-    // summary window and completeness metadata remain unchanged.
-    inspectedWorkRecord = structuredClone(item);
-    state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
-    return revealWork(id, expandDetails);
-  } catch (error) {
-    if (current()) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
-    return null;
   }
+  return null;
 }
 function savedRoomDestination() {
   return Boolean(location.hash && location.hash !== "#pr-view/rooms") || accountHomeFromLocation();
@@ -3559,7 +3620,7 @@ function syncWorkReturnControl() {
   const button = $("#work-navigation-return");
   const origin = currentWorkOrigin();
   button.disabled = false;
-  button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message)\//.test(location.hash);
+  button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message|result)\//.test(location.hash);
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
 }
 function clearWorkNavigation() {
@@ -3596,6 +3657,7 @@ function sameWorkOrigin(a, b) {
   if (a.type === "updates") return ["itemId", "filter", "pageBudget", "scrollTop", "listScrollTop", "completionEventId"]
     .every(key => a.updates?.[key] === b.updates?.[key]);
   // JDOT-COH-UPDATES-PAGE end
+  if (a.type === "result") return a.result.completionEventId === b.result.completionEventId;
   if (a.type === "board") return a.claimId === b.claimId && a.focusKey === b.focusKey;
   const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
   return key(a) ? key(a) === key(b) : a.focus === b.focus;
@@ -3737,25 +3799,45 @@ async function restoreWorkOrigin(ticket) {
   // origin that was not the board closes it again (a work record's
   // destination never had it open).
   if (origin.targetClaimId && origin.type !== "board" && $("#board-dialog").open) $("#board-dialog").close();
-  if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId, true);
+  const priorOrigin = currentWorkOrigin(origin.previous);
+  // A shared work URL can be the first entry, with no earlier navigation ticket.
+  const coldWork = !priorOrigin && origin.type === "conversation";
+  const priorTarget = priorOrigin?.target ?? (coldWork ? new URL(origin.url).hash : "");
+  const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget);
+  const priorWorkId = priorWork ? decodeFragment(priorWork[1]) : null;
+  if (activeChannelId !== origin.channelId || (priorWorkId && activeDirectMemberId)) setActiveChannel(origin.channelId, true);
   switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null, false, true);
   if (origin.mode) setRequestMode(origin.mode);
-  activeWorkNavigationId = null;
-  const priorOrigin = currentWorkOrigin(origin.previous);
-  const priorTarget = priorOrigin?.target;
-  const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget ?? "");
-  activeWorkNavigationId = priorWork ? decodeFragment(priorWork[1]) : null;
+  activeWorkNavigationId = priorWorkId;
   renderMessages();
-  if (priorWork) {
-    const id = decodeFragment(priorWork[1]), card = id && workRecord(id);
-    if (card) {
-      const section = priorOrigin.presentation === "drafts" ? card.querySelector(".work-drafts") : card.querySelector(".work-details");
-      if (section) section.open = (priorOrigin.presentation === "drafts" ? origin.workDraftsOpen : origin.workDetailsOpen)
-        ?? priorOrigin.presentation !== "focus";
-      activeWorkNavigationId = id;
-    }
-  }
+  let priorCard = priorWorkId && workRecord(priorWorkId);
   const input = $("#message-input");
+  let interactionContinued = false;
+  if (coldWork && priorWorkId && !priorCard && partialWorkSnapshot) {
+    // Read the dropped card into the restored conversation. Opening it as a
+    // new destination would focus it even if the reviewer has started typing.
+    const focused = document.activeElement;
+    const draft = input.value;
+    const selection = [input.selectionStart, input.selectionEnd, input.selectionDirection];
+    const pending = { id: priorWorkId, epoch };
+    pendingWorkReturn = pending;
+    try {
+      priorCard = await readSelectedWorkRecord(priorWorkId, false, { restoreInPlace: true });
+    } finally {
+      if (pendingWorkReturn === pending) pendingWorkReturn = null;
+    }
+    if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)
+      || location.href !== origin.url || activeWorkNavigationId !== priorWorkId) return;
+    interactionContinued = focused !== document.activeElement || draft !== input.value
+      || selection[0] !== input.selectionStart || selection[1] !== input.selectionEnd || selection[2] !== input.selectionDirection;
+  }
+  if (priorCard) {
+    const presentation = priorOrigin?.presentation ?? "focus";
+    const drafts = presentation === "drafts";
+    const section = priorCard.querySelector(drafts ? ".work-drafts" : ".work-details");
+    if (section) section.open = (drafts ? origin.workDraftsOpen : origin.workDetailsOpen) ?? presentation !== "focus";
+  }
+  if (interactionContinued) { syncWorkReturnControl(); return; }
   input.setSelectionRange(...origin.selection); input.scrollTop = origin.composerScroll;
   $("#message-list").scrollTop = origin.listScroll;
   if (origin.type === "updates") {
@@ -3771,7 +3853,9 @@ async function restoreWorkOrigin(ticket) {
   }
   if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
   window.scrollTo(...origin.windowScroll);
-  if (origin.type !== "updates") {
+  if (origin.type === "result") {
+    openLinkedResult(origin.result);
+  } else if (origin.type !== "updates") {
     const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
     const keyed = origin.focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === origin.focusKey) : null;
     const claim = origin.claimId ? $(`#work-board [data-claim-id="${CSS.escape(origin.claimId)}"] h4`) : null;
@@ -3779,7 +3863,7 @@ async function restoreWorkOrigin(ticket) {
     const messageWork = origin.messageId && origin.messageWorkId
       ? $(`#message-list [data-message-record-id="${CSS.escape(origin.messageId)}"] [data-open-work="${CSS.escape(origin.messageWorkId)}"]`) : null;
     const fallback = origin.type === "board" ? $("#board-close") : $("#conversation-title");
-    const target = [origin.focus, keyed, search, messageWork, claim].find(usable) ?? fallback;
+    const target = [origin.focus, keyed, search, messageWork, claim, coldWork ? priorCard : null].find(usable) ?? fallback;
     target?.focus({ preventScroll: true });
     if (target === fallback) target?.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
@@ -3919,9 +4003,11 @@ function retryPendingHashReveal() {
   pendingHashReveal = null;
   revealMessage(pending.messageId);
 }
-function revealLocationHash() {
+function revealLocationHash(workspaceDiscussion = null) {
   if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
   if (!location.hash.startsWith("#pr-workspace/")) workspacePreviewsUI?.closeLinked();
+  const exactResult = exactResultDestination(location);
+  if (!exactResult) closeLinkedResult();
   if (!location.hash) return;
   const hash = location.hash;
   // Account destinations also work before any room has been opened.
@@ -3953,7 +4039,19 @@ function revealLocationHash() {
   }
   // JDOT-COH-NAV end
   if (hash.startsWith("#pr-workspace/")) {
-    workspacePreviewsUI?.openLink(hash);
+    workspacePreviewsUI?.openLink(hash, workspaceDiscussion);
+    return;
+  }
+  if (hash.startsWith("#pr-record/result/")) {
+    if (!exactResult || exactResult.roomId !== session?.roomId) {
+      closeResult(false);
+      notice(uiText("result.invalidLink"), true);
+      return;
+    }
+    updatesUi?.close();
+    if ($("#board-dialog").open) $("#board-dialog").close();
+    openLinkedResult(exactResult);
+    syncWorkReturnControl();
     return;
   }
   const deepRoom = roomIdFromHash(hash);
@@ -4164,12 +4262,20 @@ function workCard(i, now, drafts, messages = []) {
   const preview = value => { const chars = [...value]; return chars.slice(0, 240).join("") + (chars.length > 240 ? "…" : ""); };
   const goal = uiText("work.focus.goalHtml", { definition: esc(preview(i.definitionOfDone)) });
   const resultSummary = i.receipt ? uiText("work.focus.resultHtml", { summary: esc(preview(i.receipt.summary)) }) : "";
-  const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${esc(status.next)}</p>`;
-  const replacement = i.supersededBy && i.supersededBy !== i.id
-    ? Object.hasOwn(state.workItems, i.supersededBy)
-      ? `<p class="form-hint"><a class="source-link" href="${esc(workHref(i.supersededBy))}" data-open-work="${esc(i.supersededBy)}" data-focus-key="replacement:${esc(i.id)}">Open replacement</a></p>`
-      : `<p class="form-hint">Replacement unavailable in this room.</p>` : "";
-  const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
+  const replacementVisible = i === inspectedWorkRecord ? inspectedWorkReplacementId === i.supersededBy
+    : typeof state.workItems[i.supersededBy]?.title === "string";
+  const nextContent = i.supersededBy && i.supersededBy !== i.id
+    ? replacementVisible
+      ? `<a class="source-link" href="${esc(workHref(i.supersededBy))}" data-open-work="${esc(i.supersededBy)}" data-open-replacement data-focus-key="replacement:${esc(i.id)}">Open replacement</a>`
+      : "Replacement unavailable in this room."
+    : esc(status.next);
+  const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${nextContent}</p>`;
+  const sourceKey = `work-source:${esc(i.id)}`;
+  const sourceWithdrawn = i.sourceMessageId && conversation?.byId.get(i.sourceMessageId)?.deletedAt;
+  const sourceHintId = `${workDomId(i.id)}-source-unavailable`;
+  const source = !i.sourceMessageId ? "" : sourceWithdrawn
+    ? uiText("work.focus.sourceUnavailableHtml", { id: esc(sourceHintId), focusKey: sourceKey })
+    : `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="${sourceKey}">From this conversation</a>`;
   const continuity = terminalWork(i) ? null : workContinuity(i, now);
   const recovery = continuity?.needsAttention ? `<section class="work-recovery" aria-label="Worker progress"><strong>${esc(continuity.label)}</strong><p>${esc(continuity.next)}</p><button type="button" class="text-button" data-portable-work="${esc(i.id)}" data-portable-progress="true" data-focus-key="work-resume:${esc(i.id)}">Continue with saved context</button></section>` : "";
   const handoff = i.handoff?.open ? `<section class="blocker" data-work-handoff="${esc(i.id)}" aria-label="Work handoff"><strong>Handoff</strong><p>${esc(i.handoff.doneSummary)}</p><p><strong>Next:</strong> ${esc(i.handoff.nextAction)}</p><details><summary>Why work paused</summary><p>${esc(i.handoff.limitReason)}</p>${i.handoff.haltAll ? "<p>A stop was requested. External process state is unknown.</p>" : ""}</details></section>` : "";
@@ -4193,7 +4299,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${goal}${resultSummary}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${replacement}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now, next)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"${sourceWithdrawn ? ` aria-describedby="${sourceHintId}"` : ""}><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${goal}${resultSummary}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now, next)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -4239,7 +4345,7 @@ function timelineWorkEntries(onlyId) {
     draftsByWork.get(message.workItemId).push(message);
   }
   return Object.values(state.workItems)
-    .filter(item => onlyId === undefined || item.id === onlyId)
+    .filter(item => item.title !== null && (onlyId === undefined || item.id === onlyId))
     .map(item => {
       const proposals = draftsByWork.get(item.id) ?? [];
       // proposals is built newest-first via reverse iteration; the most recent
@@ -4522,7 +4628,10 @@ const replyToSharedResult = createResultFeedback({
   getDraft: destination => destination === composerKey()
     ? { pending: pendingMessage, toMemberId: $("#message-to-select").value,
       body: $("#message-input").value, files: composerFiles, replyToId } : drafts.get(destination),
-  onBlocked: () => notice(uiText("result.replyBlocked")),
+  onBlocked(reason = "result.replyBlocked") {
+    if (reason === "result.quoteTooLong") $("#result-use-status").textContent = uiText(reason);
+    else notice(uiText(reason));
+  },
   openThread(message, destination) {
     setActiveChannel(messageChannelId(message));
     revealMessage(message.id);
@@ -4984,6 +5093,19 @@ function expandTimelineTo(id) {
   }
 }
 $("#message-list").addEventListener("click", e => {
+  const artifact = e.target.closest(".message-body a[href]");
+  if (artifact && !e.defaultPrevented && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+    const url = new URL(artifact.href);
+    const messageId = artifact.closest("[data-message-record-id]")?.dataset.messageRecordId;
+    if (messageId && url.origin === location.origin && url.pathname === location.pathname
+      && url.searchParams.get("room") === session?.roomId && url.hash.startsWith("#pr-workspace/")) {
+      const destination = captureWorkspaceThreadDraft(messageId);
+      if (destination && workspacePreviewsUI?.openLink(url.hash, destination)) {
+        e.preventDefault();
+        return;
+      }
+    }
+  }
   if (e.target.closest("[data-direct-retry]")) { void directWindow.retry(); return; }
   if (e.target.closest("[data-timeline-earlier]")) {
     if (activeDirectMemberId) {
@@ -5788,7 +5910,7 @@ $("#main").addEventListener("click", e => {
     const origin = currentWorkOrigin();
     const fromUpdateMessage = origin?.type === "updates" && origin.target === location.hash
       && origin.target.startsWith("#pr-record/message/") && link.closest(".conversation-work");
-    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork] && !(partialWorkSnapshot && fromUpdateMessage))
+    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork] && !(partialWorkSnapshot && (fromUpdateMessage || link.hasAttribute("data-open-replacement"))))
       void navigateClaimRecord(link.dataset.openWork);
     else if (link.hasAttribute("data-view-drafts")) navigateWorkRecord("work", link.dataset.openWork, { presentation: "drafts" });
     else navigateWorkRecord("work", link.dataset.openWork, fromUpdateMessage ? { presentation: "thread" } : {});
@@ -6848,15 +6970,26 @@ function resultRow(item) {
 }
 const { clear: clearResultComparison, sync: syncResultComparisons, load: loadResultComparison } =
   createResultComparison({ client, getState: () => state, esc });
-const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult, restore: restoreResultSelection } = installResultReader({
+const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult, restore: restoreResultSelection, openLinked: openLinkedResult, closeLinked: closeLinkedResult } = installResultReader({
   client, getState: () => state, getSession: () => session, sameSession,
   storage: recovery.storage, recoveryScope: () => session ? draftScope(session) : null,
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
+  discussionMessage: id => conversation?.byId.get(id),
+  loadDiscussion(id) {
+    selectedMessage.select(id, client.generation);
+    return selectedMessage.sync(client.sequence);
+  },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onOpenDecision(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result }); },
+  onOpenWorkspace(url, message, artifactId) {
+    const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;
+    history.pushState(workHistoryState(), "", url.href);
+    revealLocationHash(discussion ? { ...discussion, artifactId } : null);
+  },
   onReturn() { $("#work-navigation-return").click(); },
-  onWorkAction(item, action) { openWorkAction(item, action); },
+  onWorkAction(item, action, compareFrom) { openWorkAction(item, action, null, null, compareFrom); },
   onOriginal(messageId) {
     searchCollapsed = true; $("#search-results").hidden = true;
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);
@@ -6873,7 +7006,7 @@ $("#room-results-list").addEventListener("click", event => {
   const work = event.target.closest("[data-result-work]");
   if (work) revealWork(work.dataset.resultWork);
 });
-function openWorkAction(item, action, draftMessageId = null, offerId = null) {
+function openWorkAction(item, action, draftMessageId = null, offerId = null, compareFrom = null) {
   if (pendingAction?.uncertain) { resumeAction(); return; }
   if (partialWorkSnapshot && (isHelpAction(action) || isOfferAction(action))) return;
   if (!item || !Object.hasOwn(actionSpecs, action)) return;
@@ -6881,7 +7014,7 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   const [type, , fields] = actionSpecs[action];
   actionEpoch++;
   const publishRationale = action === "decide" && document.body.classList.contains("human-experience") && !document.body.classList.contains("human-advanced");
-  pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, publishRationale, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
+  pendingAction = { type, action, workId: item.id, revision: item.revision, compareFrom, draftMessageId, publishRationale, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
   if (isHelpAction(action)) {
     pendingAction.helpRevision = item.helpWanted?.revision ?? 0;
     pendingAction.accountableRevision = state.members[item.accountableMemberId]?.revision;
@@ -6967,7 +7100,7 @@ function loadActionText(item, action) {
     if (!owns() || !value) return;
     if (!entry.draftMessageId && (value.result.receipt?.eventId !== entry.receipt.completionEventId || value.result.receipt?.evidenceVersion !== entry.receipt.evidenceVersion)) throw new Error("Pinned evidence changed");
     entry.text = value.result.text;
-    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns);
+    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns, value.workThread?.correction, entry.compareFrom, true);
     $("#action-text-body").textContent = entry.text.body;
     const proposal = entry.text.proposal;
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
@@ -7984,21 +8117,21 @@ function briefEventTarget(event) {
   if (event.type === T.ROOM_CREATED) return { kind: "room", id: state.room.id };
   return { kind: "event", id: event.id };
 }
-function describeBriefEvent({ sequence, event }) {
+function describeBriefEvent({ sequence, event }, proposalTitles) {
   const actor = esc(memberLabel(event.actorId));
   const type = esc(humanize(event.type));
+  const workTitle = event.data.withheld ? "" : (proposalTitles.get(event.data.workItemId) ?? event.data.workItemId ?? "");
   const actorRole = event.type === T.WORK_COMPLETED ? `reporter ${actor}` : actor;
   let detail = "";
   if (event.type === T.MESSAGE_POSTED) detail = esc((event.data.body || "").slice(0, 80));
-  else if (event.type === T.VERIFICATION_RECORDED) detail = esc(`${event.data.result} · ${(event.data.summary || "").slice(0, 60)}`);
-  else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc(humanize(event.data.decision));
+  else if (event.type === T.VERIFICATION_RECORDED) detail = esc([workTitle, event.data.result, event.data.summary?.slice(0, 60)].filter(Boolean).join(" · "));
+  else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc([workTitle, humanize(event.data.decision)].filter(Boolean).join(" · "));
   else if (event.type === T.WORK_COMPLETED) {
-    const title = state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "";
     const producer = event.data.producerId ? memberLabel(event.data.producerId)
       : event.data.externalProducer ? `${event.data.externalProducer} · outside room, reported` : "unknown — not reported";
-    detail = esc(`${title} · producer ${producer}`);
+    detail = esc([workTitle, `producer ${producer}`].filter(Boolean).join(" · "));
   }
-  else if (event.type?.startsWith("work.")) detail = esc(state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "");
+  else if (event.type?.startsWith("work.")) detail = esc(workTitle);
   else if (event.type === "land.updated") detail = esc(`#${event.data.pr ?? ""} ${(event.data.changed || []).join(", ")}`.trim());
   const target = briefEventTarget(event);
   const href = esc(recordHref(target.kind, target.id));
@@ -8178,11 +8311,19 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
   $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
     ? "· nothing new since your marker"
     : `${history.items.length} of ${changes} events · through ${history.evaluatedThrough}`;
+  // Historical labels come from this viewer’s loaded brief. Opening a work card
+  // elsewhere must never supply text omitted from a catch-up window.
+  const proposalTitles = new Map();
+  for (const { event } of history.items) {
+    if (event.data.withheld) proposalTitles.delete(event.data.workItemId);
+    else if (event.type === T.WORK_PROPOSED && event.data.title) proposalTitles.set(event.data.workItemId, event.data.title);
+  }
+  const historyRow = row => describeBriefEvent(row, proposalTitles);
   const historyGroups = groupBriefHistory(history.items, session?.member?.id);
   renderBriefList("#rb-history-list", (historyGroups.length
     ? historyGroups.map(([name, items]) =>
-      `<li class="rb-group"><span class="rb-group-label">${esc(BRIEF_GROUP_LABELS[name])} (${items.length})</span><ul class="rb-list rb-group-list">${items.map(describeBriefEvent).join("")}</ul></li>`).join("")
-    : history.items.map(describeBriefEvent).join(""))
+      `<li class="rb-group"><span class="rb-group-label">${esc(BRIEF_GROUP_LABELS[name])} (${items.length})</span><ul class="rb-list rb-group-list">${items.map(historyRow).join("")}</ul></li>`).join("")
+    : history.items.map(historyRow).join(""))
     || (returnBrief.contractVersion===2&&history.evaluatedThrough>history.cursor?'<li class="rb-empty">No visible events in this page. Continue through the checked history.</li>':'<li class="rb-empty">Nothing new since your marker.</li>'));
   $("#rb-more-button").hidden = !history.hasMore;
   $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : "Mark caught up";

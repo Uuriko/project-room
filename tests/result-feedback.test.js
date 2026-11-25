@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { createResultFeedback } from "../src/result-feedback.js";
 
 function fixture() {
@@ -7,7 +8,7 @@ function fixture() {
   const state = { room: {}, channels: { design: {} }, messages: [message] };
   const calls = [];
   let draft, blocked = false;
-  const conversation = { rootById: new Map([["result", "thread"]]), threads: new Map([["thread", {}]]) };
+  const conversation = { byId: new Map([[message.id, message]]), rootById: new Map([["result", "thread"]]), threads: new Map([["thread", {}]]) };
   const reply = createResultFeedback({ getState: () => state, getConversation: () => conversation,
     isBlocked: () => blocked, getDraft: () => draft, onBlocked: () => calls.push("blocked"),
     openThread: (message, destination) => calls.push(["open", message.id, destination]),
@@ -35,7 +36,7 @@ test("a public draft is preserved while routing feedback", () => {
 test("withdrawn, private, archived and unknown results never navigate", () => {
   for (const change of [f => { f.message.deletedAt = 1; }, f => { f.message.toMemberId = "private"; },
     f => { f.state.room.archivedAt = "2026-10-19T00:00:00Z"; }, f => { f.state.channels.design.archivedAt = 1; },
-    f => { f.state.messages = []; }, f => f.conversation.threads.clear(), f => f.block()]) {
+    f => { f.conversation.byId.clear(); }, f => f.conversation.threads.clear(), f => f.block()]) {
     const f = fixture(); change(f); assert.equal(f.reply("result"), false); assert.deepEqual(f.calls, []);
   }
 });
@@ -83,4 +84,21 @@ test("selection cannot bypass a private destination draft", () => {
   const f = fixture(); f.message.body = "Current"; f.draft({ body: "private", toMemberId: "someone" });
   assert.equal(f.reply("result", { body: "Current", start: 0, end: 3 }), false);
   assert.deepEqual(f.calls, ["blocked"]);
+});
+
+test("the quote size check counts its permalink and allows the exact limit and an existing quote", () => {
+  const f = fixture();
+  f.message.body = "🙂";
+  const selection = { body: f.message.body, start: 0, end: 2, sourceHref: "https://example.org/?room=commons#pr-record/result/work/a" };
+  const quote = "> 🙂\n" + selection.sourceHref + "\n\n";
+  const remainder = "x".repeat(MAX_MESSAGE_BODY_CHARS - quote.length);
+  f.draft({ body: remainder + "x" });
+  assert.equal(f.reply("result", selection), false);
+  assert.deepEqual(f.calls, ["blocked"]);
+  for (const body of [remainder, quote + remainder]) {
+    f.calls.length = 0;
+    f.draft({ body });
+    assert.equal(f.reply("result", selection), true);
+    assert.deepEqual(f.calls, [["open", "result", "thread"], ["reply", "result", quote]]);
+  }
 });

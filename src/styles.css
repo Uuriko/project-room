@@ -243,6 +243,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .result-correction h3 { font-size: var(--text-sm); margin: 0; }
 .result-correction p { margin-block: .25rem 0; white-space: pre-wrap; }
 .work-next-step { margin: .6rem 0; color: var(--muted); font-size: .875rem; line-height: 1.5; overflow-wrap: anywhere; }
+.work-next-step .source-link { display: inline-flex; align-items: center; min-height: 24px; font: inherit; }
 .work-facts > div { display: grid; grid-template-columns: 6.2rem 1fr; gap: .5rem; }
 .work-facts dt { color: var(--muted); font-size: .7rem; }
 .work-facts dd { margin: 0; color: #d8dee8; font-size: .75rem; line-height: 1.4; overflow-wrap: anywhere; }
@@ -1177,7 +1178,7 @@ summary { overflow-wrap: anywhere; }
 .work-changes-list ul { margin: 0; padding-left: 1.1rem; }
 .work-changes-list li { margin: 0.15rem 0; }
 .result-diff { margin: 0.4rem 0 0; padding: 0.5rem 0.7rem; border: 1px solid var(--border, rgba(127,127,127,0.35)); border-radius: 6px; overflow-x: auto; font-size: 0.9em; }
-.result-diff span { display: block; white-space: pre-wrap; }
+.result-diff span { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
 .result-diff .diff-added { color: var(--green); background: rgb(79 208 155 / 12%); }
 .result-diff .diff-removed { color: var(--red); background: rgb(255 123 123 / 12%); text-decoration: line-through; }
 
@@ -1966,6 +1967,8 @@ svg[width="20"][height="20"] { width: 1.25rem; height: 1.25rem; }
 .workspace-previews-layout li button[aria-pressed="true"] { background: var(--panel-raised); border-color: var(--blue); }
 .workspace-previews-layout li button span { display: block; color: var(--muted); font-size: var(--text-xs); }
 .workspace-preview-detail { min-width: 0; }
+[data-workspace-discussion] { overflow-wrap: anywhere; }
+[data-workspace-note] textarea { display: block; width: 100%; box-sizing: border-box; }
 .workspace-open svg { display: none; }
 @media (max-width: 520px) {
   .room-topbar .workspace-open { width: 44px; display: inline-grid; place-items: center; }

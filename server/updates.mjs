@@ -129,7 +129,9 @@ function draft(fields) {
     terminal: fields.terminal ?? null,
     untrusted: true,
     next: fields.next ?? null,
-    ...(fields.reviewRuntime ? {reviewRuntime:fields.reviewRuntime}: {})
+    ...(fields.reviewRuntime ? {reviewRuntime:fields.reviewRuntime}: {}),
+    ...(fields.reviewAction ? { reviewAction: fields.reviewAction } : {}),
+    ...(fields.needsRevision ? { needsRevision: true } : {})
   };
 }
 
@@ -337,6 +339,8 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false,
       createdAt: iso(item.createdAt ?? at), updatedAt: at,
       basis: `${item.revision}|${item.receipt?.eventId ?? ""}|${next.action}`,
       reviewRuntime: reviewRuntimeFor(store,roomId,item,next,now),
+      reviewAction: review ? next.action : null,
+      needsRevision: next.action === "revise",
       sourceRef: { workItemId: item.id },
       next: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(item.id)}` }
     }));

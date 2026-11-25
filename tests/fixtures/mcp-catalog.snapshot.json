@@ -233,7 +233,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "555ed42d05b779b5",
+      "inputSchema": "c2469d4a640c0c6a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1215,7 +1215,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "555ed42d05b779b5",
+      "inputSchema": "c2469d4a640c0c6a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1355,7 +1355,7 @@
       }
     },
     "room_read_work_discussion": {
-      "inputSchema": "622e3a8dc028f739",
+      "inputSchema": "a0c9161c51be1a76",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1987,7 +1987,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "555ed42d05b779b5",
+      "inputSchema": "c2469d4a640c0c6a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2067,7 +2067,7 @@
       }
     },
     "room_read_work_discussion": {
-      "inputSchema": "622e3a8dc028f739",
+      "inputSchema": "a0c9161c51be1a76",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2389,7 +2389,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "555ed42d05b779b5",
+      "inputSchema": "c2469d4a640c0c6a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2691,7 +2691,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "555ed42d05b779b5",
+      "inputSchema": "c2469d4a640c0c6a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2771,7 +2771,7 @@
       }
     },
     "room_read_work_discussion": {
-      "inputSchema": "622e3a8dc028f739",
+      "inputSchema": "a0c9161c51be1a76",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -3003,7 +3003,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "555ed42d05b779b5",
+      "inputSchema": "c2469d4a640c0c6a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -3447,7 +3447,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "555ed42d05b779b5",
+      "inputSchema": "c2469d4a640c0c6a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

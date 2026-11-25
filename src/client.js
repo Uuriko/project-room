@@ -1246,7 +1246,9 @@ export class RoomClient {
     } catch (error) {
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsAccountSession()) { this.endAccess(); return null; }
-      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      // A denied result leaves the authenticated Room session usable.
+      const privateResult = error.status === 403 && error.code === "work_private";
+      if (!privateResult && ([401, 403].includes(error.status) || error.code === "session_binding_changed")) this.handleFailure(error);
       throw error;
     }
   }
@@ -1265,7 +1267,9 @@ export class RoomClient {
     } catch (error) {
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsAccountSession()) { this.endAccess(); return null; }
-      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      // A private work record can be refused while the Room session is valid.
+      const privateWork = error.status === 403 && error.code === "work_private";
+      if (!privateWork && ([401, 403].includes(error.status) || error.code === "session_binding_changed")) this.handleFailure(error);
       throw error;
     }
   }

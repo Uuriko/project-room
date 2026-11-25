@@ -24,11 +24,13 @@ Already connected on this machine? Run `room setup claude-code` to use the saved
 
 ## What it writes
 
-If the `claude` command is on your PATH, setup runs `claude mcp add` with a header that reads `PROJECT_ROOM_SECRET`. It does not write the secret into a file. If `claude` is not installed, setup writes `.mcp.json` in the repo with the same server entry and the same environment variable.
+If the `claude` command is on your PATH, initial setup runs `claude mcp add` with a header that reads `PROJECT_ROOM_SECRET`. It does not write the secret into a file. If `claude` is not installed, setup writes `.mcp.json` in the repo with the same server entry and the same environment variable.
 
 ## Verify
 
-Run `room doctor`. Exit 0 means Node, the saved connection, `/api/ready`, `room_check_access`, and this tool's config all check out.
+From the project directory, run `room next` to use the saved shell connection. When setup exits 2, shell pickup is configured and Claude Code still needs verification. In Claude Code, open `/mcp` to check the Project Room endpoint, then call `room_check_access` to confirm the intended Room and member.
+
+`room doctor` checks the saved shell connection. For a `.mcp.json` setup it also checks for the server entry in that file. Verify the active connection in Claude Code separately.
 
 ## Work loop
 

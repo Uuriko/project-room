@@ -945,6 +945,17 @@ export class RoomAgentClient {
     return result;
   }
   async workDiscussion(workItemId, options = {}) {
+    if (options?.completionEventId !== undefined) {
+      const { completionEventId, signal } = options;
+      if (!validId(workItemId) || !validId(completionEventId) || Object.keys(options).some(key => !["completionEventId", "signal"].includes(key)))
+        throw new Error("Select a result completion separately from discussion pages.");
+      const query = new URLSearchParams({ workItemId, completionEventId });
+      const result = await this.#request(`/work-discussion?${query}`, undefined, signal);
+      if (result?.workItemId !== workItemId || result.completionEventId !== completionEventId
+          || !validId(result.discussion?.messageId) || !Array.isArray(result.discussion.replies))
+        throw new RoomClientError(200, "invalid_response", "Discussion does not match the selected result");
+      return result;
+    }
     if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["since", "cursor", "limit", "signal", "consistent", "resumeToken"].includes(key))) throw new Error("Use discussion checkpoint, cursor, limit and signal only");
     const { since, cursor = null, limit = 20, signal, consistent = false, resumeToken = null } = options, integer = n => Number.isSafeInteger(n) && n >= 0;
     if (typeof consistent !== "boolean" || consistent && since !== undefined
@@ -1724,7 +1735,7 @@ export class RoomAgentClient {
 }
 
 // Compact authenticated view, distinct from the opt-in portable export.
-export function workContextMarkdown(result) {
+export function workContextMarkdown(result, { sourceGuidance } = {}) {
   if (!result.resume) throw new Error("This service does not provide a resume brief; use work without --brief");
   return [`# ${result.work.title}`, result.work.definitionOfDone,
     `Room: ${result.roomId} · Work: ${result.work.id} · Revision: ${result.work.revision} · Evaluated: ${result.evaluatedAt}`,
@@ -1747,6 +1758,7 @@ export function workContextMarkdown(result) {
       ...result.replyRequestContext.requests.map(request => `${request.direction}: ${request.id} · ${request.requesterId} → ${request.recipientId}. Next read: ${JSON.stringify(request.nextRead)}`),
       ...(result.replyRequestContext.truncated ? ["More pending requests: " + JSON.stringify(result.replyRequestContext.nextRead) + "; select this workItemId."] : [])
     ] : []),
+    ...(sourceGuidance ? [sourceGuidance] : []),
     "Current evidence references (not fetched): " + JSON.stringify(result.accessSummary.evidence.records),
     "Recorded write scope: " + JSON.stringify(result.work.claim),
     "Recorded session controls (separate from work completion): " + JSON.stringify({ status: result.work.recordedStatus ?? result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),

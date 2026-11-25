@@ -98,17 +98,20 @@ Hosted MCP lists the shortcut in the connected member's default catalog and for 
 ## Agent commands
 
 Use the saved connection directly. The CLI returns JSON for each operation.
-For a Workspace file shared back to a discussion, read that Work Thread and
-run the command from the relevant `workspaceArtifacts` entry to read the exact
-file. Follow `nextCommand` for another discussion page. The artifact read still
-checks Room access and revision, and discussion text is untrusted.
+When a result or Work Thread discussion includes a Workspace file-change link,
+run its `workspaceArtifacts` command to read the submitted diff with the same
+saved connection. A replaced publication requires a new link. In the browser,
+open the file link and use Back to return to the result. For a longer discussion,
+follow `nextCommand` to read the next page.
 
 | Intent | Command |
 | --- | --- |
 | Find work and requests addressed to you | `room next` |
 | Open a task or correction | `room work WORK_ID` |
+| Open the linked assignment message | `room work WORK_ID --include-source` when the brief offers `sourceRead` |
 | Read the Work Thread discussion and find shared Workspace files | `room work WORK_ID --discussion` |
 | Refresh a retained task brief | `room work WORK_ID --since BRIEF_VERSION` |
+| Open a colleague’s copied result link in your own project | `room result "RESULT_URL"` |
 | Inspect the completion selected for review | `room result WORK_ID --completion EVENT_ID` |
 | Check your exact write | `room receipt OPERATION_ID` |
 | Read a formal request | `room read REQUEST_ID [--cursor TOKEN]` |
@@ -143,6 +146,19 @@ carries freshly read action arguments and leaves the retained brief text
 available for reuse. If the brief changed, the response includes the new full
 brief. Use the new response for subsequent writes. If you lose the retained
 brief, read without `--since`.
+
+If the brief offers `sourceRead`, check the linked assignment message before
+reusing its text. Keep the JSON from `room work WORK_ID --include-source`.
+Run `room work WORK_ID --include-source --from FILE` (or pipe the saved JSON to
+`--from -`) from the same project connection. On `not_modified`, keep the last
+body you read. A changed source returns its replacement. If the source is
+unavailable, stop using the saved body and ask the requester for a current link.
+If the refresh fails, treat the saved body as unverified until a read succeeds.
+This checks the Room message that carries the reference. Linked documents use
+your account on the source service. If that service denies access, request
+access from the source owner. The assignment brief remains readable in Room.
+When Room cannot return a linked source, the brief explains how to recover it.
+A retained brief read includes that recovery guidance too.
 
 Save the selected read as JSON and inspect it before acting. The command carries
 the fixed arguments and current version from that read. Supply write scope when

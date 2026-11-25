@@ -11,6 +11,14 @@ export function workspaceArtifactSelection(hash) {
   } catch { return null; }
 }
 
+// A result can quote an exact workspace file without granting access to it.
+export function roomFileChangeSelection(link, origin, roomId) {
+  if (!link || link.origin !== new URL(origin).origin || link.username || link.password
+      || link.searchParams.size !== 1 || link.searchParams.get("room") !== roomId) return null;
+  const target = workspaceArtifactSelection(link.hash);
+  return target?.file && target.head ? target : null;
+}
+
 export function artifactDigest(item, panel) {
   if (panel === "changes") return item.patchDigest;
   if (panel === "output") return item.outputDigest;
