@@ -927,6 +927,21 @@ test("Catch Up opens the exact approved result and returns to its decision row",
   assert.equal(await guest.locator("#message-input").inputValue(), "Unsent follow-up about the original implementation.");
   assert.equal(cursor(), before);
   assert.equal(await guest.locator("#result-dialog").isVisible(), false);
+
+  await guest.goForward();
+  await guest.locator("#result-body").getByText("Consumer repository: verified the original implementation.", { exact: true }).waitFor();
+  assert.equal(await guest.locator("#catchup-dialog").isVisible(), false);
+  await guest.waitForFunction(() => document.activeElement?.id === "result-title");
+
+  await openCatchUp(guest);
+  const historyHeading = guest.locator("#rb-history-heading");
+  const historySection = guest.locator("#rb-history-section");
+  if (await historySection.evaluate(node => node.open)) await historyHeading.click();
+  assert.equal(await historySection.evaluate(node => node.open), false);
+  await guest.goBack();
+  await guest.waitForFunction(() => document.activeElement?.id === "rb-history-heading");
+  assert.equal(await historySection.evaluate(node => node.open), false);
+  assert.equal(cursor(), before);
 });
 
 test("catch-up labels each review with its visible work and preserves withheld history", async t => {

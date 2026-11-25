@@ -3693,10 +3693,8 @@ function showWorkDestination(kind, id, presentation = "focus") {
         syncWorkReturnControl();
       });
     }
-  } else if (kind === "result") {
-    $("#catchup-dialog").close();
-    revealLocationHash();
-  } else revealMessage(id);
+  } else if (kind === "result") revealLocationHash();
+  else revealMessage(id);
   syncWorkReturnControl();
 }
 // #3795: open the board on one claim's record — the destination behind
@@ -3876,9 +3874,14 @@ async function restoreWorkOrigin(ticket) {
     openLinkedResult(origin.result, { focusDecision: origin.focus?.id === "result-decision-source" });
   } else if (origin.type === "catchup") {
     closeResult(false);
-    $("#catchup-dialog").showModal();
-    const source = $("#catchup-dialog").querySelector(`[data-brief-key="${CSS.escape(origin.briefKey)}"]`);
-    focusRecord(source || $("#return-brief-panel > summary"));
+    const catchUp = $("#catchup-dialog");
+    catchUp.showModal();
+    const brief = $("#return-brief-panel");
+    const history = $("#rb-history-section");
+    const source = brief.open && history.open
+      ? history.querySelector(`[data-brief-key="${CSS.escape(origin.briefKey)}"]`) : null;
+    const historyHeading = brief.open ? $("#rb-history-heading") : null;
+    focusRecord([source, historyHeading, $("#return-brief-heading")].find(node => node?.getClientRects().length));
   } else if (origin.type !== "updates") {
     const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
     const keyed = origin.focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === origin.focusKey) : null;
@@ -4073,6 +4076,7 @@ function revealLocationHash(workspaceDiscussion = null) {
       return;
     }
     updatesUi?.close();
+    $("#catchup-dialog").close();
     if ($("#board-dialog").open) $("#board-dialog").close();
     openLinkedResult(exactResult);
     syncWorkReturnControl();
