@@ -17,10 +17,10 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 // and cross-user cursor isolation.
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
-function fixture(t) {
+function fixture(t, representation) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-returnbrief-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
-  store.initialize(initialRoom());
+  store.initialize(initialRoom(), representation ? { representation } : undefined);
   const owner = store.issueAccessKey("commons", "owner");
   for (const [id, kind] of [["human", "human"], ["agent", "agent"]]) store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: id, displayName: id, kind, permissions: ["accept_work", "complete_work", "verify"] }));
   // #953: new agent members default to t1_readonly; the agent fixture needs write access
@@ -293,6 +293,41 @@ test("HTTP: query parsing, auth, and response shape over the wire", async t => {
   const anon = await get("/api/rooms/commons/return-brief");
   assert.equal([401, 403].includes(anon.status), true);
 });
+
+for (const representation of [null, "normalized-current-v1"]) {
+  test(`HTTP: cancellation links only its visible original request (${representation ?? "legacy"})`, async t => {
+    const { store, owner, human, agent } = fixture(t, representation);
+    const roomId = "commons", requestMessageId = "cancelled-return-request";
+    const opening = store.command(owner, roomId, command(T.MESSAGE_POSTED, {
+      messageId: requestMessageId, body: "Review the candidate", toMemberId: "human", requestKind: "reply",
+    }));
+    store.markCaughtUp(human, roomId, opening.sequence);
+    store.markCaughtUp(agent, roomId, opening.sequence - 1);
+    const terminal = store.command(owner, roomId, command(T.REPLY_REQUEST_CANCELLED, {
+      requestMessageId, expectedRequestRevision: 0, reason: "Another reviewer picked it up",
+    }));
+    const server = createRoomServer({ store });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    t.after(() => { server.closeStreams(); server.closeAllConnections(); server.close(); });
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const get = async (path, token, status = 200) => {
+      const response = await fetch(`${origin}/api/rooms/${roomId}/${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      assert.equal(response.status, status);
+      return response.json();
+    };
+    const brief = await get("return-brief", human);
+    const row = brief.history.items.find(item => item.event.id === terminal.event.id);
+    assert.deepEqual(row.nextRead, { tool: "room_read_request", arguments: { roomId, requestMessageId, view: "compact" } });
+    const exactPath = `reply-context?${new URLSearchParams({ requestMessageId: row.nextRead.arguments.requestMessageId, view: row.nextRead.arguments.view })}`;
+    const exact = await get(exactPath, human);
+    assert.equal(exact.request.status, "cancelled");
+    assert.equal(exact.page.items.find(item => item.kind === "cancelled").reason, "Another reviewer picked it up");
+    const outside = await get("return-brief", agent);
+    assert.equal(outside.history.items.some(item => item.event.id === terminal.event.id || item.nextRead?.arguments.requestMessageId === requestMessageId), false);
+    await get(exactPath, agent, 404);
+    assert.equal(store.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, "human").sequence, opening.sequence);
+  });
+}
 
 test("a cursor moved by another tab rejects the continuation with 409 cursor_changed", t => {
   const { store, human } = fixture(t);

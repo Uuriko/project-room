@@ -5977,7 +5977,14 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       if (route === "return-brief" && req.method === "GET") {
         const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");
         const brief = store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence });
-        if (brief?.history) brief.history.items = redactEventRows(brief.history.items, brief.contractVersion===2?currentReturnBriefMessages(roomId,brief):store.redactionMessages(roomId));
+        if (brief?.history) {
+          const visibleRows = redactEventRows(brief.history.items, brief.contractVersion===2?currentReturnBriefMessages(roomId,brief):store.redactionMessages(roomId));
+          brief.history.items = visibleRows.map(row => {
+            const requestMessageId = row.event.data?.requestMessageId;
+            if (row.event.type !== "reply_request.cancelled" || !validId(requestMessageId)) return row;
+            return { ...row, nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId, view: "compact" } } };
+          });
+        }
         return json(res, 200, brief);
       }
       if (route === "cursor" && req.method === "POST") {
