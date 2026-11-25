@@ -374,6 +374,8 @@ for (const storage of ["legacy", "normalized"]) {
       await page.screenshot({ path: process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT + "-before.png" });
     }
 
+    const promptCheck = page.locator('[data-check-message-files="question"]');
+    const promptCheckCount = await promptCheck.count();
     const menu = row.locator(".message-more summary");
     const checkFiles = row.getByRole("button", { name: "Check files on this answer", exact: true });
     await menu.press("Enter");
@@ -405,6 +407,7 @@ for (const storage of ["legacy", "normalized"]) {
       await page.screenshot({ path: process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT + "-after.png" });
     }
     assert.equal(await row.count(), 1);
+    assert.equal(await promptCheck.count(), promptCheckCount);
     assert.equal(await page.locator("#message-input").inputValue(), "Unsent follow-up to the requester");
     assert.equal(await row.getByText("I finished reviewing the project brief.", { exact: true }).count(), 1);
     const download = page.waitForEvent("download");
