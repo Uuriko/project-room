@@ -158,6 +158,36 @@ test("lost committed answer remains exact and read-only across reload, then retr
   assert.deepEqual(f.errors, []);
 });
 
+test("storage refusal shows the wait and retries the exact formal draft", { timeout: 60000 }, async t => {
+  const f = await setup(t);
+  f.request("storage-retry");
+  const page = await f.login("guest");
+  await mode(page, "storage-retry", "answered");
+  await input(page).fill("Keep this exact response.");
+  const commands = [];
+  await page.route("**/api/rooms/commons/commands", async route => {
+    commands.push(route.request().postDataJSON());
+    if (commands.length === 1) {
+      await route.fulfill({ status: 503, headers: { "Retry-After": "30" },
+        json: { error: { code: "storage_unavailable", message: "Room storage is unavailable." } } });
+    } else {
+      await route.continue();
+    }
+  });
+  await input(page).press("Enter");
+  await failed(page);
+  assert.equal(await page.getByText(/Wait at least 30 seconds.*contact the Room operator/).count(), 1);
+  assert.equal(await input(page).inputValue(), "Keep this exact response.");
+  assert.equal(await input(page).evaluate(el => el.readOnly), true);
+  assert.equal(f.state().replyRequests["storage-retry"].status, "open");
+  await page.getByRole("button", { name: "Retry original", exact: true }).click();
+  await saved(page);
+  assert.equal(commands.length, 2);
+  assert.deepEqual(commands[0], commands[1]);
+  assert.equal(f.state().messages.filter(message => message.body === "Keep this exact response.").length, 1);
+  assert.deepEqual(f.errors, []);
+});
+
 test("unconfirmed receipt locks the exact request; ordinary drafts remain separate", { timeout: 60000 }, async t => {
   const f = await setup(t), page = await f.login("owner");
   await enterConversation(page);

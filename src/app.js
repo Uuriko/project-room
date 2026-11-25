@@ -5002,7 +5002,15 @@ function submitRequest(form) {
       if (consentRefusal) throw consentRefusal;
       throw error;
     }
-  }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
+  }, { failureHint: error => {
+    if (error.status !== 503 || error.code !== "storage_unavailable") {
+      return "Draft kept. Retry the original, or refresh context after a refusal.";
+    }
+    const seconds = Math.ceil(error.retryAfterMs / 1000);
+    return seconds > 0
+      ? uiText("composer.storageRetryAfter", { seconds })
+      : uiText("composer.storageRetry");
+  } });
 }
 // The menu lifting click listener is no longer needed (content-visibility
 // removed from .message). The menu positions correctly without it.
