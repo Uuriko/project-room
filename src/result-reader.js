@@ -270,6 +270,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
+    if (usableText(view) && view.producerCredit) {
+      resultElement("result-status").append(uiText("result.creditSuffix", { name: view.producerCredit }));
+    }
     if (view.releaseChecks && getState().messages.some(message => (message.deletedAt || message.editedAt)
       && (message.id === view.releaseChecks.messageId || view.releaseChecks.checks.some(check => check.evidenceMessageId === message.id || check.reportMessageId === message.id)))) {
       view.releaseChecks = null;
@@ -466,7 +469,11 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
       }
-      view.reportedById = value.result.receipt.reportedById;
+      const receipt = value.result.receipt;
+      view.reportedById = receipt.reportedById;
+      view.producerCredit = receipt.producerAttribution === "external-reported" ? receipt.externalProducer
+        : receipt.producerAttribution === "reported" && receipt.producerId && receipt.producerId !== receipt.reportedById
+          ? memberLabel(receipt.producerId) : null;
       view.reviewRuntime = value.reviewRuntime;
       view.previousCompletionEventId = value.result.receipt.nativeText?.previousCompletionEventId;
       // Text taken out of the room is served as an absence, so say so rather

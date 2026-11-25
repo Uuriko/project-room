@@ -14,7 +14,7 @@ import { signInFixture } from "./auth-signin.mjs";
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
 
-async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody } = {}) {
+async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody, firstCredit } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60, credentialReadBurst });
   let browser;
   t.after(async () => {
@@ -24,12 +24,12 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
   });
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
   const item = id => f.store.room("commons").state.workItems[id];
-  const completeWithText = (workItemId, body, toMemberId) => {
+  const completeWithText = (workItemId, body, toMemberId, credit = { producerId: "producer" }) => {
     const posted = send("producer", T.MESSAGE_POSTED, { messageId: randomUUID(), workItemId, body, ...(toMemberId ? { toMemberId } : {}) });
     return send("producer", T.WORK_COMPLETED, { workItemId, expectedRevision: item(workItemId).revision,
       evidenceKind: "room_text", evidenceMessageId: posted.event.data.messageId, evidenceMessageEventId: posted.event.id,
       evidenceVersion: textVersion(body), previousCompletionEventId: item(workItemId).receipt?.eventId ?? null,
-      producerId: "producer", summary: "An exact room result", nextAction: "Review the stored text" });
+      ...credit, summary: "An exact room result", nextAction: "Review the stored text" });
   };
   const lifecycle = workItemId => {
     send("producer", T.WORK_ACCEPTED, { workItemId, expectedRevision: item(workItemId).revision });
@@ -43,7 +43,7 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
   send("owner", T.WORK_PROPOSED, { workItemId: "calm-result", title: "A first result", definitionOfDone: "One version", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
   lifecycle("calm-result");
   completeWithText("calm-result", "Only version of this result");
-  const first = completeWithText("revision-journey", firstBody ?? (retained ? retainedBody : "Result A\nKeep this line\nMissing named owner"), firstDirectTo);
+  const first = completeWithText("revision-journey", firstBody ?? (retained ? retainedBody : "Result A\nKeep this line\nMissing named owner"), firstDirectTo, firstCredit);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
@@ -383,7 +383,7 @@ test("shared result links keep identical old and new text bound to different ver
     "Literal semicolon path: " + source + "/docs/a;b.md",
     "Literal closing parenthesis path: " + source + "/docs/a)b.md"
   ].join("\n");
-  const f = await setup(t, 1440, { firstBody: body });
+  const f = await setup(t, 1440, { firstBody: body, firstCredit: { producerId: null, externalProducer: "Design agent" } });
   const check = (receipt, result) => f.send("human-checker", T.VERIFICATION_RECORDED, {
     workItemId: f.item().id, expectedRevision: f.item().revision, completionEventId: receipt.event.id,
     evidenceVersion: receipt.event.data.evidenceVersion, result, summary: "Checked the exact revision",
@@ -422,12 +422,14 @@ test("shared result links keep identical old and new text bound to different ver
   await receiver.getByText("Verification · Failed", { exact: true }).waitFor();
   assert.match(await receiver.locator("#result-status").textContent(), /^Earlier result/);
   assert.equal(await receiver.locator("#result-body").textContent(), body);
+  assert.match(await receiver.locator("#result-status").textContent(), /Credited to Design agent/);
   assert.equal(await receiver.locator("#result-work-action").isVisible(), false);
   const newer = receiver.getByRole("link", { name: "Open current result" });
   assert.equal(await newer.getAttribute("href"), current);
   await newer.click();
   await receiver.getByText("Verification · Passed", { exact: true }).waitFor();
   assert.equal(await newer.count(), 0);
+  assert.doesNotMatch(await receiver.locator("#result-status").textContent(), /Credited to/);
   assert.doesNotMatch(await receiver.locator("#result-status").textContent(), /^Earlier result/);
   assert.equal(await receiver.locator("#result-body").textContent(), body);
   assert.deepEqual(await receiver.locator("#result-body a").evaluateAll(links => links.map(link => link.href)),
@@ -472,6 +474,7 @@ test("shared result links keep identical old and new text bound to different ver
   assert.equal(await sender.locator("#result-correction-summary").textContent(), "");
   await receiver.goto(earlier);
   await receiver.getByText(/Text withdrawn by/).waitFor();
+  assert.doesNotMatch(await receiver.locator("#result-status").textContent(), /Design agent/);
   assert.equal(await receiver.locator("#result-body").textContent(), "");
   assert.equal(await receiver.locator("#result-copy-link").isVisible(), false);
   assert.equal(await receiver.locator("#result-current-version").getAttribute("href"), null);
