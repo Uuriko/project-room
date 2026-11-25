@@ -3670,7 +3670,8 @@ function sameWorkOrigin(a, b) {
   if (a.type === "updates") return ["itemId", "filter", "pageBudget", "scrollTop", "listScrollTop", "completionEventId"]
     .every(key => a.updates?.[key] === b.updates?.[key]);
   // JDOT-COH-UPDATES-PAGE end
-  if (a.type === "result") return a.result.completionEventId === b.result.completionEventId;
+  if (a.type === "result") return a.result.completionEventId === b.result.completionEventId
+    && a.result.baselineCompletionEventId === b.result.baselineCompletionEventId;
   if (a.type === "board") return a.claimId === b.claimId && a.focusKey === b.focusKey;
   const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
   return key(a) ? key(a) === key(b) : a.focus === b.focus;

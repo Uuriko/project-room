@@ -9,18 +9,25 @@ function validRecordId(value) {
 
 // Exact result links are selectors. The reader still checks room access and the pinned receipt.
 export function exactResultDestination({ search = "", hash = "" }) {
-  const route = /^#pr-record\/result\/([^/]+)\/([^/]+)$/.exec(hash);
+  const route = /^#pr-record\/result\/([^/]+)\/([^/]+)(?:\/compare\/([^/]+))?$/.exec(hash);
   const rooms = new URLSearchParams(search).getAll("room");
   if (!route || rooms.length !== 1 || ![rooms[0], route[1], route[2]].every(validRecordId)) return null;
-  return { roomId: rooms[0], workItemId: route[1], completionEventId: route[2] };
+  const [, workItemId, completionEventId, baselineCompletionEventId] = route;
+  if (baselineCompletionEventId && (!validRecordId(baselineCompletionEventId) || baselineCompletionEventId === completionEventId)) return null;
+  return { roomId: rooms[0], workItemId, completionEventId, ...(baselineCompletionEventId ? { baselineCompletionEventId } : {}) };
 }
 
-export function exactResultHref({ roomId, workItemId, completionEventId }, locationLike = globalThis.location) {
+export function exactResultHref({ roomId, workItemId, completionEventId, baselineCompletionEventId }, locationLike = globalThis.location) {
   if (![roomId, workItemId, completionEventId].every(validRecordId)) return "";
+  const path = ["pr-record", "result", workItemId, completionEventId];
+  if (baselineCompletionEventId !== undefined) {
+    if (!validRecordId(baselineCompletionEventId) || baselineCompletionEventId === completionEventId) return "";
+    path.push("compare", baselineCompletionEventId);
+  }
   const url = new URL(locationLike.origin);
   url.pathname = locationLike.pathname;
   url.searchParams.set("room", roomId);
-  url.hash = ["pr-record", "result", workItemId, completionEventId].join("/");
+  url.hash = path.join("/");
   return url.href;
 }
 
