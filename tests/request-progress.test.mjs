@@ -199,7 +199,7 @@ for (const representation of [null, 'normalized-current-v1']) test(`a sender can
   assert.equal(read('asker'), undefined);
   t.mock.timers.tick(1);
   const [unacknowledged] = read('asker');
-  assert.match(unacknowledged.guidance, /No acknowledgment yet.*check with the recipient/);
+  assert.match(unacknowledged.guidance, /No acknowledgment yet.*Delivery may still be in progress/);
   assert.deepEqual(unacknowledged.nextRead, {tool: 'room_read_request', arguments: {roomId: 'commons', requestMessageId: 'ask', view: 'compact'}});
   for (const who of ['helper', 'owner', 'other']) assert.equal(read(who), undefined);
   assert.equal(read('asker', false), undefined);
