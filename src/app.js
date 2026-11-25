@@ -3045,7 +3045,8 @@ async function checkAnswerFiles(messageId) {
   if (!message || !receivedFormalAnswer(message)) return;
   const generation = client.generation, viewKey = conversationViewKey();
   answerFileCheck = null;
-  const checked = await refreshRoomFiles(false, [messageId]);
+  const selection = roomFilesSelection.includes(messageId) ? roomFilesSelection : [messageId];
+  const checked = await refreshRoomFiles(false, selection);
   if (generation !== client.generation || conversationViewKey() !== viewKey) return;
   const text = !checked ? uiText("file.answer.checkFailed")
     : roomFilesByMessage.get(messageId)?.length || roomFilesNextCursor ? "" : uiText("file.answer.none");
