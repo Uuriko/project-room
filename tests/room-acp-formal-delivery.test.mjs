@@ -142,6 +142,47 @@ for (const cancelled of [false, true]) test(`ACP prepares formal context once af
   }
 });
 
+for (const scenario of ['recover','corrected','tool','invalid','unfinished','interrupted']) test(`formal output recovery handles ${scenario} without repeating the task`, async t => {
+  const f = await fixture(t), bridge = f.make();
+  const body = ' I checked the named source and found the stale review is rejected. ';
+  const prompts = [];
+  bridge.host.prompt = async (_thread, prompt, options) => {
+    prompts.push({prompt, options});
+    if (prompts.length === 1) {
+      if (scenario === 'corrected') f.store.command(f.seeded.owner,'commons',{id:'format-correction',type:'message.posted',
+        data:{messageId:'format-correction',replyToId:'dm',toMemberId:'worker',body:'Check the replacement version instead.'}});
+      return {recorder:{text:body,tools:new Map()},stopReason:scenario === 'unfinished' ? 'max_tokens' : 'end_turn'};
+    }
+    if (scenario === 'interrupted') {
+      bridge.stop();
+      throw Error('interrupted while classifying');
+    }
+    const text = scenario === 'invalid' ? 'I already checked' : JSON.stringify({outcome:'answered'});
+    return {recorder:{text,tools:new Map()},stopReason:'end_turn',blockedToolUse:scenario === 'tool'};
+  };
+  await f.ready(bridge);
+  await bridge.turn('dm',[f.wake]);
+  const current = await f.read(scenario === 'interrupted' ? f.make() : bridge);
+  assert.equal(prompts.length, ['corrected','unfinished'].includes(scenario) ? 1 : 2);
+  if (prompts.length === 2) {
+    assert.equal(prompts[1].options.sessionId,prompts[0].options.sessionId);
+    assert.equal(prompts[1].options.allowTools,false);
+    assert.equal(prompts[1].options.timeoutMs,15000);
+    assert.match(prompts[1].prompt[0].text,/previous final reply/);
+  }
+  assert.equal(current.request.status,scenario === 'recover' ? 'answered' : 'open');
+  assert.equal(current.page.items.find(item=>item.kind==='answered')?.message.body,scenario === 'recover' ? body : undefined);
+  if (scenario === 'corrected') assert.equal(current.request.contextMessageId,'format-correction');
+  if (['tool','invalid','unfinished'].includes(scenario)) assert.equal(current.request.progressState,'error');
+  if (scenario === 'interrupted') {
+    const retry = f.make();
+    await f.ready(retry);
+    await retry.turn('dm',[f.wake]);
+    assert.equal(f.counts.prompts,0);
+    assert.equal(retry.chatReceipts.read(retry.chatReceipts.key(f.wake.signalId)).phase,'started');
+  }
+});
+
 test('lost committed formal response retries the frozen recipe after restart without a second execution or event', async t => {
   const f = await fixture(t,{text:JSON.stringify({outcome:'answered',body:syntheticAnswer4141})}); let lose = true;
   const first = f.make(async (url, options) => {
@@ -598,7 +639,7 @@ test('a newer requester correction fences out an obsolete ACP failure report', a
 });
 
 for (const invalidOutput of [false,true]) test(`a lost ACP ${invalidOutput?'invalid response':'failure'} receipt recovers the frozen progress operation without another model turn`, async t => {
-  const f = await fixture(t, invalidOutput ? {text:'I checked the candidate but omitted the response envelope.'} : {});
+  const f = await fixture(t, invalidOutput ? {text:'I checked the candidate but omitted the response envelope.',stopReason:'max_tokens'} : {});
   let turns = 0, lost = false;
   const operations = [];
   const transport = async (url, options) => {

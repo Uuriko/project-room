@@ -160,3 +160,21 @@ for (const saved of [null, "saved-session"]) {
     assert.equal(savedSessions.get("thread"), saved ?? undefined);
   });
 }
+
+test("a format-only ACP turn cancels new permission requests before reaching the approver", async t => {
+  const agent = fileURLToPath(new URL("../room-acp/fixtures/fake-agent.mjs", import.meta.url));
+  let approvals = 0;
+  const host = new AgentHost({ candidate: { command: process.execPath, args: [agent] },
+    env: { ...process.env, FAKE_ACP_MODE: "ask-permission" },
+    onPermission: () => { approvals++; return { outcome: { outcome: "selected", optionId: "allow_once" } }; } });
+  t.after(() => host.stop());
+  await host.start();
+  const denied = await host.prompt("thread", prompt, {allowTools:false, timeoutMs:1000});
+  assert.equal(denied.blockedToolUse,true);
+  assert.equal(denied.recorder.text,"permission: cancelled");
+  assert.equal(approvals,0);
+  const ordinary = await host.prompt("thread",prompt);
+  assert.equal(ordinary.blockedToolUse,false);
+  assert.equal(ordinary.recorder.text,"permission: allow_once");
+  assert.equal(approvals,1);
+});

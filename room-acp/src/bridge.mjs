@@ -12,7 +12,7 @@ import { RoomClient, RoomError } from "./room.mjs";
 import { AgentHost } from "./agent-host.mjs";
 import { ThreadQueue } from "./queue.mjs";
 import { buildPrompt, buildClaimPrompt, buildFormalPrompt } from "./prompt.mjs";
-import { readCompleteRequest, prepareFormalDelivery, deliverFormal } from './formal-delivery.mjs';
+import { readCompleteRequest, prepareFormalDelivery, deliverFormal, classifyFormalOutput, MAX_FORMAL_RESPONSE_CHARS } from './formal-delivery.mjs';
 import { reviewBinding, readReview, reviewOutput, deliverReview, recordedReview, reviewParkReason, reviewRepairable, explicitVerdict, REVIEW_REPAIR_PROMPT } from './review-wake.mjs';
 import { renderTurn } from "./render.mjs";
 import { SessionMap } from "./sessions.mjs";
@@ -20,6 +20,7 @@ import { PermissionBroker, decisionOf, DEFAULT_PERMISSION_TIMEOUT_MS } from "./p
 
 export const CRASH_LIMIT = 3;
 export const CRASH_WINDOW_MS = 5 * 60 * 1000;
+const FORMAL_FORMAT_TIMEOUT_MS = 15_000;
 // The Room pages pending wakes (50 per page) and reports more/nextCursor.
 // One poll cycle follows at most this many pages, so a queue that grows
 // while the bridge sleeps drains across cycles instead of looping here.
@@ -943,7 +944,11 @@ export class Bridge {
         onFirstOutput: kind => this.stageObserver.mark(receipt.signalIds, 'first_observable_output', receipt.requestId, kind)});
       this.stats.turns++;
       if (formal) {
-        const delivery = prepareFormalDelivery(formal, recorder.finalText ?? recorder.text, stopReason);
+        const output = recorder.finalText ?? recorder.text;
+        let delivery = prepareFormalDelivery(formal, output, stopReason);
+        if (delivery.kind === 'invalid') {
+          delivery = await this.recoverFormalOutput(receipt, formal, output, stopReason, sessionId) ?? delivery;
+        }
         body = delivery.kind === 'formal' ? delivery.recipe.command.data.body : delivery.body;
         if (delivery.kind === 'formal') formalDelivery = delivery;
         else if (delivery.kind === 'invalid') formalFailed = true;
@@ -975,6 +980,35 @@ export class Bridge {
       : {...result, phase:'result', body, ordinaryChat:!formal, ...(formalDelivery ? {formalDelivery} : {}),
         ...(formalPending ? {formalPending} : {}), ...(formalDraft ? {formalDraft} : {}), ...(formalFailure ? {formalFailure} : {})});
     if (!silent && this.chatReceipts.dir) this.stageObserver.mark(receipt.signalIds, 'durable_result_saved', receipt.requestId);
+  }
+
+  async recoverFormalOutput(receipt, original, output, stopReason, sessionId) {
+    if (stopReason !== 'end_turn' || this.controller.signal.aborted || typeof output !== 'string') return;
+    const text = output.trim();
+    if (!text || output.length > MAX_FORMAL_RESPONSE_CHARS || ['{','[','`'].includes(text[0])) return;
+
+    const current = await readCompleteRequest(this.room, receipt.threadKey);
+    if (current.request.status !== 'open' || !current.current?.actions?.answer
+      || current.request.revision !== original.request.revision
+      || current.current.contextEventId !== original.current.contextEventId
+      || current.current.contextSequence !== original.current.contextSequence) return;
+    await this.assertListener();
+    if (this.controller.signal.aborted || !(await this.authorized({messageIds:receipt.messageIds}))) return;
+
+    const prompt = [{type:'text',text:[
+      'Classify your previous final reply for the same request.',
+      'Do not run tools, repeat the work, or write a new reply. Room will use the entire previous final reply as it was.',
+      'Return only {"outcome":"answered"}, {"outcome":"declined"}, or {"outcome":"pending"}.',
+      'Choose answered or declined only if the whole previous reply should be shared with the requester as that outcome.',
+      'Choose pending if the previous reply was progress, incomplete, or unsuitable to send in full.'
+    ].join(' ')}];
+    const repaired = await this.host.prompt(receipt.threadKey, prompt, {sessionId, allowTools:false, timeoutMs:FORMAL_FORMAT_TIMEOUT_MS});
+    this.stats.turns++;
+    if (this.controller.signal.aborted || repaired.stopReason !== 'end_turn'
+      || repaired.blockedToolUse || repaired.recorder.tools?.size) return;
+    const outcome = classifyFormalOutput(repaired.recorder.finalText ?? repaired.recorder.text);
+    if (!outcome || outcome === 'pending') return;
+    return prepareFormalDelivery(current,JSON.stringify({outcome,body:output}),'end_turn');
   }
 
   // One addressed local reservation per existing seat/thread. This is not a

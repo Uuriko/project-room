@@ -45,6 +45,16 @@ export async function readCompleteRequest(room, requestId) {
   throw new RoomError(413, 'formal_context_too_large', 'Request exceeds the listener page budget');
 }
 
+// A second turn can classify a finished reply. It cannot replace its text.
+export function classifyFormalOutput(output) {
+  const source = unfencedJson(output);
+  let value;
+  try { value = JSON.parse(source); } catch { return null; }
+  if (!value || typeof value !== 'object' || Array.isArray(value) || repeatedTopLevelKey(source)
+    || Object.keys(value).length !== 1 || !['answered','declined','pending'].includes(value.outcome)) return null;
+  return value.outcome;
+}
+
 export function prepareFormalDelivery(context, output, stopReason) {
   if (!context.allPagesRead || context.page?.hasMore !== false || context.request?.status !== 'open'
     || context.viewerId !== context.request.recipientId) invalid('Complete open recipient context is required');
