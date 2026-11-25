@@ -438,10 +438,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     return link ? { current, session, panel, link } : null;
   }
 
+  let latestCopy = 0;
   async function copySelection(forAgent) {
     const snapshot = shareSelection();
     if (!snapshot) return;
     const { current, session, link } = snapshot;
+    const copyTicket = ++latestCopy, view = generation;
     const returnLink = threadDraft?.discussion()?.link;
     const note = noteInput.value.trim();
     const copiedText = forAgent ? [
@@ -453,7 +455,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         : "Return your revised publication to that discussion for review."),
     ].filter(Boolean).join("\n\n") : link;
     const result = await clipboard.copy(copiedText);
-    if (!dialog.open || client.session !== session || shareSelection()?.link !== link
+    if (copyTicket !== latestCopy || !owns(view, session) || shareSelection()?.link !== link
       || (forAgent && (noteInput.value.trim() !== note || threadDraft?.discussion()?.link !== returnLink))) return;
     linkFallback.hidden = result === "copied";
     if (result === "copied") linkStatus.textContent = uiText(forAgent ? "workspace.share.agentCopied" : "workspace.share.copied");
