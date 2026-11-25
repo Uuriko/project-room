@@ -3,6 +3,20 @@ import { currentRecordReplyOwner } from './current-record-context.js';
 export const REPLY_CANCELLED = "reply_request.cancelled";
 export const REPLY_PROGRESSED = "reply_request.progressed";
 export const REPLY_PROGRESS_STATES = Object.freeze(["acknowledged", "accepted", "working", "needs_input", "error"]);
+// A recipient gets a selector only for the exact answer visible on this page.
+export function answerFileSelection(result) {
+  const request = result?.request, roomId = result?.roomId;
+  if (!id(roomId) || request?.status !== "answered" || request.requesterId !== result.viewerId
+    || !id(request.responseMessageId) || !result.page?.items?.some(row => row.kind === "answered"
+      && row.eventId === request.terminalEventId && row.message?.id === request.responseMessageId
+      && row.message.toMemberId === result.viewerId && typeof row.message.body === "string")) return null;
+  return { roomId, messageIds: [request.responseMessageId] };
+}
+export function answerFilePath({ roomId, messageIds }) {
+  const path = `/api/rooms/${encodeURIComponent(roomId)}/files`;
+  return [path, new URLSearchParams({ messageId: messageIds[0] })].join("?");
+}
+
 export const REPLY_POLICY_VERSION = 1;
 // Keep a worst-case escaped answer plus its envelope inside one 64 KiB
 // selected-context page. Questions and cancellation reasons retain 4,096.

@@ -1295,3 +1295,98 @@ test("a quiet event stream can outlive the ordinary request deadline", async t =
   const result = await f.client.waitForChange(after, { timeoutMs: 15500, reviewWorkItemId: "archive" });
   assert.deepEqual(result, { changed: false, through: after });
 });
+
+test("the requester can follow the original answer to its late file on legacy and normalized Rooms", async t => {
+  const f = await fixture(t);
+  const hostedRooms = new AgentRooms(f.store);
+  const requester = f.store.identities.create("Document requester");
+  const responder = f.store.identities.create("Document responder");
+  const outsider = f.store.identities.create("Observer");
+  const made = hostedRooms.create(requester.secret, {
+    roomId: "answer-files", title: "Answer files", purpose: "Share a private document", kind: "personal", displayName: "Requester",
+  });
+  for (const identity of [responder, outsider]) linkWithProof(f.store, requester.secret, made.roomId, identity, {
+    displayName: identity === responder ? "Responder" : "Observer", permissions: [],
+  });
+  f.store.dmConsents.request(made.roomId, made.ownerMemberId, responder.identityId, "Fixture");
+  f.store.dmConsents.decide(made.roomId, responder.identityId, made.ownerMemberId, "approve");
+  f.store.dmConsents.request(made.roomId, responder.identityId, made.ownerMemberId, "Fixture");
+  f.store.dmConsents.decide(made.roomId, made.ownerMemberId, responder.identityId, "approve");
+  const mcp = createHostedRoomMcp(f.store, { agentRooms: hostedRooms });
+  const descriptor = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { profile: "full" } },
+    { authorization: "Bearer " + requester.secret });
+  assert.ok(descriptor.result.tools.some(tool => tool.name === "room_list_files"));
+  const call = async (name, args, secret = requester.secret) => {
+    const response = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
+      { authorization: "Bearer " + secret });
+    assert.equal(response.result?.isError, undefined, JSON.stringify(response));
+    return response.result.structuredContent;
+  };
+  const question = "new-question";
+  f.store.command(requester.secret, made.roomId, { id: question, type: "message.posted", data: {
+    messageId: question, toMemberId: responder.identityId, requestKind: "reply", body: "Please review the brief.",
+  } });
+  const args = { roomId: made.roomId, requestMessageId: question };
+  const open = await call("room_read_request", args);
+  assert.equal(open.answerFilesRead, undefined);
+  const context = await call("room_read_request", args, responder.secret);
+  await call("room_respond_to_request", {
+    ...context.responseActions[0].arguments, requestId: "new-answer", body: "I finished the review.",
+  }, responder.secret);
+  assert.equal((await call("room_read_request", args, responder.secret)).answerFilesRead, undefined);
+  const earlier = await call("room_read_request", { ...args, limit: 1 });
+  assert.equal(earlier.page.hasMore, true);
+  assert.equal(earlier.answerFilesRead, undefined);
+  const settled = await call("room_read_request", { ...args, limit: 1, cursor: earlier.page.nextCursor });
+  const answerId = settled.request.responseMessageId;
+  const pointer = settled.answerFilesRead;
+  assert.deepEqual(pointer, {
+    http: { method: "GET", path: "/api/rooms/answer-files/files?messageId=" + encodeURIComponent(answerId) },
+    nextRead: { tool: "room_list_files", arguments: { roomId: made.roomId, messageIds: [answerId] } },
+  });
+  assert.deepEqual((await call(pointer.nextRead.tool, pointer.nextRead.arguments)).files, []);
+  f.store.roomAttachments.stage(responder.secret, made.roomId, {
+    id: "late-file", filename: "brief.md", mediaType: "text/markdown", data: "YnJpZWY=",
+  });
+  f.store.roomAttachments.commit(responder.secret, made.roomId, { id: "late-file", messageId: answerId });
+  const files = await call(pointer.nextRead.tool, pointer.nextRead.arguments);
+  assert.deepEqual(files.files.map(file => [file.id, file.messageId]), [["late-file", answerId]]);
+  const file = await call("room_get_file", { roomId: made.roomId, id: "late-file" });
+  assert.equal(Buffer.from(file.attachment.data, "base64").toString(), "brief");
+  const hidden = await fetch(f.origin + pointer.http.path, { headers: { Authorization: "Bearer " + outsider.secret } });
+  assert.equal(hidden.status, 404);
+  f.store.command(responder.secret, made.roomId, { id: "withdraw-answer", type: "message.deleted", data: {
+    messageId: answerId, expectedMessageRevision: 0,
+  } });
+  assert.equal((await call("room_read_request", args)).answerFilesRead, undefined);
+
+  const legacy = f.open("legacy-file-question").command.data.messageId;
+  const prior = await f.client.replyContext(legacy);
+  await f.client.replyAction("room_respond_to_request", f.respond(prior));
+  const second = await fetch(f.origin + "/api/rooms/commons/reply-context?requestMessageId=" + legacy,
+    { headers: { Authorization: "Bearer " + f.keys.owner } });
+  assert.equal(second.status, 200);
+  const result = await second.json();
+  const legacyAnswer = result.request.responseMessageId;
+  assert.deepEqual(result.answerFilesRead, {
+    http: { method: "GET", path: "/api/rooms/commons/files?messageId=" + encodeURIComponent(legacyAnswer) },
+  });
+  const expected = { name: "room_read_request", args: { requestMessageId: legacy }, roomId: "commons" };
+  assert.equal(validateReplyRead(result, expected).answerFilesRead.http.path, result.answerFilesRead.http.path);
+  assert.throws(() => validateReplyRead({
+    ...result, answerFilesRead: { http: { ...result.answerFilesRead.http, path: "/api/rooms/other/files" } },
+  }, expected));
+  f.store.roomAttachments.stage(f.keys.owner, "commons", {
+    id: "unrelated-legacy-file", filename: "unrelated.md", mediaType: "text/markdown", data: "YQ==",
+  });
+  f.store.command(f.keys.owner, "commons", { id: "another-message", type: "message.posted", data: { messageId: "another-message", body: "Different document" } });
+  f.store.roomAttachments.commit(f.keys.owner, "commons", { id: "unrelated-legacy-file", messageId: "another-message" });
+  f.store.roomAttachments.stage(f.keys.producer, "commons", {
+    id: "legacy-late-file", filename: "brief.md", mediaType: "text/markdown", data: "YnJpZWY=",
+  });
+  const getLegacyFiles = path => fetch(f.origin + path, { headers: { Authorization: `Bearer ${f.keys.owner}` } }).then(response => response.json());
+  assert.deepEqual((await getLegacyFiles(result.answerFilesRead.http.path)).files, []);
+  f.store.roomAttachments.commit(f.keys.producer, "commons", { id: "legacy-late-file", messageId: legacyAnswer });
+  assert.deepEqual((await getLegacyFiles(result.answerFilesRead.http.path)).files.map(file => file.id), ["legacy-late-file"]);
+  assert.ok((await getLegacyFiles("/api/rooms/commons/files")).files.some(file => file.id === "unrelated-legacy-file"));
+});
