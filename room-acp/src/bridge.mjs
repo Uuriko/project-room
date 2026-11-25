@@ -161,7 +161,7 @@ function ordinaryTurn(recorder, stopReason) {
 }
 
 export class Bridge {
-  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", formalOnly = false, reviewScope = null, maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null, observeStage = null }) {
+  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", formalOnly = false, reviewScope = null, maxSessions = 4, closeIdleSessions = false, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null, observeStage = null }) {
     this.stageObserver = new StageObserver({observe: observeStage});
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.reviewScope = reviewScope;
@@ -187,7 +187,15 @@ export class Bridge {
     this.permissionApproverId = permissionApproverId;
     this.permissionTimeoutMs = permissionTimeoutMs; this.permissionPollMs = permissionPollMs;
     this.restartDelayMs = restartDelayMs; this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0; this.wakeCursor = null; this.freshWakeDiscovery = false; this.crashes = []; this.pausedUntil = 0; this.ready = null;
-    this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
+    this.queue = new ThreadQueue({ concurrency: maxSessions, run: async (threadKey, batch) => {
+      try { await this.turn(threadKey, batch); }
+      finally {
+        // Keep the same-thread queue slot until close finishes. Wakes that
+        // arrive during close can then reload the saved session safely.
+        if (closeIdleSessions && !this.controller.signal.aborted && this.queue.depth(threadKey) === 1)
+          await this.host.closeIdleSession?.(threadKey);
+      }
+    } });
     this.host.onExit?.(info => this.onAgentExit(info));
     this.approverController = new AbortController();
     this.fencingToken = null; this.seen = new Set(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0, stale: 0 };

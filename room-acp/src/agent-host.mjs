@@ -101,6 +101,23 @@ export class AgentHost {
     if (sessionId && this.process) this.process.peer.notify("session/cancel", { sessionId });
   }
 
+  async closeIdleSession(threadKey) {
+    const sessionId = this.sessions.get(threadKey);
+    const current = this.process;
+    if (!current || !sessionId || this.recorders.has(sessionId) || !this.capabilities?.closeSession
+      || !this.capabilities.loadSession || this.savedSessions?.get(threadKey) !== sessionId) return;
+    try {
+      await current.peer.request("session/close", { sessionId }, { timeoutMs: 5000 });
+    } catch {
+      // The adapter may have completed the close before reporting an error.
+      // Reopen the saved ID on the next turn instead of prompting a stale handle.
+      this.log("ACP adapter did not confirm session close; next turn will load the saved session");
+    }
+    if (this.process !== current || this.sessions.get(threadKey) !== sessionId) return;
+    this.sessions.delete(threadKey);
+    this.threadOf.delete(sessionId);
+  }
+
   onExit(listener) { this.exitListeners.add(listener); return () => this.exitListeners.delete(listener); }
 
   get running() { return Boolean(this.process); }
