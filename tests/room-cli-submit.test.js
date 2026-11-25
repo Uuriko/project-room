@@ -155,6 +155,10 @@ test(`${representation} pickup opens only the linked assignment source with the 
   const updated = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
   assert.equal(updated.code, 0);
   assert.equal(updated.value.sourceRead, undefined);
+  const retainedWithoutSource = await cli(["work", workItemId, "--since", updated.value.briefVersion]);
+  assert.equal(retainedWithoutSource.value.briefUnchanged, true);
+  assert.equal(retainedWithoutSource.value.sourceRead, undefined);
+  assert.doesNotMatch(retainedWithoutSource.value.guidance, /source/i);
   const deleted = await cli(["work", workItemId, "--include-source"]);
   assert.equal(deleted.code, 0);
   assert.equal(deleted.value.context.source.status, "unavailable");
