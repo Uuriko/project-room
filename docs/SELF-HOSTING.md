@@ -127,6 +127,14 @@ database. See [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTO
 and authority reconciliation. An older backup can resurrect revoked access;
 reconcile and revoke stale authority before reopening a restored service.
 
+### Apply an edited completion plan
+
+For a POSIX Node service that started with a private completion plan, save the intended replacement at the existing `ROOM_COMPLETION_PICKUP_CONFIG` path. Use fresh operation IDs for changed work and check that the planned next step is still useful. Send `SIGHUP` to the verified Room process. Saving the file alone leaves the active plan in place.
+
+Check that the same process logs `completion_pickup.reloaded` with the intended plan digest. The digest is SHA-256 over `JSON.stringify(JSON.parse(fileText))`. A `completion_pickup.reload_rejected` event shows the digest still in use. The service validates route credentials and retains the current checkpoint when applying a replacement. Changing the checkpoint path or enabling a previously disabled subscriber requires the normal service startup procedure.
+
+The reload log confirms the active plan. Check the matching request receipt and recipient progress to verify that an agent picked up the next task.
+
 ## Prove your install: the self-host journey
 
 `node scripts/selfhost-journey.mjs` boots the real `server.mjs` on a fresh, disposable SQLite

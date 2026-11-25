@@ -9,7 +9,7 @@ import { setImmediate } from "node:timers/promises";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { startCompletionPickup } from "../server/completion-pickup.mjs";
+import { startCompletionPickup, startReloadableCompletionPickup } from "../server/completion-pickup.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
@@ -68,6 +68,87 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
   t => checkScopedInvestigation(t));
 test("a completion route preserves the receiver's exact first line without chaining an investigation",
   t => checkScopedInvestigation(t, "Claude Code QA"));
+
+test("a validated continuation plan replaces only its subscriber and preserves operation receipts", async t => {
+  const f = createAcceptanceFixture(), roomId = "commons", workItemId = "qa-work", recipientId = "reload-reviewer";
+  const agent = f.store.identities.create("Reload reviewer");
+  linkWithProof(f.store, f.keys.owner, roomId, agent, { memberId: recipientId, permissions: [] });
+  const requesterId = f.store.authenticate(f.keys.owner, roomId).member.id;
+  const identity = { roomId, memberId: requesterId };
+  f.store.command(f.keys.owner, roomId, { id: "qa-proposal", type: "work.proposed",
+    data: { workItemId, title: "QA", definitionOfDone: "Review the given evidence.", accountableMemberId: requesterId, mode: "read" } });
+  chmodSync(f.directory, 0o700);
+  const configPath = join(f.directory, "pickup.json"), checkpointPath = join(f.directory, "checkpoint.json"),
+    credentialPath = join(f.directory, "operator.json");
+  atomicPrivateJson(credentialPath, { identitySecret: f.keys.owner });
+  const after = f.store.headSequence(roomId);
+  function config(name) {
+    return { checkpointPath, routes: [{ roomId, requesterId, recipientId, workItemId, credentialPath, after,
+      continuation: { seedRequestId: `${name}-seed`, steps: [
+        { requestId: `${name}-next`, body: "Check the next distinct source." },
+      ] },
+    }] };
+  }
+  function request(id) {
+    f.store.command(f.keys.owner, roomId, buildReplyCommand(identity, "room_request_reply",
+      { requestId: id, toMemberId: recipientId, workItemId, body: "Verify the pinned source." }));
+  }
+  const receipt = id => f.store.operationReceipt(f.keys.owner, roomId, id);
+  function answer(id) {
+    const event = f.store.db.prepare("SELECT body FROM events WHERE room_id=? AND sequence=?").get(roomId, receipt(id).sequence);
+    const messageId = JSON.parse(event.body).data.messageId;
+    const exact = f.store.replyRequests.selected(agent.secret, roomId, messageId);
+    const template = exact.responseActions.find(a => a.arguments.responseOutcome === "answered");
+    const { roomId: _roomId, ...args } = template.arguments;
+    f.store.command(agent.secret, roomId, buildReplyCommand({ roomId, memberId: recipientId }, template.tool,
+      { ...args, requestId: `${id}-answer`, body: "Source checked." }));
+  }
+
+  const original = config("old");
+  atomicPrivateJson(configPath, original);
+  const log = [];
+  const pickup = startReloadableCompletionPickup(f.store, configPath, message => log.push(JSON.parse(message)));
+  t.after(() => { pickup.stop(); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const loaded = log[0];
+  assert.equal(loaded.event, "completion_pickup.loaded");
+  assert.match(loaded.configDigest, /^[a-f0-9]{64}$/);
+  assert.equal(loaded.routes, 1);
+
+  const candidate = config("new");
+  candidate.routes[0].requesterId = "other";
+  atomicPrivateJson(configPath, candidate);
+  pickup.reload();
+  assert.equal(log.at(-1).event, "completion_pickup.reload_rejected");
+  assert.equal(log.at(-1).configDigest, loaded.configDigest);
+  request("old-seed");
+  answer("old-seed");
+  await setImmediate();
+  assert.equal(receipt("old-next").status, "recorded");
+  answer("old-next");
+
+  const replacement = config("new");
+  atomicPrivateJson(configPath, replacement);
+  request("new-seed");
+  answer("new-seed");
+  await setImmediate();
+  assert.equal(receipt("new-next").status, "not_recorded", "saving a plan alone cannot activate it");
+  atomicPrivateJson(configPath, { ...replacement, checkpointPath: join(f.directory, "other.json") });
+  pickup.reload();
+  assert.equal(log.at(-1).code, "checkpoint_path_changed");
+  assert.equal(log.at(-1).configDigest, loaded.configDigest);
+  atomicPrivateJson(configPath, replacement);
+  pickup.reload();
+  assert.equal(log.at(-1).event, "completion_pickup.reloaded");
+  assert.notEqual(log.at(-1).configDigest, loaded.configDigest);
+  await setImmediate();
+  assert.equal(receipt("new-next").status, "recorded");
+  const applied = receipt("new-next");
+  pickup.reload();
+  await setImmediate();
+  assert.equal(receipt("new-next").eventId, applied.eventId);
+  assert.equal(log.filter(row => row.event === "completion_pickup.continued").length, 2);
+  assert.ok(!JSON.stringify(log).includes(f.keys.owner));
+});
 
 async function checkPlannedContinuation(t, representation) {
   const directory = mkdtempSync(join(tmpdir(), "room-planned-continuation-"));
