@@ -302,8 +302,8 @@ for (const departure of ["logout", "revocation"]) {
   });
 }
 
-for (const storage of ["legacy", "normalized"]) {
-  test(`late formal answer file stays on the original message in ${storage} storage`, { timeout: 30000 }, async t => {
+for (const [storage, lookup] of [["legacy", "direct"], ["normalized", "direct"], ["legacy", "room"], ["normalized", "room"]]) {
+  test(`late formal answer file stays on the original message in ${storage} storage using ${lookup} search`, { timeout: 30000 }, async t => {
     const directory = mkdtempSync(join(tmpdir(), "room-formal-answer-file-"));
     const store = new RoomStore(join(directory, "room.sqlite"));
     const roomId = storage === "legacy" ? "commons" : "formal-files";
@@ -376,32 +376,74 @@ for (const storage of ["legacy", "normalized"]) {
     await page.goto(`${origin}/?room=${roomId}`);
     await signInFixture(page, owner);
     await openConversation(page);
-    await page.locator('#composer-options-toggle').press('Enter');
-    await page.getByRole('button', { name: 'Direct message…', exact: true }).press('Enter');
-    await page.locator('#new-direct-search').fill('writer');
-    await page.locator('#new-direct-people').getByRole('button', { name: 'writer', exact: true }).press('Enter');
-    await page.locator('#message-list').getByText('New direct note 49', { exact: true }).waitFor();
+    if (lookup === 'direct') {
+      await page.locator('#composer-options-toggle').press('Enter');
+      await page.getByRole('button', { name: 'Direct message…', exact: true }).press('Enter');
+      await page.locator('#new-direct-search').fill('writer');
+      await page.locator('#new-direct-people').getByRole('button', { name: 'writer', exact: true }).press('Enter');
+      await page.locator('#message-list').getByText('New direct note 49', { exact: true }).waitFor();
+    }
     const history = [];
     page.on('request', request => {
       const url = new URL(request.url());
-      if (url.pathname.endsWith('/conversation') && url.searchParams.has('cursor')) history.push(url);
+      if (url.pathname.endsWith('/search') || url.pathname.endsWith('/conversation') && url.searchParams.has('cursor')) history.push(url);
     });
     await openSearch(page);
     await page.locator('#message-search').fill('finished reviewing the project brief');
     const found = page.locator('#search-list').getByRole('link', { name: /I finished reviewing the project brief/ });
     assert.equal(await found.count(), 0);
-    const earlier = page.getByRole('button', { name: 'Search earlier messages with writer', exact: true });
-    if (process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT && storage === 'normalized') {
+    const earlier = page.getByRole('button', { name: lookup === 'direct' ? 'Search earlier messages with writer' : 'Search earlier room messages', exact: true });
+    if (process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT && storage === 'normalized' && lookup === 'direct') {
       await earlier.waitFor();
       await page.screenshot({ path: process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT + '-ready.png' });
     }
-    await earlier.press('Enter', { timeout: 2500 });
+    assert.equal(history.length, 0, 'typing did not search the server');
+    let attemptsBeforeSearch = 0;
+    if (storage === 'normalized' && lookup === 'room') {
+      const searchRoute = '**/api/rooms/*/search?*';
+      await page.route(searchRoute, route => route.fulfill({ status: 503, json: { error: { code: 'search_unavailable' } } }));
+      await earlier.press('Enter');
+      await page.getByText('Couldn’t search earlier messages. Try again.', { exact: true }).waitFor();
+      const retry = page.getByRole('button', { name: 'Retry earlier room search', exact: true });
+      assert.equal(await retry.evaluate(node => node === document.activeElement), true);
+      await page.unroute(searchRoute);
+      await retry.press('Enter');
+      await page.waitForFunction(() => document.querySelector('#search-earlier').getAttribute('aria-disabled') === 'false');
+      attemptsBeforeSearch = 1;
+    }
+    let searchActions = attemptsBeforeSearch;
+    while (!(await found.count())) {
+      assert.ok(searchActions++ < (lookup === 'direct' ? 1 : 2), 'found the older answer within two search actions');
+      const fetched = page.waitForResponse(response => new URL(response.url()).pathname.endsWith(lookup === 'direct' ? '/conversation' : '/search'));
+      await earlier.press('Enter', { timeout: 2500 });
+      assert.equal((await fetched).status(), 200);
+      await page.waitForFunction(() => document.querySelector('#search-earlier').getAttribute('aria-disabled') === 'false' || document.querySelector('#search-earlier').hidden);
+    }
     await found.waitFor({ timeout: 5000 });
-    assert.equal(await earlier.evaluate(node => node === document.activeElement), true, 'paging keeps keyboard focus on the action');
-    assert.equal(history.length, 1);
-    assert.equal(history[0].searchParams.get('peerMemberId'), 'writer');
-    if (process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT && storage === 'normalized') {
+    if (await earlier.isVisible()) assert.equal(await earlier.evaluate(node => node === document.activeElement), true, 'paging keeps keyboard focus on the action');
+    if (lookup === 'direct') {
+      assert.equal(history.length, 1);
+      assert.equal(history[0].searchParams.get('peerMemberId'), 'writer');
+    } else {
+      assert.ok(history.every(url => url.pathname.endsWith('/search') && url.searchParams.get('kind') === 'messages' && !url.searchParams.has('peerMemberId')));
+      assert.ok(history.length - attemptsBeforeSearch <= 6);
+      t.diagnostic(`${storage} searched ${history.length - attemptsBeforeSearch} pages in ${searchActions} actions without knowing the peer`);
+      const observerQuery = new URLSearchParams({ q: 'finished reviewing the project brief', kind: 'messages', limit: '50' });
+      for (let pages = 0; ; pages++) {
+        assert.ok(pages < 10);
+        const response = await fetch(`${origin}/api/rooms/${roomId}/search?${observerQuery}`, { headers: { Authorization: `Bearer ${observer}` } });
+        assert.equal(response.status, 200);
+        const observed = await response.json();
+        assert.deepEqual(observed.messages, []);
+        if (!observed.nextCursor) break;
+        observerQuery.set('before', observed.nextCursor);
+      }
+    }
+    if (process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT && storage === 'normalized' && lookup === 'direct') {
       await page.screenshot({ path: process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT + '-found.png' });
+    }
+    if (process.env.ROOM_HISTORY_SEARCH_SCREENSHOT && storage === 'normalized' && lookup === 'room') {
+      await page.screenshot({ path: process.env.ROOM_HISTORY_SEARCH_SCREENSHOT });
     }
     await found.press('Enter');
     const row = page.locator(`[data-message-record-id="${messageId}"]`);

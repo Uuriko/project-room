@@ -17,7 +17,7 @@ export function readCurrentSearch(store,token,roomId,query,kind,{limit=50,before
    ||typeof saved.messagesDone!=='boolean'||typeof saved.workDone!=='boolean'||saved.messagesDone&&saved.workDone)invalid();
   const next={...saved},messages=[],workItems=[];
   if(!saved.messagesDone){
-   const page=readConversation(store,token,roomId,{limit:Math.min(limit,4),cursor:saved.messageCursor,expectedSessionBinding});
+   const page=readConversation(store,token,roomId,{limit:Math.min(limit,kind==='messages'?50:4),cursor:saved.messageCursor,expectedSessionBinding});
    if(page.mode==='reset')invalid();
    const muted=new Set(auth.member.mutedMemberIds??[]);
    const pins=kind==='pinned'?new Set(store.currentOverview(roomId,auth.member.id,{limit:1}).state.pins.map(p=>p.messageId)):null;

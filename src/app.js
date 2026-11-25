@@ -10,7 +10,7 @@ import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
-import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
+import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID, validId } from "./events.js";
 import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
@@ -3166,20 +3166,66 @@ function pinnedFilterOn() {
 // brings it back with the same results.
 let searchCollapsed = false;
 const narrowSearch = matchMedia("(max-width: 40rem)");
+let roomHistorySearch = null;
+const ROOM_HISTORY_SEARCH_LIMIT = 50;
+const ROOM_HISTORY_PAGES_PER_ACTIVATION = 4;
+function roomHistoryForQuery() {
+  const { term, mentionsOnly } = parseSearchQuery($("#message-search").value);
+  if (!state || !session || activeDirectMemberId || !(partialWorkSnapshot || client.owesHistory)
+    || !term || term.length > 80 || term.toLowerCase() === "has:result" || mentionsOnly || mentionsFilterOn() || pinnedFilterOn()) {
+    roomHistorySearch = null;
+    return null;
+  }
+  const key = JSON.stringify([client.generation, client.sequence, term]);
+  if (roomHistorySearch?.key !== key) roomHistorySearch = { key, term, messages: [], cursor: null, started: false, complete: false, loading: false, error: false };
+  return roomHistorySearch;
+}
+async function searchEarlierRoomMessages() {
+  const search = roomHistoryForQuery();
+  if (!search || search.loading || search.complete || search.messages.length >= ROOM_HISTORY_SEARCH_LIMIT) return;
+  search.loading = true; search.error = false; renderSearch();
+  try {
+    for (let page = 0; page < ROOM_HISTORY_PAGES_PER_ACTIVATION; page++) {
+      const params = new URLSearchParams({ q: search.term, kind: "messages", limit: String(ROOM_HISTORY_SEARCH_LIMIT) });
+      if (search.cursor) params.set("before", search.cursor);
+      const value = await client.request(client.path(`/search?${params}`));
+      if (roomHistoryForQuery() !== search) return;
+      const cursor = value.nextCursor ?? null;
+      if (value.roomId !== state.room.id || value.query !== search.term || !Array.isArray(value.messages)
+        || value.messages.length > ROOM_HISTORY_SEARCH_LIMIT || cursor !== null && (typeof cursor !== "string" || !cursor || cursor === search.cursor)
+        || value.messages.some(row => !validId(row?.id) || !validId(row.authorId)
+          || typeof row.body !== "string" || !Number.isFinite(Date.parse(row.createdAt)))) throw new Error(uiText("search.historyUnavailable"));
+      search.messages = [...new Map([...search.messages, ...value.messages].map(message => [message.id, message])).values()]
+        .slice(0, ROOM_HISTORY_SEARCH_LIMIT);
+      search.cursor = cursor; search.complete = !cursor; search.started = true;
+      if (search.complete || value.messages.length) break;
+    }
+  } catch (error) {
+    if (roomHistoryForQuery() !== search) return;
+    if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { client.handleFailure(error); return; }
+    if (error.code === "invalid_search_cursor") { search.cursor = null; search.messages = []; search.started = false; }
+    search.error = true;
+  } finally {
+    if (roomHistoryForQuery() === search) { search.loading = false; renderSearch(); }
+  }
+}
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
   const resultsOnly = query.trim().toLowerCase() === "has:result";
   const parsed = parseSearchQuery(query);
   const pair = directWindow.view();
   const hasPair = Boolean(activeDirectMemberId && pair.peerMemberId === activeDirectMemberId);
-  const earlier = $("#search-earlier-direct");
-  earlier.hidden = resultsOnly || !parsed.term || !hasPair || !(pair.cursor || pair.error);
+  const roomHistory = roomHistoryForQuery();
+  const earlier = $("#search-earlier");
+  const canSearchPair = hasPair && Boolean(pair.cursor || pair.error);
+  const historyLimitReached = roomHistory?.messages.length >= ROOM_HISTORY_SEARCH_LIMIT && !roomHistory.complete;
+  earlier.hidden = resultsOnly || !parsed.term || !(canSearchPair || roomHistory && !roomHistory.complete && !historyLimitReached);
   if (earlier.hidden && document.activeElement === earlier) $("#message-search").focus({ preventScroll: true });
   if (!earlier.hidden) {
-    earlier.setAttribute("aria-disabled", String(pair.loading));
-    setText("#search-earlier-direct", uiText(pair.error ? "search.retryEarlierDirect" : "search.earlierDirect", {
+    earlier.setAttribute("aria-disabled", String(canSearchPair ? pair.loading : roomHistory.loading));
+    setText("#search-earlier", canSearchPair ? uiText(pair.error ? "search.retryEarlierDirect" : "search.earlierDirect", {
       name: displayName(activeDirectMemberId),
-    }));
+    }) : uiText(roomHistory.error ? "search.retryEarlierRoom" : "search.earlierRoom"));
   }
   $("#results-panel").hidden = !resultsOnly;
   $("#search-list").hidden = resultsOnly;
@@ -3200,15 +3246,23 @@ function renderSearch(now = Date.now()) {
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)) : state.messages;
   const result = searchMessages({ ...state, messages }, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
-  const total = result.total + work.total, shown = result.messages.length + work.work.length;
+  const found = [...new Map([...result.messages, ...(roomHistory?.messages ?? [])].map(message => [message.id, message])).values()]
+    .filter(message => !isMutedBy(state, session?.member?.id, message.authorId))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const total = result.total + work.total, shown = found.length + work.work.length;
   const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : pinnedOnly && !parsed.term ? (total === 1 ? "pinned message" : "pinned messages") : (total === 1 ? "match" : "matches");
   const partialSearch = partialWorkSnapshot || client.owesHistory || hasPair;
-  setText("#search-count", partialSearch ? uiText(hasPair ? shown ? "search.loadedCount" : "search.loadedEmpty" : "currentRoom.searchShownCount", { count: shown })
+  const countText = hasPair || roomHistory?.started ? (shown ? "search.loadedCount" : "search.loadedEmpty") : "currentRoom.searchShownCount";
+  setText("#search-count", roomHistory?.error ? uiText("search.historyUnavailable")
+    : roomHistory?.loading ? uiText("search.historyLoading")
+    : roomHistory?.complete && !shown ? uiText("search.historyEmpty")
+    : historyLimitReached ? uiText("search.historyRefine", { count: ROOM_HISTORY_SEARCH_LIMIT })
+    : partialSearch ? uiText(countText, { count: shown })
     : `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room`);
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
   const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
-    + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : clipGraphemes(m.body ?? "", 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || (hasPair ? "" : `<li class="empty-note">${partialSearch ? esc(uiText("currentRoom.searchNoMatches")) : empty}</li>`);
+    + found.map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : clipGraphemes(m.body ?? "", 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || (hasPair || roomHistory?.started ? "" : `<li class="empty-note">${partialSearch ? esc(uiText("currentRoom.searchNoMatches")) : empty}</li>`);
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
@@ -3532,6 +3586,7 @@ function revealMessage(id) {
   // JDOT-COH-NAV begin
   syncWorkReturnControl();
   // JDOT-COH-NAV end
+  if (location.hash === recordHref("message", id)) void readHistoricalAnswer(id);
 }
 function focusRecord(node) {
   if (!node) return;
@@ -5569,7 +5624,8 @@ document.addEventListener("keydown", event => {
   }
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
-$("#search-earlier-direct").addEventListener("click", () => {
+$("#search-earlier").addEventListener("click", () => {
+  if (!activeDirectMemberId) { void searchEarlierRoomMessages(); return; }
   const pair = directWindow.view();
   if (!activeDirectMemberId || pair.peerMemberId !== activeDirectMemberId || pair.loading) return;
   if (pair.cursor) void directWindow.older();
@@ -5887,7 +5943,6 @@ $("#main").addEventListener("click", e => {
     if (narrowSearch.matches && fromSearch) { searchCollapsed = true; $("#search-results").hidden = true; }
     history.replaceState(null, "", recordHref("message", link.dataset.openMessage));
     revealMessage(link.dataset.openMessage);
-    if (fromSearch) void readHistoricalAnswer(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
     // JDOT-COH-NAV begin
     // #3795: a claim record link (marked data-open-claim), and any record id
