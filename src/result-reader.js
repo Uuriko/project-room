@@ -271,7 +271,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         && !matchesReceipt(view.receipt, item.receipt) && !view.readAfterReplacement) {
       const { generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails, recovered } = view;
       openResult({ generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails,
-        recovered, textMessageId: view.textMessageId, readAfterReplacement: true }, item.title, false);
+        recovered, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: true }, item.title, false);
       return;
     }
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
@@ -527,7 +527,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
         resultElement("result-diff"), () => owns() && !view.withdrawn);
     }).catch(error => {
-      if (!owns()) return;
+      if (!owns() || view.withdrawn) return;
       resultElement("result-body").replaceChildren();
       view.refusalHint = exactResultRecovery(error?.status, error?.code);
       view.error = !view.refusalHint;
@@ -551,7 +551,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-work-context")?.setAttribute("hidden", "");
       resultElement("result-work-action")?.setAttribute("hidden", "");
       resultElement("result-options").open = false;
-      resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…";
+      resultElement("result-title").textContent = title;
+      resultElement("result-status").textContent = view.readAfterReplacement ? "Earlier result · Loading exact text…" : "Loading exact text…";
       if (!view.readAfterReplacement) resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = false;
       resultElement("result-current-version").hidden = true;
