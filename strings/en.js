@@ -611,6 +611,8 @@ export default {
   "result.decisionLabel": "Decision",
   "result.openDecisionSource": "Open decision note",
   "result.previouslyApprovedLinkPrefix": "Previously approved · ",
+  "result.backCatchUp": "Back to Catch Up",
+  "result.approvedHistory": "Result approved",
   "result.previouslyApprovedNoteUnavailable": "Previously approved · Decision note unavailable",
   "result.nextLabel": "Next",
   "result.openCurrentVersion": "Open current result",
