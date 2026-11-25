@@ -635,7 +635,31 @@ for (const audience of ["public", "private"]) {
     assert.equal(reviewer.context().pages().length, 1);
     if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "cold-file-return.png") });
 
-    const returning = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
+    const exact = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+    const leaving = await f.login("human-checker", exact);
+    const selectedSource = url => url.pathname.endsWith("/conversation") && url.searchParams.get("messageId") === evidence;
+    const held = Promise.withResolvers(), released = Promise.withResolvers();
+    await leaving.route(selectedSource, async route => {
+      held.resolve();
+      await released.promise;
+      await route.continue();
+    });
+    try {
+      await leaving.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+      await held.promise;
+      await leaving.locator("#topbar-updates").click();
+      await leaving.locator("#result-dialog").waitFor({ state: "hidden" });
+      const response = leaving.waitForResponse(response => selectedSource(new URL(response.url())));
+      released.resolve();
+      await response;
+      await leaving.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await leaving.locator("#room-project-workspace").isVisible(), false);
+      assert.equal(await leaving.locator("#updates-dialog").isVisible(), true);
+    } finally {
+      released.resolve();
+    }
+
+    const returning = await f.login("human-checker", exact);
     await returning.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
     const original = returning.getByRole("link", { name: "Open original discussion" });
     await original.waitFor();
