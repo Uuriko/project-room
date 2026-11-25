@@ -15,7 +15,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
-async function checkScopedInvestigation(t, firstLine, { paged = false, competing = false, changedHorizon = false } = {}) {
+async function checkScopedInvestigation(t, firstLine, { paged = false, competing = false, changedHorizon = false, missingPage = false } = {}) {
   const f = createAcceptanceFixture(), roomId = "commons", workItemId = "qa-work", recipientId = "pickup-reviewer";
   const agent = f.store.identities.create("Pickup reviewer");
   linkWithProof(f.store, f.keys.owner, roomId, agent, { memberId: recipientId, permissions: ["accept_work","verify"] });
@@ -56,14 +56,14 @@ async function checkScopedInvestigation(t, firstLine, { paged = false, competing
       if (cursor) return {
         ...result,
         evaluatedThrough: changedHorizon ? result.evaluatedThrough + 1 : result.evaluatedThrough,
-        page: { hasMore: false },
+        page: missingPage ? undefined : { hasMore: false },
       };
       return { ...result, requests: [], page: { hasMore: true, nextCursor: "later-page" } };
     });
   }
   answer(first.event.data.messageId);
   await setImmediate();
-  if (competing || changedHorizon) {
+  if (competing || changedHorizon || missingPage) {
     const expected = competing ? [first.event.data.messageId, competingId] : [first.event.data.messageId];
     assert.deepEqual(read().map(item => item.id).sort(), expected.sort());
     assert.deepEqual(log, []);
@@ -97,6 +97,8 @@ test("an actionable request after an empty page takes priority over an investiga
   t => checkScopedInvestigation(t, undefined, { paged: true, competing: true }));
 test("an outgoing continuation at a different observation cannot start an investigation",
   t => checkScopedInvestigation(t, undefined, { paged: true, changedHorizon: true }));
+test("an outgoing continuation missing its completion metadata cannot start an investigation",
+  t => checkScopedInvestigation(t, undefined, { paged: true, missingPage: true }));
 
 async function checkPlannedContinuation(t, representation) {
   const directory = mkdtempSync(join(tmpdir(), "room-planned-continuation-"));

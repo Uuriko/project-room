@@ -43,7 +43,11 @@ function recipientHasOpenRequest(store, secret, { roomId, recipientId }, observa
     if (open.requests.some(item => item.recipientId === recipientId &&
         (!observation || item.workItemId === observation.workItemId) &&
         (item.lifecycle?.state !== "stale" || item.lifecycle.unresponsive !== true))) return true;
-    if (!open.page?.hasMore) return false;
+    // Legacy lists are unpaged. Once a cursor is offered, only explicit
+    // terminal metadata can establish that the scan is complete.
+    if (!cursor && open.page === undefined) return false;
+    if (open.page?.hasMore === false) return Boolean(open.page.nextCursor);
+    if (open.page?.hasMore !== true) return true;
     cursor = open.page.nextCursor;
     if (!cursor || visited.has(cursor)) return true;
     visited.add(cursor);
