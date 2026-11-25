@@ -1,7 +1,12 @@
 // Simulated human interaction in disposable local rooms, never a user study.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { readCurrentRecord } from "../server/current-room-repository.mjs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -38,14 +43,24 @@ async function selectResultWork(f) {
   if (!await f.page.locator(`[data-work-record-id="${f.workItemId}"]`).isVisible()) await openWorkFromSearch(f.page, f.workItemId, "A quiet room");
 }
 
-async function setup(t, { mobile = false, review = false, viewport = null, onPage = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
-  const f = createAcceptanceFixture(), workItemId = "native-human";
+function currentFixture() {
+  const directory = mkdtempSync(join(tmpdir(), "room-result-current-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom(), { representation: "normalized-current-v1" });
+  const owner = store.issueAccessKey("commons", "owner");
+  store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED,
+    data: { messageId: "test-welcome", body: "Start a discussion" } });
+  return { directory, store, keys: { owner } };
+}
+
+async function setup(t, { current = false, mobile = false, review = false, viewport = null, onPage = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
+  const f = current ? currentFixture() : createAcceptanceFixture(), workItemId = "native-human";
   const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
   send(T.MEMBER_ADDED, { memberId: "human-checker", displayName: "Test checker", kind: "human", permissions: ["verify"] });
   f.keys["human-checker"] = f.store.issueAccessKey("commons", "human-checker");
   send(T.WORK_PROPOSED, { workItemId, title: "A quiet room", definitionOfDone: "Short text with one next step", mode: "read", accountableMemberId: "owner",
     verifierMemberId: "human-checker", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner" });
-  const item = () => f.store.room("commons").state.workItems[workItemId];
+  const item = () => current ? readCurrentRecord(f.store.db, "commons", "workItems", workItemId) : f.store.room("commons").state.workItems[workItemId];
   const mutate = (type, data = {}, actor) => send(type, { workItemId, expectedRevision: item().revision, ...data }, actor);
   mutate(T.WORK_ACCEPTED);
   const posted = send(T.MESSAGE_POSTED, { messageId: "native-draft", workItemId, packetId: "human-packet", basisRevision: 1, body });
@@ -784,4 +799,49 @@ test("focused failed result shows the current correction and its authorized acti
   await correction.waitFor({ state: "hidden" });
   assert.equal(f.item().blocker, null);
   assert.equal(await f.page.locator("#result-work-action").isVisible(), false);
+});
+
+for (const current of [false, true]) test(`reply with an old result passage while unrelated history is outstanding (${current ? "current" : "legacy"})`, { timeout: 30000 }, async t => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const selected = [];
+  const f = await setup(t, { current, review: true, onPage: async page => {
+    await page.route("**/api/rooms/commons/messages?*", async route => { await gate; await route.fallback(); });
+    await page.route("**/api/rooms/commons/conversation?*", async route => {
+      const query = new URL(route.request().url()).searchParams;
+      if (query.has("messageId")) selected.push(query.get("messageId"));
+      else if (!query.has("threadId")) await gate;
+      await route.fallback();
+    });
+  } });
+  try {
+    await f.page.locator(`[data-read-result='${f.workItemId}']`).first().click();
+    await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+    assert.equal(await f.page.locator('[data-message-record-id="native-draft"]').count(), 0);
+    await f.page.locator("#result-body").evaluate(body => {
+      const range = document.createRange();
+      range.setStart(body.firstChild, 2);
+      range.setEnd(body.firstChild, 14);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await f.page.locator("#result-discuss").click();
+    await f.page.waitForFunction(() => document.querySelector("#message-input").value === "> A quiet room\n\n", null, { timeout: 4500 });
+    assert.ok(selected.includes("native-draft"));
+    assert.match(await f.page.locator("#reply-context").textContent(), /A quiet room/);
+    const input = f.page.locator("#message-input");
+    const feedback = (await input.inputValue()) + "Please use “A shared room” here.";
+    await input.fill(feedback);
+    const posted = f.page.waitForResponse(response => {
+      const request = response.request();
+      return request.method() === "POST" && request.postData()?.includes("A shared room");
+    });
+    await input.press("Enter");
+    const response = await posted;
+    assert.ok(response.ok());
+    const command = response.request().postDataJSON();
+    assert.equal(command.data.replyToId, "native-draft");
+    assert.equal(command.data.body, feedback);
+  } finally { release(); }
 });

@@ -10,7 +10,7 @@ import { currentResult } from "./work-selectors.js";
 // Owns only the pinned reader view. Session, composer, and work mutations stay
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
-  isBusy, canDiscuss, memberLabel, workRecord, focusRecord,
+  isBusy, canDiscuss, discussionMessage, loadDiscussion, memberLabel, workRecord, focusRecord,
   clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null, pointerSelection = null;
@@ -120,12 +120,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
       || isRoomArchived(getState())) return null;
     // The ordinary thread composer does not inherit a DM audience.
-    return getState().messages.find(message => canReplyToResult(getState(), message) && message.id === view.textMessageId && message.workItemId === view.workItemId
-      && message.body === view.body);
+    const message = discussionMessage(view.textMessageId);
+    return canReplyToResult(getState(), message) && message.workItemId === view.workItemId
+      && message.body === view.body ? message : null;
   }
   function needsConversation(view) {
     return Boolean(usableText(view) && !isRoomArchived(getState()) && client.owesHistory
-      && !getState().messages.some(message => message.id === view.textMessageId));
+      && !discussionMessage(view.textMessageId));
   }
   // During a release, a cached page may lack the new reader controls.
   function selectedWorkAction(view, item) {
@@ -424,9 +425,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.resolving = true; resultStatus();
       resultElement("result-use-status").textContent = uiText("result.loadingConversation");
       try {
-        await client.refresh(null, { fill: true });
-        // The room read is a window: an older result's message arrives through older pages.
-        if (needsConversation(view) && typeof client.pageOlder === "function") await client.pageOlder();
+        await loadDiscussion(view.textMessageId);
       } catch {
         if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.conversationUnavailable");
         return;

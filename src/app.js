@@ -6926,6 +6926,11 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
+  discussionMessage: id => conversation?.byId.get(id),
+  loadDiscussion(id) {
+    selectedMessage.select(id, client.generation);
+    return selectedMessage.sync(client.sequence);
+  },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
   onReturn() { $("#work-navigation-return").click(); },
   onWorkAction(item, action) { openWorkAction(item, action); },
