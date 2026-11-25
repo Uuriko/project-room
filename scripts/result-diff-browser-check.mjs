@@ -185,6 +185,33 @@ for (const width of [1440, 390]) {
 }
 
 
+test("the ordinary reader keeps the governing verdict on the retained version", { timeout: 30000 }, async t => {
+  const f = await setup(t, 1440, { retained: true }), page = await f.login("owner");
+  await openResult(page);
+  await page.locator("#result-body").evaluate(body => {
+    const range = document.createRange();
+    range.setStart(body.firstChild, 0); range.setEnd(body.firstChild, 8);
+    const selection = getSelection();
+    selection.removeAllRanges(); selection.addRange(range);
+  });
+  const check = (receipt, result) => f.send("human-checker", T.VERIFICATION_RECORDED, {
+    workItemId: f.item().id, expectedRevision: f.item().revision, completionEventId: receipt.event.id,
+    evidenceVersion: receipt.event.data.evidenceVersion, result, summary: "Checked this revision",
+    ...(result === "fail" && { nextAction: "Correct the wording." })
+  });
+  check(f.first, "fail");
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Corrected the wording." });
+  f.mutate(T.WORK_STARTED, {});
+  const second = f.complete(retainedBody);
+  check(second, "pass");
+  await page.locator("#result-current-version").waitFor();
+  await page.locator("#result-verdict").getByText("Verification · Failed", { exact: true }).waitFor();
+  assert.equal(await page.locator("#result-body").textContent(), retainedBody);
+  assert.equal(await page.evaluate(() => getSelection().toString()), "Result A");
+  await page.locator("#result-current-version").click();
+  await page.getByText("Verification · Passed", { exact: true }).waitFor();
+});
+
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
   const f = await setup(t, 390);
   const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;

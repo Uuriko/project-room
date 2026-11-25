@@ -264,6 +264,16 @@ export function installResultReader({ client, getState, getSession, sameSession,
       clearResultComparison(resultElement("result-diff"));
     }
     const item = getState().workItems[view.workItemId];
+    // A live update can skip straight from an open result to its replacement.
+    // Read the original receipt again so visibility and the review history floor
+    // apply to its verdict even if the client missed the review event.
+    if (usableText(view) && view.selectionStatus === "current" && item?.receipt?.eventId
+        && !matchesReceipt(view.receipt, item.receipt) && !view.readAfterReplacement) {
+      const { generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails, recovered } = view;
+      openResult({ generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails,
+        recovered, readAfterReplacement: true }, item.title, false);
+      return;
+    }
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
       && view.pendingCorrection.verificationEventId === item?.blocker?.eventId ? view.pendingCorrection : null;
     const correctionSource = view.previousCorrection?.sourceMessageId;
@@ -302,8 +312,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (context) context.hidden = !current || !item;
     const verdict = resultElement("result-verdict");
     const finding = current && item && matchesReceipt(item.verification, item.receipt) ? item.verification
-      : view.linked ? view.selectedVerdict : null;
-    verdict.hidden = !view.focused || (!current && !(view.linked && finding && usableText(view)));
+      : view.selectedVerdict;
+    const historicalVerdict = earlier && finding && usableText(view);
+    verdict.hidden = !(historicalVerdict || (view.focused && current));
     if (!verdict.hidden) {
       verdict.dataset.outcome = finding?.result ?? "pending";
       verdict.textContent = finding
@@ -491,7 +502,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.releaseChecks = value.workThread?.releaseChecks;
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
       showOutcome(view.withdrawn ? null : value.workThread?.outcome);
-      showResultBody(view.withdrawn ? "" : value.result.text.body);
+      const text = view.withdrawn ? "" : value.result.text.body;
+      if (!view.readAfterReplacement || resultElement("result-body").textContent !== text) showResultBody(text);
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);
@@ -516,6 +528,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         resultElement("result-diff"), () => owns() && !view.withdrawn);
     }).catch(error => {
       if (!owns()) return;
+      resultElement("result-body").replaceChildren();
       view.refusalHint = exactResultRecovery(error?.status, error?.code);
       view.error = !view.refusalHint;
       view.retrying = false;
@@ -538,7 +551,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-work-context")?.setAttribute("hidden", "");
       resultElement("result-work-action")?.setAttribute("hidden", "");
       resultElement("result-options").open = false;
-      resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
+      resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…";
+      if (!view.readAfterReplacement) resultElement("result-body").textContent = "";
+      resultElement("result-body").hidden = false;
+      resultElement("result-current-version").hidden = true;
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
       resultElement("result-copy-link").hidden = true;
