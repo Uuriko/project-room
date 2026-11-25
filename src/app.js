@@ -3458,6 +3458,7 @@ function revealMessage(id) {
   }
   if (!state || busy || !conversation.byId.has(id)) return;
   activeWorkNavigationId = null;
+  updatesUi?.close();
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   if ($("#later-dialog")?.open) $("#later-dialog").close();
