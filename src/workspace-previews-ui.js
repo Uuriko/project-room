@@ -137,7 +137,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   discussionLink.addEventListener("click", event => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    if (!threadDraft?.openDiscussion?.(reset)) refreshDiscussion();
+    if (!discussionDestination()?.openDiscussion?.(reset)) refreshDiscussion();
   });
   const noteLabel = dialog.querySelector("[data-workspace-note]");
   const noteInput = noteLabel.querySelector("textarea");
@@ -147,13 +147,17 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     if (noteKey) notes.set(noteKey, noteInput.value);
     linkStatus.textContent = ""; linkFallback.hidden = true; linkFallback.value = "";
   });
+  function discussionDestination() {
+    return threadDraft?.artifactId && threadDraft.artifactId !== selected ? null : threadDraft;
+  }
   function refreshDiscussion() {
     if (!dialog.open) return;
     // A conversation can remain authorized after its artifact expires or changes.
     const canUseArtifact = !copyLink.hidden;
-    const discussion = (canUseArtifact || linked) && threadDraft?.discussion();
+    const destination = discussionDestination();
+    const discussion = (canUseArtifact || linked) && destination?.discussion();
     discussionAside.hidden = !discussion;
-    addToThread.hidden = !canUseArtifact || !discussion || Boolean(items.find(item => item.id === selected)?.recipientId);
+    addToThread.hidden = !canUseArtifact || !discussion || !destination?.append || Boolean(items.find(item => item.id === selected)?.recipientId);
     discussionMessages.replaceChildren();
     if (discussion) {
       discussionLink.href = discussion.link;

@@ -577,35 +577,73 @@ test("the verdict links exact candidate release checks without claiming missing 
   }
 });
 
-test("a submitted file change opens in the reviewer’s room and reports a replaced publication", { timeout: 45000 }, async t => {
-  const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
-  const id = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
-  const href = origin => origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
-  const text = origin => [href(origin), href(origin).replace("/?", "/other?"), href(origin).replace("commons#", "other#")].join("\n");
-  const f = await setup(t, 1440, { firstBody: text });
-  const publish = async (expectedRevision, patch) => {
-    const res = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
-      method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
-      body: JSON.stringify({ id, expectedRevision, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+for (const audience of ["public", "private"]) {
+  test(`a submitted file change follows the exact ${audience} evidence audience`, { timeout: 45000 }, async t => {
+    const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
+    const id = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
+    const href = origin => origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
+    const text = origin => [href(origin), href(origin).replace("/?", "/other?"), href(origin).replace("commons#", "other#")].join("\n");
+    const f = await setup(t, 390, { firstBody: text, ...(audience === "private" && { firstDirectTo: "human-checker" }) });
+    const publish = async (expectedRevision, patch) => {
+      const res = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+        method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+        body: JSON.stringify({ id, expectedRevision, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+      });
+      assert.ok(res.ok, await res.text());
+    };
+    await publish(0, patch);
+    const evidence = f.first.event.data.evidenceMessageId;
+    if (audience === "public") {
+      for (const author of ["owner", "guest", "producer", "human-checker"]) {
+        for (let i = 0; i < 26; i++) f.send(author, T.MESSAGE_POSTED, { body: `Later conversation ${i}` });
+      }
+    }
+    const reviewer = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
+    const body = reviewer.locator("#result-body");
+    const link = body.getByRole("link", { name: href(f.origin), exact: true });
+    await link.waitFor();
+    assert.equal(await body.textContent(), text(f.origin));
+    assert.equal(await body.locator("a").count(), 1);
+    const evidenceRead = audience === "public" && reviewer.waitForResponse(response => {
+      const url = new URL(response.url());
+      return response.ok() && url.pathname.endsWith("/conversation") && url.searchParams.get("messageId") === evidence;
     });
-    assert.ok(res.ok, await res.text());
-  };
-  await publish(0, patch);
-  const reviewer = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
-  const body = reviewer.locator("#result-body");
-  const link = body.getByRole("link", { name: href(f.origin), exact: true });
-  await link.waitFor();
-  assert.equal(await body.textContent(), text(f.origin));
-  assert.equal(await body.locator("a").count(), 1);
-  await link.click();
-  await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
-  await reviewer.goBack();
-  await link.waitFor();
-  await publish(1, patch.replace("+submitted", "+replacement"));
-  await link.click();
-  await reviewer.getByText("This preview revision changed.", { exact: true }).waitFor();
-  assert.equal(await reviewer.getByRole("button", { name: "Open current revision" }).isVisible(), true);
-});
+    await link.click();
+    if (evidenceRead) await evidenceRead;
+    await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
+    await reviewer.goBack();
+    await link.waitFor();
+    await publish(1, patch.replace("+submitted", "+replacement"));
+    await link.click();
+    await reviewer.getByText("This preview revision changed.", { exact: true }).waitFor();
+    assert.equal(await reviewer.getByRole("button", { name: "Open current revision" }).isVisible(), true);
+    if (audience === "private") {
+      assert.equal(await reviewer.locator("[data-discussion-link]").getAttribute("href"), null);
+      const nonparty = await f.login("owner", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
+      await nonparty.getByText("Ask the sender to share the intended result version somewhere you can read it.", { exact: true }).waitFor();
+      assert.equal(await nonparty.locator("#result-body a").count(), 0);
+      return;
+    }
+    const discussion = reviewer.getByRole("link", { name: "Open original discussion" });
+    if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "cold-file-preview.png") });
+    await discussion.waitFor({ timeout: 2000 });
+    assert.equal(new URL(await discussion.getAttribute("href")).hash, "#pr-record/message/" + evidence);
+    assert.equal(await reviewer.getByRole("button", { name: "Add to thread draft" }).count(), 0);
+    await discussion.press("Enter");
+    await reviewer.waitForFunction(id => document.activeElement?.dataset?.messageRecordId === id, evidence);
+    assert.equal(await reviewer.locator("#room-project-workspace").isVisible(), false);
+    assert.equal(reviewer.context().pages().length, 1);
+    if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "cold-file-return.png") });
+
+    const returning = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
+    await returning.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+    const original = returning.getByRole("link", { name: "Open original discussion" });
+    await original.waitFor();
+    f.send("producer", T.MESSAGE_DELETED, { messageId: evidence, expectedMessageRevision: 0 });
+    await original.waitFor({ state: "hidden" });
+    assert.equal(await returning.locator("[data-discussion-link]").getAttribute("href"), null);
+  });
+}
 
 test("shared result links keep identical old and new text bound to different verdicts", { timeout: 45000 }, async t => {
   const revision = "a".repeat(40);

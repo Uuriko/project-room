@@ -3398,7 +3398,7 @@ function switchThread(threadId, focusComposer = false, preserveWork = false) {
 }
 // Capture the existing discussion when Workspace opens. A failed return must
 // leave the destination draft alone.
-function captureWorkspaceThreadDraft(messageId) {
+function captureWorkspaceThreadDraft(messageId, exactSource) {
   const workId = activeWorkNavigationId, threadId = currentThreadId;
   const work = workId && state?.workItems[workId];
   const sourceId = messageId ?? (work ? work.sourceMessageId : threadId);
@@ -3407,7 +3407,8 @@ function captureWorkspaceThreadDraft(messageId) {
   function destination() {
     const source = conversation?.byId.get(sourceId), thread = conversation?.byId.get(root);
     if (!source || source.deletedAt || source.toMemberId || !thread || thread.deletedAt || thread.toMemberId
-      || !conversation.threads.has(root)) return null;
+      || !conversation.threads.has(root)
+      || (exactSource && (source.workItemId !== exactSource.workItemId || source.body !== exactSource.body))) return null;
     const channel = messageChannelId(thread);
     return state?.channels[channel] && !state.channels[channel].archivedAt ? channel : null;
   }
@@ -3459,7 +3460,7 @@ function captureWorkspaceThreadDraft(messageId) {
     revealMessage(sourceId, true);
     return true;
   }
-  return { discussion, append, openDiscussion };
+  return { discussion, openDiscussion, ...(exactSource ? {} : { append }) };
 }
 function revealMessage(id, openThread = false) {
   if (state && !busy && !conversation.byId.has(id)) {
@@ -3970,7 +3971,7 @@ function retryPendingHashReveal() {
   pendingHashReveal = null;
   revealMessage(pending.messageId);
 }
-function revealLocationHash() {
+function revealLocationHash(workspaceDiscussion = null) {
   if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
   if (!location.hash.startsWith("#pr-workspace/")) workspacePreviewsUI?.closeLinked();
   const exactResult = exactResultDestination(location);
@@ -4006,7 +4007,7 @@ function revealLocationHash() {
   }
   // JDOT-COH-NAV end
   if (hash.startsWith("#pr-workspace/")) {
-    workspacePreviewsUI?.openLink(hash);
+    workspacePreviewsUI?.openLink(hash, workspaceDiscussion);
     return;
   }
   if (hash.startsWith("#pr-record/result/")) {
@@ -6944,6 +6945,11 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
     return selectedMessage.sync(client.sequence);
   },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onOpenWorkspace(url, message, artifactId) {
+    const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;
+    history.pushState(workHistoryState(), "", url.href);
+    revealLocationHash(discussion ? { ...discussion, artifactId } : null);
+  },
   onReturn() { $("#work-navigation-return").click(); },
   onWorkAction(item, action, compareFrom) { openWorkAction(item, action, null, null, compareFrom); },
   onOriginal(messageId) {

@@ -12,7 +12,7 @@ import { currentResult } from "./work-selectors.js";
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, discussionMessage, loadDiscussion, memberLabel, workRecord, focusRecord,
-  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, storage = null, recoveryScope = () => null }) {
+  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, onOpenWorkspace, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null, pointerSelection = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
@@ -186,6 +186,28 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
     body.append(text.slice(offset));
   }
+  resultElement("result-body").addEventListener("click", async event => {
+    const link = event.target.closest("a");
+    if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const view = resultView, url = new URL(link.href);
+    if (!usableText(view)) return;
+    const artifact = roomFileChangeSelection(url, location.origin, view.roomId);
+    if (!artifact) return;
+
+    event.preventDefault();
+    if (view.openingWorkspace) return;
+    const origin = location.href;
+    if (needsConversation(view)) {
+      view.openingWorkspace = true;
+      resultElement("result-use-status").textContent = uiText("result.loadingConversation");
+      try { await loadDiscussion(view.textMessageId); }
+      catch { /* The file can still be opened without a discussion. */ }
+      finally { view.openingWorkspace = false; }
+    }
+    if (!usableText(view) || location.href !== origin) return;
+    resultElement("result-use-status").textContent = "";
+    onOpenWorkspace(url, resultDiscussionMessage(view), artifact.id);
+  });
   function showOutcome(outcome) {
     const panel = resultElement("result-outcome");
     panel.hidden = !outcome;
