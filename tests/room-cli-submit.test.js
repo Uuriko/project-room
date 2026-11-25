@@ -517,6 +517,15 @@ test(`${representation} a newly attempted stale or closed submit is refused befo
       return Response.json(mcpCallError(frame.id, { tool: frame.params.name, reason: "invalid_arguments", unexpected: ["expectedRevision"] }));
     return fetch(url, init);
   };
+  const beforeAmbiguous = store.headSequence("commons");
+  const ambiguous = await attempt("previous-room", "ambiguous-frame", legacy.revision, async (url, init) => {
+    const frame = await (await oldServer(url, init)).json();
+    return Response.json({ ...frame, result: { structuredContent: { contractVersion: 1, status: "posted" } } });
+  });
+  assert.equal(ambiguous.output.status, "unknown");
+  assert.deepEqual(ambiguous.calls, ["room_post_message"]);
+  assert.equal(store.headSequence("commons"), beforeAmbiguous);
+
   const oldValid = await attempt("previous-room", "old-valid", legacy.revision, oldServer);
   assert.equal(oldValid.output.status, "recorded", JSON.stringify(oldValid));
   const oldHead = store.headSequence("commons");

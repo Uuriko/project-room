@@ -49,7 +49,8 @@ async function callRoom({ config, secret, fetchImpl }, name, args) {
     throw new Error("Uncertain Room response");
   }
   const rpc = await boundedJson(response);
-  if (rpc?.id !== id || rpc.jsonrpc !== "2.0") throw new Error("Invalid Room response");
+  if (rpc?.id !== id || rpc.jsonrpc !== "2.0" || Object.hasOwn(rpc, "error") === Object.hasOwn(rpc, "result"))
+    throw new Error("Invalid Room response");
   const value = rpc.result?.structuredContent;
   if (rpc.error || rpc.result?.isError) {
     if (value?.status === "unconfirmed" || value?.status >= 500) throw new Error("Uncertain Room response");
