@@ -60,16 +60,20 @@ function withOverdueActions(db, result, roomId) {
     const incoming = request.recipientId === result.viewerId;
     const stale = request.lifecycle?.state === "stale";
     const startUnconfirmed = waiting.has(request.id);
-    if (!stale && !startUnconfirmed) continue;
+    const acknowledgmentMissing = request.requesterId === result.viewerId && request.lifecycle?.state === "pending"
+      && request.lifecycle.unresponsive && !request.progress && now - Date.parse(request.createdAt) >= START_REPORT_WINDOW_MS;
+    if (!stale && !startUnconfirmed && !acknowledgmentMissing) continue;
     overdueActions.push({
       requestMessageId: request.id,
-      guidance: startUnconfirmed
-        ? "Acknowledged, but no work start reported. Read the request and check with the recipient before reassigning it."
-        : incoming
-          ? "Read the request. Answer if it is still useful, ask for any missing input, or decline with a reason."
-          : request.lifecycle.unresponsive
-            ? "Read the request. Check whether delivery reached the recipient. If work must move, cancel this ask with a reason before reassigning it."
-            : "Read the request. Confirm whether the recipient is still working. Clarify the blocker or cancel with a reason before reassigning.",
+      guidance: acknowledgmentMissing
+        ? "No acknowledgment yet. Read the request and check with the recipient before reassigning it."
+        : startUnconfirmed
+          ? "Acknowledged, but no work start reported. Read the request and check with the recipient before reassigning it."
+          : incoming
+            ? "Read the request. Answer if it is still useful, ask for any missing input, or decline with a reason."
+            : request.lifecycle.unresponsive
+              ? "Read the request. Check whether delivery reached the recipient. If work must move, cancel this ask with a reason before reassigning it."
+              : "Read the request. Confirm whether the recipient is still working. Clarify the blocker or cancel with a reason before reassigning.",
       nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: request.id, view: "compact" } }
     });
   }
