@@ -333,6 +333,64 @@ test("a passage reply identifies the reviewed submission when two receipts cite 
   assert.equal(await recipient.locator("#result-current-version").getAttribute("href"), url(second.event.id));
 });
 
+for (const width of [1440, 390]) {
+  test(`Needs Me ${width}px binds a reviewer to the resumed revision`, { timeout: 30000 }, async t => {
+    const f = await setup(t, width);
+    f.send("human-checker", T.VERIFICATION_RECORDED, {
+      workItemId: "revision-journey", expectedRevision: f.item().revision, completionEventId: f.first.event.id,
+      evidenceVersion: f.item().receipt.evidenceVersion, result: "fail", summary: "Name the owner in the final line"
+    });
+    f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Added a named owner" });
+    f.mutate(T.WORK_STARTED, {});
+    const second = f.complete("Result B\nOwner: Maya");
+    const calm = f.store.room("commons").state.workItems["calm-result"];
+    f.send("human-checker", T.VERIFICATION_RECORDED, {
+      workItemId: calm.id, expectedRevision: calm.revision, completionEventId: calm.receipt.eventId,
+      evidenceVersion: calm.receipt.evidenceVersion, result: "pass", summary: "The first result met its criterion"
+    });
+    const selection = { roomId: "commons", discardLegacyAssignments: true };
+    const plan = operatorNormalization(f.store, selection);
+    operatorNormalization(f.store, { ...selection, planHash: plan.planHash, requestId: randomUUID(), reason: "Isolated review return fixture" }, true);
+
+    const reviewer = await f.login("human-checker");
+    const row = reviewer.getByRole("button", { name: "Review result for Revise a short result", exact: true });
+    const path = "**/api/rooms/commons/needs-me*";
+    if (width === 390) {
+      // Reproduce a row loaded immediately before a resubmission. Keep every
+      // other field from the real response and replace its one version pointer.
+      await reviewer.route(path, async route => {
+        const response = await route.fetch(), page = await response.json();
+        const work = page.items?.find(item => item.id === "revision-journey");
+        if (work?.reviewCompletionEventId) work.reviewCompletionEventId = f.first.event.id;
+        await route.fulfill({ response, json: page });
+      });
+      await reviewer.reload();
+    }
+    const entry = reviewer.locator("#topbar-updates");
+    if (!(await reviewer.locator("#updates-dialog").isVisible())) await entry.press("Enter");
+    await row.waitFor();
+    await row.press("Enter");
+
+    if (width === 390) {
+      await reviewer.getByText("A newer revision is available. Return to Needs me to review it.", { exact: true }).waitFor();
+      assert.equal(await reviewer.locator("#result-dialog").isVisible(), false);
+      await reviewer.unroute(path);
+      await reviewer.getByRole("button", { name: "Back to Needs me", exact: true }).press("Enter");
+      await row.waitFor();
+      await row.press("Enter");
+    }
+
+    await reviewer.locator("#result-body").getByText(/Owner: Maya/).waitFor();
+    assert.match(await reviewer.locator("#result-work-context").textContent(), /Test checker.*Review the exact submitted version/);
+    assert.match(await reviewer.locator("#result-correction-summary").textContent(), /Name the owner in the final line/);
+    await reviewer.locator("#result-work-action").press("Enter");
+    const check = reviewer.waitForRequest(request => request.method() === "POST" && request.url().endsWith("/commands")
+      && request.postDataJSON().type === T.VERIFICATION_RECORDED);
+    await review(reviewer, "pass", "Owner checked in result B");
+    assert.equal((await check).postDataJSON().data.completionEventId, second.event.id);
+  });
+}
+
 for (const representation of ["legacy", "normalized-current-v1"]) {
   test(`a phone reviewer can identify a document reference and ask about its exact revision (${representation})`, { timeout: 30000 }, async t => {
     const source = "https://docs.google.com/document/d/review-fixture/edit";

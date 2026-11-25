@@ -163,7 +163,8 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
         id:item.id,title:item.title,state:item.state,revision:item.revision,mode:item.mode,
         next:stepFor(item),
         ...(focus==='needs_me'&&stepFor(item).action==='verify'
-          ? {reviewRuntime:reviewRuntimeFor(store,roomId,item,stepFor(item),store.now())}:{}),
+          ? {reviewRuntime:reviewRuntimeFor(store,roomId,item,stepFor(item),store.now()),
+             ...(item.receipt?.eventId && {reviewCompletionEventId:item.receipt.eventId})}:{}),
         nextRead:{tool:'room_read_work',arguments:{workItemId:item.id}},
         ...(focus==='results'?(()=>{const current=readCurrentWorkItem(store.db,roomId,item.id);return {
           result:currentResult(current),nextResultRead:current.receipt.nativeText
