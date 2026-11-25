@@ -180,7 +180,7 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
           .map(field => [field, message[field]])),
         conflict: Boolean(entry.conflict), resolution: Boolean(entry.resolution) };
     }));
-    return withAttachmentReferences(selected, await room.files());
+    return withAttachmentReferences(selected, await room.files(selected.map(input => input.messageId)));
   };
   if (run.status === "resume_requested") {
     const prior = record.prior_result ? JSON.parse(record.prior_result) : null;
