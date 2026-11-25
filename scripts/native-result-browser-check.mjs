@@ -210,7 +210,7 @@ test("native review shows exact text and leaves human approval pending", { timeo
 });
 
 test("exact result shows review delivery separately from reviewer activity", { timeout: 25000 }, async t => {
-  const f = await setup(t, { review: true, mobile: true });
+  const f = await setup(t, { review: true, mobile: true, body: previewBody });
   let reviewRuntime = { status: "unavailable", webhook: "queued" };
   await f.page.route("**/work-result?**", async route => {
     const response = await route.fetch();
