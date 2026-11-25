@@ -87,10 +87,29 @@ test("opening a shared reply link from Updates reveals the actual conversation",
   store.command(agent, "commons", command(T.MESSAGE_POSTED, {
     messageId: "returned-revision", replyToId: "review-topic", body: "Here is the returned revision."
   }));
+  await page.locator("#message-input").fill("Keep my draft.");
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route("**/api/rooms/commons/files", async route => {
+    if (route.request().method() === "POST") await held;
+    await route.continue();
+  });
+  const uploading = page.waitForRequest(request => request.method() === "POST" && request.url().endsWith("/files"));
+  await page.locator("#composer-file").setInputFiles({ name: "draft.txt", mimeType: "text/plain", buffer: Buffer.from("draft") });
+  await uploading;
   await page.locator("#topbar-updates").click();
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
   const url = new URL(page.url());
   url.hash = "#pr-record/message/returned-revision";
+  const uploaded = page.waitForResponse(r => r.request().method() === "POST" && r.url().endsWith("/files"));
+  try {
+    await page.goto(url.href);
+    await page.getByText("Wait for the file upload to finish, then try again.", { exact: true }).first().waitFor();
+    assert.equal(await page.locator("#updates-dialog").isVisible(), true);
+    assert.equal(await page.locator("#message-input").inputValue(), "Keep my draft.");
+  } finally { release(); }
+  assert.equal((await uploaded).ok(), true);
+  await page.goBack();
   await page.goto(url.href);
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
   await page.locator('[data-message-record-id="returned-revision"] .message-body').waitFor();
