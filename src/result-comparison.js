@@ -1,6 +1,31 @@
 import { exactResultHref } from "./room-deep-link.js";
-import { diffResultLines, diffResultSummary } from "./workflow.js";
 import { uiText } from "./strings.js";
+
+// Show only the changed passages and their surrounding lines. Full versions
+// stay accessible through the exact result links even if a rewrite is large.
+function comparisonHtml(before, after, esc, structuredPatch) {
+  const heading = '<p class="form-hint"><strong>Resubmitted result.</strong> ';
+  const patch = structuredPatch("", "", before, after, "", "", { context: 3, maxEditLength: 800 });
+  if (!patch) return heading + "Too many changed lines for an inline comparison. Open both versions to review the rewrite. Previous approval never carries over.</p>";
+  if (!patch.hunks.length) return heading + "No text changes from the previous version. Previous approval never carries over.</p>";
+
+  let removed = 0, added = 0, total = 0;
+  const visible = [];
+  for (const hunk of patch.hunks) {
+    if (total < 200) visible.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
+    for (const line of hunk.lines) {
+      if (line.startsWith("-")) removed++;
+      if (line.startsWith("+")) added++;
+      if (++total <= 200) {
+        const kind = line.startsWith("-") ? "removed" : line.startsWith("+") ? "added" : "same";
+        visible.push(`<span class="diff-${kind}">${esc(line)}</span>`);
+      }
+    }
+  }
+  if (total > 200) visible.push(`… ${total - 200} more patch rows. Open both versions for the full text.`);
+  return heading + esc(uiText("result.comparisonSummary", { removed, added })) +
+    '</p><pre class="result-diff">' + visible.join("\n") + '</pre>';
+}
 
 // A comparison owns its pending read until cleared, replaced or invalidated.
 export function createResultComparison({ client, getState, esc }) {
@@ -30,7 +55,8 @@ export function createResultComparison({ client, getState, esc }) {
     const comparison = { currentId: text.messageId, previousId: null, owns };
     resultComparisons.set(box, comparison);
     const current = () => owns() && resultComparisons.get(box) === comparison;
-    client.workResult(workItemId, { completionEventId: previousId }).then(previous => {
+    Promise.all([client.workResult(workItemId, { completionEventId: previousId }), import("./vendor-jsdiff-patch.js")])
+      .then(([previous, { structuredPatch }]) => {
       if (!current()) return;
       if (!previous) throw new Error("previous_result_unavailable");
       comparison.previousId = previous.result?.text?.messageId;
@@ -47,15 +73,7 @@ export function createResultComparison({ client, getState, esc }) {
         return;
       }
       if (typeof before !== "string") throw new Error("Previous version has no exact text");
-      const rows = diffResultLines(before, text.body);
-      const note = "Previous approval never carries over; review the exact new text.";
-      box.innerHTML = rows === null
-        ? `<p class="form-hint"><strong>Resubmitted result.</strong> The previous version differs but is too large to compare line by line. ${esc(note)}</p>`
-        : (() => { const summary = diffResultSummary(rows);
-            const body = rows.length > 200 ? rows.slice(0, 200) : rows;
-            return `<p class="form-hint"><strong>Resubmitted result.</strong> ${esc(uiText("result.comparisonSummary", { removed: summary.removedLines, added: summary.addedLines }))}</p>` +
-              (summary.changedBytes ? `<pre class="result-diff">${body.map(row => `<span class="diff-${row.type}">${esc(row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  ")}${esc(row.text)}</span>`).join("\n")}${rows.length > 200 ? `<span class="form-hint">… ${rows.length - 200} more rows</span>` : ""}</pre>` : `<p class="form-hint">No text changes from the previous version.</p>`);
-          })();
+      box.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch);
       const earlierLink = exactResultHref({ roomId: previous.roomId, workItemId, completionEventId: previousId });
       if (earlierLink) {
         const paragraph = document.createElement("p");
