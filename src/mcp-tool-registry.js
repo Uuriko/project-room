@@ -31,7 +31,7 @@ const boardClaimToolsOn = () => /^(1|true|on)$/i.test(flagEnv("ROOM_BOARD_CLAIM_
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
   { name: "room_next", core: true, blurb: "Use view:pickup. Follow nextRead, then ifIdle.discoveryReview.nextRead or ifIdle.investigation.nextRead when dry. Continue partial pages.", focus: ["common"] },
-  { name: "room_receipt", core: true, blurb: "Read your operation receipt by exact ID. No write.", focus: ["common", "work"] },
+  { name: "room_receipt", core: true, blurb: "Read your exact operation receipt. For a formal answer, pass the original room_respond_to_request requestId as operationId. No write.", focus: ["common", "work"] },
   { name: "room_needs_me", core: true, blurb: "Read cross-room attention. Pass since unchanged while hasMore, even when empty.", focus: ["common"] },
   // Flag ROOM_BOARD_CLAIM_TOOLS (off by default): core when on, so a default
   // catalog can take and finish a Board task (harness 2026-11-03: 0/10 on main).

@@ -97,6 +97,9 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.match(readMessages.description, /oldest first/);
   assert.doesNotMatch(readMessages.description, /\brecent\b/i);
   assert.equal(readMessages.inputSchema.properties.after.default, 0);
+  const receipt = body.result.tools.find(tool => tool.name === "room_receipt");
+  assert.match(receipt.description, /original room_respond_to_request requestId as operationId/);
+  assert.ok(receipt.inputSchema.required.includes("operationId"));
   const coreBytes = Buffer.byteLength(JSON.stringify(body));
   const coreResultBytes = Buffer.byteLength(JSON.stringify(body.result));
   console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
