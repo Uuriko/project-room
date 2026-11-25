@@ -110,3 +110,11 @@ test("exact prose comparisons explain a changed file ending once", async () => {
   assert.match(f.box.innerHTML, /0 lines removed, 1 added/);
   assert.doesNotMatch(f.box.innerHTML, /Final line break/);
 });
+
+test("a line-ending conversion explains the change without showing identical wording as edited", async () => {
+  const f = fixture();
+  f.load("One line\r\nAnother line\r\n"); f.respond(0, "One line\nAnother line\n"); await settle();
+  assert.match(f.box.innerHTML, /Line-ending style changed/);
+  assert.match(f.box.innerHTML, /Previous approval never carries over/);
+  assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)|No text changes/);
+});

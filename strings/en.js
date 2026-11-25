@@ -569,6 +569,7 @@ export default {
   "result.revisionHeading": "Resubmitted result.",
   "result.finalBreakAdded": "Final line break added.",
   "result.finalBreakRemoved": "Final line break removed.",
+  "result.lineEndingStyleChanged": "Line-ending style changed.",
   "result.comparisonApproval": "Previous approval never carries over. Review the exact new text.",
   "result.revisionRange": "Previous line {before} · Revised line {after}",
   "result.rewrite": "Too many changed lines for an inline comparison. Open both versions to review the rewrite. Previous approval never carries over.",
