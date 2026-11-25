@@ -4260,7 +4260,7 @@ function workCard(i, now, drafts, messages = []) {
   const sourceWithdrawn = i.sourceMessageId && conversation?.byId.get(i.sourceMessageId)?.deletedAt;
   const sourceHintId = `${workDomId(i.id)}-source-unavailable`;
   const source = !i.sourceMessageId ? "" : sourceWithdrawn
-    ? `<p id="${sourceHintId}" class="form-hint" tabindex="-1" data-focus-key="${sourceKey}">${esc(uiText("work.focus.sourceUnavailable"))}</p>`
+    ? uiText("work.focus.sourceUnavailableHtml", { id: esc(sourceHintId), focusKey: sourceKey })
     : `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="${sourceKey}">From this conversation</a>`;
   const continuity = terminalWork(i) ? null : workContinuity(i, now);
   const recovery = continuity?.needsAttention ? `<section class="work-recovery" aria-label="Worker progress"><strong>${esc(continuity.label)}</strong><p>${esc(continuity.next)}</p><button type="button" class="text-button" data-portable-work="${esc(i.id)}" data-portable-progress="true" data-focus-key="work-resume:${esc(i.id)}">Continue with saved context</button></section>` : "";
