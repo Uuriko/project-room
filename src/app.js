@@ -3790,23 +3790,28 @@ async function restoreWorkOrigin(ticket) {
   // origin that was not the board closes it again (a work record's
   // destination never had it open).
   if (origin.targetClaimId && origin.type !== "board" && $("#board-dialog").open) $("#board-dialog").close();
-  if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId, true);
+  const priorOrigin = currentWorkOrigin(origin.previous);
+  // A shared work URL can be the first entry, with no earlier navigation ticket.
+  const coldWork = !priorOrigin && origin.type === "conversation";
+  const priorTarget = priorOrigin?.target ?? (coldWork ? new URL(origin.url).hash : "");
+  const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget);
+  const priorWorkId = priorWork ? decodeFragment(priorWork[1]) : null;
+  if (activeChannelId !== origin.channelId || (priorWorkId && activeDirectMemberId)) setActiveChannel(origin.channelId, true);
   switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null, false, true);
   if (origin.mode) setRequestMode(origin.mode);
-  activeWorkNavigationId = null;
-  const priorOrigin = currentWorkOrigin(origin.previous);
-  const priorTarget = priorOrigin?.target;
-  const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget ?? "");
-  activeWorkNavigationId = priorWork ? decodeFragment(priorWork[1]) : null;
+  activeWorkNavigationId = priorWorkId;
   renderMessages();
-  if (priorWork) {
-    const id = decodeFragment(priorWork[1]), card = id && workRecord(id);
-    if (card) {
-      const section = priorOrigin.presentation === "drafts" ? card.querySelector(".work-drafts") : card.querySelector(".work-details");
-      if (section) section.open = (priorOrigin.presentation === "drafts" ? origin.workDraftsOpen : origin.workDetailsOpen)
-        ?? priorOrigin.presentation !== "focus";
-      activeWorkNavigationId = id;
-    }
+  let priorCard = priorWorkId && workRecord(priorWorkId);
+  if (coldWork && priorWorkId && !priorCard && partialWorkSnapshot) {
+    // A newer compact snapshot may have dropped the previously inspected card.
+    priorCard = await revealWork(priorWorkId);
+    if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
+  }
+  if (priorCard) {
+    const presentation = priorOrigin?.presentation ?? "focus";
+    const drafts = presentation === "drafts";
+    const section = priorCard.querySelector(drafts ? ".work-drafts" : ".work-details");
+    if (section) section.open = (drafts ? origin.workDraftsOpen : origin.workDetailsOpen) ?? presentation !== "focus";
   }
   const input = $("#message-input");
   input.setSelectionRange(...origin.selection); input.scrollTop = origin.composerScroll;
@@ -3834,7 +3839,7 @@ async function restoreWorkOrigin(ticket) {
     const messageWork = origin.messageId && origin.messageWorkId
       ? $(`#message-list [data-message-record-id="${CSS.escape(origin.messageId)}"] [data-open-work="${CSS.escape(origin.messageWorkId)}"]`) : null;
     const fallback = origin.type === "board" ? $("#board-close") : $("#conversation-title");
-    const target = [origin.focus, keyed, search, messageWork, claim].find(usable) ?? fallback;
+    const target = [origin.focus, keyed, search, messageWork, claim, coldWork ? priorCard : null].find(usable) ?? fallback;
     target?.focus({ preventScroll: true });
     if (target === fallback) target?.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
