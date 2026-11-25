@@ -147,9 +147,11 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    const seen=new Set(saved?.seen??[]),found=[];
    // A record costs four reads with a cold receipt. Each context header
    // costs at most nine, including the legacy canonical-message fallback.
-   // Reserve both headers and all three event checks before scanning a row.
-   const contextRecords = status === 'open' ? 18 : 0;
-   const scanRowRecords = 1 + 4 + contextRecords + 3;
+   // The opening request summary may need one additional message witness
+   // at the activation instant. The context headers already prove theirs.
+   const openingHistoryRecords = floor?.version===2 ? 4 : 0;
+   const contextRecords = status==='open' ? 18 : 0;
+   const scanRowRecords = 1 + 4 + openingHistoryRecords + contextRecords + 3;
    const recordsLeft = selectedCount => b.maxRecords - b.records - 3 * selectedCount;
    const bytesLeft = selectedCount => remainingCurrentReadBytes(b) > 144 * 1024 + 384 * (selectedCount + WINDOW);
    const actionable = request => status !== 'open'
@@ -161,8 +163,10 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
     const sources=[];
     if(direction!=='outgoing')sources.push(["SELECT record_key FROM current_room_records INDEXED BY current_inbox_open_requests WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.status')='open' AND json_extract(payload,'$.recipientId')=? ORDER BY record_key LIMIT ?",'recipientId']);
     if(direction!=='incoming')sources.push(["SELECT record_key FROM current_room_records INDEXED BY current_request_party_requester WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.requesterId')=? AND json_extract(payload,'$.status')='open' ORDER BY record_key LIMIT ?",'requesterId']);
+    const indexLimit=Math.min(limit,WINDOW);
     for(const [sql,role] of sources){
-     const rows=db.prepare(sql).all(roomId,auth.member.id,Math.min(limit,WINDOW));
+     if(found.length>=limit||recordsLeft(found.length)<indexLimit)break;
+     const rows=db.prepare(sql).all(roomId,auth.member.id,indexLimit);
      chargeCurrentReadBudget(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
      for(const {record_key:id} of rows){
       if(found.length>=limit)break;

@@ -1540,8 +1540,9 @@ export {currentWorkSummary} from './current-work-summary.mjs';
 // Check witnessed metadata so pickup never loads the question bodies.
 export function currentReplyContextAvailable(db, roomId, request, memberId, b, floor = null) {
   return [...new Set([request.id, request.contextMessageId])].every(id => {
-    const message = readCurrentMessageHeader(db, roomId, id, b)?.value;
-    return message && !message.deletedAt && messageInHistory(message, floor)
+    const source = readCurrentMessageHeader(db, roomId, id, b);
+    const message = source?.value;
+    return message && !message.deletedAt && messageInHistory(message, floor, source.row.seq)
       && (!message.toMemberId || message.authorId === memberId || message.toMemberId === memberId);
   });
 }
