@@ -501,6 +501,7 @@
   "result.copied": "Copied",
   "result.copyFailed": "Could not copy. Retry or download the text.",
   "result.discuss": "Reply",
+  "result.quoteTooLong": "This quote would exceed the message limit. Select a shorter passage or shorten your draft.",
   "result.replyBlocked": "Finish or clear the existing reply in this conversation first.",
   "record.invalidView": "Choose a supported record view.",
   "record.loadingHtml": "<li role=\"status\">Loading the record…</li>",

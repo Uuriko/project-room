@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { createResultFeedback } from "../src/result-feedback.js";
 
 function fixture() {
@@ -83,4 +84,21 @@ test("selection cannot bypass a private destination draft", () => {
   const f = fixture(); f.message.body = "Current"; f.draft({ body: "private", toMemberId: "someone" });
   assert.equal(f.reply("result", { body: "Current", start: 0, end: 3 }), false);
   assert.deepEqual(f.calls, ["blocked"]);
+});
+
+test("the quote size check counts its permalink and allows the exact limit and an existing quote", () => {
+  const f = fixture();
+  f.message.body = "🙂";
+  const selection = { body: f.message.body, start: 0, end: 2, sourceHref: "https://example.org/?room=commons#pr-record/result/work/a" };
+  const quote = "> 🙂\n" + selection.sourceHref + "\n\n";
+  const remainder = "x".repeat(MAX_MESSAGE_BODY_CHARS - quote.length);
+  f.draft({ body: remainder + "x" });
+  assert.equal(f.reply("result", selection), false);
+  assert.deepEqual(f.calls, ["blocked"]);
+  for (const body of [remainder, quote + remainder]) {
+    f.calls.length = 0;
+    f.draft({ body });
+    assert.equal(f.reply("result", selection), true);
+    assert.deepEqual(f.calls, [["open", "result", "thread"], ["reply", "result", quote]]);
+  }
 });

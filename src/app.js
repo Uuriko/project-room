@@ -4580,7 +4580,10 @@ const replyToSharedResult = createResultFeedback({
   getDraft: destination => destination === composerKey()
     ? { pending: pendingMessage, toMemberId: $("#message-to-select").value,
       body: $("#message-input").value, files: composerFiles, replyToId } : drafts.get(destination),
-  onBlocked: () => notice(uiText("result.replyBlocked")),
+  onBlocked(reason = "result.replyBlocked") {
+    if (reason === "result.quoteTooLong") $("#result-use-status").textContent = uiText(reason);
+    else notice(uiText(reason));
+  },
   openThread(message, destination) {
     setActiveChannel(messageChannelId(message));
     revealMessage(message.id);

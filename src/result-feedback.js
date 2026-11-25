@@ -1,3 +1,4 @@
+import { MAX_MESSAGE_BODY_CHARS } from "./events.js";
 import { canReplyToResult } from "./result-availability.js";
 
 // Validate before navigating: the shell owns drafts/focus; this controller owns
@@ -24,6 +25,10 @@ export function createResultFeedback({ getState, getConversation, isBlocked,
     const hasContent = Boolean(draft?.body?.trim() || draft?.files?.length);
     const differentReply = hasContent && draft.replyToId && draft.replyToId !== message.id;
     if (draft?.pending || draft?.toMemberId || differentReply) { onBlocked(); return false; }
+    const body = draft?.body ?? "";
+    if (quote && !body.startsWith(quote) && quote.length + body.length > MAX_MESSAGE_BODY_CHARS) {
+      onBlocked("result.quoteTooLong"); return false;
+    }
     openThread(message, destination);
     setReply(message.id, quote);
     return true;

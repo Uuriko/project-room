@@ -10,7 +10,7 @@ import { readCurrentRecord } from "../server/current-room-repository.mjs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { EVENT_TYPES as T } from "../src/events.js";
+import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, messageAction, openCatchUp, openWorkFromSearch } from "./room-chrome.mjs";
@@ -550,6 +550,32 @@ for (const responseKind of ["wrong-completion", "missing-result"]) test(`native 
   await f.page.locator("#result-retry").click();
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#message-input").inputValue(), "Keep this draft while reviewing.");
+});
+
+test("an oversized passage reply preserves the author's existing sendable draft", { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile: true, body: previewBody });
+  f.complete();
+  const existing = "x".repeat(MAX_MESSAGE_BODY_CHARS - 16);
+  await messageAction(f.page, "native-draft", "reply");
+  const input = f.page.locator("#message-input");
+  await input.fill(existing);
+  await f.page.locator("#thread-back").click();
+  await selectResultWork(f);
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  const body = f.page.locator("#result-body");
+  await body.getByText(/quiet room/).waitFor();
+  await body.evaluate(el => {
+    const range = document.createRange();
+    range.setStart(el.firstChild, 2); range.setEnd(el.firstChild, 14);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  });
+  await f.page.locator("#result-discuss").click();
+  await f.page.locator("#result-use-status").getByText(/Select a shorter passage/).waitFor();
+  assert.equal(await body.isVisible(), true);
+  await f.page.locator("#close-result").click();
+  await messageAction(f.page, "native-draft", "reply");
+  assert.equal(await input.inputValue(), existing);
+  assert.equal(await f.page.locator("#message-form button[type=submit]").isEnabled(), true);
 });
 
 for (const mobile of [false, true]) test(`selected result feedback ${mobile ? "mobile" : "desktop"} preserves drafts and exact reply`, { timeout: 30000 }, async t => {
