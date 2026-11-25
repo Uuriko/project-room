@@ -5,6 +5,7 @@ import { validId } from "../src/events.js";
 import { listRoomWork } from "./mcp-room-profile.mjs";
 
 const investigation = "Room investigation pass.";
+const pickupRetryDelaysMs = [1000, 2000, 4000, 8000, 16000, 32000];
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
   JSON.stringify([roomId, requesterId, recipientId, workItemId]);
 
@@ -166,7 +167,25 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
     rooms.set(route.roomId, Math.min(start, rooms.get(route.roomId) ?? start));
   }
   const pending = new Set();
+  const retries = new Map();
   let stopped = false;
+  function clearRetry(scope) {
+    clearTimeout(retries.get(scope)?.timer);
+    retries.delete(scope);
+  }
+  function defer(scope, roomId, error) {
+    log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+    const retry = retries.get(scope) ?? { timer: null, attempts: 0 };
+    if (retry.timer || retry.attempts >= pickupRetryDelaysMs.length) return;
+    // Track scan and continuation failures separately. An otherwise quiet
+    // room may never emit another wake, even for an unrelated healthy lane.
+    retry.timer = setTimeout(() => {
+      retry.timer = null;
+      wake(roomId);
+    }, pickupRetryDelaysMs[retry.attempts++]);
+    retry.timer.unref();
+    retries.set(scope, retry);
+  }
   function wake(roomId) {
     if (stopped || !rooms.has(roomId) || pending.has(roomId)) return;
     pending.add(roomId);
@@ -193,17 +212,19 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
           checkpoints = next;
           rooms.set(roomId, through);
         }
+        clearRetry(roomId);
         if (rows.length === 64) wake(roomId);
       } catch (error) {
-        log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+        defer(roomId, roomId, error);
       }
       for (const binding of bindings.values()) {
         if (binding.route.roomId !== roomId || !binding.continuation) continue;
         try {
           const opening = advanceContinuation(store, binding, receiverServer);
           if (opening !== undefined) log(JSON.stringify({ event: "completion_pickup.continued", roomId, opening }));
+          clearRetry(binding);
         } catch (error) {
-          log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+          defer(binding, roomId, error);
         }
       }
     });
@@ -211,7 +232,12 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
   const unsubscribe = store.onEventAppended(wake);
   receiverServer?.on("agentReceiverConnected", wake);
   for (const roomId of rooms.keys()) wake(roomId);
-  return () => { stopped = true; unsubscribe(); receiverServer?.off("agentReceiverConnected", wake); };
+  return () => {
+    stopped = true;
+    for (const scope of retries.keys()) clearRetry(scope);
+    unsubscribe();
+    receiverServer?.off("agentReceiverConnected", wake);
+  };
 }
 
 export function startCompletionPickup(store, configPath, log = console.warn, receiverServer) {

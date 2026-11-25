@@ -131,6 +131,8 @@ reconcile and revoke stale authority before reopening a restored service.
 
 For a POSIX Node service that started with a private completion plan, save the intended replacement at the existing `ROOM_COMPLETION_PICKUP_CONFIG` path. Use fresh operation IDs for changed work and check that the planned next step is still useful. Send `SIGHUP` to the verified Room process. Saving the file alone leaves the active plan in place.
 
+If pickup hits an unexpected error, the serving process logs `completion_pickup.deferred` and makes up to six timed retries even when the room is quiet. The event scan and each planned route have independent retry limits. A room event or receiver reconnect can also trigger pickup. Activating a replacement cancels retries for the old plan.
+
 Check that the same process logs `completion_pickup.reloaded` with the intended plan digest. The digest is SHA-256 over `JSON.stringify(JSON.parse(fileText))`. A `completion_pickup.reload_rejected` event shows the digest still in use. The service validates route credentials and retains the current checkpoint when applying a replacement. Changing the checkpoint path or enabling a previously disabled subscriber requires the normal service startup procedure.
 
 Restore or fix a rejected file before restarting. Startup validates the file currently on disk. Removing a route stops its planned follow-ups, while requests already recorded in Room stay available.

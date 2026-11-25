@@ -366,4 +366,74 @@ test("a validated continuation plan replaces only its subscriber and preserves o
   assert.equal(receipt("new-next").eventId, applied.eventId);
   assert.equal(log.filter(row => row.event === "completion_pickup.continued").length, 2);
   assert.ok(!JSON.stringify(log).includes(f.keys.owner));
+
+  answer("new-next");
+  request("retry-seed");
+  answer("retry-seed");
+  await setImmediate();
+  const head = f.store.headSequence(roomId);
+  const receiptRead = f.store.operationReceipt.bind(f.store);
+  const unreadable = new Set(["retry-seed"]);
+  let permanentFailure = false;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.method(f.store, "operationReceipt", (secret, room, id) => {
+    if (permanentFailure && id === "obsolete-seed") {
+      throw Object.assign(new Error("Fixture lane remains unavailable"), { code: "storage_unavailable" });
+    }
+    if (unreadable.delete(id)) {
+      throw Object.assign(new Error("Fixture read temporarily unavailable"), { code: "SQLITE_BUSY" });
+    }
+    return receiptRead(secret, room, id);
+  });
+  atomicPrivateJson(configPath, config("retry"));
+  pickup.reload();
+  await setImmediate();
+  assert.equal(log.at(-1).code, "SQLITE_BUSY");
+  assert.equal(receipt("retry-next").status, "not_recorded");
+  assert.equal(f.store.headSequence(roomId), head, "no event arrived that could restart pickup");
+  t.mock.timers.tick(1000);
+  await setImmediate();
+  const recovered = receipt("retry-next");
+  assert.equal(recovered.status, "recorded");
+  assert.equal(recovered.sequence, head + 1);
+  pickup.reload();
+  await setImmediate();
+  assert.equal(receipt("retry-next").eventId, recovered.eventId);
+  assert.equal(f.store.headSequence(roomId), recovered.sequence);
+
+  answer("retry-next");
+  request("obsolete-seed");
+  answer("obsolete-seed");
+  unreadable.add("obsolete-seed");
+  atomicPrivateJson(configPath, config("obsolete"));
+  pickup.reload();
+  await setImmediate();
+  assert.equal(log.at(-1).code, "SQLITE_BUSY");
+  atomicPrivateJson(configPath, config("retry"));
+  pickup.reload();
+  t.mock.timers.tick(1000);
+  await setImmediate();
+  assert.equal(receipt("obsolete-next").status, "not_recorded");
+  assert.equal(receipt("retry-next").eventId, recovered.eventId);
+
+  const other = config("second"), failing = config("obsolete").routes[0];
+  const secondAgent = f.store.identities.create("Second reviewer");
+  linkWithProof(f.store, f.keys.owner, roomId, secondAgent, { memberId: "second-reviewer", permissions: [] });
+  other.routes.push({ ...other.routes[0], recipientId: "second-reviewer", continuation: failing.continuation });
+  permanentFailure = true;
+  atomicPrivateJson(configPath, other);
+  pickup.reload();
+  await setImmediate();
+  for (const milliseconds of [1000, 2000, 4000, 8000, 16000, 32000]) {
+    t.mock.timers.tick(milliseconds);
+    await setImmediate();
+  }
+  request("second-seed");
+  answer("second-seed");
+  unreadable.add("second-seed");
+  await setImmediate();
+  assert.equal(receipt("second-next").status, "not_recorded");
+  t.mock.timers.tick(1000);
+  await setImmediate();
+  assert.equal(receipt("second-next").status, "recorded", "a broken lane does not consume another lane's retry");
 });
