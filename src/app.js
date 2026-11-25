@@ -384,6 +384,7 @@ let workDraftId = null, replyToId = null, resultReplyEventId = null, busy = fals
 let workFormEpoch = 0, workRetryLocked = false;
 let confirmedWorkNavigation = null;
 let actionEpoch = 0;
+const keptReviewNotes = new Map();
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 let choosingComposerRecipient = false;
@@ -646,6 +647,9 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     partialWorkSnapshot = false; inspectedWorkRecord = null;
+    keptReviewNotes.clear();
+    const note = reviewNoteField(pendingAction);
+    if (note) note.value = "";
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
@@ -7020,6 +7024,19 @@ $("#room-results-list").addEventListener("click", event => {
   const work = event.target.closest("[data-result-work]");
   if (work) revealWork(work.dataset.resultWork);
 });
+function reviewNoteKey(entry) {
+  const scope = entry?.action === "verify" && draftScope(session);
+  return scope ? JSON.stringify([scope, entry.workId]) : null;
+}
+function reviewNoteField(entry) {
+  return entry?.action === "verify" ? $('#action-fields textarea[name="summary"]') : null;
+}
+function syncReviewNoteControls(entry) {
+  const keep = !entry?.uncertain && Boolean(reviewNoteKey(entry) && reviewNoteField(entry)?.value.trim());
+  $("#keep-review-note").hidden = !keep;
+  $("#cancel-action").textContent = entry?.uncertain ? "Close" : keep ? "Discard note" : "Cancel";
+}
+
 function openWorkAction(item, action, draftMessageId = null, offerId = null, compareFrom = null) {
   if (pendingAction?.uncertain) { resumeAction(); return; }
   if (partialWorkSnapshot && (isHelpAction(action) || isOfferAction(action))) return;
@@ -7054,6 +7071,11 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null, com
         : '<p id="offer-plan" class="definition"></p><label>Note<textarea name="reason" required rows="2" maxlength="600"></textarea></label>')
       + (action === "release-offer" ? '<label class="checkbox-label"><input name="externalActivityUnverified" type="checkbox" required> Outside work may still be running.</label>'
         : '<p class="form-hint">Coordination only. No work starts or permissions change.</p>');
+  }
+  const noteKey = reviewNoteKey(pendingAction);
+  if (noteKey && keptReviewNotes.has(noteKey) && actionAvailable(pendingAction)) {
+    reviewNoteField(pendingAction).value = keptReviewNotes.get(noteKey);
+    keptReviewNotes.delete(noteKey);
   }
   renderActionContext(item, action);
   $("#action-dialog").showModal();
@@ -7192,7 +7214,7 @@ function syncActionForm() {
   const saveFocused = document.activeElement === save;
   save.disabled = !entry.uncertain && (changed || entry.needsReview || !available || entry.textRequired && !entry.text);
   if (saveFocused && save.disabled) $("#cancel-action").focus({ preventScroll: true });
-  $("#cancel-action").textContent = entry.uncertain ? "Close" : "Cancel";
+  syncReviewNoteControls(entry);
   $("#refresh-action").hidden = entry.uncertain || !(changed || entry.needsReview || !available);
   $("#refresh-action").disabled = false;
   const text = entry.uncertain ? "Save not confirmed. Retry the original before making changes."
@@ -7208,6 +7230,9 @@ function resumeAction() {
 }
 $("#resume-action").addEventListener("click", resumeAction);
 $("#action-fields").addEventListener("change", event => { if (event.target.name === "producerId") syncActionForm(); });
+$("#action-fields").addEventListener("input", event => {
+  if (!busy && event.target === reviewNoteField(pendingAction)) syncReviewNoteControls(pendingAction);
+});
 $("#refresh-action").addEventListener("click", () => {
   const entry = pendingAction;
   if (!entry || !state || busy || entry.uncertain) return;
@@ -7282,12 +7307,23 @@ function closeActionDialog({ returnFocus = true, confirmed = false } = {}) {
   if (busy && !confirmed) return;
   actionEpoch++;
   if ($("#action-dialog").open) $("#action-dialog").close();
-  if (confirmed || !entry?.uncertain) pendingAction = null;
+  if (confirmed || !entry?.uncertain) {
+    const note = reviewNoteField(entry);
+    if (note) note.value = "";
+    pendingAction = null;
+  }
   if (!pendingAction) clearResultComparison($("#action-result-diff"));
   $("#resume-action").hidden = !pendingAction?.uncertain;
   if (returnFocus) restoreActionFocus(entry);
 }
 $("#cancel-action").addEventListener("click", () => closeActionDialog());
+$("#keep-review-note").addEventListener("click", () => {
+  const entry = pendingAction, key = reviewNoteKey(entry), note = reviewNoteField(entry);
+  if (busy || entry?.uncertain || !key || !note?.value.trim()) return;
+  keptReviewNotes.set(key, note.value.slice(0, note.maxLength));
+  closeActionDialog();
+  notice("Review note kept for this session.");
+});
 $("#action-dialog").addEventListener("cancel", e => {
   e.preventDefault();
   if (!busy) closeActionDialog();

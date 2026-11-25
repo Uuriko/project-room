@@ -16,6 +16,8 @@ import { textVersion } from "../server/text-results.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { hashPassword } from "../src/password-auth.mjs";
 
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
@@ -474,6 +476,80 @@ test("a stale review keeps its note and loads the exact replacement before savin
   assert.deepEqual(sent,[f.first.event.id]);
   await review(reviewer,"fail","The replacement needs a source for Monday.");
   assert.deepEqual(sent,[f.first.event.id,replacement.event.id]);
+});
+
+test("keeping a review note restores only its text to the same reviewer", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const accountB = "notes-reviewer-b";
+  const otherRoom = "notes-other", otherOwner = "notes-owner", reviewerId = "human-checker";
+  const workItemId = "revision-journey", title = "Revise a short result";
+  const password = randomUUID() + "9A!";
+  f.store.createAccount(accountB);
+  f.store.completeOnboarding(accountB);
+  f.store.accountLogins.linkPasswordMethod(accountB,{email:`${accountB}@example.invalid`,verifier:hashPassword(password)});
+  f.store.initialize(initialRoom(otherRoom,otherOwner));
+  const ownerKey = f.store.issueAccessKey(otherRoom,otherOwner);
+  const sendOther = (type,data) => f.store.command(ownerKey,otherRoom,{id:randomUUID(),type,data});
+  sendOther(T.MEMBER_ADDED,{memberId:reviewerId,displayName:"Second checker",kind:"human",permissions:["verify"]});
+  f.store.bindHumanAccount(otherRoom,reviewerId,accountB);
+  sendOther(T.WORK_PROPOSED,{workItemId,title,definitionOfDone:"Review the second room's own result",mode:"read",accountableMemberId:otherOwner,verifierMemberId:reviewerId,independentVerificationRequired:true});
+  sendOther(T.WORK_ACCEPTED,{workItemId,expectedRevision:0});
+  sendOther(T.WORK_STARTED,{workItemId,expectedRevision:1});
+  const otherBody = "A distinct result in the second room";
+  const posted = sendOther(T.MESSAGE_POSTED,{workItemId,messageId:"other-room-review-result",body:otherBody});
+  sendOther(T.WORK_COMPLETED,{workItemId,expectedRevision:2,summary:"Second room result",nextAction:"Review",evidenceKind:"room_text",evidenceMessageId:posted.event.data.messageId,evidenceMessageEventId:posted.event.id,evidenceVersion:textVersion(otherBody),previousCompletionEventId:null,producerId:otherOwner});
+
+  const page = await f.login("human-checker");
+  const note = page.locator('#action-fields [name="summary"]');
+  const verdict = page.locator('#action-fields [name="result"]');
+  const keep = page.getByRole("button",{name:"Keep note",exact:true});
+  const openReview = async text => {
+    await clickWorkAction(await openWorkFromSearch(page,workItemId,title),"verify");
+    await page.locator("#action-text-body").getByText(text).waitFor();
+  };
+  await openReview(/Result A/);
+  assert.equal(await keep.isVisible(),false);
+  const privateNote = "My private reviewer note about the deadline";
+  await note.fill(privateNote);
+  await verdict.selectOption("pass");
+  const saved = [];
+  page.on("request",request=>{
+    if(request.method()==="POST"&&request.url().endsWith("/commands")&&request.postDataJSON()?.type===T.VERIFICATION_RECORDED)
+      saved.push(request.postDataJSON());
+  });
+  await keep.press("Enter");
+  await page.locator("#action-dialog").waitFor({state:"hidden"});
+  f.mutate(T.WORK_BLOCKED,{reason:"A new deadline",nextAction:"Publish the refreshed result"});
+  f.mutate(T.WORK_BLOCKER_RESOLVED,{resolution:"Updated"});
+  f.mutate(T.WORK_STARTED,{});
+  f.complete("Result B\nNew deadline");
+  await openReview(/New deadline/);
+  assert.equal(await note.inputValue(),privateNote);
+  assert.equal(await verdict.inputValue(),"");
+  assert.deepEqual(saved,[]);
+  await page.getByRole("button",{name:"Discard note",exact:true}).press("Enter");
+  await openReview(/New deadline/);
+  assert.equal(await note.inputValue(),"");
+  await note.fill(privateNote);
+  await keep.press("Enter");
+
+  const documentStart = await page.evaluate(()=>performance.timeOrigin);
+  await clickChrome(page,"#signout-button");
+  await page.locator("#auth-panel").waitFor({state:"visible"});
+  await page.evaluate(room=>history.replaceState(null,"","?room="+room),otherRoom);
+  const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
+  if (!(await form.isVisible())) await page.getByRole("button",{name:"Log in",exact:true}).click();
+  await form.locator('[name="email"]').fill(accountB+"@example.invalid");
+  await form.locator('[name="password"]').fill(password);
+  await form.locator('button[type="submit"]').click();
+  await page.waitForFunction(()=>document.querySelector("#identity-label")?.textContent.startsWith("Second checker"));
+  assert.equal(await page.evaluate(()=>performance.timeOrigin),documentStart);
+  const account = await page.request.get(f.origin+"/api/account-session");
+  assert.equal((await account.json()).account.id,accountB);
+  await openReview(otherBody);
+  assert.equal(await note.inputValue(),"");
+  assert.equal(await verdict.inputValue(),"");
+  assert.deepEqual(saved,[]);
 });
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
