@@ -14,6 +14,7 @@ import { withRequestState } from "./request-states.mjs";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
 const RETAINED_EARLIER_EXCHANGE_BYTES = 4096;
+const START_REPORT_WINDOW_MS = 120_000;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const encode = value => Buffer.from(JSON.stringify(value)).toString("base64url");
 const fail = (code, message, status = 422) => { throw Object.assign(new Error(message), { code, status }); };
@@ -37,19 +38,27 @@ const statefulRequest = request => withRequestState({ ...compactRequest(request)
 // Keep metadata alongside the list so older clients can still validate their
 // exact per-request schema. Only recommend an existing, participant-bound read.
 function withOverdueActions(result, roomId) {
-  const overdueActions = result.requests.filter(request => request.lifecycle?.state === "stale")
-    .map(request => {
-      const incoming = request.recipientId === result.viewerId;
-      return {
-        requestMessageId: request.id,
-        guidance: incoming
+  const now = Date.now();
+  const overdueActions = [];
+  for (const request of result.requests) {
+    const incoming = request.recipientId === result.viewerId;
+    const stale = request.lifecycle?.state === "stale";
+    const startUnconfirmed = request.requesterId === result.viewerId && request.lifecycle?.state === "active"
+      && ["acknowledged", "accepted"].includes(request.progress?.state)
+      && !request.lifecycle.stages?.workingAt && now - Date.parse(request.progress.at) >= START_REPORT_WINDOW_MS;
+    if (!stale && !startUnconfirmed) continue;
+    overdueActions.push({
+      requestMessageId: request.id,
+      guidance: startUnconfirmed
+        ? "Acknowledged, but no work start reported. Read the request and check with the recipient before reassigning it."
+        : incoming
           ? "Read the request. Answer if it is still useful, ask for any missing input, or decline with a reason."
           : request.lifecycle.unresponsive
             ? "Read the request. Check whether delivery reached the recipient. If work must move, cancel this ask with a reason before reassigning it."
             : "Read the request. Confirm whether the recipient is still working. Clarify the blocker or cancel with a reason before reassigning.",
-        nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: request.id, view: "compact" } }
-      };
+      nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: request.id, view: "compact" } }
     });
+  }
   return overdueActions.length ? { ...result, overdueActions } : result;
 }
 const requestInHistory = (request, floor) => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor);
