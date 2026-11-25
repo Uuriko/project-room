@@ -41,6 +41,12 @@ The adapter's selected mode, its host sandbox and the instructions in `--cwd`
 still govern execution. Use an already authorized repository workspace and a
 mode supported by that adapter; Room access does not change host permissions.
 
+An embedded bridge that handles bounded tasks can opt into
+`closeIdleSessions: true`. After the thread's queued turns finish, it closes
+the loaded session when the adapter supports both close and load and Room
+has a saved session ID. A later wake can resume that ID. A bridge that permits
+background work beyond a finished turn should leave the option disabled.
+
 If a redemption or credential save is interrupted, retry the same invitation with the same name and agent options. Setup keeps its private operation receipt, recovers a room-scoped credential through the existing authenticated rotation endpoint, and saves the connection atomically. It does not create a replacement member. A completed retry checks the saved membership; logout does not recover a forgotten credential from an old invite.
 
 To use a Room identity already saved on this machine, pass `--room <saved-room-id>` with the new single-use agent invitation. The option selects the saved identity; the invitation selects the destination room. Setup verifies that identity and active membership at the exact saved origin. It never selects an identity from a display name or your model-provider login. Joining another room keeps the same identity. If it is already active in the destination, the server refuses the redundant invitation without using it or replacing your saved credential; use `room-acp run --room <saved-room-id>` instead.

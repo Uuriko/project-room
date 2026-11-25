@@ -4,6 +4,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
 import { TurnRecorder, renderTurn, TRAILER_LINES } from "../room-acp/src/render.mjs";
 import { AgentHost } from "../room-acp/src/agent-host.mjs";
 import { ThreadQueue } from "../room-acp/src/queue.mjs";
@@ -71,10 +73,11 @@ test("mayTalk: owner and the owner's agents by default; anyone when opted in", (
   assert.equal(mayTalk({ ...base, authorId: "guest", respondTo: "anyone" }), true);
 });
 
-async function startBridge(t, room, { mode = "echo", respondTo = "owner", reservationStepMs = 0 } = {}) {
+async function startBridge(t, room, { mode = "echo", respondTo = "owner", reservationStepMs = 0, trace, closeIdleSessions = false } = {}) {
   const connection = await join({ link: room.invite().link, displayName: "Coder", env: room.env });
   const env = { ...room.env, FAKE_ACP_MODE: mode, FAKE_ACP_DELAY_MS: "4000" };
-  const bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] }, env, respondTo, waitMs: 3000, cadenceSeconds: 30, log: process.env.RA_DEBUG ? (...a) => console.error("[bridge]", ...a) : () => {} });
+  if (trace) env.FAKE_ACP_TRACE = trace;
+  const bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] }, env, respondTo, closeIdleSessions, waitMs: 3000, cadenceSeconds: 30, log: process.env.RA_DEBUG ? (...a) => console.error("[bridge]", ...a) : () => {} });
   // Inject only the local reply-window clock; real API/lease time is unchanged.
   let reservationClock = Date.now();
   const reserve = bridge.reserveOrdinaryReply.bind(bridge);
@@ -87,6 +90,53 @@ async function startBridge(t, room, { mode = "echo", respondTo = "owner", reserv
 }
 
 const repliesTo = (room, rootId, memberId) => room.messages().filter(message => message.replyToId === rootId && message.authorId === memberId);
+
+test("bridge releases a finished session and holds a same-thread wake during close", async t => {
+  const room = await startRoom(t);
+  const trace = joinPath(room.env.ROOM_ACP_HOME, "session-trace.log");
+  const { bridge, connection, advanceReservation } = await startBridge(t, room, { mode: "close", trace, closeIdleSessions: true });
+  const close = bridge.host.closeIdleSession.bind(bridge.host);
+  const { promise: mayClose, resolve: resumeClose } = Promise.withResolvers();
+  let closing = false;
+  bridge.host.closeIdleSession = async threadKey => {
+    closing = true;
+    await mayClose;
+    await close(threadKey);
+  };
+  const rootId = room.say("@Coder review the proposed change");
+  let saved;
+  try {
+    await waitFor(() => bridge.stats.acked === 1 && closing);
+    saved = bridge.sessionMap.get(rootId);
+    assert.ok(saved, "the resumable session ID remains saved");
+    advanceReservation(60000);
+    room.say("@Coder review the correction too", { replyToId: rootId });
+    await waitFor(() => bridge.queue.depth(rootId) === 2);
+    assert.equal(repliesTo(room, rootId, connection.memberId).length, 1);
+  } finally { resumeClose(); }
+  await waitFor(() => bridge.stats.acked === 2);
+  await bridge.queue.idle();
+  const replies = repliesTo(room, rootId, connection.memberId);
+  assert.equal(replies.length, 2);
+  assert.match(replies[1].body, /review the correction too/);
+  assert.doesNotMatch(replies[1].body, /Thread so far/);
+  assert.equal(bridge.sessionMap.get(rootId), saved);
+  assert.equal(bridge.host.sessions.size, 0);
+  assert.equal(bridge.host.threadOf.size, 0);
+  assert.deepEqual(readFileSync(trace, "utf8").trim().split("\n"), [
+    "initialize", "session/new", "session/prompt", "session/close", "session/load", "session/prompt", "session/close"
+  ]);
+});
+
+test("ordinary bridges retain sessions even when the adapter supports close", async t => {
+  const room = await startRoom(t);
+  const { bridge } = await startBridge(t, room, { mode: "close" });
+  const id = room.say("@Coder reply to this thread");
+  await waitFor(() => bridge.stats.acked === 1);
+  await bridge.queue.idle();
+  assert.equal(bridge.host.sessions.get(id), bridge.sessionMap.get(id));
+  assert.equal(bridge.host.sessions.size, 1);
+});
 
 test("bridge: an owner mention gets one threaded reply, then the wake is acked", async t => {
   const room = await startRoom(t);

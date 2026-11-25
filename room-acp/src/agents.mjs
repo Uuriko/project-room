@@ -109,9 +109,11 @@ export function spawnAgent(candidate, { cwd = process.cwd(), env = process.env, 
 export async function initialize(peer, { timeoutMs = 5000 } = {}) {
   const result = await peer.request("initialize", { protocolVersion: ACP_PROTOCOL_VERSION, clientCapabilities: CLIENT_CAPABILITIES, clientInfo: { name: "room-acp", version: "0.0.0" } }, { timeoutMs });
   if (result?.protocolVersion !== ACP_PROTOCOL_VERSION) throw new Error(`Unsupported ACP protocol version: expected ${ACP_PROTOCOL_VERSION}`);
+  const close = result.agentCapabilities?.sessionCapabilities?.close;
   return {
     protocolVersion: result.protocolVersion,
     loadSession: result?.agentCapabilities?.loadSession === true,
+    closeSession: close != null && typeof close === "object" && !Array.isArray(close),
     promptCapabilities: result?.agentCapabilities?.promptCapabilities ?? {},
     authMethods: Array.isArray(result?.authMethods) ? result.authMethods.map(method => method?.id ?? method?.name).filter(Boolean) : [],
     agentInfo: result?.agentInfo ?? null,
