@@ -107,7 +107,7 @@ for (const width of [1440, 390]) {
     await clickWorkAction(await openWorkFromSearch(reviewer, "revision-journey", "Revise a short result"), "verify");
     await reviewer.locator("#action-text-body").getByText(/Result B/).waitFor();
     const diff = reviewer.locator("#action-result-diff");
-    await diff.waitFor({ state: "visible" });
+    await diff.getByText("- Result A", { exact: true }).waitFor();
     assert.match(await diff.innerText(), /Name the owner in the final line/);
     assert.doesNotMatch(await diff.innerText(), /Requested change:/);
     assert.match(await diff.innerText(), /- Result A/);
