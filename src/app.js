@@ -364,6 +364,7 @@ let workspacePreviewsUI = null, updatesUi = null, resetNavigationBoard = null, n
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
+let pendingWorkReturn = null;
 let navigationBoardEpoch = 0;
 // #3892: a cold deep link reaches revealClaimRecord before the lazy board
 // module has installed navigationBoardReady; wait for installation (or its
@@ -614,7 +615,10 @@ const client = new RoomClient({
       if (session.member.kind !== "agent" && !savedRoomDestination() && $("#result-dialog").hidden
         && !$("#board-dialog").open && !$("#message-input").value) updatesUi?.open("needs", false);
     }
-    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
+    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId
+      && !(pendingWorkReturn?.id === activeWorkNavigationId && pendingWorkReturn.epoch === workNavigationEpoch)) {
+      void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
+    }
     retryPendingHashReveal();
     resumeConfirmedWorkNavigation();
   },
@@ -3566,33 +3570,41 @@ function revealWork(id, expandDetails = false) {
 async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = false } = {}) {
   const context = workNavigationContext();
   if (!context || busy) return null;
-  const generation = client.generation, identity = session, held = state;
+  const generation = client.generation, identity = session;
   const epoch = workNavigationEpoch, url = location.href;
   const current = () => context === workNavigationContext() && generation === client.generation
-    && identity === session && held === state && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
-  try {
-    const selected = await client.workContext(id);
-    if (!current()) return null;
-    const item = selected?.work;
-    if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
-      || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
-      || typeof item.definitionOfDone !== "string" || !Number.isSafeInteger(item.revision) || item.revision < 0
-      || Number.isSafeInteger(held.workItems[id]?.revision) && item.revision < held.workItems[id].revision) {
-      notice(SOURCE_UNAVAILABLE_NOTICE, true); return null;
+    && identity === session && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
+  const attempts = restoreInPlace ? 2 : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const held = state;
+    try {
+      const selected = await client.workContext(id);
+      if (!current()) return null;
+      if (held !== state) continue;
+      const item = selected?.work;
+      if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
+        || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
+        || typeof item.definitionOfDone !== "string" || !Number.isSafeInteger(item.revision) || item.revision < 0
+        || Number.isSafeInteger(held.workItems[id]?.revision) && item.revision < held.workItems[id].revision) {
+        notice(SOURCE_UNAVAILABLE_NOTICE, true); return null;
+      }
+      // Mount only this independently selected current record. The room's
+      // summary window and completeness metadata remain unchanged.
+      inspectedWorkRecord = structuredClone(item);
+      state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
+      if (restoreInPlace) {
+        renderMessages();
+        return workRecord(id);
+      }
+      return revealWork(id, expandDetails);
+    } catch (error) {
+      if (!current()) return null;
+      if (held !== state) continue;
+      notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
+      return null;
     }
-    // Mount only this independently selected current record. The room's
-    // summary window and completeness metadata remain unchanged.
-    inspectedWorkRecord = structuredClone(item);
-    state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
-    if (restoreInPlace) {
-      renderMessages();
-      return workRecord(id);
-    }
-    return revealWork(id, expandDetails);
-  } catch (error) {
-    if (current()) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
-    return null;
   }
+  return null;
 }
 function savedRoomDestination() {
   return Boolean(location.hash && location.hash !== "#pr-view/rooms") || accountHomeFromLocation();
@@ -3814,7 +3826,13 @@ async function restoreWorkOrigin(ticket) {
     const focused = document.activeElement;
     const draft = input.value;
     const selection = [input.selectionStart, input.selectionEnd, input.selectionDirection];
-    priorCard = await readSelectedWorkRecord(priorWorkId, false, { restoreInPlace: true });
+    const pending = { id: priorWorkId, epoch };
+    pendingWorkReturn = pending;
+    try {
+      priorCard = await readSelectedWorkRecord(priorWorkId, false, { restoreInPlace: true });
+    } finally {
+      if (pendingWorkReturn === pending) pendingWorkReturn = null;
+    }
     if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)
       || location.href !== origin.url || activeWorkNavigationId !== priorWorkId) return;
     interactionContinued = focused !== document.activeElement || draft !== input.value
