@@ -37,15 +37,29 @@ const statefulRequest = request => withRequestState({ ...compactRequest(request)
   ...(request.progressState ? { progress: { state: request.progressState, note: request.progressNote ?? null, at: request.lastActivityAt ?? null } } : {}) }, request);
 // Keep metadata alongside the list so older clients can still validate their
 // exact per-request schema. Only recommend an existing, participant-bound read.
-function withOverdueActions(result, roomId) {
+function withOverdueActions(db, result, roomId) {
   const now = Date.now();
+  const waiting = new Set(result.requests.filter(request =>
+    request.requesterId === result.viewerId && request.lifecycle?.state === "active"
+      && ["acknowledged", "accepted"].includes(request.progress?.state)
+      && !request.lifecycle.stages?.workingAt && now - Date.parse(request.progress.at) >= START_REPORT_WINDOW_MS
+  ).map(request => request.id));
+  if (waiting.size) {
+    // The projection preserves workingAt only after acceptance. Read the durable
+    // working reports for these exact requests before telling the sender.
+    const started = db.prepare(`SELECT DISTINCT json_extract(body,'$.data.requestMessageId') AS id
+      FROM events
+      WHERE room_id=? AND json_extract(body,'$.type')='reply_request.progressed'
+        AND json_extract(body,'$.data.progress')='working'
+        AND json_extract(body,'$.data.requestMessageId') IN (SELECT value FROM json_each(?))`)
+      .all(roomId, JSON.stringify([...waiting]));
+    for (const {id} of started) waiting.delete(id);
+  }
   const overdueActions = [];
   for (const request of result.requests) {
     const incoming = request.recipientId === result.viewerId;
     const stale = request.lifecycle?.state === "stale";
-    const startUnconfirmed = request.requesterId === result.viewerId && request.lifecycle?.state === "active"
-      && ["acknowledged", "accepted"].includes(request.progress?.state)
-      && !request.lifecycle.stages?.workingAt && now - Date.parse(request.progress.at) >= START_REPORT_WINDOW_MS;
+    const startUnconfirmed = waiting.has(request.id);
     if (!stale && !startUnconfirmed) continue;
     overdueActions.push({
       requestMessageId: request.id,
@@ -145,7 +159,7 @@ export class ReplyRequests {
     options=selection;
     const {direction="incoming",status="open",expectedSessionBinding=null}=options;
     const shapeRequest=states?statefulRequest:compactRequest;
-    if(isCurrentRoom(this.store.db,roomId))return withOverdueActions(readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates}), roomId);
+    if(isCurrentRoom(this.store.db,roomId))return withOverdueActions(this.store.db, readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates}), roomId);
     if(options.cursor!==undefined||options.limit!==undefined)fail("invalid_reply_selection","Legacy request lists do not accept pagination; omit cursor and limit");
     if (!["incoming", "outgoing", "both"].includes(direction) || !["open", "answered", "declined", "cancelled", "all"].includes(status))
       fail("invalid_reply_selection", "Choose a request direction and current status");
@@ -164,7 +178,7 @@ export class ReplyRequests {
       // visible, so their horizon still reaches it.
       const evaluatedThrough = visibleSequenceHorizon(this.store.db, roomId, auth.member.id, room.sequence,
         auth.member.id === this.store.roomOwnerId(roomId));
-      return withOverdueActions({ viewerId: auth.member.id, evaluatedThrough, selection: { direction, status }, requests, nextReads }, roomId);
+      return withOverdueActions(this.store.db, { viewerId: auth.member.id, evaluatedThrough, selection: { direction, status }, requests, nextReads }, roomId);
     }, { requestSelection: { direction, status } });
   }
   selected(token, roomId, requestMessageId, options = {}) {
