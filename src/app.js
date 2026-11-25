@@ -5873,6 +5873,25 @@ for (const scroller of [$("#message-list"), window]) {
     if (nearBottomOfList()) scheduleHorizonAdvance();
   }, { passive: true });
 }
+$("#message-list").addEventListener("click", event => {
+  const link = event.target.closest(".message-body a[href]");
+  if (!link || event.defaultPrevented || event.button !== 0
+    || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+    || !state || busy || requestReading) return;
+  let url;
+  try { url = new URL(link.href); } catch { return; }
+  if (url.origin !== location.origin || url.pathname !== location.pathname
+    || url.username || url.password || url.searchParams.size !== 1) return;
+  const result = exactResultDestination(url);
+  if (!result || result.roomId !== session?.roomId) return;
+  event.preventDefault();
+  const messageId = link.closest("[data-message-record-id]")?.dataset.messageRecordId;
+  openLinkedResult(result, { opener: () => {
+    if (link.isConnected) return link;
+    const row = messageId && $("#message-list").querySelector(`[data-message-record-id="${CSS.escape(messageId)}"]`);
+    return [...(row?.querySelectorAll(".message-body a[href]") ?? [])].find(candidate => candidate.href === url.href);
+  } });
+});
 $("#main").addEventListener("click", e => {
   const link = e.target.closest("[data-open-message], [data-open-work], [data-open-member], [data-open-event], [data-open-room]");
   if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

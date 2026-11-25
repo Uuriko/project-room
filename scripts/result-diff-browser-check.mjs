@@ -558,8 +558,32 @@ test("Saved reopens a private answer and its exact result after 500 unrelated ev
   await returning.locator("#message-list").getByText(answer, { exact: true }).waitFor();
   const exact = returning.locator("#message-list a").filter({ hasText: original });
   assert.equal(await exact.getAttribute("href"), original);
-  const [resultTab] = await Promise.all([returning.waitForEvent("popup"), exact.click()]);
-  await resultTab.locator("#result-body").getByText("Missing named owner", { exact: false }).waitFor();
+  const draft = "An unsent follow-up in this conversation";
+  await returning.locator("#message-input").fill(draft);
+  const originalUrl = returning.url();
+  const openPages = returning.context().pages().length;
+  await exact.focus();
+  await returning.keyboard.press("Enter");
+  await returning.locator("#result-body").getByText("Missing named owner", { exact: false }).waitFor();
+  assert.equal(returning.url(), originalUrl);
+  assert.equal(returning.context().pages().length, openPages);
+  await returning.keyboard.press("Escape");
+  await returning.locator("#result-dialog").waitFor({ state: "hidden" });
+  assert.equal(await returning.locator("#message-input").inputValue(), draft);
+  assert.equal(await exact.evaluate(link => link === document.activeElement), true);
+  assert.equal(await exact.getAttribute("target"), "_blank");
+  for (const modifier of ["metaKey", "ctrlKey"]) {
+    const intercepted = await exact.evaluate((link, key) => {
+      let prevented;
+      document.addEventListener("click", event => {
+        prevented = event.defaultPrevented;
+        event.preventDefault(); // Suppress the browser action after checking the app.
+      }, { once: true });
+      link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, [key]: true }));
+      return prevented;
+    }, modifier);
+    assert.equal(intercepted, false);
+  }
 });
 
 test("direct review and decision explain the external reference in pinned text", { timeout: 30000 }, async t => {
