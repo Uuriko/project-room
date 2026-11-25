@@ -7,7 +7,7 @@ import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord } from "./work-context.mjs";
 import { Buffer } from "node:buffer";
 import { validId } from "../src/events.js";
-import { replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
+import { answerFilePath, answerFileSelection, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
 import { messageInHistory, visibleSequenceHorizon } from "./history-visibility.mjs";
 import { withRequestState } from "./request-states.mjs";
@@ -163,6 +163,8 @@ export class ReplyRequests {
     if (options.view !== undefined && !["compact", "full"].includes(options.view))
       fail("invalid_reply_selection", "Choose a compact or full request read");
     const selected = this.page(token, roomId, { ...options, requestMessageId, direction: null });
+    const fileSelection = answerFileSelection(selected);
+    if (fileSelection) selected.answerFilesRead = { http: { method: "GET", path: answerFilePath(fileSelection) } };
     if (options.view !== "compact") return selected;
     return compactReplySelection(selected);
   }
