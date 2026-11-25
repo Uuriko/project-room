@@ -50,9 +50,15 @@ export function createResultComparison({ client, getState, esc }) {
   function syncResultComparisons() {
     for (const [box, comparison] of resultComparisons) {
       if (!comparison.owns()) { clearResultComparison(box); continue; }
-      if ([comparison.currentId, comparison.previousId].some(id => getState()?.messages.find(message => message.id === id)?.deletedAt)) {
+      const deleted = id => id && getState()?.messages.some(message => message.id === id && message.deletedAt);
+      if (deleted(comparison.correctionSourceId)) box.querySelector(".result-correction")?.remove();
+      if (deleted(comparison.currentId)) {
         clearResultComparison(box);
         box.textContent = uiText("result.comparisonWithdrawn"); box.hidden = false;
+      } else if (!comparison.withdrawn && deleted(comparison.previousId)) {
+        comparison.withdrawn = true;
+        comparison.content.textContent = uiText("result.comparisonWithdrawn");
+        box.hidden = false;
       } else if (comparison.evidenceIds && getState()?.messages.some(message =>
         (message.deletedAt || message.editedAt) && comparison.evidenceIds.has(message.id))) {
         box.querySelector("[data-previous-release-checks]")?.remove();
@@ -64,9 +70,20 @@ export function createResultComparison({ client, getState, esc }) {
     clearResultComparison(box);
     if (!predecessorId) return;
     const previousId = compareFrom || predecessorId;
-    const comparison = { currentId: text.messageId, previousId: null, owns };
+    const content = document.createElement("div");
+    box.append(content);
+    const comparison = { currentId: text.messageId, previousId: null, owns, content, correctionSourceId: correction?.sourceMessageId };
+    if (!text.withdrawnAt && correction?.completionEventId === predecessorId && typeof correction.summary === "string" && correction.summary) {
+      const note = document.createElement("p"), label = document.createElement("strong");
+      label.textContent = uiText("result.previousReview");
+      note.className = "result-correction";
+      note.append(label, " ", previousReviewText(correction));
+      box.prepend(note);
+      box.hidden = false;
+    }
     resultComparisons.set(box, comparison);
-    const current = () => owns() && resultComparisons.get(box) === comparison;
+    syncResultComparisons();
+    const current = () => !comparison.withdrawn && owns() && resultComparisons.get(box) === comparison;
     Promise.all([client.workResult(workItemId, { completionEventId: previousId }), import("./vendor-jsdiff-patch.js")])
       .then(([previous, { structuredPatch }]) => {
       if (!current()) return;
@@ -77,7 +94,7 @@ export function createResultComparison({ client, getState, esc }) {
       if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
       const before = previous.result?.text?.body;
       if (previous.result?.text?.withdrawnAt || text.withdrawnAt) {
-        box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
+        content.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
           previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
             : "This version's text has been withdrawn, so the two cannot be compared."
         } Previous approval never carries over.</p>`;
@@ -85,14 +102,7 @@ export function createResultComparison({ client, getState, esc }) {
         return;
       }
       if (typeof before !== "string") throw new Error("Previous version has no exact text");
-      box.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch, previousId !== predecessorId);
-      if (correction?.completionEventId === predecessorId && typeof correction.summary === "string" && correction.summary) {
-        const note = document.createElement("p"), label = document.createElement("strong");
-        label.textContent = uiText("result.previousReview");
-        note.className = "result-correction";
-        note.append(label, " ", previousReviewText(correction));
-        box.prepend(note);
-      }
+      content.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch, previousId !== predecessorId);
       const earlierLink = exactResultHref({ roomId: previous.roomId, workItemId, completionEventId: previousId });
       if (earlierLink) {
         const paragraph = document.createElement("p");
@@ -100,7 +110,7 @@ export function createResultComparison({ client, getState, esc }) {
         link.href = earlierLink;
         link.textContent = uiText("result.openEarlier");
         paragraph.append(link);
-        box.append(paragraph);
+        content.append(paragraph);
       }
       const report = previous.workThread?.releaseChecks;
       if (report?.completionEventId === previousId && typeof report.evidenceVersion === "string" && report.evidenceVersion.length > 0
@@ -114,14 +124,14 @@ export function createResultComparison({ client, getState, esc }) {
         }
         if (links.length) {
           comparison.evidenceIds = new Set([report.messageId, ...report.checks.flatMap(check => [check.reportMessageId, check.evidenceMessageId])].filter(Boolean));
-          box.insertAdjacentHTML("afterbegin", `<p data-previous-release-checks class="form-hint"><strong>${esc(uiText("result.previousReleaseChecks", { revision: report.candidateRevision.slice(0, 12) }))}</strong> ${links.join(" · ")}</p>`);
+          content.insertAdjacentHTML("afterbegin", `<p data-previous-release-checks class="form-hint"><strong>${esc(uiText("result.previousReleaseChecks", { revision: report.candidateRevision.slice(0, 12) }))}</strong> ${links.join(" · ")}</p>`);
           syncResultComparisons();
         }
       }
       box.hidden = false;
     }).catch(() => {
       if (!current()) return;
-      box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
+      content.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
       box.hidden = false;
     });
   }

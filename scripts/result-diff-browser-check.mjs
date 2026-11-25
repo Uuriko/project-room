@@ -273,6 +273,21 @@ test("returning from the first submission compares all changes across two revisi
   const fresh = await f.login("human-checker", currentUrl);
   await fresh.locator("#result-diff").getByText(/No text changes from the previous version/).waitFor();
   await page.locator("#cancel-action").click();
+  await page.route("**/work-result?**", route =>
+    new URL(route.request().url()).searchParams.get("completionEventId") === f.first.event.id
+      ? route.fulfill({ status: 404, json: { error: "Result unavailable" } }) : route.continue());
+  await page.locator("#result-work-action").click();
+  const limited = page.locator("#action-result-diff");
+  await limited.getByText(/earlier version could not be loaded/).waitFor();
+  assert.match(await limited.textContent(), /Check with Maya/);
+  assert.doesNotMatch(await limited.textContent(), /Owner: undecided/);
+  const sourceId = second.event.data.evidenceMessageId;
+  const source = f.store.room("commons").state.messages.find(message => message.id === sourceId);
+  f.send("producer", T.MESSAGE_DELETED, { messageId: sourceId, expectedMessageRevision: source.revision ?? 0 });
+  await limited.getByText(/Check with Maya/).waitFor({ state: "hidden" });
+  assert.doesNotMatch(await limited.textContent(), /Check with Maya/);
+  await page.locator("#cancel-action").click();
+  await page.unroute("**/work-result?**");
   f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Name the backup owner" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Named the backup" });
   f.mutate(T.WORK_STARTED, {});
