@@ -17,7 +17,7 @@ function prepareHost(config) {
 
 export async function main(argv = process.argv.slice(2)) {
   if (argv.length === 1 && argv[0] === "--help") {
-    console.log("Usage: node scripts/run-room-request.mjs --check /absolute/host.json\n       node scripts/run-room-request.mjs REQUEST_ID|--auto /absolute/private-journal.sqlite /absolute/host.json\nUses ROOM_AGENT_CONFIG or the existing Room connection environment. Host JSON: command (absolute), args (array), cwd (absolute), timeoutMs, required fixed policy, optional verification (no env). Host reads a typed untrusted context envelope on stdin and returns {body, codeResult?} on stdout. Optional verification runs operator-configured checks against a matching coding result. --auto explicitly enables sequential pickup of addressed reply requests until stopped. The room stream wakes idle pickup; bounded polling recovers unavailable streams. Ordinary chat never starts a host. Retries reuse the journal; uncertain execution requires reconciliation.");
+    console.log("Usage: node scripts/run-room-request.mjs --check /absolute/host.json\n       node scripts/run-room-request.mjs REQUEST_ID|--auto /absolute/private-journal.sqlite /absolute/host.json [--share-staged-file FILE_ID]\nUses ROOM_AGENT_CONFIG or the existing Room connection environment. Host JSON: command (absolute), args (array), cwd (absolute), timeoutMs, required fixed policy, optional verification (no env). Host reads a typed untrusted context envelope on stdin and returns {body, codeResult?} on stdout. Optional verification runs operator-configured checks against a matching coding result. --auto explicitly enables sequential pickup of addressed reply requests until stopped. The room stream wakes idle pickup; bounded polling recovers unavailable streams. Ordinary chat never starts a host. For one selected request, --share-staged-file binds your previously staged file to your delivered answer. Retries reuse the journal; uncertain execution requires reconciliation.");
     return;
   }
   if (argv[0] === "--check" && argv.length === 2 && isAbsolute(argv[1])) {
@@ -28,7 +28,9 @@ export async function main(argv = process.argv.slice(2)) {
     return;
   }
   const [requestMessageId, journal, hostFile] = argv;
-  if (argv.length !== 3 || (requestMessageId !== "--auto" && !validId(requestMessageId)) || !isAbsolute(journal ?? "") || !isAbsolute(hostFile ?? "")) throw new Error("Invalid runner arguments; use --help");
+  const stagedFileId = argv[4];
+  const selectedFile = argv.length === 5 && argv[3] === "--share-staged-file" && validId(stagedFileId) && requestMessageId !== "--auto";
+  if ((argv.length !== 3 && !selectedFile) || (requestMessageId !== "--auto" && !validId(requestMessageId)) || !isAbsolute(journal ?? "") || !isAbsolute(hostFile ?? "")) throw new Error("Invalid runner arguments; use --help");
   const config = JSON.parse(readFileSync(hostFile, "utf8"));
   // Readiness belongs before a new attempt, not before saved-result recovery.
   const execute = configuredHost(config);
@@ -39,7 +41,11 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     if (requestMessageId === "--auto") await runRequestQueue({ connection, db, execute, signal: controller.signal,
       emit: result => console.log(JSON.stringify(result)) });
-    else console.log(JSON.stringify(await runRequestOnce({ connection, requestMessageId, db, execute, signal: controller.signal })));
+    else {
+      const result = await runRequestOnce({ connection, requestMessageId, db, execute, stagedFileId, signal: controller.signal });
+      console.log(JSON.stringify(result));
+      if (result.status !== "delivered") process.exitCode = 1;
+    }
   } finally { db.close(); process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -29,7 +29,7 @@ export async function main(argv = process.argv.slice(2)) {
   node scripts/run-codex-room.mjs --stop-watch /absolute/journal.sqlite
   ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --watch /absolute/journal.sqlite /absolute/runtime.json
   ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --watch-requests /absolute/journal.sqlite /absolute/runtime.json MEMBER_ID[,MEMBER_ID...] [REQUEST_ID[,REQUEST_ID...]]
-  ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --run-request /absolute/journal.sqlite /absolute/runtime.json MEMBER_ID REQUEST_ID
+  ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --run-request /absolute/journal.sqlite /absolute/runtime.json MEMBER_ID REQUEST_ID [--share-staged-file FILE_ID]
   ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs RUN_ID /absolute/journal.sqlite /absolute/runtime.json
 
 Runtime JSON requires command (absolute Codex executable), cwd (real workspace), codexHome (dedicated private directory outside workspace and operator Codex home), policy {approvalPolicy:"never",sandbox:"read-only"|"workspace-write"}; optional model, requestTimeoutMs, turnTimeoutMs.
@@ -53,6 +53,11 @@ Normal invocation executes one already-created public Room assistant run assigne
   }
   const preflight = argv[0] === "--preflight";
   const singleRequest = argv[0] === "--run-request";
+  let stagedFileId;
+  if (singleRequest && argv.length === 7 && argv[5] === "--share-staged-file" && validId(argv[6])) {
+    stagedFileId = argv[6];
+    argv = argv.slice(0, 5);
+  }
   const requestWatch = argv[0] === "--watch-requests" || singleRequest;
   const check = argv[0] === "--check" || preflight, watch = argv[0] === "--watch" || requestWatch;
   const [runId, journal, configPath] = check ? [null, null, argv[1]] : argv;
@@ -94,7 +99,7 @@ Normal invocation executes one already-created public Room assistant run assigne
         statusWriter.event(event); console.log(JSON.stringify(event));
       };
       const supervise = requestWatch ? superviseCodexRequests : superviseCodexRoom;
-      await supervise({ connection, db, directory: `${journal}.watch`, cwd: settings.cwd, policy: settings.policy, allowedRequesterIds, allowedRequestIds, singleRequest,
+      const result = await supervise({ connection, db, directory: `${journal}.watch`, cwd: settings.cwd, policy: settings.policy, allowedRequesterIds, allowedRequestIds, singleRequest, stagedFileId,
         signal: controller.signal, timeoutMs: settings.turnTimeoutMs, connectOnStart: true, emit,
         connect: async allowedThreadIds => {
           let transport;
@@ -112,6 +117,7 @@ Normal invocation executes one already-created public Room assistant run assigne
             await transport?.close(); throw error;
           }
         } });
+      if (singleRequest && result && result.status !== "delivered") process.exitCode = 1;
       return;
     }
     rpc = openCodexStdio(settings, { allowedThreadIds: threads, onAttention: event => {
