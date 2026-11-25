@@ -843,7 +843,7 @@ export default {
   "work.focus.goalHtml": "<p class=\"definition work-focus-summary\" data-work-focus-goal>Done when: {definition}</p>",
   "work.focus.resultHtml": "<p class=\"definition work-focus-summary\" data-work-focus-result>Current result: {summary}</p>",
   "workspace.preview.frameTitle": "Shared project preview",
-  "workspace.preview.source": "{name} · {head} · Preview {revision}",
+  "workspace.preview.source": "{name} · {head} · Revision {revision}",
   "workspace.live.open": "Open live preview",
   "workspace.live.popupBlocked": "Allow pop-ups to open the live preview.",
   "workspace.live.unavailable": "This live preview is unavailable. The saved preview is still here.",
@@ -856,11 +856,12 @@ export default {
   "workspace.share.agentText": "Continue this Project Room attempt in an isolated Git worktree. From the matching repository and using your saved Room connection, run room workspace continue with --link set to the URL below and --path set to a new worktree directory. If Git needs the commit, use --fetch-from with a configured project remote. Confirm the resulting HEAD is {head} before doing any follow-up work.\n\n{link}",
   "workspace.share.copied": "Artifact link copied.",
   "workspace.share.manual": "Select the link to copy it.",
-  "workspace.share.stale": "This preview revision changed. Open the current attempt to see its latest artifacts.",
+  "workspace.share.stale": "This preview revision changed.",
   "workspace.chooseVersion": "Continue this version",
   "workspace.chooseVersionNamed": "Continue this version: {title}",
   "workspace.versionInstruction": "Instruction for this version:\n{note}",
   "workspace.returnDiscussion": "Originating discussion: {link}",
+  "workspace.openOriginalDiscussion": "Open original discussion",
   "workspace.share.threadDraft": "Add to thread draft",
   "workspace.share.threadUnavailable": "The thread draft is unavailable. You can still copy the artifact link.",
   "workspace.share.fileMissing": "This file is unavailable in the shared changes.",
@@ -869,5 +870,5 @@ export default {
   "workspace.changes.fileLoading": "Loading file…",
   "workspace.changes.openRaw": "Open raw patch",
   "workspace.share.missing": "This shared artifact is unavailable.",
-  "workspace.share.openCurrent": "Open current attempt"
+  "workspace.share.openCurrent": "Open current revision"
 };

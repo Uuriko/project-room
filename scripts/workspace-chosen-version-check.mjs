@@ -74,6 +74,54 @@ try {
   await page.locator("dialog").waitFor({ state: "hidden" });
   assert.deepEqual(await page.evaluate(() => window.followUp),
     { link: await page.evaluate(() => window.draft.link), note: "Keep the revised navigation." });
+  await page.evaluate(() => window.workspace.openLink(new URL(window.draft.link).hash, {
+    discussion: () => ({ link: "http://localhost/?room=commons#pr-record/message/revision", messages: [] }),
+    append: () => { throw Error("A changed publication must not be drafted"); },
+  }));
+  const add = page.getByRole("button", { name: "Add to thread draft" });
+  await add.waitFor();
+  await page.evaluate(() => { window.items[1].revision++; });
+  await add.click();
+  await page.getByText(/This preview revision changed/).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Copy for agent" }).count(), 0);
+  assert.equal(await add.count(), 0);
+  assert.equal(await page.getByRole("link", { name: "Open original discussion" }).getAttribute("href"),
+    "http://localhost/?room=commons#pr-record/message/revision");
+  await page.getByRole("button", { name: "Open current revision" }).click();
+  await page.getByText(/revision 2/i).waitFor();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.evaluate(() => {
+    window.items[1].revision++;
+    window.originalReplyVisible = true;
+    const destination = {
+      discussion: () => window.originalReplyVisible ? {
+        link: "http://localhost/?room=commons#pr-record/message/revision",
+        messages: [{ author: "Reviewer", excerpt: "Here is the revision." }],
+      } : null,
+      append: () => { throw Error("A stale publication must not be drafted"); },
+    };
+    window.workspace.openLink(new URL(window.draft.link).hash, destination);
+  });
+  await page.getByText(/This preview revision changed/).waitFor();
+  const original = page.getByRole("link", { name: "Open original discussion" });
+  await original.waitFor();
+  assert.equal(await page.locator("[data-discussion-messages]").innerText(), "");
+  assert.equal(await original.getAttribute("href"), "http://localhost/?room=commons#pr-record/message/revision");
+  assert.equal(await page.getByRole("button", { name: "Add to thread draft" }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "Copy for agent" }).count(), 0);
+  const removed = await page.evaluate(() => {
+    const item = window.items.pop();
+    window.workspace.refresh();
+    return item;
+  });
+  await page.getByText("This shared artifact is unavailable.").waitFor();
+  assert.equal(await original.getAttribute("href"), "http://localhost/?room=commons#pr-record/message/revision");
+  assert.equal(await page.getByRole("button", { name: "Open current revision" }).count(), 0);
+  await page.evaluate(() => { window.originalReplyVisible = false; window.workspace.refreshDiscussion(); });
+  await original.waitFor({ state: "hidden" });
+  assert.equal(await page.locator("[data-discussion-link]").getAttribute("href"), null);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.evaluate(item => window.items.push(item), removed);
   await compare();
   await page.evaluate(() => { window.items[1].revision++; });
   await page.getByRole("button", { name: "Continue this version: Version b" }).click();
@@ -94,5 +142,5 @@ try {
   assert.equal(await page.locator("[data-workspace-compare]").isVisible(), false);
   assert.equal(await page.getByRole("button", { name: "Add to thread draft" }).isVisible(), true);
   assert.deepEqual(errors, []);
-  console.log("Single publication, both optional comparison columns, manual copy, return drafts, stale replacement and directed publication passed.");
+  console.log("Single publication, both optional comparison columns, manual copy, return drafts, unavailable previews, discussion revocation and directed publication passed.");
 } finally { await browser.close(); }
