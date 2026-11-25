@@ -31,10 +31,18 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         </div>
         <p data-preview-status role="status"></p>
         <ol data-preview-list></ol>
+        <aside data-workspace-discussion hidden>
+          <h3>Recent discussion</h3>
+          <div data-discussion-messages></div>
+          <a data-discussion-link target="_blank" rel="noopener">Open full discussion</a>
+        </aside>
       </section>
       <section class="workspace-preview-detail" aria-label="Selected preview">
         <h3 data-preview-heading>Open a shared preview</h3>
         <p data-preview-meta class="form-hint"></p>
+        <label data-workspace-note hidden>Instruction for this version
+          <textarea rows="2" maxlength="2000"></textarea>
+        </label>
         <div class="workspace-link-actions">
           <button type="button" data-workspace-live class="button secondary" hidden></button>
           <button type="button" data-workspace-link class="button ghost" hidden></button>
@@ -50,7 +58,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
           <button type="button" class="button ghost" role="tab" id="workspace-tab-output" aria-controls="workspace-panel-output" data-workspace-tab="output">Run output</button>
         </div>
         <section id="workspace-panel-changes" role="tabpanel" aria-labelledby="workspace-tab-changes" data-workspace-changes hidden>
-          <label>Compare with <select data-workspace-compare><option value="">Choose another attempt</option></select></label>
+          <label hidden>Compare with <select data-workspace-compare><option value="">Choose another attempt</option></select></label>
           <p data-workspace-change-status class="form-hint" role="status"></p>
           <div class="workspace-change-columns"><section data-workspace-primary></section><section data-workspace-peer hidden></section></div>
         </section>
@@ -122,6 +130,32 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   const changeCache = new Map();
   let selected = null, frame = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
   let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null, pendingFile = null, reviewLocation = null, threadDraft = null;
+
+  const discussionAside = dialog.querySelector("[data-workspace-discussion]");
+  const discussionMessages = discussionAside.querySelector("[data-discussion-messages]");
+  const noteLabel = dialog.querySelector("[data-workspace-note]");
+  const noteInput = noteLabel.querySelector("textarea");
+  const notes = new Map();
+  let noteKey = null;
+  noteInput.addEventListener("input", () => {
+    if (noteKey) notes.set(noteKey, noteInput.value);
+    linkStatus.textContent = ""; linkFallback.hidden = true; linkFallback.value = "";
+  });
+  function refreshDiscussion() {
+    if (!dialog.open) return;
+    const discussion = !copyLink.hidden && threadDraft?.discussion();
+    discussionAside.hidden = !discussion;
+    addToThread.hidden = !discussion || Boolean(items.find(item => item.id === selected)?.recipientId);
+    discussionMessages.replaceChildren();
+    const source = discussionAside.querySelector("[data-discussion-link]");
+    if (discussion) source.href = discussion.link;
+    else source.removeAttribute("href");
+    for (const message of discussion?.messages ?? []) {
+      const line = document.createElement("p");
+      line.textContent = [message.author, message.excerpt].join(" · ");
+      discussionMessages.append(line);
+    }
+  }
 
   function choosePanel(name) {
     if (activePanel !== name) {
@@ -228,6 +262,26 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       peer.hidden = !comparison;
       if (comparison) renderWorkspaceChange(peer, comparison, b, readPeer, { shareHunks: false });
       else peer.replaceChildren();
+      if (comparison) {
+        for (const [column, item] of [[primary, current], [peer, comparison]]) {
+          const pick = document.createElement("button");
+          pick.type = "button";
+          pick.className = "button secondary";
+          pick.textContent = uiText("workspace.chooseVersion");
+          pick.setAttribute("aria-label", uiText("workspace.chooseVersionNamed", { title: item.title }));
+          pick.addEventListener("click", async () => {
+            if (!stillOpen()) return;
+            const url = workspaceArtifactLink(location.href, session.roomId, item, "changes");
+            clearPreview();
+            linked = workspaceArtifactSelection(new URL(url).hash);
+            selected = item.id; pendingFile = null; reviewLocation = null;
+            activePanel = "preview";
+            await load();
+            if (dialog.open && selected === item.id && !noteLabel.hidden) noteInput.focus();
+          });
+          column.querySelector("h4").after(pick);
+        }
+      }
       columns.hidden = false;
       changeStatus.textContent = note && file && !a.file ? "The original review file is absent from the current patch." : "";
       renderedChanges = key;
@@ -243,12 +297,14 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     const previous = compare.value;
     const eligible = items.filter(item => item.id !== current.id && item.base === current.base && item.patchDigest);
     compare.replaceChildren(new Option("Choose another attempt", ""), ...eligible.map(item => new Option(item.title, item.id)));
-    compare.disabled = eligible.length === 0;
+    compare.closest("label").hidden = eligible.length === 0;
     if (eligible.some(item => item.id === previous)) compare.value = previous;
     void loadChanges();
   }
   const owns = (ticket, session) => dialog.open && generation === ticket && client.session === session;
   function clearPreview() {
+    noteLabel.hidden = true; noteKey = null; noteInput.value = "";
+    discussionAside.hidden = true; discussionMessages.replaceChildren();
     frameDigest = null; changeGeneration++; outputGeneration++;
     renderedChanges = null; renderedOutput = null;
     tabs.hidden = true;
@@ -262,7 +318,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     meta.textContent = "";
   }
   function reset() {
-    selectStart(null);
+    notes.clear(); selectStart(null);
     generation++; selected = null; linked = null; pendingFile = null; reviewLocation = null; threadDraft = null; clearPreview();
     status.textContent = ""; list.replaceChildren(); items = []; changeCache.clear();
     if (dialog.open) dialog.close();
@@ -320,7 +376,10 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       copyLink.hidden = false;
       openLive.hidden = !current.liveAvailable;
       copyForAgent.hidden = false;
-      addToThread.hidden = !threadDraft || Boolean(current.recipientId);
+      noteKey = changesIdentity(current);
+      noteInput.value = notes.get(noteKey) ?? "";
+      noteLabel.hidden = false;
+      refreshDiscussion();
       updateComparisons(current);
       void loadOutput();
       heading.textContent = current.title;
@@ -382,11 +441,20 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   async function copySelection(forAgent) {
     const snapshot = shareSelection();
     if (!snapshot) return;
-    const { current, session, panel, link } = snapshot;
-    const copiedText = forAgent ? uiText("workspace.share.agentText", { link, head: current.head }) : link;
+    const { current, session, link } = snapshot;
+    const returnLink = threadDraft?.discussion()?.link;
+    const note = noteInput.value.trim();
+    const copiedText = forAgent ? [
+      uiText("workspace.share.agentText", { link, head: current.head }),
+      note && uiText("workspace.versionInstruction", { note }),
+      returnLink && uiText("workspace.returnDiscussion", { link: returnLink }),
+      returnLink && (current.recipientId
+        ? "This publication is directed. Keep the returned artifact within the same audience."
+        : "Return your revised publication to that discussion for review."),
+    ].filter(Boolean).join("\n\n") : link;
     const result = await clipboard.copy(copiedText);
-    if (!dialog.open || client.session !== session || selected !== current.id || panel !== activePanel
-      || items.find(item => item.id === selected)?.revision !== current.revision) return;
+    if (!dialog.open || client.session !== session || shareSelection()?.link !== link
+      || (forAgent && (noteInput.value.trim() !== note || threadDraft?.discussion()?.link !== returnLink))) return;
     linkFallback.hidden = result === "copied";
     if (result === "copied") linkStatus.textContent = uiText(forAgent ? "workspace.share.agentCopied" : "workspace.share.copied");
     else {
@@ -429,6 +497,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   addToThread.addEventListener("click", async () => {
     const snapshot = shareSelection(), destination = threadDraft;
     if (!snapshot || addToThread.hidden || addToThread.disabled || !destination) return;
+    const note = noteInput.value.trim();
     addToThread.disabled = true;
     try {
       const { current, session, panel, link } = snapshot;
@@ -440,7 +509,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         || item.publisherId !== current.publisherId || artifactDigest(item, panel) !== artifactDigest(current, panel)) {
         linkStatus.textContent = uiText("workspace.share.stale"); return;
       }
-      if (!destination(link)) {
+      if (note !== noteInput.value.trim()) return;
+      if (!destination.append(link, note)) {
         linkStatus.textContent = uiText("workspace.share.threadUnavailable"); return;
       }
       reset();
@@ -460,16 +530,17 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   dialog.querySelector("[data-preview-refresh]").addEventListener("click", () => void load());
   dialog.addEventListener("close", () => { if (!dialog.open) reset(); });
   return {
-    reset,
+    reset, refreshDiscussion,
     refresh() { if (dialog.open) void load(); },
-    openLink(hash) {
+    openLink(hash, destination = null) {
       const target = workspaceArtifactSelection(hash);
       if (!target || !client.session) return;
-      clearPreview();
+      notes.clear(); clearPreview();
       selectStart(null);
-      threadDraft = null; linked = target; reviewLocation = target.anchor ? target : null; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
+      threadDraft = destination; linked = target; reviewLocation = target.anchor ? target : null; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
       if (!dialog.open) dialog.showModal();
       void load();
+      return true;
     },
     closeLinked() { if (linked) reset(); },
   };

@@ -1966,6 +1966,8 @@ svg[width="20"][height="20"] { width: 1.25rem; height: 1.25rem; }
 .workspace-previews-layout li button[aria-pressed="true"] { background: var(--panel-raised); border-color: var(--blue); }
 .workspace-previews-layout li button span { display: block; color: var(--muted); font-size: var(--text-xs); }
 .workspace-preview-detail { min-width: 0; }
+[data-workspace-discussion] { overflow-wrap: anywhere; }
+[data-workspace-note] textarea { display: block; width: 100%; box-sizing: border-box; }
 .workspace-open svg { display: none; }
 @media (max-width: 520px) {
   .room-topbar .workspace-open { width: 44px; display: inline-grid; place-items: center; }

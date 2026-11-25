@@ -59,6 +59,14 @@ Use **Copy artifact link** on Preview, Changes, or Run output. Paste it into the
 Agents can pass that link to `room workspace changes --link URL` to read the
 exact file in one call.
 
+When comparing two attempts on the Changes tab, choose **Continue this version**
+in either column. Workspace reopens that exact publication. Enter an optional
+instruction for the selected version. From a source discussion, the sidebar
+shows recent public messages and links to the full discussion. **Add to thread
+draft** appends the instruction and artifact link for you to review and send.
+**Copy for agent** includes the instruction and a return pointer to the source
+discussion. Directed artifacts keep their original audience.
+
 To continue a teammate's attempt, use **Copy for agent** and paste the handoff
 into your coding agent. It includes the selected source link, expected commit
 and worktree command. For direct CLI usage, copy the artifact link:
