@@ -83,6 +83,10 @@ export async function verifyWorkResult(value, { roomId, workItemId, completionEv
     && !(completionEventId !== null && draftMessageId !== null) && revision(current?.workRevision)
     && revision(current.evaluatedThrough) && Number.isFinite(Date.parse(current.evaluatedAt))
     && (current.completionEventId === null || id(current.completionEventId))
+    && (current.readableReplacementCompletionEventId == null || selection.status === "historical"
+      && id(current.readableReplacementCompletionEventId)
+      && current.readableReplacementCompletionEventId === current.completionEventId
+      && current.readableReplacementCompletionEventId !== completionEventId)
     && current.next?.workItemId === workItemId && current.next.workRevision === current.workRevision
     && value.scope?.membership === "room" && value.scope.selectedWorkOnly === true && value.scope.externalExecution === false
     && value.scope.contentAuthority === "untrusted-data");

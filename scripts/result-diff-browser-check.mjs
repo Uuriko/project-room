@@ -76,7 +76,7 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
   }
   const mutate = (type, data) => send("producer", type, { workItemId: "revision-journey", expectedRevision: item("revision-journey").revision, ...data });
   t.after(() => assert.deepEqual(errors, []));
-  return { ...f, get store() { return f.store; }, origin, restart, item: () => item("revision-journey"), first, login, mutate, send, complete: body => completeWithText("revision-journey", body) };
+  return { ...f, get store() { return f.store; }, origin, restart, item: () => item("revision-journey"), first, login, mutate, send, complete: (body, toMemberId) => completeWithText("revision-journey", body, toMemberId) };
 }
 const card = page => page.locator('[data-work-record-id="revision-journey"]');
 async function openResult(page) {
@@ -718,6 +718,35 @@ test("shared result links keep identical old and new text bound to different ver
   assert.equal(await receiver.locator("#result-body").textContent(), "");
   assert.equal(await receiver.locator("#result-copy-link").isVisible(), false);
   assert.equal(await receiver.locator("#result-current-version").getAttribute("href"), null);
+});
+
+test("an earlier result offers the newer version only when the same viewer can read it", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const href = id => f.origin + "/?room=commons#pr-record/result/revision-journey/" + id;
+  const correct = () => {
+    f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Revise" });
+    f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Revised" });
+    f.mutate(T.WORK_STARTED, {});
+  };
+  correct();
+  const privateVersion = f.complete("A private revision", "human-checker");
+  const requester = await f.login("owner", href(f.first.event.id));
+  await requester.locator("#result-body").getByText(/Result A/).waitFor();
+  await requester.locator("#result-dialog").screenshot({path: "test-results/earlier-result-current-link.png"});
+  assert.match(await requester.locator("#result-status").textContent(), /Earlier result/);
+  assert.equal(await requester.locator("#result-current-version").getAttribute("href"), null);
+  assert.equal(await requester.locator("#result-work-action").isVisible(), false);
+  const reviewer = await f.login("human-checker", href(f.first.event.id));
+  await reviewer.locator("#result-current-version").getByText("Open current result").waitFor();
+  assert.equal(await reviewer.locator("#result-current-version").getAttribute("href"), href(privateVersion.event.id));
+
+  correct();
+  const sharedVersion = f.complete("A revised result shared with the Room");
+  const link = requester.locator("#result-current-version");
+  await link.waitFor();
+  assert.equal(await link.getAttribute("href"), href(sharedVersion.event.id));
+  await link.press("Enter");
+  await requester.locator("#result-body").getByText("A revised result shared with the Room").waitFor();
 });
 
 test("an exact result link refuses a nonparty without falling forward", { timeout: 30000 }, async t => {

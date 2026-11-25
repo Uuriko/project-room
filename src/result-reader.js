@@ -264,14 +264,14 @@ export function installResultReader({ client, getState, getSession, sameSession,
       clearResultComparison(resultElement("result-diff"));
     }
     const item = getState().workItems[view.workItemId];
-    // A live update can skip straight from an open result to its replacement.
-    // Read the original receipt again so visibility and the review history floor
-    // apply to its verdict even if the client missed the review event.
-    if (usableText(view) && view.selectionStatus === "current" && item?.receipt?.eventId
-        && !matchesReceipt(view.receipt, item.receipt) && !view.readAfterReplacement) {
+    // Re-read the selected result when the active receipt changes so the
+    // server checks both the selected verdict and access to the replacement.
+    const latest = item?.receipt;
+    if (usableText(view) && latest?.eventId && !matchesReceipt(view.receipt, latest)
+        && latest.eventId !== view.observedCompletionEventId && latest.eventId !== view.readAfterReplacement) {
       const { generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails, recovered } = view;
       openResult({ generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails,
-        recovered, compareFrom: view.compareFrom, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: true }, item.title, false);
+        recovered, compareFrom: view.compareFrom, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: latest.eventId }, item.title, false);
       return;
     }
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
@@ -299,9 +299,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
     }
     const newer = resultElement("result-current-version");
-    const latest = item?.receipt;
     const canOpenNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
-      && latest?.nativeText && !latest.nativeText.withdrawnAt && latest.eventId !== view.receipt.completionEventId;
+      && latest?.nativeText && !latest.nativeText.withdrawnAt
+      && latest.eventId === view.readableReplacementCompletionEventId;
     newer.hidden = !canOpenNewer;
     if (canOpenNewer) {
       newer.href = exactResultHref({ ...view, completionEventId: latest.eventId });
@@ -481,6 +481,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
         || (view.receipt.evidenceVersion && value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion)) throw new Error("Pinned version changed");
       view.receipt.evidenceVersion = value.result.receipt.evidenceVersion;
       view.selectionStatus = value.selection.status;
+      view.observedCompletionEventId = value.current.completionEventId;
+      view.readableReplacementCompletionEventId = value.current.readableReplacementCompletionEventId;
       view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
