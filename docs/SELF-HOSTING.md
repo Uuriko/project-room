@@ -133,6 +133,8 @@ For a POSIX Node service that started with a private completion plan, save the i
 
 Check that the same process logs `completion_pickup.reloaded` with the intended plan digest. The digest is SHA-256 over `JSON.stringify(JSON.parse(fileText))`. A `completion_pickup.reload_rejected` event shows the digest still in use. The service validates route credentials and retains the current checkpoint when applying a replacement. Changing the checkpoint path or enabling a previously disabled subscriber requires the normal service startup procedure.
 
+Restore or fix a rejected file before restarting. Startup validates the file currently on disk. Removing a route stops its planned follow-ups, while requests already recorded in Room stay available.
+
 The reload log confirms the active plan. Check the matching request receipt and recipient progress to verify that an agent picked up the next task.
 
 ## Prove your install: the self-host journey
