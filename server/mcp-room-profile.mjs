@@ -1,3 +1,4 @@
+import { answerFileSelection } from "../src/reply-requests.js";
 import { reviewerProjectDiscoveries } from './project-discoveries.mjs';
 import { readRoomNext, validRoomNextSelection } from "./room-next.mjs";
 import { withInviteShare } from "./invite-share.mjs";
@@ -1339,6 +1340,14 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           const definition = HOSTED_TOOLS.find(entry => entry.name === tool);
           if (!definition || (oauthPrincipal && !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes))
               || catalogCallDenial(resolveCatalogAgent(store, identity), definition)) delete value.discussionRead;
+        }
+        if (name === "room_read_request" && !outcome.isError && value.answerFilesRead) {
+          const tool = "room_list_files";
+          const definition = HOSTED_TOOLS.find(entry => entry.name === tool);
+          if (definition && (!oauthPrincipal || mcpOAuthToolAllowed(tool, oauthPrincipal.scopes))
+            && !catalogCallDenial(resolveCatalogAgent(store, identity), definition)) {
+            value.answerFilesRead.nextRead = { tool, arguments: answerFileSelection(value) };
+          }
         }
         if (name === "room_read_result" && !outcome.isError && oauthPrincipal && value.workThread?.pendingCorrection?.action) {
           const { tool } = value.workThread.pendingCorrection.action;

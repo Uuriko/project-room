@@ -1,7 +1,7 @@
 import { validateCharterContext } from "../src/room-charter.js";
 import { createHash } from "node:crypto";
 import { validId, MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
-import { replyPostMode, ANSWER_CREDENTIALS, MAX_REPLY_RESPONSE_CHARS, MAX_REPLY_RESPONSE_COMMAND_BYTES, REPLY_PROGRESS_STATES } from "../src/reply-requests.js";
+import { answerFilePath, answerFileSelection, replyPostMode, ANSWER_CREDENTIALS, MAX_REPLY_RESPONSE_CHARS, MAX_REPLY_RESPONSE_COMMAND_BYTES, REPLY_PROGRESS_STATES } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
@@ -266,6 +266,21 @@ function validatePreviousExchangeMessages(exchanges, viewerId) {
   assert(count <= 100);
 }
 
+function validateAnswerFilesRead(result) {
+  if (!Object.hasOwn(result, "answerFilesRead")) return;
+  const selection = answerFileSelection(result), pointer = result.answerFilesRead;
+  assert(selection && keys(pointer, ["http", ...(Object.hasOwn(pointer ?? {}, "nextRead") ? ["nextRead"] : [])])
+    && keys(pointer.http, ["method", "path"]) && pointer.http.method === "GET"
+    && pointer.http.path === answerFilePath(selection));
+  if (Object.hasOwn(pointer, "nextRead")) {
+    const read = pointer.nextRead;
+    assert(keys(read, ["tool", "arguments"]) && read.tool === "room_list_files"
+      && keys(read.arguments, ["roomId", "messageIds"]) && read.arguments.roomId === selection.roomId
+      && Array.isArray(read.arguments.messageIds) && read.arguments.messageIds.length === 1
+      && read.arguments.messageIds[0] === selection.messageIds[0]);
+  }
+}
+
 export function validateReplyRead(result, { name, args, roomId }) {
   if (result?.contractVersion === 2) return validateCurrentReplyRead(result, { name, args, roomId });
   assert(result?.contractVersion === 1 && result.roomId === roomId && validId(result.viewerId)
@@ -464,6 +479,7 @@ export function validateReplyRead(result, { name, args, roomId }) {
       }
     }
   }
+  validateAnswerFilesRead(result);
   return result;
 }
 
@@ -587,5 +603,6 @@ function validateCurrentReplyRead(result,{name,args,roomId}) {
       &&JSON.stringify(http.command)===JSON.stringify(command)&&JSON.stringify(http.requiredInput)==='["command.data.body"]'
       &&http.verify?.method==='GET'&&http.verify.path===`/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(request.id)}`);
   }
+  validateAnswerFilesRead(result);
   return result;
 }
