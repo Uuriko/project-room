@@ -100,7 +100,9 @@ for (const width of [1440, 390]) {
     const firstReview = structuredClone(f.item().verification);
     f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Added a named owner" });
     f.mutate(T.WORK_STARTED, {});
-    const second = f.complete("Result B\nKeep this line\nOwner: Maya");
+    const reference = "https://artifacts.example.invalid/releases/" + "b58f4d1a".repeat(24);
+    const revisedBody = "Result B\nKeep this line\nOwner: Maya" + (width === 390 ? "\n" + reference : "");
+    const second = f.complete(revisedBody);
     assert.equal(f.item().receipt.nativeText.previousCompletionEventId, f.first.event.id);
     assert.notEqual(f.item().verification?.completionEventId, second.event.id, "A review must not apply to B");
     await clickWorkAction(await openWorkFromSearch(reviewer, "revision-journey", "Revise a short result"), "verify");
@@ -113,6 +115,12 @@ for (const width of [1440, 390]) {
     assert.match(await diff.innerText(), /\+ Result B/);
     assert.match(await diff.innerText(), /- Missing named owner/);
     assert.match(await diff.innerText(), /\+ Owner: Maya/);
+    if (width === 390) {
+      assert.ok((await diff.innerText()).includes(reference), "the exact reference remains in the rendered comparison");
+      const { viewport, content } = await diff.locator(".result-diff").evaluate(element =>
+        ({ viewport: element.clientWidth, content: element.scrollWidth }));
+      assert.ok(content <= viewport, `the changed reference must fit without sideways scrolling (${content} > ${viewport})`);
+    }
     assert.match(await diff.innerText(), /never carries over/);
     assert.equal(await reviewer.locator("#action-dialog").evaluate(node => node.scrollWidth <= node.clientWidth), true);
     await reviewer.screenshot({ path: `test-results/result-review-${width}.png`, fullPage: true });
@@ -149,7 +157,7 @@ for (const width of [1440, 390]) {
       async route => { await new Promise(resolve => setTimeout(resolve, 250)); await route.continue(); });
     await reviewer.reload(); await reviewer.locator("#main").waitFor({ state: "visible" });
     await openResult(reviewer);
-    assert.equal(await reviewer.locator("#result-body").textContent(), "Result B\nKeep this line\nOwner: Maya");
+    assert.equal(await reviewer.locator("#result-body").textContent(), revisedBody);
     // The comparison is a second, independent read of the previous version that
     // lands after #result-body; wait for its bytes instead of reading the box the
     // moment the current text appears (that race failed CI at both widths).
