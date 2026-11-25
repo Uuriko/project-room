@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -280,6 +280,31 @@ test('prepared MCP reads resume after a completed checkpoint without skipping a 
   assert.deepEqual(privateRead.discussion.items.map(row => row.message.id), transport === 'hosted' ? [] : ['private-after-checkpoint']);
   assert.equal(f.store.snapshot(f.keys.producer, 'commons').cursor, 0);
   });
+});
+
+test("stdio follows the exact result's callable discussion read", async t => {
+  const f = await fixture(t), workItemId = "test-handoff";
+  const work = () => f.store.room("commons").state.workItems[workItemId];
+  const mutate = (type, extra = {}) => f.send("producer", type, { workItemId, expectedRevision: work().revision, ...extra });
+  mutate(T.WORK_ACCEPTED);
+  mutate(T.WORK_STARTED);
+  const body = "Original passage", posted = f.post("discussion-source", { workItemId, body }, "producer");
+  const receipt = mutate(T.WORK_COMPLETED, { evidenceKind: "room_text", evidenceMessageId: "discussion-source",
+    evidenceMessageEventId: posted.event.id, evidenceVersion: "sha256:" + createHash("sha256").update(body).digest("hex"),
+    previousCompletionEventId: null, producerId: "producer", summary: "Drafted the passage", nextAction: "Review" });
+  f.post("discussion-feedback", { replyToId: "discussion-source", body: "Replace the passage." });
+  const mcp = await f.open();
+  const selected = (await mcp.call("room_read_result", { workItemId, completionEventId: receipt.event.id })).result.structuredContent;
+  assert.equal(selected.discussionRead.arguments.roomId, undefined);
+  const reply = await mcp.call(selected.discussionRead.tool, selected.discussionRead.arguments);
+  assert.notEqual(reply.result?.isError, true, JSON.stringify(reply));
+  assert.deepEqual(reply.result.structuredContent.discussion.replies.map(message => message.body), ["Replace the passage."]);
+  assert.equal((await mcp.call(selected.discussionRead.tool, { ...selected.discussionRead.arguments, since: 0 })).error.code, -32602);
+  f.send("producer", T.MESSAGE_DELETED, { messageId: "discussion-source", expectedMessageRevision: 0 });
+  const withdrawn = await mcp.call(selected.discussionRead.tool, selected.discussionRead.arguments);
+  assert.equal(withdrawn.result?.isError, true);
+  assert.equal(withdrawn.result.structuredContent.code, "result_unavailable");
+  assert.equal(JSON.stringify(withdrawn).includes("Replace the passage."), false);
 });
 
 test("consistent discussion checkpoints survive restart and ignore unrelated changes while returning new replies", async t => {

@@ -80,7 +80,7 @@ async function fixture(t, representation) {
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
 test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {
-  const { origin, store, owner, producer, reviewer, reviewerProject, cli } = await fixture(t, representation);
+  const { origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
   const workItemId = "handoff";
   store.command(owner, "commons", { id: "request", type: "work.proposed", data: { workItemId,
     title: "Draft the brief", definitionOfDone: "Share the brief", accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
@@ -105,6 +105,12 @@ test(`${representation} a colleague reads an exact shared result URL with their 
     data: { messageId: "quoted-feedback", replyToId: shared.value.result.text.messageId, body: quoted } });
   store.command(reviewer.secret, "commons", { id: "private-feedback", type: "message.posted",
     data: { messageId: "private-feedback", replyToId: shared.value.result.text.messageId, body: "Private aside", toMemberId: "owner" } });
+  const exact = await rpc("room_read_result", { workItemId, completionEventId });
+  const connectorRead = await rpc(exact.discussionRead.tool, exact.discussionRead.arguments);
+  assert.equal(connectorRead.completionEventId, completionEventId);
+  assert.equal(connectorRead.discussion.messageId, shared.value.result.text.messageId);
+  assert.deepEqual(connectorRead.discussion.replies.map(reply => reply.body), [quoted]);
+  assert.equal(connectorRead.discussion.replies[0].untrusted, true);
   const producerRead = await cli(shared.value.discussionRead.command.slice(1));
   assert.equal(producerRead.code, 0, JSON.stringify(producerRead));
   assert.equal(producerRead.value.discussion.replies[0].id, feedback.event.data.messageId);

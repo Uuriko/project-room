@@ -284,7 +284,8 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
       ...(releaseChecks ? { releaseChecks } : {}), ...(outcome ? { outcome } : {}) },
     selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
     ...(result.kind === "room_text" && typeof result.text?.body === "string"
-      ? { discussionRead: { method: "GET", path: resultDiscussionPath(state.room.id, result.text.messageId) } } : {}),
+      ? { discussionRead: { method: "GET", path: resultDiscussionPath(state.room.id, result.text.messageId),
+        tool: "room_read_work_discussion", arguments: { roomId: state.room.id, workItemId, completionEventId: result.receipt.eventId } } } : {}),
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
       completionEventId: work.receipt?.eventId ?? null, next },
