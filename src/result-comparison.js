@@ -14,12 +14,15 @@ export function previousReviewText(correction) {
 function comparisonHtml(before, after, esc, structuredPatch, fromOpened) {
   const previousBreak = before.match(/\r?\n$/)?.[0] ?? "";
   const revisedBreak = after.match(/\r?\n$/)?.[0] ?? "";
-  const ending = Boolean(previousBreak) === Boolean(revisedBreak) ? ""
+  const styleOnly = before !== after && before.replaceAll("\r\n", "\n") === after.replaceAll("\r\n", "\n");
+  let ending = Boolean(previousBreak) === Boolean(revisedBreak) ? ""
     : uiText(revisedBreak ? "result.finalBreakAdded" : "result.finalBreakRemoved");
+  if (styleOnly) ending = uiText("result.lineEndingStyleChanged");
   const heading = summary => [
     '<p class="form-hint"><strong>', esc(uiText(fromOpened ? "result.openedRevisionHeading" : "result.revisionHeading")), "</strong> ",
     esc(ending ? ending + " " + summary : summary), "</p>",
   ].join("");
+  if (styleOnly) return heading(uiText("result.comparisonApproval"));
   // The line break change has its own note. Keep the same last line out of
   // the added/removed rows when its wording has not changed.
   const previousText = previousBreak ? before : before + revisedBreak;
