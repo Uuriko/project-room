@@ -16,14 +16,14 @@ async function fixture(t){
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const connection={apiBase:`http://127.0.0.1:${server.address().port}`,roomId:'commons',memberId:'worker',identityId:seeded.identityId,credential:seeded.token,hostId:'park-context-fixture'};
  let now=Date.now();store.now=()=>now;
- const post=(id,data)=>{now+=2001;return store.command(seeded.owner,'commons',{id,type:'message.posted',data:{messageId:id,body:'Useful context',...data}});};
+ const post=(id,data,token=seeded.owner)=>{now+=2001;return store.command(token,'commons',{id,type:'message.posted',data:{messageId:id,body:'Useful context',...data}});};
  post('oversize-root',{body:'@Worker old conversation'});
  for(let i=0;i<30;i++)post('park-old-'+i,{replyToId:'oversize-root',body:'Historical context '+i});
  post('fresh-question',{body:'@Worker which API should I use for a selected request?'});
  post('fresh-fyi',{body:'@Worker FYI: the update is complete; no acknowledgement needed.'});
  const counts={prompts:[],posts:[],acks:[],full:0,requests:[]},logs=[];
- const make=async()=>{
-  const bridge=new Bridge({connection,env:{ROOM_ACP_HOME:home},minPollIntervalMs:0,log:line=>logs.push(line),fetchImpl:async(url,options)=>{if(new URL(url).pathname.endsWith('/messages/oversize-root/thread')&&!new URL(url).search)counts.full++;const response=await fetch(url,options);counts.requests.push({path:new URL(url).pathname,selected:new URL(url).searchParams.get('view')==='message',status:response.status});return response;},host:{session:async()=>({sessionId:'synthetic',created:true}),prompt:async(key)=>{counts.prompts.push(key);return{recorder:{text:JSON.stringify(key==='fresh-fyi'?{outcome:'no_reply',body:''}:{outcome:'answered',body:'Use the selected request API and retain the original request ID.'}),tools:new Map(),plan:[]},stopReason:'end_turn'};}}});
+ const make=async({formalOnly=false}={})=>{
+  const bridge=new Bridge({connection,formalOnly,env:{ROOM_ACP_HOME:home},minPollIntervalMs:0,log:line=>logs.push(line),fetchImpl:async(url,options)=>{if(new URL(url).pathname.endsWith('/messages/oversize-root/thread')&&!new URL(url).search)counts.full++;const response=await fetch(url,options);counts.requests.push({path:new URL(url).pathname,selected:new URL(url).searchParams.get('view')==='message',status:response.status});return response;},host:{session:async()=>({sessionId:'synthetic',created:true}),prompt:async(key)=>{counts.prompts.push(key);return{recorder:{text:JSON.stringify(key==='fresh-fyi'?{outcome:'no_reply',body:''}:{outcome:'answered',body:'Use the selected request API and retain the original request ID.'}),tools:new Map(),plan:[]},stopReason:'end_turn'};}}});
   const send=bridge.room.post.bind(bridge.room),ack=bridge.room.ack.bind(bridge.room);
   bridge.room.post=async args=>{counts.posts.push(args);return send(args);};bridge.room.ack=async args=>{counts.acks.push(...args.signalIds);return ack(args);};
   await bridge.refreshRoom();await bridge.lease();return bridge;
@@ -65,9 +65,13 @@ test(`unrelated ordinary failure ${status}/${code} is not downgraded to parked c
 });
 test('locally oversized formal history leaves a visible error and an independent request proceeds after restart',async t=>{
  const f=await fixture(t);
- for(let i=0;i<100;i++)f.post('formal-history-'+i,{replyToId:'dm',toMemberId:'worker',body:'A base observation. '.repeat(175)});
- const first=await f.make(),old={signalId:'large-formal-wake',messageId:'dm',author:'owner',body:'Please answer'};
- await first.turn('dm',[old]);
+ for(let i=0;i<100;i++)f.post('formal-history-'+i,{replyToId:'dm',toMemberId:'owner',body:'A base observation. '.repeat(175)},f.seeded.token);
+ const first=await f.make({formalOnly:true});
+ const firstPage=await first.room.poll({hostId:first.connection.hostId,waitMs:0});
+ const old=firstPage.pendingWakes.find(wake=>wake.messageId==='dm');
+ assert.ok(old,'the original formal request reaches the real wake queue');
+ await first.accept(old);
+ await first.queue.idle();
  assert.equal(first.controller.signal.aborted,false,f.logs.join(' | '));
  assert.deepEqual(f.counts.prompts,[]);
  const blocked=await first.room.requestContext('dm');
@@ -78,17 +82,9 @@ test('locally oversized formal history leaves a visible error and an independent
  f.post('independent-formal',{body:'Please review the independent result',toMemberId:'worker',requestKind:'reply'});
  first.stop();
 
- const second=await f.make();
- await second.turn('dm',[old]);
- let cursor=null, next;
- for(let i=0;i<8&&!next;i++){
-  const page=await second.room.poll({hostId:second.connection.hostId,waitMs:0,cursor});
-  next=page.pendingWakes.find(wake=>wake.messageId==='independent-formal');
-  if(!page.more)break;
-  cursor=page.nextCursor;
- }
- assert.ok(next,'the independent request reaches the real wake queue');
- await second.accept(next);
+ const second=await f.make({formalOnly:true});
+ await second.turn('dm',[old]); // A late replay uses the original recorded disposition.
+ await second.pollOnce();
  await second.queue.idle();
  assert.equal((await second.room.requestContext('independent-formal')).request.status,'answered');
  const stillOpen=await second.room.requestContext('dm');
