@@ -6933,7 +6933,7 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
   onReturn() { $("#work-navigation-return").click(); },
-  onWorkAction(item, action) { openWorkAction(item, action); },
+  onWorkAction(item, action, compareFrom) { openWorkAction(item, action, null, null, compareFrom); },
   onOriginal(messageId) {
     searchCollapsed = true; $("#search-results").hidden = true;
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);
@@ -6950,7 +6950,7 @@ $("#room-results-list").addEventListener("click", event => {
   const work = event.target.closest("[data-result-work]");
   if (work) revealWork(work.dataset.resultWork);
 });
-function openWorkAction(item, action, draftMessageId = null, offerId = null) {
+function openWorkAction(item, action, draftMessageId = null, offerId = null, compareFrom = null) {
   if (pendingAction?.uncertain) { resumeAction(); return; }
   if (partialWorkSnapshot && (isHelpAction(action) || isOfferAction(action))) return;
   if (!item || !Object.hasOwn(actionSpecs, action)) return;
@@ -6958,7 +6958,7 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   const [type, , fields] = actionSpecs[action];
   actionEpoch++;
   const publishRationale = action === "decide" && document.body.classList.contains("human-experience") && !document.body.classList.contains("human-advanced");
-  pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, publishRationale, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
+  pendingAction = { type, action, workId: item.id, revision: item.revision, compareFrom, draftMessageId, publishRationale, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
   if (isHelpAction(action)) {
     pendingAction.helpRevision = item.helpWanted?.revision ?? 0;
     pendingAction.accountableRevision = state.members[item.accountableMemberId]?.revision;
@@ -7044,7 +7044,7 @@ function loadActionText(item, action) {
     if (!owns() || !value) return;
     if (!entry.draftMessageId && (value.result.receipt?.eventId !== entry.receipt.completionEventId || value.result.receipt?.evidenceVersion !== entry.receipt.evidenceVersion)) throw new Error("Pinned evidence changed");
     entry.text = value.result.text;
-    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns, value.workThread?.correction);
+    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns, value.workThread?.correction, entry.compareFrom);
     $("#action-text-body").textContent = entry.text.body;
     const proposal = entry.text.proposal;
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;

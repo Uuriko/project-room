@@ -242,6 +242,38 @@ test("a withdrawal clears the retained passage while its replacement refresh is 
   assert.equal(await page.locator("#result-copy-link").isVisible(), false);
 });
 
+test("returning from the first submission compares all changes across two revisions", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390, { firstBody: "Owner: undecided" });
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Name the owner" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Named the owner" });
+  f.mutate(T.WORK_STARTED, {});
+  const second = f.complete("Owner: Maya");
+  f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: f.item().id,
+    expectedRevision: f.item().revision, completionEventId: second.event.id, evidenceVersion: second.event.data.evidenceVersion,
+    result: "fail", summary: "Confirm the owner", nextAction: "Check with Maya" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Maya confirmed" });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Owner: Maya");
+  await f.restart();
+  const firstUrl = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+  const page = await f.login("human-checker", firstUrl);
+  const next = page.getByRole("link", { name: "Open current result" });
+  const currentUrl = await next.getAttribute("href");
+  await next.click();
+  for (const id of ["result-diff", "action-result-diff"]) {
+    const diff = page.locator("#" + id);
+    await diff.waitFor();
+    assert.match(await diff.textContent(), /- Owner: undecided/);
+    assert.match(await diff.textContent(), /\+ Owner: Maya/);
+    assert.equal(new URL(await diff.getByRole("link").getAttribute("href"), f.origin).hash, new URL(firstUrl).hash);
+    assert.match(await diff.textContent(), /Changes since the result you opened/);
+    if (id === "result-diff") await page.locator("#result-work-action").click();
+    else assert.match(await diff.textContent(), /Check with Maya/);
+  }
+  const fresh = await f.login("human-checker", currentUrl);
+  await fresh.locator("#result-diff").getByText(/No text changes from the previous version/).waitFor();
+});
+
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
   const f = await setup(t, 390);
   const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;

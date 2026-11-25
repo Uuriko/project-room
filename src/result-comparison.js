@@ -11,13 +11,13 @@ export function previousReviewText(correction) {
 
 // Show only the changed passages and their surrounding lines. Full versions
 // stay accessible through the exact result links even if a rewrite is large.
-function comparisonHtml(before, after, esc, structuredPatch) {
+function comparisonHtml(before, after, esc, structuredPatch, fromOpened) {
   const heading = summary => [
-    '<p class="form-hint"><strong>', esc(uiText("result.revisionHeading")), "</strong> ", esc(summary), "</p>",
+    '<p class="form-hint"><strong>', esc(uiText(fromOpened ? "result.openedRevisionHeading" : "result.revisionHeading")), "</strong> ", esc(summary), "</p>",
   ].join("");
   const patch = structuredPatch("", "", before, after, "", "", { context: 3, maxEditLength: 800 });
   if (!patch) return heading(uiText("result.rewrite"));
-  if (!patch.hunks.length) return heading(uiText("result.sameRevisionText"));
+  if (!patch.hunks.length) return heading(uiText(fromOpened ? "result.sameOpenedText" : "result.sameRevisionText"));
 
   let removed = 0, added = 0, total = 0;
   const visible = [];
@@ -60,9 +60,10 @@ export function createResultComparison({ client, getState, esc }) {
       }
     }
   }
-  function loadResultComparison(workItemId, previousId, text, box, owns, correction) {
+  function loadResultComparison(workItemId, predecessorId, text, box, owns, correction, compareFrom) {
     clearResultComparison(box);
-    if (!previousId) return;
+    if (!predecessorId) return;
+    const previousId = compareFrom || predecessorId;
     const comparison = { currentId: text.messageId, previousId: null, owns };
     resultComparisons.set(box, comparison);
     const current = () => owns() && resultComparisons.get(box) === comparison;
@@ -84,8 +85,8 @@ export function createResultComparison({ client, getState, esc }) {
         return;
       }
       if (typeof before !== "string") throw new Error("Previous version has no exact text");
-      box.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch);
-      if (correction?.completionEventId === previousId && typeof correction.summary === "string" && correction.summary) {
+      box.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch, previousId !== predecessorId);
+      if (correction?.completionEventId === predecessorId && typeof correction.summary === "string" && correction.summary) {
         const note = document.createElement("p"), label = document.createElement("strong");
         label.textContent = uiText("result.previousReview");
         note.className = "result-correction";

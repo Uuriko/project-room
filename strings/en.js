@@ -566,6 +566,8 @@ export default {
   "result.back": "Back to results",
   "result.collapse": "Collapse result",
   "activity.recent": "Recent activity",
+  "result.openedRevisionHeading": "Changes since the result you opened.",
+  "result.sameOpenedText": "The text is unchanged. Previous approval never carries over.",
   "result.revisionHeading": "Resubmitted result.",
   "result.revisionRange": "Previous line {before} · Revised line {after}",
   "result.rewrite": "Too many changed lines for an inline comparison. Open both versions to review the rewrite. Previous approval never carries over.",

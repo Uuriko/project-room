@@ -141,7 +141,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   resultElement("result-work-action")?.addEventListener("click", () => {
     const view = resultView, item = view && getState()?.workItems[view.workItemId];
     const action = selectedWorkAction(view, item);
-    if (action && !isBusy()) onWorkAction(item, action[0]);
+    if (action && !isBusy()) onWorkAction(item, action[0], view.compareFrom);
   });
   const releaseLink = resultElement("result-release-link"), releasePanel = resultElement("result-release-checks");
   if (releaseLink && releasePanel) {
@@ -525,7 +525,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (document.activeElement === resultElement("result-retry")) resultElement(view.focused ? "result-title" : "close-result").focus({ preventScroll: true });
       resultStatus();
       if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
-        resultElement("result-diff"), () => owns() && !view.withdrawn);
+        resultElement("result-diff"), () => owns() && !view.withdrawn, undefined, view.compareFrom);
     }).catch(error => {
       if (!owns() || view.withdrawn) return;
       resultElement("result-body").replaceChildren();
@@ -609,13 +609,20 @@ export function installResultReader({ client, getState, getSession, sameSession,
     return false;
   }
 
+  resultElement("result-current-version").addEventListener("click", event => {
+    if (!resultView || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    resultView.followingCurrent = event.currentTarget.href;
+  });
   function openLinked({ roomId, workItemId, completionEventId }) {
     const session = getSession();
     if (!session || session.roomId !== roomId) return;
     if (resultView?.linked && resultView.roomId === roomId && resultView.workItemId === workItemId
       && resultView.receipt.completionEventId === completionEventId) return;
+    const from = resultView;
+    const compareFrom = from?.roomId === roomId && usableText(from) && sameSession(from.generation, roomId, from.memberId)
+      && from.workItemId === workItemId && from.followingCurrent === location.href ? from.receipt.completionEventId : null;
     forgetSelection();
-    openResult({ linked: true, focused: true, generation: client.generation, roomId,
+    openResult({ compareFrom, linked: true, focused: true, generation: client.generation, roomId,
       memberId: session.member.id, workItemId, receipt: { completionEventId } }, "Result");
   }
   function closeLinked() {
