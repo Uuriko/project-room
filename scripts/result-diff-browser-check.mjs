@@ -256,6 +256,13 @@ test("a withdrawal clears the retained passage while its replacement refresh is 
 
 test("returning from the first submission compares all changes across two revisions", { timeout: 30000 }, async t => {
   const f = await setup(t, 390, { firstBody: "Owner: undecided" });
+  const basis = () => ({ workItemId: f.item().id, expectedRevision: f.item().revision,
+    completionEventId: f.first.event.id, evidenceVersion: f.first.event.data.evidenceVersion });
+  f.send("human-checker", T.VERIFICATION_RECORDED, { ...basis(), result: "pass", summary: "Checked the first document" });
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "first-document-decision", body: "Approved the first document." });
+  const approval = f.send("owner", T.OWNER_DECISION_RECORDED, {
+    ...basis(), decision: "approved", reason: "Approved the first document.", sourceMessageId: "first-document-decision",
+  });
   f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Name the owner" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Named the owner" });
   f.mutate(T.WORK_STARTED, {});
@@ -265,11 +272,12 @@ test("returning from the first submission compares all changes across two revisi
     result: "fail", summary: "Confirm the owner", nextAction: "Check with Maya" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Maya confirmed" });
   f.mutate(T.WORK_STARTED, {});
-  f.complete("Owner: Maya");
+  const latest = f.complete("Owner: Maya");
   await f.restart();
   const firstUrl = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
   const page = await f.login("human-checker", firstUrl);
-  const next = page.getByRole("link", { name: "Open current result" });
+  await page.getByRole("link", { name: "Open decision note" }).waitFor();
+  const next = page.locator("#result-current-version");
   const currentUrl = await next.getAttribute("href");
   await next.click();
   for (const id of ["result-diff", "action-result-diff"]) {
@@ -277,12 +285,27 @@ test("returning from the first submission compares all changes across two revisi
     await diff.getByText("- Owner: undecided", { exact: true }).waitFor();
     assert.match(await diff.textContent(), /\+ Owner: Maya/);
     assert.equal(new URL(await diff.getByRole("link").getAttribute("href"), f.origin).hash, new URL(firstUrl).hash);
-    assert.match(await diff.textContent(), /Changes since the result you opened/);
+    assert.match(await diff.textContent(), /Changes since the selected earlier result/);
     if (id === "result-diff") await page.locator("#result-work-action").click();
     else assert.match(await diff.textContent(), /Check with Maya/);
   }
-  const fresh = await f.login("human-checker", currentUrl);
-  await fresh.locator("#result-diff").getByText(/No text changes from the previous version/).waitFor();
+  const fresh = await f.login("guest", currentUrl);
+  const sharedDiff = fresh.locator("#result-diff");
+  await sharedDiff.waitFor();
+  const screenshot = process.env.ROOM_SHARED_COMPARISON_SCREENSHOT;
+  if (screenshot) {
+    await sharedDiff.scrollIntoViewIfNeeded();
+    await fresh.screenshot({ path: screenshot });
+  }
+  assert.match(await sharedDiff.textContent(), /- Owner: undecided/);
+  assert.match(await sharedDiff.textContent(), /\+ Owner: Maya/);
+  assert.equal(await fresh.locator("#result-work-action").isVisible(), false);
+  assert.equal(await fresh.getByRole("link", { name: "Open decision note" }).count(), 0);
+  assert.equal(f.store.workResult(f.keys.guest, "commons", f.item().id, {
+    completionEventId: f.first.event.id,
+  }).workThread.historicalApproval.decisionEventId, approval.event.id);
+  const plain = await f.login("guest", f.origin + "/?room=commons#pr-record/result/revision-journey/" + latest.event.id);
+  await plain.locator("#result-diff").getByText(/No text changes from the previous version/).waitFor();
   await page.locator("#cancel-action").click();
   await page.route("**/work-result?**", route =>
     new URL(route.request().url()).searchParams.get("completionEventId") === f.first.event.id
@@ -303,7 +326,7 @@ test("returning from the first submission compares all changes across two revisi
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Named the backup" });
   f.mutate(T.WORK_STARTED, {});
   f.complete("Owner: Maya, backup: Lee");
-  await page.getByRole("link", { name: "Open current result" }).waitFor();
+  await page.getByRole("link", { name: "Compare with current result" }).waitFor();
   await page.locator("#result-diff").getByText("- Owner: undecided", { exact: true }).waitFor();
 });
 
@@ -339,7 +362,8 @@ test("a passage reply identifies the reviewed submission when two receipts cite 
   const recipient = await f.login("owner", await publishedLink.getAttribute("href"));
   await recipient.locator("#result-body").getByText(/Result A/).waitFor();
   assert.match(await recipient.locator("#result-status").textContent(), /Earlier result/);
-  assert.equal(await recipient.locator("#result-current-version").getAttribute("href"), url(second.event.id));
+  assert.equal(await recipient.locator("#result-current-version").getAttribute("href"),
+    url(second.event.id) + "/compare/" + f.first.event.id);
 });
 
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
@@ -358,7 +382,7 @@ test("a returning reviewer can finish the correction from the original link afte
   const returning = await f.login("human-checker", original);
   await returning.getByText("Verification · Failed", { exact: true }).waitFor();
   assert.equal(await returning.locator("#result-work-action").isVisible(), false);
-  const current = returning.getByRole("link", { name: "Open current result" });
+  const current = returning.getByRole("link", { name: "Compare with current result" });
   const currentUrl = await current.getAttribute("href");
   await current.click();
   await returning.locator("#result-correction-summary").getByText("Put the owner beside the deadline.").waitFor();
@@ -726,8 +750,8 @@ test("shared result links keep identical old and new text bound to different ver
   assert.equal(await receiver.locator("#result-body").textContent(), body);
   assert.match(await receiver.locator("#result-status").textContent(), /Credited to Design agent/);
   assert.equal(await receiver.locator("#result-work-action").isVisible(), false);
-  const newer = receiver.getByRole("link", { name: "Open current result" });
-  assert.equal(await newer.getAttribute("href"), current);
+  const newer = receiver.getByRole("link", { name: "Compare with current result" });
+  assert.equal(await newer.getAttribute("href"), current + "/compare/" + f.first.event.id);
   await newer.click();
   await receiver.getByText("Verification · Passed", { exact: true }).waitFor();
   assert.equal(await newer.count(), 0);
@@ -809,6 +833,18 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
   assert.equal(await nonparty.locator("#result-copy-link").isVisible(), false);
   assert.equal(await nonparty.locator("#result-current-version").getAttribute("href"), null);
   assert.equal(await nonparty.locator("#result-work-action").isVisible(), false);
+
+  f.mutate(T.WORK_BLOCKED, { reason: "Share a public revision", nextAction: "Write the public result" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Wrote the public result" });
+  f.mutate(T.WORK_STARTED, {});
+  const publicResult = f.complete("Public revision for collaborators");
+  const comparison = f.origin + "/?room=commons#pr-record/result/revision-journey/" + publicResult.event.id + "/compare/" + f.first.event.id;
+  await nonparty.goto(comparison);
+  await nonparty.locator("#result-body").getByText("Public revision for collaborators").waitFor();
+  const unavailable = nonparty.locator("#result-diff");
+  await unavailable.getByText(/earlier version could not be loaded/).waitFor();
+  assert.doesNotMatch(await unavailable.textContent(), /Result A|previous version/);
+  assert.equal(await unavailable.getByRole("link").count(), 0);
 
   f.send("owner", T.MESSAGE_POSTED, { messageId: "private-review", workItemId: "revision-journey",
     toMemberId: "producer", requestKind: "reply", body: "Private review question" });

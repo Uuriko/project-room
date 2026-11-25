@@ -11,7 +11,7 @@ export function previousReviewText(correction) {
 
 // Show only the changed passages and their surrounding lines. Full versions
 // stay accessible through the exact result links even if a rewrite is large.
-function comparisonHtml(before, after, esc, structuredPatch, fromOpened, reviewing) {
+function comparisonHtml(before, after, esc, structuredPatch, hasSelectedBaseline, reviewing) {
   const previousBreak = before.match(/\r?\n$/)?.[0] ?? "";
   const revisedBreak = after.match(/\r?\n$/)?.[0] ?? "";
   const styleOnly = before !== after && before.replaceAll("\r\n", "\n") === after.replaceAll("\r\n", "\n");
@@ -19,7 +19,7 @@ function comparisonHtml(before, after, esc, structuredPatch, fromOpened, reviewi
     : uiText(revisedBreak ? "result.finalBreakAdded" : "result.finalBreakRemoved");
   if (styleOnly) ending = uiText("result.lineEndingStyleChanged");
   const heading = summary => [
-    '<p class="form-hint"><strong>', esc(uiText(fromOpened ? "result.openedRevisionHeading" : "result.revisionHeading")), "</strong> ",
+    '<p class="form-hint"><strong>', esc(uiText(hasSelectedBaseline ? "result.openedRevisionHeading" : "result.revisionHeading")), "</strong> ",
     esc([ending, summary, reviewing && uiText("result.comparisonApproval")].filter(Boolean).join(" ")), "</p>",
   ].join("");
   if (styleOnly) return heading("");
@@ -29,7 +29,7 @@ function comparisonHtml(before, after, esc, structuredPatch, fromOpened, reviewi
   const revisedText = revisedBreak ? after : after + previousBreak;
   const patch = structuredPatch("", "", previousText, revisedText, "", "", { context: 3, maxEditLength: 800 });
   if (!patch) return heading(uiText("result.rewrite"));
-  const noLineChanges = fromOpened ? "result.sameOpenedText" : "result.sameRevisionText";
+  const noLineChanges = hasSelectedBaseline ? "result.sameOpenedText" : "result.sameRevisionText";
   if (!patch.hunks.length) return heading(ending ? "" : uiText(noLineChanges));
 
   let removed = 0, added = 0, total = 0;
@@ -117,7 +117,7 @@ export function createResultComparison({ client, getState, esc }) {
         return;
       }
       if (typeof before !== "string") throw new Error("Previous version has no exact text");
-      content.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch, previousId !== predecessorId, reviewing);
+      content.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch, Boolean(compareFrom), reviewing);
       const earlierLink = exactResultHref({ roomId: previous.roomId, workItemId, completionEventId: previousId });
       if (earlierLink) {
         const paragraph = document.createElement("p");

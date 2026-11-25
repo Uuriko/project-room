@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   roomIdFromHash, selectedRoomFromLocation, publicRoomDeepLink, PUBLIC_ROOM_DOOR,
   publicJoinInviteHref, humanJoinShareBase, roomOpenHandoffHref, authPanelTitle, looksLikeSecretTitle, KEY_KIND_HINT,
-  roomIdFromNext, agentSigninRecord, ROOM_ACCESS_NOTICE
+  roomIdFromNext, agentSigninRecord, exactResultHref, exactResultDestination, ROOM_ACCESS_NOTICE
 } from "../src/room-deep-link.js";
 
 test("roomIdFromHash reads #room/{roomId} and rejects lookalikes", () => {
@@ -47,6 +47,21 @@ test("agent sign-in carries only room-bound work and exact result selectors", ()
     assert.equal(agentSigninRecord({ search, hash }), null);
   }
   assert.equal(agentSigninRecord({ search:"?room=commons&room=other", hash:"#pr-record/work/review" }), null);
+});
+
+test("comparison links carry two exact result selectors through sign-in", () => {
+  const pair = { roomId: "commons", workItemId: "review", completionEventId: "result-c", baselineCompletionEventId: "result-a" };
+  const location = { origin: "https://room.example", pathname: "/room" };
+  const url = new URL(exactResultHref(pair, location));
+  assert.equal(url.hash, "#pr-record/result/review/result-c/compare/result-a");
+  assert.deepEqual(exactResultDestination(url), pair);
+  assert.deepEqual(agentSigninRecord(url), { roomId: pair.roomId, hash: url.hash });
+  assert.equal(exactResultHref({ ...pair, baselineCompletionEventId: "result-c" }, location), "");
+  for (const baseline of ["result-c", "%2Fresult-a", "constructor", "result-a/extra"]) {
+    assert.equal(exactResultDestination({
+      search: "?room=commons", hash: "#pr-record/result/review/result-c/compare/" + baseline,
+    }), null);
+  }
 });
 
 test("roomOpenHandoffHref keeps ?room= and #room/ so Open survives a dropped hash", () => {

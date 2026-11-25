@@ -273,8 +273,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const source = decisionLink.parentElement === historicalDecisionRow ? resultView?.historicalApproval?.source : resultView?.decisionSource;
       if (!usableText(resultView) || decisionLink.hidden || !source || isBusy()) { event.preventDefault(); return; }
-      const { roomId, workItemId, receipt } = resultView;
-      if (onOpenDecision(source.messageId, { roomId, workItemId, completionEventId: receipt.completionEventId })) event.preventDefault();
+      const { roomId, workItemId, receipt, compareFrom } = resultView;
+      if (onOpenDecision(source.messageId, { roomId, workItemId, completionEventId: receipt.completionEventId,
+        baselineCompletionEventId: compareFrom ?? undefined })) event.preventDefault();
     });
   }
   function resultStatus() {
@@ -364,7 +365,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       : selectedMessageId && !getState().messages.some(message => message.id === selectedMessageId && message.deletedAt));
     newer.hidden = !canOpenNewer;
     if (canOpenNewer) {
-      newer.href = exactResultHref({ ...view, completionEventId: latest.eventId });
+      newer.href = exactResultHref({ ...view, completionEventId: latest.eventId,
+        baselineCompletionEventId: view.receipt.completionEventId });
       newer.textContent = uiText("result.openCurrentVersion");
     } else newer.removeAttribute("href");
     const context = resultElement("result-work-context");
@@ -731,21 +733,14 @@ export function installResultReader({ client, getState, getSession, sameSession,
     return false;
   }
 
-  resultElement("result-current-version").addEventListener("click", event => {
-    if (!resultView || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    resultView.followingCurrent = event.currentTarget.href;
-  });
-  function openLinked({ roomId, workItemId, completionEventId }, { focusDecision = false } = {}) {
+  function openLinked({ roomId, workItemId, completionEventId, baselineCompletionEventId = null }, { focusDecision = false } = {}) {
     const session = getSession();
     if (!session || session.roomId !== roomId) return;
     if (resultView?.linked && resultView.roomId === roomId && resultView.workItemId === workItemId
-      && resultView.receipt.completionEventId === completionEventId) return;
-    const from = resultView;
-    const compareFrom = from?.roomId === roomId && usableText(from) && sameSession(from.generation, roomId, from.memberId)
-      && from.workItemId === workItemId && from.followingCurrent === location.href ? from.receipt.completionEventId : null;
+      && resultView.receipt.completionEventId === completionEventId && resultView.compareFrom === baselineCompletionEventId) return;
     forgetSelection();
-    openResult({ compareFrom, focusDecision, linked: true, focused: true, generation: client.generation, roomId,
-      memberId: session.member.id, workItemId, receipt: { completionEventId } }, "Result");
+    openResult({ compareFrom: baselineCompletionEventId, focusDecision, linked: true, focused: true,
+      generation: client.generation, roomId, memberId: session.member.id, workItemId, receipt: { completionEventId } }, "Result");
   }
   function closeLinked() {
     if (resultView?.linked) closeResult(false);
