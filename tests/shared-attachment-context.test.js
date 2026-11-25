@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { withAttachmentReferences, withAttachmentText } from "../client/shared-attachment-context.mjs";
 
+import { createRoomClient } from "../client/room-assistant-client.mjs";
+
 const file = (id, body = "hello", extra = {}) => {
   const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body);
   return { id, filename: "notes.txt", mediaType: "text/plain", byteLength: bytes.length,
@@ -49,4 +51,46 @@ test("revocation, changed bytes and non-UTF8 are explicit unread states", async 
   const invalid = await withAttachmentText(withAttachmentReferences(inputs, [binary]), async () => binary);
   assert.equal(invalid[0].attachments[0].reason, "unsupported_encoding");
   await assert.rejects(withAttachmentText(withAttachmentReferences(inputs, [f]), async () => { throw Object.assign(new Error("network"), { status: 503 }); }), /network/);
+});
+
+test("the assistant follows selected-message file pages before moving to the next batch", async () => {
+  const ids = Array.from({ length: 9 }, (_, i) => `message-${i}`);
+  const calls = [];
+  const client = createRoomClient({ origin: "https://example.invalid", roomId: "commons", fetchImpl: async url => {
+    const query = new URL(url).searchParams;
+    const batch = query.getAll("messageId");
+    const cursor = query.get("cursor");
+    calls.push([batch, cursor]);
+    const hasMore = calls.length === 1;
+    return Response.json({ contractVersion: 2, files: hasMore ? [] : [{ messageId: batch.at(-1) }],
+      coverage: { kind: "selected-messages", messageIds: batch, complete: !hasMore },
+      page: { hasMore, nextCursor: hasMore ? "second" : null } });
+  } });
+  assert.deepEqual(await client.files([...ids, ids[0]]), [{ messageId: ids[7] }, { messageId: ids[8] }]);
+  assert.deepEqual(calls, [[ids.slice(0, 8), null], [ids.slice(0, 8), "second"], [[ids[8]], null]]);
+});
+
+test("legacy attachment inventory is read once and filtered to all selected inputs", async () => {
+  let reads = 0;
+  const client = createRoomClient({ origin: "https://example.invalid", roomId: "commons", fetchImpl: async () => {
+    reads++;
+    return Response.json({ files: [{ messageId: "8" }, { messageId: "unselected" }] });
+  } });
+  assert.deepEqual(await client.files([]), []);
+  assert.deepEqual(await client.files(Array.from({ length: 9 }, (_, i) => String(i))), [{ messageId: "8" }]);
+  assert.equal(reads, 1);
+});
+
+test("a stale attachment cursor restarts the selection and drops partial results", async () => {
+  const cursors = [];
+  const client = createRoomClient({ origin: "https://example.invalid", roomId: "commons", fetchImpl: async url => {
+    cursors.push(new URL(url).searchParams.get("cursor"));
+    if (cursors.length === 2) return Response.json({ error: { code: "attachment_cursor_reset" } }, { status: 409 });
+    const partial = cursors.length === 1;
+    return Response.json({ contractVersion: 2, files: [{ messageId: "m", id: partial ? "old" : "new" }],
+      coverage: { kind: "selected-messages", messageIds: ["m"], complete: !partial },
+      page: { hasMore: partial, nextCursor: partial ? "stale" : null } });
+  } });
+  assert.deepEqual(await client.files(["m"]), [{ messageId: "m", id: "new" }]);
+  assert.deepEqual(cursors, [null, "stale", null]);
 });
