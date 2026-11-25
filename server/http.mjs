@@ -26,7 +26,7 @@ import { recordedReceiptsOptOut } from "./public-visibility.mjs";
 import { publicPageCsp } from "./public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { acceptPrefersHtml, compareIndexRedirect, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
-import { readConversation, readMessageContext } from "./conversation-sync.mjs";
+import { readConversation, readMessageContext, readVisibleMessageThread } from "./conversation-sync.mjs";
 import { readRoomSnapshot } from "./snapshot-window.mjs";
 import { readRoomAuthorityView } from "./room-authority-view.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
@@ -4867,18 +4867,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
           const context = readMessageContext(store, selected.token, roomId, threadMessageId, fence);
           return json(res, 200, {...context, thread:redactMessageTree(context.thread)});
         }
-        // RC-2026-09-19-070: a DM thread root is invisible to non-participants
-        // (404, like a missing message); DM replies inside a visible thread are dropped.
-        const result = store.readTransaction(() => {
-          const threadFloor = store.historyFloor(roomId, viewerId);
-          const threadVisible = message => messageInHistory(message, threadFloor)
-            && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
-          const thread = store.messageThread(selected.token, roomId, threadMessageId, fence);
-          if (!threadVisible(thread.thread)) reject(404, "message_not_found", "Message not found");
-          const stripDmReplies = message => ({ ...message,
-            replies: (message.replies ?? []).filter(threadVisible).map(stripDmReplies) });
-          return { ...thread, thread: redactMessageTree(stripDmReplies(thread.thread)) };
-        });
+        const result = readVisibleMessageThread(store, selected.token, roomId, threadMessageId, viewerId, fence);
         return json(res, 200, result);
       }
       if (!route && req.method === "GET") {
@@ -5291,11 +5280,12 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       }
       if (route === "work-discussion" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "consistent", "resumeToken", "auth"].includes(key) || params.getAll(key).length !== 1)
+        if ([...params.keys()].some(key => !["workItemId", "completionEventId", "cursor", "since", "limit", "consistent", "resumeToken", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || params.has("completionEventId") && (!validId(params.get("completionEventId")) || ["cursor", "since", "limit", "consistent", "resumeToken"].some(key => params.has(key)))
           || params.has("consistent") && params.get("consistent") !== "true"
           || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Use workItemId (not taskId), limit from 1 to 50, and either cursor, resumeToken or legacy since. consistent=true starts a durable read. Supply each parameter once; since must be a non-negative integer.");
         const discussion = store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
-          cursor: params.get("cursor"), consistent: params.get("consistent") === "true", resumeToken: params.get("resumeToken"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
+          completionEventId: params.get("completionEventId"), cursor: params.get("cursor"), consistent: params.get("consistent") === "true", resumeToken: params.get("resumeToken"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}), expectedSessionBinding: fence
         });
         // RC-2026-09-19-070: DM visibility is enforced inside

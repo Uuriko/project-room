@@ -9,7 +9,7 @@ function fixture() {
     client: { workResult: () => new Promise(resolve => pending.push(resolve)) },
     esc: text => String(text).replaceAll("<", "&lt;").replaceAll(">", "&gt;") });
   const respond = (index, body = "old") => pending[index]({ result: { receipt: { eventId: "previous" }, text: { messageId: "old-message", body } } });
-  const load = () => controller.load("work", "previous", { messageId: "current", body: "new" }, box, () => true);
+  const load = (body = "new") => controller.load("work", "previous", { messageId: "current", body }, box, () => true);
   return { controller, state, box, respond, load, pending };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -64,4 +64,57 @@ test("prior release links require the pinned evidence and a selected Room messag
   f.load(); f.pending[2](previous); await settle();
   assert.doesNotMatch(f.box.innerHTML, /Previous release checks/);
   assert.match(f.box.innerHTML, /Resubmitted result/);
+});
+
+test("long results show the late correction with local context", async () => {
+  const f = fixture(), lines = Array.from({ length: 520 }, (_, i) => "Section " + i);
+  const before = lines.join("\n");
+  lines[511] = "Updated review decision";
+  f.load(lines.join("\n")); f.respond(0, before); await settle();
+  assert.match(f.box.innerHTML, /1 lines removed, 1 added/);
+  assert.match(f.box.innerHTML, /- Section 511/);
+  assert.match(f.box.innerHTML, /\+ Updated review decision/);
+  assert.match(f.box.innerHTML, /Section 510/);
+  assert.doesNotMatch(f.box.innerHTML, /Section 100|more patch rows/);
+});
+
+test("newline-only edits remain visible and a large rewrite stays bounded", async () => {
+  const f = fixture();
+  f.load("final line\n"); f.respond(0, "final line"); await settle();
+  assert.match(f.box.innerHTML, /Final line break added/);
+  assert.match(f.box.innerHTML, /Previous approval never carries over/);
+  assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)|No text changes/);
+  f.load("a\n\nend"); f.respond(1, "a\nend"); await settle();
+  assert.match(f.box.innerHTML, /0 lines removed, 1 added/);
+  f.load("new\n".repeat(600)); f.respond(2, "old\n".repeat(600)); await settle();
+  assert.match(f.box.innerHTML, /Too many changed lines/);
+});
+
+test("exact prose comparisons explain a changed file ending once", async () => {
+  const f = fixture();
+  f.load("New proposal"); f.respond(0, "Old proposal"); await settle();
+  assert.match(f.box.innerHTML, /- Old proposal/);
+  assert.match(f.box.innerHTML, /\+ New proposal/);
+  assert.doesNotMatch(f.box.innerHTML, /No newline at end of file|Final line break/);
+
+  f.load("New proposal\nClosing line"); f.respond(1, "Old proposal\nClosing line\n"); await settle();
+  assert.equal(f.box.innerHTML.match(/Final line break removed/g)?.length, 1);
+  assert.match(f.box.innerHTML, /1 lines removed, 1 added/);
+  assert.doesNotMatch(f.box.innerHTML, /[+-] Closing line|No newline at end of file/);
+
+  f.load("One line\r\n"); f.respond(2, "One line"); await settle();
+  assert.match(f.box.innerHTML, /Final line break added/);
+  assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)/);
+
+  f.load("One line\n\n"); f.respond(3, "One line\n"); await settle();
+  assert.match(f.box.innerHTML, /0 lines removed, 1 added/);
+  assert.doesNotMatch(f.box.innerHTML, /Final line break/);
+});
+
+test("a line-ending conversion explains the change without showing identical wording as edited", async () => {
+  const f = fixture();
+  f.load("One line\r\nAnother line\r\n"); f.respond(0, "One line\nAnother line\n"); await settle();
+  assert.match(f.box.innerHTML, /Line-ending style changed/);
+  assert.match(f.box.innerHTML, /Previous approval never carries over/);
+  assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)|No text changes/);
 });

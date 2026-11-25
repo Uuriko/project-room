@@ -101,10 +101,14 @@ response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | What it means | Retry | Recovery |
 | --- | --- | --- | --- | --- |
+| `independent_preview_viewer_required` | 403 | Use the named independent viewer’s Room connection. | no | Have the named viewer open the exact preview using their own saved Room connection. |
+| `invalid_pr_attachment` | 422 | Supply the documented exact PR attachment fields. | fix+resend | Use the Work Thread ID and revision, pull request URL, expected head and operation ID. |
+| `invalid_preview_selection` | 422 | Choose an exact Preview link for this Room. | fix+resend | Copy the file link from the intended preview revision in this Room. |
 | `invalid_receiver_scope` | 422 | Receiver scope is missing, malformed, or exceeds its bounds | fix+resend | Use the connected receiver's configured requester and work identifiers on the existing scoped stream. |
 | `invalid_receiver_state` | 422 | A waiting report requires a valid receiver scope | fix+resend | Advertise waiting only with the valid scope of the receiving stream. |
 | `invalid_operation_selection` | 422 | Provide one operation ID without an event cursor | fix+resend | Check the receipt using the original operation ID alone. Preserve the original write input if its outcome is unknown. |
 | `invalid_reconnect` | 422 | Choose the precise existing seat and pending connector request | fix+resend | Read the pending pairing and select the saved room seat with its exact client and scopes. |
+| `invalid_refresh_head` | 422 | Supply an exact head for refresh. | fix+resend | Supply the full 40-character lowercase hexadecimal commit SHA as refreshHead. |
 | `reconnect_requires_owner` | 403 | Use the existing Room owner credential | no | Ask the current owner to pair the intended seat. |
 | `reconnect_unavailable` | 409 | Restart the connector to obtain a pending pairing | re-read | Restart the intended connector and read its new pending pairing before trying again. |
 | `reconnect_scope_mismatch` | 409 | The selected client or scopes changed | re-read | Compare the current pairing’s client and scopes with the intended connector before proceeding. |
@@ -127,6 +131,7 @@ response's own `hint`/`next` when it names something more specific.
 | `request_not_found` | 404 | No reply request addressed to this recipient | no | Confirm the exact request and recipient through the current room access. |
 | `request_context_changed` | 409 | Read the current addressed request before acknowledging or reporting progress | re-read | Use the updated request context. For an uncertain prior write, look up its operation receipt first. |
 | `request_already_acknowledged` | 409 | The request already has recipient progress | re-read | Read current progress or look up the original operation receipt. Do not send another first acknowledgment. |
+| `static_review_binding` | 409 | This PR already uses the Room’s static review lane. | no | Continue the review through the existing configured PR binding. |
 | `work_approver_unknown_member` | 422 | Approver must be an active member of this room | fix+resend | Fix the refused input and resend. |
 | `work_approval_pending` | 422 | Work is on hold until the named approver approves the step | no | Wait for the approver to approve; do not retry the gated move until then. |
 | `work_delegate_unknown_member` | 422 | Delegate is not an active member of this room | fix+resend | Fix the refused input and resend. |
@@ -1032,8 +1037,8 @@ response's own `hint`/`next` when it names something more specific.
 | `restore_refused_nonempty` | 409 | Restore refuses a store that already holds rooms | no | Operator only. Restore never overwrites live data. Restore into a fresh, empty Durable Object. |
 | `restore_verification_failed` | 422 | The restored data did not match the export's watermark or trailer, or a torn export was refused | no | Operator only. Nothing was written (rolled back). Re-take the export and retry. |
 | `result_draft_invalid` | 422 | The draft failed the requested UTF-16 size or text check; no new message was posted. | fix+resend | Use detail.codeUnits, maxCodeUnits, and targetCodeUnits when present. Shorten the draft while retaining required checks, or repair invalid text. Reconcile any earlier uncertain post before changing input. |
-| `result_not_found` | 404 | Completion not found on this work; no other result was substituted | re-list | Re-list the resource and use a current id. Do not guess ids. |
-| `result_unavailable` | 422 | Exact text evidence is unavailable; no other result was substituted | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `result_not_found` | 404 | Completion not found on this work; no other result was substituted | no | Ask the sender to copy the link to the intended result version again. |
+| `result_unavailable` | 422 | Exact text evidence is unavailable; no other result was substituted | no | Ask the sender to share the intended result version somewhere you can read it. |
 | `review_final` | 409 | Review decision is final | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `review_forbidden` | 403 | Current non-guest room membership required | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `review_not_found` | 404 | Contribution not found in this room | re-list | Re-list the resource and use a current id. Do not guess ids. |

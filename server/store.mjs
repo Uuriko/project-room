@@ -25,7 +25,7 @@ import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems, read
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
 import { assertAssignmentAvailable } from "./agent-pause.mjs";
-import { readCurrentMessageThread } from './conversation-sync.mjs';
+import { readCurrentMessageThread, readVisibleMessageThread } from './conversation-sync.mjs';
 import { selectedMessageRecord, messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput, invokeFromPlainPost } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -6742,10 +6742,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // privacy, history floor and evidence reads; byte and source bounds remain unchanged.
     }, {maxRecords:512}));
   }
-  workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, consistent = false, resumeToken = null, expectedSessionBinding = null } = {}) {
+  workDiscussion(token, roomId, workItemId, { completionEventId = null, cursor = null, since, limit, consistent = false, resumeToken = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");
+      if (completionEventId !== null) {
+        if (!validId(completionEventId) || cursor !== null || since !== undefined || limit !== undefined || consistent || resumeToken !== null)
+          fail(422, "invalid_discussion", "Select a result completion separately from discussion pages.");
+        const selected = this.workResult(token, roomId, workItemId, { completionEventId, expectedSessionBinding });
+        const source = selected.result?.text;
+        if (selected.result?.kind !== "room_text" || typeof source?.body !== "string")
+          fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted");
+        const { thread, contentTrust } = readVisibleMessageThread(this, token, roomId, source.messageId, auth.member.id, expectedSessionBinding);
+        if (thread.deletedAt || thread.body !== source.body || thread.workItemId !== workItemId || thread.authorId !== source.postedById)
+          fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted");
+        const discussion = { messageId: source.messageId, replies: thread.replies };
+        if (Buffer.byteLength(JSON.stringify(discussion)) > 65536)
+          fail(413, "current_thread_too_large", "Selected thread exceeds bounded context; request a smaller selected message");
+        return { contractVersion: 1, roomId, workItemId, completionEventId, discussion, contentTrust,
+          viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+          viewerSessionBinding: auth.sessionBinding ?? null, viewerSessionRevision: auth.sessionRevision ?? null };
+      }
       const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       assertSelectedWorkVisible(this, roomId, workItemId, room.state.workItems[workItemId], auth.member.id);

@@ -948,6 +948,17 @@ export class RoomAgentClient {
     return result;
   }
   async workDiscussion(workItemId, options = {}) {
+    if (options?.completionEventId !== undefined) {
+      const { completionEventId, signal } = options;
+      if (!validId(workItemId) || !validId(completionEventId) || Object.keys(options).some(key => !["completionEventId", "signal"].includes(key)))
+        throw new Error("Select a result completion separately from discussion pages.");
+      const query = new URLSearchParams({ workItemId, completionEventId });
+      const result = await this.#request(`/work-discussion?${query}`, undefined, signal);
+      if (result?.workItemId !== workItemId || result.completionEventId !== completionEventId
+          || !validId(result.discussion?.messageId) || !Array.isArray(result.discussion.replies))
+        throw new RoomClientError(200, "invalid_response", "Discussion does not match the selected result");
+      return result;
+    }
     if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["since", "cursor", "limit", "signal", "consistent", "resumeToken"].includes(key))) throw new Error("Use discussion checkpoint, cursor, limit and signal only");
     const { since, cursor = null, limit = 20, signal, consistent = false, resumeToken = null } = options, integer = n => Number.isSafeInteger(n) && n >= 0;
     if (typeof consistent !== "boolean" || consistent && since !== undefined

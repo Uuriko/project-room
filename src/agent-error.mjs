@@ -37,6 +37,16 @@ const BOND_DM_DATA_SHAPES = {
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
 export const ERROR_REGISTRY = {
+  result_not_found: {
+    status: "action_required", hint: uiText("agentError.result_not_found.recovery"),
+    next: [command(uiText("agentError.result_not_found.recovery"))],
+    catalog: { http: 404, retry: "no", recovery: uiText("agentError.result_not_found.recovery") }
+  },
+  result_unavailable: {
+    status: "action_required", hint: uiText("agentError.result_unavailable.recovery"),
+    next: [command(uiText("agentError.result_unavailable.recovery"))],
+    catalog: { http: 422, retry: "no", recovery: uiText("agentError.result_unavailable.recovery") }
+  },
   review_runtime_stale: {
     status: "action_required", hint: uiText("agentError.review_runtime_stale.hint"),
     next: [{ command: uiText("agentError.review_runtime_stale.recovery") }],
@@ -561,6 +571,7 @@ export function errorRegistryAx(code, { httpStatus = 0, message = "", roomId, wo
 // covered by axFamilyRecovery() below; tests/errors-catalog-drift.test.js
 // fails if a catalogued code loses either kind of coverage.
 const AX_NAMED_RECOVERIES = {
+  static_review_binding: ["This pull request already has a configured Room review.", "Continue the review through the existing configured PR binding."],
   invalid_preview: ["Room refused the preview input or link.", "Read the current publication or recopy the exact link before retrying."],
   preview_audience_changed: ["An existing preview keeps its sharing audience.", "Publish a new preview with the intended audience and use its new link."],
   preview_changed: ["The requested preview revision is stale.", "Read the current revision before editing or removing it, or explicitly open the latest preview."],

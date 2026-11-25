@@ -1,15 +1,16 @@
 import { exactResultHref } from "./room-deep-link.js";
 import { clipboard } from "./clipboard.js";
-import { canReplyToResult } from "./result-availability.js";
+import { canReplyToResult, exactResultRecovery } from "./result-availability.js";
 import { uiText } from "./strings.js";
 import { WORK_STATES as S, isRoomArchived } from "./events.js";
 import { matchesReceipt, nextWorkStep, workActions, reviewRuntimeLabel } from "./workflow.js";
+import { previousReviewText } from "./result-comparison.js";
 import { currentResult } from "./work-selectors.js";
 
 // Owns only the pinned reader view. Session, composer, and work mutations stay
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
-  isBusy, canDiscuss, memberLabel, workRecord, focusRecord,
+  isBusy, canDiscuss, discussionMessage, loadDiscussion, memberLabel, workRecord, focusRecord,
   clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null, pointerSelection = null;
@@ -80,7 +81,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
   function showCorrection(correction, pending = false) {
     resultElement("result-correction-title").textContent = uiText(pending ? "result.pendingCorrection" : "result.previousReview");
-    const text = typeof correction?.summary === "string" ? correction.summary : "";
+    const text = pending ? correction?.summary ?? "" : previousReviewText(correction);
     resultElement("result-correction-summary").textContent = text;
     resultElement("result-correction").hidden = !text;
   }
@@ -119,12 +120,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
       || isRoomArchived(getState())) return null;
     // The ordinary thread composer does not inherit a DM audience.
-    return getState().messages.find(message => canReplyToResult(getState(), message) && message.id === view.textMessageId && message.workItemId === view.workItemId
-      && message.body === view.body);
+    const message = discussionMessage(view.textMessageId);
+    return canReplyToResult(getState(), message) && message.workItemId === view.workItemId
+      && message.body === view.body ? message : null;
   }
   function needsConversation(view) {
     return Boolean(usableText(view) && !isRoomArchived(getState()) && client.owesHistory
-      && !getState().messages.some(message => message.id === view.textMessageId));
+      && !discussionMessage(view.textMessageId));
   }
   // During a release, a cached page may lack the new reader controls.
   function selectedWorkAction(view, item) {
@@ -259,12 +261,19 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const item = getState().workItems[view.workItemId];
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
       && view.pendingCorrection.verificationEventId === item?.blocker?.eventId ? view.pendingCorrection : null;
+    const correctionSource = view.previousCorrection?.sourceMessageId;
+    if (correctionSource && getState().messages.some(message => message.id === correctionSource && message.deletedAt)) {
+      view.previousCorrection = null;
+    }
     showCorrection(view.withdrawn ? null : pending ?? view.previousCorrection, Boolean(pending));
     const earlier = item ? !matchesReceipt(view.receipt, item.receipt) || (!pending && item.state !== S.COMPLETED) || Boolean(item.supersededBy)
       : view.selectionStatus === "historical";
-    resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
+    resultElement("result-status").textContent = view.refusalHint ?? (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
+    if (usableText(view) && view.producerCredit) {
+      resultElement("result-status").append(uiText("result.creditSuffix", { name: view.producerCredit }));
+    }
     if (view.releaseChecks && getState().messages.some(message => (message.deletedAt || message.editedAt)
       && (message.id === view.releaseChecks.messageId || view.releaseChecks.checks.some(check => check.evidenceMessageId === message.id || check.reportMessageId === message.id)))) {
       view.releaseChecks = null;
@@ -274,6 +283,15 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const runtime = reviewRuntimeLabel(view.reviewRuntime?.status, view.reviewRuntime?.webhook);
       if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
     }
+    const newer = resultElement("result-current-version");
+    const latest = item?.receipt;
+    const canOpenNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
+      && latest?.nativeText && !latest.nativeText.withdrawnAt && latest.eventId !== view.receipt.completionEventId;
+    newer.hidden = !canOpenNewer;
+    if (canOpenNewer) {
+      newer.href = exactResultHref({ ...view, completionEventId: latest.eventId });
+      newer.textContent = uiText("result.openCurrentVersion");
+    } else newer.removeAttribute("href");
     const context = resultElement("result-work-context");
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
     if (context) context.hidden = !current || !item;
@@ -407,9 +425,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.resolving = true; resultStatus();
       resultElement("result-use-status").textContent = uiText("result.loadingConversation");
       try {
-        await client.refresh(null, { fill: true });
-        // The room read is a window: an older result's message arrives through older pages.
-        if (needsConversation(view) && typeof client.pageOlder === "function") await client.pageOlder();
+        await loadDiscussion(view.textMessageId);
       } catch {
         if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.conversationUnavailable");
         return;
@@ -452,7 +468,11 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
       }
-      view.reportedById = value.result.receipt.reportedById;
+      const receipt = value.result.receipt;
+      view.reportedById = receipt.reportedById;
+      view.producerCredit = receipt.producerAttribution === "external-reported" ? receipt.externalProducer
+        : receipt.producerAttribution === "reported" && receipt.producerId && receipt.producerId !== receipt.reportedById
+          ? memberLabel(receipt.producerId) : null;
       view.reviewRuntime = value.reviewRuntime;
       view.previousCompletionEventId = value.result.receipt.nativeText?.previousCompletionEventId;
       // Text taken out of the room is served as an absence, so say so rather
@@ -489,7 +509,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultStatus();
       if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
         resultElement("result-diff"), () => owns() && !view.withdrawn);
-    }).catch(() => { if (owns()) { view.error = true; view.retrying = false; resultStatus(); } });
+    }).catch(error => {
+      if (!owns()) return;
+      view.refusalHint = exactResultRecovery(error?.status, error?.code);
+      view.error = !view.refusalHint;
+      view.retrying = false;
+      resultStatus();
+    });
   }
   resultElement("result-retry").addEventListener("click", () => {
     const view = resultView;

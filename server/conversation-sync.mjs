@@ -6,6 +6,7 @@ import { hydrateRecordText } from "./projection-at-rest.mjs"; // Phase 1a
 import { ServiceError } from "./service-error.mjs";
 import { validId, DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { markIfOther, withContentTrust, stampThread } from "./content-trust.mjs";
+import { redactMessageTree } from "./redact-read.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 import { archiveMarker, THREAD_VISIBILITY_INDEXES } from "./messages-store.mjs";
 import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
@@ -332,6 +333,19 @@ export function readMessageContext(store, token, roomId, messageId, expectedSess
 
 // Selected current subtree only. Refuse oversized families rather than read a
 // whole projection or silently give an executing agent incomplete context.
+// Thread responses share the same viewer filter and edit-history redaction on both storage formats.
+export function readVisibleMessageThread(store, token, roomId, messageId, viewerId, binding = null) {
+  return store.readTransaction(() => {
+    const floor = store.historyFloor(roomId, viewerId);
+    const visible = message => messageInHistory(message, floor)
+      && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
+    const result = store.messageThread(token, roomId, messageId, binding);
+    if (!visible(result.thread)) fail(404, "message_not_found", "Message not found");
+    const strip = message => ({ ...message, replies: (message.replies ?? []).filter(visible).map(strip) });
+    return { ...result, thread: redactMessageTree(strip(result.thread)) };
+  });
+}
+
 export function readCurrentMessageThread(store, token, roomId, messageId, expectedSessionBinding = null) {
   if (!isCurrentRoom(store.db, roomId)) return undefined;
   return store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {

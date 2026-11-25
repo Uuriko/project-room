@@ -1177,7 +1177,7 @@ summary { overflow-wrap: anywhere; }
 .work-changes-list ul { margin: 0; padding-left: 1.1rem; }
 .work-changes-list li { margin: 0.15rem 0; }
 .result-diff { margin: 0.4rem 0 0; padding: 0.5rem 0.7rem; border: 1px solid var(--border, rgba(127,127,127,0.35)); border-radius: 6px; overflow-x: auto; font-size: 0.9em; }
-.result-diff span { display: block; white-space: pre-wrap; }
+.result-diff span { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
 .result-diff .diff-added { color: var(--green); background: rgb(79 208 155 / 12%); }
 .result-diff .diff-removed { color: var(--red); background: rgb(255 123 123 / 12%); text-decoration: line-through; }
 
