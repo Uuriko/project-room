@@ -66,7 +66,7 @@ function withOverdueActions(db, result, roomId) {
     overdueActions.push({
       requestMessageId: request.id,
       guidance: acknowledgmentMissing
-        ? "No acknowledgment yet. Read the request and check with the recipient before reassigning it."
+        ? "No acknowledgment yet. Read the request to check its current status. Delivery may still be in progress."
         : startUnconfirmed
           ? "Acknowledged, but no work start reported. Read the request and check with the recipient before reassigning it."
           : incoming
