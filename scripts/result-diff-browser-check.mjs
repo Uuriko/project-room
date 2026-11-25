@@ -4,6 +4,7 @@ import { openCatchUp, openWorkFromSearch, clickWorkAction } from "./room-chrome.
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
+import { RoomAgentClient } from "../client/room-agent.mjs";
 import { rmSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "playwright";
@@ -361,6 +362,52 @@ test("a phone reviewer can identify a document reference without losing the subm
   await reviewer.waitForFunction(() => document.querySelector("#message-input").value === "");
   const reply = f.store.room("commons").state.messages.find(message => message.body === "Please share the deadline excerpt from the project brief.");
   assert.equal(reply?.replyToId, f.first.event.data.evidenceMessageId);
+
+  const producer = new RoomAgentClient({ origin: f.origin, roomId: "commons", memberId: "producer", token: f.keys.producer });
+  const { discussion } = await producer.workDiscussion(f.item().id, { completionEventId: f.first.event.id });
+  assert.equal(discussion.replies.find(message => message.id === reply.id)?.body, reply.body);
+  assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
+
+  f.store.dmConsents.request("commons", "human-checker", "producer", "Review follow-up");
+  f.store.dmConsents.decide("commons", "producer", "human-checker", "approve");
+  const requestId = randomUUID(), question = "Can you send the deadline excerpt for this result?\n" + original;
+  f.send("human-checker", T.MESSAGE_POSTED, { messageId: requestId, toMemberId: "producer", requestKind: "reply",
+    replyToId: reply.id, workItemId: f.item().id, body: question });
+  const pickup = await producer.orient({ focus: "needs_me" });
+  assert.ok(pickup.replyRequests.some(request => request.id === requestId));
+  const request = await producer.replyContext(requestId);
+  assert.equal(request.viewerId, "producer");
+  assert.equal(request.request.workItemId, f.item().id);
+  assert.equal(request.page.items.find(item => item.kind === "opened")?.message.body, question);
+  assert.equal(f.item().receipt.eventId, f.first.event.id);
+  assert.equal(f.item().verification ?? null, null);
+});
+
+test("direct review and decision explain the external reference in pinned text", { timeout: 30000 }, async t => {
+  const body = "Result A\nOwner: Maya\nBrief: https://docs.google.com/document/d/review-fixture/edit";
+  const f = await setup(t, 390, { firstBody: body });
+  const reviewer = await f.login("human-checker");
+  const open = (page, action) => openWorkFromSearch(page, "revision-journey", "Revise a short result")
+    .then(work => clickWorkAction(work, action));
+  const notice = page => page.locator("#action-text-origin").getByText(/External references may change or require access/);
+  await open(reviewer, "verify");
+  await reviewer.locator("#action-text-body").getByText(/Owner: Maya/).waitFor();
+  if (process.env.ROOM_REFERENCE_SCREENSHOT) await reviewer.screenshot({ path: process.env.ROOM_REFERENCE_SCREENSHOT });
+  await notice(reviewer).waitFor();
+  assert.equal(await reviewer.locator("#action-text-body").textContent(), body);
+  await review(reviewer, "pass", "Checked the submitted owner; the brief was not needed.");
+  assert.equal(f.item().verification.completionEventId, f.first.event.id);
+
+  const owner = await f.login("owner");
+  await open(owner, "decide");
+  await notice(owner).waitFor();
+  assert.equal(await owner.locator("#action-text-body").textContent(), body);
+  const deniedOwner = await f.login("owner");
+  await deniedOwner.route("**/work-result?**", route => route.fulfill({ status: 403, json: { error: { code: "work_private" } } }));
+  await open(deniedOwner, "decide");
+  await deniedOwner.locator("#action-text-origin").getByText("Text unavailable").waitFor();
+  assert.equal(await notice(deniedOwner).count(), 0);
+  assert.equal(await deniedOwner.locator("#action-text-body").textContent(), "");
 });
 
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {

@@ -377,6 +377,11 @@ you are authorized to share and the source link. Room preserves the submitted
 text. The document provider controls the link's content and access. If the
 review depends on a passage you cannot open, ask the contributor for the
 specific excerpt in the existing result discussion.
+An ordinary reply preserves that context. When the contributor's agent needs
+to pick up an explicit question, use `room_request_reply` from the authorized
+connection and link it to the result discussion. The recipient can find the open
+request through their own pickup. Use a review finding when the submission
+itself needs correction.
 
 ### Self-host connection prompt
 
