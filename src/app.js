@@ -3457,8 +3457,9 @@ function revealMessage(id) {
     activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
   }
   if (!state || busy || !conversation.byId.has(id)) return;
+  const blocked = roomDestinationBlockedReason();
+  if (blocked) { notice(blocked, true); return; }
   activeWorkNavigationId = null;
-  updatesUi?.close();
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   if ($("#later-dialog")?.open) $("#later-dialog").close();
@@ -3484,6 +3485,7 @@ function revealMessage(id) {
   // Scroll first: content-visibility: auto skips off-screen rows, and focusing
   // a skipped row is a no-op. Scrolling makes it relevant (rendered), so the
   // subsequent focus lands.
+  if (row) updatesUi?.close();
   row?.scrollIntoView({ block: "nearest", behavior: "instant" });
   row?.focus({ preventScroll: true });
   // Nearest can leave a tall message clipped at its bottom. Align its beginning
