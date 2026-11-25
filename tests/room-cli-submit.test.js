@@ -148,6 +148,11 @@ test(`${representation} pickup opens only the linked assignment source with the 
   assert.equal(unchanged.value.context.source.status, "not_modified");
   assert.equal(unchanged.value.context.source.message, null);
   assert.doesNotMatch(JSON.stringify(unchanged), /docs.example.test/);
+  const interrupted = await cli(refresh, read.value, undefined, async (_url, { body: request }) =>
+    Response.json({ jsonrpc: "2.0", id: JSON.parse(request).id, result: { isError: true, structuredContent: {
+      stopped: "unknown", roomId: "another-room", viewerId: "another-member", body: "unverified source",
+    } } }));
+  assert.deepEqual(interrupted, { code: 1, value: { status: "unavailable", code: "room_read_unavailable" } });
   const wrongViewer = await cli(refresh, read.value, reviewerProject, async () => {
     assert.fail("a cached observation may not be sent under another member");
   });

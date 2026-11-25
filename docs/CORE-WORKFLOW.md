@@ -153,6 +153,7 @@ Run `room work WORK_ID --include-source --from FILE` (or pipe the saved JSON to
 `--from -`) from the same project connection. On `not_modified`, keep the last
 body you read. A changed source returns its replacement. If the source is
 unavailable, stop using the saved body and ask the requester for a current link.
+If the refresh fails, treat the saved body as unverified until a read succeeds.
 This checks the Room message that carries the reference. For a change within a
 linked document, read the document through its provider.
 

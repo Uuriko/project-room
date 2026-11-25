@@ -182,13 +182,14 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
     }
     const value = reply.value;
     if (reply.unknown) {
+      if (!write) return report({ status: "unavailable", code: "room_read_unavailable" }, 1);
       const recovered = await readAnswerRecovery();
       if (recovered) return report({ value: recovered }, 0);
-    }
-    if (reply.unknown) return report({ status: "unknown", ...(value ? { begin: value } : {}),
-      ...(write ? { contractVersion: 1, ...recovery,
+      return report({ status: "unknown", ...(action === "begin" && value ? { begin: value } : {}),
+        contractVersion: 1, ...recovery,
         ...(action === "begin" ? receiptHint(value?.resume?.requestId) : {}),
-        ...(selectedConnection ? { nextRead: next } : {}) } : {}) }, 1);
+        ...(selectedConnection ? { nextRead: next } : {}) }, 1);
+    }
     if (!validate(value, config)) throw new Error("Unmatched Room result");
     if (["room_read_work", "room_read_request", "room_read_result"].includes(tool)) {
       const basis = selectedBasis(value, config);
