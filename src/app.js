@@ -8067,18 +8067,18 @@ function briefEventTarget(event) {
 function describeBriefEvent({ sequence, event }) {
   const actor = esc(memberLabel(event.actorId));
   const type = esc(humanize(event.type));
+  const workTitle = event.data.withheld ? "" : (state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "");
   const actorRole = event.type === T.WORK_COMPLETED ? `reporter ${actor}` : actor;
   let detail = "";
   if (event.type === T.MESSAGE_POSTED) detail = esc((event.data.body || "").slice(0, 80));
-  else if (event.type === T.VERIFICATION_RECORDED) detail = esc(`${event.data.result} · ${(event.data.summary || "").slice(0, 60)}`);
-  else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc(humanize(event.data.decision));
+  else if (event.type === T.VERIFICATION_RECORDED) detail = esc([workTitle, event.data.result, event.data.summary?.slice(0, 60)].filter(Boolean).join(" · "));
+  else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc([workTitle, humanize(event.data.decision)].filter(Boolean).join(" · "));
   else if (event.type === T.WORK_COMPLETED) {
-    const title = state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "";
     const producer = event.data.producerId ? memberLabel(event.data.producerId)
       : event.data.externalProducer ? `${event.data.externalProducer} · outside room, reported` : "unknown — not reported";
-    detail = esc(`${title} · producer ${producer}`);
+    detail = esc([workTitle, `producer ${producer}`].filter(Boolean).join(" · "));
   }
-  else if (event.type?.startsWith("work.")) detail = esc(state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "");
+  else if (event.type?.startsWith("work.")) detail = esc(workTitle);
   else if (event.type === "land.updated") detail = esc(`#${event.data.pr ?? ""} ${(event.data.changed || []).join(", ")}`.trim());
   const target = briefEventTarget(event);
   const href = esc(recordHref(target.kind, target.id));

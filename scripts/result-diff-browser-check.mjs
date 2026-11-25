@@ -1,6 +1,6 @@
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
-import { openWorkFromSearch, clickWorkAction } from "./room-chrome.mjs";
+import { openCatchUp, openWorkFromSearch, clickWorkAction } from "./room-chrome.mjs";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
@@ -745,4 +745,46 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
   await guest.getByText("Ask the sender to share the intended result version somewhere you can read it.", { exact: true }).waitFor();
   assert.equal(await guest.locator("#result-retry").isVisible(), false);
   assert.equal(await guest.locator("#result-body").textContent(), "");
+});
+
+test("catch-up labels each review with its visible work and preserves withheld history", async t => {
+  const f = await setup(t, 390);
+  const reviewIds = [];
+  for (const workItemId of ["revision-journey", "calm-result"]) {
+    const work = f.store.room("commons").state.workItems[workItemId];
+    const verified = f.send("human-checker", T.VERIFICATION_RECORDED, {
+      workItemId, expectedRevision: work.revision, completionEventId: work.receipt.eventId,
+      evidenceVersion: work.receipt.evidenceVersion, result: "pass", summary: "Checked the revision",
+    });
+    reviewIds.push(verified.event.id);
+  }
+  const work = f.item();
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "catchup-reason", body: "Approved the revision." });
+  const decision = f.send("owner", T.OWNER_DECISION_RECORDED, {
+    workItemId: work.id, expectedRevision: work.revision, completionEventId: work.receipt.eventId,
+    evidenceVersion: work.receipt.evidenceVersion, decision: "approved", reason: "Approved the revision.",
+    sourceMessageId: "catchup-reason",
+  });
+  f.store.dmConsents.request("commons", "owner", "producer", "fixture");
+  f.store.dmConsents.decide("commons", "producer", "owner", "approve");
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "private-review", toMemberId: "producer",
+    workItemId: work.id, requestKind: "reply", body: "Continue in private" });
+  for (const actor of ["owner", "guest"]) {
+    const page = await f.login(actor);
+    await openCatchUp(page);
+    const row = id => page.locator(`[data-brief-key="history:${id}"]`);
+    await page.waitForFunction(() => Boolean(document.querySelector("#rb-ack-button").dataset.horizon));
+    while (!await row(decision.event.id).count() && await page.locator("#rb-more-button").isVisible()) {
+      await page.locator("#rb-more-button").click();
+      await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+    }
+    const visible = actor === "owner";
+    assert.equal(await row(reviewIds[0]).locator(".rb-detail").textContent(),
+      visible ? "Revise a short result · pass · Checked the revision" : "pass");
+    assert.equal(await row(reviewIds[1]).locator(".rb-detail").textContent(), "A first result · pass · Checked the revision");
+    assert.equal(await row(decision.event.id).locator(".rb-detail").textContent(),
+      visible ? "Revise a short result · approved" : "approved");
+    assert.equal(await row(decision.event.id).getAttribute("data-open-work"), work.id);
+    await page.context().close();
+  }
 });
