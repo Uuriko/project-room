@@ -130,7 +130,7 @@
     "src/friend-bond.js": "sha256:585f2a15ab46ca2319a8546a5c7e674804940bb4edf64e05a50b2bdcade36c09",
     "src/front-door.js": "sha256:f0c3bb0288e0131bb3d9e987fda9e13438ee4750fcb81f71a4861c49a9a3a8c3",
     "src/google-room-return.js": "sha256:0629e0e3eb4e0fc8095b99512d513d05bfea92cf8379ca6464d9f5fd04c93a4f",
-    "src/handoff-envelope-ui.js": "sha256:9f7c44a5ad717afe1059c6f84036b0b55fff1f4a59ed0525f805b29c8b43dfec",
+    "src/handoff-envelope-ui.js": "sha256:3feec1bcdbd87040ecb533f67dbc45f24cb4a7963d28062dbfd01099aacecc0e",
     "src/help-offers.js": "sha256:f9bbd17f0d7a7d18453fdc7da11cd7f0a0166123860692bbcbc9bda02d680420",
     "src/html-escape.js": "sha256:c11803b39ce9bb53a49d7bad6e7f520b556d8a1b2247c24060392dc6e4dd90ca",
     "src/human-experience.css": "sha256:38a6f73f00046e957874e0c6d8bfdfca73e2fa89c69b0cb52435db0afce4bfe8",
