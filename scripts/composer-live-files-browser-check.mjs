@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
+import { createRoomClient } from "../client/room-assistant-client.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
@@ -297,5 +299,119 @@ for (const departure of ["logout", "revocation"]) {
     assert.equal(await page.locator("#message-input").inputValue(), "Replacement account draft");
     assert.equal(await page.locator("#composer-status").textContent(), status);
     assert.deepEqual(errors, []);
+  });
+}
+
+for (const storage of ["legacy", "normalized"]) {
+  test(`late formal answer file stays on the original message in ${storage} storage`, { timeout: 30000 }, async t => {
+    const directory = mkdtempSync(join(tmpdir(), "room-formal-answer-file-"));
+    const store = new RoomStore(join(directory, "room.sqlite"));
+    const roomId = storage === "legacy" ? "commons" : "formal-files";
+    let ownerId = "owner";
+    if (storage === "legacy") store.initialize(initialRoom());
+    else {
+      const account = store.createAccount("formal-file-requester");
+      const slot = store.createAccountSessionSlot();
+      const session = store.loginAccountSession(slot.token, store.issueAccountAccessKey(account.id), 0);
+      const created = store.createAccountRoom(slot.token, session.sessionBinding, {
+        roomId, title: "File handoff", purpose: "Review a document", kind: "personal", displayName: "Requester",
+      });
+      ownerId = created.room.memberId;
+    }
+    const owner = store.issueAccessKey(roomId, ownerId);
+    const send = (key, type, data) => store.command(key, roomId, { id: crypto.randomUUID(), type, data });
+    for (const memberId of ["writer", "observer"]) send(owner, T.MEMBER_ADDED, {
+      memberId, displayName: memberId, kind: memberId === "writer" ? "agent" : "human", permissions: [],
+    });
+    for (const [from, to] of [[ownerId, "writer"], ["writer", ownerId]]) {
+      store.dmConsents.request(roomId, from, to, "Test");
+      store.dmConsents.decide(roomId, to, from, "approve");
+    }
+    const writer = store.issueAccessKey(roomId, "writer");
+    const observer = store.issueAccessKey(roomId, "observer");
+    send(owner, T.MESSAGE_POSTED, { messageId: "question", toMemberId: "writer", requestKind: "reply", body: "Send the revised project brief" });
+    const content = Buffer.from("Reviewed project brief");
+    store.roomAttachments.stage(writer, roomId, {
+      id: "brief-file", filename: "brief.md", mediaType: "text/markdown", data: content.toString("base64"),
+    });
+    const server = createRoomServer({ store, streamInterval: 75, credentialReadBurst: 600 });
+    const journalPath = join(directory, "private-journal.sqlite");
+    let db = openRequestJournal(journalPath), browser;
+    t.after(async () => {
+      db.close(); await browser?.close(); server.closeStreams(); server.closeAllConnections();
+      if (server.listening) await new Promise(resolve => server.close(resolve));
+      store.close(); rmSync(directory, { recursive: true, force: true });
+    });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    let offline = true, runs = 0, answers = 0;
+    const connection = { origin, roomId, memberId: "writer", token: writer, fetchImpl: async (url, options) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith("/commands") && JSON.parse(options.body).data?.responseOutcome === "answered") answers++;
+      if (offline && path.endsWith("/commit")) throw new TypeError("File commit interrupted");
+      return fetch(url, options);
+    } };
+    const execute = async () => { runs++; return { body: "I finished reviewing the project brief." }; };
+    const answer = () => runRequestOnce({ connection, db, execute, requestMessageId: "question", stagedFileId: "brief-file" });
+    const first = await answer();
+    assert.equal(first.status, "file_pending");
+    assert.equal(first.answerDelivered, true);
+    const messageId = first.attachment.messageId;
+    const recipient = createRoomClient({ origin, roomId, token: owner });
+    assert.deepEqual(await recipient.files([messageId]), []);
+
+    browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
+    await page.goto(`${origin}/?room=${roomId}#pr-record/message/${messageId}`);
+    await signInFixture(page, owner);
+    const row = page.locator(`[data-message-record-id="${messageId}"]`);
+    await row.getByText("I finished reviewing the project brief.", { exact: true }).waitFor();
+    await page.clock.install();
+    await page.clock.fastForward(6000);
+    assert.equal(await row.locator('[data-download-file="brief-file"]').count(), 0);
+    if (process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT && storage === "normalized") {
+      await row.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT + "-before.png" });
+    }
+
+    const promptCheck = page.locator('[data-check-message-files="question"]');
+    const promptCheckCount = await promptCheck.count();
+    const menu = row.locator(".message-more summary");
+    const checkFiles = row.getByRole("button", { name: "Check files on this answer", exact: true });
+    await menu.press("Enter");
+    await checkFiles.press("Enter", { timeout: 2500 });
+    await row.getByRole("status").getByText("No files on this answer.", { exact: true }).waitFor();
+    assert.equal(await menu.evaluate(node => node === document.activeElement), true);
+    await page.locator("#message-input").fill("Unsent follow-up to the requester");
+
+    offline = false;
+    db.close(); db = openRequestJournal(journalPath);
+    const repaired = await answer();
+    assert.deepEqual(repaired.attachment, { fileId: "brief-file", messageId, state: "shared" });
+    assert.equal(runs, 1);
+    assert.equal(answers, 1);
+    const files = await recipient.files([messageId]);
+    assert.deepEqual(files.map(file => [file.id, file.messageId]), [["brief-file", messageId]]);
+    assert.deepEqual(Buffer.from((await recipient.file("brief-file")).data, "base64"), content);
+    const other = createRoomClient({ origin, roomId, token: observer });
+    await assert.rejects(other.file("brief-file"), { status: 404 });
+    assert.equal(await row.locator('[data-download-file="brief-file"]').count(), 0);
+
+    await menu.press("Enter");
+    await checkFiles.press("Enter", { timeout: 2500 });
+    const file = row.locator('[data-download-file="brief-file"]');
+    await file.waitFor();
+    assert.equal(await row.getByText("No files on this answer.", { exact: true }).count(), 0);
+    if (process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT && storage === "normalized") {
+      await row.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT + "-after.png" });
+    }
+    assert.equal(await row.count(), 1);
+    assert.equal(await promptCheck.count(), promptCheckCount);
+    assert.equal(await page.locator("#message-input").inputValue(), "Unsent follow-up to the requester");
+    assert.equal(await row.getByText("I finished reviewing the project brief.", { exact: true }).count(), 1);
+    const download = page.waitForEvent("download");
+    await file.press("Enter");
+    assert.equal((await download).suggestedFilename(), "brief.md");
   });
 }

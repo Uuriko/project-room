@@ -9,7 +9,7 @@ import { scopedCodexThreads } from "./codex-supervisor.mjs";
 // Room delivery is HTTPS; this supervisor needs no inbound port or VPN.
 export async function superviseCodexRequests({ connection, db, directory, connect, cwd, policy,
   allowedRequesterIds, allowedRequestIds, signal, emit = () => {}, pollMs = 2000, timeoutMs = 300000,
-  connectOnStart = false, singleRequest = false }) {
+  connectOnStart = false, singleRequest = false, stagedFileId }) {
   if (!Array.isArray(allowedRequesterIds) || !allowedRequesterIds.length || allowedRequesterIds.length > 20
     || new Set(allowedRequesterIds).size !== allowedRequesterIds.length
     || !allowedRequesterIds.every(id => typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id)))
@@ -19,6 +19,7 @@ export async function superviseCodexRequests({ connection, db, directory, connec
     throw new Error("Choose 1 to 20 distinct valid request IDs");
   if (singleRequest && (allowedRequesterIds.length !== 1 || allowedRequestIds?.length !== 1))
     throw new Error("Single request mode requires exactly one requester and request ID");
+  if (stagedFileId !== undefined && (!singleRequest || !validId(stagedFileId))) throw new Error("Choose a staged file for one explicit request");
   const selected = allowedRequestIds === undefined ? null : new Set(allowedRequestIds);
   if (typeof connect !== "function" || !Number.isInteger(pollMs) || pollMs < 1000 || pollMs > 60000
     || policy?.approvalPolicy !== "never" || !["read-only", "workspace-write"].includes(policy?.sandbox))
@@ -51,7 +52,8 @@ export async function superviseCodexRequests({ connection, db, directory, connec
   // reconciliation. It is attention, not the unknown-execution fence above,
   // so it never blocks unrelated requests.
   const reportAttention = () => Boolean(db.prepare("SELECT 1 FROM request_runs WHERE delivered=1 AND reported IN (0,2) AND attempt_id IS NOT NULL LIMIT 1").get());
-  const idleStatus = () => unresolved() ? "recovery_pending" : reportAttention() ? "report_reconciliation_pending" : "watching_room";
+  const fileAttention = () => Boolean(db.prepare("SELECT 1 FROM request_runs WHERE delivered=1 AND file_state IN ('pending','attention','expired') LIMIT 1").get());
+  const idleStatus = () => unresolved() || fileAttention() ? "recovery_pending" : reportAttention() ? "report_reconciliation_pending" : "watching_room";
   const requesterAllowed = request => allowed.has(request.requesterId) && request.recipientId === connection.memberId;
   const selectRequest = request => (!selected || selected.has(request.id)) && !unresolved();
   const executionAllowed = request => requesterAllowed(request) && (!selected || selected.has(request.id));
@@ -83,12 +85,12 @@ export async function superviseCodexRequests({ connection, db, directory, connec
       emit({ type: "request_selection", requestMessageId, requesterId: allowedRequesterIds[0],
         execution: "not_started", workLifecycle: "unchanged" });
       try {
-        const result = await runRequestOnce({ connection, db, requestMessageId, execute,
+        const result = await runRequestOnce({ connection, db, requestMessageId, execute, stagedFileId,
           allowRequest: requesterAllowed, selectRequest, signal: controller.signal });
         // A refused run report is not settled: the reply is saved but the
         // service never accepted the outcome, so it needs reconciliation.
         const refused = result?.runReported === "refused";
-        state(refused ? "recovery_pending" : "settled", { runId: requestMessageId });
+        state(refused || result.status !== "delivered" ? "recovery_pending" : "settled", { runId: requestMessageId });
         const receipt = { ...result, requestMessageId, ...(refused ? { reply: "saved", report: "needs_reconciliation" } : {}) };
         emit(receipt);
         return receipt;
@@ -113,8 +115,8 @@ export async function superviseCodexRequests({ connection, db, directory, connec
           emit(refused ? { ...event, reply: "saved", report: "needs_reconciliation" } : event);
         } else if (event.status === "report_pending") {
           state("report_reconciliation_pending", { runId: event.requestMessageId }); emit(event);
-        } else if (event.status === "needs_attention") {
-          state("recovery_pending", { runId: event.requestMessageId }); emit(event);
+        } else if (["needs_attention", "file_pending", "file_needs_attention"].includes(event.status)) {
+          state("recovery_pending", { runId: event.requestMessageId ?? event.requestId }); emit(event);
         }
       } });
   } finally {

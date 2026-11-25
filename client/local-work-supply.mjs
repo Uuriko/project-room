@@ -40,7 +40,7 @@ export async function runPlannedRequest({ snapshot, deviceId, bindings, runnerOp
   const binding = bindings.find(b => b.source === selected.source && b.revision === selected.revision && b.deviceId === deviceId);
   if (!binding?.requestMessageId || !Number.isSafeInteger(binding.requestRevision) || binding.requestRevision < 0)
     return { status: 'needs_request', job: selected };
-  if (runnerOptions.allowRequest || runnerOptions.selectRequest || runnerOptions.savedRequestId)
+  if (runnerOptions.allowRequest || runnerOptions.selectRequest || runnerOptions.savedRequestId || runnerOptions.stagedFileId !== undefined)
     throw Error('Selection belongs to the pinned work binding');
   return runner({ ...runnerOptions, requestMessageId: binding.requestMessageId,
     selectRequest: request => request.id === binding.requestMessageId && request.revision === binding.requestRevision,

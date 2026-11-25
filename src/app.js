@@ -474,6 +474,7 @@ let composerReselectId = null;
 let roomFilesByMessage = new Map();
 let roomFilesSelection = [], roomFilesNextCursor = null, roomFilesLoading = false, roomFilesAttempt = null, roomFilesFlight = null;
 const messageFileDownloads = new Map();
+let answerFileCheck = null;
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
@@ -726,7 +727,7 @@ const client = new RoomClient({
     clearStoredPasswords();
     composerFiles = [];
     roomFilesByMessage = new Map();roomFilesSelection=[];roomFilesNextCursor=null;roomFilesLoading=false;roomFilesAttempt=null;roomFilesFlight=null;
-    messageFileDownloads.clear();
+    messageFileDownloads.clear(); answerFileCheck = null;
     renderComposerFiles();
     $("#work-dialog").close();
     $("#room-overview-dialog").close();
@@ -2866,6 +2867,11 @@ return `<p class="form-hint"><a class="source-link draft-state" href="${esc(work
 // moderation move into one keyboard- and hover-reachable "⋯" overflow menu.
 // Every action keeps its
 // data-message-action wiring, so the work loop is untouched.
+function receivedFormalAnswer(message) {
+  const request = state.replyRequests?.[message.replyToId];
+  return !message.deletedAt && request?.status === "answered"
+    && request.requesterId === session.member.id && request.responseMessageId === message.id;
+}
 function messageLinksHTML(m, { linked, moderation, count, muted }) {
   if (muted) return `<div class="message-links">${moderation}</div>`;
   const saveHtml = !m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete")
@@ -2887,13 +2893,16 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   const own = !m.deletedAt && m.authorId === session.member.id && !m.proposal;
   const editHtml = own ? `<button class="message-to-work" data-message-action="edit" data-message-id="${esc(m.id)}" type="button">Edit message</button>` : "";
   const deleteHtml = own ? `<button class="message-to-work" data-message-action="delete" data-message-id="${esc(m.id)}" type="button">Delete message</button>` : "";
-  const overflow = [saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, editHtml, deleteHtml, moderation].filter(Boolean).join("");
+  const checkFilesHtml = receivedFormalAnswer(m)
+    ? ['<button class="message-to-work" type="button" data-message-action="check-answer-files" data-message-id="',
+      esc(m.id), '"', roomFilesLoading ? " disabled" : "", ">", esc(uiText("file.answer.check")), "</button>"].join("") : "";
+  const overflow = [checkFilesHtml, saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, editHtml, deleteHtml, moderation].filter(Boolean).join("");
   // F-U1A3-1: the overflow summary's accessible name carries the message's
   // identity (author + time), mirroring the "Link to message by … at …"
   // label in messageContent — a bare "More actions for this message" was
   // character-identical on every message.
   const actionName = esc(uiText("message.actionsAccessibleName", { author: displayName(m.authorId), time: messageActionTimeFormat.format(new Date(m.createdAt)) }));
-  const menu = overflow ? ['<details class="message-more"><summary aria-label="', actionName, '" title="More actions">⋯</summary><div class="message-more-menu">', overflow, "</div></details>"].join("") : "";
+  const menu = overflow ? ['<details class="message-more"><summary aria-label="', actionName, '" data-focus-key="message-menu:', esc(m.id), '" title="More actions">⋯</summary><div class="message-more-menu">', overflow, "</div></details>"].join("") : "";
   return `<div class="message-links">${requestControls(m)}${linked.map(i => {
     const postedResult = m.workItemId === i.id && (i.receipt?.nativeText?.messageId === m.id
       || i.receiptHistory?.some(receipt => receipt.nativeText?.messageId === m.id));
@@ -2905,12 +2914,15 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
 function messageFileChips(messageId) {
   const files = roomFilesByMessage.get(messageId) ?? [];
   const more=partialWorkSnapshot&&roomFilesNextCursor&&roomFilesSelection[0]===messageId?`<button type="button" data-more-message-files${roomFilesLoading?" disabled":""}>${esc(uiText("currentRoom.moreFiles"))}</button>`:"";
-  const inspect=partialWorkSnapshot&&!roomFilesSelection.includes(messageId)?`<button type="button" data-check-message-files="${esc(messageId)}">${esc(uiText("currentRoom.checkFiles"))}</button>`:"";
-  if (!files.length&&!more&&!inspect) return "";
+  const message = conversation.byId.get(messageId);
+  const inspect=partialWorkSnapshot&&!roomFilesSelection.includes(messageId)&&!(message&&receivedFormalAnswer(message))?`<button type="button" data-check-message-files="${esc(messageId)}">${esc(uiText("currentRoom.checkFiles"))}</button>`:"";
+  const checked = !files.length && answerFileCheck?.messageId === messageId ? answerFileCheck.text : "";
+  if (!files.length&&!more&&!inspect&&!checked) return "";
+  const feedback = checked ? `<span class="form-hint" role="status">${esc(checked)}</span>` : "";
   return `<div class="message-files">${files.map(file => {
     const download = messageFileDownloads.get(file.id);
     return `<span class="file-chip"><button type="button" data-download-file="${esc(file.id)}" data-file-message="${esc(messageId)}" data-focus-key="file-download:${esc(file.id)}" aria-label="${esc(uiText("file.download.action", { filename: fileChipLabel(file.filename) }))}"${download?.busy ? ' aria-disabled="true" aria-busy="true"' : ""}>${esc(fileChipLabel(file.filename))}</button>${download?.status ? `<span role="status">${esc(download.status)}</span>` : ""}</span>`;
-  }).join("")}${more}${inspect}</div>`;
+  }).join("")}${more}${inspect}${feedback}</div>`;
 }
 async function downloadMessageFile(id, messageId) {
   const file = roomFilesByMessage.get(messageId)?.find(entry => entry.id === id);
@@ -3020,11 +3032,25 @@ async function refreshRoomFiles(more=false, selectedIds=null, fromRender=false) 
     }
     roomFilesByMessage = next;roomFilesSelection=selection;roomFilesNextCursor=body.page?.nextCursor??null;
     if (state) renderMessages();
+    return true;
   } catch {
     // The failure's render must not retry immediately. A fresh snapshot can.
     if (attempt && roomFilesAttempt === attempt) attempt.failed = true;
   }
   finally{if(roomFilesFlight===ticket){roomFilesFlight=null;roomFilesLoading=false;if(generation===client.generation&&state?.room?.id===roomId)renderMessages();}}
+}
+async function checkAnswerFiles(messageId) {
+  const message = conversation.byId.get(messageId);
+  if (!message || !receivedFormalAnswer(message)) return;
+  const generation = client.generation, viewKey = conversationViewKey();
+  answerFileCheck = null;
+  const selection = roomFilesSelection.includes(messageId) ? roomFilesSelection : [messageId];
+  const checked = await refreshRoomFiles(false, selection);
+  if (generation !== client.generation || conversationViewKey() !== viewKey) return;
+  const text = !checked ? uiText("file.answer.checkFailed")
+    : roomFilesByMessage.get(messageId)?.length || roomFilesNextCursor ? "" : uiText("file.answer.none");
+  answerFileCheck = text ? { messageId, text } : null;
+  renderMessages();
 }
 function composerFileOwner(file) {
   const authSession = client.session, generation = client.generation, roomId = state?.room?.id;
@@ -5044,8 +5070,13 @@ $("#message-list").addEventListener("click", e => {
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
   // An action picked from the "⋯" overflow menu closes the menu behind it.
-  button.closest("details.message-more")?.removeAttribute("open");
-  if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
+  const menu = button.closest("details.message-more");
+  menu?.removeAttribute("open");
+  if (button.dataset.messageAction === "check-answer-files") {
+    menu?.querySelector("summary")?.focus();
+    void checkAnswerFiles(id);
+  }
+  else if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
   else if (button.dataset.messageAction === "work") openWork(id);
   else if (button.dataset.messageAction === "decide") openDecision(id);
   else if (button.dataset.messageAction === "result") {
