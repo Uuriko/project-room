@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
 import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
@@ -78,17 +79,62 @@ async function fixture(t, representation) {
   return { home, env, origin, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
 }
 
+// Session heartbeats are a legacy writer operation.
+test("a returning agent submits from the fresh revision after a heartbeat", async t => {
+  const { store, owner, producer, cli } = await fixture(t, "legacy");
+  const workItemId = "retained-after-heartbeat";
+  store.command(owner, "commons", { id: "propose", type: "work.proposed", data: {
+    workItemId, title: "Share the revised document", definitionOfDone: "Post the final text",
+    accountableMemberId: producer.identityId, mode: "read",
+  } });
+  const read = async (...args) => {
+    const result = await cli(["work", workItemId, ...args]);
+    assert.equal(result.code, 0, JSON.stringify(result));
+    return result.value;
+  };
+  assert.equal((await cli(["begin", "--from", "-"], await read())).code, 0);
+  const start = (id, expectedRevision) => store.command(producer.secret, "commons", {
+    id, type: "session.started", data: { workItemId, expectedRevision },
+  });
+  start("first-start", (await read()).revision);
+  const saved = await read();
+  start("heartbeat", saved.revision);
+  const fresh = await read("--since", saved.briefVersion);
+  assert.equal(fresh.briefUnchanged, true);
+  assert.equal(fresh.brief, undefined);
+  assert.ok(fresh.revision > saved.revision);
+  assert.equal(fresh.cliBasis.actions.submit.expectedRevision, fresh.revision);
+  assert.match(fresh.guidance, /use this response.s revision and continuation/i);
+  const submission = await cli(["submit", workItemId, "--operation", "after-heartbeat"], {
+    expectedRevision: fresh.cliBasis.actions.submit.expectedRevision, producerId: producer.identityId,
+    body: "The revised document.", summary: "Ready for review", nextAction: "Read the revision",
+  });
+  assert.equal(submission.code, 0, JSON.stringify(submission));
+});
+
 for (const representation of ["legacy", "normalized-current-v1"]) {
 test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {
-  const { origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
+  const { env, origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
   const workItemId = "handoff";
   store.command(owner, "commons", { id: "request", type: "work.proposed", data: { workItemId,
     title: "Draft the brief", definitionOfDone: "Share the brief", accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
   const selected = (await cli(["work", workItemId])).value;
   assert.equal((await cli(["begin", "--from", "-"], selected)).code, 0);
   const work = (await cli(["work", workItemId])).value;
+  const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
+  const preview = { id: "a".repeat(32), title: "Brief", base: "b".repeat(40), head: "c".repeat(40),
+    html: "<p>Brief</p>", patch, recipientId: reviewer.identityId };
+  const publish = async (expectedRevision, patch) => {
+    const response = await fetch(origin + "/api/rooms/commons/workspace-previews", { method: "POST",
+      headers: { Authorization: "Bearer " + producer.secret, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...preview, expectedRevision, patch }) });
+    assert.ok(response.ok, await response.clone().text());
+    return response.json();
+  };
+  const fileLink = workspaceArtifactLink(origin, "commons", { ...preview, ...await publish(0, patch) }, "changes", "brief.md");
+  const firstBody = "Draft from a colleague.\nChanged file: " + fileLink;
   const submitted = await cli(["submit", workItemId, "--operation", "handoff-result"], {
-    body: "Draft from a colleague.", expectedRevision: work.revision, producerId: producer.identityId,
+    body: firstBody, expectedRevision: work.revision, producerId: producer.identityId,
     summary: "Drafted the brief", nextAction: "Review the draft" });
   assert.equal(submitted.code, 0, JSON.stringify(submitted));
   const { completionEventId } = submitted.value.next.arguments;
@@ -96,11 +142,18 @@ test(`${representation} a colleague reads an exact shared result URL with their 
     completionEventId }, new URL(origin));
   const shared = await cli(["result", sharedUrl], undefined, reviewerProject);
   assert.equal(shared.code, 0);
-  assert.equal(shared.value.result.text.body, "Draft from a colleague.");
+  assert.equal(shared.value.result.text.body, firstBody);
   assert.equal(shared.value.result.receipt.eventId, completionEventId);
+  const [file] = shared.value.workspaceArtifacts;
+  assert.equal(file.messageId, shared.value.result.text.messageId);
+  assert.deepEqual(file.command, ["room", "workspace", "changes", "--link", fileLink, "--connection", "reviewer"]);
+  Object.assign(env, { ROOM_ORIGIN: origin, ROOM_ID: "commons", PROJECT_ROOM_SECRET: "different-ambient-identity" });
+  const changes = await cli(file.command.slice(1), undefined, reviewerProject);
+  assert.equal(changes.value.file.hunks[0].changes.at(-1).content, "submitted");
+  const updated = await publish(1, patch.replace("+submitted", "+replaced"));
   assert.equal(shared.value.discussion, undefined);
   assert.equal(shared.value.discussionRead.path, `/api/rooms/commons/messages/${shared.value.result.text.messageId}/thread`);
-  const quoted = "> Draft from a colleague.\n\nPlease name Maya as the owner.";
+  const quoted = "> Draft from a colleague.\n" + sharedUrl + "\n\nPlease name Maya as the owner.";
   const feedback = store.command(reviewer.secret, "commons", { id: "feedback", type: "message.posted",
     data: { messageId: "quoted-feedback", replyToId: shared.value.result.text.messageId, body: quoted } });
   store.command(reviewer.secret, "commons", { id: "private-feedback", type: "message.posted",
@@ -150,10 +203,30 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   assert.equal(current.value.workThread.correction.summary, "Name the owner.");
   const revisedDiscussion = await cli(["result", revisedUrl, "--discussion"]);
   assert.deepEqual(revisedDiscussion.value.discussion.replies, []);
+  const lateLink = workspaceArtifactLink(origin, "commons", { ...preview, ...updated }, "changes", "brief.md");
+  const replyToId = current.value.result.text.messageId;
+  store.command(producer.secret, "commons", { id: "send-late-file", type: "message.posted",
+    data: { messageId: "late-file", replyToId, body: "Here is the revised brief.\n" + lateLink } });
+  store.command(producer.secret, "commons", { id: "send-private-file", type: "message.posted",
+    data: { messageId: "private-file", replyToId, toMemberId: "owner", body: fileLink } });
+  const followUp = await cli(["result", revisedUrl, "--discussion"], undefined, reviewerProject);
+  assert.equal(followUp.value.workspaceArtifacts, undefined);
+  assert.equal(followUp.value.discussion.replies.length, 1);
+  assert.equal(followUp.value.discussion.workspaceArtifacts.length, 1);
+  const [lateFile] = followUp.value.discussion.workspaceArtifacts;
+  assert.equal(lateFile.messageId, "late-file");
+  assert.deepEqual(lateFile.command, ["room", "workspace", "changes", "--link", lateLink, "--connection", "reviewer"]);
+  const lateChanges = await cli(lateFile.command.slice(1), undefined, reviewerProject);
+  assert.equal(lateChanges.value.file.hunks[0].changes.at(-1).content, "replaced");
+  await publish(updated.revision, patch.replace("+submitted", "+latest"));
+  await assert.rejects(() => cli(lateFile.command.slice(1), undefined, reviewerProject), error => error.status === 409);
   const earlier = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject);
   assert.equal(earlier.value.discussion.replies[0].body, quoted);
   assert.equal(earlier.value.selection.status, "historical");
-  assert.equal(earlier.value.result.text.body, "Draft from a colleague.");
+  assert.equal(earlier.value.result.text.body, firstBody);
+  assert.deepEqual(earlier.value.workspaceArtifacts, [file]);
+  assert.equal(current.value.workspaceArtifacts, undefined);
+  await assert.rejects(() => cli(file.command.slice(1), undefined, reviewerProject), error => error.status === 409);
   // A producer may deliberately cite the very same message in a later receipt.
   const laterReview = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
   assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Use the original wording."],
@@ -170,6 +243,11 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   const reusedRead = await cli(["result", workItemId, "--completion", reused.event.id, "--discussion"]);
   assert.equal(reusedRead.code, 0);
   assert.deepEqual(reusedRead.value.discussion, producerRead.value.discussion);
+  const quotedSource = reusedRead.value.discussion.replies[0].body.split("\n").find(line => line.startsWith(origin));
+  const fromFeedback = await cli(["result", quotedSource]);
+  assert.equal(fromFeedback.code, 0);
+  assert.equal(fromFeedback.value.result.receipt.eventId, completionEventId);
+  assert.equal(fromFeedback.value.selection.status, "historical");
   for (const other of [sharedUrl.replace("room=commons", "room=other"), sharedUrl.replace(origin, "https://other.example")]) {
     let calls = 0;
     const refused = await cli(["result", other], undefined, reviewerProject, () => { calls++; throw new Error("unexpected call"); });
@@ -227,6 +305,7 @@ test(`${representation} commands cover pickup, correction, review, requests and 
       const prior = selected.value;
       const refreshed = (await cli(["work", workItemId, "--since", prior.briefVersion])).value;
       assert.equal(refreshed.briefUnchanged, true);
+      assert.match(refreshed.guidance, /use this response.s revision and continuation/i);
       assert.equal(refreshed.briefVersion, prior.briefVersion);
       assert.equal(refreshed.brief, undefined);
       assert.deepEqual(refreshed.continuation, prior.continuation);

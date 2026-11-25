@@ -29,7 +29,7 @@ export function envelopeStatusBadge(status) {
   return `<span class="handoff-badge handoff-badge-${statusTone(status)}" data-handoff-status="${esc(status ?? "")}">${esc(statusLabel(status))}</span>`;
 }
 
-const INPUT_KIND_LABELS = Object.freeze({ work: "Work", message: "Message", file: "File", url: "Link", note: "Note" });
+const INPUT_KIND_LABELS = Object.freeze({ work: "Work", message: "Message", file: "File path", url: "Link", note: "Note" });
 const OUTPUT_KIND_LABELS = Object.freeze({ text_result: "Text result", verification: "Verification", decision: "Decision", artifact: "Artifact", report: "Report" });
 const CHECK_KIND_LABELS = Object.freeze({ work_completed: "Work completed", result_submitted: "Result submitted",
   verification_recorded: "Verification recorded", manual_review: "Manual review" });
@@ -57,9 +57,13 @@ function inputsHtml(inputs) {
   if (!Array.isArray(inputs) || !inputs.length) return "";
   return `<ul class="handoff-inputs">${inputs.map(input => {
     const kind = INPUT_KIND_LABELS[input?.kind] ?? esc(input?.kind ?? "input");
-    const ref = input?.kind === "url"
-      ? `<a class="source-link" href="${safeHref(input.ref)}" target="_blank" rel="noopener noreferrer">${esc(input.label ?? input.ref)}</a>`
-      : esc(input.label ?? input.ref);
+    let ref = esc(input.label ?? input.ref);
+    if (input.kind === "url") {
+      ref = `<a class="source-link" href="${safeHref(input.ref)}" target="_blank" rel="noopener noreferrer">${ref}</a>`;
+    } else if (input.kind === "file") {
+      const label = input.label && input.label !== input.ref ? esc(input.label) + " " : "";
+      ref = `${label}<code>${esc(input.ref)}</code>`;
+    }
     const sha = input?.sha ? ` · <code>sha ${esc(input.sha.slice(0, 12))}</code>` : "";
     const detail = input?.detail ? `<p class="handoff-note">${esc(input.detail)}</p>` : "";
     return `<li><span class="handoff-chip">${kind}</span> ${ref}${sha}${detail}</li>`;

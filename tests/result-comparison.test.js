@@ -4,7 +4,26 @@ import { createResultComparison } from "../src/result-comparison.js";
 
 function fixture() {
   const pending = [], state = { messages: [] };
-  const box = { hidden: true, innerHTML: "", textContent: "", insertAdjacentHTML(_position, html) { this.innerHTML = html + this.innerHTML; }, querySelector() { return {remove: () => { this.innerHTML = this.innerHTML.replace(/^<p data-previous-release-checks.*?<\/p>/, ""); }}; }, replaceChildren() { this.innerHTML = ""; this.textContent = ""; } };
+  const box = {
+    hidden: true,
+    ownerDocument: { createElement: () => ({
+      innerHTML: "", textContent: "",
+      insertAdjacentHTML(_position, html) { this.innerHTML = html + this.innerHTML; },
+    }) },
+    content: null,
+    message: "",
+    get innerHTML() { return this.content?.textContent ? "" : this.content?.innerHTML ?? ""; },
+    get textContent() { return this.content?.textContent || this.message; },
+    set textContent(text) { this.content = null; this.message = text; },
+    append(content) { this.content = content; },
+    replaceChildren() { this.content = null; this.message = ""; },
+    querySelector(selector) {
+      if (selector !== "[data-previous-release-checks]" || !this.content) return null;
+      return { remove: () => {
+        this.content.innerHTML = this.content.innerHTML.replace(/^<p data-previous-release-checks.*?<\/p>/, "");
+      } };
+    },
+  };
   const controller = createResultComparison({ getState: () => state,
     client: { workResult: () => new Promise(resolve => pending.push(resolve)) },
     esc: text => String(text).replaceAll("<", "&lt;").replaceAll(">", "&gt;") });
@@ -82,7 +101,7 @@ test("newline-only edits remain visible and a large rewrite stays bounded", asyn
   const f = fixture();
   f.load("final line\n"); f.respond(0, "final line"); await settle();
   assert.match(f.box.innerHTML, /Final line break added/);
-  assert.match(f.box.innerHTML, /Previous approval never carries over/);
+  assert.doesNotMatch(f.box.innerHTML, /Previous approval never carries over/);
   assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)|No text changes/);
   f.load("a\n\nend"); f.respond(1, "a\nend"); await settle();
   assert.match(f.box.innerHTML, /0 lines removed, 1 added/);
@@ -115,6 +134,6 @@ test("a line-ending conversion explains the change without showing identical wor
   const f = fixture();
   f.load("One line\r\nAnother line\r\n"); f.respond(0, "One line\nAnother line\n"); await settle();
   assert.match(f.box.innerHTML, /Line-ending style changed/);
-  assert.match(f.box.innerHTML, /Previous approval never carries over/);
+  assert.doesNotMatch(f.box.innerHTML, /Previous approval never carries over/);
   assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)|No text changes/);
 });

@@ -1,4 +1,5 @@
 import { exactResultHref } from "./room-deep-link.js";
+import { roomFileChangeSelection } from "./workspace-artifact-link.js";
 import { clipboard } from "./clipboard.js";
 import { canReplyToResult, exactResultRecovery } from "./result-availability.js";
 import { uiText } from "./strings.js";
@@ -11,7 +12,7 @@ import { currentResult } from "./work-selectors.js";
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, discussionMessage, loadDiscussion, memberLabel, workRecord, focusRecord,
-  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, storage = null, recoveryScope = () => null }) {
+  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, onOpenWorkspace, onOpenDecision, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null, pointerSelection = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
@@ -140,7 +141,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   resultElement("result-work-action")?.addEventListener("click", () => {
     const view = resultView, item = view && getState()?.workItems[view.workItemId];
     const action = selectedWorkAction(view, item);
-    if (action && !isBusy()) onWorkAction(item, action[0]);
+    if (action && !isBusy()) onWorkAction(item, action[0], view.compareFrom);
   });
   const releaseLink = resultElement("result-release-link"), releasePanel = resultElement("result-release-checks");
   if (releaseLink && releasePanel) {
@@ -164,23 +165,49 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function showResultBody(text) {
     const body = resultElement("result-body");
     body.replaceChildren();
-    // Keep exact text for copy, comparison, and passage selection. Only
-    // canonical GitHub file links at a full commit SHA become navigable.
-    const sourceLink = /(?<!\S)https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?(?=$|\s)/gi;
+    // Preserve the submitted characters, including punctuation around plain URLs.
+    const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
     let offset = 0;
-    for (const match of text.matchAll(sourceLink)) {
+    for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
       const href = match[0];
-      if (new URL(href).href !== href) continue;
+      const url = URL.parse(href);
+      if (!url || url.href !== href) continue;
+      if (!githubFile.test(href) && !(url.pathname === location.pathname
+          && roomFileChangeSelection(url, location.origin, getSession().roomId))) continue;
       const link = document.createElement("a");
       link.href = href;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
+      if (url.origin !== location.origin) {
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+      }
       link.textContent = href;
       body.append(text.slice(offset, match.index), link);
       offset = match.index + href.length;
     }
     body.append(text.slice(offset));
   }
+  resultElement("result-body").addEventListener("click", async event => {
+    const link = event.target.closest("a");
+    if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const view = resultView, url = new URL(link.href);
+    if (!usableText(view)) return;
+    const artifact = roomFileChangeSelection(url, location.origin, view.roomId);
+    if (!artifact) return;
+
+    event.preventDefault();
+    if (view.openingWorkspace) return;
+    const origin = location.href;
+    if (needsConversation(view)) {
+      view.openingWorkspace = true;
+      resultElement("result-use-status").textContent = uiText("result.loadingConversation");
+      try { await loadDiscussion(view.textMessageId); }
+      catch { /* The file can still be opened without a discussion. */ }
+      finally { view.openingWorkspace = false; }
+    }
+    if (!usableText(view) || location.href !== origin) return;
+    resultElement("result-use-status").textContent = "";
+    onOpenWorkspace(url, resultDiscussionMessage(view), artifact.id);
+  });
   function showOutcome(outcome) {
     const panel = resultElement("result-outcome");
     panel.hidden = !outcome;
@@ -233,6 +260,17 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const note = releaseEvidenceLink(`#pr-record/message/${encodeURIComponent(report.messageId)}`, uiText("result.releaseRecord"));
     source.replaceChildren(document.createTextNode(uiText("result.releaseReporter", { name: memberLabel(report.reportedById) })), " ", note);
   }
+  const decisionLink = resultElement("result-decision-source");
+  if (decisionLink) {
+    decisionLink.textContent = uiText("result.openDecisionSource");
+    decisionLink.addEventListener("click", event => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const source = resultView?.decisionSource;
+      if (!usableText(resultView) || decisionLink.hidden || !source || isBusy()) { event.preventDefault(); return; }
+      const { roomId, workItemId, receipt } = resultView;
+      if (onOpenDecision(source.messageId, { roomId, workItemId, completionEventId: receipt.completionEventId })) event.preventDefault();
+    });
+  }
   function resultStatus() {
     mountResultReader();
     const view = resultView;
@@ -259,6 +297,16 @@ export function installResultReader({ client, getState, getSession, sameSession,
       clearResultComparison(resultElement("result-diff"));
     }
     const item = getState().workItems[view.workItemId];
+    // A live update can skip straight from an open result to its replacement.
+    // Read the original receipt again so visibility and the review history floor
+    // apply to its verdict even if the client missed the review event.
+    if (usableText(view) && view.selectionStatus === "current" && item?.receipt?.eventId
+        && !matchesReceipt(view.receipt, item.receipt) && !view.readAfterReplacement) {
+      const { generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails, recovered } = view;
+      openResult({ generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails,
+        recovered, compareFrom: view.compareFrom, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: true }, item.title, false);
+      return;
+    }
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
       && view.pendingCorrection.verificationEventId === item?.blocker?.eventId ? view.pendingCorrection : null;
     const correctionSource = view.previousCorrection?.sourceMessageId;
@@ -285,8 +333,29 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
     const newer = resultElement("result-current-version");
     const latest = item?.receipt;
-    const canOpenNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
-      && latest?.nativeText && !latest.nativeText.withdrawnAt && latest.eventId !== view.receipt.completionEventId;
+    const hasNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
+      && latest?.eventId && latest.eventId !== view.receipt.completionEventId;
+    // Compact Room snapshots hold the completion ID but omit native result metadata.
+    // Confirm the exact replacement with the same member before offering its link.
+    const basis = hasNewer && !latest.nativeText && latest.evidenceUrl === null
+      ? [item.revision, latest.eventId, latest.evidenceVersion].join("/") : null;
+    if (basis && view.newerRead?.basis !== basis) {
+      const read = view.newerRead = { basis, messageId: null };
+      const completionEventId = latest.eventId;
+      const selected = { completionEventId, evidenceVersion: latest.evidenceVersion };
+      client.workResult(view.workItemId, { completionEventId }).then(value => {
+        if (!usableText(view) || view.newerRead !== read) return;
+        if (value?.selection.status === "current" && value.result.kind === "room_text"
+          && !value.result.text.withdrawnAt && matchesReceipt(selected, value.result.receipt)) {
+          read.messageId = value.result.text.messageId;
+        }
+        resultStatus();
+      }).catch(() => {});
+    }
+    const selectedMessageId = basis && view.newerRead?.basis === basis ? view.newerRead.messageId : null;
+    const canOpenNewer = hasNewer && (latest.nativeText
+      ? !latest.nativeText.withdrawnAt
+      : selectedMessageId && !getState().messages.some(message => message.id === selectedMessageId && message.deletedAt));
     newer.hidden = !canOpenNewer;
     if (canOpenNewer) {
       newer.href = exactResultHref({ ...view, completionEventId: latest.eventId });
@@ -297,20 +366,49 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (context) context.hidden = !current || !item;
     const verdict = resultElement("result-verdict");
     const finding = current && item && matchesReceipt(item.verification, item.receipt) ? item.verification
-      : view.linked ? view.selectedVerdict : null;
-    verdict.hidden = !view.focused || (!current && !(view.linked && finding && usableText(view)));
+      : view.selectedVerdict;
+    const historicalVerdict = earlier && finding && usableText(view);
+    verdict.hidden = !(historicalVerdict || (view.focused && current));
     if (!verdict.hidden) {
       verdict.dataset.outcome = finding?.result ?? "pending";
       verdict.textContent = finding
         ? `Verification · ${finding.result === "pass" ? "Passed" : finding.result === "fail" ? "Failed" : "Recorded"}`
         : "Verification · Pending";
     }
+    if (decisionLink) {
+      decisionLink.hidden = true;
+      decisionLink.removeAttribute("href");
+    }
     if (current && context && item) {
       const next = nextWorkStep(item, Date.now(), getState().room.ownerId);
       resultElement("result-work-criteria").textContent = item.definitionOfDone;
       resultElement("result-work-verification").textContent = finding?.summary ?? "";
       resultElement("result-work-verification-row").hidden = Boolean(pending) || !finding?.summary;
-      const nextLabel = pending?.nextAction ?? next.label;
+      const accepted = !view.releaseChecks && item.ownerDecisionRequired && next.action === "complete";
+      const decisionId = item.decision?.eventId;
+      if (accepted && decisionId && view.decisionReadId !== decisionId) {
+        view.decisionReadId = decisionId;
+        const completionEventId = view.receipt.completionEventId;
+        client.workResult(view.workItemId, { completionEventId }).then(value => {
+          if (!usableText(view) || view.decisionReadId !== decisionId
+            || getState().workItems[view.workItemId]?.decision?.eventId !== decisionId) return;
+          const source = value?.workThread?.decisionSource;
+          if (value?.selection.status === "current" && source?.decisionEventId === decisionId
+            && matchesReceipt(view.receipt, value.result?.receipt) && matchesReceipt(source, value.result.receipt)) {
+            view.decisionSource = source;
+            resultStatus();
+          }
+        }).catch(() => {});
+      }
+      const source = view.decisionSource;
+      if (accepted && decisionLink && source?.decisionEventId === item.decision?.eventId
+        && matchesReceipt(source, item.receipt)
+        && !getState().messages.some(message => message.id === source.messageId && (message.deletedAt || message.editedAt))) {
+        decisionLink.hidden = false;
+        decisionLink.href = source.href;
+      }
+      const nextLabel = accepted ? uiText("result.accepted") : pending?.nextAction ?? next.label;
+      resultElement("result-work-next-label").textContent = uiText(accepted ? "result.decisionLabel" : "result.nextLabel");
       resultElement("result-work-next").textContent = next.memberId
         ? uiText("work.thread.nextFor", { name: memberLabel(next.memberId), action: nextLabel })
         : nextLabel;
@@ -409,7 +507,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     prefix.selectNodeContents(body);
     prefix.setEnd(range.startContainer, range.startOffset);
     const start = prefix.toString().length;
-    return { body: view.body, start, end: start + range.toString().length };
+    return { body: view.body, start, end: start + range.toString().length,
+      sourceHref: exactResultHref({ ...view, completionEventId: view.receipt.completionEventId }) };
   }
   // Pointer focus may collapse a text selection before click is dispatched.
   resultElement("result-discuss").addEventListener("pointerdown", () => {
@@ -458,13 +557,15 @@ export function installResultReader({ client, getState, getSession, sameSession,
   });
   function loadExactResult(view) {
     const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
+    view.decisionReadId = getState().workItems[view.workItemId]?.decision?.eventId;
     client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
-      if (!owns()) return;
+      if (!owns() || view.withdrawn) return;
       if (value?.result?.receipt?.eventId !== view.receipt.completionEventId
         || (view.receipt.evidenceVersion && value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion)) throw new Error("Pinned version changed");
       view.receipt.evidenceVersion = value.result.receipt.evidenceVersion;
       view.selectionStatus = value.selection.status;
       view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
+      view.decisionSource = value.workThread?.decisionSource;
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
       }
@@ -486,7 +587,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.releaseChecks = value.workThread?.releaseChecks;
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
       showOutcome(view.withdrawn ? null : value.workThread?.outcome);
-      showResultBody(view.withdrawn ? "" : value.result.text.body);
+      const text = view.withdrawn ? "" : value.result.text.body;
+      if (!view.readAfterReplacement || resultElement("result-body").textContent !== text) showResultBody(text);
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);
@@ -508,9 +610,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (document.activeElement === resultElement("result-retry")) resultElement(view.focused ? "result-title" : "close-result").focus({ preventScroll: true });
       resultStatus();
       if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
-        resultElement("result-diff"), () => owns() && !view.withdrawn);
+        resultElement("result-diff"), () => owns() && !view.withdrawn, undefined, view.compareFrom);
     }).catch(error => {
-      if (!owns()) return;
+      if (!owns() || view.withdrawn) return;
+      resultElement("result-body").replaceChildren();
       view.refusalHint = exactResultRecovery(error?.status, error?.code);
       view.error = !view.refusalHint;
       view.retrying = false;
@@ -533,7 +636,11 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-work-context")?.setAttribute("hidden", "");
       resultElement("result-work-action")?.setAttribute("hidden", "");
       resultElement("result-options").open = false;
-      resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
+      resultElement("result-title").textContent = title;
+      resultElement("result-status").textContent = view.readAfterReplacement ? "Earlier result · Loading exact text…" : "Loading exact text…";
+      if (!view.readAfterReplacement) resultElement("result-body").textContent = "";
+      resultElement("result-body").hidden = false;
+      resultElement("result-current-version").hidden = true;
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
       resultElement("result-copy-link").hidden = true;
@@ -542,7 +649,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-use-status").textContent = "";
       const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
       resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
-      if (view.restoreDetails) workRecord(view.workItemId).querySelector(".work-details").open = false;
+      const details = view.restoreDetails && workRecord(view.workItemId)?.querySelector(".work-details");
+      if (details) details.open = false;
       mountResultReader(); resultReader.hidden = false;
       if (focus) resultElement("result-title").focus();
       loadExactResult(view);
@@ -586,13 +694,20 @@ export function installResultReader({ client, getState, getSession, sameSession,
     return false;
   }
 
+  resultElement("result-current-version").addEventListener("click", event => {
+    if (!resultView || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    resultView.followingCurrent = event.currentTarget.href;
+  });
   function openLinked({ roomId, workItemId, completionEventId }) {
     const session = getSession();
     if (!session || session.roomId !== roomId) return;
     if (resultView?.linked && resultView.roomId === roomId && resultView.workItemId === workItemId
       && resultView.receipt.completionEventId === completionEventId) return;
+    const from = resultView;
+    const compareFrom = from?.roomId === roomId && usableText(from) && sameSession(from.generation, roomId, from.memberId)
+      && from.workItemId === workItemId && from.followingCurrent === location.href ? from.receipt.completionEventId : null;
     forgetSelection();
-    openResult({ linked: true, focused: true, generation: client.generation, roomId,
+    openResult({ compareFrom, linked: true, focused: true, generation: client.generation, roomId,
       memberId: session.member.id, workItemId, receipt: { completionEventId } }, "Result");
   }
   function closeLinked() {

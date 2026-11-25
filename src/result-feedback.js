@@ -1,3 +1,4 @@
+import { MAX_MESSAGE_BODY_CHARS } from "./events.js";
 import { canReplyToResult } from "./result-availability.js";
 
 // Validate before navigating: the shell owns drafts/focus; this controller owns
@@ -18,11 +19,16 @@ export function createResultFeedback({ getState, getConversation, isBlocked,
       // Bind the quote to the exact source inspected, before any navigation.
       if (typeof body !== "string" || body !== message.body || !Number.isSafeInteger(start) || !Number.isSafeInteger(end)
         || start < 0 || end <= start || end > body.length) return false;
-      quote = body.slice(start, end).split("\n").map(line => `> ${line}`).join("\n") + "\n\n";
+      const passage = body.slice(start, end).split("\n").map(line => `> ${line}`).join("\n");
+      quote = [passage, selection.sourceHref].filter(Boolean).join("\n") + "\n\n";
     }
     const hasContent = Boolean(draft?.body?.trim() || draft?.files?.length);
     const differentReply = hasContent && draft.replyToId && draft.replyToId !== message.id;
     if (draft?.pending || draft?.toMemberId || differentReply) { onBlocked(); return false; }
+    const body = draft?.body ?? "";
+    if (quote && !body.startsWith(quote) && quote.length + body.length > MAX_MESSAGE_BODY_CHARS) {
+      onBlocked("result.quoteTooLong"); return false;
+    }
     openThread(message, destination);
     setReply(message.id, quote);
     return true;

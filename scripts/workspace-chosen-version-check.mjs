@@ -60,6 +60,41 @@ try {
     const draft = await page.evaluate(() => window.draft);
     assert.ok(draft.link.includes(side.repeat(32)) && draft.note === "Use the existing navigation.");
   }
+  // A late clipboard callback may arrive after selecting a different result,
+  // or even after returning to the same result and asking for a different copy.
+  for (const destination of ["other", "reopened", "current"]) {
+    await compare();
+    await page.getByRole("button", { name: "Continue this version: Version a" }).click();
+    await page.evaluate(() => {
+      navigator.clipboard.writeText = () => new Promise(resolve => { window.finishWrite = resolve; });
+    });
+    await page.getByRole("button", { name: "Copy for agent" }).click();
+    await page.waitForFunction(() => typeof window.finishWrite === "function");
+    if (destination !== "current") {
+      await page.locator('[data-preview-id="' + "b".repeat(32) + '"]').click();
+      await page.getByRole("heading", { name: "Version b", exact: true }).first().waitFor();
+    }
+    if (destination === "reopened") {
+      await page.locator('[data-preview-id="' + "a".repeat(32) + '"]').click();
+      await page.getByRole("tab", { name: "Changes" }).click();
+    }
+    if (destination !== "other") {
+      await page.getByRole("button", { name: "Copy artifact link" }).click();
+      await page.locator("[data-workspace-link-fallback]").waitFor();
+    }
+    assert.equal(await page.evaluate(async () => (await import("/src/clipboard.js")).clipboard.slow), false,
+      "the held write must still be awaiting its first outcome");
+    await page.evaluate(async () => {
+      window.finishWrite();
+      delete window.finishWrite;
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    });
+    const fallback = page.locator("[data-workspace-link-fallback]");
+    assert.equal(await fallback.isVisible(), destination !== "other");
+    if (destination !== "other") assert.equal(await fallback.getAttribute("aria-label"), "Copy artifact link");
+    else assert.equal(await page.locator("[data-workspace-link-status]").textContent(), "");
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+  }
   const returned = await page.evaluate(() => {
     const source = { discussion: () => ({ link: "http://localhost/?room=commons#pr-record/message/revision",
       messages: [{ author: "Reviewer", excerpt: "Here is the revision." }] }),
@@ -142,5 +177,5 @@ try {
   assert.equal(await page.locator("[data-workspace-compare]").isVisible(), false);
   assert.equal(await page.getByRole("button", { name: "Add to thread draft" }).isVisible(), true);
   assert.deepEqual(errors, []);
-  console.log("Single publication, both optional comparison columns, manual copy, return drafts, unavailable previews, discussion revocation and directed publication passed.");
+  console.log("Optional Workspace comparisons, delayed copy ownership, return drafts, unavailable previews, discussion revocation and directed publication passed.");
 } finally { await browser.close(); }

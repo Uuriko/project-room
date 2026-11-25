@@ -65,8 +65,8 @@ function gitOk(args, options) {
   return run.stdout;
 }
 
-export async function connection({ env = process.env, cwd = process.cwd(), name } = {}) {
-  if (env.ROOM_ORIGIN && env.ROOM_ID && env.PROJECT_ROOM_SECRET) {
+export async function connection({ env = process.env, cwd = process.cwd(), name, useEnvironment = true } = {}) {
+  if (useEnvironment && env.ROOM_ORIGIN && env.ROOM_ID && env.PROJECT_ROOM_SECRET) {
     return { origin: env.ROOM_ORIGIN.replace(/\/$/, ""), roomId: env.ROOM_ID, secret: env.PROJECT_ROOM_SECRET };
   }
   const loaded = loadConnection({ project: cwd, env, name });

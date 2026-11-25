@@ -10,7 +10,7 @@ import { exactResultRecovery } from "../../src/result-availability.js";
 import { validId } from "../../src/events.js";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 import { exactResultDestination, resultDiscussionPath } from "../../src/record-link.js";
-import { workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
+import { roomFileChangeSelection } from "../../src/workspace-artifact-link.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
 const workHelp = "room work WORK_ID [--result | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]\nRead the compact task brief. Add --discussion for shared files and discussion. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.";
@@ -97,20 +97,16 @@ async function reconcileAnswer(call, args, config) {
     currentStateVerified: false, workStateChanged: false };
 }
 
-function exactDiscussionFiles(items, { origin, roomId }) {
+function exactDiscussionFiles(messages, { origin, roomId }, connectionName) {
   const files = new Map();
-  const roomOrigin = new URL(origin).origin;
-  for (const { message } of items) {
+  for (const message of messages) {
     if (!validId(message?.id) || typeof message.body !== "string") continue;
-    for (const line of message.body.split(/\r?\n/)) {
-      const link = URL.parse(line.trim());
-      if (!link || link.origin !== roomOrigin || link.username || link.password
-          || link.searchParams.size !== 1 || link.searchParams.get("room") !== roomId
-          || files.has(link.href)) continue;
-      const target = workspaceArtifactSelection(link.hash);
-      if (!target?.file || !target.head) continue;
+    for (const [href] of message.body.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
+      const link = URL.parse(href);
+      const target = roomFileChangeSelection(link, origin, roomId);
+      if (!target || link.href !== href || files.has(href)) continue;
       files.set(link.href, { messageId: message.id, file: target.file, head: target.head,
-        revision: target.revision, command: ["room", "workspace", "changes", "--link", link.href] });
+        revision: target.revision, command: ["room", "workspace", "changes", "--link", link.href, "--connection", connectionName] });
     }
   }
   return [...files.values()];
@@ -204,6 +200,10 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
       const source = value.result?.text;
       const hasDiscussion = value.result?.kind === "room_text" && typeof source?.body === "string"
         && validId(source.messageId) && source.messageId === value.result.receipt?.nativeText?.messageId;
+      if (hasDiscussion && !source.withdrawnAt) {
+        const files = exactDiscussionFiles([{ id: source.messageId, body: source.body }], config, name);
+        if (files.length) value.workspaceArtifacts = files;
+      }
       if (hasDiscussion) value.discussionRead = { method: "GET", path: resultDiscussionPath(config.roomId, source.messageId),
         command: ["room", "result", args.workItemId, "--completion", args.completionEventId, "--discussion"] };
       if (includeResultDiscussion) {
@@ -216,6 +216,8 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
             || thread.deletedAt || thread.authorId !== source.postedById || thread.body !== source.body || !Array.isArray(thread.replies))
           return report({ status: "unavailable", code: "result_discussion_unavailable" }, 1);
         value.discussion = { messageId: source.messageId, replies: thread.replies };
+        const files = exactDiscussionFiles(thread.replies, config, name);
+        if (files.length) value.discussion.workspaceArtifacts = files;
       }
     }
     if (tool === "room_read_result" && value.cliBasis?.actions.review)
@@ -229,7 +231,7 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
         step.command = ["room", "work", args.workItemId, "--result"];
     }
     if (tool === "room_read_work_discussion") {
-      value.workspaceArtifacts = exactDiscussionFiles(value.discussion.items, config);
+      value.workspaceArtifacts = exactDiscussionFiles(value.discussion.items.map(item => item.message), config, name);
       const cursor = value.discussion.nextCursor;
       if (validCursor(cursor))
         value.nextCommand = ["room", "work", args.workItemId, "--discussion", "--cursor", cursor];

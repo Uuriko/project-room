@@ -10,7 +10,7 @@ import { readCurrentRecord } from "../server/current-room-repository.mjs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { EVENT_TYPES as T } from "../src/events.js";
+import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, messageAction, openCatchUp, openWorkFromSearch } from "./room-chrome.mjs";
@@ -69,7 +69,7 @@ async function setup(t, { current = false, mobile = false, review = false, viewp
   for (let i = 0; i < 102; i++) { chatAt += 2000; send(T.MESSAGE_POSTED, { body: "Synthetic background activity", replyToId: "test-welcome" }); }
   const complete = () => mutate(T.WORK_COMPLETED, { evidenceKind: "room_text", evidenceMessageId: "native-draft", evidenceMessageEventId: posted.event.id,
     evidenceVersion: textVersion(body), previousCompletionEventId: item().receipt?.eventId ?? null, producerId: "owner", summary: "A quiet room", nextAction: "Review" });
-  if (review) complete();
+  const reviewEventId = review ? complete().event.id : null;
   const server = createRoomServer({ store: f.store, streamInterval: 40 }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
@@ -93,7 +93,7 @@ async function setup(t, { current = false, mobile = false, review = false, viewp
   };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/native-result-${name}.png` }); };
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
-  return { ...f, browser, page, workItemId, body, item, send, mutate, complete, open, fill, textReady, capture, save: page.locator("#action-form button[type=submit]") };
+  return { ...f, browser, page, workItemId, reviewEventId, body, item, send, mutate, complete, open, fill, textReady, capture, save: page.locator("#action-form button[type=submit]") };
 }
 
 test("a fresh exact result defers catch-up until the reader opens it", { timeout: 25000 }, async t => {
@@ -210,7 +210,7 @@ test("native review shows exact text and leaves human approval pending", { timeo
 });
 
 test("exact result shows review delivery separately from reviewer activity", { timeout: 25000 }, async t => {
-  const f = await setup(t, { review: true, mobile: true });
+  const f = await setup(t, { review: true, mobile: true, body: previewBody });
   let reviewRuntime = { status: "unavailable", webhook: "queued" };
   await f.page.route("**/work-result?**", async route => {
     const response = await route.fetch();
@@ -552,6 +552,32 @@ for (const responseKind of ["wrong-completion", "missing-result"]) test(`native 
   assert.equal(await f.page.locator("#message-input").inputValue(), "Keep this draft while reviewing.");
 });
 
+test("an oversized passage reply preserves the author's existing sendable draft", { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile: true, body: previewBody });
+  f.complete();
+  const existing = "x".repeat(MAX_MESSAGE_BODY_CHARS - 16);
+  await messageAction(f.page, "native-draft", "reply");
+  const input = f.page.locator("#message-input");
+  await input.fill(existing);
+  await f.page.locator("#thread-back").click();
+  await selectResultWork(f);
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  const body = f.page.locator("#result-body");
+  await body.getByText(/quiet room/).waitFor();
+  await body.evaluate(el => {
+    const range = document.createRange();
+    range.setStart(el.firstChild, 2); range.setEnd(el.firstChild, 14);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  });
+  await f.page.locator("#result-discuss").click();
+  await f.page.locator("#result-use-status").getByText(/Select a shorter passage/).waitFor();
+  assert.equal(await body.isVisible(), true);
+  await f.page.locator("#close-result").click();
+  await messageAction(f.page, "native-draft", "reply");
+  assert.equal(await input.inputValue(), existing);
+  assert.equal(await f.page.locator("#message-form button[type=submit]").isEnabled(), true);
+});
+
 for (const mobile of [false, true]) test(`selected result feedback ${mobile ? "mobile" : "desktop"} preserves drafts and exact reply`, { timeout: 30000 }, async t => {
   const f = await setup(t, { mobile, body: previewBody }); f.complete();
   await messageAction(f.page, "native-draft", "reply");
@@ -565,12 +591,15 @@ for (const mobile of [false, true]) test(`selected result feedback ${mobile ? "m
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
   });
   await f.page.locator("#result-discuss").click();
-  assert.equal(await f.page.locator("#message-input").inputValue(), "> A quiet room\n\nPlease clarify this.");
+  const source = new URL("/?room=commons", f.page.url());
+  source.hash = "#pr-record/result/" + f.workItemId + "/" + f.item().receipt.eventId;
+  const feedback = "> A quiet room\n" + source.href + "\n\nPlease clarify this.";
+  assert.equal(await f.page.locator("#message-input").inputValue(), feedback);
   assert.equal(await f.page.locator("#message-input").evaluate(el => el === document.activeElement), true);
   await f.capture(`selected-feedback-${mobile ? "mobile" : "desktop"}`);
   await f.page.locator("#message-form button[type=submit]").click();
   await f.page.waitForFunction(() => document.querySelector("#message-input").value === "");
-  const posted = f.store.room("commons").state.messages.find(message => message.body === "> A quiet room\n\nPlease clarify this.");
+  const posted = f.store.room("commons").state.messages.find(message => message.body === feedback);
   assert.equal(posted?.replyToId, "native-draft", "posted feedback references the exact inspected source message");
   if (!mobile) await f.page.locator("#close-result").click();
   await f.page.locator("#thread-back").click();
@@ -827,7 +856,9 @@ for (const current of [false, true]) test(`reply with an old result passage whil
       selection.addRange(range);
     });
     await f.page.locator("#result-discuss").click();
-    await f.page.waitForFunction(() => document.querySelector("#message-input").value === "> A quiet room\n\n", null, { timeout: 4500 });
+    const source = new URL("/?room=commons", f.page.url());
+    source.hash = "#pr-record/result/" + f.workItemId + "/" + f.reviewEventId;
+    await f.page.waitForFunction(href => document.querySelector("#message-input").value === "> A quiet room\n" + href + "\n\n", source.href, { timeout: 4500 });
     assert.ok(selected.includes("native-draft"));
     assert.match(await f.page.locator("#reply-context").textContent(), /A quiet room/);
     const input = f.page.locator("#message-input");

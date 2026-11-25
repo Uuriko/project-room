@@ -1,11 +1,11 @@
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
-import { openWorkFromSearch, clickWorkAction } from "./room-chrome.mjs";
+import { openCatchUp, openWorkFromSearch, clickWorkAction } from "./room-chrome.mjs";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { rmSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -16,7 +16,7 @@ import { signInFixture } from "./auth-signin.mjs";
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
 
-async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody, firstCredit } = {}) {
+async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody, firstCredit, approveBoth = false } = {}) {
   const f = createAcceptanceFixture();
   const makeServer = () => createRoomServer({ store: f.store, streamInterval: 60, credentialReadBurst });
   let server = makeServer(), browser;
@@ -53,14 +53,16 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
 
   send("owner", T.MEMBER_ADDED, { memberId: "human-checker", displayName: "Test checker", kind: "human", permissions: ["verify"] });
   f.keys["human-checker"] = f.store.issueAccessKey("commons", "human-checker");
+  if (approveBoth) send("guest", T.MESSAGE_POSTED, { messageId: "start-history", body: "Ready to review" });
   send("owner", T.WORK_PROPOSED, { workItemId: "revision-journey", title: "Revise a short result", definitionOfDone: "Name the owner", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner" });
   lifecycle("revision-journey");
-  send("owner", T.WORK_PROPOSED, { workItemId: "calm-result", title: "A first result", definitionOfDone: "One version", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
+  send("owner", T.WORK_PROPOSED, { workItemId: "calm-result", title: "A first result", ...(approveBoth ? { ownerDecisionRequired: true, humanDecisionMakerId: "owner" } : {}), definitionOfDone: "One version", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
   lifecycle("calm-result");
   completeWithText("calm-result", "Only version of this result");
-  const first = completeWithText("revision-journey", firstBody ?? (retained ? retainedBody : "Result A\nKeep this line\nMissing named owner"), firstDirectTo, firstCredit);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
+  const body = typeof firstBody === "function" ? firstBody(origin) : firstBody;
+  const first = completeWithText("revision-journey", body ?? (retained ? retainedBody : "Result A\nKeep this line\nMissing named owner"), firstDirectTo, firstCredit);
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const errors = [];
   async function login(actor, destination = origin) {
@@ -108,7 +110,7 @@ for (const width of [1440, 390]) {
     await clickWorkAction(await openWorkFromSearch(reviewer, "revision-journey", "Revise a short result"), "verify");
     await reviewer.locator("#action-text-body").getByText(/Result B/).waitFor();
     const diff = reviewer.locator("#action-result-diff");
-    await diff.waitFor({ state: "visible" });
+    await diff.getByText("- Result A", { exact: true }).waitFor();
     assert.match(await diff.innerText(), /Name the owner in the final line/);
     assert.doesNotMatch(await diff.innerText(), /Requested change:/);
     assert.match(await diff.innerText(), /- Result A/);
@@ -152,6 +154,8 @@ for (const width of [1440, 390]) {
     assert.equal(f.store.room("commons").state.messages.find(m=>m.id===f.item().decision.sourceMessageId).body,"Named owner checked in result B");
     assert.equal(f.item().decision.decision, "approved");
     assert.equal(f.item().decision.completionEventId, second.event.id);
+    await owner.locator("#result-work-next").getByText("Accepted", { exact: true }).waitFor();
+    assert.equal(await owner.locator("#result-work-next-label").textContent(), "Decision");
     // Pin the slow ordering: the previous version's read lands after the current
     // text, as it did on CI, so this journey cannot pass only on a fast runner.
     await reviewer.route(url => new URL(url).searchParams.get("completionEventId") === f.first.event.id,
@@ -192,6 +196,151 @@ for (const width of [1440, 390]) {
   });
 }
 
+
+test("the ordinary reader keeps the governing verdict on the retained version", { timeout: 30000 }, async t => {
+  const f = await setup(t, 1440, { retained: true }), page = await f.login("owner");
+  await openResult(page);
+  await page.locator("#result-body").evaluate(body => {
+    const range = document.createRange();
+    range.setStart(body.firstChild, 0); range.setEnd(body.firstChild, 8);
+    const selection = getSelection();
+    selection.removeAllRanges(); selection.addRange(range);
+  });
+  const check = (receipt, result) => f.send("human-checker", T.VERIFICATION_RECORDED, {
+    workItemId: f.item().id, expectedRevision: f.item().revision, completionEventId: receipt.event.id,
+    evidenceVersion: receipt.event.data.evidenceVersion, result, summary: "Checked this revision",
+    ...(result === "fail" && { nextAction: "Correct the wording." })
+  });
+  check(f.first, "fail");
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Corrected the wording." });
+  f.mutate(T.WORK_STARTED, {});
+  const second = f.complete(retainedBody);
+  check(second, "pass");
+  await page.locator("#result-current-version").waitFor();
+  await page.locator("#result-verdict").getByText("Verification · Failed", { exact: true }).waitFor();
+  assert.equal(await page.locator("#result-body").textContent(), retainedBody);
+  assert.equal(await page.evaluate(() => getSelection().toString()), "Result A");
+  await page.locator("#result-current-version").click();
+  await page.getByText("Verification · Passed", { exact: true }).waitFor();
+});
+
+test("a withdrawal clears the retained passage while its replacement refresh is pending", { timeout: 30000 }, async t => {
+  const f = await setup(t, 1440, { retained: true }), page = await f.login("owner");
+  await openResult(page);
+  let captured, release;
+  const held = new Promise(resolve => { captured = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  await page.route("**/work-result?**", async route => {
+    if (new URL(route.request().url()).searchParams.get("completionEventId") !== f.first.event.id) return route.continue();
+    const response = await route.fetch();
+    captured(); await gate;
+    await route.fulfill({ response });
+  });
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Revise" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Revised" });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Updated result");
+  await held;
+  const messageId = f.first.event.data.evidenceMessageId;
+  const message = f.store.room("commons").state.messages.find(item => item.id === messageId);
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: message.revision ?? 0 });
+  await page.locator("#result-body").waitFor({ state: "hidden", timeout: 5000 });
+  assert.equal(await page.locator("#result-body").textContent(), "");
+  const delivered = page.waitForResponse(response => new URL(response.url()).searchParams.get("completionEventId") === f.first.event.id);
+  release(); await delivered;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await page.locator("#result-body").textContent(), "");
+  assert.equal(await page.locator("#result-copy-link").isVisible(), false);
+});
+
+test("returning from the first submission compares all changes across two revisions", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390, { firstBody: "Owner: undecided" });
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Name the owner" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Named the owner" });
+  f.mutate(T.WORK_STARTED, {});
+  const second = f.complete("Owner: Maya");
+  f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: f.item().id,
+    expectedRevision: f.item().revision, completionEventId: second.event.id, evidenceVersion: second.event.data.evidenceVersion,
+    result: "fail", summary: "Confirm the owner", nextAction: "Check with Maya" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Maya confirmed" });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Owner: Maya");
+  await f.restart();
+  const firstUrl = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+  const page = await f.login("human-checker", firstUrl);
+  const next = page.getByRole("link", { name: "Open current result" });
+  const currentUrl = await next.getAttribute("href");
+  await next.click();
+  for (const id of ["result-diff", "action-result-diff"]) {
+    const diff = page.locator("#" + id);
+    await diff.getByText("- Owner: undecided", { exact: true }).waitFor();
+    assert.match(await diff.textContent(), /\+ Owner: Maya/);
+    assert.equal(new URL(await diff.getByRole("link").getAttribute("href"), f.origin).hash, new URL(firstUrl).hash);
+    assert.match(await diff.textContent(), /Changes since the result you opened/);
+    if (id === "result-diff") await page.locator("#result-work-action").click();
+    else assert.match(await diff.textContent(), /Check with Maya/);
+  }
+  const fresh = await f.login("human-checker", currentUrl);
+  await fresh.locator("#result-diff").getByText(/No text changes from the previous version/).waitFor();
+  await page.locator("#cancel-action").click();
+  await page.route("**/work-result?**", route =>
+    new URL(route.request().url()).searchParams.get("completionEventId") === f.first.event.id
+      ? route.fulfill({ status: 404, json: { error: "Result unavailable" } }) : route.continue());
+  await page.locator("#result-work-action").click();
+  const limited = page.locator("#action-result-diff");
+  await limited.getByText(/earlier version could not be loaded/).waitFor();
+  assert.match(await limited.textContent(), /Check with Maya/);
+  assert.doesNotMatch(await limited.textContent(), /Owner: undecided/);
+  const sourceId = second.event.data.evidenceMessageId;
+  const source = f.store.room("commons").state.messages.find(message => message.id === sourceId);
+  f.send("producer", T.MESSAGE_DELETED, { messageId: sourceId, expectedMessageRevision: source.revision ?? 0 });
+  await limited.getByText(/Check with Maya/).waitFor({ state: "hidden" });
+  assert.doesNotMatch(await limited.textContent(), /Check with Maya/);
+  await page.locator("#cancel-action").click();
+  await page.unroute("**/work-result?**");
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Name the backup owner" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Named the backup" });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Owner: Maya, backup: Lee");
+  await page.getByRole("link", { name: "Open current result" }).waitFor();
+  await page.locator("#result-diff").getByText("- Owner: undecided", { exact: true }).waitFor();
+});
+
+test("a passage reply identifies the reviewed submission when two receipts cite one message", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const original = f.first.event.data;
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Confirm who owns this" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Confirmed" });
+  f.mutate(T.WORK_STARTED, {});
+  const second = f.mutate(T.WORK_COMPLETED, { ...original, expectedRevision: f.item().revision,
+    previousCompletionEventId: f.first.event.id });
+  const url = id => f.origin + "/?room=commons#pr-record/result/revision-journey/" + id;
+  const page = await f.login("human-checker", url(f.first.event.id));
+  await page.locator("#result-body").getByText(/Result A/).waitFor();
+  await page.locator("#result-body").evaluate(body => {
+    const range = document.createRange();
+    range.setStart(body.firstChild, 0); range.setEnd(body.firstChild, 8);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  });
+  await page.locator("#result-discuss").click();
+  const draft = page.locator("#message-input");
+  const feedback = await draft.inputValue();
+  assert.ok(feedback.includes(url(f.first.event.id)), "the editable feedback names the selected completion");
+  assert.ok(!feedback.includes(url(second.event.id)));
+  await draft.fill(feedback + "Please revisit this wording.");
+  await page.locator("#message-form button[type=submit]").click();
+  await page.waitForFunction(() => document.querySelector("#message-input").value === "");
+  const reply = f.store.room("commons").state.messages.find(message => message.body?.includes("Please revisit this wording."));
+  assert.equal(reply.replyToId, original.evidenceMessageId);
+  const pointer = reply.body.split("\n").find(line => line.startsWith(f.origin));
+  const publishedLink = page.locator('a[href="' + pointer + '"]').first();
+  await publishedLink.waitFor();
+  const recipient = await f.login("owner", await publishedLink.getAttribute("href"));
+  await recipient.locator("#result-body").getByText(/Result A/).waitFor();
+  assert.match(await recipient.locator("#result-status").textContent(), /Earlier result/);
+  assert.equal(await recipient.locator("#result-current-version").getAttribute("href"), url(second.event.id));
+});
 
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
   const f = await setup(t, 390);
@@ -428,6 +577,98 @@ test("the verdict links exact candidate release checks without claiming missing 
   }
 });
 
+for (const audience of ["public", "private"]) {
+  test(`a submitted file change follows the exact ${audience} evidence audience`, { timeout: 45000 }, async t => {
+    const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
+    const id = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
+    const href = origin => origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
+    const text = origin => [href(origin), href(origin).replace("/?", "/other?"), href(origin).replace("commons#", "other#")].join("\n");
+    const f = await setup(t, 390, { firstBody: text, ...(audience === "private" && { firstDirectTo: "human-checker" }) });
+    const publish = async (expectedRevision, patch) => {
+      const res = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+        method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+        body: JSON.stringify({ id, expectedRevision, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+      });
+      assert.ok(res.ok, await res.text());
+    };
+    await publish(0, patch);
+    const evidence = f.first.event.data.evidenceMessageId;
+    if (audience === "public") {
+      for (const author of ["owner", "guest", "producer", "human-checker"]) {
+        for (let i = 0; i < 26; i++) f.send(author, T.MESSAGE_POSTED, { body: `Later conversation ${i}` });
+      }
+    }
+    const reviewer = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
+    const body = reviewer.locator("#result-body");
+    const link = body.getByRole("link", { name: href(f.origin), exact: true });
+    await link.waitFor();
+    assert.equal(await body.textContent(), text(f.origin));
+    assert.equal(await body.locator("a").count(), 1);
+    const evidenceRead = audience === "public" && reviewer.waitForResponse(response => {
+      const url = new URL(response.url());
+      return response.ok() && url.pathname.endsWith("/conversation") && url.searchParams.get("messageId") === evidence;
+    });
+    await link.click();
+    if (evidenceRead) await evidenceRead;
+    await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
+    await reviewer.goBack();
+    await link.waitFor();
+    await publish(1, patch.replace("+submitted", "+replacement"));
+    await link.click();
+    await reviewer.getByText("This preview revision changed.", { exact: true }).waitFor();
+    assert.equal(await reviewer.getByRole("button", { name: "Open current revision" }).isVisible(), true);
+    if (audience === "private") {
+      assert.equal(await reviewer.locator("[data-discussion-link]").getAttribute("href"), null);
+      const nonparty = await f.login("owner", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
+      await nonparty.getByText("Ask the sender to share the intended result version somewhere you can read it.", { exact: true }).waitFor();
+      assert.equal(await nonparty.locator("#result-body a").count(), 0);
+      return;
+    }
+    const discussion = reviewer.getByRole("link", { name: "Open original discussion" });
+    if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "cold-file-preview.png") });
+    await discussion.waitFor({ timeout: 2000 });
+    assert.equal(new URL(await discussion.getAttribute("href")).hash, "#pr-record/message/" + evidence);
+    assert.equal(await reviewer.getByRole("button", { name: "Add to thread draft" }).count(), 0);
+    await discussion.press("Enter");
+    await reviewer.waitForFunction(id => document.activeElement?.dataset?.messageRecordId === id, evidence);
+    assert.equal(await reviewer.locator("#room-project-workspace").isVisible(), false);
+    assert.equal(reviewer.context().pages().length, 1);
+    if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "cold-file-return.png") });
+
+    const exact = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+    const leaving = await f.login("human-checker", exact);
+    const selectedSource = url => url.pathname.endsWith("/conversation") && url.searchParams.get("messageId") === evidence;
+    const held = Promise.withResolvers(), released = Promise.withResolvers();
+    await leaving.route(selectedSource, async route => {
+      held.resolve();
+      await released.promise;
+      await route.continue();
+    });
+    try {
+      await leaving.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+      await held.promise;
+      await leaving.locator("#topbar-updates").click();
+      await leaving.locator("#result-dialog").waitFor({ state: "hidden" });
+      const response = leaving.waitForResponse(response => selectedSource(new URL(response.url())));
+      released.resolve();
+      await response;
+      await leaving.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await leaving.locator("#room-project-workspace").isVisible(), false);
+      assert.equal(await leaving.locator("#updates-dialog").isVisible(), true);
+    } finally {
+      released.resolve();
+    }
+
+    const returning = await f.login("human-checker", exact);
+    await returning.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+    const original = returning.getByRole("link", { name: "Open original discussion" });
+    await original.waitFor();
+    f.send("producer", T.MESSAGE_DELETED, { messageId: evidence, expectedMessageRevision: 0 });
+    await original.waitFor({ state: "hidden" });
+    assert.equal(await returning.locator("[data-discussion-link]").getAttribute("href"), null);
+  });
+}
+
 test("shared result links keep identical old and new text bound to different verdicts", { timeout: 45000 }, async t => {
   const revision = "a".repeat(40);
   const source = `https://github.com/room-fixtures/pinned-result/blob/${revision}`;
@@ -579,3 +820,117 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
   assert.equal(await guest.locator("#result-retry").isVisible(), false);
   assert.equal(await guest.locator("#result-body").textContent(), "");
 });
+
+test("catch-up labels each review with its visible work and preserves withheld history", async t => {
+  const f = await setup(t, 390, { approveBoth: true });
+  f.store.markCaughtUp(f.keys.owner, "commons", f.store.headSequence("commons"));
+  const decisions = [];
+  for (const workItemId of ["revision-journey", "calm-result"]) {
+    const work = () => f.store.room("commons").state.workItems[workItemId];
+    const basis = () => ({ workItemId, expectedRevision: work().revision,
+      completionEventId: work().receipt.eventId, evidenceVersion: work().receipt.evidenceVersion });
+    const review = f.send("human-checker", T.VERIFICATION_RECORDED, {
+      ...basis(), result: "pass", summary: "Checked the revision",
+    });
+    const reason = f.send("owner", T.MESSAGE_POSTED, { messageId: "reason-" + workItemId, body: "Approved the revision." });
+    const decision = f.send("owner", T.OWNER_DECISION_RECORDED, {
+      ...basis(), decision: "approved", reason: "Approved the revision.", sourceMessageId: reason.event.data.messageId,
+    });
+    decisions.push({ workItemId, title: work().title, reviewId: review.event.id, decisionId: decision.event.id });
+  }
+  const page = await f.login("guest");
+  await openCatchUp(page);
+  const row = id => page.locator(`[data-brief-key="history:${id}"]`);
+  async function checkRows(privateFirst) {
+    await page.waitForFunction(() => Boolean(document.querySelector("#rb-ack-button").dataset.horizon));
+    while (!await row(decisions[1].decisionId).count() && await page.locator("#rb-more-button").isVisible()) {
+      await page.locator("#rb-more-button").click();
+      await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+    }
+    for (const { workItemId, title, reviewId, decisionId } of decisions) {
+      const masked = privateFirst && workItemId === "revision-journey";
+      assert.equal(await row(reviewId).locator(".rb-detail").textContent(), masked ? "pass" : title + " · pass · Checked the revision");
+      assert.equal(await row(decisionId).locator(".rb-detail").textContent(), masked ? "approved" : title + " · approved");
+      assert.equal(await row(decisionId).getAttribute("data-open-work"), workItemId);
+    }
+  }
+  await checkRows(false);
+  f.store.dmConsents.request("commons", "owner", "producer", "fixture");
+  f.store.dmConsents.decide("commons", "producer", "owner", "approve");
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "private-review", toMemberId: "producer",
+    workItemId: "revision-journey", requestKind: "reply", body: "Continue in private" });
+  const refreshed = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
+  await page.locator("#rb-refresh-button").click();
+  await refreshed;
+  await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+  await checkRows(true);
+
+  // The owner can read both work cards, but both proposals predate this marker.
+  const owner = await f.login("owner");
+  await openCatchUp(owner);
+  for (const { workItemId, decisionId } of decisions) {
+    const historical = owner.locator(`[data-brief-key="history:${decisionId}"]`);
+    assert.equal(await historical.locator(".rb-detail").textContent(), workItemId + " · approved");
+    assert.equal(await historical.getAttribute("data-open-work"), workItemId);
+  }
+});
+
+for (const anchor of ["root", "reply"]) {
+  test(`replaced Workspace link in a ${anchor} returns to the same discussion draft`, { timeout: 30000 }, async t => {
+    const f = await setup(t, 390);
+    const id = "f".repeat(32), head = "c".repeat(40);
+    const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+published\n";
+    const digest = createHash("sha256").update(patch).digest("hex");
+    const href = f.origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
+    const root = "workspace-original", reply = "workspace-reply";
+    const source = anchor === "root" ? root : reply;
+    f.send("producer", T.MESSAGE_POSTED, { messageId: root, body: "Original discussion" + (source === root ? "\n" + href : "") });
+    f.send("producer", T.MESSAGE_POSTED, { messageId: reply, replyToId: root, body: "Exact version" + (source === reply ? "\n" + href : "") });
+    const publish = async (expectedRevision, value) => {
+      const response = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+        method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+        body: JSON.stringify({ id, expectedRevision, patch: value, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+      });
+      assert.ok(response.ok, await response.text());
+    };
+    await publish(0, patch);
+    await publish(1, patch.replace("+published", "+replaced"));
+    const page = await f.login("human-checker");
+    const message = id => page.locator(`[data-message-record-id="${id}"]`);
+    const input = page.locator("#message-input");
+    const draft = "Unsent note on the exact discussion.";
+    await message(root).locator('[data-message-action="thread"]').click();
+    await message(reply).locator('[data-message-action="reply"]').click();
+    await input.fill(draft);
+    if (source === root) await page.locator("#thread-back").click();
+    await message(source).getByRole("link", { name: href, exact: true }).click();
+    const dialog = page.locator("#room-project-workspace"), link = dialog.getByRole("link", { name: "Open original discussion" });
+    await link.waitFor();
+    assert.equal(new URL(await link.getAttribute("href")).hash, "#pr-record/message/" + source);
+    assert.equal(await dialog.getByRole("button", { name: "Add to thread draft" }).count(), 0);
+    const returned = Promise.race([
+      page.context().waitForEvent("page").then(() => "new tab"),
+      dialog.waitFor({ state: "hidden" }).then(() => "same tab"),
+    ]);
+    if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `discussion-${anchor}.png`) });
+    await link.press("Enter");
+    assert.equal(await returned, "same tab");
+    await page.waitForFunction(expected => document.activeElement?.dataset.messageRecordId === expected, source);
+    assert.equal(await input.inputValue(), draft);
+    assert.match(await page.locator("#reply-context").textContent(), /Exact version/);
+    assert.equal(page.context().pages().length, 1);
+    assert.equal(await page.locator("#thread-back").isVisible(), true);
+    assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
+    if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `returned-${anchor}.png`) });
+    assert.equal(f.store.snapshot(f.keys.owner, "commons").state.messages.some(entry => entry.body === draft), false);
+    if (source === reply) {
+      await message(reply).getByRole("link", { name: href, exact: true }).click();
+      await link.waitFor();
+      f.send("producer", T.MESSAGE_DELETED, { messageId: reply, expectedMessageRevision: 0 });
+      await link.waitFor({ state: "hidden" });
+      assert.equal(await dialog.locator("[data-discussion-link]").getAttribute("href"), null);
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      assert.equal(await input.inputValue(), draft);
+    }
+  });
+}

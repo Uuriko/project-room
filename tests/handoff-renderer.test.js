@@ -53,11 +53,23 @@ test("all seven sections render with their content", () => {
 
 test("inputs render every kind as a reference", () => {
   const html = handoffEnvelopeHtml(receipt());
-  assert.match(html, />Work</); assert.match(html, />Message</); assert.match(html, />File</);
+  assert.match(html, />Work</); assert.match(html, />Message</); assert.match(html, />File path</);
   assert.match(html, />Link</); assert.match(html, />Note</);
   assert.match(html, /<a class="source-link" href="https:\/\/example\.test\/spec"/);
   assert.match(html, /sha aaaaaaaaaaaa/); // sha truncated to 12 chars
   assert.match(html, /short inline context/);
+});
+
+test("a named file reference shows the path the recipient needs", () => {
+  const inputs = [
+    { kind: "file", ref: "docs/brief.md", label: "Project brief" },
+    { kind: "file", ref: "/sender/drafts/notes.md", label: "/sender/drafts/notes.md" }
+  ];
+  const html = handoffEnvelopeHtml({ ...receipt(), envelope: envelope({ inputs }) });
+  assert.match(html, /Project brief/);
+  assert.ok(html.includes("<code>docs/brief.md</code>"));
+  assert.equal(html.split("/sender/drafts/notes.md").length - 1, 1);
+  assert.doesNotMatch(html, /href="(?:docs|\/sender)/);
 });
 
 test("authority renders permission chips, scope, expiry and note", () => {

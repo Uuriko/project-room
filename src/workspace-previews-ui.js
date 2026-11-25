@@ -34,7 +34,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         <aside data-workspace-discussion hidden>
           <h3>Discussion</h3>
           <div data-discussion-messages></div>
-          <a data-discussion-link target="_blank" rel="noopener">Open full discussion</a>
+          <a data-discussion-link>Open full discussion</a>
         </aside>
       </section>
       <section class="workspace-preview-detail" aria-label="Selected preview">
@@ -133,6 +133,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
 
   const discussionAside = dialog.querySelector("[data-workspace-discussion]");
   const discussionMessages = discussionAside.querySelector("[data-discussion-messages]");
+  const discussionLink = discussionAside.querySelector("[data-discussion-link]");
+  discussionLink.addEventListener("click", event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (!discussionDestination()?.openDiscussion?.(reset)) refreshDiscussion();
+  });
   const noteLabel = dialog.querySelector("[data-workspace-note]");
   const noteInput = noteLabel.querySelector("textarea");
   const notes = new Map();
@@ -141,20 +147,22 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     if (noteKey) notes.set(noteKey, noteInput.value);
     linkStatus.textContent = ""; linkFallback.hidden = true; linkFallback.value = "";
   });
+  function discussionDestination() {
+    return threadDraft?.artifactId && threadDraft.artifactId !== selected ? null : threadDraft;
+  }
   function refreshDiscussion() {
     if (!dialog.open) return;
     // A conversation can remain authorized after its artifact expires or changes.
     const canUseArtifact = !copyLink.hidden;
-    const discussion = (canUseArtifact || linked) && threadDraft?.discussion();
+    const destination = discussionDestination();
+    const discussion = (canUseArtifact || linked) && destination?.discussion();
     discussionAside.hidden = !discussion;
-    addToThread.hidden = !canUseArtifact || !discussion || Boolean(items.find(item => item.id === selected)?.recipientId);
+    addToThread.hidden = !canUseArtifact || !discussion || !destination?.append || Boolean(items.find(item => item.id === selected)?.recipientId);
     discussionMessages.replaceChildren();
-    const source = discussionAside.querySelector("[data-discussion-link]");
     if (discussion) {
-      source.href = discussion.link;
-      source.textContent = canUseArtifact ? "Open full discussion" : uiText("workspace.openOriginalDiscussion");
-    }
-    else source.removeAttribute("href");
+      discussionLink.href = discussion.link;
+      discussionLink.textContent = canUseArtifact ? "Open full discussion" : uiText("workspace.openOriginalDiscussion");
+    } else discussionLink.removeAttribute("href");
     for (const message of canUseArtifact ? discussion?.messages ?? [] : []) {
       const line = document.createElement("p");
       line.textContent = [message.author, message.excerpt].join(" · ");
@@ -448,10 +456,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     return link ? { current, session, panel, link } : null;
   }
 
+  let latestCopy = 0;
   async function copySelection(forAgent) {
     const snapshot = shareSelection();
     if (!snapshot) return;
     const { current, session, link } = snapshot;
+    const copyTicket = ++latestCopy, view = generation;
     const returnLink = threadDraft?.discussion()?.link;
     const note = noteInput.value.trim();
     const copiedText = forAgent ? [
@@ -463,7 +473,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         : "Return your revised publication to that discussion for review."),
     ].filter(Boolean).join("\n\n") : link;
     const result = await clipboard.copy(copiedText);
-    if (!dialog.open || client.session !== session || shareSelection()?.link !== link
+    if (copyTicket !== latestCopy || !owns(view, session) || shareSelection()?.link !== link
       || (forAgent && (noteInput.value.trim() !== note || threadDraft?.discussion()?.link !== returnLink))) return;
     linkFallback.hidden = result === "copied";
     if (result === "copied") linkStatus.textContent = uiText(forAgent ? "workspace.share.agentCopied" : "workspace.share.copied");
