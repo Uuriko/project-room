@@ -332,9 +332,9 @@ test("legacy journal migration retains saved operation and uses indexed retry sc
   const upgraded = openRequestJournal(path);
   try {
     assert.deepEqual({ ...upgraded.prepare("SELECT * FROM request_runs").get() }, {
-      id: "original-op", response: '{"body":"retained"}', delivered: 0, attempt_id: "original-attempt", delivery_refused: 0, reported: 0
+      id: "original-op", response: '{"body":"retained"}', delivered: 0, attempt_id: "original-attempt", delivery_refused: 0, reported: 0, file_id: null, file_state: null, file_sha256: null
     });
-    const plan = upgraded.prepare("EXPLAIN QUERY PLAN SELECT rowid,id,response FROM request_runs WHERE (delivered=0 OR reported=0) AND delivery_refused=0 AND response IS NOT NULL AND rowid>? ORDER BY rowid LIMIT 50").all(0);
+    const plan = upgraded.prepare("EXPLAIN QUERY PLAN SELECT rowid,id,response FROM request_runs WHERE (delivered=0 OR reported=0 OR file_state='pending') AND delivery_refused=0 AND response IS NOT NULL AND rowid>? ORDER BY rowid LIMIT 50").all(0);
     assert.ok(plan.some(row => row.detail.includes("request_runs_unsettled")), JSON.stringify(plan));
     assert.ok(plan.every(row => !row.detail.includes("TEMP B-TREE")));
   } finally { upgraded.close(); }

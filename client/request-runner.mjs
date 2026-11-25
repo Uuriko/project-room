@@ -1,3 +1,5 @@
+import { validId } from "../src/events.js";
+import { buildReplyCommand } from "./reply-actions.mjs";
 import { hostReplyBody } from "./host-result.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -5,6 +7,8 @@ import { mkdirSync, openSync, closeSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomAgentClient } from "./room-agent.mjs";
 import { createWorkBrief } from "./work-brief.mjs";
+
+const unfinished = "(delivered=0 OR reported=0 OR file_state='pending') AND delivery_refused=0 AND response IS NOT NULL";
 
 // The caller selects a private local file and one configured host. This is not
 // a watcher or permission to run arbitrary room messages. SQLite serializes
@@ -28,10 +32,18 @@ export function openRequestJournal(filename) {
       db.exec("ALTER TABLE request_runs ADD COLUMN reported INTEGER NOT NULL DEFAULT 0");
       db.exec("UPDATE request_runs SET reported=1 WHERE delivered=1 AND attempt_id IS NULL");
     }
+    if (!db.prepare("PRAGMA table_info(request_runs)").all().some(column => column.name === "file_id")) {
+      db.exec("ALTER TABLE request_runs ADD COLUMN file_id TEXT");
+      db.exec("ALTER TABLE request_runs ADD COLUMN file_state TEXT");
+      db.exec("ALTER TABLE request_runs ADD COLUMN file_sha256 TEXT");
+      db.exec("DROP INDEX IF EXISTS request_runs_unsettled");
+    }
+
     db.exec("CREATE INDEX IF NOT EXISTS request_runs_retryable_delivery ON request_runs(delivered, delivery_refused) WHERE response IS NOT NULL");
     // The recovery scan's real predicate includes reported=0 rows; the partial
     // index above cannot serve the OR, so give the scan its own matching index.
-    db.exec("CREATE INDEX IF NOT EXISTS request_runs_unsettled ON request_runs(delivery_refused) WHERE response IS NOT NULL AND (delivered=0 OR reported=0)");
+    db.exec(`CREATE INDEX IF NOT EXISTS request_runs_unsettled ON request_runs(delivery_refused) WHERE ${unfinished}`);
+    db.exec("CREATE INDEX IF NOT EXISTS request_runs_unshared ON request_runs(file_state) WHERE delivered=1 AND file_state IN ('pending','attention','expired')");
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   return db;
@@ -40,7 +52,7 @@ export function openRequestJournal(filename) {
 // execute receives no connection secret: only the selected conversation and
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
-export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId }) {
+export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId, stagedFileId }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
   if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
   if (selectRequest !== undefined && typeof selectRequest !== "function") throw new Error("Execution selection must be a function");
@@ -52,6 +64,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     if (allowRequest && allowRequest(request) !== true)
       throw Object.assign(new Error("Requester is not enabled for this host"), { code: "requester_not_allowed" });
   };
+  if (stagedFileId !== undefined && !validId(stagedFileId)) throw new Error("Choose one valid staged file ID");
   const client = new RoomAgentClient(connection);
   let context = await client.replyContext(requestMessageId, { limit: 50, signal });
   if (context.viewerId !== connection.memberId || context.request.recipientId !== connection.memberId)
@@ -78,7 +91,8 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     }
     if (receipt.status !== "recorded") throw new Error("Reply delivery is unconfirmed; retain the journal and retry unchanged");
     db.prepare("UPDATE request_runs SET delivered=1, delivery_refused=0 WHERE id=?").run(id);
-    return reportDelivered(record, { status: "delivered", requestId: id, receipt, hostExecuted: false });
+    return record.file_id ? finishDelivery(record, receipt.messageId, receipt)
+      : reportDelivered(record, { status: "delivered", requestId: id, receipt, hostExecuted: false });
   };
   // The reply is recorded; a lost run report must not be hidden. Retryable
   // failures keep reported=0 and surface to the queue's backoff; a terminal
@@ -99,6 +113,29 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     db.prepare("UPDATE request_runs SET reported=1 WHERE id=?").run(id);
     return { ...result, runReported: true };
   };
+  const shareFile = async (record, messageId, result) => {
+    const attachment = { fileId: record.file_id, messageId };
+    result = { ...result, requestMessageId, answerDelivered: true };
+    if (record.file_state !== "shared") {
+      try { await client.commitAnswerFile(record.file_id, messageId, record.file_sha256, { signal }); }
+      catch (error) {
+        const refused = [403, 404, 409, 410, 422].includes(error.status);
+        const expired = error.status === 410 && error.code === "attachment_unavailable";
+        const state = expired ? "expired" : refused ? "attention" : "pending";
+        db.prepare("UPDATE request_runs SET file_state=? WHERE id=? AND file_id=? AND file_state!='shared'").run(state, id, record.file_id);
+        return { ...result, status: refused ? "file_needs_attention" : "file_pending",
+          attachment, reason: error.code ?? "attachment_commit_unconfirmed" };
+      }
+      db.prepare("UPDATE request_runs SET file_state='shared' WHERE id=? AND file_id=?").run(id, record.file_id);
+    }
+    return { ...result, attachment: { ...attachment, state: "shared" } };
+  };
+  const finishDelivery = async (record, messageId, receipt) => {
+    let result = { status: "delivered", requestId: id, hostExecuted: false, ...(receipt && { receipt }) };
+    if (record.file_id) result = await shareFile(record, messageId, result);
+    if (!record.reported) return reportDelivered(record, result);
+    return { ...result, runReported: record.reported === 2 ? "refused" : true };
+  };
   if (savedRequestId !== undefined && savedRequestId !== id)
     throw Object.assign(new Error("Saved reply identity changed; reconcile the original attempt"), { code: "saved_reply_identity_mismatch" });
   const prior = db.prepare("SELECT * FROM request_runs WHERE id=?").get(id);
@@ -106,6 +143,35 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     throw new Error("Saved reply is unavailable; reconcile the original attempt");
   if (prior) {
     if (!prior.response) throw new Error("Host outcome is unknown; reconcile the original attempt before proceeding");
+    if (stagedFileId !== undefined && prior.file_id !== stagedFileId) {
+      if (prior.file_id && prior.file_state !== "expired") throw new Error("This answer already has a different selected file");
+      const digest = await client.stagedAnswerFileDigest(stagedFileId, { signal });
+      // Explicit selection can replace a permanently unavailable file. Pin the
+      // observed old ID so two operators cannot replace one another's choices.
+      db.prepare(`UPDATE request_runs SET file_id=?, file_sha256=?, file_state='pending'
+        WHERE id=? AND file_id IS ? AND (file_id IS NULL OR file_state='expired')`)
+        .run(stagedFileId, digest, id, prior.file_id);
+      Object.assign(prior, db.prepare("SELECT file_id,file_sha256,file_state FROM request_runs WHERE id=?").get(id));
+      if (prior.file_id !== stagedFileId) throw new Error("The selected file changed during recovery");
+    }
+    if (prior.file_id && (prior.delivered || context.request.status !== "open")) {
+      const input = JSON.parse(prior.response);
+      const command = buildReplyCommand(connection, "room_respond_to_request", input);
+      const messageId = command.data.messageId;
+      if (context.request.status !== "answered" || context.request.terminalActorId !== connection.memberId
+        || context.request.responseMessageId !== messageId || input.toMemberId !== context.request.requesterId) {
+        db.prepare("UPDATE request_runs SET delivery_refused=1, file_state='attention' WHERE id=? AND file_state!='shared'").run(id);
+        throw new Error("The selected request has no matching delivered answer for this file");
+      }
+      if (!prior.delivered) {
+        // The answer may have committed just before its response or local journal write was lost.
+        const receipt = await client.operationReceipt(id, { signal });
+        if (receipt?.status !== "recorded" || receipt.eventId !== context.request.terminalEventId || receipt.eventType !== "message.posted")
+          throw new Error("The original answer operation is unconfirmed");
+        db.prepare("UPDATE request_runs SET delivered=1, delivery_refused=0 WHERE id=?").run(id);
+      }
+      return finishDelivery(prior, messageId);
+    }
     // A known local delivery whose run report is pending only reports; the saved
     // reply is not replayed again.
     if (prior.delivered === 1 && prior.reported === 0)
@@ -145,8 +211,9 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   if (execute.prepare) await execute.prepare({ signal });
   signal?.throwIfAborted();
   checkExecution(context.request);
+  const fileDigest = stagedFileId ? await client.stagedAnswerFileDigest(stagedFileId, { signal }) : null;
   const attemptId = randomUUID();
-  const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id,attempt_id) VALUES (?,?)").run(id, attemptId).changes;
+  const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id,attempt_id,file_id,file_state,file_sha256) VALUES (?,?,?,?,?)").run(id, attemptId, stagedFileId ?? null, stagedFileId ? "pending" : null, fileDigest).changes;
   if (!claimed) throw new Error("Another runner owns this attempt; reconcile before proceeding");
   const basis = { expectedRequestRevision: context.current.answerBasis.expectedRequestRevision,
     contextEventId: context.current.answerBasis.contextEventId };
@@ -198,13 +265,15 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
       // refusals still stop here; delivery never rebases or reruns the host.
       if (error?.status !== undefined && error.status !== 408 && error.status !== 429 && error.status < 500) throw error;
     }
-    const delivered = await deliver({ response: JSON.stringify(response), attempt_id: attemptId });
+    const delivered = await deliver({ response: JSON.stringify(response), attempt_id: attemptId, file_id: stagedFileId, file_sha256: fileDigest });
     return { ...delivered, hostExecuted: true };
   } catch (error) {
     clearInterval(timer); await heartbeat;
-    const saved = db.prepare("SELECT response FROM request_runs WHERE id=?").get(id)?.response;
-    const state = saved && ![409, 422].includes(error?.status) ? "result_ready" : "needs_attention";
-    await report(attemptId, state, {}, AbortSignal.timeout(5000)).catch(() => {});
+    const saved = db.prepare("SELECT response, delivered FROM request_runs WHERE id=?").get(id);
+    if (!saved?.delivered) {
+      const state = saved?.response && ![409, 422].includes(error?.status) ? "result_ready" : "needs_attention";
+      await report(attemptId, state, {}, AbortSignal.timeout(5000)).catch(() => {});
+    }
     throw error;
   } finally {
     clearInterval(timer); signal?.removeEventListener("abort", abort);
@@ -231,7 +300,7 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
   let delay = intervalMs, connectionUnavailable = false, pendingStatement, recoveryRow = 0;
-  const pending = request => (pendingStatement ??= db.prepare("SELECT 1 FROM request_runs WHERE (delivered=0 OR reported=0) AND delivery_refused=0 AND json_extract(response,'$.responseToRequestId')=?")).get(request.id);
+  const pending = request => (pendingStatement ??= db.prepare(`SELECT 1 FROM request_runs WHERE ${unfinished} AND json_extract(response,'$.responseToRequestId')=?`)).get(request.id);
   while (!signal?.aborted) {
     let cursor = null, reportPending = false;
     try {
@@ -244,7 +313,7 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
       // committed while its acknowledgement was lost, so enumerate local saved
       // deliveries independently. Rotate the bounded scan past refused records.
       const scanSaved = after => db.prepare(`SELECT rowid AS recovery_row, id, response FROM request_runs
-        WHERE (delivered=0 OR reported=0) AND delivery_refused=0 AND response IS NOT NULL AND rowid > ?
+        WHERE ${unfinished} AND rowid > ?
         ORDER BY rowid LIMIT 50`).all(after);
       let saved = scanSaved(recoveryRow);
       if (!saved.length && recoveryRow) { recoveryRow = 0; saved = scanSaved(0); }
@@ -257,8 +326,10 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
           if (typeof requestMessageId !== "string" || !requestMessageId) throw new Error("Saved reply has no request identity");
           // Preserve explicit attention fences for requests still being worked.
           if (runs[requestMessageId]?.state === "needs_attention") continue;
-          emit(await runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal,
-            allowRequest, selectRequest, savedRequestId: record.id }));
+          const result = await runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal,
+            allowRequest, selectRequest, savedRequestId: record.id });
+          emit(result);
+          if (result.status === "file_pending") reportPending = true;
           recovering.add(requestMessageId);
         } catch (error) {
           if (requestMessageId && error?.code !== "saved_reply_identity_mismatch") recovering.add(requestMessageId);

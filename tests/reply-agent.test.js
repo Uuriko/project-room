@@ -247,6 +247,110 @@ test("configured host receives prepared request once and its answer returns thro
   assert.equal(retry.hostExecuted, false);
   assert.equal(calls, 1);
 });
+for (const failure of ["before file commit", "after file commit", "with a mismatched file receipt", "after answer commit"]) {
+  test(`a saved file handoff recovers ${failure} without a second answer POST`, async t => {
+    const f = await fixture(t);
+    const journal = join(f.directory, "file-handoff.sqlite");
+    let db = openRequestJournal(journal);
+    t.after(() => db.close());
+    const requestMessageId = f.open().command.data.messageId;
+    const fileId = "selected-design";
+    const staged = f.store.roomAttachments.stage(f.keys.producer, "commons", {
+      id: fileId, filename: "design.md", mediaType: "text/markdown", data: Buffer.from("Approved design").toString("base64")
+    });
+    let answers = 0, executions = 0, fail = true;
+    const connection = { ...f.config, fetchImpl: async (url, options) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith("/commands") && JSON.parse(options.body).data.responseOutcome === "answered") {
+        answers++;
+        const response = await fetch(url, options);
+        if (fail && failure === "after answer commit") throw new TypeError("answer receipt lost");
+        return response;
+      }
+      if (fail && path.endsWith("/commit")) {
+        if (failure === "with a mismatched file receipt") {
+          const receipt = await (await fetch(url, options)).json();
+          receipt.attachment.messageId = requestMessageId;
+          return Response.json(receipt);
+        }
+        if (failure === "after file commit") await fetch(url, options);
+        throw new TypeError("file receipt unavailable");
+      }
+      return fetch(url, options);
+    } };
+    const execute = async () => { executions++; return { body: "Here is the design" }; };
+    const first = runRequestOnce({ connection, db, execute, requestMessageId, stagedFileId: fileId });
+    if (failure === "after answer commit") await assert.rejects(first, /answer receipt lost/);
+    else assert.equal((await first).status, "file_pending");
+    fail = false;
+    db.close(); db = openRequestJournal(journal);
+    const stop = new AbortController();
+    const emitted = [];
+    await runRequestQueue({ connection, db, execute, stream: false, intervalMs: 1000,
+      signal: AbortSignal.any([stop.signal, AbortSignal.timeout(5000)]),
+      emit(result) { emitted.push(result); stop.abort(); } });
+    const messageId = (await f.client.replyContext(requestMessageId)).request.responseMessageId;
+    assert.deepEqual(emitted[0]?.attachment, { fileId, messageId, state: "shared" }, JSON.stringify(emitted));
+    const fetched = f.store.roomAttachments.get(f.keys.owner, "commons", fileId).attachment;
+    assert.equal(fetched.messageId, messageId);
+    assert.equal(fetched.sha256, staged.attachment.sha256);
+    assert.equal(Buffer.from(fetched.data, "base64").toString(), "Approved design");
+    await assert.rejects(runRequestOnce({ connection, db, execute, requestMessageId, stagedFileId: "wrong-file" }), /different selected file/);
+    assert.equal((await runRequestOnce({ connection, db, execute, requestMessageId })).attachment.state, "shared");
+    assert.equal(executions, 1);
+    assert.equal(answers, 1);
+  });
+}
+
+test("a permanently unavailable file can be explicitly replaced on the original delivered answer", async t => {
+  const f = await fixture(t), args = runner(t, f);
+  const requestMessageId = f.open().command.data.messageId;
+  const stage = id => f.store.roomAttachments.stage(f.keys.producer, "commons",
+    { id, filename: "design.md", mediaType: "text/markdown", data: "YQ==" });
+  stage("original");
+  let answers = 0, executions = 0;
+  const connection = { ...f.config, fetchImpl: (url, options) => {
+    if (new URL(url).pathname.endsWith("/commands")) answers++;
+    return fetch(url, options);
+  } };
+  const execute = () => {
+    executions++;
+    f.store.roomAttachments.discard(f.keys.producer, "commons", "original");
+    return { body: "Review the design" };
+  };
+  const run = stagedFileId => runRequestOnce({ ...args, connection, requestMessageId, stagedFileId, execute });
+  const unavailable = await run("original");
+  assert.equal(unavailable.status, "file_needs_attention");
+  assert.equal(unavailable.reason, "attachment_unavailable");
+  stage("replacement");
+  const recovered = await run("replacement");
+  assert.equal(recovered.attachment.state, "shared");
+  assert.equal(recovered.attachment.messageId, unavailable.attachment.messageId);
+  assert.equal(f.store.roomAttachments.get(f.keys.owner, "commons", "replacement").attachment.messageId, recovered.attachment.messageId);
+  assert.equal(answers, 1);
+  assert.equal(executions, 1);
+});
+
+test("adding a staged file to a delivered answer never rebinds someone else's file or repeats the answer", async t => {
+  const f = await fixture(t), args = runner(t, f);
+  const requestMessageId = f.open().command.data.messageId;
+  const fileId = "someone-elses-file";
+  f.store.roomAttachments.stage(f.keys.owner, "commons", {
+    id: fileId, filename: "notes.txt", mediaType: "text/plain", data: "YQ=="
+  });
+  await runRequestOnce({ ...args, requestMessageId, execute: async () => ({ body: "Saved answer" }) });
+  let answerPosts = 0;
+  const connection = { ...f.config, fetchImpl: (url, options) => {
+    if (new URL(url).pathname.endsWith("/commands")) answerPosts++;
+    return fetch(url, options);
+  } };
+  await assert.rejects(runRequestOnce({ ...args, connection, requestMessageId, stagedFileId: fileId,
+    execute: () => assert.fail("completed host ran again") }), { status: 404 });
+  assert.equal(answerPosts, 0);
+  assert.equal(args.db.prepare("SELECT file_state FROM request_runs").get().file_state, null);
+  assert.equal(f.store.roomAttachments.get(f.keys.owner, "commons", fileId).attachment.state, "staged");
+});
+
 test("lost delivery response reuses saved answer without executing host again", async t => {
   const f = await fixture(t), args = runner(t, f), q = f.open("host-lost");
   let calls = 0, lost = false;

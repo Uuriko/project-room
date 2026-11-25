@@ -816,6 +816,23 @@ export class RoomAgentClient {
   replyAction(name, args, options = {}) {
     return submitReplyAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
+  async stagedAnswerFileDigest(fileId, { signal } = {}) {
+    if (!this.#memberId || !validId(fileId)) throw new Error("Choose a staged file");
+    const result = await this.#request(`/files/${encodeURIComponent(fileId)}`, undefined, signal);
+    const file = result?.attachment;
+    if (result?.roomId !== this.#roomId || file?.id !== fileId || file.state !== "staged"
+      || file.uploaderId !== this.#memberId || file.messageId !== null || !/^[a-f0-9]{64}$/.test(file.sha256))
+      throw new RoomClientError(409, "file_not_staged", "Choose an available file staged by the responder");
+    return file.sha256;
+  }
+  async commitAnswerFile(fileId, messageId, digest, { signal } = {}) {
+    if (!this.#memberId || !validId(fileId) || !validId(messageId)) throw new Error("Choose a staged file and an exact answer");
+    const receipt = await this.#request(`/files/${encodeURIComponent(fileId)}/commit`, { messageId }, signal);
+    const file = receipt?.attachment;
+    if (receipt?.roomId !== this.#roomId || receipt.status !== "committed" || file?.id !== fileId
+      || file.messageId !== messageId || file.uploaderId !== this.#memberId || file.state !== "committed" || file.sha256 !== digest)
+      throw new RoomClientError(200, "invalid_attachment_receipt", "Room did not confirm the selected answer file");
+  }
   async charter({ revision, signal } = {}) {
     if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 0)) throw new Error("Choose an instructions version");
     const value = await this.#request(`/charter${revision === undefined ? "" : `?revision=${revision}`}`, undefined, signal);
