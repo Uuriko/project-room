@@ -126,7 +126,7 @@ import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord, workRoleHolder, withheldWorkItem, withheldWorkEvent, privateWorkEvent, privateWorkEventId, withheldBoardRow, outsidePrivateWork } from "./work-context.mjs";
-import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
+import { nextWorkStep, workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { assertDependsOnKnown } from "./work-claim-integrity.mjs";
 import { normalizeWorkDependencies } from "../src/work-dependencies.js";
 import { nativePrerequisiteState, boardPrerequisiteState } from "./work-item-state.mjs";
@@ -7311,7 +7311,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (roomId !== "qa-onb-10302113") fail(403, "operator_retirement_scope", "Only the approved QA room may be retired");
     return this.command(OPERATOR_QA_ARCHIVE, roomId, { id: commandId, type: T.ROOM_ARCHIVED, data: { reason } });
   }
-  command(token, roomId, command, expectedSessionBinding = null, { agentConnectionSponsor = false, listenerToken } = {}) {
+  command(token, roomId, command, expectedSessionBinding = null, { agentConnectionSponsor = false, listenerToken, resultDraftRevision } = {}) {
     validateCommand(command);
     if(command.type===T.MEMBER_SPONSOR_TRANSFERRED)assertSponsorTransferCommand(this,roomId,command);
     // #2951: a flood token spent below lives in an in-memory bucket that the
@@ -7392,6 +7392,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ?? this.canonicalMessageEditContext(roomId, command);
       let room = messageContext?.room ?? this.room(roomId);
       if(!isArchivedOwnerPrivacyEvent(room.state,{type:command.type,actorId:auth.member.id}))refuseArchivedWrite(room.state);
+      if (resultDraftRevision !== undefined) {
+        const workId = command.data.workItemId;
+        const item = room.state.workItems?.[workId];
+        if (!item) fail(404, "work_not_found", "Work item not found in this Room");
+        assertSelectedWorkVisible(this, roomId, workId, item, auth.member.id);
+        if (item.revision !== resultDraftRevision) fail(409, "stale_revision", "Read the current work revision before submitting.");
+        const step = nextWorkStep(item, this.now(), room.state.ownerId);
+        if (step.action !== "in_progress" || step.memberId !== auth.member.id)
+          fail(409, "result_draft_unavailable", "Read the current work to see who can submit a result.");
+      }
       if (firstAck || exactProgress) {
         const { ifUnacknowledgedContextEventId, ifCurrentContextEventId, ...data } = command.data;
         const requests = room.state.replyRequests ?? {};

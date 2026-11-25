@@ -300,6 +300,7 @@ function validRoomArgs(name, args) {
     const draftOk = limit === undefined || validId(args.workItemId) && validId(args.id)
       && Number.isSafeInteger(limit) && limit >= 1 && limit <= 4096;
     return idOk && messageOk && replyOk && workOk && draftOk
+      && (args.expectedRevision === undefined || limit !== undefined && Number.isSafeInteger(args.expectedRevision) && args.expectedRevision >= 0)
       && (args.compact === undefined || typeof args.compact === "boolean")
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
@@ -904,7 +905,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
     const messageId = args.messageId ?? id;
     const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }),
       ...(args.workItemId === undefined ? {} : { workItemId: args.workItemId }) };
-    const posted = commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
+    const posted = commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted", { resultDraftRevision: args.expectedRevision });
     const hint = statusHint(data);
     const receipt = hint ? { ...posted, statusHint: hint } : posted;
     if (args.compact !== true && limit === undefined) return receipt;
@@ -1022,8 +1023,8 @@ function callInboxTool(store, identity, name, args) {
   throw new ServiceError(500, "internal", "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.");
 }
 
-function commandReceipt(store, secret, roomId, command, status) {
-  const result = store.command(secret, roomId, command);
+function commandReceipt(store, secret, roomId, command, status, options) {
+  const result = store.command(secret, roomId, command, null, options);
   return { status: result.duplicate ? "duplicate" : status, command, ...result };
 }
 
