@@ -291,13 +291,13 @@ test(`${representation} unavailable shared result gives the reviewer a safe next
 });
 
 test(`${representation} commands cover pickup, correction, review, requests and submission recovery`, async t => {
-  const { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli } = await fixture(t, representation);
+  const { origin, home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli } = await fixture(t, representation);
   const prepare = async (workItemId, review = false) => {
     store.command(owner, "commons", { id: "propose-" + workItemId, type: "work.proposed", data: {
       workItemId, title: "Review the evidence", definitionOfDone: "Test the exact pickup",
       accountableMemberId: producer.identityId, mode: "read",
-      independentVerificationRequired: review, ownerDecisionRequired: false,
-      ...(review ? { verifierMemberId: reviewer.identityId } : {})
+      independentVerificationRequired: review, ownerDecisionRequired: review,
+      ...(review ? { verifierMemberId: reviewer.identityId, humanDecisionMakerId: "owner" } : {})
     } });
     const selected = await cli(["work", workItemId]);
     assert.equal(selected.code, 0, JSON.stringify(selected));
@@ -479,10 +479,22 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   const replacement = await cli(["submit", "--from", save("replacement.json", work.value)],
     { ...result, body: "The exact contribution with the reconnect instructions." });
   assert.equal(replacement.code, 0, JSON.stringify(replacement));
+  const nativeReviewAction = async token => {
+    const response = await fetch(`${origin}/api/rooms/commons/needs-me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(response.status, 200);
+    return (await response.json()).items.find(item => item.id === "needs-review")?.reviewAction;
+  };
+  if (representation !== "legacy") assert.equal(await nativeReviewAction(reviewer.secret), "verify");
   const followup = await cli(["work", "needs-review", "--result"], undefined, reviewerProject);
   const accepted = await cli(["review", "--from", "-", "--pass", "--summary", "Includes reconnect instructions"],
     followup.value, reviewerProject);
   assert.equal(accepted.code, 0, JSON.stringify(accepted));
+  if (representation !== "legacy") {
+    assert.equal(await nativeReviewAction(reviewer.secret), undefined);
+    assert.equal(await nativeReviewAction(owner), "decide");
+  }
 
   const requested = await rpc("room_request_reply", { toMemberId: producer.identityId,
     requestId: "fixture-ask", body: "What did the reconnect check show?" }, reviewer);

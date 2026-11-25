@@ -846,6 +846,8 @@
   "attention.noLoadedUnread": "No unread boundary in this conversation’s loaded messages.",
   "updates.resolveOrRevise": "Resolve or revise",
   "work.thread.reviewCue": "Review or decision needed",
+  "work.thread.verifyCue": "Review needed",
+  "work.thread.decideCue": "Owner decision needed",
   "work.thread.nextFor": "{name} · {action}",
   "work.focus.briefHelp": "Name one output, the allowed scope and how to check it. Choose who will do the work and review it.",
   "work.focus.goalHtml": "<p class=\"definition work-focus-summary\" data-work-focus-goal>Done when: {definition}</p>",
