@@ -812,3 +812,63 @@ test("catch-up labels each review with its visible work and preserves withheld h
     assert.equal(await historical.getAttribute("data-open-work"), workItemId);
   }
 });
+
+for (const anchor of ["root", "reply"]) {
+  test(`replaced Workspace link in a ${anchor} returns to the same discussion draft`, { timeout: 30000 }, async t => {
+    const f = await setup(t, 390);
+    const id = "f".repeat(32), head = "c".repeat(40);
+    const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+published\n";
+    const digest = createHash("sha256").update(patch).digest("hex");
+    const href = f.origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
+    const root = "workspace-original", reply = "workspace-reply";
+    const source = anchor === "root" ? root : reply;
+    f.send("producer", T.MESSAGE_POSTED, { messageId: root, body: "Original discussion" + (source === root ? "\n" + href : "") });
+    f.send("producer", T.MESSAGE_POSTED, { messageId: reply, replyToId: root, body: "Exact version" + (source === reply ? "\n" + href : "") });
+    const publish = async (expectedRevision, value) => {
+      const response = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+        method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+        body: JSON.stringify({ id, expectedRevision, patch: value, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+      });
+      assert.ok(response.ok, await response.text());
+    };
+    await publish(0, patch);
+    await publish(1, patch.replace("+published", "+replaced"));
+    const page = await f.login("human-checker");
+    const message = id => page.locator(`[data-message-record-id="${id}"]`);
+    const input = page.locator("#message-input");
+    const draft = "Unsent note on the exact discussion.";
+    await message(root).locator('[data-message-action="thread"]').click();
+    await message(reply).locator('[data-message-action="reply"]').click();
+    await input.fill(draft);
+    if (source === root) await page.locator("#thread-back").click();
+    await message(source).getByRole("link", { name: href, exact: true }).click();
+    const dialog = page.locator("#room-project-workspace"), link = dialog.getByRole("link", { name: "Open original discussion" });
+    await link.waitFor();
+    assert.equal(new URL(await link.getAttribute("href")).hash, "#pr-record/message/" + source);
+    assert.equal(await dialog.getByRole("button", { name: "Add to thread draft" }).count(), 0);
+    const returned = Promise.race([
+      page.context().waitForEvent("page").then(() => "new tab"),
+      dialog.waitFor({ state: "hidden" }).then(() => "same tab"),
+    ]);
+    if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `discussion-${anchor}.png`) });
+    await link.press("Enter");
+    assert.equal(await returned, "same tab");
+    await page.waitForFunction(expected => document.activeElement?.dataset.messageRecordId === expected, source);
+    assert.equal(await input.inputValue(), draft);
+    assert.match(await page.locator("#reply-context").textContent(), /Exact version/);
+    assert.equal(page.context().pages().length, 1);
+    assert.equal(await page.locator("#thread-back").isVisible(), true);
+    assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
+    if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `returned-${anchor}.png`) });
+    assert.equal(f.store.snapshot(f.keys.owner, "commons").state.messages.some(entry => entry.body === draft), false);
+    if (source === reply) {
+      await message(reply).getByRole("link", { name: href, exact: true }).click();
+      await link.waitFor();
+      f.send("producer", T.MESSAGE_DELETED, { messageId: reply, expectedMessageRevision: 0 });
+      await link.waitFor({ state: "hidden" });
+      assert.equal(await dialog.locator("[data-discussion-link]").getAttribute("href"), null);
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      assert.equal(await input.inputValue(), draft);
+    }
+  });
+}

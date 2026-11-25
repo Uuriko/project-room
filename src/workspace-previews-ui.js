@@ -34,7 +34,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         <aside data-workspace-discussion hidden>
           <h3>Discussion</h3>
           <div data-discussion-messages></div>
-          <a data-discussion-link target="_blank" rel="noopener">Open full discussion</a>
+          <a data-discussion-link>Open full discussion</a>
         </aside>
       </section>
       <section class="workspace-preview-detail" aria-label="Selected preview">
@@ -133,6 +133,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
 
   const discussionAside = dialog.querySelector("[data-workspace-discussion]");
   const discussionMessages = discussionAside.querySelector("[data-discussion-messages]");
+  const discussionLink = discussionAside.querySelector("[data-discussion-link]");
+  discussionLink.addEventListener("click", event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (!threadDraft?.openDiscussion?.(reset)) refreshDiscussion();
+  });
   const noteLabel = dialog.querySelector("[data-workspace-note]");
   const noteInput = noteLabel.querySelector("textarea");
   const notes = new Map();
@@ -149,12 +155,10 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     discussionAside.hidden = !discussion;
     addToThread.hidden = !canUseArtifact || !discussion || Boolean(items.find(item => item.id === selected)?.recipientId);
     discussionMessages.replaceChildren();
-    const source = discussionAside.querySelector("[data-discussion-link]");
     if (discussion) {
-      source.href = discussion.link;
-      source.textContent = canUseArtifact ? "Open full discussion" : uiText("workspace.openOriginalDiscussion");
-    }
-    else source.removeAttribute("href");
+      discussionLink.href = discussion.link;
+      discussionLink.textContent = canUseArtifact ? "Open full discussion" : uiText("workspace.openOriginalDiscussion");
+    } else discussionLink.removeAttribute("href");
     for (const message of canUseArtifact ? discussion?.messages ?? [] : []) {
       const line = document.createElement("p");
       line.textContent = [message.author, message.excerpt].join(" · ");

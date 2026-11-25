@@ -3450,9 +3450,18 @@ function captureWorkspaceThreadDraft(messageId) {
     updateReply(); syncRequestComposer(); autosizeComposer(); saveComposer();
     return true;
   }
-  return { discussion, append };
+  function openDiscussion(closePreview) {
+    if (!stillSelected()) return false;
+    const blocked = roomDestinationBlockedReason();
+    if (blocked) { notice(blocked, true); return false; }
+    closePreview();
+    closeResult(false);
+    revealMessage(sourceId, true);
+    return true;
+  }
+  return { discussion, append, openDiscussion };
 }
-function revealMessage(id) {
+function revealMessage(id, openThread = false) {
   if (state && !busy && !conversation.byId.has(id)) {
     activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
   }
@@ -3477,7 +3486,7 @@ function revealMessage(id) {
   }
   else {
     if (activeDirectMemberId || messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
-    switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+    switchThread(message.replyToId || openThread ? conversation.rootById.get(id) : null);
   }
   expandTimelineTo(id);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
