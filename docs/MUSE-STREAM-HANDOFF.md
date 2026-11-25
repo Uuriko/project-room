@@ -126,7 +126,9 @@ one-call diagnostic when the host's stream implementation is incompatible.
 ### Report an observed host stop
 
 If a surviving host component directly observes that the delivered turn has
-stopped, it can report the stop using the exact request ID from the handoff:
+stopped, it can report the stop using the exact request ID from the handoff.
+The handoff must have used `--stay-armed --receiver-ack` so the checkpoint
+records the attempted context:
 
 ```sh
 node scripts/muse-stream-handoff.mjs /private/handoff.json /private/room-connection \
