@@ -164,26 +164,37 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
   for (const { route } of bindings.values()) {
     const saved = checkpoints[route.roomId];
     const start = Number.isSafeInteger(saved) ? Math.max(route.after, saved) : route.after;
-    const through = Math.min(start, rooms.get(route.roomId)?.through ?? start);
-    rooms.set(route.roomId, { through, retry: null, attempts: 0 });
+    rooms.set(route.roomId, Math.min(start, rooms.get(route.roomId) ?? start));
   }
   const pending = new Set();
+  const retries = new Map();
   let stopped = false;
+  function clearRetry(scope) {
+    clearTimeout(retries.get(scope)?.timer);
+    retries.delete(scope);
+  }
+  function defer(scope, roomId, error) {
+    log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
+    const retry = retries.get(scope) ?? { timer: null, attempts: 0 };
+    if (retry.timer || retry.attempts >= pickupRetryDelaysMs.length) return;
+    // Track scan and continuation failures separately. An otherwise quiet
+    // room may never emit another wake, even for an unrelated healthy lane.
+    retry.timer = setTimeout(() => {
+      retry.timer = null;
+      wake(roomId);
+    }, pickupRetryDelaysMs[retry.attempts++]);
+    retry.timer.unref();
+    retries.set(scope, retry);
+  }
   function wake(roomId) {
-    const room = rooms.get(roomId);
-    if (stopped || !room || pending.has(roomId)) return;
+    if (stopped || !rooms.has(roomId) || pending.has(roomId)) return;
     pending.add(roomId);
     setImmediate(() => {
       pending.delete(roomId);
       if (stopped) return;
-      let failed = false;
-      const deferred = error => {
-        failed = true;
-        log(JSON.stringify({ event: "completion_pickup.deferred", roomId, code: error.code ?? "pickup_failed" }));
-      };
       try {
         const rows = store.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 64")
-          .all(roomId, room.through);
+          .all(roomId, rooms.get(roomId));
         for (const row of rows) {
           const event = JSON.parse(row.body);
           const { toMemberId, workItemId, responseOutcome } = event.data ?? {};
@@ -199,32 +210,22 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
           const next = { ...checkpoints, [roomId]: through };
           atomicPrivateJson(checkpointPath, next);
           checkpoints = next;
-          room.through = through;
+          rooms.set(roomId, through);
         }
+        clearRetry(roomId);
         if (rows.length === 64) wake(roomId);
       } catch (error) {
-        deferred(error);
+        defer(roomId, roomId, error);
       }
       for (const binding of bindings.values()) {
         if (binding.route.roomId !== roomId || !binding.continuation) continue;
         try {
           const opening = advanceContinuation(store, binding, receiverServer);
           if (opening !== undefined) log(JSON.stringify({ event: "completion_pickup.continued", roomId, opening }));
+          clearRetry(binding);
         } catch (error) {
-          deferred(error);
+          defer(binding, roomId, error);
         }
-      }
-      if (!failed) {
-        clearTimeout(room.retry);
-        room.retry = null;
-        room.attempts = 0;
-      } else if (!room.retry && room.attempts < pickupRetryDelaysMs.length) {
-        // An otherwise quiet room may never emit another wake after a failure.
-        room.retry = setTimeout(() => {
-          room.retry = null;
-          wake(roomId);
-        }, pickupRetryDelaysMs[room.attempts++]);
-        room.retry.unref();
       }
     });
   }
@@ -233,7 +234,7 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
   for (const roomId of rooms.keys()) wake(roomId);
   return () => {
     stopped = true;
-    for (const room of rooms.values()) clearTimeout(room.retry);
+    for (const scope of retries.keys()) clearRetry(scope);
     unsubscribe();
     receiverServer?.off("agentReceiverConnected", wake);
   };

@@ -374,8 +374,12 @@ test("a validated continuation plan replaces only its subscriber and preserves o
   const head = f.store.headSequence(roomId);
   const receiptRead = f.store.operationReceipt.bind(f.store);
   const unreadable = new Set(["retry-seed"]);
+  let permanentFailure = false;
   t.mock.timers.enable({ apis: ["setTimeout"] });
   t.mock.method(f.store, "operationReceipt", (secret, room, id) => {
+    if (permanentFailure && id === "obsolete-seed") {
+      throw Object.assign(new Error("Fixture lane remains unavailable"), { code: "storage_unavailable" });
+    }
     if (unreadable.delete(id)) {
       throw Object.assign(new Error("Fixture read temporarily unavailable"), { code: "SQLITE_BUSY" });
     }
@@ -411,4 +415,25 @@ test("a validated continuation plan replaces only its subscriber and preserves o
   await setImmediate();
   assert.equal(receipt("obsolete-next").status, "not_recorded");
   assert.equal(receipt("retry-next").eventId, recovered.eventId);
+
+  const other = config("second"), failing = config("obsolete").routes[0];
+  const secondAgent = f.store.identities.create("Second reviewer");
+  linkWithProof(f.store, f.keys.owner, roomId, secondAgent, { memberId: "second-reviewer", permissions: [] });
+  other.routes.push({ ...other.routes[0], recipientId: "second-reviewer", continuation: failing.continuation });
+  permanentFailure = true;
+  atomicPrivateJson(configPath, other);
+  pickup.reload();
+  await setImmediate();
+  for (const milliseconds of [1000, 2000, 4000, 8000, 16000, 32000]) {
+    t.mock.timers.tick(milliseconds);
+    await setImmediate();
+  }
+  request("second-seed");
+  answer("second-seed");
+  unreadable.add("second-seed");
+  await setImmediate();
+  assert.equal(receipt("second-next").status, "not_recorded");
+  t.mock.timers.tick(1000);
+  await setImmediate();
+  assert.equal(receipt("second-next").status, "recorded", "a broken lane does not consume another lane's retry");
 });
