@@ -8,7 +8,8 @@ import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { exactResultRecovery } from "../../src/result-availability.js";
 import { validId } from "../../src/events.js";
-import { exactResultDestination } from "../../src/record-link.js";
+import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
+import { exactResultDestination, resultDiscussionPath } from "../../src/record-link.js";
 import { workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
@@ -115,8 +116,24 @@ function exactDiscussionFiles(items, { origin, roomId }) {
   return [...files.values()];
 }
 
+async function readResultThread(config, secret, fetchImpl, path) {
+  const response = await fetchImpl(config.origin.replace(/\/$/, "") + edgeDoorApiPath(config.origin, path), {
+    headers: { Accept: "application/json", Authorization: bearerHeader(secret) },
+    redirect: "error", signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    return { status: response.status };
+  }
+  const { roomId, thread } = await boundedJson(response, 512 * 1024);
+  if (roomId !== config.roomId || !thread) return null;
+  const serialized = JSON.stringify(thread);
+  if (serialized.includes(secret) || serialized.includes(config.token)) return null;
+  return { thread };
+}
+
 async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = process.env,
-  fetchImpl = fetch, out = console.log } = {}, action, selectedConnection) {
+  fetchImpl = fetch, out = console.log, includeResultDiscussion = false } = {}, action, selectedConnection) {
   const write = action !== undefined;
   const report = ({ value, ...status }, code) => {
     out(JSON.stringify(value ?? status));
@@ -181,6 +198,24 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
       if (basis) {
         value.cliBasis = basis;
         if (basis.actions.submit) value.submitCommand = ["room", "submit", "--from"];
+      }
+    }
+    if (tool === "room_read_result") {
+      const source = value.result?.text;
+      const hasDiscussion = value.result?.kind === "room_text" && typeof source?.body === "string"
+        && validId(source.messageId) && source.messageId === value.result.receipt?.nativeText?.messageId;
+      if (hasDiscussion) value.discussionRead = { method: "GET", path: resultDiscussionPath(config.roomId, source.messageId),
+        command: ["room", "result", args.workItemId, "--completion", args.completionEventId, "--discussion"] };
+      if (includeResultDiscussion) {
+        if (!hasDiscussion) return report({ status: "unavailable", code: "result_discussion_unavailable" }, 1);
+        const read = await readResultThread(config, secret, fetchImpl, value.discussionRead.path);
+        if (read?.status === 413) return report({ status: "unavailable", code: "result_discussion_too_large",
+          hint: "Open the original discussion in the Room to read the replies." }, 1);
+        const thread = read?.thread;
+        if (thread?.id !== source.messageId || thread.workItemId !== args.workItemId
+            || thread.deletedAt || thread.authorId !== source.postedById || thread.body !== source.body || !Array.isArray(thread.replies))
+          return report({ status: "unavailable", code: "result_discussion_unavailable" }, 1);
+        value.discussion = { messageId: source.messageId, replies: thread.replies };
       }
     }
     if (tool === "room_read_result" && value.cliBasis?.actions.review)
@@ -276,9 +311,11 @@ export async function workCommand(argv, io = {}) {
 }
 
 export async function resultCommand(argv, io = {}) {
-  const help = "room result RESULT_URL\nroom result WORK_ID --completion EVENT_ID\nRead the exact version using the saved Room connection for this project.";
+  const help = "room result RESULT_URL [--discussion]\nroom result WORK_ID --completion EVENT_ID [--discussion]\nRead the exact version using this project’s saved connection. Add --discussion to read replies to that version.";
   const out = io.out ?? console.log;
   if (argv.length === 1 && argv[0] === "--help") { out(help); return 0; }
+  const includeResultDiscussion = argv.at(-1) === "--discussion";
+  if (includeResultDiscussion) argv = argv.slice(0, -1);
   let args, connection;
   if (argv.length === 1) {
     const url = URL.parse(argv[0]);
@@ -296,10 +333,10 @@ export async function resultCommand(argv, io = {}) {
       throw new Error(help);
     args = { workItemId, completionEventId };
   }
-  return runWorkflow("room_read_result", args, (value, { roomId }) =>
-    value.roomId === roomId && value.workItemId === args.workItemId
+  return runWorkflow("room_read_result", args, (value, { roomId, memberId }) =>
+    value.viewerId === memberId && value.roomId === roomId && value.workItemId === args.workItemId
     && value.selection?.completionEventId === args.completionEventId && value.result?.receipt?.eventId === args.completionEventId,
-  io, undefined, connection);
+  { ...io, includeResultDiscussion }, undefined, connection);
 }
 
 export function readCommand(argv, io = {}) {

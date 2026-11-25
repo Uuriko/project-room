@@ -38,3 +38,7 @@ export function agentSigninRecord({ search = "", hash = "" }) {
     return validRecordId(id) ? { roomId: rooms[0], hash: `#pr-record/work/${encodeURIComponent(id)}` } : null;
   } catch { return null; }
 }
+
+export function resultDiscussionPath(roomId, messageId) {
+  return `/api/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/thread`;
+}

@@ -1,3 +1,4 @@
+import { resultDiscussionPath } from "../src/record-link.js";
 import { releaseSmokePlan, releaseOutcome } from "./release-smoke.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { createHash } from "node:crypto";
@@ -282,6 +283,8 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
       ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
       ...(releaseChecks ? { releaseChecks } : {}), ...(outcome ? { outcome } : {}) },
     selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
+    ...(result.kind === "room_text" && typeof result.text?.body === "string"
+      ? { discussionRead: { method: "GET", path: resultDiscussionPath(state.room.id, result.text.messageId) } } : {}),
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
       completionEventId: work.receipt?.eventId ?? null, next },

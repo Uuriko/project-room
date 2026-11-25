@@ -98,6 +98,33 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   assert.equal(shared.code, 0);
   assert.equal(shared.value.result.text.body, "Draft from a colleague.");
   assert.equal(shared.value.result.receipt.eventId, completionEventId);
+  assert.equal(shared.value.discussion, undefined);
+  assert.equal(shared.value.discussionRead.path, `/api/rooms/commons/messages/${shared.value.result.text.messageId}/thread`);
+  const quoted = "> Draft from a colleague.\n\nPlease name Maya as the owner.";
+  const feedback = store.command(reviewer.secret, "commons", { id: "feedback", type: "message.posted",
+    data: { messageId: "quoted-feedback", replyToId: shared.value.result.text.messageId, body: quoted } });
+  store.command(reviewer.secret, "commons", { id: "private-feedback", type: "message.posted",
+    data: { messageId: "private-feedback", replyToId: shared.value.result.text.messageId, body: "Private aside", toMemberId: "owner" } });
+  const producerRead = await cli(shared.value.discussionRead.command.slice(1));
+  assert.equal(producerRead.code, 0, JSON.stringify(producerRead));
+  assert.equal(producerRead.value.discussion.replies[0].id, feedback.event.data.messageId);
+  assert.equal(producerRead.value.discussion.replies[0].body, quoted);
+  assert.equal(producerRead.value.discussion.replies[0].untrusted, true);
+  assert.equal(producerRead.value.discussion.replies.length, 1);
+  assert.deepEqual(producerRead.value.current.next, shared.value.current.next);
+  assert.equal(producerRead.value.result.receipt.eventId, completionEventId);
+  assert.equal(producerRead.value.current.workRevision, shared.value.current.workRevision);
+  for (const [threadResponse, code] of [
+    [() => new Response(null, { status: 413 }), "result_discussion_too_large"],
+    [() => Response.json({ roomId: "commons", thread: { id: shared.value.result.text.messageId, workItemId,
+      authorId: producer.identityId, body: null, deletedAt: Date.now(), replies: [] } }), "result_discussion_unavailable"]
+  ]) {
+    const partial = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject, (url, options) =>
+      options.method === "POST" ? fetch(url, options) : threadResponse());
+    assert.equal(partial.code, 1);
+    assert.equal(partial.value.code, code);
+    assert.equal(partial.value.result, undefined);
+  }
   const review = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
   assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Name the owner."],
     review.value, reviewerProject)).code, 0);
@@ -115,7 +142,10 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   const current = await cli(["result", revisedUrl], undefined, reviewerProject);
   assert.equal(current.value.result.text.body, "Owner: Maya.");
   assert.equal(current.value.workThread.correction.summary, "Name the owner.");
-  const earlier = await cli(["result", sharedUrl], undefined, reviewerProject);
+  const revisedDiscussion = await cli(["result", revisedUrl, "--discussion"]);
+  assert.deepEqual(revisedDiscussion.value.discussion.replies, []);
+  const earlier = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject);
+  assert.equal(earlier.value.discussion.replies[0].body, quoted);
   assert.equal(earlier.value.selection.status, "historical");
   assert.equal(earlier.value.result.text.body, "Draft from a colleague.");
   for (const other of [sharedUrl.replace("room=commons", "room=other"), sharedUrl.replace(origin, "https://other.example")]) {
