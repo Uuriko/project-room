@@ -15,7 +15,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
-async function checkScopedInvestigation(t, firstLine) {
+async function checkScopedInvestigation(t, firstLine, { paged = false, competing = false, changedHorizon = false } = {}) {
   const f = createAcceptanceFixture(), roomId = "commons", workItemId = "qa-work", recipientId = "pickup-reviewer";
   const agent = f.store.identities.create("Pickup reviewer");
   linkWithProof(f.store, f.keys.owner, roomId, agent, { memberId: recipientId, permissions: ["accept_work","verify"] });
@@ -45,8 +45,30 @@ async function checkScopedInvestigation(t, firstLine) {
   const first = request("Verify current evidence", "initial-qa");
   await setImmediate();
   assert.equal(read().length,1);
+  let competingId;
+  if (competing) competingId = request("Review another result first", "competing-qa").event.data.messageId;
+  if (paged) {
+    const list = f.store.replyRequests.list.bind(f.store.replyRequests);
+    t.mock.method(f.store.replyRequests, "list", (secret, room, { cursor, ...options }) => {
+      const result = list(secret, room, options);
+      if (options.direction !== "outgoing" || options.status !== "open") return result;
+      assert.ok(cursor === undefined || cursor === "later-page");
+      if (cursor) return {
+        ...result,
+        evaluatedThrough: changedHorizon ? result.evaluatedThrough + 1 : result.evaluatedThrough,
+        page: { hasMore: false },
+      };
+      return { ...result, requests: [], page: { hasMore: true, nextCursor: "later-page" } };
+    });
+  }
   answer(first.event.data.messageId);
   await setImmediate();
+  if (competing || changedHorizon) {
+    const expected = competing ? [first.event.data.messageId, competingId] : [first.event.data.messageId];
+    assert.deepEqual(read().map(item => item.id).sort(), expected.sort());
+    assert.deepEqual(log, []);
+    return;
+  }
   assert.equal(read().length,2,JSON.stringify(log));
   const next=read().find(item=>item.id!==first.event.data.messageId);
   assert.equal(next.workItemId,workItemId);
@@ -68,6 +90,13 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
   t => checkScopedInvestigation(t));
 test("a completion route preserves the receiver's exact first line without chaining an investigation",
   t => checkScopedInvestigation(t, "Claude Code QA"));
+
+test("a complete outgoing scan can open one investigation after an empty partial page",
+  t => checkScopedInvestigation(t, undefined, { paged: true }));
+test("an actionable request after an empty page takes priority over an investigation",
+  t => checkScopedInvestigation(t, undefined, { paged: true, competing: true }));
+test("an outgoing continuation at a different observation cannot start an investigation",
+  t => checkScopedInvestigation(t, undefined, { paged: true, changedHorizon: true }));
 
 async function checkPlannedContinuation(t, representation) {
   const directory = mkdtempSync(join(tmpdir(), "room-planned-continuation-"));
