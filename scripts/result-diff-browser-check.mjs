@@ -508,11 +508,17 @@ test("shared result links keep identical old and new text bound to different ver
   assert.equal(await receiver.locator("#result-body").textContent(), "");
   assert.equal(await receiver.locator("#result-title").textContent(), "Result");
 
+  await receiver.goto(f.origin + "/?room=commons");
+  await openResult(receiver);
+  assert.equal(await receiver.locator("#result-body").textContent(), body);
   const reads = [];
   receiver.on("request", request => {
     if (request.url().includes("/work-result?")) reads.push(request.url());
   });
-  await receiver.goto(earlier.replace("room=commons", "room=commons&room=commons"));
+  await receiver.evaluate(href => {
+    history.replaceState(null, "", href);
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }, earlier.replace("room=commons", "room=commons&room=commons"));
   await receiver.getByText("This result link is invalid. Ask the sender to copy the result link again.", { exact: true }).waitFor();
   assert.deepEqual(reads, []);
   assert.equal(await receiver.locator("#result-body").textContent(), "");

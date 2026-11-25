@@ -4002,7 +4002,7 @@ function revealLocationHash() {
   }
   if (hash.startsWith("#pr-record/result/")) {
     if (!exactResult || exactResult.roomId !== session?.roomId) {
-      closeLinkedResult();
+      closeResult(false);
       notice(uiText("result.invalidLink"), true);
       return;
     }
