@@ -219,14 +219,18 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   const lateChanges = await cli(lateFile.command.slice(1), undefined, reviewerProject);
   assert.equal(lateChanges.value.file.hunks[0].changes.at(-1).content, "replaced");
   await publish(updated.revision, patch.replace("+submitted", "+latest"));
-  await assert.rejects(() => cli(lateFile.command.slice(1), undefined, reviewerProject), error => error.status === 409);
+  const historicalReply = await cli(lateFile.command.slice(1), undefined, reviewerProject);
+  assert.equal(historicalReply.value.historical, true);
+  assert.equal(historicalReply.value.file.hunks[0].changes.at(-1).content, "replaced");
   const earlier = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject);
   assert.equal(earlier.value.discussion.replies[0].body, quoted);
   assert.equal(earlier.value.selection.status, "historical");
   assert.equal(earlier.value.result.text.body, firstBody);
   assert.deepEqual(earlier.value.workspaceArtifacts, [file]);
   assert.equal(current.value.workspaceArtifacts, undefined);
-  await assert.rejects(() => cli(file.command.slice(1), undefined, reviewerProject), error => error.status === 409);
+  const historicalResult = await cli(file.command.slice(1), undefined, reviewerProject);
+  assert.equal(historicalResult.value.historical, true);
+  assert.equal(historicalResult.value.file.hunks[0].changes.at(-1).content, "submitted");
   // A producer may deliberately cite the very same message in a later receipt.
   const laterReview = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
   assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Use the original wording."],

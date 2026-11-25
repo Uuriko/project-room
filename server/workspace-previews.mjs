@@ -6,12 +6,14 @@ export const outputBytes = 24 * 1024;
 export const previewJsonBytes = (previewBytes + patchBytes + outputBytes) * 6 + 4096;
 const roomLimit = 24;
 const ownerLimit = 6;
+const previousPatchLimit = 2;
 const fields = "id, publisher_id AS publisherId, title, base, head, digest, revision, updated_at AS updatedAt";
 const previewId = /^[a-f0-9]{32}$/;
 const gitId = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 export function workspacePreviews(db, { create = true } = {}) {
-  const installed = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='room_workspace_previews'").get();
+  const hasTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?");
+  const installed = hasTable.get("room_workspace_previews");
   if (!installed && !create) return null;
   if (!installed) db.exec(`CREATE TABLE IF NOT EXISTS room_workspace_previews (
     room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, id TEXT NOT NULL,
@@ -32,6 +34,7 @@ export function workspacePreviews(db, { create = true } = {}) {
   // Earlier runtimes only know the shared table. A rollback must never turn a
   // directed artifact into a room-wide one.
   const shared = "room_workspace_previews", directed = "room_workspace_directed_previews";
+  const sharedPatches = "room_workspace_preview_patches", directedPatches = "room_workspace_directed_preview_patches";
   if (create) db.exec(`CREATE TABLE IF NOT EXISTS ${directed} (
     room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, id TEXT NOT NULL,
     publisher_id TEXT NOT NULL, title TEXT NOT NULL, base TEXT NOT NULL, head TEXT NOT NULL,
@@ -39,7 +42,15 @@ export function workspacePreviews(db, { create = true } = {}) {
     patch TEXT, patch_digest TEXT, run_output TEXT, output_digest TEXT, recipient_id TEXT NOT NULL,
     PRIMARY KEY(room_id,id)
   )`);
-  const hasDirected = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(directed));
+  if (create) for (const [table, parent] of [[sharedPatches, shared], [directedPatches, directed]]) {
+    db.exec(`CREATE TABLE IF NOT EXISTS ${table} (
+      room_id TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
+      base TEXT NOT NULL, head TEXT NOT NULL, patch TEXT NOT NULL, patch_digest TEXT NOT NULL,
+      PRIMARY KEY(room_id,id,revision),
+      FOREIGN KEY(room_id,id) REFERENCES ${parent}(room_id,id) ON DELETE CASCADE
+    ) WITHOUT ROWID`);
+  }
+  const hasDirected = Boolean(hasTable.get(directed));
   const sharedFields = fields + ", NULL AS recipientId"
     + (patchStorage ? ", patch_digest AS patchDigest" : ", NULL AS patchDigest")
     + (outputStorage ? ", output_digest AS outputDigest" : ", NULL AS outputDigest");
@@ -62,6 +73,16 @@ export function workspacePreviews(db, { create = true } = {}) {
       const directedBody = part === "changes" ? "patch" : part === "output" ? "run_output AS output" : part === "preview" ? "html" : "html,patch,run_output AS output";
       return db.prepare(`SELECT ${directedFields}${part === "metadata" ? "" : "," + directedBody} FROM ${directed} WHERE room_id=? AND id=?${scope}`)
         .get(roomId, id, ...(viewerId === undefined ? [] : [viewerId, viewerId]));
+    },
+    historicalPatch(roomId, current, selection) {
+      // The route first resolves the active, viewer-visible parent. Its publisher
+      // and audience cannot change without deleting the parent and its patches.
+      if (selection.publisherId !== current.publisherId || selection.revision >= current.revision) return undefined;
+      const table = current.recipientId ? directedPatches : sharedPatches;
+      if (!hasTable.get(table)) return undefined;
+      return db.prepare(`SELECT id, base, head, revision, patch FROM ${table}
+        WHERE room_id=? AND id=? AND revision=? AND head=? AND patch_digest=?`)
+        .get(roomId, current.id, selection.revision, selection.head, selection.digest);
     },
     publish(roomId, publisherId, input, now, reject) {
       const existing = this.get(roomId, input.id);
@@ -90,6 +111,14 @@ export function workspacePreviews(db, { create = true } = {}) {
           reject(409, "preview_limit", "Remove an earlier workspace preview before publishing a new one");
       }
       const table = recipientId ? directed : shared;
+      if (existing?.patch != null) {
+        const archive = recipientId ? directedPatches : sharedPatches;
+        db.prepare(`INSERT INTO ${archive} (room_id,id,revision,base,head,patch,patch_digest) VALUES (?,?,?,?,?,?,?)`)
+          .run(roomId, input.id, existing.revision, existing.base, existing.head, existing.patch, existing.patchDigest);
+        db.prepare(`DELETE FROM ${archive} WHERE room_id=? AND id=? AND revision NOT IN
+          (SELECT revision FROM ${archive} WHERE room_id=? AND id=? ORDER BY revision DESC LIMIT ?)`)
+          .run(roomId, input.id, roomId, input.id, previousPatchLimit);
+      }
       db.prepare(`INSERT INTO ${table}
         (room_id,id,publisher_id,title,base,head,digest,html,revision,updated_at,patch,patch_digest,run_output,output_digest${recipientId ? ",recipient_id" : ""}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?${recipientId ? ",?" : ""})
         ON CONFLICT(room_id,id) DO UPDATE SET title=excluded.title,base=excluded.base,head=excluded.head,

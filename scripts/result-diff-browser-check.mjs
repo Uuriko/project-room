@@ -566,7 +566,7 @@ test("the verdict links exact candidate release checks without claiming missing 
   }
 });
 
-test("a submitted file change opens in the reviewer’s room and reports a replaced publication", { timeout: 45000 }, async t => {
+test("a submitted file change survives republishing and reports when its patch is no longer retained", { timeout: 45000 }, async t => {
   const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
   const id = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
   const href = origin => origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
@@ -591,9 +591,27 @@ test("a submitted file change opens in the reviewer’s room and reports a repla
   await reviewer.goBack();
   await link.waitFor();
   await publish(1, patch.replace("+submitted", "+replacement"));
+  await f.restart();
   await link.click();
-  await reviewer.getByText("This preview revision changed. Open the current attempt to see its latest artifacts.", { exact: true }).waitFor();
+  await reviewer.locator("[data-preview-heading]").getByText("Earlier changes", { exact: true }).waitFor();
+  const earlier = reviewer.locator("[data-workspace-primary]");
+  await earlier.getByText("+submitted", { exact: true }).waitFor();
+  assert.doesNotMatch(await earlier.innerText(), /\+replacement/);
+  await reviewer.locator(".workspace-preview-detail").screenshot({ path: "test-results/retained-workspace-patch.png" });
+  await reviewer.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await reviewer.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await reviewer.locator(".workspace-preview-detail").screenshot({ path: "test-results/retained-workspace-patch-mobile.png" });
+  await earlier.getByRole("button", { name: "Browse changed files" }).click();
+  await earlier.getByRole("button", { name: "brief.md", exact: true }).click();
+  await earlier.getByText("+submitted", { exact: true }).waitFor();
+  await reviewer.goBack();
+  await link.waitFor();
+  await publish(2, patch.replace("+submitted", "+third"));
+  await publish(3, patch.replace("+submitted", "+fourth"));
+  await link.click();
+  await reviewer.getByText("This patch version is no longer available. Ask the publisher for the exact changes.", { exact: true }).waitFor();
   assert.equal(await reviewer.getByRole("button", { name: "Open current attempt" }).isVisible(), true);
+  assert.equal(await reviewer.locator("[data-workspace-primary]").isVisible(), false);
 });
 
 test("a reviewer opens the corrected file without leaving the exact result review", { timeout: 30000 }, async t => {

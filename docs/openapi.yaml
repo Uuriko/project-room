@@ -19830,7 +19830,11 @@ paths:
         - name: artifact
           in: query
           schema: { type: string }
-          description: Exact Workspace changes link binding the publisher, revision, commit and patch digest
+          description: >-
+            Exact Workspace changes link binding the publisher, revision, commit and patch digest.
+            The active preview retains its two preceding patch publications. Exact reads of
+            retained patches return changes.historical as true and use the current publication's
+            access rules. Removing the publication removes its retained patches.
         - name: frame
           in: query
           schema: { type: integer, minimum: 1 }

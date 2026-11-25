@@ -109,7 +109,11 @@ async function serveWorkspacePreviews(ctx) {
     const item = previews?.get(roomId, id, viewerId, changeRead ? "changes" : outputRead ? "output" : undefined);
     if (!item) ctx.reject(404, "preview_not_found", "This preview is unavailable");
     if (exact && (item.revision !== exact.revision || item.head !== exact.head || item.publisherId !== exact.publisherId
-      || item.patchDigest !== exact.digest)) ctx.reject(409, "preview_changed", "This preview changed. Open the latest version.");
+      || item.patchDigest !== exact.digest)) {
+      const retained = previews.historicalPatch(roomId, item, exact);
+      if (!retained) ctx.reject(409, "preview_changed", "This patch version is no longer available. Ask the publisher for the exact changes.");
+      return changeResponse(ctx, params, { ...retained, historical: true }, viewer);
+    }
     const { base, head, revision, patch, output } = item;
     if (changeRead) return changeResponse(ctx, params, { id, base, head, revision, patch }, viewer);
     if (outputRead) {

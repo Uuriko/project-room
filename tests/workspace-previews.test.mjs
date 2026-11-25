@@ -89,7 +89,14 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   const { output: _initialOutput, ...withoutOutput } = preview;
   const second = await (await call(publisher, "POST", { ...withoutOutput, expectedRevision: 1, html: "<h1>Changed</h1>" })).json();
   assert.equal(second.revision, 2);
-  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 409);
+  const retained = await call(viewer, "GET", null, exact + encodeURIComponent(artifact));
+  assert.equal(retained.status, 200);
+  const retainedChanges = (await retained.json()).changes;
+  assert.equal(retainedChanges.historical, true);
+  assert.equal(retainedChanges.revision, 1);
+  assert.equal(retainedChanges.file.hunks[0].changes[1].content, "after");
+  assert.equal((await call(viewer, "GET", null, changesQuery + "&revision=1")).status, 409);
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact.replace(first.patchDigest, "d".repeat(64))))).status, 409);
   assert.equal((await (await call(viewer, "GET", null, outputQuery)).json()).run.output, null);
   const incomplete = "diff --git a/index.html b/index.html\n--- a/index.html\n+++ b/index.html\n@@ -1,3 +1,3 @@\n-before\n+after\n";
   const replacement = await (await call(publisher, "POST", { ...preview, expectedRevision: 2, patch: incomplete })).json();
@@ -98,9 +105,13 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.equal(fallback.status, "raw_available");
   assert.equal(fallback.patch, undefined);
   assert.equal((await (await call(viewer, "GET", null, changesQuery)).json()).changes.patch, incomplete);
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 200);
+  const latest = await (await call(publisher, "POST", { ...preview, expectedRevision: 3, html: "<h1>Latest</h1>" })).json();
+  assert.equal(latest.revision, 4);
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 409);
   assert.equal((await call(otherPublisher, "DELETE", { id, expectedRevision: 2 })).status, 403);
   assert.equal((await call(owner, "DELETE", { id, expectedRevision: 1 })).status, 409);
-  assert.equal((await call(owner, "DELETE", { id, expectedRevision: 3 })).status, 200);
+  assert.equal((await call(owner, "DELETE", { id, expectedRevision: 4 })).status, 200);
   assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 404);
   const recreated = await (await call(publisher, "POST", { ...preview, patch: patch.replace("+after", "+replacement") })).json();
   assert.equal(recreated.revision, first.revision);
@@ -147,8 +158,15 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   assert.equal((await call(viewer, "DELETE", { id, expectedRevision: 1 })).status, 403);
   assert.deepEqual(await (await call(owner, "DELETE", { id, expectedRevision: 1 })).json(), { removed: true });
   assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 200);
-  assert.equal((await call(publisher, "DELETE", { id, expectedRevision: 1 })).status, 200);
+  const revisedDirected = await (await call(publisher, "POST", { ...directed, expectedRevision: 1, patch: incomplete })).json();
+  assert.equal(revisedDirected.revision, 2);
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 200);
+  assert.equal((await call(owner, "GET", null, exact + encodeURIComponent(artifact))).status, 404);
+  assert.equal((await call(publisher, "DELETE", { id, expectedRevision: 2 })).status, 200);
   assert.equal((await call(viewer, "GET", null, "?id=" + id)).status, 404);
+  const directedAgain = await (await call(publisher, "POST", { ...directed, patch: incomplete })).json();
+  await call(publisher, "POST", { ...directed, expectedRevision: directedAgain.revision, patch: incomplete, html: "<p>New publication</p>" });
+  assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 409);
 });
 
 test("new worktrees keep the project selection outside the working copy", async t => {
