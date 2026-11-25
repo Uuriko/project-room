@@ -212,3 +212,16 @@ for (const representation of [null, 'normalized-current-v1']) test(`a sender can
   t.mock.timers.tick(120_000);
   assert.equal(read('asker'), undefined);
 });
+
+for (const representation of [null, 'normalized-current-v1']) test(`a work start counts before acceptance (${representation ?? 'legacy'})`, t => {
+  t.mock.timers.enable({apis: ['Date']});
+  const {s, keys, progress} = fixture(t, representation);
+  const read = () => s.replyRequests.list(keys.asker, 'commons', {direction: 'outgoing', status: 'open', states: true}).overdueActions;
+  progress('helper', 'start-early', {progress: 'working'});
+  progress('helper', 'receipt-after-start', {progress: 'acknowledged'});
+  t.mock.timers.tick(120_000);
+  assert.equal(read(), undefined);
+  progress('helper', 'accept-after-start', {progress: 'accepted'});
+  t.mock.timers.tick(120_000);
+  assert.equal(read(), undefined);
+});
