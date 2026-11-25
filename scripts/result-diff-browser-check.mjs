@@ -1,6 +1,6 @@
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
-import { openCatchUp, openWorkFromSearch, clickWorkAction } from "./room-chrome.mjs";
+import { clickChrome, openCatchUp, openWorkFromSearch, clickWorkAction } from "./room-chrome.mjs";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
@@ -505,6 +505,62 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(replay.event.data.messageId, request.request.id);
   });
 }
+
+test("Saved reopens a private answer and its exact result after 500 unrelated events", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390), workItemId = f.item().id, messageId = randomUUID();
+  const completionEventId = f.first.event.id, evidenceMessageId = f.first.event.data.evidenceMessageId;
+  const original = f.origin + "/?room=commons#pr-record/result/" + workItemId + "/" + completionEventId;
+  f.send("human-checker", T.VERIFICATION_RECORDED, {
+    workItemId, expectedRevision: f.item().revision, completionEventId,
+    evidenceVersion: f.first.event.data.evidenceVersion, result: "fail", summary: "Name the owner",
+    nextAction: "Add the owner to the result."
+  });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Owner added." });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Result B\nOwner: Maya");
+  f.store.dmConsents.request("commons", "human-checker", "producer", "Review follow-up");
+  f.store.dmConsents.decide("commons", "producer", "human-checker", "approve");
+  f.send("human-checker", T.MESSAGE_POSTED, {
+    messageId, toMemberId: "producer", requestKind: "reply", workItemId, replyToId: evidenceMessageId,
+    resultCompletionEventId: completionEventId, body: "Where is the requested owner documented?\n\n" + original,
+  });
+  const selection = { roomId: "commons", discardLegacyAssignments: true };
+  const plan = operatorNormalization(f.store, selection);
+  operatorNormalization(f.store, { ...selection, planHash: plan.planHash,
+    requestId: randomUUID(), reason: "Isolated Saved fixture" }, true);
+
+  const producer = new RoomAgentClient({ origin: f.origin, roomId: "commons", memberId: "producer", token: f.keys.producer });
+  const request = await producer.replyContext(messageId);
+  const answer = "Maya is the owner named in the brief.";
+  const delivered = await producer.replyAction("room_respond_to_request", {
+    requestId: randomUUID(), responseToRequestId: messageId, responseOutcome: "answered",
+    toMemberId: "human-checker", workItemId, ...request.current.answerBasis, body: answer
+  });
+
+  const requester = await f.login("human-checker", f.origin + "/?room=commons#pr-record/message/" + messageId);
+  await requester.locator("#message-list").getByText(answer, { exact: true }).waitFor();
+  const requestRow = requester.locator(`[data-message-record-id="${messageId}"]`);
+  const save = requestRow.locator('[data-message-action="save"]');
+  if (!await save.isVisible()) await requestRow.locator(".message-more > summary").click();
+  await save.click();
+  await save.and(requester.locator('[aria-pressed="true"]')).waitFor({ state: "attached" });
+  await requester.context().close();
+
+  let now = f.store.now();
+  f.store.now = () => (now += 2500);
+  for (let index = 0; index < 501; index++) {
+    f.send("owner", T.MESSAGE_POSTED, { messageId: `later-activity-${index}`, body: "Unrelated room activity" });
+  }
+  assert.ok(f.store.headSequence("commons") > delivered.sequence + 500);
+  const returning = await f.login("human-checker");
+  await clickChrome(returning, "#topbar-later");
+  await returning.locator(`#later-list [data-open-message="${messageId}"]`).click();
+  await returning.locator("#message-list").getByText(answer, { exact: true }).waitFor();
+  const exact = returning.locator("#message-list a").filter({ hasText: original });
+  assert.equal(await exact.getAttribute("href"), original);
+  const [resultTab] = await Promise.all([returning.waitForEvent("popup"), exact.click()]);
+  await resultTab.locator("#result-body").getByText("Missing named owner", { exact: false }).waitFor();
+});
 
 test("direct review and decision explain the external reference in pinned text", { timeout: 30000 }, async t => {
   const body = "Result A\nOwner: Maya\nBrief: https://docs.google.com/document/d/review-fixture/edit";
