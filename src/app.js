@@ -3815,7 +3815,8 @@ async function restoreWorkOrigin(ticket) {
     const draft = input.value;
     const selection = [input.selectionStart, input.selectionEnd, input.selectionDirection];
     priorCard = await readSelectedWorkRecord(priorWorkId, false, { restoreInPlace: true });
-    if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
+    if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)
+      || location.href !== origin.url || activeWorkNavigationId !== priorWorkId) return;
     interactionContinued = focused !== document.activeElement || draft !== input.value
       || selection[0] !== input.selectionStart || selection[1] !== input.selectionEnd || selection[2] !== input.selectionDirection;
   }
