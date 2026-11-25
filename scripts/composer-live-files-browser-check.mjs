@@ -14,7 +14,7 @@ import { createRoomClient } from "../client/room-assistant-client.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
-import { clickChrome, openConversation } from "./room-chrome.mjs";
+import { clickChrome, openConversation, openSearch } from "./room-chrome.mjs";
 
 test("composer: live file chips for other members, autosize", { timeout: 60000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-live-files-"));
@@ -360,12 +360,49 @@ for (const storage of ["legacy", "normalized"]) {
     const recipient = createRoomClient({ origin, roomId, token: owner });
     assert.deepEqual(await recipient.files([messageId]), []);
 
+    store.roomFlood = { consume() {} };
+    for (let index = 0; index < 50; index++) send(writer, T.MESSAGE_POSTED, {
+      messageId: `new-direct-${index}`, toMemberId: ownerId, body: `New direct note ${index}`,
+    });
+    for (let index = 0; index < 205; index++) send(owner, T.MESSAGE_POSTED, {
+      messageId: `new-public-${index}`, body: `Unrelated public update ${index}`,
+    });
+
     browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
-    await page.goto(`${origin}/?room=${roomId}#pr-record/message/${messageId}`);
+    await page.goto(`${origin}/?room=${roomId}`);
     await signInFixture(page, owner);
+    await openConversation(page);
+    await page.locator('#composer-options-toggle').press('Enter');
+    await page.getByRole('button', { name: 'Direct message…', exact: true }).press('Enter');
+    await page.locator('#new-direct-search').fill('writer');
+    await page.locator('#new-direct-people').getByRole('button', { name: 'writer', exact: true }).press('Enter');
+    await page.locator('#message-list').getByText('New direct note 49', { exact: true }).waitFor();
+    const history = [];
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (url.pathname.endsWith('/conversation') && url.searchParams.has('cursor')) history.push(url);
+    });
+    await openSearch(page);
+    await page.locator('#message-search').fill('finished reviewing the project brief');
+    const found = page.locator('#search-list').getByRole('link', { name: /I finished reviewing the project brief/ });
+    assert.equal(await found.count(), 0);
+    const earlier = page.getByRole('button', { name: 'Search earlier messages with writer', exact: true });
+    if (process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT && storage === 'normalized') {
+      await earlier.waitFor();
+      await page.screenshot({ path: process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT + '-ready.png' });
+    }
+    await earlier.press('Enter', { timeout: 2500 });
+    await found.waitFor({ timeout: 5000 });
+    assert.equal(history.length, 1);
+    assert.equal(history[0].searchParams.get('peerMemberId'), 'writer');
+    if (process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT && storage === 'normalized') {
+      await page.screenshot({ path: process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT + '-found.png' });
+    }
+    await found.press('Enter');
     const row = page.locator(`[data-message-record-id="${messageId}"]`);
     await row.getByText("I finished reviewing the project brief.", { exact: true }).waitFor();
+    assert.equal(await row.evaluate(node => node === document.activeElement), true);
     await page.clock.install();
     await page.clock.fastForward(6000);
     assert.equal(await row.locator('[data-download-file="brief-file"]').count(), 0);
