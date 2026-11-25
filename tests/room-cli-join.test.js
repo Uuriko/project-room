@@ -84,7 +84,7 @@ test("a shell-only connection gives pickup directly after joining", async () => 
     setup: async () => SETUP_SHELL_ONLY,
   });
   assert.equal(code, 0);
-  assert.match(lines.join("\n"), /Find your assignments in \/second project.*project-room next/);
+  assert.match(lines.join("\n"), /Find your assignments: run cd -- '\/second project' && npx -y github:Uuriko\/project-room next/);
   assert.doesNotMatch(lines.join("\n"), /Select this saved connection/);
   assert.equal(lines.at(-1), oneLinePrompt("https://room.example/r/open"));
 });

@@ -70,7 +70,7 @@ export async function doctorCommand(argv, { env = process.env, cwd = process.cwd
     return 1;
   }
   if (tool === "claude-code" && project.via !== "file") {
-    out("Shell access verified. Use /mcp in Claude Code to check its Project Room connection.");
+    out("Room accepted the shell credential. Use /mcp in Claude Code to check its Project Room connection.");
     return 1;
   }
   if (!toolConfigReady({ tool, via: project.via, project: cwd, home: homeOf(env), platform })) {

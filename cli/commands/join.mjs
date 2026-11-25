@@ -135,8 +135,9 @@ export async function joinCommand(argv, io = {}) {
     if (!projectConfigured) out(`Tool setup for ${tool} did not finish; the room connection is saved.`);
   }
   if (projectConfigured) {
-    const directory = flags.project ? ` in ${clean(flags.project)}` : " in this project";
-    out(scrub(`Find your assignments${directory}: run npx -y github:Uuriko/project-room next and follow the selected item's nextRead.`));
+    const pickup = "npx -y github:Uuriko/project-room next";
+    const command = flags.project ? `cd -- ${shellQuote(flags.project)} && ${pickup}` : pickup;
+    out(scrub(`Find your assignments: run ${command} and follow the selected item's nextRead.`));
   } else {
     out(scrub(`Select this saved connection before pickup: run npx -y github:Uuriko/project-room setup ${setupArgs.map(shellQuote).join(" ")}.`));
   }

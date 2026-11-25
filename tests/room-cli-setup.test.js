@@ -249,7 +249,7 @@ test("Claude Code registration and shell pickup report separate outcomes when sw
     },
   });
   assert.equal(doctor.code, 1);
-  assert.match(doctor.out, /Shell access verified.*\/mcp/);
+  assert.match(doctor.out, /Room accepted the shell credential.*\/mcp/);
   assert.equal(statSync(log).mtimeMs, stamped);
 });
 
