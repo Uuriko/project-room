@@ -272,3 +272,5 @@ export function cancelReplyRequest(state, incoming) {
   Object.assign(request, { status: "cancelled", revision: data.expectedRequestRevision + 1,
     terminalEventId: incoming.id, terminalActorId: incoming.actorId, closedAt: incoming.at, reason: data.reason });
 }
+
+export const WITHDRAWN_REPLY_CONTEXT = "The question or its latest clarification was withdrawn. Ask the sender for a new request.";

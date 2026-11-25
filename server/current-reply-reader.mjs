@@ -1,5 +1,6 @@
+import { WITHDRAWN_REPLY_CONTEXT } from "../src/reply-requests.js";
 import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
-import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
+import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,currentReplyContextAvailable,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
 import {validId} from '../src/events.js';
 import {nativeOutboxEventId} from './mcp-outbox-event-id.mjs';
 import {identityIdForWakeMember} from './wake-identity-resolution.mjs';
@@ -144,6 +145,8 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    // witnessed scan still runs to completion as before, skipping only the hits
    // already returned (kept as hashes inside the opaque cursor).
    const seen=new Set(saved?.seen??[]),found=[];
+   const actionable = request => status !== 'open'
+     || currentReplyContextAvailable(db, roomId, request, auth.member.id, b, floor);
    if(saved?.seen!==undefined&&(!Array.isArray(saved.seen)||saved.seen.length>50||!saved.seen.every(v=>typeof v==='string')))fail('invalid_reply_cursor','Invalid request source continuation');
    if(!saved&&status==='open'){
     // Incoming hits come from the open-request index; outgoing hits from the
@@ -162,7 +165,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
       if(r?.id!==id||r.status!=='open'||r[role]!==auth.member.id)throw Error('current_room_corrupt: open request index binding differs');
       if(!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||r.revision!==0||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();
       requests.set(r.id,r);seen.add(seenKey(id));
-      if(messageInHistory({id:r.id,createdAt:r.createdAt},floor))found.push(r);
+      if(messageInHistory({id:r.id,createdAt:r.createdAt},floor) && actionable(r))found.push(r);
      }
     }
    }
@@ -173,7 +176,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    else do{
     source=readCurrentReplyRequestWindow(store,roomId,{after,limit:Math.min(limit-selected.length,WINDOW)});
     for(const r of source.requests){if(!validId(r.id)||!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||!['open','answered','declined','cancelled'].includes(r.status)||r.revision!==(r.status==='open'?0:1)||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();requests.set(r.id,r);}
-    selected.push(...source.requests.filter(r=>!seen.has(seenKey(r.id))&&directionMatches(r,auth.member.id,direction)&&messageInHistory({id:r.id,createdAt:r.createdAt},floor)&&(status==='all'||r.status===status)));
+    selected.push(...source.requests.filter(r=>!seen.has(seenKey(r.id))&&directionMatches(r,auth.member.id,direction)&&messageInHistory({id:r.id,createdAt:r.createdAt},floor)&&(status==='all'||r.status===status) && actionable(r)));
     after=source.examinedAfter;windows++;
    }while(source.hasMore&&selected.length<limit&&windows<4
     &&remainingCurrentReadBytes(b)>144*1024+384*(selected.length+WINDOW)
@@ -225,6 +228,8 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   const openingEvent=eventAt(opening.row.seq),contextEvent=eventAt(context.row.seq);
   if(openingEvent.type!=='message.posted'||openingEvent.id!==request.openingEventId||openingEvent.messageId!==request.id||opening.value.authorId!==request.requesterId||opening.value.toMemberId!==request.recipientId||openingEvent.actorId!==opening.value.authorId||openingEvent.at!==opening.value.createdAt||opening.value.createdAt!==request.createdAt||contextEvent.type!=='message.posted'||contextEvent.id!==request.contextEventId||contextEvent.messageId!==request.contextMessageId||contextEvent.actorId!==context.value.authorId||contextEvent.at!==context.value.createdAt)changed();
   if(!visible(context.value,auth.member.id,floor))fail('reply_context_unavailable','Latest request context is outside the visible conversation; ask for a new request');
+  if (request.status === 'open' && auth.member.id === request.recipientId && (opening.value.deletedAt || context.value.deletedAt))
+    fail('reply_context_unavailable', WITHDRAWN_REPLY_CONTEXT);
   evaluatedThrough=Math.max(opening.row.seq,context.row.seq);
   if(ownerOf(context.value.id)?.id!==request.id)changed();
   // Follow-up preparation keeps the established eight-exchange/100-message

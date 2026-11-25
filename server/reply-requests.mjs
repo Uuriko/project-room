@@ -7,7 +7,7 @@ import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord } from "./work-context.mjs";
 import { Buffer } from "node:buffer";
 import { validId } from "../src/events.js";
-import { replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
+import { replyContextOwners, REPLY_CANCELLED, WITHDRAWN_REPLY_CONTEXT } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
 import { messageInHistory, visibleSequenceHorizon } from "./history-visibility.mjs";
 import { withRequestState } from "./request-states.mjs";
@@ -118,9 +118,13 @@ export class ReplyRequests {
           FROM json_each(rooms.projection,'$.replyRequests') AS item
           WHERE ((? AND json_extract(item.value,'$.recipientId')=?)
               OR (? AND json_extract(item.value,'$.requesterId')=?))
-            AND (?='all' OR json_extract(item.value,'$.status')=?)) AS requests
+            AND (?='all' OR json_extract(item.value,'$.status')=?)
+            AND (?<>'open' OR NOT EXISTS (
+              SELECT 1 FROM messages m WHERE m.room_id=rooms.id AND m.deleted_at IS NOT NULL
+              AND m.message_id IN (item.key,json_extract(item.value,'$.contextMessageId'))
+            ))) AS requests
           FROM rooms WHERE id=?`).get(direction !== "outgoing" ? 1 : 0, memberId,
-            direction !== "incoming" ? 1 : 0, memberId, status, status, roomId);
+            direction !== "incoming" ? 1 : 0, memberId, status, status, status, roomId);
         if (!row) fail("room_not_found", "Room not found", 404);
         room = { sequence: row.sequence, state: { replyRequests: JSON.parse(row.requests) } };
       } else room = this.store.room(roomId);
@@ -310,6 +314,8 @@ export class ReplyRequests {
         if (contextMessage?.toMemberId && contextMessage.authorId !== auth.member.id && contextMessage.toMemberId !== auth.member.id)
           fail("reply_context_unavailable", "Latest request context is private to another exchange; ask the requester for a visible clarification", 409);
         const open = request.status === "open", recipient = auth.member.id === request.recipientId;
+        if (open && recipient && (byMessage.get(request.id)?.deletedAt || contextMessage?.deletedAt))
+          fail("reply_context_unavailable", WITHDRAWN_REPLY_CONTEXT, 409);
         const answerBasis = open && recipient && !hasMore && context.sequence <= horizonSequence
           ? { expectedRequestRevision: request.revision, contextEventId: context.id, contextSequence: context.sequence } : null;
         // These are incomplete templates, never submitted automatically. Only the

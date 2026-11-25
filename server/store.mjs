@@ -171,7 +171,7 @@ import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
 import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gate (docs/JEV-GATES.md): pure scorer, no imports of its own.
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
-import { REPLY_FIELDS, REPLY_POLICY_VERSION, MAX_REPLY_RESPONSE_COMMAND_BYTES, replyPostMode } from "../src/reply-requests.js";
+import { REPLY_FIELDS, REPLY_POLICY_VERSION, MAX_REPLY_RESPONSE_COMMAND_BYTES, replyPostMode, WITHDRAWN_REPLY_CONTEXT } from "../src/reply-requests.js";
 import { ReplyRequests } from "./reply-requests.mjs";
 import { validateHelpData, WORK_HELP_UPDATED } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
@@ -7409,6 +7409,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
+      if (requestMode === "respond" || command.type === T.REPLY_REQUEST_PROGRESSED) {
+        const request = room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId];
+        if (request?.status === "open" && request.recipientId === auth.member.id
+          && [request.id, request.contextMessageId].some(id => selectedMessageRecord(this, roomId, id, Boolean(room.state.messagesArchive))?.deletedAt))
+          fail(409, "reply_context_unavailable", WITHDRAWN_REPLY_CONTEXT);
+      }
       const endingRequest = (requestMode === "respond" || command.type === T.REPLY_REQUEST_CANCELLED)
         && room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId]?.status === "open";
       const endingHelp = command.type === T.WORK_HELP_UPDATED && command.data.status === "withdrawn"
