@@ -415,7 +415,7 @@ const selectedMessage = createMessageSelection({
 });
 const directWindow = createDirectConversationWindow({
   read: query => client.conversation(query),
-  changed: () => { if (state && activeDirectMemberId) { rebuildConversation(); renderMessages(); } },
+  changed: () => { if (state && activeDirectMemberId) { rebuildConversation(); renderMessages(); renderSearch(); } },
 });
 function rebuildConversation() {
   const pair = directWindow.view();
@@ -474,7 +474,7 @@ let composerReselectId = null;
 let roomFilesByMessage = new Map();
 let roomFilesSelection = [], roomFilesNextCursor = null, roomFilesLoading = false, roomFilesAttempt = null, roomFilesFlight = null;
 const messageFileDownloads = new Map();
-let answerFileCheck = null;
+let answerFileCheck = null, historicalAnswer = null;
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
@@ -727,7 +727,7 @@ const client = new RoomClient({
     clearStoredPasswords();
     composerFiles = [];
     roomFilesByMessage = new Map();roomFilesSelection=[];roomFilesNextCursor=null;roomFilesLoading=false;roomFilesAttempt=null;roomFilesFlight=null;
-    messageFileDownloads.clear(); answerFileCheck = null;
+    messageFileDownloads.clear(); answerFileCheck = null; historicalAnswer = null;
     renderComposerFiles();
     $("#work-dialog").close();
     $("#room-overview-dialog").close();
@@ -2604,9 +2604,11 @@ function renderTyping(typists) {
   el.hidden = false;
 }
 function renderMessages() {
+  const previousPeer = directWindow.view().peerMemberId;
   directWindow.select(activeDirectMemberId, client.generation);
   directWindow.pin(activeDirectMemberId ? currentThreadId : null);
   if (activeDirectMemberId) directWindow.sync(client.sequence);
+  if (previousPeer && previousPeer !== activeDirectMemberId && state) renderSearch();
   const pairWindow = directWindow.view();
   if (partialWorkSnapshot && session && !roomFilesLoading) queueMicrotask(() => void refreshRoomFiles(false, null, true));
   const list = $("#message-list"), view = conversationViewKey();
@@ -2868,9 +2870,26 @@ return `<p class="form-hint"><a class="source-link draft-state" href="${esc(work
 // Every action keeps its
 // data-message-action wiring, so the work loop is untouched.
 function receivedFormalAnswer(message) {
-  const request = state.replyRequests?.[message.replyToId];
+  const request = state.replyRequests?.[message.replyToId]
+    ?? (historicalAnswer?.hash === location.hash && historicalAnswer.generation === client.generation
+      && historicalAnswer.viewKey === conversationViewKey() ? historicalAnswer.request : null);
   return !message.deletedAt && request?.status === "answered"
-    && request.requesterId === session.member.id && request.responseMessageId === message.id;
+    && request.id === message.replyToId && request.requesterId === session.member.id && request.responseMessageId === message.id;
+}
+async function readHistoricalAnswer(messageId) {
+  const message = conversation.byId.get(messageId);
+  if (!partialWorkSnapshot || !message?.replyToId || message.deletedAt || message.toMemberId !== session?.member.id
+    || state.replyRequests?.[message.replyToId]) return;
+  const generation = client.generation, hash = location.hash, viewKey = conversationViewKey();
+  try {
+    const { request, page } = await client.replyContext(message.replyToId);
+    if (generation !== client.generation || hash !== location.hash || viewKey !== conversationViewKey() || request.status !== "answered"
+      || request.requesterId !== session.member.id || request.responseMessageId !== messageId
+      || !page.items.some(row => row.kind === "answered" && row.eventId === request.terminalEventId
+        && row.message?.id === messageId && row.message.toMemberId === session.member.id && typeof row.message.body === "string")) return;
+    historicalAnswer = { request, generation, hash, viewKey };
+    renderMessages();
+  } catch { /* Ordinary replies have no formal request. The selected conversation remains readable. */ }
 }
 function messageLinksHTML(m, { linked, moderation, count, muted }) {
   if (muted) return `<div class="message-links">${moderation}</div>`;
@@ -3150,6 +3169,18 @@ const narrowSearch = matchMedia("(max-width: 40rem)");
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
   const resultsOnly = query.trim().toLowerCase() === "has:result";
+  const parsed = parseSearchQuery(query);
+  const pair = directWindow.view();
+  const hasPair = Boolean(activeDirectMemberId && pair.peerMemberId === activeDirectMemberId);
+  const earlier = $("#search-earlier-direct");
+  earlier.hidden = resultsOnly || !parsed.term || !hasPair || !(pair.cursor || pair.error);
+  if (earlier.hidden && document.activeElement === earlier) $("#message-search").focus({ preventScroll: true });
+  if (!earlier.hidden) {
+    earlier.setAttribute("aria-disabled", String(pair.loading));
+    setText("#search-earlier-direct", uiText(pair.error ? "search.retryEarlierDirect" : "search.earlierDirect", {
+      name: displayName(activeDirectMemberId),
+    }));
+  }
   $("#results-panel").hidden = !resultsOnly;
   $("#search-list").hidden = resultsOnly;
   if (resultsOnly) {
@@ -3158,23 +3189,26 @@ function renderSearch(now = Date.now()) {
     setText("#search-count", partialWorkSnapshot ? uiText("currentRoom.searchResultCount", { count: completedResults(state).length }) : uiText("result.searchCount", { count: completedResults(state).length }));
     return;
   }
-  const parsed = parseSearchQuery(query);
   const only = mentionsFilterOn() || parsed.mentionsOnly, pinnedOnly = pinnedFilterOn();
   const active = Boolean(query.trim()) || only || pinnedOnly;
   $("#clear-search").hidden = !query && !mentionsFilterOn() && !pinnedOnly;
   if (!active) searchCollapsed = false;
   $("#search-results").hidden = !active || searchCollapsed;
   if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const loadingOlder = false; // the first page is the held window; older pages load on scroll
-  const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
+  const messages = hasPair ? [...new Map([...state.messages, ...pair.messages].map(message => [message.id, message])).values()]
+    .filter(message => !isMutedBy(state, session?.member?.id, message.authorId))
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)) : state.messages;
+  const result = searchMessages({ ...state, messages }, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
   const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : pinnedOnly && !parsed.term ? (total === 1 ? "pinned message" : "pinned messages") : (total === 1 ? "match" : "matches");
-  setText("#search-count", partialWorkSnapshot ? uiText("currentRoom.searchShownCount", { count: shown }) : `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room${loadingOlder ? " · loading older messages…" : ""}`);
+  const partialSearch = partialWorkSnapshot || client.owesHistory || hasPair;
+  setText("#search-count", partialSearch ? uiText(hasPair ? shown ? "search.loadedCount" : "search.loadedEmpty" : "currentRoom.searchShownCount", { count: shown })
+    : `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room`);
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
   const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
-    + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : clipGraphemes(m.body ?? "", 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${partialWorkSnapshot ? esc(uiText("currentRoom.searchNoMatches")) : empty}</li>`;
+    + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : clipGraphemes(m.body ?? "", 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || (hasPair ? "" : `<li class="empty-note">${partialSearch ? esc(uiText("currentRoom.searchNoMatches")) : empty}</li>`);
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
@@ -5535,6 +5569,12 @@ document.addEventListener("keydown", event => {
   }
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
+$("#search-earlier-direct").addEventListener("click", () => {
+  const pair = directWindow.view();
+  if (!activeDirectMemberId || pair.peerMemberId !== activeDirectMemberId || pair.loading) return;
+  if (pair.cursor) void directWindow.older();
+  else if (pair.error) void directWindow.retry();
+});
 $("#message-search").addEventListener("input", () => { searchCollapsed = false; if (state) renderSearch(); });
 $("#message-search").addEventListener("focus", () => { if (!searchCollapsed) return; searchCollapsed = false; if (state) renderSearch(); });
 $("#search-mentions").addEventListener("click", () => {
@@ -5843,9 +5883,11 @@ $("#main").addEventListener("click", e => {
   if (!link.dataset.openWork) { updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++; $("#work-navigation-return").hidden = true; }
   // JDOT-COH-NAV end
   if (link.dataset.openMessage) {
-    if (narrowSearch.matches && link.closest("#search-results")) { searchCollapsed = true; $("#search-results").hidden = true; }
+    const fromSearch = Boolean(link.closest("#search-results"));
+    if (narrowSearch.matches && fromSearch) { searchCollapsed = true; $("#search-results").hidden = true; }
     history.replaceState(null, "", recordHref("message", link.dataset.openMessage));
     revealMessage(link.dataset.openMessage);
+    if (fromSearch) void readHistoricalAnswer(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
     // JDOT-COH-NAV begin
     // #3795: a claim record link (marked data-open-claim), and any record id
