@@ -262,8 +262,7 @@ test("returning from the first submission compares all changes across two revisi
   await next.click();
   for (const id of ["result-diff", "action-result-diff"]) {
     const diff = page.locator("#" + id);
-    await diff.waitFor();
-    assert.match(await diff.textContent(), /- Owner: undecided/);
+    await diff.getByText("- Owner: undecided", { exact: true }).waitFor();
     assert.match(await diff.textContent(), /\+ Owner: Maya/);
     assert.equal(new URL(await diff.getByRole("link").getAttribute("href"), f.origin).hash, new URL(firstUrl).hash);
     assert.match(await diff.textContent(), /Changes since the result you opened/);
