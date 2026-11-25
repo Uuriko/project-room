@@ -374,7 +374,7 @@ for (const storage of ["legacy", "normalized"]) {
     const checkFiles = row.getByRole("button", { name: "Check files on this answer", exact: true });
     await menu.press("Enter");
     await checkFiles.press("Enter", { timeout: 2500 });
-    await page.getByText("No shared files on this answer yet.", { exact: true }).waitFor();
+    await row.getByRole("status").getByText("No files on this answer.", { exact: true }).waitFor();
     assert.equal(await menu.evaluate(node => node === document.activeElement), true);
     await page.locator("#message-input").fill("Unsent follow-up to the requester");
 
@@ -395,6 +395,7 @@ for (const storage of ["legacy", "normalized"]) {
     await checkFiles.press("Enter", { timeout: 2500 });
     const file = row.locator('[data-download-file="brief-file"]');
     await file.waitFor();
+    assert.equal(await row.getByText("No files on this answer.", { exact: true }).count(), 0);
     if (process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT && storage === "normalized") {
       await row.scrollIntoViewIfNeeded();
       await page.screenshot({ path: process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT + "-after.png" });
