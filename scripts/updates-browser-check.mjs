@@ -80,6 +80,24 @@ async function setup(t, storeOptions = {}) {
   return { store, owner, agent, origin, page, errors, selectUpdatesFilter };
 }
 
+test("opening a shared reply link from Updates reveals the actual conversation", async t => {
+  const { store, owner, agent, page, errors } = await setup(t);
+  await page.setViewportSize({ width: 390, height: 844 });
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: "review-topic", body: "Please review." }));
+  store.command(agent, "commons", command(T.MESSAGE_POSTED, {
+    messageId: "returned-revision", replyToId: "review-topic", body: "Here is the returned revision."
+  }));
+  await page.locator("#topbar-updates").click();
+  await page.locator("#updates-dialog").waitFor({ state: "visible" });
+  const url = new URL(page.url());
+  url.hash = "#pr-record/message/returned-revision";
+  await page.goto(url.href);
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  await page.locator('[data-message-record-id="returned-revision"] .message-body').waitFor();
+  await page.waitForFunction(() => document.activeElement?.dataset.messageRecordId === "returned-revision");
+  assert.deepEqual(errors, []);
+});
+
 test("Updates navigation keeps review, draft and return context at 1280px and 390px", { timeout: 120000 }, async t => {
   let time = Date.now();
   const { store, owner, agent, origin, page, errors, selectUpdatesFilter } = await setup(t, { now: () => ++time });
