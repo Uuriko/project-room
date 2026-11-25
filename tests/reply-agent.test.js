@@ -1334,10 +1334,23 @@ test("the requester can follow the original answer to its late file on legacy an
     ...context.responseActions[0].arguments, requestId: "new-answer", body: "I finished the review.",
   }, responder.secret);
   assert.equal((await call("room_read_request", args, responder.secret)).answerFilesRead, undefined);
-  const earlier = await call("room_read_request", { ...args, limit: 1 });
+  for (const id of ["before-1", "before-2", "before-3", "before-4"]) {
+    f.store.command(requester.secret, made.roomId, { id, type: "message.posted", data: {
+      messageId: id, toMemberId: responder.identityId, requestKind: "reply", body: "Another open request.",
+    } });
+  }
+  const lookup = { roomId: made.roomId, direction: "outgoing", status: "answered", limit: 1 };
+  assert.deepEqual((await call("room_list_requests", lookup, outsider.secret)).nextReads, []);
+  let listing = await call("room_list_requests", lookup);
+  assert.deepEqual(listing.nextReads, []);
+  assert.equal(listing.page.hasMore, true);
+  listing = await call(listing.nextRead.tool, listing.nextRead.arguments);
+  assert.equal(listing.nextReads.length, 1);
+  const readAnswer = listing.nextReads[0].nextRead;
+  const earlier = await call(readAnswer.tool, { ...readAnswer.arguments, limit: 1 });
   assert.equal(earlier.page.hasMore, true);
   assert.equal(earlier.answerFilesRead, undefined);
-  const settled = await call("room_read_request", { ...args, limit: 1, cursor: earlier.page.nextCursor });
+  const settled = await call(readAnswer.tool, { ...readAnswer.arguments, limit: 1, cursor: earlier.page.nextCursor });
   const answerId = settled.request.responseMessageId;
   const pointer = settled.answerFilesRead;
   assert.deepEqual(pointer, {
@@ -1363,8 +1376,12 @@ test("the requester can follow the original answer to its late file on legacy an
   const legacy = f.open("legacy-file-question").command.data.messageId;
   const prior = await f.client.replyContext(legacy);
   await f.client.replyAction("room_respond_to_request", f.respond(prior));
-  const second = await fetch(f.origin + "/api/rooms/commons/reply-context?requestMessageId=" + legacy,
-    { headers: { Authorization: "Bearer " + f.keys.owner } });
+  const headers = { Authorization: "Bearer " + f.keys.owner };
+  const legacyList = await fetch(f.origin + "/api/rooms/commons/reply-requests?direction=outgoing&status=answered", { headers });
+  assert.equal(legacyList.status, 200);
+  const { nextReads } = await legacyList.json();
+  assert.equal(nextReads.length, 1);
+  const second = await fetch(f.origin + nextReads[0].http.path, { headers });
   assert.equal(second.status, 200);
   const result = await second.json();
   const legacyAnswer = result.request.responseMessageId;
