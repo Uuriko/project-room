@@ -12,18 +12,28 @@ export function previousReviewText(correction) {
 // Show only the changed passages and their surrounding lines. Full versions
 // stay accessible through the exact result links even if a rewrite is large.
 function comparisonHtml(before, after, esc, structuredPatch) {
+  const previousBreak = before.match(/\r?\n$/)?.[0] ?? "";
+  const revisedBreak = after.match(/\r?\n$/)?.[0] ?? "";
+  const ending = Boolean(previousBreak) === Boolean(revisedBreak) ? ""
+    : uiText(revisedBreak ? "result.finalBreakAdded" : "result.finalBreakRemoved");
   const heading = summary => [
-    '<p class="form-hint"><strong>', esc(uiText("result.revisionHeading")), "</strong> ", esc(summary), "</p>",
+    '<p class="form-hint"><strong>', esc(uiText("result.revisionHeading")), "</strong> ",
+    esc(ending ? ending + " " + summary : summary), "</p>",
   ].join("");
-  const patch = structuredPatch("", "", before, after, "", "", { context: 3, maxEditLength: 800 });
+  // The line break change has its own note. Keep the same last line out of
+  // the added/removed rows when its wording has not changed.
+  const previousText = previousBreak ? before : before + revisedBreak;
+  const revisedText = revisedBreak ? after : after + previousBreak;
+  const patch = structuredPatch("", "", previousText, revisedText, "", "", { context: 3, maxEditLength: 800 });
   if (!patch) return heading(uiText("result.rewrite"));
-  if (!patch.hunks.length) return heading(uiText("result.sameRevisionText"));
+  if (!patch.hunks.length) return heading(uiText(ending ? "result.comparisonApproval" : "result.sameRevisionText"));
 
   let removed = 0, added = 0, total = 0;
   const visible = [];
   for (const hunk of patch.hunks) {
     if (total < 200) visible.push(esc(uiText("result.revisionRange", { before: hunk.oldStart, after: hunk.newStart })));
     for (const line of hunk.lines) {
+      if (line === "\\ No newline at end of file") continue;
       if (line.startsWith("-")) removed++;
       if (line.startsWith("+")) added++;
       if (++total <= 200) {

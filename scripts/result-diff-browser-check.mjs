@@ -115,6 +115,7 @@ for (const width of [1440, 390]) {
     assert.match(await diff.innerText(), /\+ Result B/);
     assert.match(await diff.innerText(), /- Missing named owner/);
     assert.match(await diff.innerText(), /\+ Owner: Maya/);
+    assert.doesNotMatch(await diff.innerText(), /No newline at end of file|Final line break/);
     if (width === 390) {
       assert.ok((await diff.innerText()).includes(reference), "the exact reference remains in the rendered comparison");
       const { viewport, content } = await diff.locator(".result-diff").evaluate(element =>
