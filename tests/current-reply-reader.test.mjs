@@ -50,7 +50,15 @@ test('bounded witnessed refill finds an addressed request behind unrelated reque
 });
 test('witnessed refill respects a nested 200-record context and returns every request',t=>{
  const {store,keys}=fixture(t,(_events,add)=>{
-  for(let i=0;i<25;i++)add('message.posted',{messageId:`a-match-${String(i).padStart(2,'0')}`,toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Question'});
+  for(let i=0;i<25;i++){
+   const messageId=`a-match-${String(i).padStart(2,'0')}`;
+   add('message.posted',{messageId,toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Question'});
+   if(i%2===0){
+    const clarificationId=`clarification-${i}`;
+    add('message.posted',{messageId:clarificationId,replyToId:messageId,toMemberId:'reader',body:'Clarification'});
+    if(i===12)add('message.deleted',{messageId:clarificationId,expectedMessageRevision:0});
+   }
+  }
  });
  store.room=()=>{throw Error('whole-room hydration forbidden');};
  let args={direction:'incoming',status:'open',limit:50},ids=[],pages=0;
@@ -63,7 +71,8 @@ test('witnessed refill respects a nested 200-record context and returns every re
   ids.push(...result.requests.map(request=>request.id));args=result.nextRead?.arguments;
   assert.ok(++pages<20);
  }while(args);
- assert.equal(ids.length,26);assert.equal(new Set(ids).size,26);assert.equal(ids.at(-1),'question');
+ const expected=Array.from({length:25},(_,i)=>`a-match-${String(i).padStart(2,'0')}`).filter(id=>id!=='a-match-12');
+ assert.deepEqual(ids,[...expected,'question']);
 });
 for(const [field,value] of [['recipientId','other'],['status','answered']])test(`witnessed refill fails closed when ${field} is corrupted`,t=>{
  const {store,keys}=fixture(t);

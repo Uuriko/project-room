@@ -143,8 +143,15 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    // reads existing indexes, so an open ask is never behind empty pages.
    // It is discovery, not a census: every hit is proof-read and bound, and the
    // witnessed scan still runs to completion as before, skipping only the hits
-   // already returned (kept as hashes inside the opaque cursor).
+   // already evaluated (kept as hashes inside the opaque cursor).
    const seen=new Set(saved?.seen??[]),found=[];
+   // A record costs four reads with a cold receipt. Each context header
+   // costs at most nine, including the legacy canonical-message fallback.
+   // Reserve both headers and all three event checks before scanning a row.
+   const contextRecords = status === 'open' ? 18 : 0;
+   const scanRowRecords = 1 + 4 + contextRecords + 3;
+   const recordsLeft = selectedCount => b.maxRecords - b.records - 3 * selectedCount;
+   const bytesLeft = selectedCount => remainingCurrentReadBytes(b) > 144 * 1024 + 384 * (selectedCount + WINDOW);
    const actionable = request => status !== 'open'
      || currentReplyContextAvailable(db, roomId, request, auth.member.id, b, floor);
    if(saved?.seen!==undefined&&(!Array.isArray(saved.seen)||saved.seen.length>50||!saved.seen.every(v=>typeof v==='string')))fail('invalid_reply_cursor','Invalid request source continuation');
@@ -159,8 +166,8 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
      chargeCurrentReadBudget(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
      for(const {record_key:id} of rows){
       if(found.length>=limit)break;
-      // Same headroom rule as the scan below; an unread hit is simply found by the scan.
-      if(remainingCurrentReadBytes(b)<=144*1024+384*(found.length+WINDOW)||(b.maxRecords??200)-b.records<=100+3*(found.length+WINDOW))break;
+      // An unread indexed hit remains eligible for the witnessed scan.
+      if(!bytesLeft(found.length)||recordsLeft(found.length)<scanRowRecords)break;
       const r=readCurrentRecord(db,roomId,'replyRequests',id,b);
       if(r?.id!==id||r.status!=='open'||r[role]!==auth.member.id)throw Error('current_room_corrupt: open request index binding differs');
       if(!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||r.revision!==0||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();
@@ -171,16 +178,21 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    }
    // Refill a few witnessed source windows while there is space. The ceiling
    // remains explicit; an empty page with hasMore still means keep reading.
-   let source,after=saved?.after??'',windows=0;const selected=[...found];
-   if(selected.length>=limit||found.length&&(remainingCurrentReadBytes(b)<=144*1024+384*(selected.length+WINDOW)||(b.maxRecords??200)-b.records<=100+3*(selected.length+WINDOW)))source={requests:[],examinedAfter:after,hasMore:true};
-   else do{
-    source=readCurrentReplyRequestWindow(store,roomId,{after,limit:Math.min(limit-selected.length,WINDOW)});
+   let after=saved?.after??'';
+   let source={examinedAfter:after,hasMore:true};
+   const selected=[...found];
+   for(let windows=0;source.hasMore&&selected.length<limit&&windows<4;windows++){
+    // Three reads recheck the head, and one reads the lookahead key.
+    const windowLimit=Math.min(limit-selected.length,WINDOW,Math.floor((recordsLeft(selected.length)-4)/scanRowRecords));
+    if(windowLimit<1||(!bytesLeft(selected.length)&&(windows>0||(!saved&&found.length>0)))){
+     if(windows===0&&saved&&selected.length===0)fail('current_room_context_unavailable','Current record context exceeds bounded input; use a smaller addressed request');
+     break;
+    }
+    source=readCurrentReplyRequestWindow(store,roomId,{after,limit:windowLimit});
     for(const r of source.requests){if(!validId(r.id)||!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||!['open','answered','declined','cancelled'].includes(r.status)||r.revision!==(r.status==='open'?0:1)||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();requests.set(r.id,r);}
     selected.push(...source.requests.filter(r=>!seen.has(seenKey(r.id))&&directionMatches(r,auth.member.id,direction)&&messageInHistory({id:r.id,createdAt:r.createdAt},floor)&&(status==='all'||r.status===status) && actionable(r)));
-    after=source.examinedAfter;windows++;
-   }while(source.hasMore&&selected.length<limit&&windows<4
-    &&remainingCurrentReadBytes(b)>144*1024+384*(selected.length+WINDOW)
-    &&(b.maxRecords??200)-b.records>100+3*(selected.length+WINDOW));
+    after=source.examinedAfter;
+   }
    for(const request of selected)noteRequest(request);
    const nextCursor=source.hasMore?crypto.encode({...binding,after:source.examinedAfter,...(seen.size?{seen:[...seen]}:{})}):null;
    const nextRead=nextCursor?{tool:'room_list_requests',arguments:{direction,status,limit,cursor:nextCursor}}:null;
