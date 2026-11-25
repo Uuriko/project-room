@@ -2,6 +2,8 @@
 import test from "node:test";
 import { openWorkFromSearch, clickWorkAction } from "./room-chrome.mjs";
 import assert from "node:assert/strict";
+import { join } from "node:path";
+import { RoomStore } from "../server/store.mjs";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
@@ -15,12 +17,25 @@ import { signInFixture } from "./auth-signin.mjs";
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
 
 async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody, firstCredit } = {}) {
-  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60, credentialReadBurst });
-  let browser;
-  t.after(async () => {
-    await browser?.close(); server.closeStreams(); server.closeAllConnections();
+  const f = createAcceptanceFixture();
+  const makeServer = () => createRoomServer({ store: f.store, streamInterval: 60, credentialReadBurst });
+  let server = makeServer(), browser;
+  async function stopServer() {
+    server.closeStreams(); server.closeAllConnections();
     if (server.listening) await new Promise(resolve => server.close(resolve));
-    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+    f.store.close();
+  }
+  async function restart() {
+    const { port } = server.address();
+    await stopServer();
+    f.store = new RoomStore(join(f.directory, "room.sqlite"));
+    server = makeServer();
+    await new Promise(resolve => server.listen(port, "127.0.0.1", resolve));
+  }
+  t.after(async () => {
+    await browser?.close();
+    await stopServer();
+    rmSync(f.directory, { recursive: true, force: true });
   });
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
   const item = id => f.store.room("commons").state.workItems[id];
@@ -59,7 +74,7 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
   }
   const mutate = (type, data) => send("producer", type, { workItemId: "revision-journey", expectedRevision: item("revision-journey").revision, ...data });
   t.after(() => assert.deepEqual(errors, []));
-  return { ...f, origin, item: () => item("revision-journey"), first, login, mutate, send, complete: body => completeWithText("revision-journey", body) };
+  return { ...f, get store() { return f.store; }, origin, restart, item: () => item("revision-journey"), first, login, mutate, send, complete: body => completeWithText("revision-journey", body) };
 }
 const card = page => page.locator('[data-work-record-id="revision-journey"]');
 async function openResult(page) {
@@ -168,6 +183,43 @@ for (const width of [1440, 390]) {
   });
 }
 
+
+test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+  const reviewer = await f.login("human-checker", original);
+  await reviewer.locator("#result-work-action").click();
+  await review(reviewer, "fail", "Put the owner beside the deadline.");
+  await reviewer.context().close();
+
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Updated the final line." });
+  f.mutate(T.WORK_STARTED, {});
+  const second = f.complete("Result B\nOwner: Maya · Friday");
+  await f.restart();
+
+  const returning = await f.login("human-checker", original);
+  await returning.getByText("Verification · Failed", { exact: true }).waitFor();
+  assert.equal(await returning.locator("#result-work-action").isVisible(), false);
+  const current = returning.getByRole("link", { name: "Open current result" });
+  const currentUrl = await current.getAttribute("href");
+  await current.click();
+  await returning.locator("#result-correction-summary").getByText("Put the owner beside the deadline.").waitFor();
+  assert.equal(await returning.locator("#result-body").textContent(), "Result B\nOwner: Maya · Friday");
+  await returning.locator("#result-work-action").click();
+  await returning.locator("#action-result-diff").getByText("+ Owner: Maya · Friday", { exact: true }).waitFor();
+  await review(returning, "pass", "Checked Maya against the Friday deadline.");
+  assert.equal(f.item().verification.completionEventId, second.event.id);
+  assert.equal(f.item().verificationHistory.find(v => v.completionEventId === f.first.event.id)?.result, "fail");
+  const owner = await f.login("owner", currentUrl);
+  await owner.getByText("Verification · Passed", { exact: true }).waitFor();
+  await owner.locator("#result-work-action").click();
+  await owner.locator('#action-fields [name="decision"]').selectOption("approved");
+  await owner.locator('#action-fields [name="reason"]').fill("The revised result names the owner.");
+  await owner.locator('#action-form button[type="submit"]').click();
+  await owner.locator("#action-dialog").waitFor({ state: "hidden" });
+  assert.equal(f.item().decision.completionEventId, second.event.id);
+  assert.equal(f.item().decision.decision, "approved");
+});
 
 test("late previous-result read cannot repopulate a different review after cancellation", { timeout: 30000 }, async t => {
   const f = await setup(t, 1440);
