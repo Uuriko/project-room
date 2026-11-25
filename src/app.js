@@ -3398,10 +3398,10 @@ function switchThread(threadId, focusComposer = false, preserveWork = false) {
 }
 // Capture the existing discussion when Workspace opens. A failed return must
 // leave the destination draft alone.
-function captureWorkspaceThreadDraft() {
+function captureWorkspaceThreadDraft(messageId) {
   const workId = activeWorkNavigationId, threadId = currentThreadId;
   const work = workId && state?.workItems[workId];
-  const sourceId = work ? work.sourceMessageId : threadId;
+  const sourceId = messageId ?? (work ? work.sourceMessageId : threadId);
   const root = conversation?.rootById.get(sourceId);
   const identity = session, context = workNavigationContext();
   function destination() {
@@ -3414,7 +3414,7 @@ function captureWorkspaceThreadDraft() {
   if (!context || !destination()) return null;
   function stillSelected() {
     return session === identity && workNavigationContext() === context && destination()
-      && (work ? activeWorkNavigationId === workId && state.workItems[workId]?.sourceMessageId === sourceId
+      && (work ? activeWorkNavigationId === workId && state.workItems[workId]?.sourceMessageId === work.sourceMessageId
         : currentThreadId === threadId);
   }
   function discussion() {
@@ -5039,6 +5039,19 @@ function expandTimelineTo(id) {
   }
 }
 $("#message-list").addEventListener("click", e => {
+  const artifact = e.target.closest(".message-body a[href]");
+  if (artifact && !e.defaultPrevented && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+    const url = new URL(artifact.href);
+    const messageId = artifact.closest("[data-message-record-id]")?.dataset.messageRecordId;
+    if (messageId && url.origin === location.origin && url.pathname === location.pathname
+      && url.searchParams.get("room") === session?.roomId && url.hash.startsWith("#pr-workspace/")) {
+      const destination = captureWorkspaceThreadDraft(messageId);
+      if (destination && workspacePreviewsUI?.openLink(url.hash, destination)) {
+        e.preventDefault();
+        return;
+      }
+    }
+  }
   if (e.target.closest("[data-direct-retry]")) { void directWindow.retry(); return; }
   if (e.target.closest("[data-timeline-earlier]")) {
     if (activeDirectMemberId) {
