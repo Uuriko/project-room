@@ -267,8 +267,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
           const pick = document.createElement("button");
           pick.type = "button";
           pick.className = "button secondary";
-          pick.textContent = "Continue this version";
-          pick.setAttribute("aria-label", "Continue this version: " + item.title);
+          pick.textContent = uiText("workspace.chooseVersion");
+          pick.setAttribute("aria-label", uiText("workspace.chooseVersionNamed", { title: item.title }));
           pick.addEventListener("click", async () => {
             if (!stillOpen()) return;
             const url = workspaceArtifactLink(location.href, session.roomId, item, "changes");
@@ -446,8 +446,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     const note = noteInput.value.trim();
     const copiedText = forAgent ? [
       uiText("workspace.share.agentText", { link, head: current.head }),
-      note && "Instruction for this version:\n" + note,
-      returnLink && "Originating discussion: " + returnLink,
+      note && uiText("workspace.versionInstruction", { note }),
+      returnLink && uiText("workspace.returnDiscussion", { link: returnLink }),
       returnLink && (current.recipientId
         ? "This publication is directed. Keep the returned artifact within the same audience."
         : "Return your revised publication to that discussion for review."),
@@ -532,14 +532,15 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   return {
     reset, refreshDiscussion,
     refresh() { if (dialog.open) void load(); },
-    openLink(hash) {
+    openLink(hash, destination = null) {
       const target = workspaceArtifactSelection(hash);
       if (!target || !client.session) return;
       notes.clear(); clearPreview();
       selectStart(null);
-      threadDraft = null; linked = target; reviewLocation = target.anchor ? target : null; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
+      threadDraft = destination; linked = target; reviewLocation = target.anchor ? target : null; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
       if (!dialog.open) dialog.showModal();
       void load();
+      return true;
     },
     closeLinked() { if (linked) reset(); },
   };

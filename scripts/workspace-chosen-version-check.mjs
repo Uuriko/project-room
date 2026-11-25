@@ -30,7 +30,7 @@ try {
       return { items: structuredClone(items) };
     }};
     Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => { throw Error("manual"); } } });
-    installWorkspacePreviews({ client, toolbar: document.querySelector("nav"), memberLabel: id => id,
+    window.workspace = installWorkspacePreviews({ client, toolbar: document.querySelector("nav"), memberLabel: id => id,
       captureThreadDraft: () => ({
         discussion: () => ({ link: "http://localhost/?room=commons#pr-record/message/design",
           messages: [{ author: "Designer", excerpt: "Keep the navigation." }] }),
@@ -60,6 +60,20 @@ try {
     const draft = await page.evaluate(() => window.draft);
     assert.ok(draft.link.includes(side.repeat(32)) && draft.note === "Use the existing navigation.");
   }
+  const returned = await page.evaluate(() => {
+    const source = { discussion: () => ({ link: "http://localhost/?room=commons#pr-record/message/revision",
+      messages: [{ author: "Reviewer", excerpt: "Here is the revision." }] }),
+      append: (link, note) => { window.followUp = { link, note }; return true; } };
+    return window.workspace.openLink(new URL(window.draft.link).hash, source);
+  });
+  assert.equal(returned, true);
+  assert.equal(await page.getByText("Open full discussion").getAttribute("href"),
+    "http://localhost/?room=commons#pr-record/message/revision");
+  await page.getByLabel("Instruction for this version").fill("Keep the revised navigation.");
+  await page.getByRole("button", { name: "Add to thread draft" }).click();
+  await page.locator("dialog").waitFor({ state: "hidden" });
+  assert.deepEqual(await page.evaluate(() => window.followUp),
+    { link: await page.evaluate(() => window.draft.link), note: "Keep the revised navigation." });
   await compare();
   await page.evaluate(() => { window.items[1].revision++; });
   await page.getByRole("button", { name: "Continue this version: Version b" }).click();
