@@ -1,7 +1,7 @@
 import {initialRoom} from '../../server/bootstrap.mjs';
 import {event} from '../../src/events.js';
 import {linkWithProof} from './link-with-proof.mjs';
-export function seedScopedInbox(store){
+export function seedScopedInbox(store,{representation='normalized-current-v1'}={}){
  const identity=store.identities.create('Scoped worker'),events=initialRoom(),add=(type,data,actorId='owner')=>events.push(event({roomId:'commons',actorId,type,data}));
  for(const id of ['worker','other','third','observer'])add('member.added',{memberId:id,displayName:id==='worker'?'Worker':id,kind:'agent',permissions:['accept_work','complete_work'],...(id==='worker'?{identityId:identity.identityId}:{})});
  add('work.proposed',{workItemId:'assigned',title:'Assigned useful work',definitionOfDone:'Saved result',accountableMemberId:'worker'});
@@ -10,7 +10,7 @@ export function seedScopedInbox(store){
  add('message.posted',{messageId:'mine',body:'A selected question'},'worker');
  add('message.posted',{messageId:'mine-2',body:'Second selected question'},'worker');
  while(events.length<42)add('message.posted',{messageId:'old-'+events.length,body:'Older harmless context'});
- store.initialize(events,{representation:'normalized-current-v1'});const owner=store.issueAccessKey('commons','owner');
+ store.initialize(events,representation ? {representation} : undefined);const owner=store.issueAccessKey('commons','owner');
  linkWithProof(store,owner,'commons',identity,{memberId:'worker',permissions:['accept_work','complete_work']});
  const scopes=['inbox:read','rooms:read','rooms:write','heartbeats:report','heartbeats:read'],issued=store.agentPlugin.issueApiKey({identityId:identity.identityId,scopes,expiresAt:store.now()+3600000});
  const send=(id,data)=>store.command(owner,'commons',{id,type:'message.posted',data:{messageId:id,...data}});

@@ -1080,8 +1080,27 @@ export class Bridge {
             this.chatReceipts.save(key, receipt);
           }
         }
-        if (!receipt.formalDelivery || receipt.formalReview) await this.room.post({ body: receipt.body, replyToId: receipt.threadKey,
-          messageId: `acp-${receipt.requestId}`, requestId: receipt.requestId, listenerToken: this.fencingToken });
+        if (!receipt.formalDelivery || receipt.formalReview) {
+          const ifOpenReplyRequestId = receipt.formalReview
+            ? receipt.formalDelivery?.recipe.command.data.responseToRequestId : undefined;
+          try {
+            await this.room.post({ body: receipt.body, replyToId: receipt.threadKey,
+              messageId: `acp-${receipt.requestId}`, requestId: receipt.requestId, listenerToken: this.fencingToken,
+              ifOpenReplyRequestId });
+          } catch (error) {
+            if (!ifOpenReplyRequestId || !(error instanceof RoomError)) throw error;
+            const closed = error.status === 409 && error.code === 'formal_draft_request_closed';
+            const unsupported = error.status === 422 && error.code === 'invalid_command'
+              && error.message === 'Unexpected field: ifOpenReplyRequestId';
+            const replayConflict = error.status === 409 && error.code === 'idempotency_conflict';
+            if (!closed && !unsupported && !replayConflict) throw error;
+            receipt = { ...receipt, phase: 'discarded', disposition: error.code };
+            this.chatReceipts.save(key, receipt);
+            this.log(`Draft retained locally after ${error.code}. Read formal request ${ifOpenReplyRequestId} for its current outcome.`);
+            await this.ack(receipt.signalIds);
+            return;
+          }
+        }
         this.stats.posted++;
         const { body: _body, formalDelivery:_delivery, ...delivered } = receipt;
         receipt = { ...delivered, phase: "posted" };
