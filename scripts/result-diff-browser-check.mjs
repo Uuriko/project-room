@@ -4,6 +4,7 @@ import { openCatchUp, openWorkFromSearch, clickWorkAction } from "./room-chrome.
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
+import { operatorNormalization } from "../server/operator-normalization.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { rmSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
@@ -332,56 +333,178 @@ test("a passage reply identifies the reviewed submission when two receipts cite 
   assert.equal(await recipient.locator("#result-current-version").getAttribute("href"), url(second.event.id));
 });
 
-test("a phone reviewer can identify a document reference without losing the submitted text", { timeout: 30000 }, async t => {
-  const source = "https://docs.google.com/document/d/review-fixture/edit";
-  const submitted = "Result A\nOwner: Maya\nProject brief: " + source;
-  const f = await setup(t, 390, { firstBody: submitted });
-  const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
-  const reviewer = await f.login("human-checker", original);
-  const requests = [];
-  await reviewer.context().route("https://docs.google.com/**", async route => {
-    requests.push(route.request().url());
-    await route.fulfill({ status: 403, body: "The project brief requires separate access." });
+for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`a phone reviewer can identify a document reference and ask about its exact revision (${representation})`, { timeout: 30000 }, async t => {
+    const source = "https://docs.google.com/document/d/review-fixture/edit";
+    const submitted = "Result A\nOwner: Maya\nProject brief: " + source;
+    const f = await setup(t, 390, { firstBody: submitted });
+    const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+    const reviewer = await f.login("human-checker", original);
+    const requests = [];
+    await reviewer.context().route("https://docs.google.com/**", async route => {
+      requests.push(route.request().url());
+      await route.fulfill({ status: 403, body: "The project brief requires separate access." });
+    });
+    await reviewer.reload();
+    const body = reviewer.locator("#result-body");
+    await body.getByText(/Owner: Maya/).waitFor();
+    assert.equal(await body.textContent(), submitted);
+    assert.equal(await body.locator("a").count(), 0);
+    if (process.env.ROOM_REFERENCE_SCREENSHOT) await reviewer.screenshot({ path: process.env.ROOM_REFERENCE_SCREENSHOT });
+    await reviewer.locator("#result-status").getByText(/External references may change or require access/).waitFor();
+    assert.deepEqual(requests, [], "Room reads the result without contacting the document provider");
+    const provider = await reviewer.context().newPage();
+    assert.equal((await provider.goto(source)).status(), 403);
+    await provider.close();
+    assert.equal(await body.textContent(), submitted, "a provider refusal does not change the submitted result");
+    await reviewer.locator("#result-discuss").focus();
+    await reviewer.keyboard.press("Enter");
+    await reviewer.locator("#message-input").fill("Please share the deadline excerpt from the project brief.");
+    await reviewer.locator("#message-form button[type=submit]").click();
+    await reviewer.waitForFunction(() => document.querySelector("#message-input").value === "");
+    const reply = f.store.room("commons").state.messages.find(message => message.body === "Please share the deadline excerpt from the project brief.");
+    assert.equal(reply?.replyToId, f.first.event.data.evidenceMessageId);
+
+    const producer = new RoomAgentClient({ origin: f.origin, roomId: "commons", memberId: "producer", token: f.keys.producer });
+    const { discussion } = await producer.workDiscussion(f.item().id, { completionEventId: f.first.event.id });
+    assert.equal(discussion.replies.find(message => message.id === reply.id)?.body, reply.body);
+    assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
+
+    const workItemId = f.item().id;
+    f.send("human-checker", T.VERIFICATION_RECORDED, {
+      workItemId: f.item().id, expectedRevision: f.item().revision, completionEventId: f.first.event.id,
+      evidenceVersion: f.first.event.data.evidenceVersion, result: "fail", summary: "Clarify the deadline",
+      nextAction: "Confirm the deadline against the source."
+    });
+    f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Rechecked the source." });
+    f.mutate(T.WORK_STARTED, {});
+    // Both completions cite the same immutable evidence. Only the permalink
+    // distinguishes the version the reviewer chose.
+    const second = f.mutate(T.WORK_COMPLETED, {
+      ...f.first.event.data, expectedRevision: f.item().revision, previousCompletionEventId: f.first.event.id,
+      summary: "Reviewed against the source again."
+    });
+    if (representation === "normalized-current-v1") {
+      const selection = { roomId: "commons", discardLegacyAssignments: true };
+      const plan = operatorNormalization(f.store, selection);
+      operatorNormalization(f.store, { ...selection, planHash: plan.planHash,
+        requestId: randomUUID(), reason: "Isolated exact-result question fixture" }, true);
+    }
+    const question = "Can you send the deadline excerpt for this result?";
+    const requester = await f.login("human-checker", original);
+    await requester.locator("#result-body").getByText(/Owner: Maya/).waitFor();
+    await requester.locator("#result-discuss").click();
+    await requester.locator("#message-input").fill("A separate discussion draft");
+    const requestButton = requester.locator("#request-reply");
+    await requester.locator("#reply-bar #request-reply").waitFor();
+    const actionBounds = await requestButton.boundingBox();
+    assert.ok(actionBounds.height >= 44 && actionBounds.x + actionBounds.width <= 390);
+    if (representation === "legacy" && process.env.ROOM_EXACT_QUESTION_SCREENSHOT) await requester.screenshot({ path: process.env.ROOM_EXACT_QUESTION_SCREENSHOT });
+    await requestButton.focus();
+    await requester.keyboard.press("Enter");
+    assert.equal(await requester.locator("#message-input").inputValue(), "");
+    assert.equal(await requester.locator("#message-to-select").inputValue(), "");
+    await requester.locator("#message-input").fill(question);
+    await requester.locator("#message-to-select").selectOption("producer");
+    await requester.locator("#request-mode-label").getByText(/Earlier result/).waitFor();
+    await requester.reload();
+    await requester.locator("#request-mode-label").getByText(/Earlier result/).waitFor();
+    assert.equal(await requester.locator("#message-input").inputValue(), question);
+    assert.equal(await requester.locator("#message-to-select").inputValue(), "producer");
+    const submit = requester.locator("#message-form button[type=submit]");
+    f.store.dmConsents.block("commons", "producer", "human-checker");
+    await submit.click();
+    await requester.locator("#composer-status").getByText(/producer|permission/i).waitFor();
+    assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
+    assert.equal(await requester.locator("#message-input").inputValue(), question);
+
+    f.store.dmConsents.unblock("commons", "producer", "human-checker");
+    f.store.dmConsents.request("commons", "human-checker", "producer", "Review follow-up");
+    f.store.dmConsents.decide("commons", "producer", "human-checker", "approve");
+    const commands = [];
+    await requester.route("**/api/rooms/commons/commands", async route => {
+      commands.push(route.request().postDataJSON());
+      if (commands.length === 1) { await route.fetch(); await route.abort("failed"); }
+      else await route.continue();
+    });
+    await submit.click();
+    await requester.locator("#composer-status.error").waitFor();
+    await requester.getByRole("button", { name: "Retry original", exact: true }).waitFor();
+    assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 1);
+    requester.once("dialog", dialog => dialog.accept());
+    await requester.reload();
+    await requester.getByRole("button", { name: "Retry original", exact: true }).click();
+    await requester.locator("#request-mode-bar").waitFor({ state: "hidden" });
+    assert.equal(commands.length, 2);
+    assert.deepEqual(commands[0], commands[1]);
+    assert.equal(commands[0].data.resultCompletionEventId, f.first.event.id);
+
+    const pickup = await producer.orient({ focus: "needs_me" });
+    assert.equal(pickup.replyRequests.length, 1);
+    const request = await producer.replyContext(pickup.replyRequests[0].id);
+    assert.equal(request.viewerId, "producer");
+    assert.equal(request.request.workItemId, workItemId);
+    const opened = request.page.items.find(item => item.kind === "opened")?.message;
+    assert.equal(opened?.body, question + "\n\n" + original);
+    assert.equal(opened?.replyToId, f.first.event.data.evidenceMessageId);
+    assert.equal(await requester.locator("#message-input").inputValue(), "A separate discussion draft");
+    const answer = "The fixture deadline is Friday.";
+    await producer.replyAction("room_respond_to_request", {
+      requestId: randomUUID(), responseToRequestId: request.request.id, responseOutcome: "answered",
+      toMemberId: "human-checker", workItemId, ...request.current.answerBasis, body: answer
+    });
+    const response = await requester.request.get(f.origin + "/api/rooms/commons/reply-context", {
+      params: { requestMessageId: request.request.id }
+    });
+    assert.equal(response.status(), 200);
+    const closed = await response.json();
+    assert.equal(closed.request.status, "answered");
+    assert.equal(closed.page.items.find(item => item.kind === "answered")?.message.body, answer);
+    await requester.locator("#message-delivery").getByRole("link", { name: "View request" }).click();
+    await requester.locator("#message-list").getByText(answer, { exact: true }).waitFor();
+    const { work } = await producer.workContext(workItemId);
+    assert.equal(work.receipt.eventId, second.event.id);
+    assert.equal(work.verification ?? null, null);
+
+    const interrupted = await f.login("human-checker", original);
+    await interrupted.locator("#result-body").getByText(/Owner: Maya/).waitFor();
+    await interrupted.locator("#result-discuss").click();
+    await interrupted.locator("#request-reply").click();
+    const uncommitted = "Keep this question if its source is withdrawn.";
+    await interrupted.locator("#message-input").fill(uncommitted);
+    await interrupted.locator("#message-to-select").selectOption("producer");
+    let attempted = 0;
+    await interrupted.route("**/api/rooms/commons/commands", async route => {
+      attempted++;
+      if (attempted === 1) await route.abort("failed");
+      else {
+        // Change authority after the browser starts sending, before the
+        // service transaction sees the command.
+        f.send("producer", T.MESSAGE_DELETED, { messageId: f.first.event.data.evidenceMessageId, expectedMessageRevision: 0 });
+        await route.continue();
+      }
+    });
+    await interrupted.getByRole("button", { name: "Send request", exact: true }).click();
+    await interrupted.locator("#composer-status.error").waitFor();
+    await interrupted.getByRole("button", { name: "Retry original", exact: true }).waitFor();
+    assert.equal(attempted, 1);
+    assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
+    interrupted.once("dialog", dialog => dialog.accept());
+    await interrupted.reload();
+    const refusal = interrupted.waitForResponse(response =>
+      new URL(response.url()).pathname.endsWith("/commands") && response.status() === 409);
+    await interrupted.getByRole("button", { name: "Retry original", exact: true }).click();
+    assert.equal((await (await refusal).json()).error.code, "result_source_unavailable");
+    await interrupted.locator("#composer-status").getByText(/result is no longer available/i).waitFor();
+    assert.equal(await interrupted.locator("#message-input").inputValue(), uncommitted);
+    assert.equal(await interrupted.locator("#message-input").evaluate(input => input.readOnly), false);
+    assert.equal(attempted, 2, "the retry reached the server and was refused before commit");
+    assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
+    const replay = f.store.command(f.keys["human-checker"], "commons", commands[0]);
+    assert.equal(replay.duplicate, true, "a committed retry survives withdrawal of the cited result");
+    assert.equal(replay.event.data.messageId, request.request.id);
   });
-  await reviewer.reload();
-  const body = reviewer.locator("#result-body");
-  await body.getByText(/Owner: Maya/).waitFor();
-  assert.equal(await body.textContent(), submitted);
-  assert.equal(await body.locator("a").count(), 0);
-  if (process.env.ROOM_REFERENCE_SCREENSHOT) await reviewer.screenshot({ path: process.env.ROOM_REFERENCE_SCREENSHOT });
-  await reviewer.locator("#result-status").getByText(/External references may change or require access/).waitFor();
-  assert.deepEqual(requests, [], "Room reads the result without contacting the document provider");
-  const provider = await reviewer.context().newPage();
-  assert.equal((await provider.goto(source)).status(), 403);
-  await provider.close();
-  assert.equal(await body.textContent(), submitted, "a provider refusal does not change the submitted result");
-  await reviewer.locator("#result-discuss").focus();
-  await reviewer.keyboard.press("Enter");
-  await reviewer.locator("#message-input").fill("Please share the deadline excerpt from the project brief.");
-  await reviewer.locator("#message-form button[type=submit]").click();
-  await reviewer.waitForFunction(() => document.querySelector("#message-input").value === "");
-  const reply = f.store.room("commons").state.messages.find(message => message.body === "Please share the deadline excerpt from the project brief.");
-  assert.equal(reply?.replyToId, f.first.event.data.evidenceMessageId);
-
-  const producer = new RoomAgentClient({ origin: f.origin, roomId: "commons", memberId: "producer", token: f.keys.producer });
-  const { discussion } = await producer.workDiscussion(f.item().id, { completionEventId: f.first.event.id });
-  assert.equal(discussion.replies.find(message => message.id === reply.id)?.body, reply.body);
-  assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
-
-  f.store.dmConsents.request("commons", "human-checker", "producer", "Review follow-up");
-  f.store.dmConsents.decide("commons", "producer", "human-checker", "approve");
-  const requestId = randomUUID(), question = "Can you send the deadline excerpt for this result?\n" + original;
-  f.send("human-checker", T.MESSAGE_POSTED, { messageId: requestId, toMemberId: "producer", requestKind: "reply",
-    replyToId: reply.id, workItemId: f.item().id, body: question });
-  const pickup = await producer.orient({ focus: "needs_me" });
-  assert.ok(pickup.replyRequests.some(request => request.id === requestId));
-  const request = await producer.replyContext(requestId);
-  assert.equal(request.viewerId, "producer");
-  assert.equal(request.request.workItemId, f.item().id);
-  assert.equal(request.page.items.find(item => item.kind === "opened")?.message.body, question);
-  assert.equal(f.item().receipt.eventId, f.first.event.id);
-  assert.equal(f.item().verification ?? null, null);
-});
+}
 
 test("direct review and decision explain the external reference in pinned text", { timeout: 30000 }, async t => {
   const body = "Result A\nOwner: Maya\nBrief: https://docs.google.com/document/d/review-fixture/edit";

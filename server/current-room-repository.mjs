@@ -5,7 +5,7 @@ import {conflictingClaim} from './claim-scopes.mjs';
 import {boardStateForWorkItem} from './work-item-state.mjs';
 import {roomWorkClaimConfig} from './work-claims.mjs';
 import {CURRENT_INBOX_DISCOVERY_INDEXES} from './current-inbox-indexes.mjs';
-import {emptyWorkPrivacy,validateWorkPrivacy,applyWorkPrivacyRequest,deriveWorkPrivacy,workRequestPrefix,workRequestKey,workRequestValue} from './current-work-privacy.mjs';
+import {emptyWorkPrivacy,validateWorkPrivacy,applyWorkPrivacyRequest,deriveWorkPrivacy,workRequestKey,workRequestValue} from './current-work-privacy.mjs';
 import {CURRENT_LEGACY_WORK_INDEXES,CURRENT_LEGACY_WORK_GUARDS,assertLegacyWorkReconciled} from './current-legacy-work-gate.mjs';
 import {currentWorkCapacity,assertCurrentWorkCapacity,CURRENT_WORK_CAPACITY_INDEXES} from './current-work-capacity.mjs';
 import {CURRENT_WRITER_FORMAT} from './current-room-format.mjs';
@@ -1528,10 +1528,27 @@ export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{inclu
   const members=Object.create(null);for(const id of ids){const member=readCurrentRecord(db,roomId,'members',id,b);if(member!==undefined)members[id]=member;}
   const replyRequests=Object.create(null);
   const privacy=readCurrentWorkPrivacy(db,roomId,workId,b);
-  if(privacy.requests>8)refuse('Selected work replies require continuation for this work item');
-  const prefix=workRequestPrefix(workId),requests=db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='workRequest' AND present=1 AND record_key>=? AND record_key<? ORDER BY record_key LIMIT 9").all(roomId,prefix,prefix+'\uffff');
-  charge(b,requests.length*256,requests.length);if(requests.length!==privacy.requests)corrupt('selected request index count differs');
-  for(const {record_key:key} of requests){const link=readCurrentRecord(db,roomId,'workRequest',key,b);if(!link||link.workItemId!==workId||workRequestKey(workId,link.requestId)!==key)corrupt('selected request index binding differs');const request=readCurrentRecord(db,roomId,'replyRequests',link.requestId,b);if(request?.workItemId!==workId)corrupt('selected private request missing');Object.defineProperty(replyRequests,link.requestId,{value:request,enumerable:true});}
+  // Open conversation pointers are scoped to this participant. Other
+  // people's exchanges cannot consume the selected work read's request budget.
+  const requestIds = new Set();
+  for (const role of ["requester", "recipient"]) {
+    const candidates = db.prepare(`SELECT record_key FROM current_room_records INDEXED BY current_request_party_${role}
+      WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.${role}Id')=?
+        AND json_extract(payload,'$.workItemId')=? AND json_extract(payload,'$.status')='open'
+      ORDER BY record_key LIMIT 9`).all(roomId, viewerId, workId);
+    charge(b,candidates.length*256,candidates.length);
+    for (const {record_key:id} of candidates) requestIds.add(id);
+  }
+  if (requestIds.size > 8) refuse('Selected work replies require continuation for this work item');
+  for (const id of requestIds) {
+    const link = readCurrentRecord(db,roomId,'workRequest',workRequestKey(workId,id),b);
+    const request = readCurrentRecord(db,roomId,'replyRequests',id,b);
+    if (!link || link.workItemId !== workId || link.requestId !== id
+      || request?.id !== id || request.workItemId !== workId || request.status !== 'open'
+      || ![request.requesterId, request.recipientId].includes(viewerId))
+      corrupt('selected request index binding differs');
+    Object.defineProperty(replyRequests,id,{value:request,enumerable:true});
+  }
   // privateParties: the parties this read already observed (null when the work has no private request), so the caller's refusal check needs no second privacy read.
   return {sequence:head.sequence,state:{room,members,workItems:{[workId]:privateWorkForViewer(db,roomId,workId,item,viewerId,b)},replyRequests},privateParties:privacy.requests?new Set(Object.keys(privacy.parties)):null};
 }

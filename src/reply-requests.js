@@ -1,3 +1,4 @@
+import { exactResultHref } from "./record-link.js";
 import { currentRecordReplyOwner } from './current-record-context.js';
 // Shared request semantics. Deliberately independent of events, storage and UI.
 export const REPLY_CANCELLED = "reply_request.cancelled";
@@ -45,13 +46,21 @@ export function checkReceiverRoute(scope, { requesterId, workItemId, id: request
 // one conversation. Keys cannot collide with a canonical message ID.
 export function replyDraftKey(mode, threadId = null) {
   if (mode?.kind === "request" && mode.followUpRequestId) return JSON.stringify(["follow-up", mode.followUpRequestId]);
-  if (mode?.kind === "request" && mode.resultEventId) return JSON.stringify(["result-question", mode.workItemId, mode.resultEventId]);
+  if (mode?.kind === "request" && mode.resultEventId) return JSON.stringify([mode.aboutResult ? "result-reply" : "result-question", mode.workItemId, mode.resultEventId]);
   return mode ? JSON.stringify(["request", mode.kind, mode.requestMessageId ?? threadId]) : threadId;
 }
 const resultReceipt = (state, mode) => {
   const work = state.workItems?.[mode.workItemId];
   return [...(work?.receiptHistory ?? []), work?.receipt].find(receipt => receipt?.eventId === mode.resultEventId);
 };
+// The reader supplies the selected completion. Compact snapshots omit
+// historical receipts, so submission confirms the pair via the exact reader.
+export function resultReplyMode(message, completionEventId, { allowWithdrawn = false } = {}) {
+  if (!id(completionEventId) || !id(message?.workItemId) || !id(message.id)
+    || message.toMemberId || (!allowWithdrawn && message.deletedAt)) return null;
+  return { kind: "request", workItemId: message.workItemId, resultEventId: completionEventId,
+    resultMessageId: message.id, aboutResult: true };
+}
 // A question gathers context. It never changes credit, work state or review authority.
 export function creditQuestion(state, workItemId, memberId, resultEventId) {
   const work = state.workItems?.[workItemId], receipt = work?.receipt;
@@ -87,7 +96,14 @@ export function validReplyDraft(mode, state) {
         && mode.responseMessageId === request.responseMessageId && mode.workItemId === request.workItemId
         && state.messages?.some(message => message.id === mode.responseMessageId);
     }
-    const keys = ["kind", "workItemId", "resultEventId", "resultMessageId"], receipt = resultReceipt(state, mode);
+    const keys = ["kind", "workItemId", "resultEventId", "resultMessageId"];
+    if (mode.aboutResult === true) {
+      const message = state.messages?.find(entry => entry.id === mode.resultMessageId);
+      const anchor = resultReplyMode(message, mode.resultEventId, { allowWithdrawn: true });
+      return Boolean(anchor) && anchor.workItemId === mode.workItemId
+        && Object.keys(mode).length === keys.length + 1 && keys.every(key => own(mode, key));
+    }
+    const receipt = resultReceipt(state, mode);
     return Object.keys(mode).length === keys.length && keys.every(key => own(mode, key))
       && id(mode.workItemId) && id(mode.resultEventId) && Boolean(receipt)
       && mode.resultMessageId === (receipt.nativeText?.messageId ?? null)
@@ -101,15 +117,24 @@ export function validReplyDraft(mode, state) {
     && mode.requesterId === request.requesterId && mode.workItemId === request.workItemId
     && id(mode.contextEventId) && Number.isSafeInteger(mode.contextSequence) && mode.contextSequence > 0;
 }
-export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, channelId }) {
+export function resultReplyHref(mode, roomId) {
+  return exactResultHref({ roomId, workItemId: mode.workItemId, completionEventId: mode.resultEventId });
+}
+export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, channelId, roomId }) {
   if (!mode) return { ...(messageId === undefined ? {} : { messageId }), body, toMemberId, replyToId,
     ...(channelId === undefined ? {} : { channelId }) };
   if (mode.kind === "cancelled") return { requestMessageId: mode.requestMessageId,
     expectedRequestRevision: mode.expectedRequestRevision, reason: body };
+  if (mode.aboutResult && body) {
+    const link = resultReplyHref(mode, roomId);
+    if (!link) throw new Error("Result link is unavailable");
+    if (!body.split("\n").includes(link)) body += "\n\n" + link;
+  }
   const data = mode.kind === "request" ? { messageId, body, toMemberId, replyToId, requestKind: "reply",
       ...(channelId === undefined ? {} : { channelId }),
       ...(mode.followUpRequestId ? { toMemberId: mode.recipientId, replyToId: mode.responseMessageId, workItemId: mode.workItemId } : {}),
-      ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}) }
+      ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}),
+      ...(mode.aboutResult ? { resultCompletionEventId: mode.resultEventId } : {}) }
     : { messageId, body, toMemberId: mode.requesterId, replyToId: mode.requestMessageId,
       workItemId: mode.workItemId, responseToRequestId: mode.requestMessageId,
       expectedRequestRevision: mode.expectedRequestRevision, responseOutcome: mode.kind,
@@ -135,6 +160,10 @@ export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
 // Commands use this strict validator before the service stamps the event. Old
 // unmarked events may contain ignored fields; they must remain ordinary messages.
 export function replyPostMode(data) {
+  if (own(data, "resultCompletionEventId")) {
+    requireValid(data.requestKind === "reply" && id(data.resultCompletionEventId)
+      && id(data.workItemId) && id(data.replyToId), "An exact result question needs a work item, result completion, and evidence message");
+  }
   const fields = REPLY_FIELDS.filter(key => own(data, key));
   if (!fields.length) return null;
   const bodyKept = text(data.body, own(data, "responseToRequestId") ? MAX_REPLY_RESPONSE_CHARS : 4096) || (data.redacted === true && data.body == null);
@@ -174,7 +203,7 @@ export function prepareReplyPost(state, incoming) {
   // already permits it, so leaving it out here refused every reply request and
   // every answer with "Unexpected reply request fields".
   // PRIV-1: rewritten reply-request posts carry redacted:true and a null body.
-  const allowed = ["messageId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", "redacted", "answerCredential", ...REPLY_FIELDS];
+  const allowed = ["messageId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", "redacted", "answerCredential", "resultCompletionEventId", ...REPLY_FIELDS];
   requireValid(Object.keys(data).every(key => allowed.includes(key)), "Unexpected reply request fields");
   requireValid(!own(data, "answerCredential") || mode === "respond" && ANSWER_CREDENTIALS.includes(data.answerCredential),
     "Invalid answer credential");
@@ -208,13 +237,30 @@ export function replyContextOwners(state) {
  return owners;
 }
 
+// Keep internal visibility classification out of the versioned selected read.
+export function selectedReplyRequest(request) {
+  const copy = structuredClone(request);
+  delete copy.resultCompletionEventId;
+  return copy;
+}
+
 export function recordReplyPost(state, incoming, mode) {
   const data = incoming.data, messageId = data.messageId || incoming.id;
   if (mode === "open") {
     state.replyRequests ??= {};
+    let resultCompletionEventId = data.resultCompletionEventId;
+    if (!resultCompletionEventId && data.replyToId) {
+      const previousAnswer = state.messages.find(message => message.id === data.replyToId);
+      const previous = previousAnswer && state.replyRequests[previousAnswer.replyToId];
+      if (previous?.status === "answered" && previous.responseMessageId === data.replyToId
+        && previous.workItemId === data.workItemId && previous.requesterId === incoming.actorId
+        && previous.recipientId === data.toMemberId)
+        resultCompletionEventId = previous.resultCompletionEventId;
+    }
     state.replyRequests[messageId] = {
       id: messageId, openingEventId: incoming.id, requesterId: incoming.actorId,
       recipientId: data.toMemberId, workItemId: data.workItemId || null,
+      ...(resultCompletionEventId ? { resultCompletionEventId } : {}),
       status: "open", revision: 0, createdAt: incoming.at,
       contextEventId: incoming.id, contextMessageId: messageId,
       terminalEventId: null, terminalActorId: null, closedAt: null,

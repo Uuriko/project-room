@@ -5,7 +5,7 @@ import { canReplyToResult } from "./result-availability.js";
 // eligibility and destination selection. Re-read current state on every action.
 export function createResultFeedback({ getState, getConversation, isBlocked,
   getDraft, onBlocked, openThread, setReply }) {
-  return (messageId, selection = null) => {
+  return (messageId, selection = null, completionEventId = null) => {
     const state = getState();
     const conversation = getConversation();
     const message = conversation?.byId.get(messageId);
@@ -23,14 +23,15 @@ export function createResultFeedback({ getState, getConversation, isBlocked,
       quote = [passage, selection.sourceHref].filter(Boolean).join("\n") + "\n\n";
     }
     const hasContent = Boolean(draft?.body?.trim() || draft?.files?.length);
-    const differentReply = hasContent && draft.replyToId && draft.replyToId !== message.id;
+    const differentReply = hasContent && ((draft.replyToId && draft.replyToId !== message.id)
+      || (draft.resultReplyEventId && draft.resultReplyEventId !== completionEventId));
     if (draft?.pending || draft?.toMemberId || differentReply) { onBlocked(); return false; }
     const body = draft?.body ?? "";
     if (quote && !body.startsWith(quote) && quote.length + body.length > MAX_MESSAGE_BODY_CHARS) {
       onBlocked("result.quoteTooLong"); return false;
     }
     openThread(message, destination);
-    setReply(message.id, quote);
+    setReply(message.id, quote, completionEventId);
     return true;
   };
 }

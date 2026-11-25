@@ -26,6 +26,7 @@ import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardM
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
 import { assertAssignmentAvailable } from "./agent-pause.mjs";
 import { readCurrentMessageThread, readVisibleMessageThread } from './conversation-sync.mjs';
+import { restrictsWorkVisibility } from "./current-work-privacy.mjs";
 import { selectedMessageRecord, messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput, invokeFromPlainPost } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -743,7 +744,7 @@ const shapes = {
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
-  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll resultCompletionEventId ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -5476,6 +5477,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // The replyRequests slice is read from the projection directly so
   // this works for both the work projection (which does not carry it)
   // and the full room state.
+  // An exact-result question refers to work the participants could
+  // already read, so it only restricts the question and its replies.
   // Members the work item itself names (proposer, accountable, verifier,
   // decision maker, claim holder) already hold its title and definition of
   // done; a private request on the item must not lock them out of it.
@@ -5484,13 +5487,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const rows = workIds === null
       ? Object.values(JSON.parse(this.db.prepare("SELECT json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId)?.requests ?? "{}"))
       : this.db.prepare(`SELECT json_extract(item.value,'$.workItemId') AS workItemId,
-          json_extract(item.value,'$.requesterId') AS requesterId, json_extract(item.value,'$.recipientId') AS recipientId
+          json_extract(item.value,'$.requesterId') AS requesterId, json_extract(item.value,'$.recipientId') AS recipientId,
+          json_extract(item.value,'$.resultCompletionEventId') AS resultCompletionEventId
         FROM rooms, json_each(rooms.projection,'$.replyRequests') AS item
         WHERE rooms.id=? AND json_extract(item.value,'$.workItemId') IN (SELECT value FROM json_each(?))`)
         .all(roomId, JSON.stringify([...workIds]));
     const privatePartiesByWork = new Map();
     for (const request of rows) {
-      if (!request?.workItemId) continue;
+      if (!restrictsWorkVisibility(request)) continue;
       if (!privatePartiesByWork.has(request.workItemId)) privatePartiesByWork.set(request.workItemId, new Set());
       privatePartiesByWork.get(request.workItemId).add(request.requesterId).add(request.recipientId);
     }
@@ -7426,6 +7430,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
+      if (requestMode === "open" && command.data.resultCompletionEventId) {
+        const { workItemId, resultCompletionEventId: completionEventId, replyToId, toMemberId } = command.data;
+        // This runs inside the writer transaction, after exact idempotent
+        // replay. No new request can commit on a stale evidence reference.
+        try {
+          const selected = this.workResult(token, roomId, workItemId, { completionEventId, expectedSessionBinding });
+          const text = selected.result?.text;
+          const source = selectedMessageRecord(this, roomId, replyToId, Boolean(room.state.messagesArchive));
+          if (text?.messageId !== replyToId || typeof text.body !== "string" || text.withdrawnAt || !source || source.deletedAt || source.toMemberId
+            || !messageInHistory(source, this.historyFloor(roomId, toMemberId, room.sequence)))
+            fail(409, "result_source_unavailable", "This result is no longer available to both participants");
+          assertSelectedWorkVisible(this, roomId, workItemId, room.state.workItems[workItemId], toMemberId);
+        } catch (error) {
+          if (["work_private", "work_not_found", "result_not_found", "result_unavailable"].includes(error.code))
+            fail(409, "result_source_unavailable", "This result is no longer available to both participants");
+          throw error;
+        }
+      }
       const endingRequest = (requestMode === "respond" || command.type === T.REPLY_REQUEST_CANCELLED)
         && room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId]?.status === "open";
       const endingHelp = command.type === T.WORK_HELP_UPDATED && command.data.status === "withdrawn"

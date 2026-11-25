@@ -1,4 +1,4 @@
-import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
+import { replyDraftKey, validReplyDraft, replyDraftData, resultReplyMode } from "./reply-requests.js";
 import { uiText } from "./strings.js";
 import { terminalWork } from "./workflow.js";
 // Conversation structure is derived from immutable reply links, including older logs.
@@ -559,6 +559,7 @@ export class DraftRecovery {
         [id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
           ...(typeof d.channelId === "string" ? { channelId: d.channelId } : {}),
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
+          ...(d.resultReplyEventId ? { resultReplyEventId: d.resultReplyEventId } : {}),
           ...(d.assistantDraft ? { assistantDraft: d.assistantDraft } : {}),
           pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null,
           files: recoveredFiles(d.files) }]);
@@ -598,7 +599,7 @@ export class DraftRecovery {
           let pending = null;
           try {
             const data = replyDraftData(d.mode, { body: d.body.trim(), toMemberId: d.toMemberId || null,
-              replyToId: d.replyToId, messageId: d.pending?.messageId,
+              replyToId: d.replyToId, messageId: d.pending?.messageId, roomId: state.room?.id,
               ...(channelId === undefined ? {} : { channelId }) });
             const type = d.mode.kind === "cancelled" ? "reply_request.cancelled" : "message.posted";
             const contents = JSON.stringify({ type, data, causationId: null });
@@ -651,7 +652,9 @@ export class DraftRecovery {
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
-        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, files: recoveredFiles(d.files), ...(assistantDraft ? { assistantDraft } : {}) });
+        const resultReplyEventId = resultReplyMode(index.byId.get(d.replyToId), d.resultReplyEventId, { allowWithdrawn: true })?.resultEventId;
+        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, files: recoveredFiles(d.files),
+          ...(resultReplyEventId ? { resultReplyEventId } : {}), ...(assistantDraft ? { assistantDraft } : {}) });
         restoredKeys.set(id, draftId);
       }
       let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)

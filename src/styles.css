@@ -652,6 +652,9 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .create-room-details code { font-size: .85em; }
 .reply-bar, .cursor-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .65rem 1rem; border-top: 1px solid var(--line-soft); font-size: var(--text-sm); color: var(--muted); }
 .reply-bar-actions { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+#reply-bar:has(#request-reply) { flex-wrap: wrap; }
+#reply-bar:has(#request-reply) .reply-bar-actions { flex-wrap: wrap; max-width: 100%; }
+#reply-bar #request-reply { min-height: 44px; }
 #reply-mention[aria-pressed="true"] { color: var(--text); }
 #reply-mention[hidden] { display: none; }
 #request-mode-bar { flex-wrap: wrap; }

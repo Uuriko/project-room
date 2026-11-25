@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {validId} from '../src/events.js';
 const digest=value=>createHash('sha256').update(value).digest('hex');
 export const emptyWorkPrivacy=()=>({version:1,requests:0,parties:{}});
 export function validateWorkPrivacy(value) {
@@ -10,6 +11,7 @@ export function validateWorkPrivacy(value) {
 }
 export function applyWorkPrivacyRequest(value,request,delta) {
   validateWorkPrivacy(value);
+  if (!restrictsWorkVisibility(request)) return value;
   const parties=new Map(Object.entries(value.parties)),requests=value.requests+delta;
   for(const id of new Set([request.requesterId,request.recipientId])) {
     if(typeof id!=='string'||!id)throw Error('current_room_corrupt: private request party missing');
@@ -21,6 +23,12 @@ export function applyWorkPrivacyRequest(value,request,delta) {
 export const workRequestPrefix=workId=>digest(workId)+'\0';
 export const workRequestKey=(workId,requestId)=>workRequestPrefix(workId)+digest(requestId);
 export const workRequestValue=(workId,requestId)=>({workItemId:workId,requestId});
+// An exact-result follow-up is admitted only after both participants can
+// read its existing work. The exchange does not grant or revoke work access.
+export function restrictsWorkVisibility(request) {
+  return typeof request?.workItemId === "string" && Boolean(request.workItemId)
+    && !validId(request.resultCompletionEventId);
+}
 export function deriveWorkPrivacy(state) {
   const privacy=new Map(Object.keys(state.workItems??{}).map(id=>[id,emptyWorkPrivacy()])),links=new Map();
   for(const [requestId,request] of Object.entries(state.replyRequests??{}))if(typeof request?.workItemId==='string'&&request.workItemId) {
