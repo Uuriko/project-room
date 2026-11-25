@@ -886,6 +886,64 @@ test("an earlier approval keeps its own decision note after a new submission", a
   assert.match(await old.locator("#result-body").textContent(), /Result A/);
 });
 
+test("Catch Up opens the exact approved result and returns to its decision row", async t => {
+  const f = await setup(t, 390, { firstBody: "Consumer repository: verified the original implementation." });
+  const workItemId = f.item().id, completionEventId = f.first.event.id;
+  const bind = () => ({ workItemId, completionEventId, expectedRevision: f.item().revision, evidenceVersion: f.item().receipt.evidenceVersion });
+  f.send("human-checker", T.VERIFICATION_RECORDED, { ...bind(), result: "pass", summary: "Verified the original implementation." });
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "original-code-decision", body: "Use the checked consumer implementation." });
+  const approved = f.send("owner", T.OWNER_DECISION_RECORDED, {
+    ...bind(), decision: "approved", reason: "The consumer checks passed.", sourceMessageId: "original-code-decision",
+  });
+  f.mutate(T.WORK_BLOCKED, { reason: "The upstream API changed.", nextAction: "Update the consumer." });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Updated the consumer." });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Consumer repository: a newer implementation awaiting review.");
+  const guest = await f.login("guest");
+  await guest.locator("#message-input").fill("Unsent follow-up about the original implementation.");
+  await openCatchUp(guest);
+  await guest.locator("#rb-history-heading").click();
+  const row = guest.locator(`[data-brief-key="history:${approved.event.id}"]`);
+  await row.waitFor();
+  const cursor = () => f.store.returnBrief(f.keys.guest, "commons").history.cursor;
+  const before = cursor();
+  const screenshot = process.env.ROOM_EXACT_CATCHUP_SCREENSHOT;
+  if (screenshot) {
+    await row.scrollIntoViewIfNeeded();
+    await guest.screenshot({ path: screenshot });
+  }
+  await row.press("Enter");
+  const target = new URL("#pr-record/result/" + workItemId + "/" + completionEventId, guest.url());
+  await guest.waitForURL(url => url.hash === target.hash, { timeout: 2500 });
+  assert.equal(await guest.locator("#catchup-dialog").isVisible(), false);
+  await guest.locator("#result-body").getByText("Consumer repository: verified the original implementation.", { exact: true }).waitFor();
+  if (screenshot) await guest.screenshot({ path: screenshot.replace(/\.png$/, "-opened.png") });
+  assert.equal(await guest.locator("#result-body").getByText(/newer implementation/).count(), 0);
+  assert.equal(await guest.getByRole("link", { name: "Open decision note" }).count(), 1);
+  const back = guest.getByRole("button", { name: "Back to Catch Up", exact: true });
+  await back.press("Enter");
+  await row.waitFor();
+  await guest.waitForFunction(id => document.activeElement?.dataset.briefKey === "history:" + id, approved.event.id);
+  assert.equal(await guest.locator("#message-input").inputValue(), "Unsent follow-up about the original implementation.");
+  assert.equal(cursor(), before);
+  assert.equal(await guest.locator("#result-dialog").isVisible(), false);
+
+  await guest.goForward();
+  await guest.locator("#result-body").getByText("Consumer repository: verified the original implementation.", { exact: true }).waitFor();
+  assert.equal(await guest.locator("#catchup-dialog").isVisible(), false);
+  await guest.waitForFunction(() => document.activeElement?.id === "result-title");
+
+  await openCatchUp(guest);
+  const historyHeading = guest.locator("#rb-history-heading");
+  const historySection = guest.locator("#rb-history-section");
+  if (await historySection.evaluate(node => node.open)) await historyHeading.click();
+  assert.equal(await historySection.evaluate(node => node.open), false);
+  await guest.goBack();
+  await guest.waitForFunction(() => document.activeElement?.id === "rb-history-heading");
+  assert.equal(await historySection.evaluate(node => node.open), false);
+  assert.equal(cursor(), before);
+});
+
 test("catch-up labels each review with its visible work and preserves withheld history", async t => {
   const f = await setup(t, 390, { approveBoth: true });
   f.store.markCaughtUp(f.keys.owner, "commons", f.store.headSequence("commons"));
@@ -901,7 +959,7 @@ test("catch-up labels each review with its visible work and preserves withheld h
     const decision = f.send("owner", T.OWNER_DECISION_RECORDED, {
       ...basis(), decision: "approved", reason: "Approved the revision.", sourceMessageId: reason.event.data.messageId,
     });
-    decisions.push({ workItemId, title: work().title, reviewId: review.event.id, decisionId: decision.event.id });
+    decisions.push({ workItemId, title: work().title, reviewId: review.event.id, decisionId: decision.event.id, completionEventId: decision.event.data.completionEventId });
   }
   const page = await f.login("guest");
   await openCatchUp(page);
@@ -912,11 +970,12 @@ test("catch-up labels each review with its visible work and preserves withheld h
       await page.locator("#rb-more-button").click();
       await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
     }
-    for (const { workItemId, title, reviewId, decisionId } of decisions) {
+    for (const { workItemId, title, reviewId, decisionId, completionEventId } of decisions) {
       const masked = privateFirst && workItemId === "revision-journey";
       assert.equal(await row(reviewId).locator(".rb-detail").textContent(), masked ? "pass" : title + " · pass · Checked the revision");
-      assert.equal(await row(decisionId).locator(".rb-detail").textContent(), masked ? "approved" : title + " · approved");
-      assert.equal(await row(decisionId).getAttribute("data-open-work"), workItemId);
+      assert.equal(await row(decisionId).locator(".rb-detail").textContent(), masked ? "approved" : title);
+      const href = new URL(await row(decisionId).getAttribute("href"), page.url());
+      assert.equal(href.hash, masked ? "#pr-record/work/" + workItemId : "#pr-record/result/" + workItemId + "/" + completionEventId);
     }
   }
   await checkRows(false);
@@ -933,10 +992,10 @@ test("catch-up labels each review with its visible work and preserves withheld h
   // The owner can read both work cards, but both proposals predate this marker.
   const owner = await f.login("owner");
   await openCatchUp(owner);
-  for (const { workItemId, decisionId } of decisions) {
+  for (const { workItemId, decisionId, completionEventId } of decisions) {
     const historical = owner.locator(`[data-brief-key="history:${decisionId}"]`);
-    assert.equal(await historical.locator(".rb-detail").textContent(), workItemId + " · approved");
-    assert.equal(await historical.getAttribute("data-open-work"), workItemId);
+    assert.equal(await historical.locator(".rb-detail").textContent(), workItemId);
+    assert.equal(new URL(await historical.getAttribute("href"), owner.url()).hash, "#pr-record/result/" + workItemId + "/" + completionEventId);
   }
 });
 

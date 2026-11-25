@@ -55,7 +55,7 @@ import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-nav
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, exactResultHref, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -3632,7 +3632,7 @@ function syncWorkReturnControl() {
   const origin = currentWorkOrigin();
   button.disabled = false;
   button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message|result)\//.test(location.hash);
-  button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
+  button.textContent = origin?.type === "catchup" ? uiText("result.backCatchUp") : origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
 }
 function clearWorkNavigation() {
   confirmedWorkNavigation = null;
@@ -3693,7 +3693,8 @@ function showWorkDestination(kind, id, presentation = "focus") {
         syncWorkReturnControl();
       });
     }
-  } else revealMessage(id);
+  } else if (kind === "result") revealLocationHash();
+  else revealMessage(id);
   syncWorkReturnControl();
 }
 // #3795: open the board on one claim's record — the destination behind
@@ -3718,11 +3719,16 @@ async function revealClaimRecord(id) {
 }
 function navigateWorkRecord(kind, id, extra = {}) {
   if (!workNavigationContext() || busy) return false;
-  if (kind === "work" ? !partialWorkSnapshot && (!Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id) : !conversation?.byId.has(id) && !client.owesHistory) {
+  if (kind === "work" && !partialWorkSnapshot && (!Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id)
+    || kind === "message" && !conversation?.byId.has(id) && !client.owesHistory) {
     notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
-  const presentation = extra.presentation ?? "focus";
-  const target = recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
+  const href = kind === "result" ? exactResultHref({ roomId: session.roomId, workItemId: id, completionEventId: extra.completionEventId })
+    : recordHref(kind, id);
+  if (!href) return false;
+  const destination = new URL(href, location.href);
+  const target = destination.hash, presentation = extra.presentation ?? "focus";
+  const origin = { ...captureWorkOrigin(extra), presentation };
   const current = currentWorkOrigin();
   if (current?.target === target && location.hash === target && history.state?.roomWorkTarget === activeWorkNavigation) {
     // A new surface can inspect the same task without a second URL entry.
@@ -3734,13 +3740,13 @@ function navigateWorkRecord(kind, id, extra = {}) {
     return true;
   }
   const ticket = crypto.randomUUID();
-  origin.target = target; origin.targetUrl = new URL(target, location.href).href;
+  origin.target = target; origin.targetUrl = destination.href;
   workNavigationOrigins.set(ticket, origin);
   // Preserve this entry's own target when it also becomes the next entry's origin.
   // Only opaque tickets travel in history; private context stays in memory.
   const entry = history.state && typeof history.state === "object" ? history.state : {};
   history.replaceState({ ...entry, roomWorkOrigin: ticket }, "", location.href);
-  history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
+  history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", destination.href);
   activeWorkNavigation = ticket;
   // Pre-seed the replay key so a late hashchange/popstate for this navigation
   // dedupes instead of reprocessing stale state (which would close a board
@@ -3748,7 +3754,7 @@ function navigateWorkRecord(kind, id, extra = {}) {
   // processed synchronously by showWorkDestination below; the event is only
   // its echo. Key format matches replayWorkNavigation's computed key, with
   // an empty back segment (the pushed entry carries no roomWorkOrigin).
-  workHistoryReplayKey = [new URL(target, location.href).href, ticket, "", workNavigationContext()].join("|");
+  workHistoryReplayKey = [destination.href, ticket, "", workNavigationContext()].join("|");
   showWorkDestination(kind, id, presentation);
   return true;
 }
@@ -3866,6 +3872,16 @@ async function restoreWorkOrigin(ticket) {
   window.scrollTo(...origin.windowScroll);
   if (origin.type === "result") {
     openLinkedResult(origin.result, { focusDecision: origin.focus?.id === "result-decision-source" });
+  } else if (origin.type === "catchup") {
+    closeResult(false);
+    const catchUp = $("#catchup-dialog");
+    catchUp.showModal();
+    const brief = $("#return-brief-panel");
+    const history = $("#rb-history-section");
+    const source = brief.open && history.open
+      ? history.querySelector(`[data-brief-key="${CSS.escape(origin.briefKey)}"]`) : null;
+    const historyHeading = brief.open ? $("#rb-history-heading") : null;
+    focusRecord([source, historyHeading, $("#return-brief-heading")].find(node => node?.getClientRects().length));
   } else if (origin.type !== "updates") {
     const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
     const keyed = origin.focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === origin.focusKey) : null;
@@ -4060,6 +4076,7 @@ function revealLocationHash(workspaceDiscussion = null) {
       return;
     }
     updatesUi?.close();
+    $("#catchup-dialog").close();
     if ($("#board-dialog").open) $("#board-dialog").close();
     openLinkedResult(exactResult);
     syncWorkReturnControl();
@@ -8133,13 +8150,15 @@ function briefEventTarget(event) {
 }
 function describeBriefEvent({ sequence, event }, proposalTitles) {
   const actor = esc(memberLabel(event.actorId));
-  const type = esc(humanize(event.type));
+  const approvedResult = event.type === T.OWNER_DECISION_RECORDED && !event.data.withheld && event.data.decision === "approved"
+    ? exactResultHref({ roomId: state.room.id, workItemId: event.data.workItemId, completionEventId: event.data.completionEventId }) : "";
+  const type = esc(approvedResult ? uiText("result.approvedHistory") : humanize(event.type));
   const workTitle = event.data.withheld ? "" : (proposalTitles.get(event.data.workItemId) ?? event.data.workItemId ?? "");
   const actorRole = event.type === T.WORK_COMPLETED ? `reporter ${actor}` : actor;
   let detail = "";
   if (event.type === T.MESSAGE_POSTED) detail = esc((event.data.body || "").slice(0, 80));
   else if (event.type === T.VERIFICATION_RECORDED) detail = esc([workTitle, event.data.result, event.data.summary?.slice(0, 60)].filter(Boolean).join(" · "));
-  else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc([workTitle, humanize(event.data.decision)].filter(Boolean).join(" · "));
+  else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc(approvedResult ? workTitle : [workTitle, humanize(event.data.decision)].filter(Boolean).join(" · "));
   else if (event.type === T.WORK_COMPLETED) {
     const producer = event.data.producerId ? memberLabel(event.data.producerId)
       : event.data.externalProducer ? `${event.data.externalProducer} · outside room, reported` : "unknown — not reported";
@@ -8148,8 +8167,8 @@ function describeBriefEvent({ sequence, event }, proposalTitles) {
   else if (event.type?.startsWith("work.")) detail = esc(workTitle);
   else if (event.type === "land.updated") detail = esc(`#${event.data.pr ?? ""} ${(event.data.changed || []).join(", ")}`.trim());
   const target = briefEventTarget(event);
-  const href = esc(recordHref(target.kind, target.id));
-  const attribute = target.kind === "room" ? `data-open-room="${esc(target.id)}"`
+  const href = esc(approvedResult || recordHref(target.kind, target.id));
+  const attribute = approvedResult ? "data-open-brief-result"
     : `data-open-${target.kind}="${esc(target.id)}"`;
   return `<li class="rb-event"><a class="rb-event-link" href="${href}" ${attribute} data-brief-key="history:${esc(event.id)}"><span class="rb-seq">#${sequence}</span> <span class="rb-type">${type}</span> <span class="rb-actor">${actorRole}</span>${detail ? ` <span class="rb-detail">${detail}</span>` : ""}</a></li>`;
 }
@@ -8508,6 +8527,15 @@ $("#advanced-room-tools").addEventListener("toggle", event => {
 });
 $("#topbar-settings").addEventListener("click", () => openSettings());
 $("#catchup-close").addEventListener("click", () => $("#catchup-dialog").close());
+$("#catchup-dialog").addEventListener("click", event => {
+  const link = event.target.closest("[data-open-brief-result]");
+  if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const result = exactResultDestination(new URL(link.href));
+  if (!result || result.roomId !== session?.roomId) return;
+  navigateWorkRecord("result", result.workItemId, { type: "catchup", briefKey: link.dataset.briefKey,
+    completionEventId: result.completionEventId });
+});
 $("#settings-close").addEventListener("click", () => { closeSecondaryBoards(); $("#settings-dialog").close(); });
 $("#topbar-search-toggle").addEventListener("click", () => {
   const form = $("#search-form"), show = form.hidden;
