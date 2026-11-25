@@ -74,6 +74,22 @@ try {
   await page.locator("dialog").waitFor({ state: "hidden" });
   assert.deepEqual(await page.evaluate(() => window.followUp),
     { link: await page.evaluate(() => window.draft.link), note: "Keep the revised navigation." });
+  await page.evaluate(() => window.workspace.openLink(new URL(window.draft.link).hash, {
+    discussion: () => ({ link: "http://localhost/?room=commons#pr-record/message/revision", messages: [] }),
+    append: () => { throw Error("A changed publication must not be drafted"); },
+  }));
+  const add = page.getByRole("button", { name: "Add to thread draft" });
+  await add.waitFor();
+  await page.evaluate(() => { window.items[1].revision++; });
+  await add.click();
+  await page.getByText(/This preview revision changed/).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Copy for agent" }).count(), 0);
+  assert.equal(await add.count(), 0);
+  assert.equal(await page.getByRole("link", { name: "Open full discussion" }).getAttribute("href"),
+    "http://localhost/?room=commons#pr-record/message/revision");
+  await page.getByRole("button", { name: "Open current revision" }).click();
+  await page.getByText(/revision 2/i).waitFor();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.evaluate(() => {
     window.items[1].revision++;
     window.originalReplyVisible = true;
