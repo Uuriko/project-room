@@ -7,6 +7,7 @@
 //   ask-permission   requests permission, replies with the chosen optionId
 //   no-loadSession   like echo but does not advertise loadSession
 //   close            releases a loaded session and supports reloading it
+//   close-unconfirmed releases a session but returns an error for the close
 //   notices          emits adapter diagnostics, structured when negotiated
 //   tools            emits a plan and tool calls before replying
 //   wrong-protocol / unauthenticated / session-permission / empty-session / session-stall
@@ -15,6 +16,7 @@ import { appendFileSync } from "node:fs";
 import { createPeer } from "../src/jsonrpc.mjs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "echo";
+const supportsClose = ["close", "close-unconfirmed"].includes(mode);
 const delay = Number(process.env.FAKE_ACP_DELAY_MS ?? 300);
 const sessions = new Map();
 let counter = 0;
@@ -25,7 +27,7 @@ const peer = createPeer({
   input: process.stdin, output: process.stdout,
   async onRequest(method, params) {
     if (process.env.FAKE_ACP_TRACE) appendFileSync(process.env.FAKE_ACP_TRACE, method + "\n");
-    if (method === "initialize") { if (mode === "init-exit") { process.exit(7); } if (mode === "init-stall") return new Promise(() => {}); supportsNotices = typeof params.clientCapabilities?.session?.notices === "object" && params.clientCapabilities.session.notices !== null; return { protocolVersion: mode === "wrong-protocol" ? 99 : 1, agentCapabilities: { loadSession: mode !== "no-loadSession", promptCapabilities: { embeddedContext: true }, ...(mode === "close" ? { sessionCapabilities: { close: {} } } : {}) }, authMethods: [], agentInfo: { name: "fake-acp", version: "1" } }; }
+    if (method === "initialize") { if (mode === "init-exit") { process.exit(7); } if (mode === "init-stall") return new Promise(() => {}); supportsNotices = typeof params.clientCapabilities?.session?.notices === "object" && params.clientCapabilities.session.notices !== null; return { protocolVersion: mode === "wrong-protocol" ? 99 : 1, agentCapabilities: { loadSession: mode !== "no-loadSession", promptCapabilities: { embeddedContext: true }, ...(supportsClose ? { sessionCapabilities: { close: {} } } : {}) }, authMethods: [], agentInfo: { name: "fake-acp", version: "1" } }; }
     if (method === "session/new") {
       if (mode === "unauthenticated") throw Object.assign(new Error("Authentication required"), { code: -32000 });
       if (mode === "session-stall") return new Promise(() => {});
@@ -36,8 +38,9 @@ const peer = createPeer({
       }
       const sessionId = `fake-${process.pid}-${++counter}`; sessions.set(sessionId, []); return { sessionId }; }
     if (method === "session/load") { if (mode === "no-loadSession") throw Object.assign(new Error("loadSession unsupported"), { code: -32601 }); sessions.set(params.sessionId, sessions.get(params.sessionId) ?? []); return null; }
-    if (method === "session/close" && mode === "close") {
+    if (method === "session/close" && supportsClose) {
       sessions.delete(params.sessionId);
+      if (mode === "close-unconfirmed") throw Error("Close result unavailable");
       return {};
     }
     if (method === "session/set_mode") {
@@ -50,7 +53,7 @@ const peer = createPeer({
       return null;
     }
     if (method === "session/prompt") {
-      if (mode === "close" && !sessions.has(params.sessionId)) throw Error("Session must be loaded before prompting");
+      if (supportsClose && !sessions.has(params.sessionId)) throw Error("Session must be loaded before prompting");
       const text = textOf(params.prompt);
       sessions.get(params.sessionId)?.push(text);
       const say = chunk => peer.notify("session/update", { sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: chunk } } });

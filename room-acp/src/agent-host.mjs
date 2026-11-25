@@ -109,9 +109,9 @@ export class AgentHost {
     try {
       await current.peer.request("session/close", { sessionId }, { timeoutMs: 5000 });
     } catch {
-      // Room's saved work receipts are independent of adapter cleanup.
-      this.log("ACP adapter did not confirm session close");
-      return;
+      // The adapter may have completed the close before reporting an error.
+      // Reopen the saved ID on the next turn instead of prompting a stale handle.
+      this.log("ACP adapter did not confirm session close; next turn will load the saved session");
     }
     if (this.process !== current || this.sessions.get(threadKey) !== sessionId) return;
     this.sessions.delete(threadKey);

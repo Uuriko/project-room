@@ -63,7 +63,7 @@
     "push-sw.js": "sha256:dd274367cfbe1ec861c0605f1f996773b0e80267c06aecdac8e4a42b1c173a28",
     "room-acp/README.md": "sha256:279f6eef827ab8ec1d612ae9abd0e9da577e08e426f7f61a49ce928f35df0df3",
     "room-acp/package.json": "sha256:413c81a210d2e81bde01421e1e27b6bc8ecb1bd30e8d973964f8bc2898804d6f",
-    "room-acp/src/agent-host.mjs": "sha256:a234ad31c917f183717d0e4844fd3876e97a5116f308677a158f19dc37ced129",
+    "room-acp/src/agent-host.mjs": "sha256:0fb3ba9d6b1c3731ff2291067e32714e6d21b83cf3f0145ac3befd8d620d0f99",
     "room-acp/src/agents.mjs": "sha256:7855e65f4b0b6974a30b707c222adaf5f9172823bd22d21e4f8a81532ac60fdf",
     "room-acp/src/args.mjs": "sha256:0504f3a710ffe13c0bcb3da2925b1ddf678fba499750ddab8cffb253cffcae3d",
     "room-acp/src/bridge.mjs": "sha256:24cdbb002c8ff3d2b763c7dc1d573d10782806021c0f82f6b4f340d929851fc8",

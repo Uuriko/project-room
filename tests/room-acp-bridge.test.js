@@ -138,6 +138,25 @@ test("ordinary bridges retain sessions even when the adapter supports close", as
   assert.equal(bridge.host.sessions.size, 1);
 });
 
+test("bridge resumes the saved session when a completed close is unconfirmed", async t => {
+  const room = await startRoom(t);
+  const trace = joinPath(room.env.ROOM_ACP_HOME, "session-trace.log");
+  const { bridge, connection, advanceReservation } = await startBridge(t, room, { mode: "close-unconfirmed", trace, closeIdleSessions: true });
+  const id = room.say("@Coder check this proposed change");
+  await waitFor(() => bridge.stats.acked === 1);
+  await bridge.queue.idle();
+  const sessionId = bridge.sessionMap.get(id);
+  advanceReservation(60000);
+  room.say("@Coder recheck only the changed section", { replyToId: id });
+  await waitFor(() => bridge.stats.acked === 2);
+  await bridge.queue.idle();
+  assert.match(repliesTo(room, id, connection.memberId)[1].body, /^echo: [\s\S]*recheck only/);
+  assert.equal(bridge.sessionMap.get(id), sessionId);
+  assert.deepEqual(readFileSync(trace, "utf8").trim().split("\n"), [
+    "initialize", "session/new", "session/prompt", "session/close", "session/load", "session/prompt", "session/close"
+  ]);
+});
+
 test("bridge: an owner mention gets one threaded reply, then the wake is acked", async t => {
   const room = await startRoom(t);
   const { bridge, connection, advanceReservation } = await startBridge(t, room);
