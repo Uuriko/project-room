@@ -8,6 +8,7 @@ import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { textVersion } from "../server/text-results.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -122,6 +123,40 @@ test(`${representation} a colleague reads an exact shared result URL with their 
     const refused = await cli(["result", other], undefined, reviewerProject, () => { calls++; throw new Error("unexpected call"); });
     assert.equal(refused.value.code, "room_selection_mismatch");
     assert.equal(calls, 0);
+  }
+});
+
+test(`${representation} unavailable shared result gives the reviewer a safe next step`, async t => {
+  const { origin, store, owner, producer, reviewer, reviewerProject, cli } = await fixture(t, representation);
+  const workItemId = "refused-result", body = "Private reviewer fixture text";
+  store.command(owner, "commons", { id: "propose", type: "work.proposed", data: { workItemId,
+    title: "Draft a brief", definitionOfDone: "Review the draft", accountableMemberId: producer.identityId,
+    verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
+  const selected = await cli(["work", workItemId]);
+  assert.equal((await cli(["begin", "--from", "-"], selected.value)).code, 0);
+  const work = await cli(["work", workItemId]);
+  const messageId = "private-result-message";
+  const posted = store.command(producer.secret, "commons", { id: "post-private", type: "message.posted",
+    data: { messageId, workItemId, toMemberId: "owner", body } });
+  const receipt = store.command(producer.secret, "commons", { id: "complete-private", type: "work.completed",
+    data: { workItemId, expectedRevision: work.value.revision, evidenceKind: "room_text", evidenceMessageId: messageId,
+      evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body), previousCompletionEventId: null,
+      producerId: producer.identityId, summary: "Drafted", nextAction: "Review" } });
+  for (const [completionEventId, code] of [[receipt.event.id, "result_unavailable"], ["missing-completion", "result_not_found"]]) {
+    const url = exactResultHref({ roomId: "commons", workItemId, completionEventId }, new URL(origin));
+    const envelopes = [];
+    const refused = await cli(["result", url], undefined, reviewerProject, async (...args) => {
+      const response = await fetch(...args);
+      envelopes.push((await response.clone().json()).result.structuredContent);
+      return response;
+    });
+    assert.equal(refused.code, 1);
+    assert.equal(refused.value.code, code);
+    assert.match(refused.value.hint, /ask the sender/i);
+    assert.equal(JSON.stringify(refused.value).includes(body), false);
+    assert.equal(envelopes.length, 1);
+    assert.equal(envelopes[0].reason, code);
+    assert.equal(envelopes[0].hint, refused.value.hint);
   }
 });
 

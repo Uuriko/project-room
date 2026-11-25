@@ -775,6 +775,8 @@
   "currentRoom.attentionComplete": "Personal work and requests checked. Other room activity is outside this view.",
   "currentRoom.attentionPartial": "Some personal work and requests are loaded. Continue for more.",
   "currentRoom.attentionRange": "Showing {from}–{to} of {count}",
+  "agentError.result_not_found.recovery": "Ask the sender to copy the link to the intended result version again.",
+  "agentError.result_unavailable.recovery": "Ask the sender to share the intended result version somewhere you can read it.",
   "agentError.current_room_context_required.hint": "This room requires a bounded read.",
   "agentError.current_room_context_required.recovery": "Use the bounded conversation window, explicit peer selection, or addressed current-work/request read named by the operation.",
   "agentError.current_directory_integrity.hint": "Conversation directory integrity check failed.",

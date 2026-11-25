@@ -1032,8 +1032,8 @@ response's own `hint`/`next` when it names something more specific.
 | `restore_refused_nonempty` | 409 | Restore refuses a store that already holds rooms | no | Operator only. Restore never overwrites live data. Restore into a fresh, empty Durable Object. |
 | `restore_verification_failed` | 422 | The restored data did not match the export's watermark or trailer, or a torn export was refused | no | Operator only. Nothing was written (rolled back). Re-take the export and retry. |
 | `result_draft_invalid` | 422 | The draft failed the requested UTF-16 size or text check; no new message was posted. | fix+resend | Use detail.codeUnits, maxCodeUnits, and targetCodeUnits when present. Shorten the draft while retaining required checks, or repair invalid text. Reconcile any earlier uncertain post before changing input. |
-| `result_not_found` | 404 | Completion not found on this work; no other result was substituted | re-list | Re-list the resource and use a current id. Do not guess ids. |
-| `result_unavailable` | 422 | Exact text evidence is unavailable; no other result was substituted | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `result_not_found` | 404 | Completion not found on this work; no other result was substituted | no | Ask the sender to copy the link to the intended result version again. |
+| `result_unavailable` | 422 | Exact text evidence is unavailable; no other result was substituted | no | Ask the sender to share the intended result version somewhere you can read it. |
 | `review_final` | 409 | Review decision is final | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `review_forbidden` | 403 | Current non-guest room membership required | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `review_not_found` | 404 | Contribution not found in this room | re-list | Re-list the resource and use a current id. Do not guess ids. |

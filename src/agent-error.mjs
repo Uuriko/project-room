@@ -37,6 +37,16 @@ const BOND_DM_DATA_SHAPES = {
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
 export const ERROR_REGISTRY = {
+  result_not_found: {
+    status: "action_required", hint: uiText("agentError.result_not_found.recovery"),
+    next: [command(uiText("agentError.result_not_found.recovery"))],
+    catalog: { http: 404, retry: "no", recovery: uiText("agentError.result_not_found.recovery") }
+  },
+  result_unavailable: {
+    status: "action_required", hint: uiText("agentError.result_unavailable.recovery"),
+    next: [command(uiText("agentError.result_unavailable.recovery"))],
+    catalog: { http: 422, retry: "no", recovery: uiText("agentError.result_unavailable.recovery") }
+  },
   review_runtime_stale: {
     status: "action_required", hint: uiText("agentError.review_runtime_stale.hint"),
     next: [{ command: uiText("agentError.review_runtime_stale.recovery") }],
