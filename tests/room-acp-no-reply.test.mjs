@@ -61,10 +61,15 @@ test('no_reply cannot hide tools, plan or unfinished execution '+Object.keys(opt
  const f=await fixture(t,{text:JSON.stringify({outcome:'no_reply',body:''}),...options}),bridge=await f.make();await bridge.turn(f.thread,[f.wake('activity')]);
  assert.equal(f.counts.posts.length,1);assert.notEqual(saved(bridge,'activity').disposition,'silent');
 });
-test('formal no_reply is not an answer or silent disposition, and formal pending is exempt from ordinary window',async t=>{
+test('formal no_reply records an error and deliberate pending posts its note',async t=>{
  const f=await fixture(t,{formal:true,text:JSON.stringify({outcome:'no_reply',body:''})}),bridge=await f.make();
- await bridge.turn(f.thread,[f.wake('formal-no-reply')]);f.output.text=JSON.stringify({outcome:'pending',body:'The required approval is not available.'});
- await bridge.turn(f.thread,[f.wake('formal-pending')]);assert.equal(f.counts.posts.length,2);
+ await bridge.turn(f.thread,[f.wake('formal-no-reply')]);
+ const invalid=await bridge.room.request('/api/rooms/commons/reply-context?requestMessageId=dm');
+ assert.equal(invalid.request.progressState,'error');
+ assert.equal(invalid.request.contextMessageId,'dm');
+ assert.equal(f.counts.posts.length,0);
+ f.output.text=JSON.stringify({outcome:'pending',body:'The required approval is not available.'});
+ await bridge.turn(f.thread,[f.wake('formal-pending')]);assert.equal(f.counts.posts.length,1);
  assert.equal((await bridge.room.request('/api/rooms/commons/reply-context?requestMessageId=dm')).request.status,'open');
  assert.notEqual(saved(bridge,'formal-no-reply').disposition,'silent');
 });
