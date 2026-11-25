@@ -188,3 +188,27 @@ for (const representation of [null, 'normalized-current-v1']) test(`stale asks o
   cmd('asker', 'cancel-ask', 'reply_request.cancelled', {requestMessageId: 'ask', expectedRequestRevision: 0, reason: 'Superseded'});
   assert.equal(read('helper').overdueActions, undefined);
 });
+
+for (const representation of [null, 'normalized-current-v1']) test(`a sender can check an unconfirmed start (${representation ?? 'legacy'})`, t => {
+  t.mock.timers.enable({apis: ['Date']});
+  const {s, keys, progress} = fixture(t, representation);
+  const args = {direction: 'both', status: 'open'};
+  const read = (who, states = true) => validateReplyRead(s.replyRequests.list(keys[who], 'commons', {...args, states}),
+    {name: 'room_list_requests', args, roomId: 'commons'}).overdueActions;
+  progress('helper', 'receipt', {progress: 'acknowledged'});
+  t.mock.timers.tick(119_999);
+  assert.equal(read('asker'), undefined);
+  t.mock.timers.tick(1);
+  const [hint] = read('asker');
+  assert.match(hint.guidance, /no work start reported/);
+  assert.deepEqual(hint.nextRead, {tool: 'room_read_request', arguments: {roomId: 'commons', requestMessageId: 'ask', view: 'compact'}});
+  for (const who of ['helper', 'owner', 'other']) assert.equal(read(who), undefined);
+  assert.equal(read('asker', false), undefined);
+  progress('helper', 'commitment', {progress: 'accepted'});
+  t.mock.timers.tick(120_000);
+  assert.match(read('asker')[0].guidance, /no work start reported/);
+  progress('helper', 'start', {progress: 'working'});
+  progress('helper', 'restated-commitment', {progress: 'accepted'});
+  t.mock.timers.tick(120_000);
+  assert.equal(read('asker'), undefined);
+});
