@@ -201,7 +201,42 @@ test("late previous-result read cannot repopulate a different review after cance
 
 test("the verdict links exact candidate release checks without claiming missing stages passed", { timeout: 30000 }, async t => {
   // Three receipt popups each bootstrap a fresh Room view on the same credential.
-  const f = await setup(t, 390, { credentialReadBurst: 600 });
+  const earlierCandidate = "b".repeat(40);
+  const f = await setup(t, 390, {
+    credentialReadBurst: 600, firstBody: `Candidate revision: ${earlierCandidate}\nResult A`,
+  });
+  const earlier = f.item().receipt;
+  f.send("human-checker", T.VERIFICATION_RECORDED, {
+    workItemId: "revision-journey", expectedRevision: f.item().revision,
+    completionEventId: earlier.eventId, evidenceVersion: earlier.evidenceVersion,
+    result: "pass", summary: "Earlier candidate reviewed",
+  });
+  const earlierDigest = "sha256:" + "4".repeat(64);
+  const earlierEvidenceId = "earlier-candidate-browser-receipt";
+  f.send("producer", T.MESSAGE_POSTED, {
+    workItemId: "revision-journey", replyToId: earlier.nativeText.messageId, messageId: earlierEvidenceId,
+    body: `room-release-receipt/1 browser ${earlier.eventId} ${earlierCandidate} ${earlierDigest}\nEarlier browser run passed`,
+  });
+  f.send("producer", T.MESSAGE_POSTED, {
+    workItemId: "revision-journey", replyToId: earlier.nativeText.messageId, messageId: "earlier-candidate-release-checks",
+    body: "room-release-checks/1\n" + JSON.stringify({
+      completionEventId: earlier.eventId,
+      evidenceVersion: earlier.evidenceVersion,
+      candidateRevision: earlierCandidate,
+      checks: { browser: {
+        candidateRevision: earlierCandidate, status: "passed", summary: "Earlier browser run passed",
+        evidenceDigest: earlierDigest, evidenceMessageId: earlierEvidenceId,
+      } },
+    }),
+  });
+  const earlierResult = f.store.workResult(f.keys.owner, "commons", "revision-journey", {
+    completionEventId: earlier.eventId,
+  });
+  assert.equal(earlierResult.workThread.releaseChecks.candidateRevision, earlierCandidate);
+  const earlierBrowser = earlierResult.workThread.releaseChecks.checks.find(check => check.stage === "browser");
+  assert.equal(earlierBrowser.status, "passed");
+  assert.equal(earlierBrowser.href, "#pr-record/message/" + earlierEvidenceId);
+
   const candidateRevision = "a".repeat(40);
   f.mutate(T.WORK_BLOCKED, { reason: "Select exact release", nextAction: "Resubmit" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Candidate pinned" });
@@ -229,6 +264,7 @@ test("the verdict links exact candidate release checks without claiming missing 
   assert.match(await page.locator("#result-release-stages").innerText(), /Build · Passed/);
   assert.match(await page.locator("#result-release-stages").innerText(), /Browser · Pending/);
   assert.match(await page.locator("#result-release-stages").innerText(), /Deploy · Pending/);
+  assert.equal(await page.locator(`#result-release-stages a[href="#pr-record/message/${earlierEvidenceId}"]`).count(), 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(await page.locator("#result-release-title").evaluate(node => document.activeElement === node), true);
   const source = page.getByRole("link", { name: "Open recorded evidence" });
