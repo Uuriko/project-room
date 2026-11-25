@@ -48,7 +48,7 @@ import { installWorkspacePreviews } from "./workspace-previews-ui.js";
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
-import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
+import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, resultReplyMode, resultReplyHref, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-navigation.js";
@@ -380,7 +380,7 @@ function whenNavigationBoardInstalled() {
 // Phase 2 channels: the visible channel; persisted per room, defaults to the main channel.
 let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
 let activeDirectMemberId = null;
-let workDraftId = null, replyToId = null, busy = false;
+let workDraftId = null, replyToId = null, resultReplyEventId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
 let confirmedWorkNavigation = null;
 let actionEpoch = 0;
@@ -687,7 +687,7 @@ const client = new RoomClient({
       if (pendingSignout || endedContext === "account-switch") clearBrowserSessionHints();
     }
     else workspaceUI?.detachRoom();
-    workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
+    workDraftId = null; replyToId = null; resultReplyEventId = null; workFormEpoch++; setWorkRetry(false);
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
     currentThreadId = sessionExpired ? currentThreadId : null; conversation = null;
@@ -1545,7 +1545,13 @@ function setFormStatus(status, text, error = false) {
   status.classList.toggle("visible", Boolean(text));
   status.classList.toggle("error", Boolean(text) && error);
 }
-function composerOverLimit() { return $("#message-input").value.length > MAX_MESSAGE_BODY_CHARS; }
+function composerLengthLimit() {
+  if (!requestMode?.aboutResult) return MAX_MESSAGE_BODY_CHARS;
+  const href = resultReplyHref(requestMode, session?.roomId);
+  return $("#message-input").value.trim().split("\n").includes(href) ? MAX_MESSAGE_BODY_CHARS
+    : MAX_MESSAGE_BODY_CHARS - href.length - 2;
+}
+function composerOverLimit() { return $("#message-input").value.length > composerLengthLimit(); }
 // The composer grows with its text up to the CSS max-height (25dvh), then scrolls.
 function autosizeComposer() {
   const input = $("#message-input");
@@ -1556,7 +1562,7 @@ function autosizeComposer() {
 }
 function renderComposerLength() {
   const input = $("#message-input"), over = composerOverLimit();
-  const limit = new Intl.NumberFormat("en-US").format(MAX_MESSAGE_BODY_CHARS);
+  const limit = new Intl.NumberFormat("en-US").format(composerLengthLimit());
   const message = over ? `Message is too long. Shorten it to ${limit} characters or fewer; emoji may count as two. Your draft has not been shortened.` : "";
   input.setCustomValidity(message);
   if (over) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
@@ -3154,7 +3160,7 @@ function renderSearch(now = Date.now()) {
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
 function saveComposer() {
-  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage, files: composerFiles,
+  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, resultReplyEventId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage, files: composerFiles,
     assistantDraft, ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
 }
@@ -3198,7 +3204,7 @@ function restoreComposer(draft) {
     select.add(new Option("Previous recipient unavailable", draft.toMemberId));
     select.options[select.options.length - 1].disabled = true;
   }
-  select.value = draft.toMemberId || activeDirectMemberId || ""; replyToId = draft.replyToId; pendingMessage = draft.pending;
+  select.value = draft.toMemberId || activeDirectMemberId || ""; replyToId = draft.replyToId; resultReplyEventId = draft.resultReplyEventId ?? null; pendingMessage = draft.pending;
   syncComposerChrome();
   autosizeComposer();
 }
@@ -3252,13 +3258,10 @@ function requestControls(message) {
 function syncRequestComposer() {
   const mode = requestMode, active = Boolean(mode) || requestReading;
   $("#request-mode-bar").hidden = !active;
-  const requestButton = $("#request-reply");
-  const requestHost = $("#composer-options .composer-options-panel");
-  if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
-  requestButton.hidden = !state || active;
+  syncRequestReplyAction();
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
-  const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer request", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
+  const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? mode.aboutResult ? "Request a reply about this result" : "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer request", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
   const work = mode?.resultEventId && state?.workItems[mode.workItemId];
   const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
     : request ? (conversation?.byId.get(request.id)?.deletedAt ? "Message deleted" : (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
@@ -3350,7 +3353,14 @@ composerOptions.addEventListener("keydown", event => {
 document.addEventListener("click", event => {
   if (!composerOptions.contains(event.target)) composerOptions.open = false;
 });
-$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }, { toMemberId: $("#message-to-select").value }); });
+$("#request-reply").addEventListener("click", () => {
+  if (!state || busy || requestMode || requestReading) return;
+  if (resultReplyEventId) {
+    const mode = resultReplyMode(conversation?.byId.get(replyToId), resultReplyEventId);
+    if (!mode) { notice("This result is no longer available."); return; }
+    setRequestMode(mode, { replyToId: mode.resultMessageId });
+  } else setRequestMode({ kind: "request" }, { toMemberId: $("#message-to-select").value });
+});
 document.addEventListener("click", event => {
   const resume = event.target.closest("[data-resume-credit]");
   if (resume && state && !busy && !requestReading) {
@@ -3447,6 +3457,7 @@ function captureWorkspaceThreadDraft(messageId) {
     if (activeChannelId !== channel || currentThreadId !== root || composerKey() !== root) return false;
     $("#message-input").value = text;
     replyToId = draft.body || draft.files?.length ? (draft.replyToId ?? sourceId) : sourceId;
+    resultReplyEventId = draft.replyToId === replyToId ? draft.resultReplyEventId ?? null : null;
     updateReply(); syncRequestComposer(); autosizeComposer(); saveComposer();
     return true;
   }
@@ -4579,7 +4590,7 @@ const replyToSharedResult = createResultFeedback({
   isBlocked: () => busy || requestReading || pendingMessage || composerFiles.some(file => file.status === "uploading"),
   getDraft: destination => destination === composerKey()
     ? { pending: pendingMessage, toMemberId: $("#message-to-select").value,
-      body: $("#message-input").value, files: composerFiles, replyToId } : drafts.get(destination),
+      body: $("#message-input").value, files: composerFiles, replyToId, resultReplyEventId } : drafts.get(destination),
   onBlocked(reason = "result.replyBlocked") {
     if (reason === "result.quoteTooLong") $("#result-use-status").textContent = uiText(reason);
     else notice(uiText(reason));
@@ -4589,8 +4600,9 @@ const replyToSharedResult = createResultFeedback({
     revealMessage(message.id);
     switchThread(destination, true);
   },
-  setReply(messageId, quote) {
+  setReply(messageId, quote, completionEventId) {
     replyToId = messageId;
+    resultReplyEventId = completionEventId;
     if (quote) {
       const input = $("#message-input");
       if (!input.value.startsWith(quote)) input.value = quote + input.value;
@@ -4993,20 +5005,27 @@ function submitRequest(form) {
   // Keyboard/programmatic submission must respect the terminal-request state
   // used by the disabled button. An uncertain command still retries unchanged.
   if (request && request.status !== "open" && !pendingMessage) return;
-  if (!$("#message-input").value.trim()) return;
+  const body = $("#message-input").value.trim();
+  if (!body) return;
+  const target = { body, toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   const hadPending = Boolean(pendingMessage);
-  try {
-    if (!pendingMessage) {
-      const data = replyDraftData(mode, { body: $("#message-input").value.trim(),
-        toMemberId: $("#message-to-select").value || null, replyToId, messageId: crypto.randomUUID(),
-        channelId: activeChannelId });
-      pendingMessage = draftCommand(null, mode.kind === "cancelled" ? REPLY_CANCELLED : T.MESSAGE_POSTED, data);
-    }
-  } catch (error) { setComposerError(error.message); return; }
-  saveComposer();
-  const command = pendingMessage.command;
-  submit(form, async () => {
+  let command = pendingMessage?.command;
+  submit(form, async current => {
     try {
+      if (!command) {
+        if (mode.aboutResult) {
+          const anchor = resultReplyMode(conversation?.byId.get(mode.resultMessageId), mode.resultEventId);
+          if (anchor?.workItemId !== mode.workItemId) throw new Error("This result is no longer available");
+          const exact = await client.workResult(mode.workItemId, { completionEventId: mode.resultEventId });
+          if (!current() || session !== identity || !state || composerKey() !== key) return;
+          const text = exact?.result?.text;
+          if (text?.messageId !== mode.resultMessageId || text.withdrawnAt) throw new Error("This result is no longer available");
+        }
+        const data = replyDraftData(mode, { ...target, messageId: crypto.randomUUID(), roomId: identity.roomId });
+        pendingMessage = draftCommand(null, mode.kind === "cancelled" ? REPLY_CANCELLED : T.MESSAGE_POSTED, data);
+        command = pendingMessage.command;
+      }
+      saveComposer();
       if (command.data.messageId) locallyOwnedMessageIds.add(command.data.messageId);
       const receipt = await client.send(command);
       if (generation !== client.generation || session !== identity || !state) return;
@@ -5015,6 +5034,14 @@ function submitRequest(form) {
       drafts.clear(key); requestMode = null; requestEpoch++;
       restoreComposer(drafts.get(composerKey())); updateReply(); persistDrafts();
       if (mode.resultEventId) renderReturnBrief();
+      if (mode.aboutResult) {
+        const delivery = $("#message-delivery");
+        const link = document.createElement("a");
+        link.href = recordHref("message", command.data.messageId);
+        link.textContent = "View request";
+        delivery.replaceChildren(link);
+        delivery.hidden = false;
+      }
       notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
     } catch (error) {
       if (generation !== client.generation || session !== identity || !state) return;
@@ -5101,7 +5128,7 @@ $("#message-list").addEventListener("click", e => {
   else if (["reply", "thread"].includes(button.dataset.messageAction)) {
     switchThread(conversation.rootById.get(id), button.dataset.messageAction === "reply");
     if (button.dataset.messageAction === "reply") {
-      replyToId = id;
+      replyToId = id; resultReplyEventId = null;
       const author = replyAuthorToAddress(session.member.id, state.members[conversation.byId.get(id)?.authorId]);
       // Replying stays public: the thread is room-visible and the @mention is
       // text only. Never touch the DM recipient select here — a reply is not
@@ -5111,23 +5138,36 @@ $("#message-list").addEventListener("click", e => {
     }
   }
 });
+function syncRequestReplyAction() {
+  const button = $("#request-reply");
+  const inReplyBar = !requestMode && !requestReading && Boolean(resultReplyEventId) && conversation?.byId.has(replyToId);
+  const host = inReplyBar ? $("#reply-bar .reply-bar-actions") : $("#composer-options .composer-options-panel");
+  if (button.parentElement !== host) host.append(button);
+  button.hidden = !state || Boolean(requestMode) || requestReading;
+}
 function updateReply() {
   const target = conversation?.byId.get(replyToId);
-  $("#reply-bar").hidden = Boolean(requestMode) || !target || replyToId === currentThreadId;
+  const threadRoot = replyToId === currentThreadId;
+  $("#reply-bar").hidden = Boolean(requestMode) || !target || (threadRoot && !resultReplyEventId);
+  $("#cancel-reply").hidden = threadRoot;
   const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
   const addressing = Boolean(author && messageMentionsMember($("#message-input").value, author));
   // Runs on every keystroke: write text only when it changes. Replacing an
   // unchanged text node still forces a layout of the whole timeline.
+  const resultWork = resultReplyEventId && target && state.workItems[target.workItemId];
+  const resultLabel = resultWork && !target.deletedAt
+    ? `${resultWork.receipt?.eventId === resultReplyEventId ? "Result" : "Earlier result"} · ${resultWork.title}` : "";
   setText("#reply-context", target
-    ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${target.deletedAt ? "Message deleted" : target.body.slice(0, 100)}`
+    ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${resultLabel || (target.deletedAt ? "Message deleted" : target.body.slice(0, 100))}`
     : "");
   const mention = $("#reply-mention");
   mention.hidden = !author;
   mention.disabled = busy;
   mention.setAttribute("aria-pressed", addressing ? "true" : "false");
   setText("#reply-mention", author ? `Also @ ${author.displayName}` : "Also @");
+  syncRequestReplyAction();
 }
-function clearReply() { replyToId = assistantDraft?.sourceMessageId ?? currentThreadId; updateReply(); }
+function clearReply() { replyToId = assistantDraft?.sourceMessageId ?? currentThreadId; resultReplyEventId = null; updateReply(); }
 function cancelReply() { if (assistantDraft) switchThread(currentThreadId); else clearReply(); }
 $("#cancel-reply").addEventListener("click", () => { cancelReply(); $("#message-input").focus({ preventScroll: true }); });
 $("#reply-mention").addEventListener("click", () => {
@@ -6934,7 +6974,14 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
     selectedMessage.select(id, client.generation);
     return selectedMessage.sync(client.sequence);
   },
-  onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onDiscuss(message, selection, completionEventId) {
+    if (!replyToSharedResult(message.id, selection, completionEventId)) return false;
+    // This view now belongs to the saved discussion draft. Reloading should
+    // recover that draft without placing the linked result over its composer.
+    if (exactResultDestination(location)?.completionEventId === completionEventId)
+      history.replaceState(history.state, "", location.pathname + location.search);
+    return true;
+  },
   onReturn() { $("#work-navigation-return").click(); },
   onWorkAction(item, action, compareFrom) { openWorkAction(item, action, null, null, compareFrom); },
   onOriginal(messageId) {
