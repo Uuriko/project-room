@@ -199,8 +199,8 @@
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
     "src/workspace-previews-ui.js": "sha256:7301c966b49b637b67b31d307d506e7486692e5f0e09ca562430eb74379118ef",
-    "strings/en.js": "sha256:8d0c8762144a19f02ad38534a4542e076619811cbe4ba387983ee6fa8b286e19",
-    "strings/en.json": "sha256:309dd9ce550071c3c19f2fa1938f048ff68f629db60f80ed7b8dd179c3d67356"
+    "strings/en.js": "sha256:43fa0769d11a23a86ee832fdf127928916173ba19c86d71b31e5786a9024f03d",
+    "strings/en.json": "sha256:2653b33aa807d1a81e5ec55250769244f4a5d9a222aa7ae1136a0013c26779a8"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

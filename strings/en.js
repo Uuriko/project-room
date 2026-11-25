@@ -607,7 +607,7 @@ export default {
   "result.releaseReporter": "Latest report by {name}.",
   "result.releaseStageEvidence": "Open {stage} receipt",
   "result.invalidLink": "This result link is invalid. Ask the sender to copy the result link again.",
-  "result.accepted": "Result accepted",
+  "result.accepted": "Accepted",
   "result.decisionLabel": "Decision",
   "result.nextLabel": "Next",
   "result.openCurrentVersion": "Open current result",
