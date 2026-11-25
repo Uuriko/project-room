@@ -4003,7 +4003,7 @@ function revealLocationHash() {
   if (hash.startsWith("#pr-record/result/")) {
     if (!exactResult || exactResult.roomId !== session?.roomId) {
       closeLinkedResult();
-      notice(SOURCE_UNAVAILABLE_NOTICE, true);
+      notice(uiText("result.invalidLink"), true);
       return;
     }
     updatesUi?.close();

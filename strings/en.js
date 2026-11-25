@@ -599,6 +599,7 @@ export default {
   "result.releaseCandidate": "Candidate {revision}",
   "result.releaseReporter": "Latest report by {name}.",
   "result.releaseStageEvidence": "Open {stage} receipt",
+  "result.invalidLink": "This result link is invalid. Ask the sender to copy the result link again.",
   "result.openCurrentVersion": "Open current result",
   "result.releaseRecord": "Open recorded evidence",
   "result.pendingCorrection": "Correction needed",
