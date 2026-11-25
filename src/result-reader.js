@@ -385,6 +385,21 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-work-verification").textContent = finding?.summary ?? "";
       resultElement("result-work-verification-row").hidden = Boolean(pending) || !finding?.summary;
       const accepted = !view.releaseChecks && item.ownerDecisionRequired && next.action === "complete";
+      const decisionId = item.decision?.eventId;
+      if (accepted && decisionId && view.decisionReadId !== decisionId) {
+        view.decisionReadId = decisionId;
+        const completionEventId = view.receipt.completionEventId;
+        client.workResult(view.workItemId, { completionEventId }).then(value => {
+          if (!usableText(view) || view.decisionReadId !== decisionId
+            || getState().workItems[view.workItemId]?.decision?.eventId !== decisionId) return;
+          const source = value?.workThread?.decisionSource;
+          if (value?.selection.status === "current" && source?.decisionEventId === decisionId
+            && matchesReceipt(view.receipt, value.result?.receipt) && matchesReceipt(source, value.result.receipt)) {
+            view.decisionSource = source;
+            resultStatus();
+          }
+        }).catch(() => {});
+      }
       const source = view.decisionSource;
       if (accepted && decisionLink && source?.decisionEventId === item.decision?.eventId
         && matchesReceipt(source, item.receipt)
@@ -542,6 +557,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   });
   function loadExactResult(view) {
     const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
+    view.decisionReadId = getState().workItems[view.workItemId]?.decision?.eventId;
     client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
       if (!owns() || view.withdrawn) return;
       if (value?.result?.receipt?.eventId !== view.receipt.completionEventId
