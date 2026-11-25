@@ -4,7 +4,7 @@
 // Nothing printed here carries the identity secret, an invite code, or a share token: the invite
 // line points at the room's public page, never at the invitation that was used to get in.
 import { loginCommand } from "./login.mjs";
-import { setupCommand, SETUP_TOOLS, preflightSetup } from "./setup.mjs";
+import { setupCommand, SETUP_TOOLS, SETUP_SHELL_ONLY, preflightSetup } from "./setup.mjs";
 
 const TOOL_HINTS = Object.freeze([
   ["CLAUDECODE", "claude-code"],
@@ -131,7 +131,7 @@ export async function joinCommand(argv, io = {}) {
     try { setupCode = await setup(setupArgs, { ...io, out: line => lines.push(String(line)), err: line => lines.push(String(line)) }); }
     catch (error) { lines.push(String(error?.message ?? error)); setupCode = 1; }
     for (const line of lines) out(scrub(line));
-    projectConfigured = setupCode === 0;
+    projectConfigured = setupCode === 0 || setupCode === SETUP_SHELL_ONLY;
     if (!projectConfigured) out(`Tool setup for ${tool} did not finish; the room connection is saved.`);
   }
   if (projectConfigured) {

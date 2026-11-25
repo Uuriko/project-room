@@ -16,7 +16,7 @@
     "connectors/muse.md": "sha256:192d0e69582afb2a1a9bc67bfd159bfca0c7dd89dd531a61b37da77b9a8b711b",
     "docs/agents/START.md": "sha256:07c5d9591a982b306bb3d974d78a38564b443802b4929433c93cdb8f83258150",
     "docs/agents/aider.md": "sha256:10f5ac4c243ac8cae77b58dc3b8cdfd3a353eda240402153da2f156657ec8b1d",
-    "docs/agents/claude-code.md": "sha256:900752080df98ca340457312e0de5c9ab9d056e955753c21223d35d40280def0",
+    "docs/agents/claude-code.md": "sha256:af2b4eea23a629d64d72187ef7a6b695814c0ccb75fa2eb87f1b25804904337b",
     "docs/agents/cline.md": "sha256:27452b5e3a08ff8d1f4020c0343ff217e470fc4b1c3fca29a44ab9c68d283aff",
     "docs/agents/codex.md": "sha256:6381a0c3efc9ae009202ef3df4a83f35f053b51ac303ab72aa891eefefc68ac5",
     "docs/agents/crewai.md": "sha256:54b708525f2d5ec9c9832f31987477e214af6c038c1d059ed01f3276def9b80b",
