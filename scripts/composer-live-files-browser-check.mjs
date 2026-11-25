@@ -329,6 +329,10 @@ for (const storage of ["legacy", "normalized"]) {
     }
     const writer = store.issueAccessKey(roomId, "writer");
     const observer = store.issueAccessKey(roomId, "observer");
+    store.roomFlood = { consume() {} };
+    for (let index = 0; index < 50; index++) send(writer, T.MESSAGE_POSTED, {
+      messageId: `old-direct-${index}`, toMemberId: ownerId, body: `Earlier direct note ${index}`,
+    });
     send(owner, T.MESSAGE_POSTED, { messageId: "question", toMemberId: "writer", requestKind: "reply", body: "Send the revised project brief" });
     const content = Buffer.from("Reviewed project brief");
     store.roomAttachments.stage(writer, roomId, {
@@ -360,7 +364,6 @@ for (const storage of ["legacy", "normalized"]) {
     const recipient = createRoomClient({ origin, roomId, token: owner });
     assert.deepEqual(await recipient.files([messageId]), []);
 
-    store.roomFlood = { consume() {} };
     for (let index = 0; index < 50; index++) send(writer, T.MESSAGE_POSTED, {
       messageId: `new-direct-${index}`, toMemberId: ownerId, body: `New direct note ${index}`,
     });
@@ -394,6 +397,7 @@ for (const storage of ["legacy", "normalized"]) {
     }
     await earlier.press('Enter', { timeout: 2500 });
     await found.waitFor({ timeout: 5000 });
+    assert.equal(await earlier.evaluate(node => node === document.activeElement), true, 'paging keeps keyboard focus on the action');
     assert.equal(history.length, 1);
     assert.equal(history[0].searchParams.get('peerMemberId'), 'writer');
     if (process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT && storage === 'normalized') {

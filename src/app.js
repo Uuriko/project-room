@@ -2885,7 +2885,8 @@ async function readHistoricalAnswer(messageId) {
     const { request, page } = await client.replyContext(message.replyToId);
     if (generation !== client.generation || hash !== location.hash || viewKey !== conversationViewKey() || request.status !== "answered"
       || request.requesterId !== session.member.id || request.responseMessageId !== messageId
-      || !page.items.some(row => row.kind === "answered" && row.message?.id === messageId && typeof row.message.body === "string")) return;
+      || !page.items.some(row => row.kind === "answered" && row.eventId === request.terminalEventId
+        && row.message?.id === messageId && row.message.toMemberId === session.member.id && typeof row.message.body === "string")) return;
     historicalAnswer = { request, generation, hash, viewKey };
     renderMessages();
   } catch { /* Ordinary replies have no formal request. The selected conversation remains readable. */ }
