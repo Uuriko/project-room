@@ -2752,7 +2752,23 @@ function renderMessages() {
                 continue;
               }
             }
+            let focusedRequestAction;
+            if (selector === ".message-links") {
+              const currentStatus = before.querySelector("[data-request-state]");
+              const nextStatus = after.querySelector("[data-request-state]");
+              if (currentStatus && nextStatus) {
+                if (currentStatus.textContent !== nextStatus.textContent) currentStatus.textContent = nextStatus.textContent;
+                if (before.innerHTML === after.innerHTML) continue;
+              }
+              const focused = document.activeElement;
+              if (before.contains(focused) && focused.matches("[data-message-action^='request-']"))
+                focusedRequestAction = focused.dataset.messageAction;
+            }
             before.innerHTML = after.innerHTML;
+            if (focusedRequestAction) {
+              const action = before.querySelector(`[data-message-action="${CSS.escape(focusedRequestAction)}"]`);
+              (action ?? node).focus({ preventScroll: true });
+            }
           }
         }
       }
@@ -3201,13 +3217,30 @@ function restoreComposer(draft) {
   syncComposerChrome();
   autosizeComposer();
 }
-function requestRunLabel(id) {
-  if(client.sectionAvailability('requestRuns')?.available===false)return uiText("currentRoom.executionUnavailable");
+function requestRunLabel(id, { showUnavailable = true } = {}) {
+  if (client.sectionAvailability("requestRuns")?.available === false)
+    return showUnavailable ? uiText("currentRoom.executionUnavailable") : "";
   const run = requestRuns[id];
   if (!run || state?.replyRequests?.[id]?.status !== "open") return "";
   const status = run.state === "working" && Date.now() - run.updatedAt > 120000 ? "unknown" : run.state;
   return ({ working: "Agent working", result_ready: "Result saved · delivery pending",
     needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
+}
+function knownRequestStatusLabel(request) {
+  if (request.status !== "open") {
+    const key = ({ answered: "request.answered", declined: "request.declined", cancelled: "request.cancelled" })[request.status];
+    return key ? uiText(key) : "";
+  }
+  return state.members[request.recipientId]?.active === false ? uiText("request.recipientUnavailable") : "";
+}
+function requesterStatusLabel(request) {
+  if (!request) return "";
+  const known = knownRequestStatusLabel(request);
+  if (known || request.status !== "open") return known;
+  if (request.progressState === "needs_input") return uiText("request.needsInput");
+  if (request.progressState === "error") return uiText("request.reportedError");
+  return requestRunLabel(request.id, { showUnavailable: false }) ||
+    uiText(request.acknowledgedAt ? "request.acknowledged" : "request.waitingForAcknowledgment");
 }
 async function refreshRequestRuns({ force = false } = {}) {
   if(client.sectionAvailability('requestRuns')?.available===false)return;
@@ -3226,7 +3259,15 @@ async function refreshRequestRuns({ force = false } = {}) {
   } catch { /* Last heartbeat still ages into unknown; never claim a new run. */ }
   finally { requestRunsReading = false; }
   if (generation !== client.generation) return;
-  for (const node of document.querySelectorAll("[data-request-run]")) node.textContent = requestRunLabel(node.dataset.requestRun);
+  for (const node of document.querySelectorAll("[data-request-run]")) {
+    const requestId = node.closest("[data-message-record-id]")?.dataset.messageRecordId;
+    if (requestId) node.textContent = requestRunLabel(requestId);
+  }
+  for (const node of document.querySelectorAll("[data-request-state]")) {
+    const requestId = node.closest("[data-message-record-id]")?.dataset.messageRecordId;
+    const label = requesterStatusLabel(state?.replyRequests?.[requestId]);
+    if (label && node.textContent !== label) node.textContent = label;
+  }
   // A request arriving during the read still gets its initial status promptly.
   void refreshRequestRuns();
 }
@@ -3239,14 +3280,17 @@ function requestControls(message) {
       ? `<button type="button" class="message-to-work" data-message-id="${esc(previous.id)}" data-message-action="request-follow-up">Follow up</button>` : "";
   }
   const own = session.member.id, open = request.status === "open";
-  const status = open ? state.members[request.recipientId]?.active === false ? "Recipient unavailable" : "Reply requested"
-    : ({ answered: "Answered", declined: "Declined", cancelled: "Cancelled" })[request.status];
+  const status = knownRequestStatusLabel(request) || (open ? uiText("request.requested") : "");
   const actions = [];
   if (replyFollowUp(state, request.id, own)) actions.push(["follow-up", "Follow up"]);
   if (open && own === request.recipientId) actions.push(["answered", "Answer request"], ["declined", "Decline"]);
   if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
-  return `<span class="request-state">${esc(status)}</span><span class="request-state" data-request-run="${esc(message.id)}" role="status">${esc(requestRunLabel(message.id))}</span>${actions.map(([kind, label]) =>
-    `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`).join("")}`;
+  const statusMarkup = own === request.requesterId
+    ? [`<span class="request-state" data-request-state role="status">${esc(requesterStatusLabel(request))}</span>`]
+    : [`<span class="request-state">${esc(status)}</span>`,
+      `<span class="request-state" data-request-run role="status">${esc(requestRunLabel(message.id))}</span>`];
+  return [...statusMarkup, ...actions.map(([kind, label]) =>
+    `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`)].join("");
 }
 function syncRequestComposer() {
   const mode = requestMode, active = Boolean(mode) || requestReading;
