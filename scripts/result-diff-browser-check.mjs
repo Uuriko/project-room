@@ -419,8 +419,11 @@ test("shared result links keep identical old and new text bound to different ver
   assert.match(await receiver.locator("#result-status").textContent(), /^Earlier result/);
   assert.equal(await receiver.locator("#result-body").textContent(), body);
   assert.equal(await receiver.locator("#result-work-action").isVisible(), false);
-  await receiver.goto(current);
+  const newer = receiver.getByRole("link", { name: "Open current result" });
+  assert.equal(await newer.getAttribute("href"), current);
+  await newer.click();
   await receiver.getByText("Verification · Passed", { exact: true }).waitFor();
+  assert.equal(await newer.count(), 0);
   assert.doesNotMatch(await receiver.locator("#result-status").textContent(), /^Earlier result/);
   assert.equal(await receiver.locator("#result-body").textContent(), body);
   assert.deepEqual(await receiver.locator("#result-body a").evaluateAll(links => links.map(link => link.href)),
@@ -465,6 +468,7 @@ test("shared result links keep identical old and new text bound to different ver
   await receiver.getByText(/Text withdrawn by/).waitFor();
   assert.equal(await receiver.locator("#result-body").textContent(), "");
   assert.equal(await receiver.locator("#result-copy-link").isVisible(), false);
+  assert.equal(await receiver.locator("#result-current-version").getAttribute("href"), null);
 });
 
 test("an exact result link refuses a nonparty without falling forward", { timeout: 30000 }, async t => {
@@ -480,5 +484,6 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
   assert.equal(await nonparty.locator("#result-body").textContent(), "");
   assert.equal(await nonparty.locator("#result-title").textContent(), "Result");
   assert.equal(await nonparty.locator("#result-copy-link").isVisible(), false);
+  assert.equal(await nonparty.locator("#result-current-version").getAttribute("href"), null);
   assert.equal(await nonparty.locator("#result-work-action").isVisible(), false);
 });

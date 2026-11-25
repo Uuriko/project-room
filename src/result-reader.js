@@ -274,6 +274,15 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const runtime = reviewRuntimeLabel(view.reviewRuntime?.status, view.reviewRuntime?.webhook);
       if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
     }
+    const newer = resultElement("result-current-version");
+    const latest = item?.receipt;
+    const canOpenNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
+      && latest?.nativeText && !latest.nativeText.withdrawnAt && latest.eventId !== view.receipt.completionEventId;
+    newer.hidden = !canOpenNewer;
+    if (canOpenNewer) {
+      newer.href = exactResultHref({ ...view, completionEventId: latest.eventId });
+      newer.textContent = uiText("result.openCurrentVersion");
+    } else newer.removeAttribute("href");
     const context = resultElement("result-work-context");
     const current = view.loaded && !view.error && !view.withdrawn && !earlier;
     if (context) context.hidden = !current || !item;

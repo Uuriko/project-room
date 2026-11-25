@@ -599,6 +599,7 @@ export default {
   "result.releaseCandidate": "Candidate {revision}",
   "result.releaseReporter": "Latest report by {name}.",
   "result.releaseStageEvidence": "Open {stage} receipt",
+  "result.openCurrentVersion": "Open current result",
   "result.releaseRecord": "Open recorded evidence",
   "result.pendingCorrection": "Correction needed",
   "result.previousReview": "What the previous review flagged",
