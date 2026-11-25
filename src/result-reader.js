@@ -326,7 +326,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-work-criteria").textContent = item.definitionOfDone;
       resultElement("result-work-verification").textContent = finding?.summary ?? "";
       resultElement("result-work-verification-row").hidden = Boolean(pending) || !finding?.summary;
-      const nextLabel = pending?.nextAction ?? next.label;
+      const accepted = !view.releaseChecks && item.ownerDecisionRequired && next.action === "complete";
+      const nextLabel = accepted ? uiText("result.accepted") : pending?.nextAction ?? next.label;
+      resultElement("result-work-next-label").textContent = uiText(accepted ? "result.decisionLabel" : "result.nextLabel");
       resultElement("result-work-next").textContent = next.memberId
         ? uiText("work.thread.nextFor", { name: memberLabel(next.memberId), action: nextLabel })
         : nextLabel;

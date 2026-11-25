@@ -41,7 +41,7 @@
     "icons/icon-192.png": "sha256:8b1afa1152a889494606cf1d91479d6a8f0282a0161adbc11deac402f7fb4d8f",
     "icons/icon-512.png": "sha256:29b3c5e64459ea3c61c3ce6ddab857fea403b5270dc3337582fec31b47e3e95c",
     "icons/maskable-512.png": "sha256:af47118cfead824c67f3fa69ce99bfac368d3ffb77693319269f9a24cb9e539d",
-    "index.html": "sha256:646f06d7a6128287572c43d9c7fba6b3dbbd3a7679310fae62d0a5cf06372456",
+    "index.html": "sha256:4782eb9ea4d775bb0eb89037d34815ef976d1583c0c95847f9d4689964700584",
     "manifest.webmanifest": "sha256:602341ff5426f69cf698028e4f3dec0f9ee22eb1dd5b96244598b50a52955224",
     "offers.html": "sha256:eddb3bfa83ec565f22e036596bf81fb8c0d7ec3ab0ce7a44942032a6626d4977",
     "offline.html": "sha256:904698a195de5f930487f6f7b9d12ab9d99a1e12b2ff1d2b66c91e66b101d55b",
@@ -162,7 +162,7 @@
     "src/result-availability.js": "sha256:2a8b09755dcc1ad32e84b5f68715ff71abbafa83c95a0343b86cdc1031cebdee",
     "src/result-comparison.js": "sha256:df60f140bd59f6b32bfc49d6737cb7de1f45214f0c4c2ca27a26b5d3a1396d98",
     "src/result-feedback.js": "sha256:16a54ba9531d5f37fc2cf1a1f6f19dd86cf8fa523296709d3a79078b1f8c8d57",
-    "src/result-reader.js": "sha256:c698918e85d3df8824c75ed2b4e58c83ea8590daf6641907565390a98df6fd88",
+    "src/result-reader.js": "sha256:58f2f4377cc267d71cf0e6b43d9b8dd05410996174e59263d193bbc875449d05",
     "src/return-brief.js": "sha256:60fe009414d994d445baca3e7c36b36c8b6fce6490c7a0e0ab38bd674371e712",
     "src/room-administration.js": "sha256:27e9d03dfaef3247fc02bec3a98db79db18c8fe53bef026fd94f7b38ee1c0fd1",
     "src/room-charter.js": "sha256:a4d4ef0881a7e31541141ab583df5d59fa771f4259c859d9050fcb1c5dd6615e",
@@ -199,8 +199,8 @@
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
     "src/workspace-previews-ui.js": "sha256:7301c966b49b637b67b31d307d506e7486692e5f0e09ca562430eb74379118ef",
-    "strings/en.js": "sha256:6b11b5af62f009b90a263083004459ac4e8b382614f3404bc8cb179f38762152",
-    "strings/en.json": "sha256:9f1fa9d428fe57bc36aba7fe0213123ecf7b3a5cc84b53024eba9a155b2d47bf"
+    "strings/en.js": "sha256:a8d197ed7332ac6eebf7e5f726ca9cb0a021e5de9292e6e01d10d1c62a5f48cb",
+    "strings/en.json": "sha256:b8f0ff845a962b3b9cc5d60c178d44c318b392e17e40770529def9aad949460e"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

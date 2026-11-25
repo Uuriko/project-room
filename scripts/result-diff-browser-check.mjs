@@ -154,6 +154,8 @@ for (const width of [1440, 390]) {
     assert.equal(f.store.room("commons").state.messages.find(m=>m.id===f.item().decision.sourceMessageId).body,"Named owner checked in result B");
     assert.equal(f.item().decision.decision, "approved");
     assert.equal(f.item().decision.completionEventId, second.event.id);
+    await owner.locator("#result-work-next").getByText("Result accepted", { exact: true }).waitFor();
+    assert.equal(await owner.locator("#result-work-next-label").textContent(), "Decision");
     // Pin the slow ordering: the previous version's read lands after the current
     // text, as it did on CI, so this journey cannot pass only on a fast runner.
     await reviewer.route(url => new URL(url).searchParams.get("completionEventId") === f.first.event.id,
