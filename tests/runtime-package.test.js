@@ -62,33 +62,27 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   // Cold import from the exact package, with neither checkout dependencies nor a
   // working PATH. This module is absent from genuine historical packages.
   if (existsSync(join(destination, "client/work-actions.mjs"))) {
-    const program = `import { roomTools } from ${JSON.stringify(pathToFileURL(join(destination, "client/mcp-stdio.mjs")).href)};
-      import { buildWorkCommand } from ${JSON.stringify(pathToFileURL(join(destination, "client/work-actions.mjs")).href)};
-      import { RoomAgentClient } from ${JSON.stringify(pathToFileURL(join(destination, "client/room-agent.mjs")).href)};
-      console.log(JSON.stringify({ tools: roomTools.length, assistantTools: roomTools.filter(tool => tool.name.startsWith("room_assistant_")).map(tool => tool.name), helper: typeof RoomAgentClient.prototype.workAction,
-        command: buildWorkCommand("room_accept_work", { requestId: "cold-package", workItemId: "work", expectedRevision: 0 }) }));`;
-    const cold = spawnSync(process.execPath, ["--input-type=module", "-e", program], { cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8" });
-    assert.equal(cold.status, 0, cold.stderr);
-    const packagedTools = readFileSync(join(destination, "client/mcp-stdio.mjs"), "utf8");
-    const packagedWorkActions = existsSync(join(destination, "client/work-actions.mjs"))
-      ? readFileSync(join(destination, "client/work-actions.mjs"), "utf8") : "";
-    const toolCount = !existsSync(join(destination, "client/help-actions.mjs")) ? 27
-      : packagedTools.includes('"room_mark_caught_up"') ? 49
-      : packagedTools.includes('"room_map"') ? 47
-      : packagedWorkActions.includes('"room_claim"') ? 46
-      : packagedTools.includes("\"room_close_work_claim\"") ? 44
-      : packagedTools.includes("...assistantTools") ? 43
-      : packagedTools.includes('"room_link_work_claim_pr"') ? 41
-      : packagedTools.includes('"room_set_member_claim_cap"') ? 40
-      : packagedTools.includes('"room_list_outside_agents"') ? 39
-      : packagedTools.includes('"room_begin_work"') ? 37
-      : packagedWorkActions.includes('"renew_claim"') ? 36
-      : packagedTools.includes('"get_room_context"') && packagedTools.includes('"room_read_inbox"') ? 35
-      : packagedTools.includes('"room_read_inbox"') ? 34
-      : packagedTools.includes('"get_room_context"') ? 33
-      : 32;
-    assert.deepEqual(JSON.parse(cold.stdout), { tools: toolCount, assistantTools: packagedTools.includes("...assistantTools") ? ["room_assistant_context", "room_assistant_action"] : [], helper: "function",
-      command: { id: "cold-package", type: "work.accepted", data: { workItemId: "work", expectedRevision: 0 } } });
+    const coldCatalog = root => {
+      const program = `import { roomTools } from ${JSON.stringify(pathToFileURL(join(root, "client/mcp-stdio.mjs")).href)};
+        import { buildWorkCommand } from ${JSON.stringify(pathToFileURL(join(root, "client/work-actions.mjs")).href)};
+        import { RoomAgentClient } from ${JSON.stringify(pathToFileURL(join(root, "client/room-agent.mjs")).href)};
+        console.log(JSON.stringify({ tools: roomTools, helper: typeof RoomAgentClient.prototype.workAction,
+          command: buildWorkCommand("room_accept_work", { requestId: "cold-package", workItemId: "work", expectedRevision: 0 }) }));`;
+      const child = spawnSync(process.execPath, ["--input-type=module", "-e", program], {
+        cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8",
+      });
+      assert.equal(child.status, 0, child.stderr);
+      return JSON.parse(child.stdout);
+    };
+    const cold = coldCatalog(destination);
+    assert.deepEqual(cold.tools, coldCatalog(repository).tools, "cold runtime advertises the same command contract as source");
+    const names = cold.tools.map(tool => tool.name);
+    assert.equal(new Set(names).size, names.length, "each command is advertised once");
+    for (const name of ["room_assistant_context", "room_assistant_action", "room_read_request", "room_respond_to_request", "room_receipt"]) {
+      assert.ok(names.includes(name), `cold runtime advertises ${name}`);
+    }
+    assert.equal(cold.helper, "function");
+    assert.deepEqual(cold.command, { id: "cold-package", type: "work.accepted", data: { workItemId: "work", expectedRevision: 0 } });
   }
   if (existsSync(join(destination, "scripts/run-codex-room.mjs"))) {
     const cold = spawnSync(process.execPath, [join(destination, "scripts/run-codex-room.mjs"), "--help"], {
