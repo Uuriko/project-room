@@ -212,6 +212,36 @@ test("the ordinary reader keeps the governing verdict on the retained version", 
   await page.getByText("Verification · Passed", { exact: true }).waitFor();
 });
 
+test("a withdrawal clears the retained passage while its replacement refresh is pending", { timeout: 30000 }, async t => {
+  const f = await setup(t, 1440, { retained: true }), page = await f.login("owner");
+  await openResult(page);
+  let captured, release;
+  const held = new Promise(resolve => { captured = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  await page.route("**/work-result?**", async route => {
+    if (new URL(route.request().url()).searchParams.get("completionEventId") !== f.first.event.id) return route.continue();
+    const response = await route.fetch();
+    captured(); await gate;
+    await route.fulfill({ response });
+  });
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Revise" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Revised" });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Updated result");
+  await held;
+  const messageId = f.first.event.data.evidenceMessageId;
+  const message = f.store.room("commons").state.messages.find(item => item.id === messageId);
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: message.revision ?? 0 });
+  await page.locator("#result-body").waitFor({ state: "hidden", timeout: 5000 });
+  assert.equal(await page.locator("#result-body").textContent(), "");
+  const delivered = page.waitForResponse(response => new URL(response.url()).searchParams.get("completionEventId") === f.first.event.id);
+  release(); await delivered;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await page.locator("#result-body").textContent(), "");
+  assert.equal(await page.locator("#result-copy-link").isVisible(), false);
+});
+
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
   const f = await setup(t, 390);
   const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;

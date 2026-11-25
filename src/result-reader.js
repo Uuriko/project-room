@@ -271,7 +271,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         && !matchesReceipt(view.receipt, item.receipt) && !view.readAfterReplacement) {
       const { generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails, recovered } = view;
       openResult({ generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails,
-        recovered, readAfterReplacement: true }, item.title, false);
+        recovered, textMessageId: view.textMessageId, readAfterReplacement: true }, item.title, false);
       return;
     }
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
@@ -475,7 +475,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function loadExactResult(view) {
     const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
     client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
-      if (!owns()) return;
+      if (!owns() || view.withdrawn) return;
       if (value?.result?.receipt?.eventId !== view.receipt.completionEventId
         || (view.receipt.evidenceVersion && value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion)) throw new Error("Pinned version changed");
       view.receipt.evidenceVersion = value.result.receipt.evidenceVersion;
@@ -563,7 +563,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-use-status").textContent = "";
       const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
       resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
-      if (view.restoreDetails) workRecord(view.workItemId).querySelector(".work-details").open = false;
+      const details = view.restoreDetails && workRecord(view.workItemId)?.querySelector(".work-details");
+      if (details) details.open = false;
       mountResultReader(); resultReader.hidden = false;
       if (focus) resultElement("result-title").focus();
       loadExactResult(view);
