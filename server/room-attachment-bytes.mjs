@@ -244,14 +244,20 @@ export class RoomAttachmentBytes {
   }
   list(token, roomId, options={}) {
     if(isCurrentRoom(this.db,roomId))return this.listCurrent(token,roomId,options);
+    const ids = options.messageIds ?? [];
+    if (!Array.isArray(ids) || ids.length > 8 || new Set(ids).size !== ids.length || ids.some(id => !validId(id)))
+      fail(422, "attachment_selection_required", "Select one to eight visible messages for files");
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
       this.expire(roomId, this.store.now());
       const messages = this.messageIndex(roomId);
       const memberId = auth.member.id;
+      const query = ids.length
+        ? `state='committed' AND message_id IN (${ids.map(() => "?").join(",")})`
+        : "state IN ('staged','committed')";
       const files = this.db.prepare(`SELECT ${FILE_METADATA} FROM room_attachments
-        WHERE room_id=? AND state IN ('staged','committed')
-        ORDER BY created_at DESC, id`).all(roomId)
+        WHERE room_id=? AND ${query}
+        ORDER BY created_at DESC, id`).all(roomId, ...ids)
         .filter(row => this.visibleTo(row, messages, memberId))
         .map(view);
       return { roomId, files };
