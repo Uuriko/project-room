@@ -1,6 +1,14 @@
 import { exactResultHref } from "./room-deep-link.js";
 import { uiText } from "./strings.js";
 
+export function previousReviewText(correction) {
+  const summary = correction?.summary;
+  if (typeof summary !== "string" || !summary) return "";
+  const instruction = correction.nextAction?.trim();
+  return instruction && instruction !== summary.trim()
+    ? uiText("result.feedbackWithInstruction", { summary, instruction }) : summary;
+}
+
 // Show only the changed passages and their surrounding lines. Full versions
 // stay accessible through the exact result links even if a rewrite is large.
 function comparisonHtml(before, after, esc, structuredPatch) {
@@ -81,7 +89,7 @@ export function createResultComparison({ client, getState, esc }) {
         const note = document.createElement("p"), label = document.createElement("strong");
         label.textContent = uiText("result.previousReview");
         note.className = "result-correction";
-        note.append(label, " ", correction.summary);
+        note.append(label, " ", previousReviewText(correction));
         box.prepend(note);
       }
       const earlierLink = exactResultHref({ roomId: previous.roomId, workItemId, completionEventId: previousId });

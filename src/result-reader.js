@@ -4,6 +4,7 @@ import { canReplyToResult } from "./result-availability.js";
 import { uiText } from "./strings.js";
 import { WORK_STATES as S, isRoomArchived } from "./events.js";
 import { matchesReceipt, nextWorkStep, workActions, reviewRuntimeLabel } from "./workflow.js";
+import { previousReviewText } from "./result-comparison.js";
 import { currentResult } from "./work-selectors.js";
 
 // Owns only the pinned reader view. Session, composer, and work mutations stay
@@ -80,7 +81,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
   function showCorrection(correction, pending = false) {
     resultElement("result-correction-title").textContent = uiText(pending ? "result.pendingCorrection" : "result.previousReview");
-    const text = typeof correction?.summary === "string" ? correction.summary : "";
+    const text = pending ? correction?.summary ?? "" : previousReviewText(correction);
     resultElement("result-correction-summary").textContent = text;
     resultElement("result-correction").hidden = !text;
   }
@@ -259,6 +260,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const item = getState().workItems[view.workItemId];
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
       && view.pendingCorrection.verificationEventId === item?.blocker?.eventId ? view.pendingCorrection : null;
+    const correctionSource = view.previousCorrection?.sourceMessageId;
+    if (correctionSource && getState().messages.some(message => message.id === correctionSource && message.deletedAt)) {
+      view.previousCorrection = null;
+    }
     showCorrection(view.withdrawn ? null : pending ?? view.previousCorrection, Boolean(pending));
     const earlier = item ? !matchesReceipt(view.receipt, item.receipt) || (!pending && item.state !== S.COMPLETED) || Boolean(item.supersededBy)
       : view.selectionStatus === "historical";

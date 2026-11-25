@@ -160,9 +160,9 @@
     "src/reply-requests.js": "sha256:7d7dacc520507c6551e1b0f7368e07d96e13568fcfe3c794919a2aef61dd6866",
     "src/request-access.js": "sha256:4d2714b80d5530b94ccd3cfd21780bc3461e8b15fb986eb90c3bfd68d8859d5b",
     "src/result-availability.js": "sha256:62c352ecf523344df2539262a26c66a312d00089cda3f241dcf276993d069638",
-    "src/result-comparison.js": "sha256:c417b3ac449357d7adf887d855ae51a3dd729d59f6ec6e4df73e899950f58d0f",
+    "src/result-comparison.js": "sha256:bcb3bc40683234063676d98b61360fc5a7f571fd90a3b2d0065268d6209440a2",
     "src/result-feedback.js": "sha256:c97402e2f9bb3ac3683d0da34598835f13d3afaf0d9b5fcbe3e84ec417b72237",
-    "src/result-reader.js": "sha256:7f85a27235a1f77e1253cb467acd619952ed11cde0439a2238f3668fa2aa8843",
+    "src/result-reader.js": "sha256:0346343e46946e9aae5428bd154b9f51472815831b8333c21574b40963f1a7c0",
     "src/return-brief.js": "sha256:60fe009414d994d445baca3e7c36b36c8b6fce6490c7a0e0ab38bd674371e712",
     "src/room-administration.js": "sha256:27e9d03dfaef3247fc02bec3a98db79db18c8fe53bef026fd94f7b38ee1c0fd1",
     "src/room-charter.js": "sha256:a4d4ef0881a7e31541141ab583df5d59fa771f4259c859d9050fcb1c5dd6615e",
@@ -199,8 +199,8 @@
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
     "src/workspace-previews-ui.js": "sha256:70fe5ef8e7a2dfe68754650eb6768704120ca847f70d5cb50cc569569d2eef28",
-    "strings/en.js": "sha256:2811572a3f510bb9ecdf6aa736983bfa3715c4b2734adaa20f360cb4bbe45306",
-    "strings/en.json": "sha256:d942628f16165762fdbe5a7aa0606c6ab083a0af1cca08bb234f0e64789cfa23"
+    "strings/en.js": "sha256:83dcce21a29c0d563f29bf25982723532f1f7a86d6be6cc0131fb879dd53702f",
+    "strings/en.json": "sha256:10dde62aedda3b06e6f46ac618884e4202ce5a05c96fb5d9432130eb0ce7f6d9"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

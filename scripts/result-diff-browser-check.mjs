@@ -70,8 +70,6 @@ async function openResult(page) {
 async function review(page, result, summary) {
   await page.locator('#action-fields [name="result"]').selectOption(result);
   await page.locator('#action-fields [name="summary"]').fill(summary);
-  const next = page.locator('#action-fields [name="nextAction"]');
-  if (await next.count()) await next.fill("Name the owner, then review again");
   await page.locator('#action-form button[type="submit"]').click();
   await page.locator("#action-dialog").waitFor({ state: "hidden" });
 }
@@ -95,6 +93,7 @@ for (const width of [1440, 390]) {
     const diff = reviewer.locator("#action-result-diff");
     await diff.waitFor({ state: "visible" });
     assert.match(await diff.innerText(), /Name the owner in the final line/);
+    assert.doesNotMatch(await diff.innerText(), /Requested change:/);
     assert.match(await diff.innerText(), /- Result A/);
     assert.match(await diff.innerText(), /\+ Result B/);
     assert.match(await diff.innerText(), /- Missing named owner/);
@@ -394,9 +393,14 @@ test("shared result links keep identical old and new text bound to different ver
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Rechecked the evidence." });
   f.mutate(T.WORK_STARTED, {});
   const second = f.complete(body);
+  const checker = await f.login("human-checker");
+  await clickWorkAction(await openWorkFromSearch(checker, "revision-journey", "Revise a short result"), "verify");
+  await checker.locator("#action-result-diff").getByText(/Requested change: Use the same text with the correct evidence/).waitFor();
+  await checker.close();
   check(second, "pass");
   const sender = await f.login("owner");
   await openResult(sender);
+  await sender.locator("#result-correction-summary").getByText(/Requested change: Use the same text with the correct evidence/).waitFor();
   await sender.evaluate(() => {
     const noisy = new URL(location.href);
     noisy.searchParams.set("unrelated", "discard");
@@ -464,6 +468,8 @@ test("shared result links keep identical old and new text bound to different ver
 
   const messageId = f.first.event.data.evidenceMessageId;
   f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.store.room("commons").state.messages.find(message => message.id === messageId).revision ?? 0 });
+  await sender.locator("#result-correction").waitFor({ state: "hidden", timeout: 5000 });
+  assert.equal(await sender.locator("#result-correction-summary").textContent(), "");
   await receiver.goto(earlier);
   await receiver.getByText(/Text withdrawn by/).waitFor();
   assert.equal(await receiver.locator("#result-body").textContent(), "");

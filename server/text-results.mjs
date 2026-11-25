@@ -114,7 +114,15 @@ function precedingCorrection(db, state, work, receipt, viewerId, floor, messageR
     const oldMessage = (messageRecords ?? messageRepository({ db }, state.room.id, state)).get(messageId);
     if (oldMessage?.deletedAt || !textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecords)) return null;
   }
+  // The blocker disappears on resolution. Its verifier-authored instruction
+  // remains on the exact verdict event, including for older saved rooms.
+  const verdict = db.prepare(`SELECT sequence, json_extract(body,'$.data.nextAction') AS nextAction
+    FROM events WHERE room_id=? AND id=?`).get(state.room.id, finding.eventId);
+  if (!verdict || verdict.sequence < (floor?.sequence ?? 0)) return null;
   return {
+    ...(previous.nativeText ? { sourceMessageId: previous.nativeText.messageId } : {}),
+    ...(finding.reworkRequested !== false && typeof verdict.nextAction === "string" && verdict.nextAction.trim()
+      ? { nextAction: verdict.nextAction } : {}),
     verificationEventId: finding.eventId, verifierId: finding.verifierId,
     completionEventId: previous.eventId, summary: finding.summary, untrusted: true,
     nextRead: { tool: "room_read_result", arguments: { roomId: state.room.id, workItemId: work.id, completionEventId: previous.eventId } }
