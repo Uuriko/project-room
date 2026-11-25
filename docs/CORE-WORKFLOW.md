@@ -100,9 +100,15 @@ Hosted MCP lists the shortcut in the connected member's default catalog and for 
 Use the saved connection directly. The CLI returns JSON for each operation.
 When a result or Work Thread discussion includes a Workspace file-change link,
 run its `workspaceArtifacts` command to read the submitted diff with the same
-saved connection. A replaced publication requires a new link. In the browser,
-open the file link and use Back to return to the result. For a longer discussion,
-follow `nextCommand` to read the next page.
+saved connection. The active preview retains its two preceding patch
+publications. In the browser, open the file link and use Back to return to the
+result. For a longer discussion, follow `nextCommand` to read the next page.
+
+If the patch expired and you still have access to the publication, run
+`room workspace changes --link URL --base BASE_SHA` from a local repository
+containing the full original base and the linked commit. Room checks that the
+reconstructed patch matches the original digest before returning it. Save the
+original base with the result when the file will need longer review history.
 
 | Intent | Command |
 | --- | --- |

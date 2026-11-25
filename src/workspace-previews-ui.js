@@ -1,5 +1,6 @@
 import { uiText } from "./strings.js";
 import { clipboard } from "./clipboard.js";
+import { workspaceChangePath } from "./workspace-diff-parser.js";
 
 import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "./workspace-artifact-link.js";
 
@@ -208,6 +209,48 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       if (ownsOutput()) outputStatus.textContent = error.message || "Could not read run output.";
     }
   }
+  async function readEarlierPatch(current, ticket, session) {
+    const target = linked;
+    if (!current || target.panel !== "changes" || !target.head || current.publisherId !== target.publisherId
+        || target.revision >= current.revision) return false;
+    const item = { ...current, revision: target.revision, head: target.head, patchDigest: target.digest };
+    const ownsPatch = () => owns(ticket, session) && linked === target;
+    const read = async (view, path) => {
+      if (!ownsPatch()) return null;
+      const artifact = new URL(workspaceArtifactLink(location.href, session.roomId, item, "changes", path)).hash;
+      const query = new URLSearchParams({ id: item.id, changes: "1", revision: String(item.revision), artifact });
+      if (view) query.set("view", view);
+      if (path) query.set("path", path);
+      const value = await client.roomRead(`/workspace-previews?${query}`);
+      if (!ownsPatch() || !value) return null;
+      const changes = value.changes;
+      if (changes?.historical !== true || changes.id !== item.id || changes.head !== item.head || changes.revision !== item.revision
+          || changes.publisherId !== target.publisherId || changes.patchDigest !== target.digest)
+        throw new Error(uiText("workspace.share.changesUnavailable"));
+      return changes;
+    };
+    linkStatus.textContent = uiText("workspace.changes.fileLoading");
+    let changes;
+    try { changes = await read(target.file ? "file" : "summary", target.file); }
+    catch (error) { if (error.status === 409) return false; throw error; }
+    if (!ownsPatch() || !changes) return true;
+    const { renderWorkspaceChange } = await import("./workspace-change-view.js");
+    if (!ownsPatch()) return true;
+    heading.textContent = uiText("workspace.share.earlierPatch");
+    meta.textContent = uiText("workspace.preview.source", {
+      name: memberLabel(item.publisherId) || item.publisherId, head: item.head.slice(0, 12), revision: item.revision,
+    });
+    const file = changes.file && workspaceChangePath(changes.file);
+    renderWorkspaceChange(primary, item, changes, read, { file: target.file, showTitle: false,
+      review: target.anchor && file ? { file, anchor: target.anchor, exact: true } : null, shareHunks: false });
+    changesView.hidden = false;
+    columns.hidden = false;
+    compare.closest("label").hidden = true;
+    latest.textContent = uiText(target.anchor && current.patchDigest ? "workspace.share.locateCurrentNote" : "workspace.share.openCurrent");
+    latest.hidden = false;
+    linkStatus.textContent = "";
+    return true;
+  }
   async function loadChanges() {
     const session = client.session;
     if (!session || !dialog.open || changesView.hidden) return;
@@ -359,10 +402,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         || (linked.head && current.head !== linked.head)
         || artifactDigest(current, linked.panel) !== linked.digest)) {
         clearPreview();
-        linkStatus.textContent = uiText(current ? "workspace.share.stale" : "workspace.share.missing");
+        if (await readEarlierPatch(current, ticket, session) || !owns(ticket, session)) return;
+        linkStatus.textContent = uiText(!current ? "workspace.share.missing"
+          : linked.panel === "changes" ? "workspace.share.changesUnavailable" : "workspace.share.stale");
         latest.hidden = !current;
-        latest.textContent = linked.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
-          ? "Locate note in current patch" : uiText("workspace.share.openCurrent");
+        latest.textContent = uiText(linked.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
+          ? "workspace.share.locateCurrentNote" : "workspace.share.openCurrent");
         return;
       }
       if (!current) return;

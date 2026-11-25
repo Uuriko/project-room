@@ -142,10 +142,11 @@ function renderFile(body, file, review, shareHunks) {
   }
 }
 
-export function renderWorkspaceChange(parent, item, changes, read, { file: requestedFile, review, shareHunks = true } = {}) {
+export function renderWorkspaceChange(parent, item, changes, read, { file: requestedFile, review, shareHunks = true, showTitle = true } = {}) {
   const selected = parent.querySelector("[aria-current=true]")?.dataset.file;
   const focused = parent.contains(document.activeElement) ? document.activeElement?.dataset.file : null;
-  parent.replaceChildren(node("h4", item.title));
+  parent.replaceChildren();
+  if (showTitle) parent.append(node("h4", item.title));
   const choices = node("div", undefined, "workspace-change-files");
   const body = node("div");
   const status = node("p", "", "form-hint");

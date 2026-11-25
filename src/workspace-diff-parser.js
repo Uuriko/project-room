@@ -83,6 +83,16 @@ export function fileLabel(file, fallback) {
 export function workspaceChangePath(file) {
     return file.newPath === "/dev/null" ? file.oldPath : file.newPath || file.oldPath;
 }
+export function workspaceChangeFile(files, path) {
+    return files.find(file => workspaceChangePath(file) === path)
+        ?? files.find(file => path !== "/dev/null" && (file.oldPath === path || file.newPath === path));
+}
+export function workspaceChangeIndex(files) {
+    return files.map(file => {
+        const path = fileLabel(file), filePath = workspaceChangePath(file);
+        return { path, ...(filePath && filePath !== path ? { filePath } : {}), type: file.type, hunks: file.hunks.length };
+    });
+}
 export function diffType(file) {
     return [
         "add",

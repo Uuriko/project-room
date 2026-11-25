@@ -195,12 +195,12 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:045a6de36b95f973493dc383fc266d764f1404a86836a00ad83e682276a0a0ce",
     "src/workspace-artifact-link.js": "sha256:9fac99d123cf512ef9f131910a41a34ccf2e12ff7b026eb774bc5c22a8d591e3",
-    "src/workspace-change-view.js": "sha256:0d48219f7b3043f95718c4004542032afe9e46d284c9f822a81176c5ebd6cda7",
-    "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
+    "src/workspace-change-view.js": "sha256:55626a8fb3d661b11e29a70995a1339a5acf8ea94395d5457a77bb30a544b918",
+    "src/workspace-diff-parser.js": "sha256:2050ac289623983d9ffddede22fef1c09f150877834aa3068284b4af440c7dc9",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "src/workspace-previews-ui.js": "sha256:735d6437270df142db007fd1bcaf2587a99cae6549508f11e130020bbc12605d",
-    "strings/en.js": "sha256:f18c4da6d866015656a27c8cebc0929b582c7a899e42399d5171054757e37fcd",
-    "strings/en.json": "sha256:875dad22daaed31b1fb8a95ee8ffb8d7d05aac9b3916003182ad1807a8b7a0d2"
+    "src/workspace-previews-ui.js": "sha256:1a79a563ccf68f422fbb2214d590dab6c594c87d6a5e848c280847df40a82f14",
+    "strings/en.js": "sha256:2895a29e42ef4d3098e3253b4f690acf0b73afe35124a28600571ddf46a125fc",
+    "strings/en.json": "sha256:fadc378278264816f2b06f4954a350e0f4b4310188f27c65d0597e1f62d68ea6"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

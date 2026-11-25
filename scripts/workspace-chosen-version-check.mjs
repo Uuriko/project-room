@@ -25,7 +25,11 @@ try {
     window.items = items;
     const client = { path: path => path, session: { roomId: "commons" }, roomRead: async path => {
       const query = new URL(path, location.href).searchParams;
-      if (query.has("changes")) return { changes: { files: [] } };
+      if (query.has("changes")) {
+        const selected = items.find(item => item.id === query.get("id"));
+        if (String(selected?.revision) !== query.get("revision")) throw Object.assign(new Error("Patch unavailable"), { status: 409 });
+        return { changes: { files: [] } };
+      }
       if (query.has("id")) return { item: items.find(item => item.id === query.get("id")) };
       return { items: structuredClone(items) };
     }};
@@ -112,7 +116,7 @@ try {
   await compare();
   await page.evaluate(() => { window.items[1].revision++; });
   await page.getByRole("button", { name: "Continue this version: Version b" }).click();
-  await page.getByText(/This preview revision changed/).waitFor();
+  await page.getByText(/This patch version is no longer available/).waitFor();
   assert.equal(await page.getByRole("button", { name: "Copy for agent" }).count(), 0);
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.evaluate(() => { window.items[1].recipientId = "friend"; });
