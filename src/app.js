@@ -3672,6 +3672,7 @@ function showWorkDestination(kind, id, presentation = "focus") {
         }
         const button = card.querySelector("[data-read-result]");
         if (button) readResult({ target: button }, { focused: true });
+        else if (update?.reviewCompletionEventId) card.querySelector('[data-action="verify"]')?.click();
         syncWorkReturnControl();
       });
     }

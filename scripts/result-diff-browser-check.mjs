@@ -14,6 +14,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
@@ -390,6 +391,27 @@ for (const width of [1440, 390]) {
     assert.equal((await check).postDataJSON().data.completionEventId, second.event.id);
   });
 }
+
+test("Needs Me opens the exact verification form for external evidence", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const evidenceUrl = "https://example.com/review/123";
+  const workItemId = "aa-external-result";
+  f.send("owner", T.WORK_PROPOSED, { workItemId, title: "External review", definitionOfDone: "Check the linked change", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
+  for (const [type, expectedRevision] of [[T.WORK_ACCEPTED, 0], [T.WORK_STARTED, 1]])
+    f.send("producer", type, { workItemId, expectedRevision });
+  const completed = f.send("producer", T.WORK_COMPLETED, { workItemId, expectedRevision: 2, evidenceUrl, evidenceVersion: "change-123-v1", producerId: "producer", signedEvidence: makeTestSigner(f.store)({ evidenceUrl }), summary: "Linked change", nextAction: "Review evidence" });
+  const selection = { roomId: "commons", discardLegacyAssignments: true };
+  const plan = operatorNormalization(f.store, selection);
+  operatorNormalization(f.store, { ...selection, planHash: plan.planHash, requestId: randomUUID(), reason: "Isolated external review fixture" }, true);
+  const reviewer = await f.login("human-checker");
+  if (!(await reviewer.locator("#updates-dialog").isVisible())) await reviewer.locator("#topbar-updates").press("Enter");
+  await reviewer.getByRole("button", { name: "Review result for External review", exact: true }).press("Enter");
+  await reviewer.locator("#action-dialog").waitFor();
+  const check = reviewer.waitForRequest(request => request.method() === "POST" && request.url().endsWith("/commands")
+    && request.postDataJSON().type === T.VERIFICATION_RECORDED);
+  await review(reviewer, "pass", "Checked the linked change");
+  assert.equal((await check).postDataJSON().data.completionEventId, completed.event.id);
+});
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
   test(`a phone reviewer can identify a document reference and ask about its exact revision (${representation})`, { timeout: 30000 }, async t => {
