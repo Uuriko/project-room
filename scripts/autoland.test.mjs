@@ -9,7 +9,8 @@ import {
 } from "./autoland.mjs";
 
 function run(name, conclusion = "success", status = "completed", completed_at = "2026-11-10T00:00:00Z", id = name.length) {
-  return { name, conclusion, status, completed_at, id };
+  return { name, conclusion, status, completed_at, id,
+    workflowPath: name === "mechanical" ? ".github/workflows/review-mechanical.yml" : ".github/workflows/test.yml" };
 }
 
 function allRequired(overrides = {}) {
@@ -47,6 +48,18 @@ describe("evaluateHeadChecks", () => {
   it("takes the newer of two real results (a re-run that went green)", () => {
     const rerun = [...allRequired().filter((r) => r.name !== "cloudflare"), run("cloudflare", "failure", "completed", "2026-11-10T00:00:00Z", 1), run("cloudflare", "success", "completed", "2026-11-10T01:00:00Z", 2)];
     assert.equal(evaluateHeadChecks(rerun).ok, true);
+  });
+
+  it("uses the required workflow when two workflows report the same job name", () => {
+    const required = allRequired().filter(check => check.name !== "test");
+    const failed = { ...run("test", "failure"), workflowPath: ".github/workflows/test.yml" };
+    const unrelated = { ...run("test", "success", "completed", "2026-11-10T01:00:00Z"),
+      workflowPath: ".github/workflows/schema-gate.yml" };
+    const rerun = { ...unrelated, workflowPath: failed.workflowPath };
+    assert.equal(evaluateHeadChecks([...required, failed, unrelated]).ok, false);
+    assert.equal(evaluateHeadChecks([...required, failed, rerun]).ok, true);
+    assert.ok(evaluateHeadChecks([...required, unrelated]).problems.includes("test: missing"));
+    assert.equal(evaluateHeadChecks([...required, rerun, { ...unrelated, conclusion: "failure" }]).ok, false);
   });
 
   it("reports missing required checks so autoland cannot skip the ready-to-land suite", () => {
@@ -137,15 +150,23 @@ describe("autoland", () => {
 
   function mockApi(options = {}) {
     const calls = [];
+    const suites = new Map([[".github/workflows/test.yml", 100], [".github/workflows/review-mechanical.yml", 101],
+      [".github/workflows/schema-gate.yml", 102]]);
     const request = (args, extra) => {
       calls.push({ args, extra });
       const path = args[args.length - 1];
       if (path.endsWith("/labels/autoland")) return { name: "autoland" };
       if (path.includes("/issues?")) return options.issues ?? [{ number: 10, pull_request: {} }];
       if (path.includes("/pulls/10")) return options.pr ?? greenPr;
-      if (path.includes("/check-runs")) return { check_runs: options.checks ?? allRequired() };
+      if (path.includes("/check-runs")) return { check_runs: (options.checks ?? allRequired()).map(
+        ({ workflowPath, ...check }) => ({
+          ...check, head_sha: sha, app: { slug: "github-actions" }, check_suite: { id: suites.get(workflowPath) },
+        }),
+      ) };
       if (path.includes("/statuses")) return options.statuses ?? [];
       if (path.includes("/actions/runs")) {
+        if (path.includes("head_sha="))
+          return { workflow_runs: [...suites].map(([producer, check_suite_id]) => ({ path: producer, check_suite_id, head_sha: sha })) };
         return { workflow_runs: options.schemaGreen === false ? [] : [{ name: "schema-gate", conclusion: "success", created_at: "2026-11-10T00:00:00Z" }] };
       }
       if (path.includes("/commits/main")) return { sha: options.tip ?? tip };
@@ -154,6 +175,17 @@ describe("autoland", () => {
     };
     return { request, calls };
   }
+
+  it("does not land a same-head green job from an unrelated workflow", async () => {
+    const red = run("test", "failure");
+    const green = { ...run("test", "success", "completed", "2026-11-10T01:00:00Z"),
+      workflowPath: ".github/workflows/schema-gate.yml" };
+    const { request, calls } = mockApi({ checks: [...allRequired().filter(check => check.name !== "test"), red, green] });
+    const result = await autoland({ repo: "Uuriko/project-room", token: "test-token", request, env: {} });
+    assert.deepEqual(result.merged, []);
+    assert.match(result.skipped[0].reason, /test: failure/);
+    assert(!calls.some(({ args }) => args.includes("PUT")));
+  });
 
   it("refuses to merge when LANDING_TOKEN is missing", async () => {
     const result = await autoland({
