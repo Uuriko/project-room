@@ -11,9 +11,10 @@ import { validId } from "../../src/events.js";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 import { exactResultDestination, resultDiscussionPath } from "../../src/record-link.js";
 import { roomFileChangeSelection } from "../../src/workspace-artifact-link.js";
+import { validSourceObservation } from "../../src/work-packet.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
-const workHelp = "room work WORK_ID [--result | --include-source | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]\nRead the compact task brief. Add --include-source for the linked assignment message, or --discussion for shared files and discussion. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.";
+const workHelp = "room work WORK_ID [--result | --include-source [--from FILE] | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]\nRead the compact task brief. Add --include-source for the linked assignment message, or --discussion for shared files and discussion. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.\nTo refresh a linked source, pass its previous JSON read with --include-source --from FILE (or - for stdin). Keep the last body for not_modified. If the source is unavailable, stop using the saved body.";
 const requestHelp = "room request REQUEST_ID [--compact] [--cursor TOKEN]\nRead the selected request and follow its next page before responding.";
 const validCursor = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(value);
 
@@ -227,6 +228,13 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
       if (sourceRead?.tool === "room_read_work" && sourceRead.arguments?.roomId === config.roomId
           && sourceRead.arguments.workItemId === args.workItemId && sourceRead.arguments.includeSource === true)
         sourceRead.command = ["room", "work", args.workItemId, "--include-source"];
+      const source = value.context?.source;
+      if (args.includeSource && source) {
+        delete source.cliRefresh;
+        if (validSourceObservation(source.observation)) source.cliRefresh = {
+          origin: config.origin, command: ["room", "work", args.workItemId, "--include-source", "--from", "-"],
+        };
+      }
       const step = value.continuation;
       const shortcut = Object.keys(actions).find(name => actions[name] === step.tool);
       if (value.cliBasis?.actions[shortcut]) step.command = ["room", shortcut, "--from"];
@@ -303,14 +311,9 @@ export async function workCommand(argv, io = {}) {
         && Array.isArray(value.discussion?.items), io);
   }
   if (flag === "--include-source") {
-    if (!validId(workItemId) || argv.length !== 2) throw new Error(workHelp);
-    return runWorkflow("room_read_work", { workItemId, includeSource: true },
-      (value, { roomId, memberId }) => value.roomId === roomId && value.viewerId === memberId
-        && value.work?.id === workItemId && hasRevision(value.work.revision) && isRecord(value.continuation)
-        && (value.context?.source?.status === "included"
-          ? validId(value.context.source.message?.id) && value.context.source.message.id === value.work.sourceMessageId
-            && typeof value.context.source.message.body === "string"
-          : ["not_linked", "unavailable"].includes(value.context?.source?.status) && value.context.source.message === null), io);
+    if (!validId(workItemId) || !(argv.length === 2 || argv.length === 4 && since === "--from" && argv[3]))
+      throw new Error(workHelp);
+    return readAssignmentSource(workItemId, argv[3], io);
   }
   const includeResult = flag === "--result";
   const conditional = flag === "--since" && /^[a-f0-9]{64}$/.test(since ?? "");
@@ -324,6 +327,41 @@ export async function workCommand(argv, io = {}) {
       ? conditional && value.briefVersion === since && value.brief === undefined
       : typeof value.brief === "string")
     && (!includeResult || value.review?.workRevision === value.revision), io);
+}
+
+function matchesSourceObservation(observation, workItemId, { roomId, memberId }) {
+  return validSourceObservation(observation) && observation.workItemId === workItemId
+    && observation.roomId === roomId && observation.viewerId === memberId;
+}
+
+async function readAssignmentSource(workItemId, previousFile, io) {
+  const out = io.out ?? console.log;
+  let connection, previous;
+  try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env }); }
+  catch { out(JSON.stringify({ status: "refused", code: "saved_connection_required" })); return 1; }
+  if (previousFile !== undefined) {
+    try {
+      const packet = JSON.parse(await readInput(fileInput(previousFile, io), 512 * 1024));
+      const source = packet?.context?.source;
+      if (source?.cliRefresh?.origin === connection.config.origin
+          && matchesSourceObservation(source.observation, workItemId, connection.config)) previous = source.observation;
+    } catch { /* Invalid or inaccessible input is rejected before the network call. */ }
+    if (!previous) { out(JSON.stringify({ status: "refused", code: "source_selection_mismatch" })); return 1; }
+  }
+  return runWorkflow("room_read_work", { workItemId, includeSource: true, ...(previous ? { sourceObservation: previous } : {}) },
+    (value, config) => {
+      if (value.roomId !== config.roomId || value.viewerId !== config.memberId || value.work?.id !== workItemId
+          || !hasRevision(value.work.revision) || !isRecord(value.continuation)) return false;
+      const source = value.context?.source;
+      if (source?.status === "included") return validId(source.message?.id) && source.message.id === value.work.sourceMessageId
+        && typeof source.message.body === "string" && (source.observation == null
+          ? !previous : matchesSourceObservation(source.observation, workItemId, config) && source.observation.messageId === source.message.id);
+      if (source?.status === "not_modified") return previous && source.message === null
+        && source.observation?.messageId === value.work.sourceMessageId
+        && matchesSourceObservation(source.observation, workItemId, config)
+        && Object.keys(previous).every(key => previous[key] === source.observation[key]);
+      return ["not_linked", "unavailable"].includes(source?.status) && source.message === null && source.observation == null;
+    }, io, undefined, connection);
 }
 
 export async function resultCommand(argv, io = {}) {

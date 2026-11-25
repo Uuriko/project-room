@@ -114,7 +114,7 @@ test("a returning agent submits from the fresh revision after a heartbeat", asyn
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
 test(`${representation} pickup opens only the linked assignment source with the project connection`, async t => {
-  const { store, owner, producer, cli } = await fixture(t, representation);
+  const { store, owner, producer, reviewer, reviewerProject, cli } = await fixture(t, representation);
   const workItemId = "first-assignment", body = "The agreed contract is https://docs.example.test/contract.";
   store.command(owner, "commons", { id: "assignment-source", type: "message.posted",
     data: { messageId: "assignment-source", body } });
@@ -141,6 +141,39 @@ test(`${representation} pickup opens only the linked assignment source with the 
   assert.equal(read.value.viewerId, producer.identityId);
   assert.equal(read.value.context.source.message.body, body);
   assert.doesNotMatch(JSON.stringify(read), /Unrelated project discussion/);
+  const refresh = ["work", workItemId, "--include-source", "--from", "-"];
+  assert.deepEqual(read.value.context.source.cliRefresh.command, ["room", ...refresh]);
+  const unchanged = await cli(refresh, read.value);
+  assert.equal(unchanged.code, 0, JSON.stringify(unchanged));
+  assert.equal(unchanged.value.context.source.status, "not_modified");
+  assert.equal(unchanged.value.context.source.message, null);
+  assert.doesNotMatch(JSON.stringify(unchanged), /docs.example.test/);
+  const wrongViewer = await cli(refresh, read.value, reviewerProject, async () => {
+    assert.fail("a cached observation may not be sent under another member");
+  });
+  assert.deepEqual(wrongViewer, { code: 1, value: { status: "refused", code: "source_selection_mismatch" } });
+  const wrongOrigin = structuredClone(read.value);
+  wrongOrigin.context.source.cliRefresh.origin = "https://other-room.example.test";
+  assert.deepEqual(await cli(refresh, wrongOrigin, undefined, async () => {
+    assert.fail("a cached observation may not be sent to a different origin");
+  }), wrongViewer);
+  assert.equal(store.headSequence("commons"), head);
+  store.command(owner, "commons", { id: "edit-source", type: "message.edited",
+    data: { messageId: "assignment-source", expectedMessageRevision: 0, body: "Use the new document instead." } });
+  const retainedAfterEdit = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
+  assert.equal(retainedAfterEdit.value.briefUnchanged, true);
+  assert.match(retainedAfterEdit.value.guidance, /sourceRead.*linked source/i);
+  const changed = await cli(refresh, unchanged.value);
+  assert.equal(changed.code, 0, JSON.stringify(changed));
+  assert.equal(changed.value.context.source.freshness, "changed");
+  assert.equal(changed.value.context.source.message.body, "Use the new document instead.");
+  const otherRead = await cli(["work", workItemId, "--include-source"], undefined, reviewerProject);
+  assert.equal(otherRead.code, 0, JSON.stringify(otherRead));
+  assert.equal(otherRead.value.viewerId, reviewer.identityId);
+  store.identities.unlink(owner, "commons", reviewer.identityId);
+  const revoked = await cli(refresh, otherRead.value, reviewerProject);
+  assert.equal(revoked.code, 1);
+  assert.doesNotMatch(JSON.stringify(revoked), /Use the new document|not_modified/);
   const mismatch = await cli(brief.value.sourceRead.command.slice(1), undefined, undefined, async (...args) => {
     const response = await fetch(...args);
     const result = await response.json();
@@ -148,10 +181,9 @@ test(`${representation} pickup opens only the linked assignment source with the 
     return Response.json(result);
   });
   assert.equal(mismatch.code, 1);
-  assert.doesNotMatch(JSON.stringify(mismatch), /docs.example.test/);
-  assert.equal(store.headSequence("commons"), head);
+  assert.doesNotMatch(JSON.stringify(mismatch), /docs.example.test|Use the new document/);
   store.command(owner, "commons", { id: "delete-source", type: "message.deleted",
-    data: { messageId: "assignment-source", expectedMessageRevision: 0 } });
+    data: { messageId: "assignment-source", expectedMessageRevision: 1 } });
   const updated = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
   assert.equal(updated.code, 0);
   assert.equal(updated.value.sourceRead, undefined);
@@ -159,10 +191,11 @@ test(`${representation} pickup opens only the linked assignment source with the 
   assert.equal(retainedWithoutSource.value.briefUnchanged, true);
   assert.equal(retainedWithoutSource.value.sourceRead, undefined);
   assert.doesNotMatch(retainedWithoutSource.value.guidance, /source/i);
-  const deleted = await cli(["work", workItemId, "--include-source"]);
+  const deleted = await cli(refresh, changed.value);
   assert.equal(deleted.code, 0);
   assert.equal(deleted.value.context.source.status, "unavailable");
-  assert.doesNotMatch(JSON.stringify(deleted), /docs.example.test/);
+  assert.equal(deleted.value.context.source.cliRefresh, undefined);
+  assert.doesNotMatch(JSON.stringify(deleted), /docs.example.test|Use the new document/);
 });
 
 test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {

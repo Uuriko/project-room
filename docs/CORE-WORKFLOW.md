@@ -147,6 +147,15 @@ available for reuse. If the brief changed, the response includes the new full
 brief. Use the new response for subsequent writes. If you lose the retained
 brief, read without `--since`.
 
+If the brief offers `sourceRead`, check the linked assignment message before
+reusing its text. Keep the JSON from `room work WORK_ID --include-source`.
+Run `room work WORK_ID --include-source --from FILE` (or pipe the saved JSON to
+`--from -`) from the same project connection. On `not_modified`, keep the last
+body you read. A changed source returns its replacement. If the source is
+unavailable, stop using the saved body and ask the requester for a current link.
+This checks the Room message that carries the reference. For a change within a
+linked document, read the document through its provider.
+
 Save the selected read as JSON and inspect it before acting. The command carries
 the fixed arguments and current version from that read. Supply write scope when
 Begin requires it. If Begin returns an unknown stage with a request ID, pass
