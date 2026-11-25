@@ -40,5 +40,5 @@ export function agentSigninRecord({ search = "", hash = "" }) {
 }
 
 export function resultDiscussionPath(roomId, messageId) {
-  return `/api/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/thread`;
+  return ["/api/rooms", encodeURIComponent(roomId), "messages", encodeURIComponent(messageId), "thread"].join("/");
 }
