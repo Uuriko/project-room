@@ -38,6 +38,11 @@ export class AgentHost {
 
   async #agentRequest(method, params) {
     if (method === "session/request_permission") {
+      const turn = this.recorders.get(params.sessionId);
+      if (turn?.allowTools === false) {
+        turn.blockedToolUse = true;
+        return { outcome: { outcome: "cancelled" } };
+      }
       if (!this.onPermission) return { outcome: { outcome: "cancelled" } };
       return this.onPermission({ threadKey: this.threadOf.get(params.sessionId) ?? null, ...params });
     }
@@ -75,24 +80,32 @@ export class AgentHost {
   }
 
   // Run one prompt turn on the thread's session. Returns the recorder and stopReason.
-  async prompt(threadKey, prompt, { sessionId, onDispatched = null, onFirstOutput = null } = {}) {
+  async prompt(threadKey, prompt, { sessionId, onDispatched = null, onFirstOutput = null, allowTools = true, timeoutMs = 0 } = {}) {
     if (!this.process) throw new Error("agent is not running");
     const id = sessionId ?? (await this.session(threadKey)).sessionId;
     const recorder = new TurnRecorder();
     let observed = false;
-    this.recorders.set(id, { update: update => {
+    const turn = { allowTools, blockedToolUse: false, update: update => {
       recorder.update(update);
       const kind = update?.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text'
         && typeof update.content.text === 'string' && update.content.text.trim() ? 'text'
         : update?.sessionUpdate === 'tool_call' && typeof update.toolCallId === 'string' && update.toolCallId.trim() ? 'tool' : null;
+      if (kind === 'tool' && !allowTools && !turn.blockedToolUse) {
+        turn.blockedToolUse = true;
+        this.cancel(threadKey);
+      }
       if (!observed && kind) { observed = true; safelyObserve(onFirstOutput, kind); }
-    } });
+    } };
+    this.recorders.set(id, turn);
     const peer = this.process.peer;
     try {
-      const pending = peer.request("session/prompt", { sessionId: id, prompt });
+      const pending = peer.request("session/prompt", { sessionId: id, prompt }, { timeoutMs });
       safelyObserve(onDispatched);
       const result = await pending;
-      return { recorder, stopReason: result?.stopReason ?? "end_turn" };
+      return { recorder, stopReason: result?.stopReason ?? "end_turn", blockedToolUse: turn.blockedToolUse };
+    } catch (error) {
+      if (error?.code === -32001) this.cancel(threadKey);
+      throw error;
     } finally { this.recorders.delete(id); }
   }
 
