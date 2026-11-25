@@ -361,7 +361,10 @@ for (const normalized of [false, true]) test(`an external receipt updates the re
   linkWithProof(f.store, f.keys.owner, "commons", agent, { memberId: recipientId, permissions: [] });
   f.keys[recipientId] = agent.secret;
   f.request("receipt-first", recipientId); f.request("receipt-other", recipientId);
+  f.request("receipt-human", normalized ? "observer" : "guest");
   const owner = await f.login("owner");
+  const human = await record(owner, "receipt-human");
+  assert.equal(await human.locator(".request-state[role=status]").textContent(), "Reply requested");
   const row = await record(owner, "receipt-first");
   const status = row.locator(".request-state[role=status]");
   assert.equal(await status.textContent(), "Waiting for acknowledgment");

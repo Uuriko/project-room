@@ -3239,8 +3239,11 @@ function requesterStatusLabel(request) {
   if (known || request.status !== "open") return known;
   if (request.progressState === "needs_input") return uiText("request.needsInput");
   if (request.progressState === "error") return uiText("request.reportedError");
-  return requestRunLabel(request.id, { showUnavailable: false }) ||
-    uiText(request.acknowledgedAt ? "request.acknowledged" : "request.waitingForAcknowledgment");
+  const run = requestRunLabel(request.id, { showUnavailable: false });
+  if (run) return run;
+  if (request.acknowledgedAt) return uiText("request.acknowledged");
+  return uiText(state.members[request.recipientId]?.kind === "agent"
+    ? "request.waitingForAcknowledgment" : "request.requested");
 }
 async function refreshRequestRuns({ force = false } = {}) {
   if(client.sectionAvailability('requestRuns')?.available===false)return;
