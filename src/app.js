@@ -7049,10 +7049,13 @@ function loadActionText(item, action) {
     entry.text = value.result.text;
     if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns, value.workThread?.correction, entry.compareFrom);
     const body = $("#action-text-body");
+    let hasExternalReference = false;
     if (entry.draftMessageId || entry.text.body === null) body.textContent = entry.text.body;
-    else renderSubmittedResultText(body, entry.text.body, roomId, { openInNewTab: true });
+    else hasExternalReference = renderSubmittedResultText(body, entry.text.body, roomId, { openInNewTab: true });
     const proposal = entry.text.proposal;
-    $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
+    const origin = $("#action-text-origin");
+    origin.textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
+    if (hasExternalReference) origin.append(uiText("result.externalReferenceSuffix"));
     if (value.current.workRevision !== entry.revision) { entry.needsReview = true; entry.error = "Work changed. Review current work before saving."; }
     syncActionForm();
     // NR-B: the exact text lands asynchronously and can push the focused

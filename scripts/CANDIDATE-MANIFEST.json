@@ -102,7 +102,7 @@
     "src/agent-invite-ui.js": "sha256:59dd07a3da0379ea0b5214d9462dbe5d82c5f9acad46c4b8ee08190835c17571",
     "src/agent-signin-page.js": "sha256:bd12efdafe474d67a5e53050bee973d323b27d43a179ee18df9386adfb2e3c03",
     "src/agent-signin-ui.js": "sha256:1b3e497e55ed24a857293880a3622401cf9543a8c49f350e38ec7a810f232279",
-    "src/app.js": "sha256:4f1ff491379bf85c5df3cd9e48e50cba7edc3f3742c4eaacc2fca5083b5df75a",
+    "src/app.js": "sha256:b19c7954a391c33cea1e009a28d708302de6fea313c03e22777279981e1b43c3",
     "src/auth-signin-ui.js": "sha256:144766e0999763ded6f81ac249d2d69899ef1bc8673c49b138d2ee5bf9bf8c73",
     "src/board-deeplink.js": "sha256:1c0829f21cafacfb78d01d0429083dffdd09aa7e329bcd23d2146e47ab24ecf9",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
@@ -162,7 +162,7 @@
     "src/result-availability.js": "sha256:2a8b09755dcc1ad32e84b5f68715ff71abbafa83c95a0343b86cdc1031cebdee",
     "src/result-comparison.js": "sha256:4d83a8280003af2286908f4e79d13b684cbb4c634468382d362ac64abc8b5e6f",
     "src/result-feedback.js": "sha256:16a54ba9531d5f37fc2cf1a1f6f19dd86cf8fa523296709d3a79078b1f8c8d57",
-    "src/result-reader.js": "sha256:4039ca46be4b10435b1a72cbab784d89db72605dbd2013828c5ddbb2dbf9a01d",
+    "src/result-reader.js": "sha256:369b31462f820f4deb20141482137467b54990497c65b7bb164e44700f6d2f42",
     "src/return-brief.js": "sha256:60fe009414d994d445baca3e7c36b36c8b6fce6490c7a0e0ab38bd674371e712",
     "src/room-administration.js": "sha256:27e9d03dfaef3247fc02bec3a98db79db18c8fe53bef026fd94f7b38ee1c0fd1",
     "src/room-charter.js": "sha256:a4d4ef0881a7e31541141ab583df5d59fa771f4259c859d9050fcb1c5dd6615e",
@@ -199,8 +199,8 @@
     "src/workspace-diff-parser.js": "sha256:2050ac289623983d9ffddede22fef1c09f150877834aa3068284b4af440c7dc9",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
     "src/workspace-previews-ui.js": "sha256:1a79a563ccf68f422fbb2214d590dab6c594c87d6a5e848c280847df40a82f14",
-    "strings/en.js": "sha256:2895a29e42ef4d3098e3253b4f690acf0b73afe35124a28600571ddf46a125fc",
-    "strings/en.json": "sha256:fadc378278264816f2b06f4954a350e0f4b4310188f27c65d0597e1f62d68ea6"
+    "strings/en.js": "sha256:c60cd39bc3c1016dfdbd74f0250cbf06c4e720d33bcbcd9de6c1a4951dfbb8da",
+    "strings/en.json": "sha256:70db06e645027179a850847805a9907f9f2a3a7abcc841e7609dbc3fd71ba9ca"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

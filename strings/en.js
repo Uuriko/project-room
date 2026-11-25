@@ -608,6 +608,7 @@ export default {
   "result.pendingCorrection": "Correction needed",
   "result.feedbackWithInstruction": "{summary} Requested change: {instruction}",
   "result.creditSuffix": " · Credited to {name}",
+  "result.externalReferenceSuffix": " · External references may change or require access.",
   "result.previousReview": "What the previous review flagged",
   "result.previewActions": "Preview actions",
   "connection.outageTitle": "Room temporarily unavailable",
