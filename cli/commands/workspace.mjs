@@ -396,11 +396,20 @@ export async function workspaceCommand(argv, io = {}) {
     if (changes?.id !== target.id || changes.head !== target.head || changes.revision !== target.revision
         || (changes.publisherId !== undefined || changes.patchDigest !== undefined)
           && (changes.publisherId !== target.publisherId || changes.patchDigest !== target.digest)
-        || changes.patch !== undefined || (target.file
-          ? changes.status !== "raw_available" && !workspaceChangeFile(changes.file ? [changes.file] : [], target.file)
-          : changes.status !== "raw_available" && !Array.isArray(changes.files)))
+        || changes.patch !== undefined)
       throw new Error("Room did not match the selected patch.");
-    out(changes);
+    const { id, base, head, revision, publisherId, patchDigest, historical, status, file, files } = changes;
+    const metadata = { id, base, head, revision, publisherId, patchDigest, historical };
+    if (status === "raw_available" && file === undefined && files === undefined) {
+      out({ ...metadata, status });
+    } else if (status === undefined && target.file && files === undefined
+        && workspaceChangeFile(file ? [file] : [], target.file)) {
+      out({ ...metadata, file });
+    } else if (status === undefined && !target.file && file === undefined && Array.isArray(files)) {
+      out({ ...metadata, files });
+    } else {
+      throw new Error("Room did not match the selected patch.");
+    }
     return 0;
   }
   if (!validId.test(flags.id ?? "")) throw new Error("--id must be the ID from room workspace start");

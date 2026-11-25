@@ -244,6 +244,14 @@ test("an expired Workspace file can be recovered only from its exact local Git p
   await assert.rejects(run(async () => Response.json({ roomId, viewerId: "another-member",
     changes: { id, revision: 1, head, publisherId, patchDigest: publication.patchDigest, status: "raw_available" } })),
   /did not confirm the Workspace identity/);
+  const rawAvailable = { id, revision: 1, head, publisherId, patchDigest: publication.patchDigest, status: "raw_available" };
+  for (const payload of [{ file: { path: "another-file.md", hunks: [] } }, { files: [] }]) {
+    await assert.rejects(run(async () => Response.json({ roomId, viewerId: "reviewer",
+      changes: { ...rawAvailable, ...payload } })), /did not match the selected patch/);
+  }
+  assert.deepEqual(output, []);
+  assert.equal(await run(async () => Response.json({ roomId, viewerId: "reviewer", changes: rawAvailable })), 0);
+  assert.deepEqual(output.pop(), rawAvailable);
   const calls = [];
   const read = async (url, options) => {
     calls.push(new URL(url).searchParams);
