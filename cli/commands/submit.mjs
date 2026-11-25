@@ -2,15 +2,17 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
 import { loadConnection } from "../paths.mjs";
+import { matchesOperationReceipt } from "./workflow.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { openPrivateJournal, privateDirectory } from "../../client/setup-journal.mjs";
-import { readInput, hasRevision, readSelectedBasis, operationFingerprint, submissionOperationKey } from "../selected-basis.mjs";
+import { readInput, hasRevision, isRecord, selectedBasis, readSelectedBasis, operationFingerprint, submissionOperationKey } from "../selected-basis.mjs";
 import { validId } from "../../src/events.js";
 
 const HELP = `room submit --from WORK.json [--operation ID] < result.json
 Compatibility: room submit WORK_ID --operation ID < result.json
 JSON fields are body, summary, nextAction, producerId (member ID or null),
 and optional maxCodeUnits. The compatibility form also requires expectedRevision.
+Older Rooms check the revision before posting. Updated Rooms check it atomically when posting.
 Use the same ID and JSON after an uncertain result. A receipt records submission.`;
 
 const hash = value => createHash("sha256").update(value, "utf8").digest("hex");
@@ -47,15 +49,43 @@ async function callRoom({ config, secret, fetchImpl }, name, args) {
     throw new Error("Uncertain Room response");
   }
   const rpc = await boundedJson(response);
-  if (rpc?.id !== id || rpc.jsonrpc !== "2.0") throw new Error("Invalid Room response");
+  if (rpc?.id !== id || rpc.jsonrpc !== "2.0" || Object.hasOwn(rpc, "error") === Object.hasOwn(rpc, "result"))
+    throw new Error("Invalid Room response");
   const value = rpc.result?.structuredContent;
   if (rpc.error || rpc.result?.isError) {
     if (value?.status === "unconfirmed" || value?.status >= 500) throw new Error("Uncertain Room response");
+    const detail = rpc.error?.data;
+    if (name === "room_post_message" && rpc.error?.code === -32602 && detail?.tool === name
+        && detail.reason === "invalid_arguments" && Array.isArray(detail.unexpected) && detail.unexpected.length === 1
+        && detail.unexpected[0] === "expectedRevision" && Array.isArray(detail.missing) && detail.missing.length === 0
+        && isRecord(detail.invalid) && Object.keys(detail.invalid).length === 0)
+      return { unsupportedDraftRevision: true };
     const code = value?.reason ?? value?.code ?? rpc.error?.data?.reason;
     return { refused: typeof code === "string" && /^[a-z][a-z0-9_]{0,79}$/.test(code) ? code : "room_refused" };
   }
-  if (!value || value.contractVersion !== 1) throw new Error("Invalid Room response");
+  if (!value || (name !== "room_read_work" && value.contractVersion !== 1)) throw new Error("Invalid Room response");
   return { value };
+}
+
+async function postDraft(call, config, draft, expectedRevision) {
+  const guarded = await call("room_post_message", { ...draft, expectedRevision });
+  if (!guarded.unsupportedDraftRevision) return guarded;
+
+  // An older server explicitly rejected the new field before dispatch. Check
+  // current eligibility, preserving recovery of any previously recorded post.
+  const work = await call("room_read_work", { workItemId: draft.workItemId, brief: true });
+  if (work.refused) return work;
+  if (work.value.roomId !== config.roomId || work.value.workItemId !== draft.workItemId
+      || !hasRevision(work.value.revision) || !work.value.continuation) throw new Error("Unmatched work read");
+  const basis = selectedBasis(work.value, config)?.actions.submit;
+  if (basis?.workItemId !== draft.workItemId || basis.expectedRevision !== expectedRevision) {
+    const prior = await call("room_receipt", { operationId: draft.id });
+    if (prior.refused) return prior;
+    if (!matchesOperationReceipt(prior.value, config, draft.id)) throw new Error("Unmatched draft receipt");
+    if (prior.value.status !== "recorded" || prior.value.eventType !== "message.posted")
+      return { refused: "result_draft_unavailable" };
+  }
+  return call("room_post_message", draft);
 }
 
 function matchesEvidence(basis, operation) {
@@ -125,8 +155,7 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
     let basis = saved?.basis;
     if (!basis) {
       stage = "draft";
-      const posted = await call("room_post_message", { workItemId, id: draftId, body,
-        maxResultCodeUnits: maxCodeUnits });
+      const posted = await postDraft(call, config, { workItemId, id: draftId, body, maxResultCodeUnits: maxCodeUnits }, expectedRevision);
       if (posted.refused) return report("refused", stage, { code: posted.refused, next });
       const post = posted.value;
       if (post.roomId !== roomId || post.actorId !== memberId || post.workItemId !== workItemId
