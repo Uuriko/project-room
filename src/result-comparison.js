@@ -4,27 +4,30 @@ import { uiText } from "./strings.js";
 // Show only the changed passages and their surrounding lines. Full versions
 // stay accessible through the exact result links even if a rewrite is large.
 function comparisonHtml(before, after, esc, structuredPatch) {
-  const heading = '<p class="form-hint"><strong>Resubmitted result.</strong> ';
+  const heading = summary => [
+    '<p class="form-hint"><strong>', esc(uiText("result.revisionHeading")), "</strong> ", esc(summary), "</p>",
+  ].join("");
   const patch = structuredPatch("", "", before, after, "", "", { context: 3, maxEditLength: 800 });
-  if (!patch) return heading + "Too many changed lines for an inline comparison. Open both versions to review the rewrite. Previous approval never carries over.</p>";
-  if (!patch.hunks.length) return heading + "No text changes from the previous version. Previous approval never carries over.</p>";
+  if (!patch) return heading(uiText("result.rewrite"));
+  if (!patch.hunks.length) return heading(uiText("result.sameRevisionText"));
 
   let removed = 0, added = 0, total = 0;
   const visible = [];
   for (const hunk of patch.hunks) {
-    if (total < 200) visible.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
+    if (total < 200) visible.push(esc(uiText("result.revisionRange", { before: hunk.oldStart, after: hunk.newStart })));
     for (const line of hunk.lines) {
       if (line.startsWith("-")) removed++;
       if (line.startsWith("+")) added++;
       if (++total <= 200) {
         const kind = line.startsWith("-") ? "removed" : line.startsWith("+") ? "added" : "same";
-        visible.push(`<span class="diff-${kind}">${esc(line)}</span>`);
+        const display = kind === "same" ? line : [line[0], line.slice(1)].join(" ");
+        visible.push(['<span class="diff-', kind, '">', esc(display), "</span>"].join(""));
       }
     }
   }
-  if (total > 200) visible.push(`… ${total - 200} more patch rows. Open both versions for the full text.`);
-  return heading + esc(uiText("result.comparisonSummary", { removed, added })) +
-    '</p><pre class="result-diff">' + visible.join("\n") + '</pre>';
+  if (total > 200) visible.push(esc(uiText("result.remainingPatchRows", { count: total - 200 })));
+  return [heading(uiText("result.comparisonSummary", { removed, added })),
+    '<pre class="result-diff">', visible.join("\n"), '</pre>'].join("");
 }
 
 // A comparison owns its pending read until cleared, replaced or invalidated.
@@ -49,7 +52,7 @@ export function createResultComparison({ client, getState, esc }) {
       }
     }
   }
-  function loadResultComparison(workItemId, previousId, text, box, owns) {
+  function loadResultComparison(workItemId, previousId, text, box, owns, correction) {
     clearResultComparison(box);
     if (!previousId) return;
     const comparison = { currentId: text.messageId, previousId: null, owns };
@@ -74,6 +77,13 @@ export function createResultComparison({ client, getState, esc }) {
       }
       if (typeof before !== "string") throw new Error("Previous version has no exact text");
       box.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch);
+      if (correction?.completionEventId === previousId && typeof correction.summary === "string" && correction.summary) {
+        const note = document.createElement("p"), label = document.createElement("strong");
+        label.textContent = uiText("result.previousReview");
+        note.className = "result-correction";
+        note.append(label, " ", correction.summary);
+        box.prepend(note);
+      }
       const earlierLink = exactResultHref({ roomId: previous.roomId, workItemId, completionEventId: previousId });
       if (earlierLink) {
         const paragraph = document.createElement("p");

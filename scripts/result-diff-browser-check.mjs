@@ -94,6 +94,7 @@ for (const width of [1440, 390]) {
     await reviewer.locator("#action-text-body").getByText(/Result B/).waitFor();
     const diff = reviewer.locator("#action-result-diff");
     await diff.waitFor({ state: "visible" });
+    assert.match(await diff.innerText(), /Name the owner in the final line/);
     assert.match(await diff.innerText(), /- Result A/);
     assert.match(await diff.innerText(), /\+ Result B/);
     assert.match(await diff.innerText(), /- Missing named owner/);

@@ -174,11 +174,9 @@ var Diff = class {
     }
     return ret;
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   castInput(value, options) {
     return value;
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   tokenize(value, options) {
     return Array.from(value);
   }

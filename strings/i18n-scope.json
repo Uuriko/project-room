@@ -127,6 +127,7 @@
   "src/strings.js",
   "src/updates-ui.js",
   "src/vendor-gitdiff-parser.js",
+  "src/vendor-jsdiff-patch.js",
   "src/webmcp.js",
   "src/work-announcements.js",
   "src/work-dependencies.js",

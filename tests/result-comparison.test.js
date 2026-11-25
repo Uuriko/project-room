@@ -72,8 +72,8 @@ test("long results show the late correction with local context", async () => {
   lines[511] = "Updated review decision";
   f.load(lines.join("\n")); f.respond(0, before); await settle();
   assert.match(f.box.innerHTML, /1 lines removed, 1 added/);
-  assert.match(f.box.innerHTML, /-Section 511/);
-  assert.match(f.box.innerHTML, /\+Updated review decision/);
+  assert.match(f.box.innerHTML, /- Section 511/);
+  assert.match(f.box.innerHTML, /\+ Updated review decision/);
   assert.match(f.box.innerHTML, /Section 510/);
   assert.doesNotMatch(f.box.innerHTML, /Section 100|more patch rows/);
 });
