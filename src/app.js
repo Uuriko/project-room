@@ -3865,7 +3865,7 @@ async function restoreWorkOrigin(ticket) {
   if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
   window.scrollTo(...origin.windowScroll);
   if (origin.type === "result") {
-    openLinkedResult(origin.result);
+    openLinkedResult(origin.result, { focusDecision: origin.focus?.id === "result-decision-source" });
   } else if (origin.type !== "updates") {
     const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
     const keyed = origin.focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === origin.focusKey) : null;
