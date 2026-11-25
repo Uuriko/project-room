@@ -30,7 +30,7 @@ async function fixture(t){
  };
  const old=Array.from({length:12},(_,i)=>({signalId:'old-wake-'+i,kind:'mention',messageId:'park-old-'+i,author:'owner',body:'Historical context '+i}));
  const wake=id=>({signalId:id+'-wake',kind:'mention',messageId:id,author:'owner',body:id});
- return{store,seeded,home,make,counts,logs,old,wake};
+ return{store,seeded,home,make,counts,logs,old,wake,post};
 }
 const saved=(bridge,id)=>bridge.chatReceipts.read(bridge.chatReceipts.key(id));
 test('real HTTP oversize ordinary batch parks all12wakes, and later question and FYI continue across restart',async t=>{
@@ -62,6 +62,39 @@ test(`unrelated ordinary failure ${status}/${code} is not downgraded to parked c
  bridge.room.thread=async(id,options)=>{if(id==='fresh-question'&&!options?.selected)throw new RoomError(status,code,'synthetic');return read(id,options);};
  await bridge.turn('fresh-question',[f.wake('fresh-question')]);const receipt=saved(bridge,'fresh-question-wake');
  assert.equal(receipt.phase,'queued');assert.equal(receipt.contextBlocked,undefined);assert.equal(f.counts.prompts.length,0);assert.equal(f.counts.acks.length,0);assert.equal(bridge.controller.signal.aborted,stopped);
+});
+test('locally oversized formal history leaves a visible error and an independent request proceeds after restart',async t=>{
+ const f=await fixture(t);
+ for(let i=0;i<100;i++)f.post('formal-history-'+i,{replyToId:'dm',toMemberId:'worker',body:'A base observation. '.repeat(175)});
+ const first=await f.make(),old={signalId:'large-formal-wake',messageId:'dm',author:'owner',body:'Please answer'};
+ await first.turn('dm',[old]);
+ assert.equal(first.controller.signal.aborted,false,f.logs.join(' | '));
+ assert.deepEqual(f.counts.prompts,[]);
+ const blocked=await first.room.requestContext('dm');
+ assert.equal(blocked.request.status,'open');
+ assert.equal(blocked.request.progressState,'error',f.logs.join(' | '));
+ assert.match(blocked.request.progressNote,/shorter request/);
+ assert.equal(blocked.request.contextMessageId,'formal-history-99');
+ f.post('independent-formal',{body:'Please review the independent result',toMemberId:'worker',requestKind:'reply'});
+ first.stop();
+
+ const second=await f.make();
+ await second.turn('dm',[old]);
+ let cursor=null, next;
+ for(let i=0;i<8&&!next;i++){
+  const page=await second.room.poll({hostId:second.connection.hostId,waitMs:0,cursor});
+  next=page.pendingWakes.find(wake=>wake.messageId==='independent-formal');
+  if(!page.more)break;
+  cursor=page.nextCursor;
+ }
+ assert.ok(next,'the independent request reaches the real wake queue');
+ await second.accept(next);
+ await second.queue.idle();
+ assert.equal((await second.room.requestContext('independent-formal')).request.status,'answered');
+ const stillOpen=await second.room.requestContext('dm');
+ assert.equal(stillOpen.request.progressEventId,blocked.request.progressEventId);
+ assert.equal(stillOpen.request.status,'open');
+ assert.deepEqual(f.counts.prompts,['independent-formal']);
 });
 test('incomplete formal context still stops unacknowledged and is never marked parked or answered',async t=>{
  const f=await fixture(t),bridge=await f.make();bridge.room.requestContext=async()=>{throw new RoomError(413,'formal_context_too_large','synthetic');};

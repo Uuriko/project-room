@@ -21,6 +21,19 @@ function pendingOverflow(context, value, code, actual, maximum) {
 const MAX_CONTEXT_BYTES = 4 * 65536;
 const invalid = reason => {throw new RoomError(409, 'formal_context_invalid', reason);};
 
+export class FormalContextLimit extends RoomError {
+  constructor(context, message) {
+    super(413, 'formal_context_too_large', message);
+    const request = context.request;
+    if (request.status === 'open' && context.current?.actions?.reply === true
+      && Number.isSafeInteger(request.revision) && request.revision >= 0
+      && typeof request.contextEventId === 'string' && request.contextEventId
+      && request.contextEventId === context.current.contextEventId) {
+      this.progressBasis = {id:request.id,revision:request.revision,contextEventId:request.contextEventId};
+    }
+  }
+}
+
 export async function readCompleteRequest(room, requestId) {
   let cursor = null, binding, last, bytes = 0;
   const items = [], seen = new Set();
@@ -34,7 +47,7 @@ export async function readCompleteRequest(room, requestId) {
     if (binding && binding !== identity) invalid('Request changed while reading; inspect again before execution');
     binding = identity;
     bytes += Buffer.byteLength(JSON.stringify(last));
-    if (bytes > MAX_CONTEXT_BYTES) throw new RoomError(413, 'formal_context_too_large', 'Request exceeds the listener context budget');
+    if (bytes > MAX_CONTEXT_BYTES) throw new FormalContextLimit(last, 'Request exceeds the listener context budget');
     if (!Array.isArray(last.page?.items)) invalid('Missing request page');
     items.push(...last.page.items);
     if (last.page.hasMore === false) return {...last, inspectedItems:items, allPagesRead:true};
@@ -42,7 +55,7 @@ export async function readCompleteRequest(room, requestId) {
     if (typeof cursor !== 'string' || !cursor || seen.has(cursor)) invalid('Invalid request continuation');
     seen.add(cursor);
   }
-  throw new RoomError(413, 'formal_context_too_large', 'Request exceeds the listener page budget');
+  throw new FormalContextLimit(last, 'Request exceeds the listener page budget');
 }
 
 // A second turn can classify a finished reply. It cannot replace its text.

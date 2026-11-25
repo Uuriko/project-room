@@ -12,11 +12,18 @@ import { RoomClient, RoomError } from "./room.mjs";
 import { AgentHost } from "./agent-host.mjs";
 import { ThreadQueue } from "./queue.mjs";
 import { buildPrompt, buildClaimPrompt, buildFormalPrompt } from "./prompt.mjs";
-import { readCompleteRequest, prepareFormalDelivery, deliverFormal, classifyFormalOutput, MAX_FORMAL_RESPONSE_CHARS } from './formal-delivery.mjs';
+import { readCompleteRequest, prepareFormalDelivery, deliverFormal, classifyFormalOutput, MAX_FORMAL_RESPONSE_CHARS, FormalContextLimit } from './formal-delivery.mjs';
 import { reviewBinding, readReview, reviewOutput, deliverReview, recordedReview, reviewParkReason, reviewRepairable, explicitVerdict, REVIEW_REPAIR_PROMPT } from './review-wake.mjs';
 import { renderTurn } from "./render.mjs";
 import { SessionMap } from "./sessions.mjs";
 import { PermissionBroker, decisionOf, DEFAULT_PERMISSION_TIMEOUT_MS } from "./permission.mjs";
+
+function formalErrorProgress(id, request, note) {
+  return {id, type:'reply_request.progressed', data:{
+    requestMessageId:request.id, expectedRequestRevision:request.revision,
+    ifCurrentContextEventId:request.contextEventId, progress:'error', note
+  }};
+}
 
 export const CRASH_LIMIT = 3;
 export const CRASH_WINDOW_MS = 5 * 60 * 1000;
@@ -925,7 +932,22 @@ export class Bridge {
     this.stageObserver.mark(receipt.signalIds, 'session_ready', receipt.requestId);
     // Session startup may overlap a correction or cancellation. Read the
     // complete request once afterwards, when its context can authorize the turn.
-    const formal = incomingRequest ? await readCompleteRequest(this.room, receipt.threadKey) : null;
+    let formal = null;
+    if (incomingRequest) {
+      try { formal = await readCompleteRequest(this.room, receipt.threadKey); }
+      catch (error) {
+        // A local bound can identify the open request even when the full
+        // transcript is too large to execute. Keep the exact error receipt;
+        // server/authority failures still use the bridge's normal stop rules.
+        if (!(error instanceof FormalContextLimit) || !error.progressBasis) throw error;
+        const {wakes:_wakes,...result} = receipt;
+        const note = "This request's history exceeds the receiver's context limit. Start a shorter request using the relevant excerpts and keep this history for reference.";
+        this.chatReceipts.save(key,{...result,phase:'result',body:note,ordinaryChat:false,
+          formalFailure:formalErrorProgress(receipt.requestId,error.progressBasis,note)});
+        if (this.chatReceipts.dir) this.stageObserver.mark(receipt.signalIds,'durable_result_saved',receipt.requestId);
+        return;
+      }
+    }
     if (formal && (formal.request.status !== 'open' || formal.current?.actions?.answer !== true)) {
       this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
     }
@@ -966,10 +988,7 @@ export class Bridge {
         formalFailed = true;
       } else body = renderTurn({text:'', tools:new Map()}, {error:error.message});
     }
-    const formalFailure = formalFailed ? { id:receipt.requestId, type:'reply_request.progressed', data:{
-      requestMessageId:formal.request.id, expectedRequestRevision:formal.request.revision,
-      ifCurrentContextEventId:formal.request.contextEventId, progress:'error', note:body
-    }} : null;
+    const formalFailure = formalFailed ? formalErrorProgress(receipt.requestId,formal.request,body) : null;
     // Save the exact filled recipe and answer BEFORE the first network send.
     // Drop the input copy after execution, retaining it only for an interrupted
     // started receipt that may need local inspection.
