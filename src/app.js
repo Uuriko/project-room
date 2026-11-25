@@ -5005,37 +5005,20 @@ function submitRequest(form) {
   // Keyboard/programmatic submission must respect the terminal-request state
   // used by the disabled button. An uncertain command still retries unchanged.
   if (request && request.status !== "open" && !pendingMessage) return;
-  const body = $("#message-input").value.trim();
-  if (!body) return;
-  const target = { body, toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
+  if (!$("#message-input").value.trim()) return;
   const hadPending = Boolean(pendingMessage);
-  let command = pendingMessage?.command;
-  submit(form, async current => {
+  try {
+    if (!pendingMessage) {
+      const data = replyDraftData(mode, { body: $("#message-input").value.trim(),
+        toMemberId: $("#message-to-select").value || null, replyToId, messageId: crypto.randomUUID(),
+        channelId: activeChannelId, roomId: identity.roomId });
+      pendingMessage = draftCommand(null, mode.kind === "cancelled" ? REPLY_CANCELLED : T.MESSAGE_POSTED, data);
+    }
+  } catch (error) { setComposerError(error.message); return; }
+  saveComposer();
+  const command = pendingMessage.command;
+  submit(form, async () => {
     try {
-      if (mode.aboutResult) {
-        let recorded = false;
-        if (command) {
-          const prior = await client.operationReceipt(command.id);
-          if (!current() || session !== identity || !state || composerKey() !== key) return;
-          if (!prior || (prior.status === "recorded" && prior.eventType !== command.type))
-            throw new Error("Room could not confirm the original request");
-          recorded = prior.status === "recorded";
-        }
-        if (!recorded) {
-          const anchor = resultReplyMode(conversation?.byId.get(mode.resultMessageId), mode.resultEventId);
-          if (anchor?.workItemId !== mode.workItemId) throw new Error("This result is no longer available");
-          const exact = await client.workResult(mode.workItemId, { completionEventId: mode.resultEventId });
-          if (!current() || session !== identity || !state || composerKey() !== key) return;
-          const text = exact?.result?.text;
-          if (text?.messageId !== mode.resultMessageId || text.withdrawnAt) throw new Error("This result is no longer available");
-        }
-      }
-      if (!command) {
-        const data = replyDraftData(mode, { ...target, messageId: crypto.randomUUID(), roomId: identity.roomId });
-        pendingMessage = draftCommand(null, mode.kind === "cancelled" ? REPLY_CANCELLED : T.MESSAGE_POSTED, data);
-        command = pendingMessage.command;
-      }
-      saveComposer();
       if (command.data.messageId) locallyOwnedMessageIds.add(command.data.messageId);
       const receipt = await client.send(command);
       if (generation !== client.generation || session !== identity || !state) return;
@@ -5057,7 +5040,8 @@ function submitRequest(form) {
       if (generation !== client.generation || session !== identity || !state) return;
       // draftRefused: only a refusal issued after the exact-operation lookup
       // (command_rejected, channel_archived) unlocks an earlier uncertain send.
-      if (draftRefused(error, hadPending)) pendingMessage = null;
+      const resultRefused = mode.aboutResult && error.code === "result_source_unavailable" && error.status === 409;
+      if (resultRefused || draftRefused(error, hadPending)) pendingMessage = null;
       saveComposer();
       // A DM refused by the consent gate names the recipient and the next
       // step, instead of surfacing the raw gate message.

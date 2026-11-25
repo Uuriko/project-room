@@ -133,7 +133,8 @@ export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, c
   const data = mode.kind === "request" ? { messageId, body, toMemberId, replyToId, requestKind: "reply",
       ...(channelId === undefined ? {} : { channelId }),
       ...(mode.followUpRequestId ? { toMemberId: mode.recipientId, replyToId: mode.responseMessageId, workItemId: mode.workItemId } : {}),
-      ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}) }
+      ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}),
+      ...(mode.aboutResult ? { resultCompletionEventId: mode.resultEventId } : {}) }
     : { messageId, body, toMemberId: mode.requesterId, replyToId: mode.requestMessageId,
       workItemId: mode.workItemId, responseToRequestId: mode.requestMessageId,
       expectedRequestRevision: mode.expectedRequestRevision, responseOutcome: mode.kind,
@@ -159,6 +160,10 @@ export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
 // Commands use this strict validator before the service stamps the event. Old
 // unmarked events may contain ignored fields; they must remain ordinary messages.
 export function replyPostMode(data) {
+  if (own(data, "resultCompletionEventId")) {
+    requireValid(data.requestKind === "reply" && id(data.resultCompletionEventId)
+      && id(data.workItemId) && id(data.replyToId), "An exact result question needs a work item, result completion, and evidence message");
+  }
   const fields = REPLY_FIELDS.filter(key => own(data, key));
   if (!fields.length) return null;
   const bodyKept = text(data.body, own(data, "responseToRequestId") ? MAX_REPLY_RESPONSE_CHARS : 4096) || (data.redacted === true && data.body == null);
@@ -198,7 +203,7 @@ export function prepareReplyPost(state, incoming) {
   // already permits it, so leaving it out here refused every reply request and
   // every answer with "Unexpected reply request fields".
   // PRIV-1: rewritten reply-request posts carry redacted:true and a null body.
-  const allowed = ["messageId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", "redacted", "answerCredential", ...REPLY_FIELDS];
+  const allowed = ["messageId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", "redacted", "answerCredential", "resultCompletionEventId", ...REPLY_FIELDS];
   requireValid(Object.keys(data).every(key => allowed.includes(key)), "Unexpected reply request fields");
   requireValid(!own(data, "answerCredential") || mode === "respond" && ANSWER_CREDENTIALS.includes(data.answerCredential),
     "Invalid answer credential");

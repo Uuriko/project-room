@@ -437,6 +437,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     await requester.locator("#request-mode-bar").waitFor({ state: "hidden" });
     assert.equal(commands.length, 2);
     assert.deepEqual(commands[0], commands[1]);
+    assert.equal(commands[0].data.resultCompletionEventId, f.first.event.id);
 
     const pickup = await producer.orient({ focus: "needs_me" });
     assert.equal(pickup.replyRequests.length, 1);
@@ -475,21 +476,33 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     let attempted = 0;
     await interrupted.route("**/api/rooms/commons/commands", async route => {
       attempted++;
-      await route.abort("failed");
+      if (attempted === 1) await route.abort("failed");
+      else {
+        // Change authority after the browser starts sending, before the
+        // service transaction sees the command.
+        f.send("producer", T.MESSAGE_DELETED, { messageId: f.first.event.data.evidenceMessageId, expectedMessageRevision: 0 });
+        await route.continue();
+      }
     });
     await interrupted.getByRole("button", { name: "Send request", exact: true }).click();
     await interrupted.locator("#composer-status.error").waitFor();
     await interrupted.getByRole("button", { name: "Retry original", exact: true }).waitFor();
     assert.equal(attempted, 1);
     assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
-    f.send("producer", T.MESSAGE_DELETED, { messageId: f.first.event.data.evidenceMessageId, expectedMessageRevision: 0 });
     interrupted.once("dialog", dialog => dialog.accept());
     await interrupted.reload();
+    const refusal = interrupted.waitForResponse(response =>
+      new URL(response.url()).pathname.endsWith("/commands") && response.status() === 409);
     await interrupted.getByRole("button", { name: "Retry original", exact: true }).click();
+    assert.equal((await (await refusal).json()).error.code, "result_source_unavailable");
     await interrupted.locator("#composer-status").getByText(/result is no longer available/i).waitFor();
     assert.equal(await interrupted.locator("#message-input").inputValue(), uncommitted);
-    assert.equal(attempted, 1, "no command posts after an unrecorded operation fails the source check");
+    assert.equal(await interrupted.locator("#message-input").evaluate(input => input.readOnly), false);
+    assert.equal(attempted, 2, "the retry reached the server and was refused before commit");
     assert.equal((await producer.replyRequests({ direction: "incoming", status: "open" })).requests.length, 0);
+    const replay = f.store.command(f.keys["human-checker"], "commons", commands[0]);
+    assert.equal(replay.duplicate, true, "a committed retry survives withdrawal of the cited result");
+    assert.equal(replay.event.data.messageId, request.request.id);
   });
 }
 

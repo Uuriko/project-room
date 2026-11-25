@@ -743,7 +743,7 @@ const shapes = {
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
-  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll resultCompletionEventId ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -7426,6 +7426,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
+      if (requestMode === "open" && command.data.resultCompletionEventId) {
+        const { workItemId, resultCompletionEventId: completionEventId, replyToId, toMemberId } = command.data;
+        // This runs inside the writer transaction, after exact idempotent
+        // replay. No new request can commit on a stale evidence reference.
+        try {
+          const selected = this.workResult(token, roomId, workItemId, { completionEventId, expectedSessionBinding });
+          const text = selected.result?.text;
+          const source = selectedMessageRecord(this, roomId, replyToId, Boolean(room.state.messagesArchive));
+          if (text?.messageId !== replyToId || typeof text.body !== "string" || text.withdrawnAt || !source || source.deletedAt || source.toMemberId
+            || !messageInHistory(source, this.historyFloor(roomId, toMemberId, room.sequence)))
+            fail(409, "result_source_unavailable", "This result is no longer available to both participants");
+          assertSelectedWorkVisible(this, roomId, workItemId, room.state.workItems[workItemId], toMemberId);
+        } catch (error) {
+          if (["work_private", "work_not_found", "result_not_found", "result_unavailable"].includes(error.code))
+            fail(409, "result_source_unavailable", "This result is no longer available to both participants");
+          throw error;
+        }
+      }
       const endingRequest = (requestMode === "respond" || command.type === T.REPLY_REQUEST_CANCELLED)
         && room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId]?.status === "open";
       const endingHelp = command.type === T.WORK_HELP_UPDATED && command.data.status === "withdrawn"
