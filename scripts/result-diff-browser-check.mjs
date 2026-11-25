@@ -93,7 +93,8 @@ async function review(page, result, summary) {
 
 for (const width of [1440, 390]) {
   test(`result revision journey ${width}px: review correction, compare resubmission and return`, { timeout: 60000 }, async t => {
-    const f = await setup(t, width), reviewer = await f.login("human-checker");
+    const f = await setup(t, width);
+    let reviewer = await f.login("human-checker");
     await clickWorkAction(await openWorkFromSearch(reviewer, "revision-journey", "Revise a short result"), "verify");
     await reviewer.locator("#action-text-body").getByText(/Result A/).waitFor();
     assert.equal(await reviewer.locator("#action-result-diff").isVisible(), false, "first result has no comparison");
@@ -107,7 +108,27 @@ for (const width of [1440, 390]) {
     const second = f.complete(revisedBody);
     assert.equal(f.item().receipt.nativeText.previousCompletionEventId, f.first.event.id);
     assert.notEqual(f.item().verification?.completionEventId, second.event.id, "A review must not apply to B");
-    await clickWorkAction(await openWorkFromSearch(reviewer, "revision-journey", "Revise a short result"), "verify");
+    await reviewer.context().close();
+    reviewer = await f.login("human-checker");
+    await reviewer.locator("#topbar-updates").press("Enter");
+    const reviewRow = reviewer.locator("#updates-dialog .updates-row").filter({ hasText: "Revise a short result" });
+    const returnedReview = reviewRow.getByRole("button", { name: "Open Revise a short result", exact: true });
+    await reviewRow.getByText("Review needed", { exact: true }).waitFor({ timeout: 2500 });
+    assert.equal(await reviewRow.getByText("Owner decision needed", { exact: true }).count(), 0);
+    if (width === 390 && process.env.ROOM_REVIEW_CUE_CAPTURE) {
+      await reviewRow.screenshot({ path: join(process.env.ROOM_REVIEW_CUE_CAPTURE, "reviewer-updates.png") });
+    }
+    await returnedReview.press("Enter");
+    await reviewer.locator("#result-body").getByText(/Result B/).waitFor();
+    await reviewer.locator("#result-correction-summary").getByText("Name the owner in the final line").waitFor();
+    assert.equal(await reviewer.locator("#result-diff .result-correction").count(), 0, "the prior correction appears once in the result reader");
+    await reviewer.locator("#work-navigation-return").press("Enter");
+    await returnedReview.waitFor();
+    await reviewer.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Open Revise a short result");
+    await returnedReview.press("Enter");
+    await reviewer.locator("#result-body").getByText(/Result B/).waitFor();
+    await reviewer.locator("#result-work-action").waitFor();
+    await reviewer.locator("#result-work-action").press("Enter");
     await reviewer.locator("#action-text-body").getByText(/Result B/).waitFor();
     const diff = reviewer.locator("#action-result-diff");
     await diff.getByText("- Result A", { exact: true }).waitFor();
@@ -136,6 +157,11 @@ for (const width of [1440, 390]) {
     await owner.locator("#topbar-updates").click();
     const update = owner.locator('#updates-dialog .updates-row').filter({ hasText: "Revise a short result" });
     const open = update.getByRole("button", { name: "Open Revise a short result", exact: true });
+    await update.getByText("Owner decision needed", { exact: true }).waitFor({ timeout: 2500 });
+    assert.equal(await update.getByText("Review needed", { exact: true }).count(), 0);
+    if (width === 390 && process.env.ROOM_REVIEW_CUE_CAPTURE) {
+      await update.screenshot({ path: join(process.env.ROOM_REVIEW_CUE_CAPTURE, "owner-updates.png") });
+    }
     await open.waitFor();
     await owner.waitForFunction(() => document.querySelector(".attention-decision[data-duplicate-update]"));
     assert.equal(await owner.locator(".attention-decision[data-duplicate-update]").isVisible(), false);
