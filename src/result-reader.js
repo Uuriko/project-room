@@ -271,7 +271,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         && !matchesReceipt(view.receipt, item.receipt) && !view.readAfterReplacement) {
       const { generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails, recovered } = view;
       openResult({ generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails,
-        recovered, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: true }, item.title, false);
+        recovered, compareFrom: view.compareFrom, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: true }, item.title, false);
       return;
     }
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision

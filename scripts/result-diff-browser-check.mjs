@@ -272,6 +272,13 @@ test("returning from the first submission compares all changes across two revisi
   }
   const fresh = await f.login("human-checker", currentUrl);
   await fresh.locator("#result-diff").getByText(/No text changes from the previous version/).waitFor();
+  await page.locator("#cancel-action").click();
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Name the backup owner" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Named the backup" });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Owner: Maya, backup: Lee");
+  await page.getByRole("link", { name: "Open current result" }).waitFor();
+  await page.locator("#result-diff").getByText("- Owner: undecided", { exact: true }).waitFor();
 });
 
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
