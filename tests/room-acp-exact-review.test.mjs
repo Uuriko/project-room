@@ -11,7 +11,7 @@ import {RoomError} from '../room-acp/src/room.mjs';
 import {reviewOutput, reviewRepairable, explicitVerdict, unfencedJson, repeatedTopLevelKey, REVIEW_REPAIR_PROMPT} from '../room-acp/src/review-wake.mjs';
 import {linkWithProof} from './helpers/link-with-proof.mjs';
 
-async function setup(t, {respondTo, reviewScope, pending = false, nextAction, replies = [], observeStage} = {}) {
+async function setup(t, {respondTo, reviewScope, pending = false, nextAction, replies = [], observeStage, maxSessions} = {}) {
   const f = createAcceptanceFixture(), roomId = 'commons', workItemId = 'exact-review-work', memberId = 'exact-reviewer';
   const identity = f.store.identities.create('Exact reviewer');
   linkWithProof(f.store,f.keys.owner,roomId,identity,{memberId,permissions:['verify']});
@@ -22,18 +22,22 @@ async function setup(t, {respondTo, reviewScope, pending = false, nextAction, re
   const hostId = 'fixture-exact-review';
   f.store.workWakes.setHost(identity.identityId,hostId,true,roomId);
   const send = (member,type,data) => f.store.command(f.keys[member],roomId,{id:randomUUID(),type,data});
-  send('owner','work.proposed',{workItemId,title:'Exact agenda review',definitionOfDone:'Verify the named agenda owner.',
-    accountableMemberId:producerId,verifierMemberId:memberId,independentVerificationRequired:true,mode:'read'});
-  const current = () => f.store.room(roomId).state.workItems[workItemId];
-  const transition = (type,data={}) => f.store.command(producer.secret,roomId,{id:randomUUID(),type,
-    data:{workItemId,expectedRevision:current().revision,...data}});
-  transition('work.accepted');
-  transition('work.started');
-  const messageId = randomUUID(), body = 'Evidence for the agenda is ready.';
-  const post = f.store.command(producer.secret,roomId,{id:randomUUID(),type:'message.posted',data:{workItemId,messageId,body}});
-  const completion = transition('work.completed',{evidenceKind:'room_text',evidenceMessageId:messageId,
-    evidenceMessageEventId:post.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null,
-    producerId,summary:'Exact evidence',nextAction:'Review the stored text'});
+  const submitReview = id => {
+    send('owner','work.proposed',{workItemId:id,title:'Exact agenda review',definitionOfDone:'Verify the named agenda owner.',
+      accountableMemberId:producerId,verifierMemberId:memberId,independentVerificationRequired:true,mode:'read'});
+    const current = () => f.store.room(roomId).state.workItems[id];
+    const transition = (type,data={}) => f.store.command(producer.secret,roomId,{id:randomUUID(),type,
+      data:{workItemId:id,expectedRevision:current().revision,...data}});
+    transition('work.accepted');
+    transition('work.started');
+    const messageId = randomUUID(), body = 'Evidence for the agenda is ready.';
+    const post = f.store.command(producer.secret,roomId,{id:randomUUID(),type:'message.posted',data:{workItemId:id,messageId,body}});
+    const completion = transition('work.completed',{evidenceKind:'room_text',evidenceMessageId:messageId,
+      evidenceMessageEventId:post.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null,
+      producerId,summary:'Exact evidence',nextAction:'Review the stored text'});
+    return {completion,current,body};
+  };
+  const {completion,current,body} = submitReview(workItemId);
   const server = createRoomServer({store:f.store});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(async()=>{ server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
@@ -41,10 +45,10 @@ async function setup(t, {respondTo, reviewScope, pending = false, nextAction, re
   const connection = {apiBase:`http://127.0.0.1:${server.address().port}`,roomId,memberId,credential:identity.secret,hostId};
   const counts = {prompt:0,write:0,receipt:0,ack:0}, prompts = [];
   function make() {
-    const bridge = new Bridge({connection,respondTo,reviewScope,observeStage,waitMs:0,env:{ROOM_ACP_HOME:join(f.directory,'acp-host')},host:{
+    const bridge = new Bridge({connection,respondTo,reviewScope,observeStage,maxSessions,waitMs:0,env:{ROOM_ACP_HOME:join(f.directory,'acp-host')},host:{
       session:async()=>({sessionId:'fixture-review-session'}),prompt:async(_key,prompt,options)=>{
         counts.prompt++;
-        prompts.push({prompt,sessionId:options?.sessionId});
+        prompts.push({prompt,sessionId:options?.sessionId,timeoutMs:options?.timeoutMs,allowTools:options?.allowTools});
         if (prompt !== REVIEW_REPAIR_PROMPT) assert.match(prompt[0].text,/Evidence for the agenda is ready/);
         if (replies.length) { const reply = replies.shift(); return typeof reply === 'string' ? {stopReason:'end_turn',recorder:{text:reply}} : reply; }
         const result = pending ? 'pending' : nextAction ? 'fail' : 'pass';
@@ -82,7 +86,7 @@ async function setup(t, {respondTo, reviewScope, pending = false, nextAction, re
     return value.structuredContent;
   };
   const receipt = () => bridge.reviewReceipts.read(bridge.reviewReceipts.key(wake.signalId));
-  return {bridge,wake,counts,prompts,make,receipt,receiptPhase:()=>receipt()?.phase,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer};
+  return {bridge,wake,counts,prompts,make,receipt,receiptPhase:()=>receipt()?.phase,verdict,pendingRows,recordCompetingVerdict,correctionSignals,readAsProducer,submitReview,poll:()=>bridge.room.poll({hostId,waitMs:0})};
 }
 
 test('an ACP failed review hands the exact reproducer to the producer with one protected wake read',async t=>{
@@ -406,6 +410,41 @@ test('a completed review with malformed verdict text gets one same-session repai
   await restarted.queue.idle();
   assert.equal(f.counts.prompt,2);
   assert.equal(f.counts.write,1);
+});
+
+for (const failure of ['timeout','tool use'])test(`a bounded review format retry parks after ${failure} without posting or rerunning`,async t=>{
+  const f = await setup(t,{replies:[malformed6411,repaired6411],maxSessions:1});
+  const prompt = f.bridge.host.prompt;
+  f.bridge.host.prompt = async (key,text,options) => {
+    const result = await prompt(key,text,options);
+    if(text!==REVIEW_REPAIR_PROMPT)return result;
+    assert.equal(options.timeoutMs,15000);
+    assert.equal(options.allowTools,false);
+    if(failure==='timeout')throw Object.assign(new Error('session/prompt timed out'),{code:-32001});
+    return {...result,blockedToolUse:true};
+  };
+  await f.bridge.accept(f.wake);
+  await f.bridge.queue.idle();
+  assert.equal(f.prompts[0].timeoutMs,undefined,'ordinary evidence gathering keeps its existing runtime');
+  assert.equal(f.receiptPhase(),'needs_review');
+  assert.equal(f.receipt().reason,'turn_interrupted');
+  assert.equal(f.pendingRows().delivered_at,null);
+  assert.equal((await f.readAsProducer(f.wake.nextRead)).reviewRuntime.status,'interrupted');
+  assert.deepEqual(f.counts,{prompt:2,write:0,receipt:0,ack:0});
+  const {completion} = f.submitReview('independent-exact-review');
+  const pending = (await f.poll()).pendingWakes;
+  const next = pending.find(wake=>wake.completionEventId===completion.event.id);
+  assert.ok(next);
+  await f.bridge.accept(next);
+  await f.bridge.queue.idle();
+  assert.equal((await f.readAsProducer(next.nextRead)).reviewRuntime.status,'verdict_recorded');
+  assert.equal((await f.readAsProducer(f.wake.nextRead)).reviewRuntime.status,'interrupted');
+
+  const restarted = f.make();
+  await restarted.lease();
+  await restarted.accept(f.wake);
+  await restarted.queue.idle();
+  assert.equal(f.counts.prompt,3);
 });
 
 test('a second malformed reply parks after exactly one repair, and the bound survives restart',async t=>{

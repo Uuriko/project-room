@@ -27,7 +27,7 @@ function formalErrorProgress(id, request, note) {
 
 export const CRASH_LIMIT = 3;
 export const CRASH_WINDOW_MS = 5 * 60 * 1000;
-const FORMAL_FORMAT_TIMEOUT_MS = 15_000;
+const FORMAT_ONLY_TIMEOUT_MS = 15_000;
 // The Room pages pending wakes (50 per page) and reports more/nextCursor.
 // One poll cycle follows at most this many pages, so a queue that grows
 // while the bridge sleeps drains across cycles instead of looping here.
@@ -672,32 +672,45 @@ export class Bridge {
           }});
         this.stageObserver.mark(signalIds,'review_prompt_returned',receipt.requestId);
         this.stats.turns++;
-        let output = reviewOutput(recorder,stopReason);
+        let output = reviewOutput(recorder,stopReason), repairInterrupted = false;
         // Nothing has been submitted for this receipt yet. Allow one durable,
         // same-session format repair; explicit pending still parks.
         if (!output && !receipt.repaired && reviewRepairable(recorder,stopReason) && !this.controller.signal.aborted) {
           const stated = explicitVerdict(recorder);
           this.reviewReceipts.save(key,receipt = {...receipt,repaired:true});
-          ({recorder, stopReason} = await this.host.prompt(threadKey,REVIEW_REPAIR_PROMPT,{sessionId}));
-          this.stageObserver.mark(signalIds,'review_repair_returned',receipt.requestId);
-          this.stats.turns++;
-          output = reviewOutput(recorder,stopReason);
+          try {
+            const repaired = await this.host.prompt(threadKey, REVIEW_REPAIR_PROMPT, {
+              sessionId, allowTools:false, timeoutMs:FORMAT_ONLY_TIMEOUT_MS,
+            });
+            ({recorder, stopReason} = repaired);
+            this.stageObserver.mark(signalIds,'review_repair_returned',receipt.requestId);
+            this.stats.turns++;
+            repairInterrupted = Boolean(repaired.blockedToolUse || recorder.tools?.size);
+            output = repairInterrupted ? null : reviewOutput(recorder,stopReason);
+          } catch (error) {
+            if (error?.code !== -32001) throw error;
+            repairInterrupted = true;
+          }
           if (output && stated && output.result !== stated) {
             this.log(`exact review ${binding.workItemId} repair reversed an explicit ${stated}; not filed`);
             output = null;
           }
         }
         if (!output) {
-          const reason = reviewParkReason(recorder, stopReason);
-          this.reviewReceipts.save(key,{...receipt,phase:'needs_review',reason,body:'No supported final verdict. Use the exact Work Thread action.'});
+          const reason = repairInterrupted ? 'turn_interrupted' : reviewParkReason(recorder, stopReason);
+          const body = repairInterrupted ? 'Verdict formatting was interrupted. Review the exact result in the Work Thread.'
+            : 'No supported final verdict. Use the exact Work Thread action.';
+          receipt = {...receipt,phase:'needs_review',reason,body};
+          this.reviewReceipts.save(key,receipt);
           this.stageObserver.mark(signalIds,'review_parked',receipt.requestId);
           this.log(`exact review ${binding.workItemId} needs evidence or manual review; wake remains pending`);
-          return;
+          if (!repairInterrupted) return;
+        } else {
+          receipt = {...receipt,phase:'result',result:output.result,body:output.summary,
+            ...(output.nextAction ? {nextAction:output.nextAction} : {})};
+          this.reviewReceipts.save(key,receipt);
+          if (this.reviewReceipts.dir) this.stageObserver.mark(signalIds,'durable_result_saved',receipt.requestId);
         }
-        receipt = {...receipt,phase:'result',result:output.result,body:output.summary,
-          ...(output.nextAction ? {nextAction:output.nextAction} : {})};
-        this.reviewReceipts.save(key,receipt);
-        if (this.reviewReceipts.dir) this.stageObserver.mark(signalIds,'durable_result_saved',receipt.requestId);
       }
       if (receipt.signalId !== signalId || !Object.entries(binding).every(([field,value])=>receipt.binding?.[field]===value)) return;
       if (receipt.phase === 'started' || receipt.reason === 'turn_interrupted') {
@@ -1021,7 +1034,7 @@ export class Bridge {
       'Choose answered or declined only if the whole previous reply should be shared with the requester as that outcome.',
       'Choose pending if the previous reply was progress, incomplete, or unsuitable to send in full.'
     ].join(' ')}];
-    const repaired = await this.host.prompt(receipt.threadKey, prompt, {sessionId, allowTools:false, timeoutMs:FORMAL_FORMAT_TIMEOUT_MS});
+    const repaired = await this.host.prompt(receipt.threadKey, prompt, {sessionId, allowTools:false, timeoutMs:FORMAT_ONLY_TIMEOUT_MS});
     this.stats.turns++;
     if (this.controller.signal.aborted || repaired.stopReason !== 'end_turn'
       || repaired.blockedToolUse || repaired.recorder.tools?.size) return;
