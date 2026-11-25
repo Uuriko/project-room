@@ -46,6 +46,29 @@ export function museSeenAction(handoff, roomId) {
   } };
 }
 
+// Called by the host only after it observes a stop on the delivered request.
+// The ACK and checkpoint by themselves do not identify why a turn stopped.
+export async function reportMuseHostStop({ client, policy, checkpoint, requestId, signal }) {
+  const saved = checkpoint.inFlight;
+  if (saved?.requestMessageId !== requestId || !validId(saved.contextEventId))
+    throw Error("muse_host_stop_checkpoint_mismatch");
+  const context = await client.replyContext(requestId, { view: "compact", signal });
+  const request = context.request;
+  if (context.roomId !== policy.roomId || context.viewerId !== policy.memberId
+    || context.roomCreatedEventId !== saved.roomCreatedEventId || !matches(request, policy)
+    || request.id !== saved.requestMessageId || request.requesterId !== saved.requesterId
+    || request.openingEventId !== saved.openingEventId || request.contextEventId !== saved.contextEventId
+    || request.revision !== saved.requestRevision || !request.acknowledgedAt)
+    throw Error("muse_host_stop_context_changed");
+  const receipt = await client.command({ id: `muse-host-stop-${saved.contextEventId}`, type: "reply_request.progressed",
+    data: { requestMessageId: requestId, expectedRequestRevision: saved.requestRevision,
+      ifCurrentContextEventId: saved.contextEventId, progress: "error",
+      note: "The host stopped this request before returning a result." } }, { signal });
+  if (!validId(receipt?.event?.id) || !integer(receipt.sequence))
+    throw Error("muse_host_stop_unconfirmed");
+  return { status: "reported", sequence: receipt.sequence, duplicate: receipt.duplicate === true };
+}
+
 function pointer(context, candidate, policy, after, receiverAck = false) {
   const current = context.request;
   const alreadySeen = current?.acknowledgedAt || current?.progressState;
@@ -302,6 +325,7 @@ async function runRecovery({ client, directory, file, policy, statusFile, signal
 
 async function main([configFile, connectionDirectory, mode, ...extra]) {
   const routeCheck = mode === "--check-route";
+  const reportStop = mode === "--report-host-stop" && extra.length === 1 && validId(extra[0]);
   const receiverAck = extra.includes("--receiver-ack"), advertiseScope = extra.includes("--advertise-scope");
   const settlementPrefix = "--after-settlement=";
   const settlementFlags = extra.filter(flag => flag.startsWith(settlementPrefix));
@@ -309,9 +333,10 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
   const armedFlags = mode === "--stay-armed" && new Set(extra).size === extra.length
     && settlementFlags.length <= 1 && (!settlementFlags.length || receiverAck && validId(afterSettlement))
     && extra.every(flag => flag === "--receiver-ack" || flag === "--advertise-scope" || flag.startsWith(settlementPrefix));
-  if (extra.length && !armedFlags && !routeCheck || mode !== undefined && !["--once", "--stay-armed", "--recover", "--check-route"].includes(mode) || !isAbsolute(configFile ?? "")
+  if (extra.length && !armedFlags && !routeCheck && !reportStop || mode !== undefined
+    && !["--once", "--stay-armed", "--recover", "--check-route"].includes(mode) && !reportStop || !isAbsolute(configFile ?? "")
     || connectionDirectory !== "-" && !isAbsolute(connectionDirectory ?? ""))
-    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack [--after-settlement=REQUEST_ID]] [--advertise-scope] | --recover | --check-route REQUESTER WORK_ITEM_OR_DASH [REQUEST_ID]]");
+    throw Error("Usage: node scripts/muse-stream-handoff.mjs /private/handoff.json [/private/room-connection | -] [--once | --stay-armed [--receiver-ack [--after-settlement=REQUEST_ID]] [--advertise-scope] | --recover | --check-route REQUESTER WORK_ITEM_OR_DASH [REQUEST_ID] | --report-host-stop REQUEST_ID]");
   const directory = dirname(realpathSync(configFile));
   const connection = connectionDirectory === "-" ? await readConnectionInput() : readAgentConnection(connectionDirectory);
   assertPrivatePath(directory, true);
@@ -323,6 +348,13 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
       throw Error("Route check requires a requester, a work item or -, and optionally an exact request id");
     const status = checkMuseRoute(policy, { requesterId, workItemId: workItem === "-" ? null : workItem, id });
     console.log(JSON.stringify({ status, liveness: "unknown" }));
+    return;
+  }
+  if (reportStop) {
+    const { checkpoint } = loadCheckpoint(join(directory, "stream-checkpoint.json"), policy);
+    const result = await reportMuseHostStop({ client: new RoomAgentClient(connection), policy, checkpoint,
+      requestId: extra[0], signal: AbortSignal.timeout(10000) });
+    console.log(JSON.stringify(result));
     return;
   }
   const owner = new WatchJournal(join(directory, mode === "--recover" ? "recovery-watch" : "watch"));

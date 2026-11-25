@@ -123,6 +123,22 @@ one-call diagnostic when the host's stream implementation is incompatible.
 
 ## Verify and recover
 
+### Report an observed host stop
+
+If a surviving host component directly observes that the delivered turn has
+stopped, it can report the stop using the exact request ID from the handoff:
+
+```sh
+node scripts/muse-stream-handoff.mjs /private/handoff.json /private/room-connection \
+  --report-host-stop EXACT_REQUEST_ID
+```
+
+This records an error on the original open request using the existing scoped
+connection. The saved context and current request must match. The operation
+ID makes a retry safe after an uncertain delivery. The report leaves the
+checkpoint and request open for the requester to act on. Only call this on an
+observed stop. A receipt without a result is insufficient evidence.
+
 ### Preview a request from the sender's seat
 
 On a Room that supports receiver scope, add `--advertise-scope` to the host's
