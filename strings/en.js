@@ -609,6 +609,7 @@ export default {
   "result.invalidLink": "This result link is invalid. Ask the sender to copy the result link again.",
   "result.accepted": "Accepted",
   "result.decisionLabel": "Decision",
+  "result.openDecisionSource": "Open decision note",
   "result.nextLabel": "Next",
   "result.openCurrentVersion": "Open current result",
   "result.releaseRecord": "Open recorded evidence",

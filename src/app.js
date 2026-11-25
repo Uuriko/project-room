@@ -6945,6 +6945,7 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
     return selectedMessage.sync(client.sequence);
   },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onOpenDecision(messageId) { return navigateWorkRecord("message", messageId); },
   onOpenWorkspace(url, message, artifactId) {
     const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;
     history.pushState(workHistoryState(), "", url.href);

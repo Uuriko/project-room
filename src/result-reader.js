@@ -12,7 +12,7 @@ import { currentResult } from "./work-selectors.js";
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, discussionMessage, loadDiscussion, memberLabel, workRecord, focusRecord,
-  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, onOpenWorkspace, storage = null, recoveryScope = () => null }) {
+  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, onOpenWorkspace, onOpenDecision, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null, pointerSelection = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
@@ -260,6 +260,16 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const note = releaseEvidenceLink(`#pr-record/message/${encodeURIComponent(report.messageId)}`, uiText("result.releaseRecord"));
     source.replaceChildren(document.createTextNode(uiText("result.releaseReporter", { name: memberLabel(report.reportedById) })), " ", note);
   }
+  const decisionLink = resultElement("result-decision-source");
+  if (decisionLink) {
+    decisionLink.textContent = uiText("result.openDecisionSource");
+    decisionLink.addEventListener("click", event => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const source = resultView?.decisionSource;
+      if (!usableText(resultView) || decisionLink.hidden || !source || isBusy()) { event.preventDefault(); return; }
+      if (onOpenDecision(source.messageId)) event.preventDefault();
+    });
+  }
   function resultStatus() {
     mountResultReader();
     const view = resultView;
@@ -364,12 +374,23 @@ export function installResultReader({ client, getState, getSession, sameSession,
         ? `Verification · ${finding.result === "pass" ? "Passed" : finding.result === "fail" ? "Failed" : "Recorded"}`
         : "Verification · Pending";
     }
+    if (decisionLink) {
+      decisionLink.hidden = true;
+      decisionLink.removeAttribute("href");
+    }
     if (current && context && item) {
       const next = nextWorkStep(item, Date.now(), getState().room.ownerId);
       resultElement("result-work-criteria").textContent = item.definitionOfDone;
       resultElement("result-work-verification").textContent = finding?.summary ?? "";
       resultElement("result-work-verification-row").hidden = Boolean(pending) || !finding?.summary;
       const accepted = !view.releaseChecks && item.ownerDecisionRequired && next.action === "complete";
+      const source = view.decisionSource;
+      if (accepted && decisionLink && source?.decisionEventId === item.decision?.eventId
+        && matchesReceipt(source, item.receipt)
+        && !getState().messages.some(message => message.id === source.messageId && (message.deletedAt || message.editedAt))) {
+        decisionLink.hidden = false;
+        decisionLink.href = source.href;
+      }
       const nextLabel = accepted ? uiText("result.accepted") : pending?.nextAction ?? next.label;
       resultElement("result-work-next-label").textContent = uiText(accepted ? "result.decisionLabel" : "result.nextLabel");
       resultElement("result-work-next").textContent = next.memberId
@@ -527,6 +548,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.receipt.evidenceVersion = value.result.receipt.evidenceVersion;
       view.selectionStatus = value.selection.status;
       view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
+      view.decisionSource = value.workThread?.decisionSource;
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
       }
