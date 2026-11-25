@@ -559,6 +559,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (!view.readAfterReplacement) resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = false;
       resultElement("result-current-version").hidden = true;
+      resultElement("result-current-version").removeAttribute("href");
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
       resultElement("result-copy-link").hidden = true;

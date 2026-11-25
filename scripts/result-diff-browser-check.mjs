@@ -740,11 +740,25 @@ test("an earlier result offers the newer version only when the same viewer can r
   await reviewer.locator("#result-current-version").getByText("Open current result").waitFor();
   assert.equal(await reviewer.locator("#result-current-version").getAttribute("href"), href(privateVersion.event.id));
 
+  let releaseRefresh, sawRefresh;
+  const refreshHeld = new Promise(resolve => { sawRefresh = resolve; });
+  const refreshGate = new Promise(resolve => { releaseRefresh = resolve; });
+  t.after(() => releaseRefresh());
+  await reviewer.route(url => url.searchParams.get("completionEventId") === f.first.event.id, async route => {
+    sawRefresh();
+    await refreshGate;
+    await route.continue();
+  });
   correct();
   const sharedVersion = f.complete("A revised result shared with the Room");
+  await refreshHeld;
+  assert.equal(await reviewer.locator("#result-current-version").getAttribute("href"), null);
+  assert.equal(await reviewer.locator("#result-body").textContent(), "Result A\nKeep this line\nMissing named owner");
+  releaseRefresh();
   const link = requester.locator("#result-current-version");
   await link.waitFor();
   assert.equal(await link.getAttribute("href"), href(sharedVersion.event.id));
+  assert.equal(await requester.locator("#result-body").textContent(), "Result A\nKeep this line\nMissing named owner");
   await link.press("Enter");
   await requester.locator("#result-body").getByText("A revised result shared with the Room").waitFor();
 });
