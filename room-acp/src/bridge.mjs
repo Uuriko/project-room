@@ -936,7 +936,7 @@ export class Bridge {
       : buildPrompt({roomTitle:this.title, thread, wakes, firstTurn:created});
     const started = {...receipt, phase:'started', ...(formal ? {formalContext:formal} : {})};
     this.chatReceipts.save(key, started);
-    let body, formalDelivery, formalPending, formalDraft, formalFailure, silent = false;
+    let body, formalDelivery, formalPending, formalDraft, formalFailed = false, silent = false;
     try {
       const {recorder, stopReason} = await this.host.prompt(receipt.threadKey, prompt, {sessionId,
         onDispatched: () => this.stageObserver.mark(receipt.signalIds, 'prompt_dispatch_attempt', receipt.requestId),
@@ -946,6 +946,7 @@ export class Bridge {
         const delivery = prepareFormalDelivery(formal, recorder.finalText ?? recorder.text, stopReason);
         body = delivery.kind === 'formal' ? delivery.recipe.command.data.body : delivery.body;
         if (delivery.kind === 'formal') formalDelivery = delivery;
+        else if (delivery.kind === 'invalid') formalFailed = true;
         else { formalPending = delivery.pendingReason; formalDraft = delivery.draft; }
       } else {
         const outcome = ordinaryTurn(recorder, stopReason);
@@ -957,13 +958,13 @@ export class Bridge {
       if (this.controller.signal.aborted) return;
       if (formal) {
         body = 'The agent turn failed. This request remains open.';
-        formalFailure = { id:receipt.requestId, type:'reply_request.progressed', data:{
-          requestMessageId:formal.request.id, expectedRequestRevision:formal.request.revision,
-          ifCurrentContextEventId:formal.request.contextEventId, progress:'error',
-          note:body
-        }};
+        formalFailed = true;
       } else body = renderTurn({text:'', tools:new Map()}, {error:error.message});
     }
+    const formalFailure = formalFailed ? { id:receipt.requestId, type:'reply_request.progressed', data:{
+      requestMessageId:formal.request.id, expectedRequestRevision:formal.request.revision,
+      ifCurrentContextEventId:formal.request.contextEventId, progress:'error', note:body
+    }} : null;
     // Save the exact filled recipe and answer BEFORE the first network send.
     // Drop the input copy after execution, retaining it only for an interrupted
     // started receipt that may need local inspection.

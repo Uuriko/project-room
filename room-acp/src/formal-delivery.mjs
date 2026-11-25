@@ -50,12 +50,12 @@ export function prepareFormalDelivery(context, output, stopReason) {
     || context.viewerId !== context.request.recipientId) invalid('Complete open recipient context is required');
   let value;
   const source = unfencedJson(output);
-  try {value = JSON.parse(source);} catch {return {kind:'pending', body:'The agent did not return an explicit answer or decline. This request remains open.'};}
+  try {value = JSON.parse(source);} catch {return {kind:'invalid', body:'The agent did not return an explicit answer or decline. This request remains open.'};}
   if (!value || typeof value !== 'object' || Array.isArray(value) || repeatedTopLevelKey(source)
     || Object.keys(value).some(key => !['outcome','body'].includes(key))
     || !['answered','declined','pending'].includes(value.outcome) || typeof value.body !== 'string'
     || !value.body.trim() || stopReason !== 'end_turn')
-    return {kind:'pending', body:'The agent did not finish a valid response. This request remains open.'};
+    return {kind:'invalid', body:'The agent did not finish a valid response. This request remains open.'};
   const bodyLimit = value.outcome === 'pending' ? 4096 : MAX_FORMAL_RESPONSE_CHARS;
   if (value.body.length > bodyLimit) return pendingOverflow(context,value,'formal_body_too_long',value.body.length,bodyLimit);
   if (value.outcome === 'pending') return {kind:'pending', body:value.body};

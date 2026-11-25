@@ -597,8 +597,8 @@ test('a newer requester correction fences out an obsolete ACP failure report', a
   assert.equal(selected.page.items.filter(item => item.kind === 'context').length, 1);
 });
 
-test('a lost ACP failure receipt recovers the frozen progress operation without another model turn', async t => {
-  const f = await fixture(t);
+for (const invalidOutput of [false,true]) test(`a lost ACP ${invalidOutput?'invalid response':'failure'} receipt recovers the frozen progress operation without another model turn`, async t => {
+  const f = await fixture(t, invalidOutput ? {text:'I checked the candidate but omitted the response envelope.'} : {});
   let turns = 0, lost = false;
   const operations = [];
   const transport = async (url, options) => {
@@ -614,17 +614,18 @@ test('a lost ACP failure receipt recovers the frozen progress operation without 
   };
   const bridge = f.make(transport);
   await f.ready(bridge);
-  bridge.host.prompt = async () => { turns++; throw new Error('model failed'); };
+  if(!invalidOutput)bridge.host.prompt = async () => { turns++; throw new Error('model failed'); };
   await bridge.turn('dm', [f.wake]);
   const saved = await f.read(bridge);
   const retry = f.make(transport);
   await f.ready(retry);
   await retry.turn('dm', [f.wake]);
   const current = await f.read(retry);
-  assert.equal(turns, 1);
-  assert.equal(f.counts.prompts, 0);
+  assert.equal(turns, invalidOutput ? 0 : 1);
+  assert.equal(f.counts.prompts, invalidOutput ? 1 : 0);
   assert.equal(operations.length, 2);
   assert.equal(operations[0], operations[1]);
+  assert.equal(current.request.status, 'open');
   assert.equal(current.request.progressState, 'error');
   assert.equal(current.request.progressEventId, saved.request.progressEventId);
   assert.equal(current.request.contextMessageId, 'dm');
