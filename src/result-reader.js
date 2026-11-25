@@ -13,12 +13,15 @@ const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a
 export function renderSubmittedResultText(body, text, roomId, { openInNewTab = false } = {}) {
   body.replaceChildren();
   // Preserve all submitted characters for copying and passage selection.
-  let offset = 0;
+  let offset = 0, hasExternalReference = false;
   for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
     const href = match[0], url = URL.parse(href);
     if (!url || url.href !== href) continue;
     const workspaceFile = url.pathname === location.pathname && roomFileChangeSelection(url, location.origin, roomId);
-    if (!workspaceFile && !githubFile.test(href)) continue;
+    if (!workspaceFile && !githubFile.test(href)) {
+      hasExternalReference ||= url.origin !== location.origin;
+      continue;
+    }
     const link = document.createElement("a");
     link.href = href;
     if (openInNewTab || url.origin !== location.origin) {
@@ -35,6 +38,7 @@ export function renderSubmittedResultText(body, text, roomId, { openInNewTab = f
     offset = match.index + href.length;
   }
   body.append(text.slice(offset));
+  return hasExternalReference;
 }
 
 // Owns only the pinned reader view. Session, composer, and work mutations stay
@@ -191,9 +195,6 @@ export function installResultReader({ client, getState, getSession, sameSession,
     else link.addEventListener("click", () => closeResult(false));
     return link;
   }
-  function showResultBody(text) {
-    renderSubmittedResultText(resultElement("result-body"), text, getSession().roomId);
-  }
   function showOutcome(outcome) {
     const panel = resultElement("result-outcome");
     panel.hidden = !outcome;
@@ -279,7 +280,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         && latest.eventId !== view.observedCompletionEventId && latest.eventId !== view.readAfterReplacement) {
       const { generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails, recovered } = view;
       openResult({ generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails,
-        recovered, compareFrom: view.compareFrom, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: latest.eventId }, item.title, false);
+        recovered, hasExternalReference: view.hasExternalReference, compareFrom: view.compareFrom, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: latest.eventId }, item.title, false);
       return;
     }
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
@@ -305,6 +306,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!earlier && view.loaded && !view.error && !view.withdrawn && !item?.verification) {
       const runtime = reviewRuntimeLabel(view.reviewRuntime?.status, view.reviewRuntime?.webhook);
       if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
+    }
+    if (usableText(view) && view.hasExternalReference) {
+      resultElement("result-status").append(uiText("result.externalReferenceSuffix"));
     }
     const newer = resultElement("result-current-version");
     const canOpenNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
@@ -514,7 +518,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
       showOutcome(view.withdrawn ? null : value.workThread?.outcome);
       const text = view.withdrawn ? "" : value.result.text.body;
-      if (!view.readAfterReplacement || resultElement("result-body").textContent !== text) showResultBody(text);
+      const body = resultElement("result-body");
+      if (!view.readAfterReplacement || body.textContent !== text) {
+        view.hasExternalReference = renderSubmittedResultText(body, text, view.roomId);
+      }
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);

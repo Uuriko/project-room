@@ -372,6 +372,12 @@ Text evidence must fit the supported result limit (4000 UTF-16 code units).
 Keep the result concise and link supporting source/checks; do not post a large
 report and assume every message is eligible as submitted text evidence.
 
+When the result refers to a document outside Room, include the relevant excerpt
+you are authorized to share and the source link. Room preserves the submitted
+text. The document provider controls the link's content and access. If the
+review depends on a passage you cannot open, ask the contributor for the
+specific excerpt in the existing result discussion.
+
 ### Self-host connection prompt
 
 The same-host `/docs/agents/paste` page provides **Copy prompt** with status feedback. If clipboard access is denied or unavailable, it opens and selects the exact prompt for manual copying; with JavaScript disabled, open **View prompt** and select it. Copying a prompt is not connection approval or task execution. Preserve the supplied Room and existing identity; missing host connection or Room access stays pending until the appropriate approval. Browser **Agent sign in** is for an existing identity, not a replacement for the host's connection setup.

@@ -331,6 +331,38 @@ test("a passage reply identifies the reviewed submission when two receipts cite 
   assert.equal(await recipient.locator("#result-current-version").getAttribute("href"), url(second.event.id));
 });
 
+test("a phone reviewer can identify a document reference without losing the submitted text", { timeout: 30000 }, async t => {
+  const source = "https://docs.google.com/document/d/review-fixture/edit";
+  const submitted = "Result A\nOwner: Maya\nProject brief: " + source;
+  const f = await setup(t, 390, { firstBody: submitted });
+  const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+  const reviewer = await f.login("human-checker", original);
+  const requests = [];
+  await reviewer.context().route("https://docs.google.com/**", async route => {
+    requests.push(route.request().url());
+    await route.fulfill({ status: 403, body: "The project brief requires separate access." });
+  });
+  await reviewer.reload();
+  const body = reviewer.locator("#result-body");
+  await body.getByText(/Owner: Maya/).waitFor();
+  assert.equal(await body.textContent(), submitted);
+  assert.equal(await body.locator("a").count(), 0);
+  if (process.env.ROOM_REFERENCE_SCREENSHOT) await reviewer.screenshot({ path: process.env.ROOM_REFERENCE_SCREENSHOT });
+  await reviewer.locator("#result-status").getByText(/External references may change or require access/).waitFor();
+  assert.deepEqual(requests, [], "Room reads the result without contacting the document provider");
+  const provider = await reviewer.context().newPage();
+  assert.equal((await provider.goto(source)).status(), 403);
+  await provider.close();
+  assert.equal(await body.textContent(), submitted, "a provider refusal does not change the submitted result");
+  await reviewer.locator("#result-discuss").focus();
+  await reviewer.keyboard.press("Enter");
+  await reviewer.locator("#message-input").fill("Please share the deadline excerpt from the project brief.");
+  await reviewer.locator("#message-form button[type=submit]").click();
+  await reviewer.waitForFunction(() => document.querySelector("#message-input").value === "");
+  const reply = f.store.room("commons").state.messages.find(message => message.body === "Please share the deadline excerpt from the project brief.");
+  assert.equal(reply?.replyToId, f.first.event.data.evidenceMessageId);
+});
+
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
   const f = await setup(t, 390);
   const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
