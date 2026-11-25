@@ -100,7 +100,7 @@ test("an outgoing continuation at a different observation cannot start an invest
 test("an outgoing continuation missing its completion metadata cannot start an investigation",
   t => checkScopedInvestigation(t, undefined, { paged: true, missingPage: true }));
 
-async function checkPlannedContinuation(t, representation) {
+async function checkPlannedContinuation(t, representation, { missingFirstPage = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-planned-continuation-"));
   const db = join(directory, "room.sqlite");
   const roomId = "commons", workItemId = "qa-work";
@@ -168,10 +168,23 @@ async function checkPlannedContinuation(t, representation) {
   }));
   await setImmediate();
   for (const { name } of lanes) assert.equal(status(`${name}-second`), "not_recorded");
+  if (missingFirstPage) {
+    const list = f.store.replyRequests.list.bind(f.store.replyRequests);
+    t.mock.method(f.store.replyRequests, "list", (secret, room, options) => {
+      const result = list(secret, room, options);
+      return options.direction === "outgoing" && options.status === "open"
+        ? { ...result, page: undefined }
+        : result;
+    });
+  }
   record("claude-seed", "claude");
   record("dot-seed", "dot");
   record("muse-seed", "muse", "declined");
   await setImmediate();
+  if (missingFirstPage) {
+    for (const { name } of lanes) assert.equal(status(`${name}-second`), "not_recorded");
+    return;
+  }
   assert.equal(status("claude-second"), "recorded", JSON.stringify(log));
   assert.equal(status("claude-third"), "not_recorded");
   assert.equal(status("dot-second"), "not_recorded");
@@ -224,6 +237,8 @@ test("legacy Room advances three explicit lanes through restart, refusal and com
   t => checkPlannedContinuation(t));
 test("normalized Room advances three explicit lanes through restart, refusal and competing work",
   t => checkPlannedContinuation(t, "normalized-current-v1"));
+test("normalized Room cannot continue a plan when its first outgoing page omits completion metadata",
+  t => checkPlannedContinuation(t, "normalized-current-v1", { missingFirstPage: true }));
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
   test(`an approved alternative waits for a fresh scoped receiver after decline (${representation})`, async t => {

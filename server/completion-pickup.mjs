@@ -3,6 +3,7 @@ import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
 import { validId } from "../src/events.js";
 import { listRoomWork } from "./mcp-room-profile.mjs";
+import { isCurrentRoom } from "./current-room-repository.mjs";
 
 const investigation = "Room investigation pass.";
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
@@ -45,7 +46,7 @@ function recipientHasOpenRequest(store, secret, { roomId, recipientId }, observa
         (item.lifecycle?.state !== "stale" || item.lifecycle.unresponsive !== true))) return true;
     // Legacy lists are unpaged. Once a cursor is offered, only explicit
     // terminal metadata can establish that the scan is complete.
-    if (!cursor && open.page === undefined) return false;
+    if (!cursor && open.page === undefined) return isCurrentRoom(store.db, roomId);
     if (open.page?.hasMore === false) return Boolean(open.page.nextCursor);
     if (open.page?.hasMore !== true) return true;
     cursor = open.page.nextCursor;
