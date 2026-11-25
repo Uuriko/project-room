@@ -197,7 +197,7 @@
     "src/workspace-change-view.js": "sha256:0d48219f7b3043f95718c4004542032afe9e46d284c9f822a81176c5ebd6cda7",
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "src/workspace-previews-ui.js": "sha256:a3fcc03326a1c05cd6cb0ab15c6c9cd704e4e98922c7d659b31049cec3b9843d",
+    "src/workspace-previews-ui.js": "sha256:8802a2db04a05f1bfe48e8c84c4d3d43b7e624bbca97eef343ff85ffcaf75daf",
     "strings/en.js": "sha256:8d165aaf8c472b8cc7ec368af445d9dfa842afb1c3cdeeadd8898ed74909033e",
     "strings/en.json": "sha256:7647879a43ee59883a148bc8bf6b447fefb3c39c954d0a434707238d824b5965"
   },

@@ -58,7 +58,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
           <button type="button" class="button ghost" role="tab" id="workspace-tab-output" aria-controls="workspace-panel-output" data-workspace-tab="output">Run output</button>
         </div>
         <section id="workspace-panel-changes" role="tabpanel" aria-labelledby="workspace-tab-changes" data-workspace-changes hidden>
-          <label>Compare with <select data-workspace-compare><option value="">Choose another attempt</option></select></label>
+          <label hidden>Compare with <select data-workspace-compare><option value="">Choose another attempt</option></select></label>
           <p data-workspace-change-status class="form-hint" role="status"></p>
           <div class="workspace-change-columns"><section data-workspace-primary></section><section data-workspace-peer hidden></section></div>
         </section>
@@ -297,7 +297,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     const previous = compare.value;
     const eligible = items.filter(item => item.id !== current.id && item.base === current.base && item.patchDigest);
     compare.replaceChildren(new Option("Choose another attempt", ""), ...eligible.map(item => new Option(item.title, item.id)));
-    compare.disabled = eligible.length === 0;
+    compare.closest("label").hidden = eligible.length === 0;
     if (eligible.some(item => item.id === previous)) compare.value = previous;
     void loadChanges();
   }

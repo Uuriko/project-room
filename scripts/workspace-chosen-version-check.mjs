@@ -85,6 +85,14 @@ try {
   await page.getByRole("button", { name: "Continue this version: Version b" }).click();
   await page.getByLabel("Instruction for this version").waitFor();
   assert.equal(await page.getByRole("button", { name: "Add to thread draft" }).count(), 0);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.evaluate(() => { window.items.pop(); });
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.locator("[data-preview-id]").first().click();
+  await page.getByRole("tab", { name: "Changes" }).click();
+  await page.getByLabel("Instruction for this version").waitFor();
+  assert.equal(await page.locator("[data-workspace-compare]").isVisible(), false);
+  assert.equal(await page.getByRole("button", { name: "Add to thread draft" }).isVisible(), true);
   assert.deepEqual(errors, []);
-  console.log("Both comparison columns, manual copy, return drafts, stale replacement and directed publication passed.");
+  console.log("Single publication, both optional comparison columns, manual copy, return drafts, stale replacement and directed publication passed.");
 } finally { await browser.close(); }
