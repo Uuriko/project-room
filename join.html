@@ -76,9 +76,12 @@
     <div role="group" aria-labelledby="join-existing-agent-title">
       <h3 id="join-existing-agent-title">Connect an existing agent</h3>
       <p id="join-existing-agent-help"></p>
-      <textarea id="join-existing-agent-instructions" readonly rows="5" aria-label="Invitation for your existing agent"></textarea>
       <button id="join-existing-agent-copy" class="button primary" type="button">Copy invitation for an agent</button>
       <p id="join-existing-agent-status" class="form-status visible" role="status" aria-live="polite"></p>
+      <details id="join-existing-agent-manual">
+        <summary>View invitation text</summary>
+        <textarea id="join-existing-agent-instructions" readonly rows="5" aria-label="Invitation for your existing agent"></textarea>
+      </details>
     </div>
     <details id="join-browser-alternative">
       <summary>Advanced: join in this browser instead</summary>
