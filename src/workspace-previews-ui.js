@@ -319,6 +319,14 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     heading.textContent = "Open a shared preview";
     meta.textContent = "";
   }
+  function showUnavailable(current) {
+    clearPreview();
+    linkStatus.textContent = uiText(current ? "workspace.share.stale" : "workspace.share.missing");
+    latest.hidden = !current;
+    latest.textContent = linked?.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
+      ? "Locate note in current patch" : uiText("workspace.share.openCurrent");
+    refreshDiscussion();
+  }
   function reset() {
     notes.clear(); selectStart(null);
     generation++; selected = null; linked = null; pendingFile = null; reviewLocation = null; threadDraft = null; clearPreview();
@@ -360,12 +368,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       if (linked && (!current || current.revision !== linked.revision || current.publisherId !== linked.publisherId
         || (linked.head && current.head !== linked.head)
         || artifactDigest(current, linked.panel) !== linked.digest)) {
-        clearPreview();
-        linkStatus.textContent = uiText(current ? "workspace.share.stale" : "workspace.share.missing");
-        latest.hidden = !current;
-        latest.textContent = linked.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
-          ? "Locate note in current patch" : uiText("workspace.share.openCurrent");
-        refreshDiscussion();
+        showUnavailable(current);
         return;
       }
       if (!current) return;
@@ -501,17 +504,27 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   addToThread.addEventListener("click", async () => {
     const snapshot = shareSelection(), destination = threadDraft;
     if (!snapshot || addToThread.hidden || addToThread.disabled || !destination) return;
+    const { current, session, panel, link } = snapshot;
+    const stillSelected = () => dialog.open && threadDraft === destination
+      && client.session === session && shareSelection()?.link === link;
+    const invalidate = replacement => {
+      generation++;
+      linked = workspaceArtifactSelection(new URL(link).hash);
+      items = items.filter(preview => preview.id !== current.id);
+      if (replacement) items.push(replacement);
+      showUnavailable(replacement);
+    };
     const note = noteInput.value.trim();
     addToThread.disabled = true;
     try {
-      const { current, session, panel, link } = snapshot;
       const query = new URLSearchParams({ id: current.id });
       const observed = await client.roomRead(`/workspace-previews?${query}`);
-      if (!dialog.open || threadDraft !== destination || client.session !== session || shareSelection()?.link !== link) return;
+      if (!stillSelected()) return;
       const item = observed?.item;
-      if (!item || item.recipientId || item.revision !== current.revision || item.head !== current.head
+      if (!item || item.id !== current.id || item.recipientId || item.revision !== current.revision || item.head !== current.head
         || item.publisherId !== current.publisherId || artifactDigest(item, panel) !== artifactDigest(current, panel)) {
-        linkStatus.textContent = uiText("workspace.share.stale"); return;
+        invalidate(item?.id === current.id && !item.recipientId ? item : null);
+        return;
       }
       if (note !== noteInput.value.trim()) return;
       if (!destination.append(link, note)) {
@@ -519,8 +532,10 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       }
       reset();
       document.querySelector("#message-input")?.focus();
-    } catch {
-      if (dialog.open && threadDraft === destination) linkStatus.textContent = uiText("workspace.share.threadUnavailable");
+    } catch (error) {
+      if (!stillSelected()) return;
+      if (error.code === "preview_not_found") invalidate(null);
+      else linkStatus.textContent = uiText("workspace.share.threadUnavailable");
     } finally { addToThread.disabled = false; }
   });
   button.addEventListener("click", () => {
