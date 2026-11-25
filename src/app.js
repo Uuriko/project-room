@@ -3398,7 +3398,7 @@ function switchThread(threadId, focusComposer = false, preserveWork = false) {
 }
 // Capture the existing discussion when Workspace opens. A failed return must
 // leave the destination draft alone.
-function captureWorkspaceThreadDraft(messageId) {
+function captureWorkspaceThreadDraft(messageId, exactSource) {
   const workId = activeWorkNavigationId, threadId = currentThreadId;
   const work = workId && state?.workItems[workId];
   const sourceId = messageId ?? (work ? work.sourceMessageId : threadId);
@@ -3407,7 +3407,8 @@ function captureWorkspaceThreadDraft(messageId) {
   function destination() {
     const source = conversation?.byId.get(sourceId), thread = conversation?.byId.get(root);
     if (!source || source.deletedAt || source.toMemberId || !thread || thread.deletedAt || thread.toMemberId
-      || !conversation.threads.has(root)) return null;
+      || !conversation.threads.has(root)
+      || (exactSource && (source.workItemId !== exactSource.workItemId || source.body !== exactSource.body))) return null;
     const channel = messageChannelId(thread);
     return state?.channels[channel] && !state.channels[channel].archivedAt ? channel : null;
   }
@@ -3450,9 +3451,18 @@ function captureWorkspaceThreadDraft(messageId) {
     updateReply(); syncRequestComposer(); autosizeComposer(); saveComposer();
     return true;
   }
-  return { discussion, append };
+  function openDiscussion(closePreview) {
+    if (!stillSelected()) return false;
+    const blocked = roomDestinationBlockedReason();
+    if (blocked) { notice(blocked, true); return false; }
+    closePreview();
+    closeResult(false);
+    revealMessage(sourceId, true);
+    return true;
+  }
+  return { discussion, openDiscussion, ...(exactSource ? {} : { append }) };
 }
-function revealMessage(id) {
+function revealMessage(id, openThread = false) {
   if (state && !busy && !conversation.byId.has(id)) {
     activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
   }
@@ -3477,7 +3487,7 @@ function revealMessage(id) {
   }
   else {
     if (activeDirectMemberId || messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
-    switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+    switchThread(message.replyToId || openThread ? conversation.rootById.get(id) : null);
   }
   expandTimelineTo(id);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
@@ -3638,6 +3648,7 @@ function sameWorkOrigin(a, b) {
   if (a.type === "updates") return ["itemId", "filter", "pageBudget", "scrollTop", "listScrollTop", "completionEventId"]
     .every(key => a.updates?.[key] === b.updates?.[key]);
   // JDOT-COH-UPDATES-PAGE end
+  if (a.type === "result") return a.result.completionEventId === b.result.completionEventId;
   if (a.type === "board") return a.claimId === b.claimId && a.focusKey === b.focusKey;
   const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
   return key(a) ? key(a) === key(b) : a.focus === b.focus;
@@ -3813,7 +3824,9 @@ async function restoreWorkOrigin(ticket) {
   }
   if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
   window.scrollTo(...origin.windowScroll);
-  if (origin.type !== "updates") {
+  if (origin.type === "result") {
+    openLinkedResult(origin.result);
+  } else if (origin.type !== "updates") {
     const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
     const keyed = origin.focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === origin.focusKey) : null;
     const claim = origin.claimId ? $(`#work-board [data-claim-id="${CSS.escape(origin.claimId)}"] h4`) : null;
@@ -3961,7 +3974,7 @@ function retryPendingHashReveal() {
   pendingHashReveal = null;
   revealMessage(pending.messageId);
 }
-function revealLocationHash() {
+function revealLocationHash(workspaceDiscussion = null) {
   if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
   if (!location.hash.startsWith("#pr-workspace/")) workspacePreviewsUI?.closeLinked();
   const exactResult = exactResultDestination(location);
@@ -3997,7 +4010,7 @@ function revealLocationHash() {
   }
   // JDOT-COH-NAV end
   if (hash.startsWith("#pr-workspace/")) {
-    workspacePreviewsUI?.openLink(hash);
+    workspacePreviewsUI?.openLink(hash, workspaceDiscussion);
     return;
   }
   if (hash.startsWith("#pr-record/result/")) {
@@ -6935,6 +6948,12 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
     return selectedMessage.sync(client.sequence);
   },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onOpenDecision(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result }); },
+  onOpenWorkspace(url, message, artifactId) {
+    const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;
+    history.pushState(workHistoryState(), "", url.href);
+    revealLocationHash(discussion ? { ...discussion, artifactId } : null);
+  },
   onReturn() { $("#work-navigation-return").click(); },
   onWorkAction(item, action, compareFrom) { openWorkAction(item, action, null, null, compareFrom); },
   onOriginal(messageId) {
@@ -7047,7 +7066,7 @@ function loadActionText(item, action) {
     if (!owns() || !value) return;
     if (!entry.draftMessageId && (value.result.receipt?.eventId !== entry.receipt.completionEventId || value.result.receipt?.evidenceVersion !== entry.receipt.evidenceVersion)) throw new Error("Pinned evidence changed");
     entry.text = value.result.text;
-    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns, value.workThread?.correction, entry.compareFrom);
+    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns, value.workThread?.correction, entry.compareFrom, true);
     $("#action-text-body").textContent = entry.text.body;
     const proposal = entry.text.proposal;
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;

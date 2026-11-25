@@ -72,6 +72,11 @@ test("source-less human assignment remains discoverable through Updates as its n
   assert.notEqual(accepted[0].id, initial[0].id);
   command(T.WORK_STARTED, { workItemId: "assigned", expectedRevision: 1 });
   assert.deepEqual(await read(), [], "in-progress work does not demand another action");
+  command(T.WORK_BLOCKED, { workItemId: "assigned", expectedRevision: 2, reason: "Need the confirmed date",
+    nextAction: "Confirm the date or revise the note." });
+  const [blocked] = await read();
+  assert.equal(blocked.needsRevision, true);
+  assert.equal(initial[0].needsRevision, undefined);
 });
 
 function persistedUpdates(store) {

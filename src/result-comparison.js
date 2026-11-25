@@ -11,19 +11,33 @@ export function previousReviewText(correction) {
 
 // Show only the changed passages and their surrounding lines. Full versions
 // stay accessible through the exact result links even if a rewrite is large.
-function comparisonHtml(before, after, esc, structuredPatch, fromOpened) {
+function comparisonHtml(before, after, esc, structuredPatch, fromOpened, reviewing) {
+  const previousBreak = before.match(/\r?\n$/)?.[0] ?? "";
+  const revisedBreak = after.match(/\r?\n$/)?.[0] ?? "";
+  const styleOnly = before !== after && before.replaceAll("\r\n", "\n") === after.replaceAll("\r\n", "\n");
+  let ending = Boolean(previousBreak) === Boolean(revisedBreak) ? ""
+    : uiText(revisedBreak ? "result.finalBreakAdded" : "result.finalBreakRemoved");
+  if (styleOnly) ending = uiText("result.lineEndingStyleChanged");
   const heading = summary => [
-    '<p class="form-hint"><strong>', esc(uiText(fromOpened ? "result.openedRevisionHeading" : "result.revisionHeading")), "</strong> ", esc(summary), "</p>",
+    '<p class="form-hint"><strong>', esc(uiText(fromOpened ? "result.openedRevisionHeading" : "result.revisionHeading")), "</strong> ",
+    esc([ending, summary, reviewing && uiText("result.comparisonApproval")].filter(Boolean).join(" ")), "</p>",
   ].join("");
-  const patch = structuredPatch("", "", before, after, "", "", { context: 3, maxEditLength: 800 });
+  if (styleOnly) return heading("");
+  // The line break change has its own note. Keep the same last line out of
+  // the added/removed rows when its wording has not changed.
+  const previousText = previousBreak ? before : before + revisedBreak;
+  const revisedText = revisedBreak ? after : after + previousBreak;
+  const patch = structuredPatch("", "", previousText, revisedText, "", "", { context: 3, maxEditLength: 800 });
   if (!patch) return heading(uiText("result.rewrite"));
-  if (!patch.hunks.length) return heading(uiText(fromOpened ? "result.sameOpenedText" : "result.sameRevisionText"));
+  const noLineChanges = fromOpened ? "result.sameOpenedText" : "result.sameRevisionText";
+  if (!patch.hunks.length) return heading(ending ? "" : uiText(noLineChanges));
 
   let removed = 0, added = 0, total = 0;
   const visible = [];
   for (const hunk of patch.hunks) {
     if (total < 200) visible.push(esc(uiText("result.revisionRange", { before: hunk.oldStart, after: hunk.newStart })));
     for (const line of hunk.lines) {
+      if (line === "\\ No newline at end of file") continue;
       if (line.startsWith("-")) removed++;
       if (line.startsWith("+")) added++;
       if (++total <= 200) {
@@ -66,10 +80,11 @@ export function createResultComparison({ client, getState, esc }) {
       }
     }
   }
-  function loadResultComparison(workItemId, predecessorId, text, box, owns, correction, compareFrom) {
+  function loadResultComparison(workItemId, predecessorId, text, box, owns, correction, compareFrom, reviewing = false) {
     clearResultComparison(box);
     if (!predecessorId) return;
     const previousId = compareFrom || predecessorId;
+    const document = box.ownerDocument;
     const content = document.createElement("div");
     box.append(content);
     const comparison = { currentId: text.messageId, previousId: null, owns, content, correctionSourceId: correction?.sourceMessageId };
@@ -97,12 +112,12 @@ export function createResultComparison({ client, getState, esc }) {
         content.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
           previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
             : "This version's text has been withdrawn, so the two cannot be compared."
-        } Previous approval never carries over.</p>`;
+        }${reviewing ? " " + esc(uiText("result.comparisonApproval")) : ""}</p>`;
         box.hidden = false;
         return;
       }
       if (typeof before !== "string") throw new Error("Previous version has no exact text");
-      content.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch, previousId !== predecessorId);
+      content.innerHTML = comparisonHtml(before, text.body, esc, structuredPatch, previousId !== predecessorId, reviewing);
       const earlierLink = exactResultHref({ roomId: previous.roomId, workItemId, completionEventId: previousId });
       if (earlierLink) {
         const paragraph = document.createElement("p");
@@ -131,7 +146,7 @@ export function createResultComparison({ client, getState, esc }) {
       box.hidden = false;
     }).catch(() => {
       if (!current()) return;
-      content.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
+      content.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison.${reviewing ? " " + esc(uiText("result.comparisonApproval")) : ""}</p>`;
       box.hidden = false;
     });
   }

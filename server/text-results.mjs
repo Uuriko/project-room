@@ -4,7 +4,7 @@ import { messageRepository } from "./message-repository.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer, validateResultSegments } from "../src/work-packet.js";
-import { nextWorkStep, workActions, workThreadHref } from "../src/workflow.js";
+import { currentApproval, matchesReceipt, nextWorkStep, workActions, workThreadHref } from "../src/workflow.js";
 import { messageInHistory } from "./history-visibility.mjs";
 import { WORK_REVISION_TYPES } from "../src/events.js";
 
@@ -98,6 +98,19 @@ function textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecor
   if (!message) return false;
   if (message.toMemberId && message.authorId !== viewerId && message.toMemberId !== viewerId) return false;
   return messageInHistory(message, floor);
+}
+
+// The decision note is a separate read with its own audience and history floor.
+function selectedDecisionSource(db, state, work, receipt, viewerId, floor, messageRecords) {
+  const decision = work.decision;
+  const messageId = decision?.sourceMessageId;
+  if (!messageId || messageId === receipt.nativeText?.messageId || !currentApproval(work) || !matchesReceipt(decision, receipt)) return null;
+  const messages = messageRecords ?? messageRepository({ db }, state.room.id, state);
+  const message = messages.get(messageId);
+  if (!message?.body || message.deletedAt || message.editedAt || message.toMemberId
+    || !textVisibleToViewer(db, state, messageId, viewerId, floor, messages)) return null;
+  return { messageId, decisionEventId: decision.eventId, completionEventId: receipt.eventId,
+    evidenceVersion: receipt.evidenceVersion, href: `#pr-record/message/${encodeURIComponent(messageId)}` };
 }
 
 // A correction is grounded in the failed verdict on the immediately preceding
@@ -268,6 +281,8 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const visibleReceipt = result.text?.body === null ? null : result.receipt;
   const start = visibleReceipt ? selectedStart(db, state.room.id, workItemId, visibleReceipt.eventId, floor) : null;
   const verdict = visibleReceipt ? selectedVerdict(db, state.room.id, work, visibleReceipt, floor) : null;
+  const decisionSource = selectionStatus === "current" && visibleReceipt && result.kind === "room_text"
+    ? selectedDecisionSource(db, state, work, visibleReceipt, viewerId, floor, messageRecords) : null;
   const pendingCorrection = selectionStatus === "current" && next.action === "revise"
     && verdict?.result === "fail" && work.blocker?.eventId === verdict.eventId
     ? { verificationEventId: verdict.eventId, completionEventId: verdict.completionEventId,
@@ -281,6 +296,7 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
       ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
+      ...(decisionSource ? { decisionSource } : {}),
       ...(releaseChecks ? { releaseChecks } : {}), ...(outcome ? { outcome } : {}) },
     selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
     ...(result.kind === "room_text" && typeof result.text?.body === "string"

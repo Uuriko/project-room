@@ -102,7 +102,9 @@ for (const width of [1440, 390]) {
     const firstReview = structuredClone(f.item().verification);
     f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Added a named owner" });
     f.mutate(T.WORK_STARTED, {});
-    const second = f.complete("Result B\nKeep this line\nOwner: Maya");
+    const reference = "https://artifacts.example.invalid/releases/" + "b58f4d1a".repeat(24);
+    const revisedBody = "Result B\nKeep this line\nOwner: Maya" + (width === 390 ? "\n" + reference : "");
+    const second = f.complete(revisedBody);
     assert.equal(f.item().receipt.nativeText.previousCompletionEventId, f.first.event.id);
     assert.notEqual(f.item().verification?.completionEventId, second.event.id, "A review must not apply to B");
     await clickWorkAction(await openWorkFromSearch(reviewer, "revision-journey", "Revise a short result"), "verify");
@@ -115,6 +117,13 @@ for (const width of [1440, 390]) {
     assert.match(await diff.innerText(), /\+ Result B/);
     assert.match(await diff.innerText(), /- Missing named owner/);
     assert.match(await diff.innerText(), /\+ Owner: Maya/);
+    assert.doesNotMatch(await diff.innerText(), /No newline at end of file|Final line break/);
+    if (width === 390) {
+      assert.ok((await diff.innerText()).includes(reference), "the exact reference remains in the rendered comparison");
+      const { viewport, content } = await diff.locator(".result-diff").evaluate(element =>
+        ({ viewport: element.clientWidth, content: element.scrollWidth }));
+      assert.ok(content <= viewport, `the changed reference must fit without sideways scrolling (${content} > ${viewport})`);
+    }
     assert.match(await diff.innerText(), /never carries over/);
     assert.equal(await reviewer.locator("#action-dialog").evaluate(node => node.scrollWidth <= node.clientWidth), true);
     await reviewer.screenshot({ path: `test-results/result-review-${width}.png`, fullPage: true });
@@ -145,13 +154,15 @@ for (const width of [1440, 390]) {
     assert.equal(f.store.room("commons").state.messages.find(m=>m.id===f.item().decision.sourceMessageId).body,"Named owner checked in result B");
     assert.equal(f.item().decision.decision, "approved");
     assert.equal(f.item().decision.completionEventId, second.event.id);
+    await owner.locator("#result-work-next").getByText("Accepted", { exact: true }).waitFor();
+    assert.equal(await owner.locator("#result-work-next-label").textContent(), "Decision");
     // Pin the slow ordering: the previous version's read lands after the current
     // text, as it did on CI, so this journey cannot pass only on a fast runner.
     await reviewer.route(url => new URL(url).searchParams.get("completionEventId") === f.first.event.id,
       async route => { await new Promise(resolve => setTimeout(resolve, 250)); await route.continue(); });
     await reviewer.reload(); await reviewer.locator("#main").waitFor({ state: "visible" });
     await openResult(reviewer);
-    assert.equal(await reviewer.locator("#result-body").textContent(), "Result B\nKeep this line\nOwner: Maya");
+    assert.equal(await reviewer.locator("#result-body").textContent(), revisedBody);
     // The comparison is a second, independent read of the previous version that
     // lands after #result-body; wait for its bytes instead of reading the box the
     // moment the current text appears (that race failed CI at both widths).
@@ -566,35 +577,97 @@ test("the verdict links exact candidate release checks without claiming missing 
   }
 });
 
-test("a submitted file change opens in the reviewer’s room and reports a replaced publication", { timeout: 45000 }, async t => {
-  const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
-  const id = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
-  const href = origin => origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
-  const text = origin => [href(origin), href(origin).replace("/?", "/other?"), href(origin).replace("commons#", "other#")].join("\n");
-  const f = await setup(t, 1440, { firstBody: text });
-  const publish = async (expectedRevision, patch) => {
-    const res = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
-      method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
-      body: JSON.stringify({ id, expectedRevision, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+for (const audience of ["public", "private"]) {
+  test(`a submitted file change follows the exact ${audience} evidence audience`, { timeout: 45000 }, async t => {
+    const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
+    const id = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
+    const href = origin => origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
+    const text = origin => [href(origin), href(origin).replace("/?", "/other?"), href(origin).replace("commons#", "other#")].join("\n");
+    const f = await setup(t, 390, { firstBody: text, ...(audience === "private" && { firstDirectTo: "human-checker" }) });
+    const publish = async (expectedRevision, patch) => {
+      const res = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+        method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+        body: JSON.stringify({ id, expectedRevision, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+      });
+      assert.ok(res.ok, await res.text());
+    };
+    await publish(0, patch);
+    const evidence = f.first.event.data.evidenceMessageId;
+    if (audience === "public") {
+      for (const author of ["owner", "guest", "producer", "human-checker"]) {
+        for (let i = 0; i < 26; i++) f.send(author, T.MESSAGE_POSTED, { body: `Later conversation ${i}` });
+      }
+    }
+    const reviewer = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
+    const body = reviewer.locator("#result-body");
+    const link = body.getByRole("link", { name: href(f.origin), exact: true });
+    await link.waitFor();
+    assert.equal(await body.textContent(), text(f.origin));
+    assert.equal(await body.locator("a").count(), 1);
+    const evidenceRead = audience === "public" && reviewer.waitForResponse(response => {
+      const url = new URL(response.url());
+      return response.ok() && url.pathname.endsWith("/conversation") && url.searchParams.get("messageId") === evidence;
     });
-    assert.ok(res.ok, await res.text());
-  };
-  await publish(0, patch);
-  const reviewer = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
-  const body = reviewer.locator("#result-body");
-  const link = body.getByRole("link", { name: href(f.origin), exact: true });
-  await link.waitFor();
-  assert.equal(await body.textContent(), text(f.origin));
-  assert.equal(await body.locator("a").count(), 1);
-  await link.click();
-  await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
-  await reviewer.goBack();
-  await link.waitFor();
-  await publish(1, patch.replace("+submitted", "+replacement"));
-  await link.click();
-  await reviewer.getByText("This preview revision changed. Open the current attempt to see its latest artifacts.", { exact: true }).waitFor();
-  assert.equal(await reviewer.getByRole("button", { name: "Open current attempt" }).isVisible(), true);
-});
+    await link.click();
+    if (evidenceRead) await evidenceRead;
+    await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
+    await reviewer.goBack();
+    await link.waitFor();
+    await publish(1, patch.replace("+submitted", "+replacement"));
+    await link.click();
+    await reviewer.getByText("This preview revision changed.", { exact: true }).waitFor();
+    assert.equal(await reviewer.getByRole("button", { name: "Open current revision" }).isVisible(), true);
+    if (audience === "private") {
+      assert.equal(await reviewer.locator("[data-discussion-link]").getAttribute("href"), null);
+      const nonparty = await f.login("owner", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
+      await nonparty.getByText("Ask the sender to share the intended result version somewhere you can read it.", { exact: true }).waitFor();
+      assert.equal(await nonparty.locator("#result-body a").count(), 0);
+      return;
+    }
+    const discussion = reviewer.getByRole("link", { name: "Open original discussion" });
+    if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "cold-file-preview.png") });
+    await discussion.waitFor({ timeout: 2000 });
+    assert.equal(new URL(await discussion.getAttribute("href")).hash, "#pr-record/message/" + evidence);
+    assert.equal(await reviewer.getByRole("button", { name: "Add to thread draft" }).count(), 0);
+    await discussion.press("Enter");
+    await reviewer.waitForFunction(id => document.activeElement?.dataset?.messageRecordId === id, evidence);
+    assert.equal(await reviewer.locator("#room-project-workspace").isVisible(), false);
+    assert.equal(reviewer.context().pages().length, 1);
+    if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "cold-file-return.png") });
+
+    const exact = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+    const leaving = await f.login("human-checker", exact);
+    const selectedSource = url => url.pathname.endsWith("/conversation") && url.searchParams.get("messageId") === evidence;
+    const held = Promise.withResolvers(), released = Promise.withResolvers();
+    await leaving.route(selectedSource, async route => {
+      held.resolve();
+      await released.promise;
+      await route.continue();
+    });
+    try {
+      await leaving.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+      await held.promise;
+      await leaving.locator("#topbar-updates").click();
+      await leaving.locator("#result-dialog").waitFor({ state: "hidden" });
+      const response = leaving.waitForResponse(response => selectedSource(new URL(response.url())));
+      released.resolve();
+      await response;
+      await leaving.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await leaving.locator("#room-project-workspace").isVisible(), false);
+      assert.equal(await leaving.locator("#updates-dialog").isVisible(), true);
+    } finally {
+      released.resolve();
+    }
+
+    const returning = await f.login("human-checker", exact);
+    await returning.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+    const original = returning.getByRole("link", { name: "Open original discussion" });
+    await original.waitFor();
+    f.send("producer", T.MESSAGE_DELETED, { messageId: evidence, expectedMessageRevision: 0 });
+    await original.waitFor({ state: "hidden" });
+    assert.equal(await returning.locator("[data-discussion-link]").getAttribute("href"), null);
+  });
+}
 
 test("shared result links keep identical old and new text bound to different verdicts", { timeout: 45000 }, async t => {
   const revision = "a".repeat(40);
@@ -801,3 +874,63 @@ test("catch-up labels each review with its visible work and preserves withheld h
     assert.equal(await historical.getAttribute("data-open-work"), workItemId);
   }
 });
+
+for (const anchor of ["root", "reply"]) {
+  test(`replaced Workspace link in a ${anchor} returns to the same discussion draft`, { timeout: 30000 }, async t => {
+    const f = await setup(t, 390);
+    const id = "f".repeat(32), head = "c".repeat(40);
+    const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+published\n";
+    const digest = createHash("sha256").update(patch).digest("hex");
+    const href = f.origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
+    const root = "workspace-original", reply = "workspace-reply";
+    const source = anchor === "root" ? root : reply;
+    f.send("producer", T.MESSAGE_POSTED, { messageId: root, body: "Original discussion" + (source === root ? "\n" + href : "") });
+    f.send("producer", T.MESSAGE_POSTED, { messageId: reply, replyToId: root, body: "Exact version" + (source === reply ? "\n" + href : "") });
+    const publish = async (expectedRevision, value) => {
+      const response = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+        method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+        body: JSON.stringify({ id, expectedRevision, patch: value, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+      });
+      assert.ok(response.ok, await response.text());
+    };
+    await publish(0, patch);
+    await publish(1, patch.replace("+published", "+replaced"));
+    const page = await f.login("human-checker");
+    const message = id => page.locator(`[data-message-record-id="${id}"]`);
+    const input = page.locator("#message-input");
+    const draft = "Unsent note on the exact discussion.";
+    await message(root).locator('[data-message-action="thread"]').click();
+    await message(reply).locator('[data-message-action="reply"]').click();
+    await input.fill(draft);
+    if (source === root) await page.locator("#thread-back").click();
+    await message(source).getByRole("link", { name: href, exact: true }).click();
+    const dialog = page.locator("#room-project-workspace"), link = dialog.getByRole("link", { name: "Open original discussion" });
+    await link.waitFor();
+    assert.equal(new URL(await link.getAttribute("href")).hash, "#pr-record/message/" + source);
+    assert.equal(await dialog.getByRole("button", { name: "Add to thread draft" }).count(), 0);
+    const returned = Promise.race([
+      page.context().waitForEvent("page").then(() => "new tab"),
+      dialog.waitFor({ state: "hidden" }).then(() => "same tab"),
+    ]);
+    if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `discussion-${anchor}.png`) });
+    await link.press("Enter");
+    assert.equal(await returned, "same tab");
+    await page.waitForFunction(expected => document.activeElement?.dataset.messageRecordId === expected, source);
+    assert.equal(await input.inputValue(), draft);
+    assert.match(await page.locator("#reply-context").textContent(), /Exact version/);
+    assert.equal(page.context().pages().length, 1);
+    assert.equal(await page.locator("#thread-back").isVisible(), true);
+    assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
+    if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `returned-${anchor}.png`) });
+    assert.equal(f.store.snapshot(f.keys.owner, "commons").state.messages.some(entry => entry.body === draft), false);
+    if (source === reply) {
+      await message(reply).getByRole("link", { name: href, exact: true }).click();
+      await link.waitFor();
+      f.send("producer", T.MESSAGE_DELETED, { messageId: reply, expectedMessageRevision: 0 });
+      await link.waitFor({ state: "hidden" });
+      assert.equal(await dialog.locator("[data-discussion-link]").getAttribute("href"), null);
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      assert.equal(await input.inputValue(), draft);
+    }
+  });
+}

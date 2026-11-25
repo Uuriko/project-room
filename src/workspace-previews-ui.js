@@ -32,9 +32,9 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         <p data-preview-status role="status"></p>
         <ol data-preview-list></ol>
         <aside data-workspace-discussion hidden>
-          <h3>Recent discussion</h3>
+          <h3>Discussion</h3>
           <div data-discussion-messages></div>
-          <a data-discussion-link target="_blank" rel="noopener">Open full discussion</a>
+          <a data-discussion-link>Open full discussion</a>
         </aside>
       </section>
       <section class="workspace-preview-detail" aria-label="Selected preview">
@@ -133,6 +133,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
 
   const discussionAside = dialog.querySelector("[data-workspace-discussion]");
   const discussionMessages = discussionAside.querySelector("[data-discussion-messages]");
+  const discussionLink = discussionAside.querySelector("[data-discussion-link]");
+  discussionLink.addEventListener("click", event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (!discussionDestination()?.openDiscussion?.(reset)) refreshDiscussion();
+  });
   const noteLabel = dialog.querySelector("[data-workspace-note]");
   const noteInput = noteLabel.querySelector("textarea");
   const notes = new Map();
@@ -141,16 +147,23 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     if (noteKey) notes.set(noteKey, noteInput.value);
     linkStatus.textContent = ""; linkFallback.hidden = true; linkFallback.value = "";
   });
+  function discussionDestination() {
+    return threadDraft?.artifactId && threadDraft.artifactId !== selected ? null : threadDraft;
+  }
   function refreshDiscussion() {
     if (!dialog.open) return;
-    const discussion = !copyLink.hidden && threadDraft?.discussion();
+    // A conversation can remain authorized after its artifact expires or changes.
+    const canUseArtifact = !copyLink.hidden;
+    const destination = discussionDestination();
+    const discussion = (canUseArtifact || linked) && destination?.discussion();
     discussionAside.hidden = !discussion;
-    addToThread.hidden = !discussion || Boolean(items.find(item => item.id === selected)?.recipientId);
+    addToThread.hidden = !canUseArtifact || !discussion || !destination?.append || Boolean(items.find(item => item.id === selected)?.recipientId);
     discussionMessages.replaceChildren();
-    const source = discussionAside.querySelector("[data-discussion-link]");
-    if (discussion) source.href = discussion.link;
-    else source.removeAttribute("href");
-    for (const message of discussion?.messages ?? []) {
+    if (discussion) {
+      discussionLink.href = discussion.link;
+      discussionLink.textContent = canUseArtifact ? "Open full discussion" : uiText("workspace.openOriginalDiscussion");
+    } else discussionLink.removeAttribute("href");
+    for (const message of canUseArtifact ? discussion?.messages ?? [] : []) {
       const line = document.createElement("p");
       line.textContent = [message.author, message.excerpt].join(" · ");
       discussionMessages.append(line);
@@ -317,6 +330,14 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     heading.textContent = "Open a shared preview";
     meta.textContent = "";
   }
+  function showUnavailable(current) {
+    clearPreview();
+    linkStatus.textContent = uiText(current ? "workspace.share.stale" : "workspace.share.missing");
+    latest.hidden = !current;
+    latest.textContent = linked?.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
+      ? "Locate note in current patch" : uiText("workspace.share.openCurrent");
+    refreshDiscussion();
+  }
   function reset() {
     notes.clear(); selectStart(null);
     generation++; selected = null; linked = null; pendingFile = null; reviewLocation = null; threadDraft = null; clearPreview();
@@ -358,11 +379,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       if (linked && (!current || current.revision !== linked.revision || current.publisherId !== linked.publisherId
         || (linked.head && current.head !== linked.head)
         || artifactDigest(current, linked.panel) !== linked.digest)) {
-        clearPreview();
-        linkStatus.textContent = uiText(current ? "workspace.share.stale" : "workspace.share.missing");
-        latest.hidden = !current;
-        latest.textContent = linked.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
-          ? "Locate note in current patch" : uiText("workspace.share.openCurrent");
+        showUnavailable(current);
         return;
       }
       if (!current) return;
@@ -391,6 +408,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     } catch (error) {
       if (!owns(ticket, session)) return;
       clearPreview();
+      refreshDiscussion();
       status.textContent = error.message || "Could not open previews.";
     }
   }
@@ -499,17 +517,27 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   addToThread.addEventListener("click", async () => {
     const snapshot = shareSelection(), destination = threadDraft;
     if (!snapshot || addToThread.hidden || addToThread.disabled || !destination) return;
+    const { current, session, panel, link } = snapshot;
+    const stillSelected = () => dialog.open && threadDraft === destination
+      && client.session === session && shareSelection()?.link === link;
+    const invalidate = replacement => {
+      generation++;
+      linked = workspaceArtifactSelection(new URL(link).hash);
+      items = items.filter(preview => preview.id !== current.id);
+      if (replacement) items.push(replacement);
+      showUnavailable(replacement);
+    };
     const note = noteInput.value.trim();
     addToThread.disabled = true;
     try {
-      const { current, session, panel, link } = snapshot;
       const query = new URLSearchParams({ id: current.id });
       const observed = await client.roomRead(`/workspace-previews?${query}`);
-      if (!dialog.open || threadDraft !== destination || client.session !== session || shareSelection()?.link !== link) return;
+      if (!stillSelected()) return;
       const item = observed?.item;
-      if (!item || item.recipientId || item.revision !== current.revision || item.head !== current.head
+      if (!item || item.id !== current.id || item.recipientId || item.revision !== current.revision || item.head !== current.head
         || item.publisherId !== current.publisherId || artifactDigest(item, panel) !== artifactDigest(current, panel)) {
-        linkStatus.textContent = uiText("workspace.share.stale"); return;
+        invalidate(item?.id === current.id && !item.recipientId ? item : null);
+        return;
       }
       if (note !== noteInput.value.trim()) return;
       if (!destination.append(link, note)) {
@@ -517,8 +545,10 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       }
       reset();
       document.querySelector("#message-input")?.focus();
-    } catch {
-      if (dialog.open && threadDraft === destination) linkStatus.textContent = uiText("workspace.share.threadUnavailable");
+    } catch (error) {
+      if (!stillSelected()) return;
+      if (error.code === "preview_not_found") invalidate(null);
+      else linkStatus.textContent = uiText("workspace.share.threadUnavailable");
     } finally { addToThread.disabled = false; }
   });
   button.addEventListener("click", () => {
