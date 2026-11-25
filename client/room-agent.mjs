@@ -1738,7 +1738,7 @@ export class RoomAgentClient {
 }
 
 // Compact authenticated view, distinct from the opt-in portable export.
-export function workContextMarkdown(result) {
+export function workContextMarkdown(result, { sourceGuidance } = {}) {
   if (!result.resume) throw new Error("This service does not provide a resume brief; use work without --brief");
   return [`# ${result.work.title}`, result.work.definitionOfDone,
     `Room: ${result.roomId} · Work: ${result.work.id} · Revision: ${result.work.revision} · Evaluated: ${result.evaluatedAt}`,
@@ -1761,6 +1761,7 @@ export function workContextMarkdown(result) {
       ...result.replyRequestContext.requests.map(request => `${request.direction}: ${request.id} · ${request.requesterId} → ${request.recipientId}. Next read: ${JSON.stringify(request.nextRead)}`),
       ...(result.replyRequestContext.truncated ? ["More pending requests: " + JSON.stringify(result.replyRequestContext.nextRead) + "; select this workItemId."] : [])
     ] : []),
+    ...(sourceGuidance ? [sourceGuidance] : []),
     "Current evidence references (not fetched): " + JSON.stringify(result.accessSummary.evidence.records),
     "Recorded write scope: " + JSON.stringify(result.work.claim),
     "Recorded session controls (separate from work completion): " + JSON.stringify({ status: result.work.recordedStatus ?? result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),

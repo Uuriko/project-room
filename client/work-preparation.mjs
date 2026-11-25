@@ -219,16 +219,18 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
         workItemId: context.work.id, includeSource: true } } : null;
     const identity = { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
-      continuation: workContinuation(context, { hosted }), briefVersion: brief.version, ...(sourceRead ? { sourceRead } : {}),
-      ...(sourceGuidance ? { sourceGuidance } : {}) };
+      continuation: workContinuation(context, { hosted }), briefVersion: brief.version, ...(sourceRead ? { sourceRead } : {}) };
     if (args.knownBriefVersion === brief.version) return { ...identity, briefUnchanged: true,
       evaluatedAt: context.evaluatedAt,
-      guidance: "Reuse your retained brief for this identity and task. Use this response’s revision and continuation for your next action. "
-        + (sourceRead ? "Follow sourceRead before reusing linked source text. " : "")
-        + "Read discussion or external evidence separately when you need their current contents. Read without knownBriefVersion if that brief is unavailable." };
+      guidance: [
+        "Reuse your retained brief for this identity and task. Use this response’s revision and continuation for your next action.",
+        sourceRead ? "Follow sourceRead before reusing linked source text." : sourceGuidance,
+        "Read discussion or external evidence separately when you need their current contents. Read without knownBriefVersion if that brief is unavailable."
+      ].filter(Boolean).join(" ") };
     const { publishedVerdicts, pullRequest } = brief.sections.evidence;
     return { ...identity, ...(publishedVerdicts ? { publishedVerdicts } : {}), ...(pullRequest ? { pullRequest } : {}),
-      brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } }),
+      brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } },
+        { sourceGuidance }),
       ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) };
 
   };
