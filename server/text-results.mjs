@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer, validateResultSegments } from "../src/work-packet.js";
 import { nextWorkStep, workActions, workThreadHref } from "../src/workflow.js";
 import { messageInHistory } from "./history-visibility.mjs";
-import { WORK_REVISION_TYPES } from "../src/events.js";
+import { WORK_REVISION_TYPES, WORK_STATES as S } from "../src/events.js";
 
 const check = condition => { if (!condition) throw new Error("Native result evidence requires reconciliation"); };
 export const textVersion = body => {
@@ -244,6 +244,10 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const selectionStatus = result.receipt
     ? (result.receipt.eventId === work.receipt?.eventId ? "current" : "historical")
     : result.kind;
+  const currentText = work.receipt?.nativeText;
+  const readableReplacementCompletionEventId = selectionStatus === "historical" && typeof result.text?.body === "string"
+    && work.state === S.COMPLETED && !work.supersededBy && currentText && !currentText.withdrawnAt
+    && textVisibleToViewer(db, state, currentText.messageId, viewerId, floor, messageRecords) ? work.receipt.eventId : null;
   const review = selectionStatus === "current" && next.action === "verify"
     && result.text?.body !== null && workActions(work, reviewer, now).some(([action]) => action === "verify")
     ? { criteria: work.definitionOfDone, runtimeDispatchFence: true,
@@ -288,7 +292,7 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
         tool: "room_read_work_discussion", arguments: { roomId: state.room.id, workItemId, completionEventId: result.receipt.eventId } } } : {}),
     ...(review ? { review } : {}),
     current: { evaluatedAt: new Date(now).toISOString(), evaluatedThrough: sequence, workRevision: work.revision,
-      completionEventId: work.receipt?.eventId ?? null, next },
+      completionEventId: work.receipt?.eventId ?? null, readableReplacementCompletionEventId, next },
     scope: { membership: "room", selectedWorkOnly: true, externalExecution: false, contentAuthority: "untrusted-data" } };
 }
 

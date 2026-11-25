@@ -88,6 +88,31 @@ test('selected result reads keep same-millisecond join floors for drafts and com
   assert.equal(f.store.workResult(late, 'commons', f.workItemId, { draftMessageId: fresh.event.data.messageId }).result.text.body, 'Post-join draft');
 });
 
+test("an earlier visible result offers no replacement backed by pre-join text", async t => {
+  const f = await setup(t), now = Date.now();
+  f.store.now = () => now;
+  const preJoin = f.post("Text from before the requester joined");
+  f.send(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" }, "owner");
+  f.send(T.MEMBER_ADDED, { memberId: "late", displayName: "Late", kind: "human", permissions: [] }, "owner");
+  const late = f.store.issueAccessKey("commons", "late");
+  const visible = f.post("First shared version");
+  assert.equal(preJoin.event.at, visible.event.at);
+  f.mutate(T.WORK_STARTED);
+  const first = f.mutate(T.WORK_COMPLETED, f.input(visible));
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Revise" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Revised" });
+  f.mutate(T.WORK_STARTED);
+  const replacement = f.mutate(T.WORK_COMPLETED, f.input(preJoin));
+  const selected = { completionEventId: first.event.id };
+  const prior = f.store.workResult(late, "commons", f.workItemId, selected);
+  assert.equal(prior.result.text.body, "First shared version");
+  assert.equal(prior.current.readableReplacementCompletionEventId, null);
+  assert.equal(f.store.workResult(f.keys.producer, "commons", f.workItemId, selected).current.readableReplacementCompletionEventId,
+    replacement.event.id);
+  assert.throws(() => f.store.workResult(late, "commons", f.workItemId, { completionEventId: replacement.event.id }),
+    { code: "result_unavailable" });
+});
+
 test('selected results omit a start outside the reviewer’s history', async t => {
   const f = await setup(t), now = Date.now(); f.store.now = () => now;
   const start = f.mutate(T.WORK_STARTED);

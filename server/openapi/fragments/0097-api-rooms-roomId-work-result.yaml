@@ -9,6 +9,10 @@
         verified. The receipt's `nativeText` carries the same two fields; a
         response where only one side says so is a tampered answer and the
         clients refuse it.
+        An earlier readable text result includes
+        `current.readableReplacementCompletionEventId` when its current
+        replacement is also readable by the same member. A subsequent read
+        still checks access to that exact result.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: workItemId

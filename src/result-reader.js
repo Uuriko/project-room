@@ -8,6 +8,35 @@ import { matchesReceipt, nextWorkStep, workActions, reviewRuntimeLabel } from ".
 import { previousReviewText } from "./result-comparison.js";
 import { currentResult } from "./work-selectors.js";
 
+const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
+
+export function renderSubmittedResultText(body, text, roomId, { openInNewTab = false } = {}) {
+  body.replaceChildren();
+  // Preserve all submitted characters for copying and passage selection.
+  let offset = 0;
+  for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
+    const href = match[0], url = URL.parse(href);
+    if (!url || url.href !== href) continue;
+    const workspaceFile = url.pathname === location.pathname && roomFileChangeSelection(url, location.origin, roomId);
+    if (!workspaceFile && !githubFile.test(href)) continue;
+    const link = document.createElement("a");
+    link.href = href;
+    if (openInNewTab || url.origin !== location.origin) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    if (openInNewTab && workspaceFile) {
+      const label = uiText("workspace.changes.openFileInNewTab", { file: workspaceFile.file });
+      link.setAttribute("aria-label", label);
+      link.title = label;
+    }
+    link.textContent = href;
+    body.append(text.slice(offset, match.index), link);
+    offset = match.index + href.length;
+  }
+  body.append(text.slice(offset));
+}
+
 // Owns only the pinned reader view. Session, composer, and work mutations stay
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
@@ -163,28 +192,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     return link;
   }
   function showResultBody(text) {
-    const body = resultElement("result-body");
-    body.replaceChildren();
-    // Preserve the submitted characters, including punctuation around plain URLs.
-    const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
-    let offset = 0;
-    for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
-      const href = match[0];
-      const url = URL.parse(href);
-      if (!url || url.href !== href) continue;
-      if (!githubFile.test(href) && !(url.pathname === location.pathname
-          && roomFileChangeSelection(url, location.origin, getSession().roomId))) continue;
-      const link = document.createElement("a");
-      link.href = href;
-      if (url.origin !== location.origin) {
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-      }
-      link.textContent = href;
-      body.append(text.slice(offset, match.index), link);
-      offset = match.index + href.length;
-    }
-    body.append(text.slice(offset));
+    renderSubmittedResultText(resultElement("result-body"), text, getSession().roomId);
   }
   function showOutcome(outcome) {
     const panel = resultElement("result-outcome");
@@ -264,14 +272,14 @@ export function installResultReader({ client, getState, getSession, sameSession,
       clearResultComparison(resultElement("result-diff"));
     }
     const item = getState().workItems[view.workItemId];
-    // A live update can skip straight from an open result to its replacement.
-    // Read the original receipt again so visibility and the review history floor
-    // apply to its verdict even if the client missed the review event.
-    if (usableText(view) && view.selectionStatus === "current" && item?.receipt?.eventId
-        && !matchesReceipt(view.receipt, item.receipt) && !view.readAfterReplacement) {
+    // Re-read the selected result when the active receipt changes so the
+    // server checks both the selected verdict and access to the replacement.
+    const latest = item?.receipt;
+    if (usableText(view) && latest?.eventId && !matchesReceipt(view.receipt, latest)
+        && latest.eventId !== view.observedCompletionEventId && latest.eventId !== view.readAfterReplacement) {
       const { generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails, recovered } = view;
       openResult({ generation, roomId, memberId, workItemId, receipt, focused, linked, fromResults, restoreDetails,
-        recovered, compareFrom: view.compareFrom, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: true }, item.title, false);
+        recovered, compareFrom: view.compareFrom, textMessageId: view.textMessageId, reportedById: view.reportedById, readAfterReplacement: latest.eventId }, item.title, false);
       return;
     }
     const pending = !view.withdrawn && view.pendingCorrection && view.pendingCorrection.revision === item?.revision
@@ -299,9 +307,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (runtime) resultElement("result-status").append(uiText("review.runtime.statusSuffix", {status: runtime}));
     }
     const newer = resultElement("result-current-version");
-    const latest = item?.receipt;
     const canOpenNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
-      && latest?.nativeText && !latest.nativeText.withdrawnAt && latest.eventId !== view.receipt.completionEventId;
+      && latest?.nativeText && !latest.nativeText.withdrawnAt
+      && latest.eventId === view.readableReplacementCompletionEventId;
     newer.hidden = !canOpenNewer;
     if (canOpenNewer) {
       newer.href = exactResultHref({ ...view, completionEventId: latest.eventId });
@@ -481,6 +489,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
         || (view.receipt.evidenceVersion && value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion)) throw new Error("Pinned version changed");
       view.receipt.evidenceVersion = value.result.receipt.evidenceVersion;
       view.selectionStatus = value.selection.status;
+      view.observedCompletionEventId = value.current.completionEventId;
+      view.readableReplacementCompletionEventId = value.current.readableReplacementCompletionEventId;
       view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
@@ -557,6 +567,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (!view.readAfterReplacement) resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = false;
       resultElement("result-current-version").hidden = true;
+      resultElement("result-current-version").removeAttribute("href");
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
       resultElement("result-copy-link").hidden = true;
