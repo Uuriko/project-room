@@ -445,6 +445,10 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
         }
       }
     }
+    // The recommended continuation must keep returning a recommended action.
+    // Leave the original per-source paging contract intact for other callers.
+    if (view === "pickup" && packet.nextRead?.tool === "room_next")
+      packet.nextRead = { ...packet.nextRead, arguments: { ...packet.nextRead.arguments, view: "pickup" } };
     if (Buffer.byteLength(JSON.stringify(packet)) > MAX_BYTES)
       throw new ServiceError(409, "current_room_context_unavailable", "Read one source at a time");
     return packet;
