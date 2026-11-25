@@ -12,7 +12,7 @@ import { currentResult } from "./work-selectors.js";
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, discussionMessage, loadDiscussion, memberLabel, workRecord, focusRecord,
-  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, onOpenWorkspace, onOpenDecision, storage = null, recoveryScope = () => null }) {
+  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, onOpenWorkspace, onOpenDecision, onExactAccess, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null, pointerSelection = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
@@ -594,6 +594,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (!owns() || view.withdrawn) return;
       if (value?.result?.receipt?.eventId !== view.receipt.completionEventId
         || (view.receipt.evidenceVersion && value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion)) throw new Error("Pinned version changed");
+      onExactAccess?.(view.workItemId, true);
       view.receipt.evidenceVersion = value.result.receipt.evidenceVersion;
       view.selectionStatus = value.selection.status;
       view.historicalDecisionRead = value.current.workRevision;
@@ -648,6 +649,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }).catch(error => {
       if (!owns() || view.withdrawn) return;
       resultElement("result-body").replaceChildren();
+      if (error?.status === 403 && error.code === "work_private") onExactAccess?.(view.workItemId, false);
       view.refusalHint = exactResultRecovery(error?.status, error?.code);
       view.error = !view.refusalHint;
       view.retrying = false;

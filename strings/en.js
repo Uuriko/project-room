@@ -613,6 +613,7 @@ export default {
   "result.previouslyApprovedLinkPrefix": "Previously approved · ",
   "result.backCatchUp": "Back to Catch Up",
   "result.approvedHistory": "Result approved",
+  "result.unavailableHistory": "Result unavailable",
   "result.previouslyApprovedNoteUnavailable": "Previously approved · Decision note unavailable",
   "result.nextLabel": "Next",
   "result.openCurrentVersion": "Open current result",

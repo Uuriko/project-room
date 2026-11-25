@@ -944,6 +944,89 @@ test("Catch Up opens the exact approved result and returns to its decision row",
   assert.equal(cursor(), before);
 });
 
+test("Catch Up removes an exact approval action after the reader loses access", async t => {
+  const f = await setup(t, 390);
+  const workItemId = f.item().id, completionEventId = f.first.event.id;
+  const basis = () => ({ workItemId, completionEventId, expectedRevision: f.item().revision, evidenceVersion: f.item().receipt.evidenceVersion });
+  f.send("human-checker", T.VERIFICATION_RECORDED, { ...basis(), result: "pass", summary: "Checked the original result" });
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "approval-note", body: "Approved the original result" });
+  const approval = f.send("owner", T.OWNER_DECISION_RECORDED, {
+    ...basis(), decision: "approved", reason: "Checked", sourceMessageId: "approval-note",
+  });
+  f.mutate(T.WORK_BLOCKED, { reason: "Add a follow-up", nextAction: "Update the result" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Added the follow-up" });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Result B awaits review");
+  const guest = await f.login("guest");
+  const draft = "Unsent note about this project";
+  await guest.locator("#message-input").fill(draft);
+  await openCatchUp(guest);
+  const historyHeading = guest.locator("#rb-history-heading");
+  await historyHeading.click();
+  const row = guest.locator(`[data-brief-key="history:${approval.event.id}"]`);
+  await row.waitFor();
+  assert.match(await row.getAttribute("href"), /#pr-record\/result\//);
+  const cursor = () => f.store.returnBrief(f.keys.guest, "commons").history.cursor;
+  const before = cursor();
+
+  let captured, release;
+  const held = new Promise(resolve => { captured = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  let exactReads = 0, briefReads = 0;
+  guest.on("request", request => {
+    const { pathname } = new URL(request.url());
+    if (pathname.endsWith("/return-brief")) briefReads++;
+  });
+  await guest.route("**/work-result?**", async route => {
+    exactReads++;
+    if (new URL(route.request().url()).searchParams.get("completionEventId") === completionEventId) {
+      captured();
+      await gate;
+    }
+    await route.continue();
+  });
+  const denied = guest.waitForResponse(response => new URL(response.url()).searchParams.get("completionEventId") === completionEventId);
+  await row.press("Enter");
+  await held;
+  f.store.dmConsents.request("commons", "owner", "producer", "fixture");
+  f.store.dmConsents.decide("commons", "producer", "owner", "approve");
+  f.send("owner", T.MESSAGE_POSTED, {
+    messageId: "private-review", workItemId, toMemberId: "producer", requestKind: "reply", body: "Continue in private",
+  });
+  release();
+  const response = await denied;
+  assert.equal(response.status(), 403);
+  assert.equal((await response.json()).error.code, "work_private");
+  await guest.getByText("Ask the sender to share the intended result version somewhere you can read it.", { exact: true }).waitFor();
+  assert.equal(await guest.locator("#result-body").textContent(), "");
+  assert.equal(await guest.locator("#result-retry").isVisible(), false);
+  assert.equal(await guest.getByRole("link", { name: "Open decision note" }).count(), 0);
+  const screenshots = process.env.ROOM_EXACT_DENIED_SCREENSHOT;
+  if (screenshots) await guest.screenshot({ path: screenshots + "-denied.png" });
+
+  await guest.getByRole("button", { name: "Back to Catch Up", exact: true }).press("Enter");
+  await row.waitFor();
+  if (screenshots) {
+    await row.scrollIntoViewIfNeeded();
+    await guest.screenshot({ path: screenshots + "-back.png" });
+  }
+  assert.equal(await row.getAttribute("href"), null);
+  assert.equal(await row.locator(".rb-type").textContent(), "Result unavailable");
+  assert.doesNotMatch(await guest.locator("#rb-history-list").textContent(), /Revise a short result|Checked the original result/);
+  assert.equal(await row.getAttribute("tabindex"), "-1");
+  await guest.waitForFunction(id => document.activeElement?.dataset.briefKey === "history:" + id, approval.event.id);
+  assert.equal(await guest.locator("#message-input").inputValue(), draft);
+  assert.equal(briefReads, 0);
+  assert.equal(exactReads, 1);
+  assert.equal(cursor(), before);
+
+  const owner = await f.login("owner");
+  await owner.goto(f.origin + "/?room=commons#pr-record/result/" + workItemId + "/" + completionEventId);
+  await owner.locator("#result-body").getByText(/Result A/).waitFor();
+  assert.equal(await owner.getByRole("link", { name: "Open decision note" }).isVisible(), true);
+});
+
 test("catch-up labels each review with its visible work and preserves withheld history", async t => {
   const f = await setup(t, 390, { approveBoth: true });
   f.store.markCaughtUp(f.keys.owner, "commons", f.store.headSequence("commons"));
