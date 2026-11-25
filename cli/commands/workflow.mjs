@@ -311,7 +311,7 @@ export async function workCommand(argv, io = {}) {
 }
 
 export async function resultCommand(argv, io = {}) {
-  const help = "room result RESULT_URL [--discussion]\nroom result WORK_ID --completion EVENT_ID [--discussion]\nRead the exact version using this project’s saved connection. Add --discussion to read replies to that version.";
+  const help = "room result RESULT_URL [--discussion]\nroom result WORK_ID --completion EVENT_ID [--discussion]\nRead the exact version using this project’s saved connection. Add --discussion to read replies to the original message. Result versions that cite the same message share its discussion.";
   const out = io.out ?? console.log;
   if (argv.length === 1 && argv[0] === "--help") { out(help); return 0; }
   const includeResultDiscussion = argv.at(-1) === "--discussion";

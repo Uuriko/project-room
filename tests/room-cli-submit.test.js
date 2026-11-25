@@ -148,6 +148,22 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   assert.equal(earlier.value.discussion.replies[0].body, quoted);
   assert.equal(earlier.value.selection.status, "historical");
   assert.equal(earlier.value.result.text.body, "Draft from a colleague.");
+  // A producer may deliberately cite the very same message in a later receipt.
+  const laterReview = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
+  assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Use the original wording."],
+    laterReview.value, reviewerProject)).code, 0);
+  assert.equal((await cli(["resolve", "--from", "-", "--resolution", "Reusing the original wording."],
+    (await cli(["work", workItemId])).value)).code, 0);
+  assert.equal((await cli(["begin", "--from", "-"], (await cli(["work", workItemId])).value)).code, 0);
+  const source = shared.value.result.text;
+  const reused = store.command(producer.secret, "commons", { id: "cite-original", type: "work.completed", data: {
+    workItemId, expectedRevision: (await cli(["work", workItemId])).value.revision, evidenceKind: "room_text",
+    evidenceMessageId: source.messageId, evidenceMessageEventId: source.messageEventId, evidenceVersion: source.evidenceVersion,
+    previousCompletionEventId: revised.value.next.arguments.completionEventId, producerId: producer.identityId,
+    summary: "Restored wording", nextAction: "Review the original wording" } });
+  const reusedRead = await cli(["result", workItemId, "--completion", reused.event.id, "--discussion"]);
+  assert.equal(reusedRead.code, 0);
+  assert.deepEqual(reusedRead.value.discussion, producerRead.value.discussion);
   for (const other of [sharedUrl.replace("room=commons", "room=other"), sharedUrl.replace(origin, "https://other.example")]) {
     let calls = 0;
     const refused = await cli(["result", other], undefined, reviewerProject, () => { calls++; throw new Error("unexpected call"); });
