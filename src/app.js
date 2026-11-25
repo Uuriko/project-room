@@ -363,6 +363,7 @@ let partialWorkSnapshot = false, inspectedWorkRecord = null, inspectedWorkReplac
 let workspacePreviewsUI = null, updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
+const privateWorkInBrief = new Set();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
 let pendingWorkReturn = null;
 let navigationBoardEpoch = 0;
@@ -3636,6 +3637,7 @@ function syncWorkReturnControl() {
 }
 function clearWorkNavigation() {
   confirmedWorkNavigation = null;
+  privateWorkInBrief.clear();
   navigationBoardEpoch++; resetNavigationBoard?.();
   workNavigationEpoch++; workNavigationOrigins.clear(); activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
   const button = $("#work-navigation-return");
@@ -3876,6 +3878,7 @@ async function restoreWorkOrigin(ticket) {
     closeResult(false);
     const catchUp = $("#catchup-dialog");
     catchUp.showModal();
+    renderReturnBrief();
     const brief = $("#return-brief-panel");
     const history = $("#rb-history-section");
     const source = brief.open && history.open
@@ -7013,6 +7016,10 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
     return selectedMessage.sync(client.sequence);
   },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onExactAccess(workItemId, allowed) {
+    if (allowed) privateWorkInBrief.delete(workItemId);
+    else privateWorkInBrief.add(workItemId);
+  },
   onOpenDecision(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result }); },
   onOpenWorkspace(url, message, artifactId) {
     const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;
@@ -8149,8 +8156,15 @@ function briefEventTarget(event) {
   return { kind: "event", id: event.id };
 }
 function describeBriefEvent({ sequence, event }, proposalTitles) {
+  const approved = event.type === T.OWNER_DECISION_RECORDED && event.data.decision === "approved";
+  // The held history predates an authoritative permission denial. Keep the
+  // event in place without its old title, details, or navigation.
+  if (privateWorkInBrief.has(event.data.workItemId)) {
+    const type = esc(approved ? uiText("result.unavailableHistory") : humanize(event.type));
+    return `<li class="rb-event" tabindex="-1" data-brief-key="history:${esc(event.id)}"><span class="rb-seq">#${sequence}</span> <span class="rb-type">${type}</span></li>`;
+  }
   const actor = esc(memberLabel(event.actorId));
-  const approvedResult = event.type === T.OWNER_DECISION_RECORDED && !event.data.withheld && event.data.decision === "approved"
+  const approvedResult = approved && !event.data.withheld
     ? exactResultHref({ roomId: state.room.id, workItemId: event.data.workItemId, completionEventId: event.data.completionEventId }) : "";
   const type = esc(approvedResult ? uiText("result.approvedHistory") : humanize(event.type));
   const workTitle = event.data.withheld ? "" : (proposalTitles.get(event.data.workItemId) ?? event.data.workItemId ?? "");
