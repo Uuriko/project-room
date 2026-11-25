@@ -160,7 +160,7 @@
     "src/reply-requests.js": "sha256:7d7dacc520507c6551e1b0f7368e07d96e13568fcfe3c794919a2aef61dd6866",
     "src/request-access.js": "sha256:4d2714b80d5530b94ccd3cfd21780bc3461e8b15fb986eb90c3bfd68d8859d5b",
     "src/result-availability.js": "sha256:2a8b09755dcc1ad32e84b5f68715ff71abbafa83c95a0343b86cdc1031cebdee",
-    "src/result-comparison.js": "sha256:4d83a8280003af2286908f4e79d13b684cbb4c634468382d362ac64abc8b5e6f",
+    "src/result-comparison.js": "sha256:834c2744aaf7f69f3732ca04b173b892c1844773a113df1713d2f11d05638fb0",
     "src/result-feedback.js": "sha256:16a54ba9531d5f37fc2cf1a1f6f19dd86cf8fa523296709d3a79078b1f8c8d57",
     "src/result-reader.js": "sha256:c698918e85d3df8824c75ed2b4e58c83ea8590daf6641907565390a98df6fd88",
     "src/return-brief.js": "sha256:60fe009414d994d445baca3e7c36b36c8b6fce6490c7a0e0ab38bd674371e712",
@@ -179,7 +179,7 @@
     "src/signin-navigation.js": "sha256:494f2537099c152a1711d4a5c9087f89b67a35d1153ee9658e1aea6d71b35f25",
     "src/spend-pricing-ui.js": "sha256:907de1a2bdbb39ef6c6dab568515946276467dcf7803d4473fbc0ace503e3cff",
     "src/strings.js": "sha256:16d9742fc2ef6f0e9dad2e933857a4c120bc923dc3a71ec86e255c0aa7561615",
-    "src/styles.css": "sha256:c4a61339dd32cc685bb16a90ed12909a3c9a14e07cce403cecbb4b6f1bd75373",
+    "src/styles.css": "sha256:dc7aa830df9ab825df1cc1d48f7d70bfb453912c888ce33fe2d10598484c04cc",
     "src/updates-ui.js": "sha256:b4ade17054f171c0e0bf1d13a67f4cb8af731a8a2a6817d66d3bf56bf3027293",
     "src/vendor-gitdiff-parser.js": "sha256:a5b93c44784a9adabed77de47f9774a28cb492bcc66681c359dd74e0d19eee2c",
     "src/vendor-jsdiff-patch.js": "sha256:73253d9445561433580f38da6870b5d9ec2c310a1ee069169b41985325859a68",
@@ -198,9 +198,9 @@
     "src/workspace-change-view.js": "sha256:0d48219f7b3043f95718c4004542032afe9e46d284c9f822a81176c5ebd6cda7",
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "src/workspace-previews-ui.js": "sha256:735d6437270df142db007fd1bcaf2587a99cae6549508f11e130020bbc12605d",
-    "strings/en.js": "sha256:38af505a9f56ae84dcc63b4c6f4fd55a23bf22190f78aea69f16d560e603339e",
-    "strings/en.json": "sha256:977654ef53fe1247d6d1d9b70635e2df697abcd6869ea496379d0581e5e2dcc4"
+    "src/workspace-previews-ui.js": "sha256:7301c966b49b637b67b31d307d506e7486692e5f0e09ca562430eb74379118ef",
+    "strings/en.js": "sha256:4fe89a3eb945e1c65a5dab7e4195a0b04b6a037ef27317ade0c0655d28fb7df0",
+    "strings/en.json": "sha256:baa4c1ab583f64817a0322d4fabccf5a14d49be1547155d7f9e2d9060da8ce3b"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",
