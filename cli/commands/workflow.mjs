@@ -97,9 +97,9 @@ async function reconcileAnswer(call, args, config) {
     currentStateVerified: false, workStateChanged: false };
 }
 
-function exactDiscussionFiles(items, { origin, roomId }, connectionName) {
+function exactDiscussionFiles(messages, { origin, roomId }, connectionName) {
   const files = new Map();
-  for (const { message } of items) {
+  for (const message of messages) {
     if (!validId(message?.id) || typeof message.body !== "string") continue;
     for (const [href] of message.body.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
       const link = URL.parse(href);
@@ -201,7 +201,7 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
       const hasDiscussion = value.result?.kind === "room_text" && typeof source?.body === "string"
         && validId(source.messageId) && source.messageId === value.result.receipt?.nativeText?.messageId;
       if (hasDiscussion && !source.withdrawnAt) {
-        const files = exactDiscussionFiles([{ message: { id: source.messageId, body: source.body } }], config, name);
+        const files = exactDiscussionFiles([{ id: source.messageId, body: source.body }], config, name);
         if (files.length) value.workspaceArtifacts = files;
       }
       if (hasDiscussion) value.discussionRead = { method: "GET", path: resultDiscussionPath(config.roomId, source.messageId),
@@ -216,6 +216,8 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
             || thread.deletedAt || thread.authorId !== source.postedById || thread.body !== source.body || !Array.isArray(thread.replies))
           return report({ status: "unavailable", code: "result_discussion_unavailable" }, 1);
         value.discussion = { messageId: source.messageId, replies: thread.replies };
+        const files = exactDiscussionFiles(thread.replies, config, name);
+        if (files.length) value.discussion.workspaceArtifacts = files;
       }
     }
     if (tool === "room_read_result" && value.cliBasis?.actions.review)
@@ -229,7 +231,7 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
         step.command = ["room", "work", args.workItemId, "--result"];
     }
     if (tool === "room_read_work_discussion") {
-      value.workspaceArtifacts = exactDiscussionFiles(value.discussion.items, config, name);
+      value.workspaceArtifacts = exactDiscussionFiles(value.discussion.items.map(item => item.message), config, name);
       const cursor = value.discussion.nextCursor;
       if (validCursor(cursor))
         value.nextCommand = ["room", "work", args.workItemId, "--discussion", "--cursor", cursor];

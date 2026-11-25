@@ -117,7 +117,7 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   Object.assign(env, { ROOM_ORIGIN: origin, ROOM_ID: "commons", PROJECT_ROOM_SECRET: "different-ambient-identity" });
   const changes = await cli(file.command.slice(1), undefined, reviewerProject);
   assert.equal(changes.value.file.hunks[0].changes.at(-1).content, "submitted");
-  await publish(1, patch.replace("+submitted", "+replaced"));
+  const updated = await publish(1, patch.replace("+submitted", "+replaced"));
   assert.equal(shared.value.discussion, undefined);
   assert.equal(shared.value.discussionRead.path, `/api/rooms/commons/messages/${shared.value.result.text.messageId}/thread`);
   const quoted = "> Draft from a colleague.\n" + sharedUrl + "\n\nPlease name Maya as the owner.";
@@ -170,6 +170,23 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   assert.equal(current.value.workThread.correction.summary, "Name the owner.");
   const revisedDiscussion = await cli(["result", revisedUrl, "--discussion"]);
   assert.deepEqual(revisedDiscussion.value.discussion.replies, []);
+  const lateLink = workspaceArtifactLink(origin, "commons", { ...preview, ...updated }, "changes", "brief.md");
+  const replyToId = current.value.result.text.messageId;
+  store.command(producer.secret, "commons", { id: "send-late-file", type: "message.posted",
+    data: { messageId: "late-file", replyToId, body: "Here is the revised brief.\n" + lateLink } });
+  store.command(producer.secret, "commons", { id: "send-private-file", type: "message.posted",
+    data: { messageId: "private-file", replyToId, toMemberId: "owner", body: fileLink } });
+  const followUp = await cli(["result", revisedUrl, "--discussion"], undefined, reviewerProject);
+  assert.equal(followUp.value.workspaceArtifacts, undefined);
+  assert.equal(followUp.value.discussion.replies.length, 1);
+  assert.equal(followUp.value.discussion.workspaceArtifacts.length, 1);
+  const [lateFile] = followUp.value.discussion.workspaceArtifacts;
+  assert.equal(lateFile.messageId, "late-file");
+  assert.deepEqual(lateFile.command, ["room", "workspace", "changes", "--link", lateLink, "--connection", "reviewer"]);
+  const lateChanges = await cli(lateFile.command.slice(1), undefined, reviewerProject);
+  assert.equal(lateChanges.value.file.hunks[0].changes.at(-1).content, "replaced");
+  await publish(updated.revision, patch.replace("+submitted", "+latest"));
+  await assert.rejects(() => cli(lateFile.command.slice(1), undefined, reviewerProject), error => error.status === 409);
   const earlier = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject);
   assert.equal(earlier.value.discussion.replies[0].body, quoted);
   assert.equal(earlier.value.selection.status, "historical");
