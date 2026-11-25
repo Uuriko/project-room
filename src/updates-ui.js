@@ -12,6 +12,7 @@ const FILTERS = [
 ];
 const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
 export const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
+const actionLabel = (item, action) => action === "open" && item?.sourceRef?.reviewCompletionEventId ? "Review" : ACTION_LABELS[action];
 const messageDestination = item => item.kind === "request" ? item.sourceRef?.requestId : item.sourceRef?.messageId;
 const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions" };
 
@@ -158,9 +159,10 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       const operation = operations.get(row.dataset.updateId);
       for (const button of row.querySelectorAll("[data-update-action]")) {
         const action = button.dataset.updateAction;
-        const label = `${operation?.action === action ? (operation.busy ? "Checking " : "Retry ") : ""}${ACTION_LABELS[action]}`;
+        const item = items.find(item => item.id === row.dataset.updateId);
+        const label = `${operation?.action === action ? (operation.busy ? "Checking " : "Retry ") : ""}${actionLabel(item, action)}`;
         button.textContent = label;
-        button.setAttribute("aria-label", `${label} ${items.find(item => item.id === row.dataset.updateId)?.title || "update"}`);
+        button.setAttribute("aria-label", `${label === "Review" ? "Review result for" : label} ${item?.title || "update"}`);
         button.disabled = (loading && blockingRead) || (!!operation && (operation.action !== action || (operation.busy && action !== "open")));
       }
     }
@@ -245,7 +247,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       }
       const actions = document.createElement("div");
       actions.className = "updates-actions";
-      for (const [name, label] of Object.entries(ACTION_LABELS)) {
+      for (const name of Object.keys(ACTION_LABELS)) {
+        const label = actionLabel(item, name);
         if ((nativeAttention() || item.kind === "release_accepted") && name !== "open") continue;
         // Owner decisions are below this list; do not offer an Open action
         // unless this row has a supported work or conversation destination.
@@ -255,7 +258,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         button.className = name === "open" ? "button secondary" : "button ghost";
         button.dataset.updateAction = name;
         button.textContent = label;
-        button.setAttribute("aria-label", `${label} ${item.title || item.kind}`);
+        button.setAttribute("aria-label", `${label === "Review" ? "Review result for" : label} ${item.title || item.kind}`);
         actions.append(button);
       }
       row.append(copy, actions);
@@ -276,7 +279,16 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       for(let step=0;step<(append?1:Math.max(1,budget));step++){
         const page=await client.roomRead('/needs-me'+(after?'?cursor='+encodeURIComponent(after):''));if(!page||!current())return false;
         if(page.contractVersion!==2||!Array.isArray(page.items)||typeof page.complete!=='boolean'||page.coverage?.mode!=='native_bounded'||page.complete!==(page.cursor===null))throw Error('Could not verify this attention page.');
-        for(const source of page.items){if(!source||typeof source.id!=='string'||typeof source.kind!=='string'||typeof source.summary!=='string')throw Error('Could not verify this attention item.');const item={id:source.kind+':'+source.id,roomId:source.roomId,kind:source.kind,title:source.summary,state:'open',reviewRuntime:source.reviewRuntime,sourceRef:source.kind==='work'?{workItemId:source.id}:{messageId:source.id}};merged.set(item.id,item);}
+        for(const source of page.items){
+          if(!source||typeof source.id!=='string'||typeof source.kind!=='string'||typeof source.summary!=='string')throw Error('Could not verify this attention item.');
+          const sourceRef=source.kind==='work'?{workItemId:source.id}:{messageId:source.id};
+          if(source.kind==='work'&&source.reviewCompletionEventId!==undefined){
+            if(typeof source.reviewCompletionEventId!=='string'||!source.reviewCompletionEventId)throw Error('Could not verify this review destination.');
+            sourceRef.reviewCompletionEventId=source.reviewCompletionEventId;
+          }
+          const item={id:source.kind+':'+source.id,roomId:source.roomId,kind:source.kind,title:source.summary,state:'open',reviewRuntime:source.reviewRuntime,sourceRef};
+          merged.set(item.id,item);
+        }
         pages++;more=!page.complete;const following=page.cursor;if(more&&(typeof following!=='string'||!following||seen.has(following)))throw Error('Attention page did not advance. Refresh to continue.');after=following;if(!more)break;seen.add(after);
       }
       items=[...merged.values()];cursor=after;hasMore=more;loadedPages=pages;visitedCursors=seen;incomplete=true;filter='needs';actionable=items.length;badgeMore=hasMore;badgeIncomplete=false;loading=false;paintBadge();paint({keepPosition:background});status.textContent=notice;return true;
@@ -350,7 +362,10 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   }
   async function mark(item, action) {
     if(nativeAttention()){
-      if(action!=='open')return;const origin=capture(item.id,action),opened=item.sourceRef?.workItemId&&onOpenWork?onOpenWork(item.sourceRef.workItemId,origin):item.sourceRef?.messageId&&onOpenMessage?onOpenMessage(item.sourceRef.messageId,origin):false;
+      if(action!=='open')return;
+      const origin=capture(item.id,action);
+      if(item.sourceRef?.reviewCompletionEventId)origin.reviewCompletionEventId=item.sourceRef.reviewCompletionEventId;
+      const opened=item.sourceRef?.workItemId&&onOpenWork?onOpenWork(item.sourceRef.workItemId,origin):item.sourceRef?.messageId&&onOpenMessage?onOpenMessage(item.sourceRef.messageId,origin):false;
       if(opened===false){status.textContent='That source is no longer available in this room.';return;}cancelPending();hidePage();return;
     }
     const owned = currentContext();

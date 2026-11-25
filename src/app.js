@@ -3613,7 +3613,7 @@ function syncWorkReturnControl() {
   const origin = currentWorkOrigin();
   button.disabled = false;
   button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message|result)\//.test(location.hash);
-  button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
+  button.textContent = origin ? `Back to ${origin.type === "updates" ? (client.sectionAvailability("updates")?.replacement === "needs-me" ? "Needs me" : "Updates") : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
 }
 function clearWorkNavigation() {
   confirmedWorkNavigation = null;
@@ -3646,7 +3646,7 @@ function sameWorkOrigin(a, b) {
   if (a.type !== b.type || a.channelId !== b.channelId || a.threadId !== b.threadId
     || JSON.stringify(a.mode ?? null) !== JSON.stringify(b.mode ?? null)) return false;
   // JDOT-COH-UPDATES-PAGE begin
-  if (a.type === "updates") return ["itemId", "filter", "pageBudget", "scrollTop", "listScrollTop", "completionEventId"]
+  if (a.type === "updates") return ["itemId", "filter", "pageBudget", "scrollTop", "listScrollTop", "completionEventId", "reviewCompletionEventId"]
     .every(key => a.updates?.[key] === b.updates?.[key]);
   // JDOT-COH-UPDATES-PAGE end
   if (a.type === "board") return a.claimId === b.claimId && a.focusKey === b.focusKey;
@@ -3661,15 +3661,18 @@ function showWorkDestination(kind, id, presentation = "focus") {
     const selected = revealWork(id, presentation === "details");
     if (presentation === "thread") {
       const epoch = workNavigationEpoch, identity = session;
-      const completion = currentWorkOrigin()?.updates?.completionEventId;
+      const update = currentWorkOrigin()?.updates;
+      const completion = update?.reviewCompletionEventId ?? update?.completionEventId;
       void Promise.resolve(selected).then(card => {
         if (!card || workNavigationEpoch !== epoch || session !== identity || activeWorkNavigationId !== id) return;
         if (completion && state.workItems[id]?.receipt?.eventId !== completion) {
-          notice("This release changed. Return to Updates to open the accepted result.", true);
+          notice(update.reviewCompletionEventId ? "A newer revision is available. Return to Needs me to review it."
+            : "This release changed. Return to Updates to open the accepted result.", true);
           return;
         }
         const button = card.querySelector("[data-read-result]");
         if (button) readResult({ target: button }, { focused: true });
+        else if (update?.reviewCompletionEventId) card.querySelector('[data-action="verify"]')?.click();
         syncWorkReturnControl();
       });
     }
