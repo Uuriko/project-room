@@ -59,11 +59,15 @@ test('native invitation HTTPS browser: review Back, lost-response retry and revo
   invitation = { code: new URL(invitationUrl).pathname.split('/').at(-1) };
   assert.match(invitation.code, /^RM-[A-Z0-9]{16}$/);
   await inviterContext.close();
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const context = await browser.newContext({
+    ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+  });
   const page = await context.newPage(); page.setDefaultTimeout(7000);
   await context.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { globalThis.copiedAgentInvite = text; } } }));
   await page.goto(invitationUrl);
   await page.locator('#join-consent:not([hidden])').waitFor();
+  const fitsViewport = () => page.evaluate(() => innerWidth === 390 && document.documentElement.scrollWidth <= innerWidth);
+  assert.ok(await fitsViewport(), 'the invitation fits the phone before copying');
   assert.equal(await page.locator('#join-existing-agent-copy').evaluate(button => button === globalThis.document.activeElement), true, 'keyboard starts with the non-consuming existing-agent option');
   const instructions = page.getByRole('textbox', { name: 'Invitation for your existing agent', includeHidden: true });
   assert.equal(await instructions.isVisible(), false, 'the invitation text starts collapsed');
@@ -82,6 +86,7 @@ test('native invitation HTTPS browser: review Back, lost-response retry and revo
   });
   await copyInvitation.click();
   await instructions.waitFor({ state: 'visible' });
+  assert.ok(await fitsViewport(), 'manual fallback fits the phone too');
   assert.equal(await instructions.evaluate(field => (
     field === globalThis.document.activeElement
     && field.selectionStart === 0
