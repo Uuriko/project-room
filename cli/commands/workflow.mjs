@@ -6,7 +6,7 @@ import { workflowTools as actions, isRecord, hasRevision, selectedBasis, readSel
 import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
 import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
-import { uiText } from "../../src/strings.js";
+import { exactResultRecovery } from "../../src/result-availability.js";
 import { validId } from "../../src/events.js";
 import { exactResultDestination } from "../../src/record-link.js";
 import { workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
@@ -54,10 +54,8 @@ async function exchange(tool, args, config, secret, fetchImpl) {
     if (value?.status === "unconfirmed" || value?.status >= 500 || value?.stopped === "unknown") {
       return { unknown: true, value: value?.stopped === "unknown" ? value : undefined };
     }
-    if (tool === "room_read_result" && ((value?.code === "result_unavailable" && value.status === 422)
-        || (value?.code === "result_not_found" && value.status === 404))) {
-      return { refused: value.code, hint: uiText(`agentError.${value.code}.recovery`) };
-    }
+    const hint = tool === "room_read_result" && exactResultRecovery(value?.status, value?.code);
+    if (hint) return { refused: value.code === "work_private" ? "access_denied" : value.code, hint };
     const code = value?.reason ?? value?.code ?? rpc.error?.data?.reason;
     return { refused: typeof code === "string" && /^[a-z][a-z0-9_]{0,79}$/.test(code) ? code : "room_refused" };
   }

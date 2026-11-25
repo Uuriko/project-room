@@ -504,7 +504,8 @@ test("shared result links keep identical old and new text bound to different ver
   assert.equal(requests.length, 1);
 
   await receiver.goto(expected("missing-completion"));
-  await receiver.getByText(/Exact text unavailable/).waitFor();
+  await receiver.getByText("Ask the sender to copy the link to the intended result version again.", { exact: true }).waitFor();
+  assert.equal(await receiver.locator("#result-retry").isVisible(), false);
   assert.equal(await receiver.locator("#result-body").textContent(), "");
   assert.equal(await receiver.locator("#result-title").textContent(), "Result");
 
@@ -551,10 +552,21 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
 
   const nonparty = await f.login("owner");
   await nonparty.goto(target);
-  await nonparty.getByText(/Exact text unavailable/).waitFor();
+  await nonparty.getByText("Ask the sender to share the intended result version somewhere you can read it.", { exact: true }).waitFor();
+  assert.equal(await nonparty.locator("#result-retry").isVisible(), false);
   assert.equal(await nonparty.locator("#result-body").textContent(), "");
   assert.equal(await nonparty.locator("#result-title").textContent(), "Result");
   assert.equal(await nonparty.locator("#result-copy-link").isVisible(), false);
   assert.equal(await nonparty.locator("#result-current-version").getAttribute("href"), null);
   assert.equal(await nonparty.locator("#result-work-action").isVisible(), false);
+
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "private-review", workItemId: "revision-journey",
+    toMemberId: "producer", requestKind: "reply", body: "Private review question" });
+  const guest = await f.login("guest");
+  const denied = guest.waitForResponse(response => new URL(response.url()).pathname.endsWith("/work-result"));
+  await guest.goto(target);
+  assert.equal((await denied).status(), 403);
+  await guest.getByText("Ask the sender to share the intended result version somewhere you can read it.", { exact: true }).waitFor();
+  assert.equal(await guest.locator("#result-retry").isVisible(), false);
+  assert.equal(await guest.locator("#result-body").textContent(), "");
 });

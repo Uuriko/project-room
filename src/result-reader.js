@@ -1,6 +1,6 @@
 import { exactResultHref } from "./room-deep-link.js";
 import { clipboard } from "./clipboard.js";
-import { canReplyToResult } from "./result-availability.js";
+import { canReplyToResult, exactResultRecovery } from "./result-availability.js";
 import { uiText } from "./strings.js";
 import { WORK_STATES as S, isRoomArchived } from "./events.js";
 import { matchesReceipt, nextWorkStep, workActions, reviewRuntimeLabel } from "./workflow.js";
@@ -268,7 +268,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     showCorrection(view.withdrawn ? null : pending ?? view.previousCorrection, Boolean(pending));
     const earlier = item ? !matchesReceipt(view.receipt, item.receipt) || (!pending && item.state !== S.COMPLETED) || Boolean(item.supersededBy)
       : view.selectionStatus === "historical";
-    resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
+    resultElement("result-status").textContent = view.refusalHint ?? (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
     if (usableText(view) && view.producerCredit) {
@@ -509,7 +509,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultStatus();
       if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
         resultElement("result-diff"), () => owns() && !view.withdrawn);
-    }).catch(() => { if (owns()) { view.error = true; view.retrying = false; resultStatus(); } });
+    }).catch(error => {
+      if (!owns()) return;
+      view.refusalHint = exactResultRecovery(error?.status, error?.code);
+      view.error = !view.refusalHint;
+      view.retrying = false;
+      resultStatus();
+    });
   }
   resultElement("result-retry").addEventListener("click", () => {
     const view = resultView;

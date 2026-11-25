@@ -24,3 +24,15 @@ test("revoked membership and other denials retain their existing recovery classi
   }
   assert.equal(connectionDiagnostic(new RoomClientError(401, "insufficient_scope", "PRIVATE")).code, "access_ended");
 });
+
+test("a private work refusal is distinguished from a broken connection and never suggests retrying the same read", () => {
+  const diagnostic = connectionDiagnostic(new RoomClientError(403, "work_private", "PRIVATE-PARTIES-SENTINEL"));
+  assert.equal(diagnostic.code, "work_private");
+  assert.equal(diagnostic.reason, "work_private");
+  assert.equal(diagnostic.status, "action_required");
+  assert.match(diagnostic.message, /private to its participants/);
+  assert.doesNotMatch(diagnostic.message, /access was not accepted|check the service address/i);
+  assert.match(diagnostic.hint, /[Dd]o not retry the same read/);
+  assert.doesNotMatch(JSON.stringify(diagnostic), /PRIVATE-PARTIES-SENTINEL/);
+  assert.equal(connectionDiagnostic(new RoomClientError(401, "work_private", "PRIVATE-PARTIES-SENTINEL")).code, "access_ended");
+});
