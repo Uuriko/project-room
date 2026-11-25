@@ -16,7 +16,7 @@ import { signInFixture } from "./auth-signin.mjs";
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
 
-async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody, firstCredit } = {}) {
+async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody, firstCredit, approveBoth = false } = {}) {
   const f = createAcceptanceFixture();
   const makeServer = () => createRoomServer({ store: f.store, streamInterval: 60, credentialReadBurst });
   let server = makeServer(), browser;
@@ -53,9 +53,10 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
 
   send("owner", T.MEMBER_ADDED, { memberId: "human-checker", displayName: "Test checker", kind: "human", permissions: ["verify"] });
   f.keys["human-checker"] = f.store.issueAccessKey("commons", "human-checker");
+  if (approveBoth) send("guest", T.MESSAGE_POSTED, { messageId: "start-history", body: "Ready to review" });
   send("owner", T.WORK_PROPOSED, { workItemId: "revision-journey", title: "Revise a short result", definitionOfDone: "Name the owner", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner" });
   lifecycle("revision-journey");
-  send("owner", T.WORK_PROPOSED, { workItemId: "calm-result", title: "A first result", definitionOfDone: "One version", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
+  send("owner", T.WORK_PROPOSED, { workItemId: "calm-result", title: "A first result", ...(approveBoth ? { ownerDecisionRequired: true, humanDecisionMakerId: "owner" } : {}), definitionOfDone: "One version", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
   lifecycle("calm-result");
   completeWithText("calm-result", "Only version of this result");
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -748,43 +749,55 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
 });
 
 test("catch-up labels each review with its visible work and preserves withheld history", async t => {
-  const f = await setup(t, 390);
-  const reviewIds = [];
+  const f = await setup(t, 390, { approveBoth: true });
+  f.store.markCaughtUp(f.keys.owner, "commons", f.store.headSequence("commons"));
+  const decisions = [];
   for (const workItemId of ["revision-journey", "calm-result"]) {
-    const work = f.store.room("commons").state.workItems[workItemId];
-    const verified = f.send("human-checker", T.VERIFICATION_RECORDED, {
-      workItemId, expectedRevision: work.revision, completionEventId: work.receipt.eventId,
-      evidenceVersion: work.receipt.evidenceVersion, result: "pass", summary: "Checked the revision",
+    const work = () => f.store.room("commons").state.workItems[workItemId];
+    const basis = () => ({ workItemId, expectedRevision: work().revision,
+      completionEventId: work().receipt.eventId, evidenceVersion: work().receipt.evidenceVersion });
+    const review = f.send("human-checker", T.VERIFICATION_RECORDED, {
+      ...basis(), result: "pass", summary: "Checked the revision",
     });
-    reviewIds.push(verified.event.id);
+    const reason = f.send("owner", T.MESSAGE_POSTED, { messageId: "reason-" + workItemId, body: "Approved the revision." });
+    const decision = f.send("owner", T.OWNER_DECISION_RECORDED, {
+      ...basis(), decision: "approved", reason: "Approved the revision.", sourceMessageId: reason.event.data.messageId,
+    });
+    decisions.push({ workItemId, title: work().title, reviewId: review.event.id, decisionId: decision.event.id });
   }
-  const work = f.item();
-  f.send("owner", T.MESSAGE_POSTED, { messageId: "catchup-reason", body: "Approved the revision." });
-  const decision = f.send("owner", T.OWNER_DECISION_RECORDED, {
-    workItemId: work.id, expectedRevision: work.revision, completionEventId: work.receipt.eventId,
-    evidenceVersion: work.receipt.evidenceVersion, decision: "approved", reason: "Approved the revision.",
-    sourceMessageId: "catchup-reason",
-  });
-  f.store.dmConsents.request("commons", "owner", "producer", "fixture");
-  f.store.dmConsents.decide("commons", "producer", "owner", "approve");
-  f.send("owner", T.MESSAGE_POSTED, { messageId: "private-review", toMemberId: "producer",
-    workItemId: work.id, requestKind: "reply", body: "Continue in private" });
-  for (const actor of ["owner", "guest"]) {
-    const page = await f.login(actor);
-    await openCatchUp(page);
-    const row = id => page.locator(`[data-brief-key="history:${id}"]`);
+  const page = await f.login("guest");
+  await openCatchUp(page);
+  const row = id => page.locator(`[data-brief-key="history:${id}"]`);
+  async function checkRows(privateFirst) {
     await page.waitForFunction(() => Boolean(document.querySelector("#rb-ack-button").dataset.horizon));
-    while (!await row(decision.event.id).count() && await page.locator("#rb-more-button").isVisible()) {
+    while (!await row(decisions[1].decisionId).count() && await page.locator("#rb-more-button").isVisible()) {
       await page.locator("#rb-more-button").click();
       await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
     }
-    const visible = actor === "owner";
-    assert.equal(await row(reviewIds[0]).locator(".rb-detail").textContent(),
-      visible ? "Revise a short result · pass · Checked the revision" : "pass");
-    assert.equal(await row(reviewIds[1]).locator(".rb-detail").textContent(), "A first result · pass · Checked the revision");
-    assert.equal(await row(decision.event.id).locator(".rb-detail").textContent(),
-      visible ? "Revise a short result · approved" : "approved");
-    assert.equal(await row(decision.event.id).getAttribute("data-open-work"), work.id);
-    await page.context().close();
+    for (const { workItemId, title, reviewId, decisionId } of decisions) {
+      const masked = privateFirst && workItemId === "revision-journey";
+      assert.equal(await row(reviewId).locator(".rb-detail").textContent(), masked ? "pass" : title + " · pass · Checked the revision");
+      assert.equal(await row(decisionId).locator(".rb-detail").textContent(), masked ? "approved" : title + " · approved");
+      assert.equal(await row(decisionId).getAttribute("data-open-work"), workItemId);
+    }
+  }
+  await checkRows(false);
+  f.store.dmConsents.request("commons", "owner", "producer", "fixture");
+  f.store.dmConsents.decide("commons", "producer", "owner", "approve");
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "private-review", toMemberId: "producer",
+    workItemId: "revision-journey", requestKind: "reply", body: "Continue in private" });
+  const refreshed = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
+  await page.locator("#rb-refresh-button").click();
+  await refreshed;
+  await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+  await checkRows(true);
+
+  // The owner can read both work cards, but both proposals predate this marker.
+  const owner = await f.login("owner");
+  await openCatchUp(owner);
+  for (const { workItemId, decisionId } of decisions) {
+    const historical = owner.locator(`[data-brief-key="history:${decisionId}"]`);
+    assert.equal(await historical.locator(".rb-detail").textContent(), workItemId + " · approved");
+    assert.equal(await historical.getAttribute("data-open-work"), workItemId);
   }
 });

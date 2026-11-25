@@ -8064,10 +8064,10 @@ function briefEventTarget(event) {
   if (event.type === T.ROOM_CREATED) return { kind: "room", id: state.room.id };
   return { kind: "event", id: event.id };
 }
-function describeBriefEvent({ sequence, event }) {
+function describeBriefEvent({ sequence, event }, proposalTitles) {
   const actor = esc(memberLabel(event.actorId));
   const type = esc(humanize(event.type));
-  const workTitle = event.data.withheld ? "" : (state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "");
+  const workTitle = event.data.withheld ? "" : (proposalTitles.get(event.data.workItemId) ?? event.data.workItemId ?? "");
   const actorRole = event.type === T.WORK_COMPLETED ? `reporter ${actor}` : actor;
   let detail = "";
   if (event.type === T.MESSAGE_POSTED) detail = esc((event.data.body || "").slice(0, 80));
@@ -8258,11 +8258,19 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
   $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
     ? "· nothing new since your marker"
     : `${history.items.length} of ${changes} events · through ${history.evaluatedThrough}`;
+  // Historical labels come from this viewer’s loaded brief. Opening a work card
+  // elsewhere must never supply text omitted from a catch-up window.
+  const proposalTitles = new Map();
+  for (const { event } of history.items) {
+    if (event.data.withheld) proposalTitles.delete(event.data.workItemId);
+    else if (event.type === T.WORK_PROPOSED && event.data.title) proposalTitles.set(event.data.workItemId, event.data.title);
+  }
+  const historyRow = row => describeBriefEvent(row, proposalTitles);
   const historyGroups = groupBriefHistory(history.items, session?.member?.id);
   renderBriefList("#rb-history-list", (historyGroups.length
     ? historyGroups.map(([name, items]) =>
-      `<li class="rb-group"><span class="rb-group-label">${esc(BRIEF_GROUP_LABELS[name])} (${items.length})</span><ul class="rb-list rb-group-list">${items.map(describeBriefEvent).join("")}</ul></li>`).join("")
-    : history.items.map(describeBriefEvent).join(""))
+      `<li class="rb-group"><span class="rb-group-label">${esc(BRIEF_GROUP_LABELS[name])} (${items.length})</span><ul class="rb-list rb-group-list">${items.map(historyRow).join("")}</ul></li>`).join("")
+    : history.items.map(historyRow).join(""))
     || (returnBrief.contractVersion===2&&history.evaluatedThrough>history.cursor?'<li class="rb-empty">No visible events in this page. Continue through the checked history.</li>':'<li class="rb-empty">Nothing new since your marker.</li>'));
   $("#rb-more-button").hidden = !history.hasMore;
   $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : "Mark caught up";
