@@ -300,8 +300,29 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
     const newer = resultElement("result-current-version");
     const latest = item?.receipt;
-    const canOpenNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
-      && latest?.nativeText && !latest.nativeText.withdrawnAt && latest.eventId !== view.receipt.completionEventId;
+    const hasNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
+      && latest?.eventId && latest.eventId !== view.receipt.completionEventId;
+    // Compact Room snapshots hold the completion ID but omit native result metadata.
+    // Confirm the exact replacement with the same member before offering its link.
+    const basis = hasNewer && !latest.nativeText && latest.evidenceUrl === null
+      ? [item.revision, latest.eventId, latest.evidenceVersion].join("/") : null;
+    if (basis && view.newerRead?.basis !== basis) {
+      const read = view.newerRead = { basis, messageId: null };
+      const completionEventId = latest.eventId;
+      const selected = { completionEventId, evidenceVersion: latest.evidenceVersion };
+      client.workResult(view.workItemId, { completionEventId }).then(value => {
+        if (!usableText(view) || view.newerRead !== read) return;
+        if (value?.selection.status === "current" && value.result.kind === "room_text"
+          && !value.result.text.withdrawnAt && matchesReceipt(selected, value.result.receipt)) {
+          read.messageId = value.result.text.messageId;
+        }
+        resultStatus();
+      }).catch(() => {});
+    }
+    const selectedMessageId = basis && view.newerRead?.basis === basis ? view.newerRead.messageId : null;
+    const canOpenNewer = hasNewer && (latest.nativeText
+      ? !latest.nativeText.withdrawnAt
+      : selectedMessageId && !getState().messages.some(message => message.id === selectedMessageId && message.deletedAt));
     newer.hidden = !canOpenNewer;
     if (canOpenNewer) {
       newer.href = exactResultHref({ ...view, completionEventId: latest.eventId });
