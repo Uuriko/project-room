@@ -241,7 +241,7 @@
   "file.attach.failed": "Couldn’t attach that file.",
   "file.answer.check": "Check files on this answer",
   "file.answer.checkFailed": "Could not check this answer’s files. Try again.",
-  "file.answer.none": "No shared files on this answer yet.",
+  "file.answer.none": "No files on this answer.",
   "file.download.action": "Download {filename}",
   "file.download.pending": "Downloading…",
   "file.download.started": "Download started",
