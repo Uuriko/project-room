@@ -224,7 +224,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       const value = await client.roomRead(`/workspace-previews?${query}`);
       if (!ownsPatch() || !value) return null;
       const changes = value.changes;
-      if (changes?.historical !== true || changes.id !== item.id || changes.head !== item.head || changes.revision !== item.revision)
+      if (changes?.historical !== true || changes.id !== item.id || changes.head !== item.head || changes.revision !== item.revision
+          || changes.publisherId !== target.publisherId || changes.patchDigest !== target.digest)
         throw new Error(uiText("workspace.share.changesUnavailable"));
       return changes;
     };

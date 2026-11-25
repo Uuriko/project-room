@@ -7,6 +7,7 @@ import { readProject, safeName } from "../paths.mjs";
 import { bearerHeader } from "../auth.mjs";
 import { connection, parseArgs } from "./code.mjs";
 import { artifactDigest, workspaceArtifactLink, workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
+import { parsePatch, workspaceChangeFile, workspaceChangeIndex } from "../../src/workspace-diff-parser.js";
 import { runWorkspaceServer } from "../workspace-dev-server.mjs";
 import { attachWorkspacePublisher, workspacePublisherEndpoint } from "../workspace-preview-publisher.mjs";
 import { workspacePublisherAddress } from "../../server/workspace-publisher-address.mjs";
@@ -22,12 +23,14 @@ room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace changes --id ID [--file PATH | --raw yes]
-room workspace changes --link URL [--connection NAME]
+room workspace changes --link URL [--connection NAME] [--base COMMIT]
 room workspace inspect --link URL --viewer MEMBER_ID [--connection NAME]
 room workspace output --id ID
 room workspace remove --id ID
 Pass --connection NAME to choose a saved connection explicitly.`;
 const validId = /^[a-f0-9]{32}$/;
+const fullCommit = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+const localGitEnv = { ...process.env, GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0" };
 
 function git(cwd, ...args) {
   const output = spawnSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -122,10 +125,47 @@ function launch(cwd, path, base, scope, details = {}) {
 }
 
 function roomCustody(packet, conn) {
-  if (packet?.roomId !== conn.roomId || typeof packet.viewerId !== "string" || !packet.viewerId)
-    throw new Error("Room did not confirm the identity for this Workspace checkout");
+  if (packet?.roomId !== conn.roomId || typeof packet.viewerId !== "string" || !packet.viewerId
+      || conn.memberId && packet.viewerId !== conn.memberId)
+    throw new Error("Room did not confirm the Workspace identity");
   return { origin: new URL(conn.origin).origin, roomId: packet.roomId, memberId: packet.viewerId,
     accountId: packet.viewerAccountId ?? null };
+}
+
+function committedPatch(cwd, base, head, env) {
+  const patch = spawnSync("git", ["diff", "--no-ext-diff", "--no-textconv", "--no-color", base, head, "--"], {
+    cwd, env, encoding: "utf8", maxBuffer: 192 * 1024, stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (patch.status !== 0) throw new Error("Could not read the committed patch within the 192 KiB limit");
+  return patch.stdout;
+}
+
+async function recoverWorkspacePatch(call, conn, target, cwd, base) {
+  const verify = async () => {
+    const packet = await call();
+    const room = roomCustody(packet, conn);
+    const item = packet.items?.find(entry => entry.id === target.id);
+    if (item?.publisherId !== target.publisherId || !Number.isSafeInteger(item.revision) || item.revision <= target.revision)
+      throw new Error("The publisher's current Workspace share is unavailable.");
+    return { room, revision: item.revision, head: item.head, patchDigest: item.patchDigest };
+  };
+  const before = await verify();
+  for (const commit of [base, target.head]) {
+    const result = spawnSync("git", ["rev-parse", "--verify", "--end-of-options", commit + "^{commit}"],
+      { cwd, env: localGitEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    if (result.status !== 0 || result.stdout.trim() !== commit)
+      throw new Error("Use the matching local repository with both the original base and submitted commit available.");
+  }
+  const patch = committedPatch(cwd, base, target.head, localGitEnv);
+  if (createHash("sha256").update(patch).digest("hex") !== target.digest)
+    throw new Error("The local Git diff does not match the published patch digest.");
+  const source = { id: target.id, revision: target.revision, base, head: target.head, source: "local_git", historical: true };
+  const files = parsePatch(patch);
+  const file = files && target.file && workspaceChangeFile(files, target.file);
+  if (target.file && !file) throw new Error("Could not select this file from the verified local patch.");
+  if (!isDeepStrictEqual(await verify(), before))
+    throw new Error("Room access changed or the publication was updated while verifying the local patch.");
+  return { ...source, ...(target.file ? { file } : files ? { files: workspaceChangeIndex(files) } : { patch }) };
 }
 
 function previewInput(cwd, flags) {
@@ -141,11 +181,7 @@ function previewInput(cwd, flags) {
   if (flags["share-with"] !== undefined) input.recipientId = flags["share-with"];
   if (flags["include-changes"] !== undefined) {
     if (flags["include-changes"] !== "yes") throw new Error("Use --include-changes yes to share the committed patch");
-    const patch = spawnSync("git", ["diff", "--no-ext-diff", "--no-textconv", "--no-color", base, head, "--"], {
-      cwd: root, encoding: "utf8", maxBuffer: 192 * 1024, stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (patch.status !== 0) throw new Error("Could not read the committed patch within the 192 KiB limit");
-    input.patch = patch.stdout;
+    input.patch = committedPatch(root, base, head);
   }
   if (flags.output) {
     const output = realpathSync(resolve(cwd, flags.output));
@@ -230,6 +266,8 @@ export async function workspaceCommand(argv, io = {}) {
   const [action, ...extra] = positional;
   const out = data => (io.out ?? console.log)(JSON.stringify(data));
   const cwd = io.cwd ?? process.cwd();
+  if (action === "changes" && flags.base !== undefined && (!flags.link || !fullCommit.test(flags.base)))
+    throw new Error("Use --base with the full original base commit and an exact --link.");
   if (flags["from-work"] !== undefined && action !== "start") throw new Error("--from-work is available with workspace start");
   if (flags.cwd !== undefined && action !== "run") throw new Error("--cwd is available with workspace run");
   const shareLive = ["live", "publisher", "publisher-ca"].some(flag => flags[flag] !== undefined);
@@ -346,7 +384,22 @@ export async function workspaceCommand(argv, io = {}) {
     if (target.panel !== "changes") throw new Error("Choose a Changes artifact link");
     const query = new URLSearchParams({ id: target.id, changes: "1", artifact: hash, view: target.file ? "file" : "summary" });
     if (target.file) query.set("path", target.file);
-    const { changes } = await call("GET", undefined, `?${query}`);
+    let packet;
+    try { packet = await call("GET", undefined, `?${query}`); }
+    catch (error) {
+      if (!flags.base || error.status !== 409 || error.code !== "preview_changed") throw error;
+      out(await recoverWorkspacePatch(call, conn, target, cwd, flags.base));
+      return 0;
+    }
+    roomCustody(packet, conn);
+    const { changes } = packet;
+    if (changes?.id !== target.id || changes.head !== target.head || changes.revision !== target.revision
+        || (changes.publisherId !== undefined || changes.patchDigest !== undefined)
+          && (changes.publisherId !== target.publisherId || changes.patchDigest !== target.digest)
+        || changes.patch !== undefined || (target.file
+          ? changes.status !== "raw_available" && !workspaceChangeFile(changes.file ? [changes.file] : [], target.file)
+          : changes.status !== "raw_available" && !Array.isArray(changes.files)))
+      throw new Error("Room did not match the selected patch.");
     out(changes);
     return 0;
   }

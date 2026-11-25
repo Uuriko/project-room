@@ -94,6 +94,8 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   const retainedChanges = (await retained.json()).changes;
   assert.equal(retainedChanges.historical, true);
   assert.equal(retainedChanges.revision, 1);
+  assert.equal(retainedChanges.publisherId, first.publisherId);
+  assert.equal(retainedChanges.patchDigest, first.patchDigest);
   assert.equal(retainedChanges.file.hunks[0].changes[1].content, "after");
   assert.equal((await call(viewer, "GET", null, changesQuery + "&revision=1")).status, 409);
   assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact.replace(first.patchDigest, "d".repeat(64))))).status, 409);
@@ -167,6 +169,100 @@ test("workspace preview scope, publish authority, version binding and withdrawal
   const directedAgain = await (await call(publisher, "POST", { ...directed, patch: incomplete })).json();
   await call(publisher, "POST", { ...directed, expectedRevision: directedAgain.revision, patch: incomplete, html: "<p>New publication</p>" });
   assert.equal((await call(viewer, "GET", null, exact + encodeURIComponent(artifact))).status, 409);
+});
+
+test("an expired Workspace file can be recovered only from its exact local Git patch", async t => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { workspaceCommand } = await import("../cli/commands/workspace.mjs");
+  const { workspaceArtifactLink } = await import("../src/workspace-artifact-link.js");
+  const { createHash } = await import("node:crypto");
+  const cwd = mkdtempSync(join(tmpdir(), "room-recover-patch-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const commit = note => git("-c", "user.name=Reviewer fixture", "-c", "user.email=fixture@example.test",
+    "-c", "commit.gpgsign=false", "commit", "-qm", note);
+  git("init", "-q");
+  writeFileSync(join(cwd, "brief.md"), "Initial\n");
+  git("add", "brief.md"); commit("base");
+  const base = git("rev-parse", "HEAD").trim();
+  writeFileSync(join(cwd, "brief.md"), "Reviewed\n");
+  git("add", "brief.md"); commit("reviewed");
+  const head = git("rev-parse", "HEAD").trim();
+  const patch = git("diff", "--no-ext-diff", "--no-textconv", "--no-color", base, head, "--");
+  const roomId = "commons", id = "a".repeat(32), publisherId = "owner";
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom(roomId));
+  const publisherKey = store.issueAccessKey(roomId, publisherId);
+  store.command(publisherKey, roomId, { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "reviewer", displayName: "Reviewer", kind: "agent", permissions: ["verify"] } });
+  const reviewerKey = store.issueAccessKey(roomId, "reviewer");
+  const server = createRoomServer({ store });
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = "http://127.0.0.1:" + server.address().port;
+  const submit = (method, body) => fetch(origin + "/api/rooms/commons/workspace-previews", {
+    method, headers: { Authorization: "Bearer " + publisherKey, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const publication = { id, publisherId, base, head, revision: 1, patchDigest: createHash("sha256").update(patch).digest("hex") };
+  const link = workspaceArtifactLink(origin, roomId, publication, "changes", "brief.md");
+  writeFileSync(join(cwd, "brief.md"), "Later\n");
+  git("add", "brief.md"); commit("later");
+  const later = git("rev-parse", "HEAD").trim();
+  for (let expectedRevision = 0; expectedRevision < 4; expectedRevision++) {
+    const response = await submit("POST", { id, expectedRevision, recipientId: "reviewer", title: "Brief", base,
+      head: expectedRevision ? later : head, patch: expectedRevision ? patch.replace("+Reviewed", "+Later") : patch,
+      html: "<h1>Version " + (expectedRevision + 1) + "</h1>" });
+    assert.equal(response.status, 200, await response.text());
+  }
+  const packet = { roomId, viewerId: "reviewer", items: [{ ...publication, revision: 4 }] };
+  const output = [];
+  const { saveAgentConnection } = await import("../client/agent-connection.mjs");
+  const { connectionHome, connectionsRoot, writePointer } = await import("../cli/paths.mjs");
+  const env = { HOME: cwd, PROJECT_ROOM_KEYCHAIN: "0" };
+  mkdirSync(connectionsRoot(env), { recursive: true, mode: 0o700 });
+  const directory = connectionHome("reviewer", env);
+  saveAgentConnection(directory, { version: 1, origin, roomId, memberId: "reviewer", token: reviewerKey });
+  writePointer("reviewer", directory, env);
+  const run = (fetch, options = []) => workspaceCommand(["changes", "--link", link, "--connection", "reviewer", ...options],
+    { cwd, env, fetch, out: line => output.push(JSON.parse(line)) });
+  const unavailable = (status, code) => Response.json({ error: { code } }, { status });
+  const expired = () => unavailable(409, "preview_changed");
+  await assert.rejects(run(fetch), { status: 409 });
+  await assert.rejects(run(async () => Response.json({ roomId, viewerId: "reviewer",
+    changes: { id, revision: 4, head, files: [] } })), /did not match the selected patch/);
+  await assert.rejects(run(async () => Response.json({ roomId, viewerId: "reviewer",
+    changes: { id, revision: 1, head, publisherId, patchDigest: "b".repeat(64), status: "raw_available" } })),
+  /did not match the selected patch/);
+  await assert.rejects(run(async () => Response.json({ roomId, viewerId: "another-member",
+    changes: { id, revision: 1, head, publisherId, patchDigest: publication.patchDigest, status: "raw_available" } })),
+  /did not confirm the Workspace identity/);
+  const calls = [];
+  const read = async (url, options) => {
+    calls.push(new URL(url).searchParams);
+    return fetch(url, options);
+  };
+  assert.equal(await run(read, ["--base", base]), 0);
+  assert.equal(calls.length, 3);
+  assert.equal(output[0].source, "local_git");
+  assert.deepEqual([output[0].id, output[0].revision, output[0].head], [id, 1, head]);
+  assert.equal(output[0].file.hunks[0].changes.at(-1).content, "Reviewed");
+  await assert.rejects(run(read, ["--base", head]), /does not match the published patch digest/);
+  let confirmations = 0;
+  await assert.rejects(run(async url => {
+    if (new URL(url).searchParams.has("changes")) return expired();
+    return Response.json({ ...packet, viewerId: ++confirmations === 1 ? "reviewer" : "another-member" });
+  }, ["--base", base]), /did not confirm the Workspace identity/);
+  assert.equal((await submit("DELETE", { id, expectedRevision: 4 })).status, 200);
+  await assert.rejects(run(fetch, ["--base", base]), { status: 404 });
+  assert.equal(output.length, 1, "a mismatch, lost share, or different viewer cannot add output");
 });
 
 test("new worktrees keep the project selection outside the working copy", async t => {
