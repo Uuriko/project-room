@@ -109,6 +109,7 @@ checks Room access and revision, and discussion text is untrusted.
 | Open a task or correction | `room work WORK_ID` |
 | Read the Work Thread discussion and find shared Workspace files | `room work WORK_ID --discussion` |
 | Refresh a retained task brief | `room work WORK_ID --since BRIEF_VERSION` |
+| Open a colleague’s copied result link in your own project | `room result "RESULT_URL"` |
 | Inspect the completion selected for review | `room result WORK_ID --completion EVENT_ID` |
 | Check your exact write | `room receipt OPERATION_ID` |
 | Read a formal request | `room read REQUEST_ID [--cursor TOKEN]` |

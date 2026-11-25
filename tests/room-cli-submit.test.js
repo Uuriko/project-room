@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
@@ -73,10 +74,57 @@ async function fixture(t, representation) {
     assert.equal(lines.length, 1);
     return { code, value: lines[0] };
   };
-  return { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
+  return { home, env, origin, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
 }
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
+test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {
+  const { origin, store, owner, producer, reviewer, reviewerProject, cli } = await fixture(t, representation);
+  const workItemId = "handoff";
+  store.command(owner, "commons", { id: "request", type: "work.proposed", data: { workItemId,
+    title: "Draft the brief", definitionOfDone: "Share the brief", accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
+  const selected = (await cli(["work", workItemId])).value;
+  assert.equal((await cli(["begin", "--from", "-"], selected)).code, 0);
+  const work = (await cli(["work", workItemId])).value;
+  const submitted = await cli(["submit", workItemId, "--operation", "handoff-result"], {
+    body: "Draft from a colleague.", expectedRevision: work.revision, producerId: producer.identityId,
+    summary: "Drafted the brief", nextAction: "Review the draft" });
+  assert.equal(submitted.code, 0, JSON.stringify(submitted));
+  const { completionEventId } = submitted.value.next.arguments;
+  const sharedUrl = exactResultHref({ roomId: "commons", workItemId,
+    completionEventId }, new URL(origin));
+  const shared = await cli(["result", sharedUrl], undefined, reviewerProject);
+  assert.equal(shared.code, 0);
+  assert.equal(shared.value.result.text.body, "Draft from a colleague.");
+  assert.equal(shared.value.result.receipt.eventId, completionEventId);
+  const review = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
+  assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Name the owner."],
+    review.value, reviewerProject)).code, 0);
+  const blocked = await cli(["work", workItemId]);
+  assert.equal((await cli(["resolve", "--from", "-", "--resolution", "Added the owner."], blocked.value)).code, 0);
+  const resumed = await cli(["work", workItemId]);
+  assert.equal((await cli(["begin", "--from", "-"], resumed.value)).code, 0);
+  const working = await cli(["work", workItemId]);
+  const revised = await cli(["submit", workItemId, "--operation", "revised-handoff"], {
+    body: "Owner: Maya.", expectedRevision: working.value.revision, producerId: producer.identityId,
+    summary: "Named the owner", nextAction: "Check the revised brief" });
+  assert.equal(revised.code, 0);
+  const revisedUrl = exactResultHref({ roomId: "commons", workItemId,
+    completionEventId: revised.value.next.arguments.completionEventId }, new URL(origin));
+  const current = await cli(["result", revisedUrl], undefined, reviewerProject);
+  assert.equal(current.value.result.text.body, "Owner: Maya.");
+  assert.equal(current.value.workThread.correction.summary, "Name the owner.");
+  const earlier = await cli(["result", sharedUrl], undefined, reviewerProject);
+  assert.equal(earlier.value.selection.status, "historical");
+  assert.equal(earlier.value.result.text.body, "Draft from a colleague.");
+  for (const other of [sharedUrl.replace("room=commons", "room=other"), sharedUrl.replace(origin, "https://other.example")]) {
+    let calls = 0;
+    const refused = await cli(["result", other], undefined, reviewerProject, () => { calls++; throw new Error("unexpected call"); });
+    assert.equal(refused.value.code, "room_selection_mismatch");
+    assert.equal(calls, 0);
+  }
+});
+
 test(`${representation} commands cover pickup, correction, review, requests and submission recovery`, async t => {
   const { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli } = await fixture(t, representation);
   const prepare = async (workItemId, review = false) => {

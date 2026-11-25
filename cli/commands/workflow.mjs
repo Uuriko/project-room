@@ -7,6 +7,7 @@ import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
 import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { validId } from "../../src/events.js";
+import { exactResultDestination } from "../../src/record-link.js";
 import { workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
@@ -272,15 +273,30 @@ export async function workCommand(argv, io = {}) {
 }
 
 export async function resultCommand(argv, io = {}) {
-  const help = "room result WORK_ID --completion EVENT_ID\nRead the exact completion selected by room next.";
-  if (argv.length === 1 && argv[0] === "--help") { (io.out ?? console.log)(help); return 0; }
-  const [workItemId, flag, completionEventId] = argv;
-  if (argv.length !== 3 || flag !== "--completion" || !validId(workItemId) || !validId(completionEventId))
-    throw new Error(help);
-  return runWorkflow("room_read_result", { workItemId, completionEventId }, (value, { roomId }) =>
-    value.roomId === roomId && value.workItemId === workItemId
-    && value.selection?.completionEventId === completionEventId && value.result?.receipt?.eventId === completionEventId,
-  io);
+  const help = "room result RESULT_URL\nroom result WORK_ID --completion EVENT_ID\nRead the exact version using the saved Room connection for this project.";
+  const out = io.out ?? console.log;
+  if (argv.length === 1 && argv[0] === "--help") { out(help); return 0; }
+  let args, connection;
+  if (argv.length === 1) {
+    const url = URL.parse(argv[0]);
+    const selected = url && exactResultDestination(url);
+    if (!selected || url.username || url.password || !["https:", "http:"].includes(url.protocol)) throw new Error(help);
+    try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env }); }
+    catch { out(JSON.stringify({ status: "refused", code: "saved_connection_required" })); return 1; }
+    if (url.origin !== new URL(connection.config.origin).origin || selected.roomId !== connection.config.roomId) {
+      out(JSON.stringify({ status: "refused", code: "room_selection_mismatch" })); return 1;
+    }
+    args = selected;
+  } else {
+    const [workItemId, flag, completionEventId] = argv;
+    if (argv.length !== 3 || flag !== "--completion" || !validId(workItemId) || !validId(completionEventId))
+      throw new Error(help);
+    args = { workItemId, completionEventId };
+  }
+  return runWorkflow("room_read_result", args, (value, { roomId }) =>
+    value.roomId === roomId && value.workItemId === args.workItemId
+    && value.selection?.completionEventId === args.completionEventId && value.result?.receipt?.eventId === args.completionEventId,
+  io, undefined, connection);
 }
 
 export function readCommand(argv, io = {}) {
