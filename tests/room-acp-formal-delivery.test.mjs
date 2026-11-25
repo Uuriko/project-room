@@ -162,7 +162,7 @@ for (const scenario of ['recover','corrected','tool','invalid','unfinished','int
   };
   await f.ready(bridge);
   await bridge.turn('dm',[f.wake]);
-  const current = await f.read(bridge);
+  const current = await f.read(scenario === 'interrupted' ? f.make() : bridge);
   assert.equal(prompts.length, ['corrected','unfinished'].includes(scenario) ? 1 : 2);
   if (prompts.length === 2) {
     assert.equal(prompts[1].options.sessionId,prompts[0].options.sessionId);
