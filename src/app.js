@@ -358,7 +358,7 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
-let partialWorkSnapshot = false, inspectedWorkRecord = null;
+let partialWorkSnapshot = false, inspectedWorkRecord = null, inspectedWorkReplacementId = null;
 // JDOT-COH-NAV begin
 let workspacePreviewsUI = null, updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -520,7 +520,7 @@ const client = new RoomClient({
     if (presenceBoundary) stopPresencePoll();
     const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
     partialWorkSnapshot = snapshot.snapshotVersion === 2;
-    inspectedWorkRecord = null;
+    inspectedWorkRecord = null; inspectedWorkReplacementId = null;
     state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
     session = identity;
     // A successful room snapshot supersedes a denied deep link from an
@@ -649,7 +649,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
-    partialWorkSnapshot = false; inspectedWorkRecord = null;
+    partialWorkSnapshot = false; inspectedWorkRecord = null; inspectedWorkReplacementId = null;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
@@ -3590,6 +3590,10 @@ async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = fals
       }
       // Mount only this independently selected current record. The room's
       // summary window and completeness metadata remain unchanged.
+      const replacement = selected.next?.replacement;
+      inspectedWorkReplacementId = replacement?.status === "available" && replacement.workItemId === item.supersededBy
+        && replacement.nextRead?.tool === "room_read_work" && replacement.nextRead.arguments?.workItemId === item.supersededBy
+        ? item.supersededBy : null;
       inspectedWorkRecord = structuredClone(item);
       state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
       if (restoreInPlace) {
@@ -3600,7 +3604,7 @@ async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = fals
     } catch (error) {
       if (!current()) return null;
       if (held !== state) continue;
-      notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
+      notice(error.code === "work_private" ? SOURCE_UNAVAILABLE_NOTICE : error.message || SOURCE_UNAVAILABLE_NOTICE, true);
       return null;
     }
   }
@@ -4270,9 +4274,11 @@ function workCard(i, now, drafts, messages = []) {
   const goal = uiText("work.focus.goalHtml", { definition: esc(preview(i.definitionOfDone)) });
   const resultSummary = i.receipt ? uiText("work.focus.resultHtml", { summary: esc(preview(i.receipt.summary)) }) : "";
   const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${esc(status.next)}</p>`;
+  const replacementVisible = i === inspectedWorkRecord ? inspectedWorkReplacementId === i.supersededBy
+    : typeof state.workItems[i.supersededBy]?.title === "string";
   const replacement = i.supersededBy && i.supersededBy !== i.id
-    ? Object.hasOwn(state.workItems, i.supersededBy)
-      ? `<p class="form-hint"><a class="source-link" href="${esc(workHref(i.supersededBy))}" data-open-work="${esc(i.supersededBy)}" data-focus-key="replacement:${esc(i.id)}">Open replacement</a></p>`
+    ? replacementVisible
+      ? `<p class="form-hint"><a class="source-link" href="${esc(workHref(i.supersededBy))}" data-open-work="${esc(i.supersededBy)}" data-open-replacement data-focus-key="replacement:${esc(i.id)}">Open replacement</a></p>`
       : `<p class="form-hint">Replacement unavailable in this room.</p>` : "";
   const sourceKey = `work-source:${esc(i.id)}`;
   const sourceWithdrawn = i.sourceMessageId && conversation?.byId.get(i.sourceMessageId)?.deletedAt;
@@ -5916,7 +5922,7 @@ $("#main").addEventListener("click", e => {
     const origin = currentWorkOrigin();
     const fromUpdateMessage = origin?.type === "updates" && origin.target === location.hash
       && origin.target.startsWith("#pr-record/message/") && link.closest(".conversation-work");
-    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork] && !(partialWorkSnapshot && fromUpdateMessage))
+    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork] && !(partialWorkSnapshot && (fromUpdateMessage || link.hasAttribute("data-open-replacement"))))
       void navigateClaimRecord(link.dataset.openWork);
     else if (link.hasAttribute("data-view-drafts")) navigateWorkRecord("work", link.dataset.openWork, { presentation: "drafts" });
     else navigateWorkRecord("work", link.dataset.openWork, fromUpdateMessage ? { presentation: "thread" } : {});
