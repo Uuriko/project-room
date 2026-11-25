@@ -102,7 +102,7 @@
     "src/agent-invite-ui.js": "sha256:59dd07a3da0379ea0b5214d9462dbe5d82c5f9acad46c4b8ee08190835c17571",
     "src/agent-signin-page.js": "sha256:bd12efdafe474d67a5e53050bee973d323b27d43a179ee18df9386adfb2e3c03",
     "src/agent-signin-ui.js": "sha256:1b3e497e55ed24a857293880a3622401cf9543a8c49f350e38ec7a810f232279",
-    "src/app.js": "sha256:03c78c53829cdbd0c5623da8a7e08bf1340bf2a8f0938889640598ef45690dc1",
+    "src/app.js": "sha256:3af83a9567f566d8519543449f4b9ed9dbf3e4e7630869603622b982e73bd1b9",
     "src/auth-signin-ui.js": "sha256:144766e0999763ded6f81ac249d2d69899ef1bc8673c49b138d2ee5bf9bf8c73",
     "src/board-deeplink.js": "sha256:1c0829f21cafacfb78d01d0429083dffdd09aa7e329bcd23d2146e47ab24ecf9",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
@@ -198,8 +198,8 @@
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
     "src/workspace-previews-ui.js": "sha256:70fe5ef8e7a2dfe68754650eb6768704120ca847f70d5cb50cc569569d2eef28",
-    "strings/en.js": "sha256:8759bc706cda13ec263c351104147d484ebd2c4f7f73c726ef19191bd8ea843f",
-    "strings/en.json": "sha256:e94a8b623ae0b25a0a4fe69c956c837515855aa06b6d1279cd870dfdbc49f1fa"
+    "strings/en.js": "sha256:201108de9506564f7c77c34b706329d85a7282cf6094cb871cec753be004ed3b",
+    "strings/en.json": "sha256:5c9be37b5382e737d09cc336e41ca4006fbe588df9bf09c95c7aa8ae0b28dcdb"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

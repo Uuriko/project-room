@@ -6,14 +6,29 @@ import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs
 import { hostReplyBody } from "../client/host-result.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { RoomStore } from "../server/store.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { buildReplyCommand } from "../client/reply-actions.mjs";
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
-async function setup(t, viewport = { width: 1280, height: 900 }) {
-  const fixture = createAcceptanceFixture({ dmConsent: true }), errors = [];
+function normalizedReplyFixture() {
+  const directory = mkdtempSync(join(tmpdir(), "room-request-receipt-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"), { representation: "normalized-current-v1" });
+  const owner = store.issueAccessKey("commons", "owner");
+  store.command(owner, "commons", { id: "add-observer", type: "member.added",
+    data: { memberId: "observer", displayName: "Observer", kind: "human", permissions: [] } });
+  return { directory, store, keys: { owner, guest: store.issueAccessKey("commons", "observer") } };
+}
+async function setup(t, viewport = { width: 1280, height: 900 }, { normalized = false } = {}) {
+  const fixture = normalized ? normalizedReplyFixture() : createAcceptanceFixture({ dmConsent: true });
+  const errors = [];
   const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
   let browser;
   t.after(async () => {
@@ -193,11 +208,12 @@ test("original conversation shows host progress and recovery without changing th
     expectedRequestRevision: request.revision, contextEventId: request.contextEventId };
   f.store.requestRuns.apply(f.keys.producer, "commons", input);
   const owner = await f.login("owner"), row = (await record(owner, requestMessageId));
-  await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent === "Agent working", requestMessageId);
+  const status = row.locator(".request-state[role=status]");
+  await status.filter({ hasText: "Agent working" }).waitFor();
   assert.equal(f.state().replyRequests[requestMessageId].revision, request.revision);
   f.store.requestRuns.apply(f.keys.producer, "commons", { ...input, action: "needs_attention" });
   // The operational poll does not require a new room event or a page reload.
-  await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent.includes("Host needs attention"), requestMessageId, { timeout: 15000 });
+  await status.filter({ hasText: "Host needs attention" }).waitFor({ timeout: 15000 });
   assert.equal(await row.locator('[data-message-action="request-cancelled"]').count(), 1);
   assert.deepEqual(f.errors, []);
 });
@@ -335,5 +351,55 @@ test("restored cancellation draft does not submit by keyboard after another sess
   assert.equal(commands.length, 0, "a disabled terminal cancellation cannot be submitted with Enter");
   assert.equal(await input(first).inputValue(), "My unsent cancellation reason");
   assert.equal(f.state().replyRequests['cancel-history'].reason, "The winning cancellation reason");
+  assert.deepEqual(f.errors, []);
+});
+
+for (const normalized of [false, true]) test(`an external receipt updates the requester status without moving the draft or focused action (${normalized ? "normalized" : "legacy"})`, { timeout: 25000 }, async t => {
+  const f = await setup(t, { width: 390, height: 844 }, { normalized });
+  const recipientId = "review-assistant";
+  const agent = f.store.identities.create("Review assistant");
+  linkWithProof(f.store, f.keys.owner, "commons", agent, { memberId: recipientId, permissions: [] });
+  f.keys[recipientId] = agent.secret;
+  f.request("receipt-first", recipientId); f.request("receipt-other", recipientId);
+  f.request("receipt-human", normalized ? "observer" : "guest");
+  const owner = await f.login("owner");
+  const human = await record(owner, "receipt-human");
+  assert.equal(await human.locator(".request-state[role=status]").textContent(), "Reply requested");
+  const row = await record(owner, "receipt-first");
+  const status = row.locator(".request-state[role=status]");
+  assert.equal(await status.textContent(), "Waiting for acknowledgment");
+  const cancel = row.getByRole("button", { name: "Cancel request", exact: true });
+  await input(owner).fill("Unsent note about the document");
+  await cancel.focus();
+  const focusedAction = await cancel.elementHandle();
+  f.send(recipientId, "reply_request.progressed", {
+    requestMessageId: "receipt-first", expectedRequestRevision: 0, progress: "acknowledged",
+  });
+  await status.filter({ hasText: "Acknowledged · waiting for an answer" }).waitFor();
+  assert.equal(await focusedAction.evaluate(button => button === document.activeElement), true);
+  assert.equal(await input(owner).inputValue(), "Unsent note about the document");
+  f.send(recipientId, "reply_request.progressed", {
+    requestMessageId: "receipt-first", expectedRequestRevision: 0, progress: "needs_input",
+  });
+  await status.filter({ hasText: "Input requested" }).waitFor();
+  assert.equal(await focusedAction.evaluate(button => button === document.activeElement), true);
+  const outsider = await fetch(f.origin + "/api/rooms/commons", {
+    headers: { Authorization: "Bearer " + f.keys.guest, "X-Project-Room-Reply-View": "browser-v1" },
+  });
+  assert.equal(outsider.status, 200);
+  assert.equal((await outsider.json()).state.replyRequests?.["receipt-first"], undefined);
+  assert.equal(await (await record(owner, "receipt-other")).locator(".request-state[role=status]").textContent(),
+    "Waiting for acknowledgment");
+  await record(owner, "receipt-first");
+  await cancel.focus();
+  const exact = f.store.replyRequests.selected(agent.secret, "commons", "receipt-first");
+  const template = exact.responseActions.find(action => action.arguments.responseOutcome === "answered");
+  const { roomId: _room, ...answer } = template.arguments;
+  f.store.command(agent.secret, "commons", buildReplyCommand({ roomId: "commons", memberId: recipientId }, template.tool,
+    { ...answer, requestId: "receipt-first-answer", body: "The instructions match the approved document." }));
+  await status.filter({ hasText: "Answered" }).waitFor();
+  assert.equal(await row.evaluate(element => element === document.activeElement), true);
+  assert.equal(await input(owner).inputValue(), "Unsent note about the document");
+  assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   assert.deepEqual(f.errors, []);
 });
