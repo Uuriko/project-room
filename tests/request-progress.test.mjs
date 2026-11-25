@@ -195,7 +195,16 @@ for (const representation of [null, 'normalized-current-v1']) test(`a sender can
   const args = {direction: 'both', status: 'open'};
   const read = (who, states = true) => validateReplyRead(s.replyRequests.list(keys[who], 'commons', {...args, states}),
     {name: 'room_list_requests', args, roomId: 'commons'}).overdueActions;
+  t.mock.timers.tick(119_999);
+  assert.equal(read('asker'), undefined);
+  t.mock.timers.tick(1);
+  const [unacknowledged] = read('asker');
+  assert.match(unacknowledged.guidance, /No acknowledgment yet.*check with the recipient/);
+  assert.deepEqual(unacknowledged.nextRead, {tool: 'room_read_request', arguments: {roomId: 'commons', requestMessageId: 'ask', view: 'compact'}});
+  for (const who of ['helper', 'owner', 'other']) assert.equal(read(who), undefined);
+  assert.equal(read('asker', false), undefined);
   progress('helper', 'receipt', {progress: 'acknowledged'});
+  assert.equal(read('asker'), undefined);
   t.mock.timers.tick(119_999);
   assert.equal(read('asker'), undefined);
   t.mock.timers.tick(1);
