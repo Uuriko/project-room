@@ -237,13 +237,30 @@ export function replyContextOwners(state) {
  return owners;
 }
 
+// Keep internal visibility classification out of the versioned selected read.
+export function selectedReplyRequest(request) {
+  const copy = structuredClone(request);
+  delete copy.resultCompletionEventId;
+  return copy;
+}
+
 export function recordReplyPost(state, incoming, mode) {
   const data = incoming.data, messageId = data.messageId || incoming.id;
   if (mode === "open") {
     state.replyRequests ??= {};
+    let resultCompletionEventId = data.resultCompletionEventId;
+    if (!resultCompletionEventId && data.replyToId) {
+      const previousAnswer = state.messages.find(message => message.id === data.replyToId);
+      const previous = previousAnswer && state.replyRequests[previousAnswer.replyToId];
+      if (previous?.status === "answered" && previous.responseMessageId === data.replyToId
+        && previous.workItemId === data.workItemId && previous.requesterId === incoming.actorId
+        && previous.recipientId === data.toMemberId)
+        resultCompletionEventId = previous.resultCompletionEventId;
+    }
     state.replyRequests[messageId] = {
       id: messageId, openingEventId: incoming.id, requesterId: incoming.actorId,
       recipientId: data.toMemberId, workItemId: data.workItemId || null,
+      ...(resultCompletionEventId ? { resultCompletionEventId } : {}),
       status: "open", revision: 0, createdAt: incoming.at,
       contextEventId: incoming.id, contextMessageId: messageId,
       terminalEventId: null, terminalActorId: null, closedAt: null,

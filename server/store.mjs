@@ -26,6 +26,7 @@ import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardM
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
 import { assertAssignmentAvailable } from "./agent-pause.mjs";
 import { readCurrentMessageThread, readVisibleMessageThread } from './conversation-sync.mjs';
+import { restrictsWorkVisibility } from "./current-work-privacy.mjs";
 import { selectedMessageRecord, messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput, invokeFromPlainPost } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -5476,6 +5477,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // The replyRequests slice is read from the projection directly so
   // this works for both the work projection (which does not carry it)
   // and the full room state.
+  // An exact-result question refers to work the participants could
+  // already read, so it only restricts the question and its replies.
   // Members the work item itself names (proposer, accountable, verifier,
   // decision maker, claim holder) already hold its title and definition of
   // done; a private request on the item must not lock them out of it.
@@ -5484,13 +5487,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const rows = workIds === null
       ? Object.values(JSON.parse(this.db.prepare("SELECT json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId)?.requests ?? "{}"))
       : this.db.prepare(`SELECT json_extract(item.value,'$.workItemId') AS workItemId,
-          json_extract(item.value,'$.requesterId') AS requesterId, json_extract(item.value,'$.recipientId') AS recipientId
+          json_extract(item.value,'$.requesterId') AS requesterId, json_extract(item.value,'$.recipientId') AS recipientId,
+          json_extract(item.value,'$.resultCompletionEventId') AS resultCompletionEventId
         FROM rooms, json_each(rooms.projection,'$.replyRequests') AS item
         WHERE rooms.id=? AND json_extract(item.value,'$.workItemId') IN (SELECT value FROM json_each(?))`)
         .all(roomId, JSON.stringify([...workIds]));
     const privatePartiesByWork = new Map();
     for (const request of rows) {
-      if (!request?.workItemId) continue;
+      if (!restrictsWorkVisibility(request)) continue;
       if (!privatePartiesByWork.has(request.workItemId)) privatePartiesByWork.set(request.workItemId, new Set());
       privatePartiesByWork.get(request.workItemId).add(request.requesterId).add(request.recipientId);
     }

@@ -7,7 +7,7 @@ import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord } from "./work-context.mjs";
 import { Buffer } from "node:buffer";
 import { validId } from "../src/events.js";
-import { replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
+import { selectedReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
 import { messageInHistory, visibleSequenceHorizon } from "./history-visibility.mjs";
 import { withRequestState } from "./request-states.mjs";
@@ -329,7 +329,7 @@ export class ReplyRequests {
           omitted: ["other_work", "other_messages", "private_inbox", "external_resources"],
           externalExecution: false
         };
-        Object.assign(result, { request: structuredClone(request), current: { evaluatedThrough: room.sequence,
+        Object.assign(result, { request: selectedReplyRequest(request), current: { evaluatedThrough: room.sequence,
           requesterAvailable: state.members[request.requesterId]?.active === true, recipientAvailable: state.members[request.recipientId]?.active === true,
           contextEventId: context.id, contextSequence: context.sequence, answerBasis,
           actions: { reply: true, answer: Boolean(answerBasis), decline: Boolean(answerBasis),
