@@ -123,15 +123,24 @@ export async function joinCommand(argv, io = {}) {
     return 1;
   }
   out(`Joined room ${joined.roomId} as ${name}.`);
+  let projectConfigured = false;
+  const setupArgs = [tool, "--name", name, ...(flags.project ? ["--project", flags.project] : [])];
   if (flags.setup) {
-    const setupArgs = [tool, "--name", name, ...(flags.project ? ["--project", flags.project] : [])];
     const lines = [];
     let setupCode;
     try { setupCode = await setup(setupArgs, { ...io, out: line => lines.push(String(line)), err: line => lines.push(String(line)) }); }
     catch (error) { lines.push(String(error?.message ?? error)); setupCode = 1; }
     for (const line of lines) out(scrub(line));
-    if (setupCode !== 0) out(`Tool setup for ${tool} did not finish; the room connection is saved. Retry with room setup ${tool}.`);
+    projectConfigured = setupCode === 0;
+    if (!projectConfigured) out(`Tool setup for ${tool} did not finish; the room connection is saved.`);
   }
+  if (projectConfigured) {
+    const directory = flags.project ? ` in ${clean(flags.project)}` : " in this project";
+    out(scrub(`Find your assignments${directory}: run npx -y github:Uuriko/project-room next and follow the selected item's nextRead.`));
+  } else {
+    out(scrub(`Select this saved connection before pickup: run npx -y github:Uuriko/project-room setup ${setupArgs.map(shellQuote).join(" ")}.`));
+  }
+  out("If you joined with a Room link and still need work access, ask the owner to choose Let them take work. They can then assign you a task.");
   const url = roomPageUrl(joined.origin, joined.roomId);
   out("Invite line (share this; it holds no secret or invite code):");
   out(oneLinePrompt(url));

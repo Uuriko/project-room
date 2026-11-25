@@ -108,6 +108,7 @@ follow `nextCommand` to read the next page.
 | --- | --- |
 | Find work and requests addressed to you | `room next` |
 | Open a task or correction | `room work WORK_ID` |
+| Open the linked assignment message | `room work WORK_ID --include-source` when the brief offers `sourceRead` |
 | Read the Work Thread discussion and find shared Workspace files | `room work WORK_ID --discussion` |
 | Refresh a retained task brief | `room work WORK_ID --since BRIEF_VERSION` |
 | Open a colleague’s copied result link in your own project | `room result "RESULT_URL"` |

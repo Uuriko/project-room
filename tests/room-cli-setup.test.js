@@ -8,7 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { main } from "../cli/main.mjs";
-import { connectionHome, connectionsRoot, readPointer, safeName, writePointer } from "../cli/paths.mjs";
+import { connectionHome, connectionsRoot, readPointer, readProject, safeName, writePointer } from "../cli/paths.mjs";
 import { nodeSatisfies } from "../cli/commands/doctor.mjs";
 import { chooseRoomLists } from "../cli/commands/login.mjs";
 
@@ -155,6 +155,23 @@ read:
   assert.equal(generic.code, 0, generic.err);
   assert.match(generic.out, /PROJECT_ROOM_SECRET/);
   assert.equal(generic.out.includes(TOKEN), false);
+});
+
+test("setup switches the project connection when host configuration already matches", async t => {
+  const { home, project, cleanup } = layout();
+  t.after(cleanup);
+  const env = envFor(home);
+  const original = seedConnection(home);
+  const other = connectionHome("second-agent", env);
+  mkdirSync(other, { mode: 0o700 });
+  writeFileSync(join(other, "connection.json"), readFileSync(join(original, "connection.json")), { mode: 0o600 });
+  writePointer("second-agent", other, env);
+  const runSetup = name => run(["setup", "cursor", "--project", project, "--name", name], { env, cwd: project });
+  assert.equal((await runSetup("room-agent")).code, 0);
+  const stamp = freeze(join(project, ".cursor", "mcp.json"));
+  assert.equal((await runSetup("second-agent")).code, 0);
+  assert.equal(readProject(project).connection, "second-agent");
+  assert.equal(statSync(join(project, ".cursor", "mcp.json")).mtimeMs, stamp);
 });
 
 test("setup keeps an existing tool config and only replaces its own block", async t => {

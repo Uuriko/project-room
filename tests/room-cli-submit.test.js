@@ -113,6 +113,54 @@ test("a returning agent submits from the fresh revision after a heartbeat", asyn
 });
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
+test(`${representation} pickup opens only the linked assignment source with the project connection`, async t => {
+  const { store, owner, producer, cli } = await fixture(t, representation);
+  const workItemId = "first-assignment", body = "The agreed contract is https://docs.example.test/contract.";
+  store.command(owner, "commons", { id: "assignment-source", type: "message.posted",
+    data: { messageId: "assignment-source", body } });
+  store.command(owner, "commons", { id: "other-message", type: "message.posted",
+    data: { messageId: "other-message", body: "Unrelated project discussion." } });
+  store.command(owner, "commons", { id: "propose-first", type: "work.proposed", data: {
+    workItemId, title: "Implement the client", definitionOfDone: "Use the agreed contract",
+    accountableMemberId: producer.identityId, sourceMessageId: "assignment-source", mode: "read",
+  } });
+  const head = store.headSequence("commons");
+  const pickup = await cli(["next"]);
+  assert.equal(pickup.code, 0, JSON.stringify(pickup));
+  const row = pickup.value.work.items.find(item => item.id === workItemId);
+  assert.ok(row, JSON.stringify(pickup));
+  const brief = await cli(row.nextRead.command.slice(1));
+  assert.equal(brief.code, 0, JSON.stringify(brief));
+  assert.doesNotMatch(JSON.stringify(brief), /docs.example.test/);
+  assert.deepEqual(brief.value.sourceRead.command, ["room", "work", workItemId, "--include-source"]);
+  const retained = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
+  assert.equal(retained.value.briefUnchanged, true);
+  assert.deepEqual(retained.value.sourceRead, brief.value.sourceRead);
+  const read = await cli(brief.value.sourceRead.command.slice(1));
+  assert.equal(read.code, 0, JSON.stringify(read));
+  assert.equal(read.value.viewerId, producer.identityId);
+  assert.equal(read.value.context.source.message.body, body);
+  assert.doesNotMatch(JSON.stringify(read), /Unrelated project discussion/);
+  const mismatch = await cli(brief.value.sourceRead.command.slice(1), undefined, undefined, async (...args) => {
+    const response = await fetch(...args);
+    const result = await response.json();
+    result.result.structuredContent.viewerId = "another-agent";
+    return Response.json(result);
+  });
+  assert.equal(mismatch.code, 1);
+  assert.doesNotMatch(JSON.stringify(mismatch), /docs.example.test/);
+  assert.equal(store.headSequence("commons"), head);
+  store.command(owner, "commons", { id: "delete-source", type: "message.deleted",
+    data: { messageId: "assignment-source", expectedMessageRevision: 0 } });
+  const updated = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
+  assert.equal(updated.code, 0);
+  assert.equal(updated.value.sourceRead, undefined);
+  const deleted = await cli(["work", workItemId, "--include-source"]);
+  assert.equal(deleted.code, 0);
+  assert.equal(deleted.value.context.source.status, "unavailable");
+  assert.doesNotMatch(JSON.stringify(deleted), /docs.example.test/);
+});
+
 test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {
   const { env, origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
   const workItemId = "handoff";

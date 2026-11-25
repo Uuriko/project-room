@@ -199,6 +199,7 @@ export async function setupCommand(argv, { env = process.env, cwd = process.cwd(
   }
   const via = plan.command ? "command" : "file";
   if (alreadyApplied(project, tool, via) && plan.files.every(file => readOrNull(file.path) === file.contents)) {
+    if (connectionName && readProject(project)?.connection !== connectionName) writeProject(project, { connection: connectionName, tool, via });
     out(plan.next);
     return 0;
   }

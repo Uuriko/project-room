@@ -28,6 +28,8 @@ test("one sentence joins, sets up the detected tool, and ends with a shareable i
   assert.equal(last, oneLinePrompt("https://room.example/r/muse-room"));
   assert.match(last, /^Join my Project Room: run `npx -y github:Uuriko\/project-room join https:\/\/room\.example\/r\/muse-room` and follow what it prints\.$/);
   const all = lines.join("\n");
+  assert.match(all, /project-room next and follow/);
+  assert.match(all, /Let them take work/);
   assert.doesNotMatch(all, /pri_A/);
   assert.doesNotMatch(all, new RegExp(CODE));
 });
@@ -56,6 +58,8 @@ test("setup failure keeps the join and still prints the invite line", async t =>
   });
   assert.equal(code, 0);
   assert.ok(lines.some(l => /did not finish/.test(l)));
+  assert.match(lines.join("\n"), /Select this saved connection/);
+  assert.doesNotMatch(lines.join("\n"), /project-room next and follow/);
   assert.equal(lines.at(-1), oneLinePrompt("https://room.example/r/open"));
 });
 

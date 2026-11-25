@@ -13,7 +13,7 @@ import { exactResultDestination, resultDiscussionPath } from "../../src/record-l
 import { roomFileChangeSelection } from "../../src/workspace-artifact-link.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
-const workHelp = "room work WORK_ID [--result | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]\nRead the compact task brief. Add --discussion for shared files and discussion. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.";
+const workHelp = "room work WORK_ID [--result | --include-source | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]\nRead the compact task brief. Add --include-source for the linked assignment message, or --discussion for shared files and discussion. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.";
 const requestHelp = "room request REQUEST_ID [--compact] [--cursor TOKEN]\nRead the selected request and follow its next page before responding.";
 const validCursor = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(value);
 
@@ -223,6 +223,10 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
     if (tool === "room_read_result" && value.cliBasis?.actions.review)
       value.review.action.command = ["room", "review", "--from"];
     if (tool === "room_read_work") {
+      const sourceRead = value.sourceRead;
+      if (sourceRead?.tool === "room_read_work" && sourceRead.arguments?.roomId === config.roomId
+          && sourceRead.arguments.workItemId === args.workItemId && sourceRead.arguments.includeSource === true)
+        sourceRead.command = ["room", "work", args.workItemId, "--include-source"];
       const step = value.continuation;
       const shortcut = Object.keys(actions).find(name => actions[name] === step.tool);
       if (value.cliBasis?.actions[shortcut]) step.command = ["room", shortcut, "--from"];
@@ -297,6 +301,16 @@ export async function workCommand(argv, io = {}) {
       (value, { roomId, memberId }) => value.contractVersion === 1 && value.roomId === roomId
         && value.workItemId === workItemId && value.viewerId === memberId
         && Array.isArray(value.discussion?.items), io);
+  }
+  if (flag === "--include-source") {
+    if (!validId(workItemId) || argv.length !== 2) throw new Error(workHelp);
+    return runWorkflow("room_read_work", { workItemId, includeSource: true },
+      (value, { roomId, memberId }) => value.roomId === roomId && value.viewerId === memberId
+        && value.work?.id === workItemId && hasRevision(value.work.revision) && isRecord(value.continuation)
+        && (value.context?.source?.status === "included"
+          ? validId(value.context.source.message?.id) && value.context.source.message.id === value.work.sourceMessageId
+            && typeof value.context.source.message.body === "string"
+          : ["not_linked", "unavailable"].includes(value.context?.source?.status) && value.context.source.message === null), io);
   }
   const includeResult = flag === "--result";
   const conditional = flag === "--since" && /^[a-f0-9]{64}$/.test(since ?? "");

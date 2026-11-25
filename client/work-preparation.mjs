@@ -201,9 +201,12 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     if (!(args.brief ?? batch)) return context?.next && Array.isArray(context.suggestedActions)
       ? { ...context, continuation: workContinuation(context, { hosted, brief: false }) } : context;
     const brief = await createWorkBrief(context);
+    const sourceRead = context.accessSummary.conversation?.sourceAvailability === "available"
+      ? { tool: "room_read_work", arguments: { ...(hosted ? { roomId: context.roomId } : {}),
+        workItemId: context.work.id, includeSource: true } } : null;
     const identity = { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
-      continuation: workContinuation(context, { hosted }), briefVersion: brief.version };
+      continuation: workContinuation(context, { hosted }), briefVersion: brief.version, ...(sourceRead ? { sourceRead } : {}) };
     if (args.knownBriefVersion === brief.version) return { ...identity, briefUnchanged: true,
       evaluatedAt: context.evaluatedAt,
       guidance: "Reuse your retained brief for this identity and task. Use this response’s revision and continuation for your next action. Read omitted source, discussion or external evidence separately when you need their current contents. Read without knownBriefVersion if that brief is unavailable." };
