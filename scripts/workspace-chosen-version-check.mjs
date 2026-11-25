@@ -85,7 +85,7 @@ try {
   await page.getByText(/This preview revision changed/).waitFor();
   assert.equal(await page.getByRole("button", { name: "Copy for agent" }).count(), 0);
   assert.equal(await add.count(), 0);
-  assert.equal(await page.getByRole("link", { name: "Open full discussion" }).getAttribute("href"),
+  assert.equal(await page.getByRole("link", { name: "Open original discussion" }).getAttribute("href"),
     "http://localhost/?room=commons#pr-record/message/revision");
   await page.getByRole("button", { name: "Open current revision" }).click();
   await page.getByText(/revision 2/i).waitFor();
@@ -103,7 +103,7 @@ try {
     window.workspace.openLink(new URL(window.draft.link).hash, destination);
   });
   await page.getByText(/This preview revision changed/).waitFor();
-  const original = page.getByRole("link", { name: "Open full discussion" });
+  const original = page.getByRole("link", { name: "Open original discussion" });
   await original.waitFor();
   assert.equal(await page.locator("[data-discussion-messages]").innerText(), "");
   assert.equal(await original.getAttribute("href"), "http://localhost/?room=commons#pr-record/message/revision");

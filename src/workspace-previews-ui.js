@@ -150,7 +150,10 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     addToThread.hidden = !canUseArtifact || !discussion || Boolean(items.find(item => item.id === selected)?.recipientId);
     discussionMessages.replaceChildren();
     const source = discussionAside.querySelector("[data-discussion-link]");
-    if (discussion) source.href = discussion.link;
+    if (discussion) {
+      source.href = discussion.link;
+      source.textContent = canUseArtifact ? "Open full discussion" : uiText("workspace.openOriginalDiscussion");
+    }
     else source.removeAttribute("href");
     for (const message of canUseArtifact ? discussion?.messages ?? [] : []) {
       const line = document.createElement("p");

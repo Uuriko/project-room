@@ -847,6 +847,7 @@ export default {
   "workspace.chooseVersionNamed": "Continue this version: {title}",
   "workspace.versionInstruction": "Instruction for this version:\n{note}",
   "workspace.returnDiscussion": "Originating discussion: {link}",
+  "workspace.openOriginalDiscussion": "Open original discussion",
   "workspace.share.threadDraft": "Add to thread draft",
   "workspace.share.threadUnavailable": "The thread draft is unavailable. You can still copy the artifact link.",
   "workspace.share.fileMissing": "This file is unavailable in the shared changes.",
