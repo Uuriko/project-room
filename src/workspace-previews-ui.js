@@ -32,7 +32,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         <p data-preview-status role="status"></p>
         <ol data-preview-list></ol>
         <aside data-workspace-discussion hidden>
-          <h3>Recent discussion</h3>
+          <h3>Discussion</h3>
           <div data-discussion-messages></div>
           <a data-discussion-link target="_blank" rel="noopener">Open full discussion</a>
         </aside>
@@ -143,14 +143,16 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   });
   function refreshDiscussion() {
     if (!dialog.open) return;
-    const discussion = !copyLink.hidden && threadDraft?.discussion();
+    // A conversation can remain authorized after its artifact expires or changes.
+    const canUseArtifact = !copyLink.hidden;
+    const discussion = (canUseArtifact || linked) && threadDraft?.discussion();
     discussionAside.hidden = !discussion;
-    addToThread.hidden = !discussion || Boolean(items.find(item => item.id === selected)?.recipientId);
+    addToThread.hidden = !canUseArtifact || !discussion || Boolean(items.find(item => item.id === selected)?.recipientId);
     discussionMessages.replaceChildren();
     const source = discussionAside.querySelector("[data-discussion-link]");
     if (discussion) source.href = discussion.link;
     else source.removeAttribute("href");
-    for (const message of discussion?.messages ?? []) {
+    for (const message of canUseArtifact ? discussion?.messages ?? [] : []) {
       const line = document.createElement("p");
       line.textContent = [message.author, message.excerpt].join(" · ");
       discussionMessages.append(line);
@@ -363,6 +365,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
         latest.hidden = !current;
         latest.textContent = linked.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
           ? "Locate note in current patch" : uiText("workspace.share.openCurrent");
+        refreshDiscussion();
         return;
       }
       if (!current) return;
@@ -391,6 +394,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     } catch (error) {
       if (!owns(ticket, session)) return;
       clearPreview();
+      refreshDiscussion();
       status.textContent = error.message || "Could not open previews.";
     }
   }
