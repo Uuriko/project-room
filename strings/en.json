@@ -843,6 +843,7 @@
   "webmcp.confirmReview": "Let the agent send a review request to {member}?",
   "attention.firstUnread": "Jump to first unread (g then u)",
   "attention.noLoadedUnread": "No unread boundary in this conversation’s loaded messages.",
+  "updates.resolveOrRevise": "Resolve or revise",
   "work.thread.reviewCue": "Review or decision needed",
   "work.thread.nextFor": "{name} · {action}",
   "work.focus.briefHelp": "Name one output, the allowed scope and how to check it. Choose who will do the work and review it.",
