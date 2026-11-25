@@ -1,4 +1,4 @@
-import { isCurrentRoom, currentThreadParticipants, readCurrentMessage, currentMessageMayBeVisible, withCurrentReadContext } from './current-room-repository.mjs';
+import { isCurrentRoom, currentThreadParticipants, readCurrentMessage, readCurrentRecord, currentMessageMayBeVisible, withCurrentReadContext } from './current-room-repository.mjs';
 import { messageRepository } from "./message-repository.mjs";
 // Personal attention surfaces: activity feed, read horizons, saved messages,
 // thread mutes. Write-time fan-out for mention/reply/thread_reply
@@ -501,30 +501,40 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
 
 // --- saved messages -----------------------------------------------------------
 
-function savedView(store, roomId, row, memberId, floor = null) {
-  const message = messageOrArchived(store, roomId, row.message_id);
-  // PRIV-2: a since_join reader's saved list follows the same floor as every
-  // other message read.
-  if (!message || !dmVisible(message, memberId) || !messageInHistory(message, floor)) return null;
-  const members = store.room(roomId).state.members;
+function savedMessage(store, roomId, messageId, memberId, floor, current) {
+  if (current && !currentMessageMayBeVisible(store.db, roomId, messageId, memberId, undefined, floor)) return null;
+  const message = current ? readCurrentMessage(store.db, roomId, messageId)?.value : messageOrArchived(store, roomId, messageId);
+  // A saved row cannot bypass the viewer's current message and history access.
+  return message && dmVisible(message, memberId) && messageInHistory(message, floor) ? message : null;
+}
+
+function savedView(store, roomId, row, memberId, floor, current) {
+  const message = savedMessage(store, roomId, row.message_id, memberId, floor, current);
+  if (!message) return null;
+  const author = current ? readCurrentRecord(store.db, roomId, "members", message.authorId)
+    : store.room(roomId).state.members[message.authorId];
   return {
     messageId: row.message_id, savedAt: row.saved_at,
-    authorId: message.authorId, authorName: members[message.authorId]?.displayName ?? message.authorId,
+    authorId: message.authorId, authorName: author?.displayName ?? message.authorId,
     body: message.deletedAt ? null : String(message.body ?? "").slice(0, 280),
     deleted: Boolean(message.deletedAt), createdAt: message.createdAt, replyToId: message.replyToId ?? null
   };
 }
 
 export function listSaved(store, token, roomId, expectedSessionBinding = null) {
-  const auth = authed(store, token, roomId, expectedSessionBinding);
-  const member = auth.member;
   return store.readTransaction(() => {
+    const auth = authed(store, token, roomId, expectedSessionBinding);
+    const member = auth.member;
     const rows = store.db.prepare(
       "SELECT * FROM saved_messages WHERE room_id=? AND member_id=? ORDER BY saved_at DESC, message_id").all(roomId, member.id);
     const items = [];
-    const floor = store.historyFloor(roomId, member.id);
+    const current = isCurrentRoom(store.db, roomId);
+    const legacyFloor = current ? null : store.historyFloor(roomId, member.id);
     for (const row of rows) {
-      const view = savedView(store, roomId, row, member.id, floor);
+      const view = withCurrentReadContext(store.db, roomId, () => {
+        const floor = current ? store.historyFloor(roomId, member.id) : legacyFloor;
+        return savedView(store, roomId, row, member.id, floor, current);
+      });
       if (view) items.push(view);
     }
     return { ...viewerEnvelope(auth, roomId), count: items.length, items };
@@ -541,12 +551,12 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
     fail(422, "invalid_saved", "messageId must be a message id");
   }
   if (typeof data.saved !== "boolean") fail(422, "invalid_saved", "saved must be true or false");
-  const auth = authed(store, token, roomId, expectedSessionBinding);
-  const member = auth.member;
-  return store.transaction(() => {
-    const message = messageOrArchived(store, roomId, data.messageId);
-    if (!message || !dmVisible(message, member.id)) fail(404, "message_not_found", "No such message in this room");
-    if (data.saved && !messageInHistory(message, store.historyFloor(roomId, member.id))) fail(404, "message_not_found", "No such message in this room");
+  return store.transaction(() => withCurrentReadContext(store.db, roomId, () => {
+    const auth = authed(store, token, roomId, expectedSessionBinding);
+    const member = auth.member;
+    const floor = data.saved ? store.historyFloor(roomId, member.id) : null;
+    const message = savedMessage(store, roomId, data.messageId, member.id, floor, isCurrentRoom(store.db, roomId));
+    if (!message) fail(404, "message_not_found", "No such message in this room");
     if (data.saved && message.deletedAt) fail(409, "message_deleted", "A deleted message cannot be saved");
     const now = store.now();
     if (data.saved) {
@@ -558,5 +568,5 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
         .run(roomId, member.id, data.messageId);
     }
     return { ...viewerEnvelope(auth, roomId), messageId: data.messageId, saved: data.saved };
-  });
+  }));
 }
