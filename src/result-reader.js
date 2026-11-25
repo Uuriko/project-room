@@ -8,6 +8,35 @@ import { matchesReceipt, nextWorkStep, workActions, reviewRuntimeLabel } from ".
 import { previousReviewText } from "./result-comparison.js";
 import { currentResult } from "./work-selectors.js";
 
+const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
+
+export function renderSubmittedResultText(body, text, roomId, { openInNewTab = false } = {}) {
+  body.replaceChildren();
+  // Preserve all submitted characters for copying and passage selection.
+  let offset = 0;
+  for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
+    const href = match[0], url = URL.parse(href);
+    if (!url || url.href !== href) continue;
+    const workspaceFile = url.pathname === location.pathname && roomFileChangeSelection(url, location.origin, roomId);
+    if (!workspaceFile && !githubFile.test(href)) continue;
+    const link = document.createElement("a");
+    link.href = href;
+    if (openInNewTab || url.origin !== location.origin) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    if (openInNewTab && workspaceFile) {
+      const label = uiText("workspace.changes.openFileInNewTab", { file: workspaceFile.file });
+      link.setAttribute("aria-label", label);
+      link.title = label;
+    }
+    link.textContent = href;
+    body.append(text.slice(offset, match.index), link);
+    offset = match.index + href.length;
+  }
+  body.append(text.slice(offset));
+}
+
 // Owns only the pinned reader view. Session, composer, and work mutations stay
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
@@ -163,28 +192,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     return link;
   }
   function showResultBody(text) {
-    const body = resultElement("result-body");
-    body.replaceChildren();
-    // Preserve the submitted characters, including punctuation around plain URLs.
-    const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
-    let offset = 0;
-    for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
-      const href = match[0];
-      const url = URL.parse(href);
-      if (!url || url.href !== href) continue;
-      if (!githubFile.test(href) && !(url.pathname === location.pathname
-          && roomFileChangeSelection(url, location.origin, getSession().roomId))) continue;
-      const link = document.createElement("a");
-      link.href = href;
-      if (url.origin !== location.origin) {
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-      }
-      link.textContent = href;
-      body.append(text.slice(offset, match.index), link);
-      offset = match.index + href.length;
-    }
-    body.append(text.slice(offset));
+    renderSubmittedResultText(resultElement("result-body"), text, getSession().roomId);
   }
   function showOutcome(outcome) {
     const panel = resultElement("result-outcome");

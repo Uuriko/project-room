@@ -596,6 +596,48 @@ test("a submitted file change opens in the reviewer’s room and reports a repla
   assert.equal(await reviewer.getByRole("button", { name: "Open current attempt" }).isVisible(), true);
 });
 
+test("a reviewer opens the corrected file without leaving the exact result review", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  f.send("human-checker", T.VERIFICATION_RECORDED, {
+    workItemId: f.item().id, expectedRevision: f.item().revision, completionEventId: f.first.event.id,
+    evidenceVersion: f.first.event.data.evidenceVersion, result: "fail", summary: "Name the owner", nextAction: "Submit corrected text",
+  });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Named the owner in the implementation." });
+  f.mutate(T.WORK_STARTED, {});
+  const patch = "diff --git a/src/owner.js b/src/owner.js\n--- a/src/owner.js\n+++ b/src/owner.js\n@@ -1 +1 @@\n-const owner = null;\n+const owner = 'Maya';\n";
+  const id = "f".repeat(32), head = "c".repeat(40);
+  const publish = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+    method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+    body: JSON.stringify({ id, expectedRevision: 0, patch, base: "b".repeat(40), head, title: "Named owner", html: "<p>Named owner</p>" }),
+  });
+  assert.ok(publish.ok, await publish.text());
+  const digest = createHash("sha256").update(patch).digest("hex");
+  const file = f.origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "src%2Fowner.js"].join("/");
+  const text = "Result B\n" + file + "\n" + file.replace("room=commons", "room=other");
+  const revised = f.complete(text);
+  const reviewer = await f.login("human-checker");
+  await clickWorkAction(await openWorkFromSearch(reviewer, "revision-journey", "Revise a short result"), "verify");
+  const body = reviewer.locator("#action-text-body");
+  await body.getByText(/Result B/).waitFor();
+  await reviewer.locator("#action-dialog").screenshot({path: "test-results/review-corrected-code.png"});
+  assert.equal(await body.textContent(), text);
+  assert.equal(await body.getByRole("link").count(), 1);
+  const link = body.getByRole("link", { name: "Open changes for src/owner.js in a new tab", exact: true });
+  assert.equal(await link.getAttribute("href"), file);
+  await reviewer.locator('#action-fields [name="result"]').selectOption("pass");
+  const summary = reviewer.locator('#action-fields [name="summary"]');
+  await summary.fill("Checked the corrected owner in this exact file.");
+  const [opened] = await Promise.all([reviewer.waitForEvent("popup"), link.press("Enter")]);
+  await opened.locator("[data-workspace-primary]").getByText("+const owner = 'Maya';", { exact: true }).waitFor();
+  assert.equal(opened.url(), file);
+  await opened.close();
+  assert.equal(await reviewer.locator("#action-dialog").isVisible(), true);
+  assert.equal(await summary.inputValue(), "Checked the corrected owner in this exact file.");
+  await reviewer.locator('#action-form button[type="submit"]').click();
+  await reviewer.locator("#action-dialog").waitFor({ state: "hidden" });
+  assert.equal(f.item().verification.completionEventId, revised.event.id);
+});
+
 test("shared result links keep identical old and new text bound to different verdicts", { timeout: 45000 }, async t => {
   const revision = "a".repeat(40);
   const source = `https://github.com/room-fixtures/pinned-result/blob/${revision}`;

@@ -865,6 +865,7 @@ export default {
   "workspace.share.threadUnavailable": "The thread draft is unavailable. You can still copy the artifact link.",
   "workspace.share.fileMissing": "This file is unavailable in the shared changes.",
   "workspace.changes.browseFiles": "Browse changed files",
+  "workspace.changes.openFileInNewTab": "Open changes for {file} in a new tab",
   "workspace.changes.fileError": "Could not read file.",
   "workspace.changes.fileLoading": "Loading file…",
   "workspace.changes.openRaw": "Open raw patch",
