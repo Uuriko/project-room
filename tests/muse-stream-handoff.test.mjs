@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
+import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, reportMuseHostStop, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
 
 const connection = { origin: "https://room.example.org", roomId: "build", memberId: "muse" };
 const policy = museHandoffPolicy({ ...connection, version: 1, requesters: ["codex"], workItems: ["ready"],
@@ -14,6 +14,39 @@ const request = (id, patch = {}) => ({ id, status: "open", requesterId: "codex",
   workItemId: "ready", openingEventId: "open-" + id, revision: 0, ...patch });
 const context = (row, sequence) => ({ roomId: "build", viewerId: "muse", roomCreatedEventId: "room-birth",
   request: row, page: { items: [{ kind: "opened", eventId: row.openingEventId, sequence, message: { body: "private QA details" } }] } });
+
+test("an observed Muse host stop reports only to the same in-flight request and context", async () => {
+  const row = request("blocked", { contextEventId: "basis", acknowledgedAt: "2026-11-25T14:00:00Z" });
+  const checkpoint = { after: 11, inFlight: { requestMessageId: row.id, openingEventId: row.openingEventId,
+    requesterId: row.requesterId, roomCreatedEventId: "room-birth", requestRevision: 0, contextEventId: "basis" } };
+  const actions = [];
+  let current = context(row, 11);
+  const client = {
+    async replyContext(id) {
+      assert.equal(id, row.id);
+      return current;
+    },
+    async command(action) {
+      actions.push(action);
+      return { event: { id: "host-reported" }, sequence: 12, duplicate: actions.length > 1 };
+    },
+  };
+  const report = (requestId = row.id) => reportMuseHostStop({ client, policy, checkpoint, requestId });
+  await assert.rejects(report("other"), /muse_host_stop_checkpoint_mismatch/);
+  for (const patch of [{ contextEventId: "corrected" }, { acknowledgedAt: null }, { workItemId: "unapproved" },
+    { revision: 1 }, { status: "cancelled" }]) {
+    current = context({ ...row, ...patch }, 11);
+    await assert.rejects(report(), /muse_host_stop_context_changed/);
+  }
+  assert.deepEqual(actions, []);
+  current = context(row, 11);
+  assert.deepEqual(await report(), { status: "reported", sequence: 12, duplicate: false });
+  assert.deepEqual(await report(), { status: "reported", sequence: 12, duplicate: true });
+  assert.deepEqual(actions[0], actions[1]);
+  assert.equal(actions[0].data.ifCurrentContextEventId, "basis");
+  assert.equal(actions[0].data.progress, "error");
+  assert.equal(JSON.stringify(actions).includes("private QA details"), false);
+});
 
 async function checkSuccessorAfterSettlement(outcome) {
   const first = request("first"), successor = request("successor");
