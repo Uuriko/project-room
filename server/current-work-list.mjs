@@ -1,7 +1,7 @@
 import { reviewRuntimeFor } from "./review-runtime.mjs";
 import {createHmac,createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
 import {INBOX_WORK_ROLES} from './current-inbox-indexes.mjs';
-import {readCurrentRecord,readCurrentWorkSummaryForViewer,chargeCurrentReadBudget,isCurrentRoom,readCurrentHead,readCurrentWorkItem,readCurrentOverviewWindow,currentVisibleHorizon,withCurrentReadContext} from './current-room-repository.mjs';
+import {currentReplyContextAvailable,readCurrentRecord,readCurrentWorkSummaryForViewer,chargeCurrentReadBudget,isCurrentRoom,readCurrentHead,readCurrentWorkItem,readCurrentOverviewWindow,currentVisibleHorizon,withCurrentReadContext} from './current-room-repository.mjs';
 import {ownMember} from '../src/events.js';
 import {validWorkPage} from './work-list-page.mjs';
 import {nextWorkStep} from '../src/workflow.js';
@@ -107,7 +107,11 @@ export function addressedRequestWindow(store,roomId,memberId,after,limit,b) {
     if(request?.id!==id||request.recipientId!==memberId||request.status!=='open')throw Error('current_room_corrupt: addressed request index binding differs');
     return request;
   });
-  return {requests,hasMore:rows.length>selected.length,examinedAfter:selected.at(-1)?.record_key??after};
+  return {
+    requests: requests.filter(request => currentReplyContextAvailable(store.db, roomId, request, memberId, b)),
+    hasMore: rows.length > selected.length,
+    examinedAfter: selected.at(-1)?.record_key ?? after
+  };
 }
 
 // The cursor walks source keys, including excluded records. A filtered empty

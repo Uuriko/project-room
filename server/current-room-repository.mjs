@@ -1537,6 +1537,16 @@ export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{inclu
 }
 
 export {currentWorkSummary} from './current-work-summary.mjs';
+// Check witnessed metadata so pickup never loads the question bodies.
+export function currentReplyContextAvailable(db, roomId, request, memberId, b, floor = null) {
+  return [...new Set([request.id, request.contextMessageId])].every(id => {
+    const source = readCurrentMessageHeader(db, roomId, id, b);
+    const message = source?.value;
+    return message && !message.deletedAt && messageInHistory(message, floor, source.row.seq)
+      && (!message.toMemberId || message.authorId === memberId || message.toMemberId === memberId);
+  });
+}
+
 // Examine a fixed source window before recipient/status/history predicates.
 // Tombstones are excluded by the partial index rather than scanned on refill.
 export function readCurrentReplyRequestWindow(store,roomId,{after='',limit=4}={}) {

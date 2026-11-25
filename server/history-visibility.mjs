@@ -62,10 +62,10 @@ export function historyActivationValue({sequence,at,found}) {
  if(found===false)throw Error('Missing qualified member activation source');
  return {version:2,sequence,at,tieBreak:'source-sequence'};
 }
-function atOrAfterActivation(at,id,floor,sequenceFor) {
+function atOrAfterActivation(at,id,floor,sequenceFor,provenSequence) {
  const instant=Date.parse(at),joined=Date.parse(floor.at);
  if(!Number.isFinite(instant)||!Number.isFinite(joined))return false;
- return instant>joined || instant===joined&&sequenceFor(id)>=floor.sequence;
+ return instant>joined || instant===joined&&(provenSequence??sequenceFor(id))>=floor.sequence;
 }
 
 // Returns null (no limit) or { sequence, at, sameInstant } for the member's
@@ -99,11 +99,12 @@ export function historyFloor(db, state, roomId, memberId, headSequence = null) {
   return { sequence: row.sequence, at: row.at, sameInstant };
 }
 
-// Projection messages: visible when created after the join point.
-export function messageInHistory(message, floor) {
+// Projection messages: visible when created after the join point. A caller
+// with an already verified message sequence can reuse it for the timestamp tie.
+export function messageInHistory(message, floor, provenSequence) {
   if (!floor) return true;
   const createdAt = message?.createdAt;
-  if(floor.version===2)return typeof createdAt==='string'&&atOrAfterActivation(createdAt,message.id,floor,floor.messageSequence);
+  if(floor.version===2)return typeof createdAt==='string'&&atOrAfterActivation(createdAt,message.id,floor,floor.messageSequence,provenSequence);
   if (typeof createdAt !== "string" || createdAt < floor.at) return false;
   return createdAt > floor.at || !floor.sameInstant?.has(message.id);
 }

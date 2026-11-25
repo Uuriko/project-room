@@ -1,5 +1,6 @@
+import { WITHDRAWN_REPLY_CONTEXT } from "../src/reply-requests.js";
 import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
-import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
+import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,currentReplyContextAvailable,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
 import {validId} from '../src/events.js';
 import {nativeOutboxEventId} from './mcp-outbox-event-id.mjs';
 import {identityIdForWakeMember} from './wake-identity-resolution.mjs';
@@ -142,8 +143,19 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
    // reads existing indexes, so an open ask is never behind empty pages.
    // It is discovery, not a census: every hit is proof-read and bound, and the
    // witnessed scan still runs to completion as before, skipping only the hits
-   // already returned (kept as hashes inside the opaque cursor).
+   // already evaluated (kept as hashes inside the opaque cursor).
    const seen=new Set(saved?.seen??[]),found=[];
+   // A record costs four reads with a cold receipt. Each context header
+   // costs at most nine, including the legacy canonical-message fallback.
+   // The opening request summary may need one additional message witness
+   // at the activation instant. The context headers already prove theirs.
+   const openingHistoryRecords = floor?.version===2 ? 4 : 0;
+   const contextRecords = status==='open' ? 18 : 0;
+   const scanRowRecords = 1 + 4 + openingHistoryRecords + contextRecords + 3;
+   const recordsLeft = selectedCount => b.maxRecords - b.records - 3 * selectedCount;
+   const bytesLeft = selectedCount => remainingCurrentReadBytes(b) > 144 * 1024 + 384 * (selectedCount + WINDOW);
+   const actionable = request => status !== 'open'
+     || currentReplyContextAvailable(db, roomId, request, auth.member.id, b, floor);
    if(saved?.seen!==undefined&&(!Array.isArray(saved.seen)||saved.seen.length>50||!saved.seen.every(v=>typeof v==='string')))fail('invalid_reply_cursor','Invalid request source continuation');
    if(!saved&&status==='open'){
     // Incoming hits come from the open-request index; outgoing hits from the
@@ -151,33 +163,40 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
     const sources=[];
     if(direction!=='outgoing')sources.push(["SELECT record_key FROM current_room_records INDEXED BY current_inbox_open_requests WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.status')='open' AND json_extract(payload,'$.recipientId')=? ORDER BY record_key LIMIT ?",'recipientId']);
     if(direction!=='incoming')sources.push(["SELECT record_key FROM current_room_records INDEXED BY current_request_party_requester WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.requesterId')=? AND json_extract(payload,'$.status')='open' ORDER BY record_key LIMIT ?",'requesterId']);
+    const indexLimit=Math.min(limit,WINDOW);
     for(const [sql,role] of sources){
-     const rows=db.prepare(sql).all(roomId,auth.member.id,Math.min(limit,WINDOW));
+     if(found.length>=limit||recordsLeft(found.length)<indexLimit)break;
+     const rows=db.prepare(sql).all(roomId,auth.member.id,indexLimit);
      chargeCurrentReadBudget(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
      for(const {record_key:id} of rows){
       if(found.length>=limit)break;
-      // Same headroom rule as the scan below; an unread hit is simply found by the scan.
-      if(remainingCurrentReadBytes(b)<=144*1024+384*(found.length+WINDOW)||(b.maxRecords??200)-b.records<=100+3*(found.length+WINDOW))break;
+      // An unread indexed hit remains eligible for the witnessed scan.
+      if(!bytesLeft(found.length)||recordsLeft(found.length)<scanRowRecords)break;
       const r=readCurrentRecord(db,roomId,'replyRequests',id,b);
       if(r?.id!==id||r.status!=='open'||r[role]!==auth.member.id)throw Error('current_room_corrupt: open request index binding differs');
       if(!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||r.revision!==0||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();
       requests.set(r.id,r);seen.add(seenKey(id));
-      if(messageInHistory({id:r.id,createdAt:r.createdAt},floor))found.push(r);
+      if(messageInHistory({id:r.id,createdAt:r.createdAt},floor) && actionable(r))found.push(r);
      }
     }
    }
    // Refill a few witnessed source windows while there is space. The ceiling
    // remains explicit; an empty page with hasMore still means keep reading.
-   let source,after=saved?.after??'',windows=0;const selected=[...found];
-   if(selected.length>=limit||found.length&&(remainingCurrentReadBytes(b)<=144*1024+384*(selected.length+WINDOW)||(b.maxRecords??200)-b.records<=100+3*(selected.length+WINDOW)))source={requests:[],examinedAfter:after,hasMore:true};
-   else do{
-    source=readCurrentReplyRequestWindow(store,roomId,{after,limit:Math.min(limit-selected.length,WINDOW)});
+   let after=saved?.after??'';
+   let source={examinedAfter:after,hasMore:true};
+   const selected=[...found];
+   for(let windows=0;source.hasMore&&selected.length<limit&&windows<4;windows++){
+    // Three reads recheck the head, and one reads the lookahead key.
+    const windowLimit=Math.min(limit-selected.length,WINDOW,Math.floor((recordsLeft(selected.length)-4)/scanRowRecords));
+    if(windowLimit<1||(!bytesLeft(selected.length)&&(windows>0||(!saved&&found.length>0)))){
+     if(windows===0&&saved&&selected.length===0)fail('current_room_context_unavailable','Current record context exceeds bounded input; use a smaller addressed request');
+     break;
+    }
+    source=readCurrentReplyRequestWindow(store,roomId,{after,limit:windowLimit});
     for(const r of source.requests){if(!validId(r.id)||!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||!['open','answered','declined','cancelled'].includes(r.status)||r.revision!==(r.status==='open'?0:1)||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();requests.set(r.id,r);}
-    selected.push(...source.requests.filter(r=>!seen.has(seenKey(r.id))&&directionMatches(r,auth.member.id,direction)&&messageInHistory({id:r.id,createdAt:r.createdAt},floor)&&(status==='all'||r.status===status)));
-    after=source.examinedAfter;windows++;
-   }while(source.hasMore&&selected.length<limit&&windows<4
-    &&remainingCurrentReadBytes(b)>144*1024+384*(selected.length+WINDOW)
-    &&(b.maxRecords??200)-b.records>100+3*(selected.length+WINDOW));
+    selected.push(...source.requests.filter(r=>!seen.has(seenKey(r.id))&&directionMatches(r,auth.member.id,direction)&&messageInHistory({id:r.id,createdAt:r.createdAt},floor)&&(status==='all'||r.status===status) && actionable(r)));
+    after=source.examinedAfter;
+   }
    for(const request of selected)noteRequest(request);
    const nextCursor=source.hasMore?crypto.encode({...binding,after:source.examinedAfter,...(seen.size?{seen:[...seen]}:{})}):null;
    const nextRead=nextCursor?{tool:'room_list_requests',arguments:{direction,status,limit,cursor:nextCursor}}:null;
@@ -225,6 +244,8 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   const openingEvent=eventAt(opening.row.seq),contextEvent=eventAt(context.row.seq);
   if(openingEvent.type!=='message.posted'||openingEvent.id!==request.openingEventId||openingEvent.messageId!==request.id||opening.value.authorId!==request.requesterId||opening.value.toMemberId!==request.recipientId||openingEvent.actorId!==opening.value.authorId||openingEvent.at!==opening.value.createdAt||opening.value.createdAt!==request.createdAt||contextEvent.type!=='message.posted'||contextEvent.id!==request.contextEventId||contextEvent.messageId!==request.contextMessageId||contextEvent.actorId!==context.value.authorId||contextEvent.at!==context.value.createdAt)changed();
   if(!visible(context.value,auth.member.id,floor))fail('reply_context_unavailable','Latest request context is outside the visible conversation; ask for a new request');
+  if (request.status === 'open' && auth.member.id === request.recipientId && (opening.value.deletedAt || context.value.deletedAt))
+    fail('reply_context_unavailable', WITHDRAWN_REPLY_CONTEXT);
   evaluatedThrough=Math.max(opening.row.seq,context.row.seq);
   if(ownerOf(context.value.id)?.id!==request.id)changed();
   // Follow-up preparation keeps the established eight-exchange/100-message

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
+import { readRoomNext } from "../server/room-next.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -514,6 +515,46 @@ test("compact correction with a large earlier decision keeps exact continuation 
   assert.equal(read(earlier.requestMessageId, earlier).page.items.at(-1).message.body, decision);
   assert.ok(Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(read(id))));
 });
+
+for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`withdrawn questions leave pickup while preserving request history (${representation})`, t => {
+    const f = fixture(t, [], representation === "legacy" ? {} : { representation });
+    const older = f.open("guest", { messageId: "a-withdrawn", body: "An excerpt that was withdrawn." });
+    const queued = f.open("guest", { messageId: "b-kept" });
+    const openId = older.command.data.messageId;
+    const cachedAnswer = f.answer(older);
+    f.send("guest", { id: "withdraw-new-question", type: "message.deleted",
+      data: { messageId: openId, expectedMessageRevision: 0 } });
+    const open = f.store.replyRequests.list(f.keys.agent, "commons", { direction: "incoming", status: "open" });
+    assert.deepEqual(open.requests.map(request => request.id), [queued.command.data.messageId]);
+    const pickup = readRoomNext(f.store, f.keys.agent, "commons", { source: "requests", view: "pickup" });
+    assert.equal(pickup.nextRead.arguments.requestMessageId, queued.command.data.messageId);
+    assert.throws(() => f.store.replyRequests.selected(f.keys.agent, "commons", openId), { code: "reply_context_unavailable" });
+    assert.throws(() => f.send("agent", cachedAnswer), { code: "reply_context_unavailable" });
+    const historical = f.store.replyRequests.selected(f.keys.guest, "commons", openId);
+    assert.equal(historical.request.status, "open");
+    assert.equal(historical.page.items[0].message.body, null);
+    assert.equal(historical.current.actions.cancel, true);
+    f.send("guest", f.cancel(older));
+    assert.equal(f.store.replyRequests.selected(f.keys.agent, "commons", openId).request.status, "cancelled");
+
+    const clarification = f.post("guest", { messageId: "latest-question", replyToId: queued.command.data.messageId, toMemberId: "agent", body: "Clarification" });
+    const answer = f.answer(queued, clarification);
+    f.send("guest", { id: "withdraw-clarification", type: "message.deleted",
+      data: { messageId: "latest-question", expectedMessageRevision: 0 } });
+    assert.equal(f.store.replyRequests.list(f.keys.agent, "commons").requests.length, 0);
+    assert.throws(() => f.send("agent", answer), { code: "reply_context_unavailable" });
+
+    const finished = f.open("guest", { messageId: "c-already-answered" });
+    const originalAnswer = f.answer(finished);
+    const receipt = f.send("agent", originalAnswer);
+    f.send("guest", { id: "remove-answered-question", type: "message.deleted",
+      data: { messageId: finished.command.data.messageId, expectedMessageRevision: 0 } });
+    const replayed = f.send("agent", originalAnswer);
+    assert.equal(replayed.duplicate, true);
+    assert.equal(replayed.event.id, receipt.event.id);
+  });
+}
 
 test("follow-up refuses withdrawn context and oversized history instead of silently omitting it", t => {
   const f = fixture(t), q = f.open();

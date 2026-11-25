@@ -48,9 +48,23 @@ test('bounded witnessed refill finds an addressed request behind unrelated reque
  assert.deepEqual(result.requests.map(request=>request.id),['question']);
  assert.equal(result.page.hasMore,false);
 });
-test('witnessed refill respects a nested 200-record context and returns every request',t=>{
- const {store,keys}=fixture(t,(_events,add)=>{
-  for(let i=0;i<25;i++)add('message.posted',{messageId:`a-match-${String(i).padStart(2,'0')}`,toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Question'});
+for(const sinceJoin of [false,true])test('witnessed refill respects a nested 200-record context'+(sinceJoin?' on the rejoin millisecond':'')+' and returns every visible request',t=>{
+ const {store,keys}=fixture(t,(events,add)=>{
+  if(sinceJoin){
+   add('room.history_visibility_set',{historyVisibility:'since_join'});
+   add('member.access_changed',{memberId:'reader',expectedMemberRevision:0,permissions:[],active:false});
+   add('member.access_changed',{memberId:'reader',expectedMemberRevision:1,permissions:[],active:true});
+  }
+  for(let i=0;i<25;i++){
+   const messageId=`a-match-${String(i).padStart(2,'0')}`;
+   add('message.posted',{messageId,toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Question'});
+   if(sinceJoin||i%2===0){
+    const clarificationId=`clarification-${i}`;
+    add('message.posted',{messageId:clarificationId,replyToId:messageId,toMemberId:'reader',body:'Clarification'});
+    if(i===12)add('message.deleted',{messageId:clarificationId,expectedMessageRevision:0});
+   }
+  }
+  if(sinceJoin)for(const entry of events)entry.at=events[0].at;
  });
  store.room=()=>{throw Error('whole-room hydration forbidden');};
  let args={direction:'incoming',status:'open',limit:50},ids=[],pages=0;
@@ -63,7 +77,8 @@ test('witnessed refill respects a nested 200-record context and returns every re
   ids.push(...result.requests.map(request=>request.id));args=result.nextRead?.arguments;
   assert.ok(++pages<20);
  }while(args);
- assert.equal(ids.length,26);assert.equal(new Set(ids).size,26);assert.equal(ids.at(-1),'question');
+ const expected=Array.from({length:25},(_,i)=>`a-match-${String(i).padStart(2,'0')}`).filter(id=>id!=='a-match-12');
+ assert.deepEqual(ids,sinceJoin?expected:[...expected,'question']);
 });
 for(const [field,value] of [['recipientId','other'],['status','answered']])test(`witnessed refill fails closed when ${field} is corrupted`,t=>{
  const {store,keys}=fixture(t);

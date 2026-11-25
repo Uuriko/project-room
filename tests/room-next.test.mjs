@@ -298,6 +298,42 @@ test("composite OAuth scope admits only the combined read grant", () => {
   }
 });
 
+test("pickup follows an empty withdrawn page to an exact request using its returned actions", async t => {
+  const f = await privateWorkFixture(t, "normalized-current-v1");
+  f.store.dmConsents.request("commons", "owner", f.observer.id, "Fixture ask");
+  f.store.dmConsents.decide("commons", f.observer.id, "owner", "approve");
+  for (let index = 0; index < 20; index++) {
+    const messageId = `a-withdrawn-${String(index).padStart(2, "0")}`;
+    f.send(f.owner, "message.posted", { messageId, toMemberId: f.observer.id, requestKind: "reply", body: "Withdrawn question" });
+    f.send(f.owner, "message.deleted", { messageId, expectedMessageRevision: 0 });
+  }
+  const requestMessageId = "b-current-request", question = "Can you check the exact submitted excerpt?";
+  f.send(f.owner, "message.posted", { messageId: requestMessageId, toMemberId: f.observer.id, requestKind: "reply", body: question });
+  const first = await f.mcp(f.observer, "room_next", { source: "requests", view: "pickup" });
+  assert.equal(first.ok, true, first.text);
+  validatePickup(first.value);
+  assert.deepEqual(first.value.requests.items, []);
+  assert.equal(first.value.requests.coverage, "partial");
+  assert.equal(first.value.ifIdle, undefined);
+  assert.equal(first.value.nextRead.tool, "room_next");
+  let page = first;
+  for (let pages = 0; page.value.nextRead?.tool === "room_next" && pages < 12; pages++) {
+    assert.equal(page.value.requests.coverage, "partial");
+    assert.equal(page.value.ifIdle, undefined);
+    page = await f.mcp(f.observer, page.value.nextRead.tool, page.value.nextRead.arguments);
+    assert.equal(page.ok, true, page.text);
+    validatePickup(page.value);
+  }
+  assert.equal(page.value.nextRead?.arguments.requestMessageId, requestMessageId);
+  const selected = await f.mcp(f.observer, page.value.nextRead.tool, page.value.nextRead.arguments);
+  assert.equal(selected.ok, true, selected.text);
+  assert.equal(selected.value.page.items[0].message.body, question);
+  const original = await f.mcp(f.observer, "room_next", { source: "requests" });
+  assert.equal(original.ok, true, original.text);
+  assert.equal(original.value.nextRead, undefined);
+  assert.equal(original.value.requests.nextRead.arguments.view, undefined);
+});
+
 test("legacy pickup finds a failed formal request outside the first page without changing continuation", async t => {
   const f = await privateWorkFixture(t, "legacy");
   f.store.dmConsents.request("commons", "owner", f.observer.id, "fixture");
