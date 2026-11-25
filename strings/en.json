@@ -848,6 +848,7 @@
   "work.thread.reviewCue": "Review or decision needed",
   "work.thread.nextFor": "{name} · {action}",
   "work.focus.briefHelp": "Name one output, the allowed scope and how to check it. Choose who will do the work and review it.",
+  "work.focus.sourceUnavailableHtml": "<p id=\"{id}\" class=\"form-hint\" tabindex=\"-1\" data-focus-key=\"{focusKey}\">Source unavailable. Ask the teammate who assigned this work for an accessible reference.</p>",
   "work.focus.goalHtml": "<p class=\"definition work-focus-summary\" data-work-focus-goal>Done when: {definition}</p>",
   "work.focus.resultHtml": "<p class=\"definition work-focus-summary\" data-work-focus-result>Current result: {summary}</p>",
   "workspace.preview.frameTitle": "Shared project preview",

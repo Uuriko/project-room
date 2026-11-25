@@ -428,11 +428,22 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // already apply). A selected read carries the claim scope, evidence, source and
 // discussion, so anyone else is refused rather than served a partly redacted
 // copy. An unreadable privacy record withholds. No new permission is involved.
-function assertSelectedWorkVisible(store, roomId, workItemId, item, viewerId, observed = undefined) {
+function selectedWorkVisible(store, roomId, workItemId, item, viewerId, observed = undefined) {
   let parties = observed;
   if (observed === undefined) try { parties = store.privateWorkParties(roomId, { workIds: [workItemId] })?.get(workItemId) ?? null; }
   catch { parties = new Set(); }
-  if (parties && !parties.has(viewerId) && !workRoleHolder(item, viewerId)) fail(403, "work_private", "This work is private to its participants");
+  return !outsidePrivateWork(parties, item, viewerId);
+}
+function assertSelectedWorkVisible(store, roomId, workItemId, item, viewerId, observed = undefined) {
+  if (!selectedWorkVisible(store, roomId, workItemId, item, viewerId, observed)) {
+    fail(403, "work_private", "This work is private to its participants");
+  }
+}
+function selectedReplacementAvailable(store, roomId, item, viewerId) {
+  const id = item.supersededBy;
+  if (!validId(id) || id === item.id) return false;
+  const replacement = readWorkItem(store.db, roomId, id);
+  return Boolean(replacement && selectedWorkVisible(store, roomId, id, replacement, viewerId));
 }
 // F5: the bounded pilot caps in one place. The room write paths below enforce
 // them; server/usage-summary.mjs reports them with the remaining headroom.
@@ -6677,7 +6688,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const current=readCurrentSelectedWorkState(this,roomId,workItemId,auth.member.id,{includeOffers});
       if(current) {
         if(!Object.hasOwn(current.state.workItems,workItemId))fail(404,'work_not_found','Work item not found in this Room');
-        const item=current.state.workItems[workItemId],target=item.supersededBy;
+        const item=current.state.workItems[workItemId];
         assertSelectedWorkVisible(this,roomId,workItemId,item,auth.member.id,current.privateParties);
         const ids=item.dependsOn??[];
         if(ids.length>16)fail(409,'current_room_context_unavailable','Selected dependency list exceeds bounded context');
@@ -6691,7 +6702,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         });
         const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now,includeSource,includeOffers,sourceObservation,dependencies,
           floor:this.historyFloor(roomId,auth.member.id,current.sequence),messageRecords:{get:id=>selectedMessageRecord(this,roomId,id,false)},
-          replacementAvailable:validId(target)&&target!==workItemId&&Boolean(readWorkItem(this.db,roomId,target))});
+          replacementAvailable:selectedReplacementAvailable(this,roomId,item,auth.member.id)});
         // Native commands do not support the legacy help invitation/offer service.
         // Omit its versioned capability contract rather than fabricate false v1 data.
         delete value.helpContextVersion;
@@ -6731,10 +6742,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const pullRequest = threadGithubAttachment(this, roomId, workItemId);
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, sourceObservation, dependencies, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
         floor: this.historyFloor(roomId, auth.member.id, room.sequence),
-        replacementAvailable: (() => {
-          const target = room.state.workItems[workItemId].supersededBy;
-          return validId(target) && target !== workItemId && Boolean(readWorkItem(this.db, roomId, target));
-        })() }),
+        replacementAvailable: selectedReplacementAvailable(this, roomId, room.state.workItems[workItemId], auth.member.id) }),
         dependencies,
         ...(pullRequest ? { pullRequest } : {}), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };

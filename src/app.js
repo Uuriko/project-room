@@ -358,12 +358,13 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
-let partialWorkSnapshot = false, inspectedWorkRecord = null;
+let partialWorkSnapshot = false, inspectedWorkRecord = null, inspectedWorkReplacementId = null;
 // JDOT-COH-NAV begin
 let workspacePreviewsUI = null, updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
+let pendingWorkReturn = null;
 let navigationBoardEpoch = 0;
 // #3892: a cold deep link reaches revealClaimRecord before the lazy board
 // module has installed navigationBoardReady; wait for installation (or its
@@ -519,7 +520,7 @@ const client = new RoomClient({
     if (presenceBoundary) stopPresencePoll();
     const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
     partialWorkSnapshot = snapshot.snapshotVersion === 2;
-    inspectedWorkRecord = null;
+    inspectedWorkRecord = null; inspectedWorkReplacementId = null;
     state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
     session = identity;
     // A successful room snapshot supersedes a denied deep link from an
@@ -614,7 +615,10 @@ const client = new RoomClient({
       if (session.member.kind !== "agent" && !savedRoomDestination() && $("#result-dialog").hidden
         && !$("#board-dialog").open && !$("#message-input").value) updatesUi?.open("needs", false);
     }
-    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId) void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
+    else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId
+      && !(pendingWorkReturn?.id === activeWorkNavigationId && pendingWorkReturn.epoch === workNavigationEpoch)) {
+      void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
+    }
     retryPendingHashReveal();
     resumeConfirmedWorkNavigation();
   },
@@ -645,7 +649,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
-    partialWorkSnapshot = false; inspectedWorkRecord = null;
+    partialWorkSnapshot = false; inspectedWorkRecord = null; inspectedWorkReplacementId = null;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
@@ -3563,32 +3567,48 @@ function revealWork(id, expandDetails = false) {
   syncWorkReturnControl();
   return card;
 }
-async function readSelectedWorkRecord(id, expandDetails) {
+async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = false } = {}) {
   const context = workNavigationContext();
   if (!context || busy) return null;
-  const generation = client.generation, identity = session, held = state;
+  const generation = client.generation, identity = session;
   const epoch = workNavigationEpoch, url = location.href;
   const current = () => context === workNavigationContext() && generation === client.generation
-    && identity === session && held === state && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
-  try {
-    const selected = await client.workContext(id);
-    if (!current()) return null;
-    const item = selected?.work;
-    if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
-      || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
-      || typeof item.definitionOfDone !== "string" || !Number.isSafeInteger(item.revision) || item.revision < 0
-      || Number.isSafeInteger(held.workItems[id]?.revision) && item.revision < held.workItems[id].revision) {
-      notice(SOURCE_UNAVAILABLE_NOTICE, true); return null;
+    && identity === session && epoch === workNavigationEpoch && url === location.href && activeWorkNavigationId === id;
+  const attempts = restoreInPlace ? 2 : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const held = state;
+    try {
+      const selected = await client.workContext(id);
+      if (!current()) return null;
+      if (held !== state) continue;
+      const item = selected?.work;
+      if (!selected || !client.ownsResponse(selected, identity) || selected.roomId !== identity.roomId
+        || selected.viewerId !== identity.member.id || item?.id !== id || typeof item.title !== "string"
+        || typeof item.definitionOfDone !== "string" || !Number.isSafeInteger(item.revision) || item.revision < 0
+        || Number.isSafeInteger(held.workItems[id]?.revision) && item.revision < held.workItems[id].revision) {
+        notice(SOURCE_UNAVAILABLE_NOTICE, true); return null;
+      }
+      // Mount only this independently selected current record. The room's
+      // summary window and completeness metadata remain unchanged.
+      const replacement = selected.next?.replacement;
+      inspectedWorkReplacementId = replacement?.status === "available" && replacement.workItemId === item.supersededBy
+        && replacement.nextRead?.tool === "room_read_work" && replacement.nextRead.arguments?.workItemId === item.supersededBy
+        ? item.supersededBy : null;
+      inspectedWorkRecord = structuredClone(item);
+      state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
+      if (restoreInPlace) {
+        renderMessages();
+        return workRecord(id);
+      }
+      return revealWork(id, expandDetails);
+    } catch (error) {
+      if (!current()) return null;
+      if (held !== state) continue;
+      notice(error.code === "work_private" ? SOURCE_UNAVAILABLE_NOTICE : error.message || SOURCE_UNAVAILABLE_NOTICE, true);
+      return null;
     }
-    // Mount only this independently selected current record. The room's
-    // summary window and completeness metadata remain unchanged.
-    inspectedWorkRecord = structuredClone(item);
-    state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
-    return revealWork(id, expandDetails);
-  } catch (error) {
-    if (current()) notice(error.message || SOURCE_UNAVAILABLE_NOTICE, true);
-    return null;
   }
+  return null;
 }
 function savedRoomDestination() {
   return Boolean(location.hash && location.hash !== "#pr-view/rooms") || accountHomeFromLocation();
@@ -3790,25 +3810,45 @@ async function restoreWorkOrigin(ticket) {
   // origin that was not the board closes it again (a work record's
   // destination never had it open).
   if (origin.targetClaimId && origin.type !== "board" && $("#board-dialog").open) $("#board-dialog").close();
-  if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId, true);
+  const priorOrigin = currentWorkOrigin(origin.previous);
+  // A shared work URL can be the first entry, with no earlier navigation ticket.
+  const coldWork = !priorOrigin && origin.type === "conversation";
+  const priorTarget = priorOrigin?.target ?? (coldWork ? new URL(origin.url).hash : "");
+  const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget);
+  const priorWorkId = priorWork ? decodeFragment(priorWork[1]) : null;
+  if (activeChannelId !== origin.channelId || (priorWorkId && activeDirectMemberId)) setActiveChannel(origin.channelId, true);
   switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null, false, true);
   if (origin.mode) setRequestMode(origin.mode);
-  activeWorkNavigationId = null;
-  const priorOrigin = currentWorkOrigin(origin.previous);
-  const priorTarget = priorOrigin?.target;
-  const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget ?? "");
-  activeWorkNavigationId = priorWork ? decodeFragment(priorWork[1]) : null;
+  activeWorkNavigationId = priorWorkId;
   renderMessages();
-  if (priorWork) {
-    const id = decodeFragment(priorWork[1]), card = id && workRecord(id);
-    if (card) {
-      const section = priorOrigin.presentation === "drafts" ? card.querySelector(".work-drafts") : card.querySelector(".work-details");
-      if (section) section.open = (priorOrigin.presentation === "drafts" ? origin.workDraftsOpen : origin.workDetailsOpen)
-        ?? priorOrigin.presentation !== "focus";
-      activeWorkNavigationId = id;
-    }
-  }
+  let priorCard = priorWorkId && workRecord(priorWorkId);
   const input = $("#message-input");
+  let interactionContinued = false;
+  if (coldWork && priorWorkId && !priorCard && partialWorkSnapshot) {
+    // Read the dropped card into the restored conversation. Opening it as a
+    // new destination would focus it even if the reviewer has started typing.
+    const focused = document.activeElement;
+    const draft = input.value;
+    const selection = [input.selectionStart, input.selectionEnd, input.selectionDirection];
+    const pending = { id: priorWorkId, epoch };
+    pendingWorkReturn = pending;
+    try {
+      priorCard = await readSelectedWorkRecord(priorWorkId, false, { restoreInPlace: true });
+    } finally {
+      if (pendingWorkReturn === pending) pendingWorkReturn = null;
+    }
+    if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)
+      || location.href !== origin.url || activeWorkNavigationId !== priorWorkId) return;
+    interactionContinued = focused !== document.activeElement || draft !== input.value
+      || selection[0] !== input.selectionStart || selection[1] !== input.selectionEnd || selection[2] !== input.selectionDirection;
+  }
+  if (priorCard) {
+    const presentation = priorOrigin?.presentation ?? "focus";
+    const drafts = presentation === "drafts";
+    const section = priorCard.querySelector(drafts ? ".work-drafts" : ".work-details");
+    if (section) section.open = (drafts ? origin.workDraftsOpen : origin.workDetailsOpen) ?? presentation !== "focus";
+  }
+  if (interactionContinued) { syncWorkReturnControl(); return; }
   input.setSelectionRange(...origin.selection); input.scrollTop = origin.composerScroll;
   $("#message-list").scrollTop = origin.listScroll;
   if (origin.type === "updates") {
@@ -3834,7 +3874,7 @@ async function restoreWorkOrigin(ticket) {
     const messageWork = origin.messageId && origin.messageWorkId
       ? $(`#message-list [data-message-record-id="${CSS.escape(origin.messageId)}"] [data-open-work="${CSS.escape(origin.messageWorkId)}"]`) : null;
     const fallback = origin.type === "board" ? $("#board-close") : $("#conversation-title");
-    const target = [origin.focus, keyed, search, messageWork, claim].find(usable) ?? fallback;
+    const target = [origin.focus, keyed, search, messageWork, claim, coldWork ? priorCard : null].find(usable) ?? fallback;
     target?.focus({ preventScroll: true });
     if (target === fallback) target?.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
@@ -4233,12 +4273,20 @@ function workCard(i, now, drafts, messages = []) {
   const preview = value => { const chars = [...value]; return chars.slice(0, 240).join("") + (chars.length > 240 ? "…" : ""); };
   const goal = uiText("work.focus.goalHtml", { definition: esc(preview(i.definitionOfDone)) });
   const resultSummary = i.receipt ? uiText("work.focus.resultHtml", { summary: esc(preview(i.receipt.summary)) }) : "";
-  const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${esc(status.next)}</p>`;
-  const replacement = i.supersededBy && i.supersededBy !== i.id
-    ? Object.hasOwn(state.workItems, i.supersededBy)
-      ? `<p class="form-hint"><a class="source-link" href="${esc(workHref(i.supersededBy))}" data-open-work="${esc(i.supersededBy)}" data-focus-key="replacement:${esc(i.id)}">Open replacement</a></p>`
-      : `<p class="form-hint">Replacement unavailable in this room.</p>` : "";
-  const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
+  const replacementVisible = i === inspectedWorkRecord ? inspectedWorkReplacementId === i.supersededBy
+    : typeof state.workItems[i.supersededBy]?.title === "string";
+  const nextContent = i.supersededBy && i.supersededBy !== i.id
+    ? replacementVisible
+      ? `<a class="source-link" href="${esc(workHref(i.supersededBy))}" data-open-work="${esc(i.supersededBy)}" data-open-replacement data-focus-key="replacement:${esc(i.id)}">Open replacement</a>`
+      : "Replacement unavailable in this room."
+    : esc(status.next);
+  const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${nextContent}</p>`;
+  const sourceKey = `work-source:${esc(i.id)}`;
+  const sourceWithdrawn = i.sourceMessageId && conversation?.byId.get(i.sourceMessageId)?.deletedAt;
+  const sourceHintId = `${workDomId(i.id)}-source-unavailable`;
+  const source = !i.sourceMessageId ? "" : sourceWithdrawn
+    ? uiText("work.focus.sourceUnavailableHtml", { id: esc(sourceHintId), focusKey: sourceKey })
+    : `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="${sourceKey}">From this conversation</a>`;
   const continuity = terminalWork(i) ? null : workContinuity(i, now);
   const recovery = continuity?.needsAttention ? `<section class="work-recovery" aria-label="Worker progress"><strong>${esc(continuity.label)}</strong><p>${esc(continuity.next)}</p><button type="button" class="text-button" data-portable-work="${esc(i.id)}" data-portable-progress="true" data-focus-key="work-resume:${esc(i.id)}">Continue with saved context</button></section>` : "";
   const handoff = i.handoff?.open ? `<section class="blocker" data-work-handoff="${esc(i.id)}" aria-label="Work handoff"><strong>Handoff</strong><p>${esc(i.handoff.doneSummary)}</p><p><strong>Next:</strong> ${esc(i.handoff.nextAction)}</p><details><summary>Why work paused</summary><p>${esc(i.handoff.limitReason)}</p>${i.handoff.haltAll ? "<p>A stop was requested. External process state is unknown.</p>" : ""}</details></section>` : "";
@@ -4262,7 +4310,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${goal}${resultSummary}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${replacement}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now, next)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"${sourceWithdrawn ? ` aria-describedby="${sourceHintId}"` : ""}><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${goal}${resultSummary}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now, next)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -5875,7 +5923,7 @@ $("#main").addEventListener("click", e => {
     const origin = currentWorkOrigin();
     const fromUpdateMessage = origin?.type === "updates" && origin.target === location.hash
       && origin.target.startsWith("#pr-record/message/") && link.closest(".conversation-work");
-    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork] && !(partialWorkSnapshot && fromUpdateMessage))
+    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork] && !(partialWorkSnapshot && (fromUpdateMessage || link.hasAttribute("data-open-replacement"))))
       void navigateClaimRecord(link.dataset.openWork);
     else if (link.hasAttribute("data-view-drafts")) navigateWorkRecord("work", link.dataset.openWork, { presentation: "drafts" });
     else navigateWorkRecord("work", link.dataset.openWork, fromUpdateMessage ? { presentation: "thread" } : {});

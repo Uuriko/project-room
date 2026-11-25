@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectTool, joinCommand, oneLinePrompt, roomPageUrl, scrub } from "../cli/commands/join.mjs";
+import { SETUP_SHELL_ONLY } from "../cli/commands/setup.mjs";
 import { main } from "../cli/main.mjs";
 
 const SECRET = "pri_" + "A".repeat(43);
@@ -28,6 +29,8 @@ test("one sentence joins, sets up the detected tool, and ends with a shareable i
   assert.equal(last, oneLinePrompt("https://room.example/r/muse-room"));
   assert.match(last, /^Join my Project Room: run `npx -y github:Uuriko\/project-room join https:\/\/room\.example\/r\/muse-room` and follow what it prints\.$/);
   const all = lines.join("\n");
+  assert.match(all, /project-room next and follow/);
+  assert.match(all, /Let them take work/);
   assert.doesNotMatch(all, /pri_A/);
   assert.doesNotMatch(all, new RegExp(CODE));
 });
@@ -56,6 +59,8 @@ test("setup failure keeps the join and still prints the invite line", async t =>
   });
   assert.equal(code, 0);
   assert.ok(lines.some(l => /did not finish/.test(l)));
+  assert.match(lines.join("\n"), /Select this saved connection/);
+  assert.doesNotMatch(lines.join("\n"), /project-room next and follow/);
   assert.equal(lines.at(-1), oneLinePrompt("https://room.example/r/open"));
 });
 
@@ -69,6 +74,19 @@ test("--no-setup skips tool config; unknown tools are refused", async () => {
   assert.equal(ran, false);
   await assert.rejects(joinCommand(["x", "--tool", "nope"], { out: () => {} }), /Unknown tool/);
   await assert.rejects(joinCommand([], { out: () => {} }), /room join/);
+});
+
+test("a shell-only connection gives pickup directly after joining", async () => {
+  const lines = [];
+  const code = await joinCommand(["https://room.example/r/open", "--tool", "claude-code", "--project", "/second project"], {
+    env: {}, out: line => lines.push(line),
+    login: fakeLogin({ status: "connected", origin: "https://room.example", roomId: "open" }, []),
+    setup: async () => SETUP_SHELL_ONLY,
+  });
+  assert.equal(code, 0);
+  assert.match(lines.join("\n"), /Find your assignments: run cd -- '\/second project' && npx -y github:Uuriko\/project-room next/);
+  assert.doesNotMatch(lines.join("\n"), /Select this saved connection/);
+  assert.equal(lines.at(-1), oneLinePrompt("https://room.example/r/open"));
 });
 
 test("helpers: tool detection falls back to generic, urls and scrubbing", () => {
@@ -118,7 +136,9 @@ test('join --no-setup and explicit non-Codex override bypass Codex config prefli
 
 // Dot seq 25409: choose_room lists survive login's public result and join shows them
 // as choices (no auto-selection, no setup), with no secrets and sanitized titles.
-test("choose_room prints your rooms and public rooms as choices without setup or secrets", async () => {
+test("choose_room prints your rooms and public rooms as choices without setup or secrets", async t => {
+  const home = mkdtempSync(join(tmpdir(), "join-choose-home-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
   const lines = [], calls = [];
   const result = { status: "choose_room", identityId: "id1", token: SECRET, secret: SECRET,
     memberships: [
@@ -129,7 +149,7 @@ test("choose_room prints your rooms and public rooms as choices without setup or
     directory: { rooms: [{ roomId: "open", title: "Open $(rm -rf)", purpose: "p", kind: "team", memberCount: 3, listedAt: 1, joinToken: SECRET }], nextCursor: "c2" },
     next: "Run join again" };
   const code = await joinCommand(["https://room.example/", "--name", "Peer's bot", "--tool", "codex"], {
-    env: {}, out: line => lines.push(line), login: fakeLogin(result, calls),
+    env: { HOME: home }, out: line => lines.push(line), login: fakeLogin(result, calls),
     setup: async () => { throw new Error("setup must not run"); },
   });
   assert.equal(code, 1);

@@ -4,7 +4,7 @@
 // Nothing printed here carries the identity secret, an invite code, or a share token: the invite
 // line points at the room's public page, never at the invitation that was used to get in.
 import { loginCommand } from "./login.mjs";
-import { setupCommand, SETUP_TOOLS, preflightSetup } from "./setup.mjs";
+import { setupCommand, SETUP_TOOLS, SETUP_SHELL_ONLY, preflightSetup } from "./setup.mjs";
 
 const TOOL_HINTS = Object.freeze([
   ["CLAUDECODE", "claude-code"],
@@ -123,15 +123,25 @@ export async function joinCommand(argv, io = {}) {
     return 1;
   }
   out(`Joined room ${joined.roomId} as ${name}.`);
+  let projectConfigured = false;
+  const setupArgs = [tool, "--name", name, ...(flags.project ? ["--project", flags.project] : [])];
   if (flags.setup) {
-    const setupArgs = [tool, "--name", name, ...(flags.project ? ["--project", flags.project] : [])];
     const lines = [];
     let setupCode;
     try { setupCode = await setup(setupArgs, { ...io, out: line => lines.push(String(line)), err: line => lines.push(String(line)) }); }
     catch (error) { lines.push(String(error?.message ?? error)); setupCode = 1; }
     for (const line of lines) out(scrub(line));
-    if (setupCode !== 0) out(`Tool setup for ${tool} did not finish; the room connection is saved. Retry with room setup ${tool}.`);
+    projectConfigured = setupCode === 0 || setupCode === SETUP_SHELL_ONLY;
+    if (!projectConfigured) out(`Tool setup for ${tool} did not finish; the room connection is saved.`);
   }
+  if (projectConfigured) {
+    const pickup = "npx -y github:Uuriko/project-room next";
+    const command = flags.project ? `cd -- ${shellQuote(flags.project)} && ${pickup}` : pickup;
+    out(scrub(`Find your assignments: run ${command} and follow the selected item's nextRead.`));
+  } else {
+    out(scrub(`Select this saved connection before pickup: run npx -y github:Uuriko/project-room setup ${setupArgs.map(shellQuote).join(" ")}.`));
+  }
+  out("If you joined with a Room link and still need work access, ask the owner to choose Let them take work. They can then assign you a task.");
   const url = roomPageUrl(joined.origin, joined.roomId);
   out("Invite line (share this; it holds no secret or invite code):");
   out(oneLinePrompt(url));

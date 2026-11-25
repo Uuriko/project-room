@@ -540,6 +540,14 @@ test("replacement reads are one-hop navigation, preserve history, and omit targe
     fetchImpl: async () => new Response(JSON.stringify({ ...old, next: { ...old.next, replacement: { ...old.next.replacement,
       nextRead: { tool: "room_read_work", arguments: { roomId: "foreign-room", workItemId: "replacement-one" } } } } }), { status: 200 }) });
   await assert.rejects(corrupt.workContext("test-handoff"), error => error.code === "invalid_response");
+
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "private-replacement-request", toMemberId: "reviewer",
+    workItemId: "replacement-one", requestKind: "reply", body: "PRIVATE-REQUEST-SENTINEL" });
+  const denied = await f.client("producer").workContext("test-handoff");
+  assert.deepEqual(denied.next.replacement, { status: "unavailable", workItemId: "replacement-one", nextRead: null });
+  assert.doesNotMatch(JSON.stringify(denied), /REPLACEMENT-TITLE-SENTINEL|PRIVATE-REQUEST-SENTINEL|private to its participants/);
+  await assert.rejects(f.client("producer").workContext("replacement-one"), { code: "work_private" });
+  assert.equal((await f.client("owner").workContext("test-handoff")).next.replacement.status, "available");
   f.store.revoke(f.keys.producer);
   await assert.rejects(f.client("producer").workContext("replacement-one"), error => error.status === 401);
 });

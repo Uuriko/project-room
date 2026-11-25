@@ -8,7 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { main } from "../cli/main.mjs";
-import { connectionHome, connectionsRoot, readPointer, safeName, writePointer } from "../cli/paths.mjs";
+import { connectionHome, connectionsRoot, readPointer, readProject, safeName, writePointer } from "../cli/paths.mjs";
 import { nodeSatisfies } from "../cli/commands/doctor.mjs";
 import { chooseRoomLists } from "../cli/commands/login.mjs";
 
@@ -157,6 +157,23 @@ read:
   assert.equal(generic.out.includes(TOKEN), false);
 });
 
+test("setup switches the project connection when host configuration already matches", async t => {
+  const { home, project, cleanup } = layout();
+  t.after(cleanup);
+  const env = envFor(home);
+  const original = seedConnection(home);
+  const other = connectionHome("second-agent", env);
+  mkdirSync(other, { mode: 0o700 });
+  writeFileSync(join(other, "connection.json"), readFileSync(join(original, "connection.json")), { mode: 0o600 });
+  writePointer("second-agent", other, env);
+  const runSetup = name => run(["setup", "cursor", "--project", project, "--name", name], { env, cwd: project });
+  assert.equal((await runSetup("room-agent")).code, 0);
+  const stamp = freeze(join(project, ".cursor", "mcp.json"));
+  assert.equal((await runSetup("second-agent")).code, 0);
+  assert.equal(readProject(project).connection, "second-agent");
+  assert.equal(statSync(join(project, ".cursor", "mcp.json")).mtimeMs, stamp);
+});
+
 test("setup keeps an existing tool config and only replaces its own block", async t => {
   const { home, project, cleanup } = layout();
   t.after(cleanup);
@@ -180,7 +197,7 @@ test("setup keeps an existing tool config and only replaces its own block", asyn
   assert.equal(JSON.stringify(json).includes(TOKEN), false);
 });
 
-test("claude on PATH is registered with the env header and a second run does not register again", async t => {
+test("Claude Code registration and shell pickup report separate outcomes when switching Rooms", async t => {
   const { home, project, cleanup } = layout();
   t.after(cleanup);
   const bin = join(home, "bin");
@@ -191,15 +208,62 @@ test("claude on PATH is registered with the env header and a second run does not
   const env = envFor(home, { PATH: bin, CLAUDE_LOG: log });
   const first = await run(["setup", "claude-code", "--project", project], { env, cwd: project, platform: "linux" });
   assert.equal(first.code, 0, first.err);
+  assert.match(first.out, /registration saved.*verify Room access/i);
   assert.equal(statSync(join(project, ".mcp.json"), { throwIfNoEntry: false }), undefined);
   assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [
     "mcp", "add", "--transport", "http", "project-room", MCP, "--header", "Authorization: Bearer ${PROJECT_ROOM_SECRET}",
   ]);
   const stamped = freeze(log);
-  const second = await run(["setup", "claude-code", "--project", project], { env, cwd: project, platform: "linux" });
-  assert.equal(second.code, 0, second.err);
+  const secondOrigin = "https://other-room.example.invalid";
+  const other = connectionHome("second-agent", env);
+  mkdirSync(other, { mode: 0o700 });
+  writeFileSync(join(other, "connection.json"), JSON.stringify({
+    version: 1, origin: secondOrigin, roomId: "other-room", memberId: "member2", token: TOKEN,
+  }), { mode: 0o600 });
+  writePointer("second-agent", other, env);
+  for (const name of ["room-agent", "second-agent", "second-agent"]) {
+    const repeated = await run(["setup", "claude-code", "--project", project, "--name", name], { env, cwd: project });
+    assert.equal(repeated.code, 2);
+    assert.match(repeated.out, /Shell pickup is configured.*\/mcp in Claude Code/);
+    assert.doesNotMatch(repeated.out, /registered|registration saved/);
+  }
   assert.equal(statSync(log).mtimeMs, stamped);
   assert.equal(readFileSync(log, "utf8").includes(TOKEN), false);
+  assert.equal(readProject(project).connection, "second-agent");
+  const pickedUp = await run(["next"], {
+    env, cwd: project, fetchImpl: async (url, init) => {
+      assert.equal(url, secondOrigin + "/mcp");
+      assert.equal(JSON.parse(init.body).params.arguments.roomId, "other-room");
+      const complete = { items: [], coverage: "complete", nextRead: null };
+      return Response.json({ id: "room-next", result: { structuredContent: {
+        contractVersion: 1, roomId: "other-room", viewerId: "member2", work: complete, requests: complete,
+      } } });
+    },
+  });
+  assert.equal(pickedUp.code, 0, pickedUp.err);
+  assert.equal(JSON.parse(pickedUp.out).viewerId, "member2");
+  const doctor = await run(["doctor"], {
+    env, cwd: project, fetchImpl: async url => {
+      assert.ok(String(url).startsWith(secondOrigin + "/"));
+      return Response.json({ result: { structuredContent: { status: "credential_accepted" } } });
+    },
+  });
+  assert.equal(doctor.code, 1);
+  assert.match(doctor.out, /Room accepted the shell credential.*\/mcp/);
+  assert.equal(statSync(log).mtimeMs, stamped);
+});
+
+test("Claude Code registration failure preserves shell pickup and suppresses child output", async t => {
+  const { home, project, cleanup } = layout();
+  t.after(cleanup);
+  const bin = join(home, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "claude"), "#!/bin/sh\nprintf '%s' 'private child output' >&2\nexit 1\n", { mode: 0o755 });
+  const result = await run(["setup", "claude-code", "--project", project], { env: envFor(home, { PATH: bin }), cwd: project });
+  assert.equal(result.code, 2);
+  assert.match(result.out, /Shell pickup is configured.*\/mcp in Claude Code/);
+  assert.doesNotMatch(result.out + result.err, /private child output/);
+  assert.equal(readProject(project).connection, "room-agent");
 });
 
 test("token prints the saved secret on stdout only", async t => {

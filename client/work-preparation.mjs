@@ -5,6 +5,8 @@ import { PREREQUISITE_GATED_STEPS, prerequisiteHold } from "./begin-work.mjs";
 
 const readScope = value => JSON.stringify(["roomId", "viewerId", "viewerAccountId", "viewerAuthEpoch", "viewerSessionBinding", "viewerSessionRevision"].map(key => value[key] ?? null));
 const changedReview = () => new WorkReviewRefused("review_changed", "Work, result or membership changed during review preparation. Read this task again; no review packet was returned.");
+const unavailableAssignmentSource = "The linked assignment message is unavailable. The assignment brief is still available. Stop using saved source text and ask the teammate who assigned the work for an accessible reference.";
+const externalAssignmentSource = "Open any external link with your own account on that service. If access is denied, request access from the source owner. Your Room assignment stays readable here.";
 
 // Compose existing authenticated reads; no writes, acknowledgements or dispatch.
 // A bounded window keeps a busy task from consuming an entire agent context.
@@ -197,19 +199,38 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
       for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = context.roomId;
       if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = context.roomId;
     }
+    const availability = context.accessSummary?.conversation?.sourceAvailability;
+    const missingSource = availability === "unavailable" || availability === "deleted";
+    // Unavailable linked messages share one recovery path.
+    // A selected Room message does not attest to access on another service.
+    const source = context.context?.source;
+    const sourceGuidance = missingSource ? unavailableAssignmentSource
+      : source?.status === "included" || source?.status === "not_modified" ? externalAssignmentSource : undefined;
     // Full selected reads carry the same executable contract as brief reads.
-    if (!(args.brief ?? batch)) return context?.next && Array.isArray(context.suggestedActions)
-      ? { ...context, continuation: workContinuation(context, { hosted, brief: false }) } : context;
+    if (!(args.brief ?? batch)) {
+      if (source && sourceGuidance) context = { ...context,
+        context: { ...context.context, source: { ...source, guidance: sourceGuidance } } };
+      return context?.next && Array.isArray(context.suggestedActions)
+        ? { ...context, continuation: workContinuation(context, { hosted, brief: false }) } : context;
+    }
     const brief = await createWorkBrief(context);
+    const sourceRead = availability === "available"
+      ? { tool: "room_read_work", arguments: { ...(hosted ? { roomId: context.roomId } : {}),
+        workItemId: context.work.id, includeSource: true } } : null;
     const identity = { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
-      continuation: workContinuation(context, { hosted }), briefVersion: brief.version };
+      continuation: workContinuation(context, { hosted }), briefVersion: brief.version, ...(sourceRead ? { sourceRead } : {}) };
     if (args.knownBriefVersion === brief.version) return { ...identity, briefUnchanged: true,
       evaluatedAt: context.evaluatedAt,
-      guidance: "Reuse your retained brief for this identity and task. Use this response’s revision and continuation for your next action. Read omitted source, discussion or external evidence separately when you need their current contents. Read without knownBriefVersion if that brief is unavailable." };
+      guidance: [
+        "Reuse your retained brief for this identity and task. Use this response’s revision and continuation for your next action.",
+        sourceRead ? "Follow sourceRead before reusing linked source text." : sourceGuidance,
+        "Read discussion or external evidence separately when you need their current contents. Read without knownBriefVersion if that brief is unavailable."
+      ].filter(Boolean).join(" ") };
     const { publishedVerdicts, pullRequest } = brief.sections.evidence;
     return { ...identity, ...(publishedVerdicts ? { publishedVerdicts } : {}), ...(pullRequest ? { pullRequest } : {}),
-      brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } }),
+      brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } },
+        { sourceGuidance }),
       ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) };
 
   };

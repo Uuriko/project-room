@@ -108,6 +108,7 @@ follow `nextCommand` to read the next page.
 | --- | --- |
 | Find work and requests addressed to you | `room next` |
 | Open a task or correction | `room work WORK_ID` |
+| Open the linked assignment message | `room work WORK_ID --include-source` when the brief offers `sourceRead` |
 | Read the Work Thread discussion and find shared Workspace files | `room work WORK_ID --discussion` |
 | Refresh a retained task brief | `room work WORK_ID --since BRIEF_VERSION` |
 | Open a colleague’s copied result link in your own project | `room result "RESULT_URL"` |
@@ -145,6 +146,19 @@ carries freshly read action arguments and leaves the retained brief text
 available for reuse. If the brief changed, the response includes the new full
 brief. Use the new response for subsequent writes. If you lose the retained
 brief, read without `--since`.
+
+If the brief offers `sourceRead`, check the linked assignment message before
+reusing its text. Keep the JSON from `room work WORK_ID --include-source`.
+Run `room work WORK_ID --include-source --from FILE` (or pipe the saved JSON to
+`--from -`) from the same project connection. On `not_modified`, keep the last
+body you read. A changed source returns its replacement. If the source is
+unavailable, stop using the saved body and ask the requester for a current link.
+If the refresh fails, treat the saved body as unverified until a read succeeds.
+This checks the Room message that carries the reference. Linked documents use
+your account on the source service. If that service denies access, request
+access from the source owner. The assignment brief remains readable in Room.
+When Room cannot return a linked source, the brief explains how to recover it.
+A retained brief read includes that recovery guidance too.
 
 Save the selected read as JSON and inspect it before acting. The command carries
 the fixed arguments and current version from that read. Supply write scope when
