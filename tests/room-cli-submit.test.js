@@ -114,7 +114,7 @@ test("a returning agent submits from the fresh revision after a heartbeat", asyn
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
 test(`${representation} pickup opens only the linked assignment source with the project connection`, async t => {
-  const { store, owner, producer, reviewer, reviewerProject, cli } = await fixture(t, representation);
+  const { store, owner, producer, reviewer, reviewerProject, origin, cli } = await fixture(t, representation);
   const workItemId = "first-assignment", body = "The agreed contract is https://docs.example.test/contract.";
   store.command(owner, "commons", { id: "assignment-source", type: "message.posted",
     data: { messageId: "assignment-source", body } });
@@ -136,10 +136,14 @@ test(`${representation} pickup opens only the linked assignment source with the 
   const retained = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
   assert.equal(retained.value.briefUnchanged, true);
   assert.deepEqual(retained.value.sourceRead, brief.value.sourceRead);
-  const read = await cli(brief.value.sourceRead.command.slice(1));
+  const read = await cli(brief.value.sourceRead.command.slice(1), undefined, undefined, async (url, options) => {
+    assert.equal(new URL(url).origin, origin, "the Room read must never open the external document");
+    return fetch(url, options);
+  });
   assert.equal(read.code, 0, JSON.stringify(read));
   assert.equal(read.value.viewerId, producer.identityId);
   assert.equal(read.value.context.source.message.body, body);
+  assert.match(read.value.context.source.guidance, /external link.*own account.*request access/i);
   assert.doesNotMatch(JSON.stringify(read), /Unrelated project discussion/);
   const refresh = ["work", workItemId, "--include-source", "--from", "-"];
   assert.deepEqual(read.value.context.source.cliRefresh.command, ["room", ...refresh]);
@@ -175,6 +179,25 @@ test(`${representation} pickup opens only the linked assignment source with the 
   const otherRead = await cli(["work", workItemId, "--include-source"], undefined, reviewerProject);
   assert.equal(otherRead.code, 0, JSON.stringify(otherRead));
   assert.equal(otherRead.value.viewerId, reviewer.identityId);
+  const privateId = "private-assignment-reference";
+  const privateBody = "Restricted reference at https://docs.example.test/reviewers-only.";
+  store.command(owner, "commons", { id: privateId, type: "message.posted",
+    data: { messageId: privateId, toMemberId: reviewer.identityId, body: privateBody } });
+  const hiddenWorkId = "hidden-assignment";
+  store.command(owner, "commons", { id: "hidden-proposal", type: "work.proposed", data: {
+    workItemId: hiddenWorkId, title: "Review the fallback", definitionOfDone: "Use an accessible reference",
+    accountableMemberId: producer.identityId, sourceMessageId: privateId, mode: "read",
+  } });
+  const hidden = await cli(["work", hiddenWorkId, "--include-source"]);
+  assert.equal(hidden.code, 0, JSON.stringify(hidden));
+  assert.equal(hidden.value.context.source.message, null);
+  assert.equal(hidden.value.context.source.observation, null);
+  assert.equal(hidden.value.context.source.status, "unavailable");
+  assert.doesNotMatch(JSON.stringify(hidden), /reviewers-only/);
+  const hiddenBrief = await cli(["work", hiddenWorkId]);
+  assert.equal(hiddenBrief.value.sourceRead, undefined);
+  assert.equal(hiddenBrief.value.sourceGuidance, hidden.value.context.source.guidance);
+  assert.match(hiddenBrief.value.brief, /Review the fallback/);
   store.identities.unlink(owner, "commons", reviewer.identityId);
   const revoked = await cli(refresh, otherRead.value, reviewerProject);
   assert.equal(revoked.code, 1);
@@ -192,14 +215,19 @@ test(`${representation} pickup opens only the linked assignment source with the 
   const updated = await cli(["work", workItemId, "--since", brief.value.briefVersion]);
   assert.equal(updated.code, 0);
   assert.equal(updated.value.sourceRead, undefined);
+  assert.match(updated.value.sourceGuidance, /assignment brief is still available.*accessible reference/i);
+  assert.doesNotMatch(JSON.stringify(updated), /docs.example.test|Use the new document/);
   const retainedWithoutSource = await cli(["work", workItemId, "--since", updated.value.briefVersion]);
   assert.equal(retainedWithoutSource.value.briefUnchanged, true);
   assert.equal(retainedWithoutSource.value.sourceRead, undefined);
-  assert.doesNotMatch(retainedWithoutSource.value.guidance, /source/i);
+  assert.equal(retainedWithoutSource.value.sourceGuidance, updated.value.sourceGuidance);
+  assert.doesNotMatch(retainedWithoutSource.value.guidance, /Follow sourceRead/i);
   const deleted = await cli(refresh, changed.value);
   assert.equal(deleted.code, 0);
   assert.equal(deleted.value.context.source.status, "unavailable");
   assert.equal(deleted.value.context.source.cliRefresh, undefined);
+  assert.equal(deleted.value.context.source.guidance, updated.value.sourceGuidance);
+  assert.equal(deleted.value.context.source.guidance, hidden.value.context.source.guidance);
   assert.doesNotMatch(JSON.stringify(deleted), /docs.example.test|Use the new document/);
 });
 

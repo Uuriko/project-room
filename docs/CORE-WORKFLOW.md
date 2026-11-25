@@ -154,8 +154,11 @@ Run `room work WORK_ID --include-source --from FILE` (or pipe the saved JSON to
 body you read. A changed source returns its replacement. If the source is
 unavailable, stop using the saved body and ask the requester for a current link.
 If the refresh fails, treat the saved body as unverified until a read succeeds.
-This checks the Room message that carries the reference. For a change within a
-linked document, read the document through its provider.
+This checks the Room message that carries the reference. Linked documents use
+your account on the source service. If that service denies access, request
+access from the source owner. The assignment brief remains readable in Room.
+When present, `sourceGuidance` explains how to recover a linked source that Room
+could not return, including on a retained brief read.
 
 Save the selected read as JSON and inspect it before acting. The command carries
 the fixed arguments and current version from that read. Supply write scope when
