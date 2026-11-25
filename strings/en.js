@@ -610,6 +610,8 @@ export default {
   "result.accepted": "Accepted",
   "result.decisionLabel": "Decision",
   "result.openDecisionSource": "Open decision note",
+  "result.previouslyApproved": "Previously approved",
+  "result.decisionNoteUnavailable": "Decision note unavailable",
   "result.nextLabel": "Next",
   "result.openCurrentVersion": "Open current result",
   "result.releaseRecord": "Open recorded evidence",

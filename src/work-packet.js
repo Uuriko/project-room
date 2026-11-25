@@ -134,14 +134,18 @@ export async function verifyWorkResult(value, { roomId, workItemId, completionEv
         && native.withdrawnAt === text.withdrawnAt && native.withdrawnBy === text.withdrawnBy);
     }
   }
-  if (value.workThread?.decisionSource !== undefined) {
-    const source = value.workThread.decisionSource;
-    check(selection.status === "current" && current.next.action === "complete" && result.kind === "room_text"
-      && result.text.body !== null && id(source?.messageId) && id(source.decisionEventId)
-      && source.messageId !== result.text.messageId
-      && source.completionEventId === result.receipt.eventId && source.evidenceVersion === result.receipt.evidenceVersion
-      && source.href === `#pr-record/message/${encodeURIComponent(source.messageId)}`);
-  }
+  const exactDecision = decision => result.kind === "room_text" && result.text.body !== null
+    && id(decision?.decisionEventId) && decision.completionEventId === result.receipt.eventId
+    && decision.evidenceVersion === result.receipt.evidenceVersion;
+  const noteLink = source => id(source?.messageId) && source.messageId !== result.text.messageId
+    && source.href === `#pr-record/message/${encodeURIComponent(source.messageId)}`;
+  const decisionSource = value.workThread?.decisionSource;
+  if (decisionSource !== undefined)
+    check(selection.status === "current" && current.next.action === "complete" && exactDecision(decisionSource) && noteLink(decisionSource));
+  const historicalApproval = value.workThread?.historicalApproval;
+  if (historicalApproval !== undefined)
+    check(selection.status === "historical" && exactDecision(historicalApproval)
+      && (historicalApproval.source === undefined || noteLink(historicalApproval.source)));
   if (value.workThread?.pendingCorrection !== undefined) {
     const correction = value.workThread.pendingCorrection;
     const verdict = value.workThread.verdict;

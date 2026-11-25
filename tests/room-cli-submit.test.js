@@ -15,12 +15,17 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { verifyWorkResult } from "../src/work-packet.js";
+import { event } from "../src/events.js";
 
-async function fixture(t, representation) {
+async function fixture(t, representation, { sinceJoin = false } = {}) {
   const home = mkdtempSync(join(realpathSync(tmpdir()), "room-submit-"));
   const env = { HOME: home, PROJECT_ROOM_KEYCHAIN: "0" };
   const store = new RoomStore(join(home, "fixture.sqlite"));
-  store.initialize(initialRoom(), representation === "legacy" ? {} : { representation });
+  const events = initialRoom();
+  if (sinceJoin) events.push(event({ roomId: "commons", actorId: "owner", type: "room.history_visibility_set",
+    data: { historyVisibility: "since_join" } }));
+  store.initialize(events, representation === "legacy" ? {} : { representation });
   const owner = store.issueAccessKey("commons", "owner");
   const producer = store.identities.create("Producer");
   linkWithProof(store, owner, "commons", producer, {
@@ -113,6 +118,62 @@ test("a returning agent submits from the fresh revision after a heartbeat", asyn
 });
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
+test(`${representation} historical owner decision links respect the viewer’s history and exact result`, async t => {
+  const { store, owner, producer, reviewer, cli, reviewerProject } = await fixture(t, representation, { sinceJoin: true });
+  const workItemId = "historical-decision", messageId = "first-decision-note";
+  const write = (actor, type, data) => store.command(actor, "commons", { id: crypto.randomUUID(), type, data });
+  write(owner, "work.proposed", { workItemId, title: "Review contract", definitionOfDone: "Check exact text",
+    accountableMemberId: producer.identityId, independentVerificationRequired: true, verifierMemberId: reviewer.identityId,
+    ownerDecisionRequired: true, humanDecisionMakerId: "owner", mode: "read" });
+  write(owner, "message.posted", { messageId, body: "Originally approved for the first repository." });
+  write(owner, "member.added", { memberId: "later-reader", displayName: "Later reader", kind: "human", permissions: [] });
+  const late = store.issueAccessKey("commons", "later-reader");
+  const revision = () => store.workContext(producer.secret, "commons", workItemId).work.revision;
+  const update = (actor, type, data = {}) => write(actor, type, { workItemId, expectedRevision: revision(), ...data });
+  const publish = (id, previousCompletionEventId) => {
+    const body = id === "first-text" ? "Initial contract" : "Updated contract";
+    const source = write(producer.secret, "message.posted", { messageId: id, workItemId, body });
+    return update(producer.secret, "work.completed", { producerId: producer.identityId,
+      evidenceKind: "room_text", evidenceMessageId: id, evidenceMessageEventId: source.event.id,
+      evidenceVersion: textVersion(body), previousCompletionEventId, summary: body, nextAction: "Review the exact contract" });
+  };
+  update(producer.secret, "work.accepted");
+  update(producer.secret, "work.started");
+  const first = publish("first-text", null);
+  const completionEventId = first.event.id;
+  const evidenceVersion = first.event.data.evidenceVersion;
+  update(reviewer.secret, "verification.recorded", { completionEventId, evidenceVersion, result: "pass", summary: "Checked the initial text." });
+  const approved = update(owner, "owner.decision_recorded", {
+    completionEventId, evidenceVersion, reason: "The first contract applies.", decision: "approved", sourceMessageId: messageId,
+  });
+  update(producer.secret, "work.blocked", { reason: "New contract", nextAction: "Review the updated text." });
+  update(producer.secret, "work.blocker_resolved", { resolution: "Prepared the updated text." });
+  update(producer.secret, "work.started");
+  publish("next-text", completionEventId);
+  const options = { roomId: "commons", workItemId, completionEventId };
+  const output = await cli(["result", workItemId, "--completion", completionEventId], undefined, reviewerProject);
+  assert.equal(output.code, 0);
+  const pointer = output.value.workThread.historicalApproval;
+  assert.deepEqual(pointer, { decisionEventId: approved.event.id, completionEventId, evidenceVersion,
+    source: { messageId, href: "#pr-record/message/" + messageId } });
+  assert.equal(output.value.workThread.decisionSource, undefined);
+  assert.equal(JSON.stringify(output.value).includes("Originally approved for"), false);
+  const forged = structuredClone(output.value);
+  forged.workThread.historicalApproval.completionEventId = "different-completion";
+  await assert.rejects(verifyWorkResult(forged, options), /does not match the request/);
+
+  const read = token => store.workResult(token, "commons", workItemId, { completionEventId });
+  const laterReader = read(late);
+  assert.equal(laterReader.result.text.body, "Initial contract");
+  assert.equal(laterReader.workThread.historicalApproval.decisionEventId, approved.event.id);
+  assert.equal(laterReader.workThread.historicalApproval.source, undefined);
+  assert.deepEqual(read(owner).workThread.historicalApproval, pointer);
+  write(owner, "message.edited", { messageId, body: "This no longer records the original rationale.", expectedMessageRevision: 0 });
+  assert.equal(read(owner).workThread.historicalApproval.source, undefined);
+  assert.equal(read(owner).result.text.body, "Initial contract");
+});
+
+
 test(`${representation} pickup opens only the linked assignment source with the project connection`, async t => {
   const { store, owner, producer, reviewer, reviewerProject, origin, cli } = await fixture(t, representation);
   const workItemId = "first-assignment", body = "The agreed contract is https://docs.example.test/contract.";

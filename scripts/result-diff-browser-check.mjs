@@ -821,6 +821,62 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
   assert.equal(await guest.locator("#result-body").textContent(), "");
 });
 
+test("an earlier approval keeps its own decision note after a new submission", async t => {
+  const f = await setup(t, 390);
+  const workItemId = f.item().id;
+  const basis = () => ({ workItemId, expectedRevision: f.item().revision,
+    completionEventId: f.item().receipt.eventId, evidenceVersion: f.item().receipt.evidenceVersion });
+  f.send("human-checker", T.VERIFICATION_RECORDED, { ...basis(), result: "pass", summary: "Checked the first revision." });
+  const messageId = "first-approval-note";
+  const noteText = "Approved the first result for the contract repository.";
+  f.send("owner", T.MESSAGE_POSTED, { messageId, body: noteText });
+  const decision = f.send("owner", T.OWNER_DECISION_RECORDED, {
+    ...basis(), decision: "approved", reason: noteText, sourceMessageId: messageId,
+  });
+  const firstUrl = f.origin + "/?room=commons#pr-record/result/" + workItemId + "/" + f.first.event.id;
+  const opened = await f.login("guest", firstUrl);
+  const decisionLink = page => page.getByRole("link", { name: "Open decision note", exact: true });
+  await decisionLink(opened).waitFor();
+  assert.equal(await opened.locator("#result-work-next").textContent(), "Accepted");
+
+  f.mutate(T.WORK_BLOCKED, { reason: "The consumer moved to a new contract.", nextAction: "Update the contract." });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Located the new contract." });
+  f.mutate(T.WORK_STARTED, {});
+  const later = f.complete("New result for the consumer repository.");
+  const approvedBefore = f.store.workResult(f.keys.guest, "commons", workItemId, { completionEventId: f.first.event.id });
+  assert.equal(approvedBefore.selection.status, "historical");
+  assert.equal(approvedBefore.workThread.decisionSource, undefined);
+  assert.equal(f.store.workResult(f.keys.guest, "commons", workItemId, { completionEventId: later.event.id }).workThread.historicalApproval, undefined);
+  await opened.locator("#result-historical-decision").waitFor();
+  const old = await f.login("guest", firstUrl);
+  const openEarlierNote = decisionLink(old);
+  const screenshot = process.env.ROOM_HISTORICAL_DECISION_SCREENSHOT;
+  await old.locator("#result-body").getByText(/Result A/).waitFor();
+  try {
+    await openEarlierNote.waitFor({ timeout: 2500 });
+  } finally {
+    if (screenshot) await old.screenshot({ path: screenshot });
+  }
+  assert.equal(approvedBefore.workThread.historicalApproval.decisionEventId, decision.event.id);
+  assert.equal(await decisionLink(opened).count(), 1);
+  assert.equal(await old.locator("#result-work-action").isVisible(), false);
+  assert.match(await old.locator("#result-historical-decision").innerText(), /Previously approved/);
+  await openEarlierNote.press("Enter");
+  await old.locator('[data-message-record-id="' + messageId + '"]').getByText(noteText, { exact: true }).waitFor();
+  await old.goBack();
+  await openEarlierNote.waitFor();
+  await old.waitForFunction(() => document.activeElement?.id === "result-decision-source");
+  const current = await f.login("guest", f.origin + "/?room=commons#pr-record/result/" + workItemId + "/" + later.event.id);
+  await current.locator("#result-body").getByText("New result for the consumer repository.", { exact: true }).waitFor();
+  assert.equal(await current.locator("#result-historical-decision").isVisible(), false);
+  assert.equal(await decisionLink(current).count(), 0);
+  f.send("owner", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: 0 });
+  await openEarlierNote.waitFor({ state: "hidden" });
+  assert.equal(f.store.workResult(f.keys.guest, "commons", workItemId, { completionEventId: f.first.event.id }).workThread.historicalApproval.source, undefined);
+  assert.match(await old.locator("#result-historical-decision").innerText(), /Previously approved · Decision note unavailable/);
+  assert.match(await old.locator("#result-body").textContent(), /Result A/);
+});
+
 test("catch-up labels each review with its visible work and preserves withheld history", async t => {
   const f = await setup(t, 390, { approveBoth: true });
   f.store.markCaughtUp(f.keys.owner, "commons", f.store.headSequence("commons"));

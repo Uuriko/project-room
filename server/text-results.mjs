@@ -100,11 +100,17 @@ function textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecor
   return messageInHistory(message, floor);
 }
 
+function decisionInHistory(db, roomId, decision, floor) {
+  if (!decision?.eventId) return false;
+  if (!floor) return true;
+  const row = db.prepare("SELECT sequence FROM events WHERE room_id=? AND id=?").get(roomId, decision.eventId);
+  return Boolean(row && row.sequence >= floor.sequence);
+}
+
 // The decision note is a separate read with its own audience and history floor.
-function selectedDecisionSource(db, state, work, receipt, viewerId, floor, messageRecords) {
-  const decision = work.decision;
+function selectedDecisionSource(db, state, decision, receipt, viewerId, floor, messageRecords) {
   const messageId = decision?.sourceMessageId;
-  if (!messageId || messageId === receipt.nativeText?.messageId || !currentApproval(work) || !matchesReceipt(decision, receipt)) return null;
+  if (!messageId || messageId === receipt.nativeText?.messageId || !matchesReceipt(decision, receipt)) return null;
   const messages = messageRecords ?? messageRepository({ db }, state.room.id, state);
   const message = messages.get(messageId);
   if (!message?.body || message.deletedAt || message.editedAt || message.toMemberId
@@ -281,8 +287,17 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const visibleReceipt = result.text?.body === null ? null : result.receipt;
   const start = visibleReceipt ? selectedStart(db, state.room.id, workItemId, visibleReceipt.eventId, floor) : null;
   const verdict = visibleReceipt ? selectedVerdict(db, state.room.id, work, visibleReceipt, floor) : null;
-  const decisionSource = selectionStatus === "current" && visibleReceipt && result.kind === "room_text"
-    ? selectedDecisionSource(db, state, work, visibleReceipt, viewerId, floor, messageRecords) : null;
+  const textReceipt = result.kind === "room_text" && visibleReceipt;
+  const noteFor = decision => selectedDecisionSource(db, state, decision, textReceipt, viewerId, floor, messageRecords);
+  const decisionSource = textReceipt && selectionStatus === "current" && currentApproval(work)
+    && decisionInHistory(db, state.room.id, work.decision, floor) ? noteFor(work.decision) : null;
+  const pastDecision = textReceipt && selectionStatus === "historical"
+    ? work.decisionHistory?.findLast(decision => decision.decision === "approved" && matchesReceipt(decision, textReceipt)) : null;
+  const pastApproval = decisionInHistory(db, state.room.id, pastDecision, floor);
+  const pastNote = pastApproval ? noteFor(pastDecision) : null;
+  const historicalApproval = pastApproval ? { decisionEventId: pastDecision.eventId,
+    completionEventId: textReceipt.eventId, evidenceVersion: textReceipt.evidenceVersion,
+    ...(pastNote ? { source: { messageId: pastNote.messageId, href: pastNote.href } } : {}) } : null;
   const pendingCorrection = selectionStatus === "current" && next.action === "revise"
     && verdict?.result === "fail" && work.blocker?.eventId === verdict.eventId
     ? { verificationEventId: verdict.eventId, completionEventId: verdict.completionEventId,
@@ -297,6 +312,7 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
     workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
       ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
       ...(decisionSource ? { decisionSource } : {}),
+      ...(historicalApproval ? { historicalApproval } : {}),
       ...(releaseChecks ? { releaseChecks } : {}), ...(outcome ? { outcome } : {}) },
     selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
     ...(result.kind === "room_text" && typeof result.text?.body === "string"

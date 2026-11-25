@@ -261,11 +261,17 @@ export function installResultReader({ client, getState, getSession, sameSession,
     source.replaceChildren(document.createTextNode(uiText("result.releaseReporter", { name: memberLabel(report.reportedById) })), " ", note);
   }
   const decisionLink = resultElement("result-decision-source");
+  const activeDecisionRow = decisionLink?.parentElement;
+  const historicalDecisionRow = resultElement("result-historical-decision");
+  const exactDecisionFor = (view, decision) => usableText(view) && decision
+    && decision.completionEventId === view.receipt.completionEventId && decision.evidenceVersion === view.receipt.evidenceVersion;
+  const visibleDecisionNote = source => source
+    && !getState().messages.some(message => message.id === source.messageId && (message.deletedAt || message.editedAt));
   if (decisionLink) {
     decisionLink.textContent = uiText("result.openDecisionSource");
     decisionLink.addEventListener("click", event => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      const source = resultView?.decisionSource;
+      const source = decisionLink.parentElement === historicalDecisionRow ? resultView?.historicalApproval?.source : resultView?.decisionSource;
       if (!usableText(resultView) || decisionLink.hidden || !source || isBusy()) { event.preventDefault(); return; }
       const { roomId, workItemId, receipt } = resultView;
       if (onOpenDecision(source.messageId, { roomId, workItemId, completionEventId: receipt.completionEventId })) event.preventDefault();
@@ -375,9 +381,31 @@ export function installResultReader({ client, getState, getSession, sameSession,
         ? `Verification · ${finding.result === "pass" ? "Passed" : finding.result === "fail" ? "Failed" : "Recorded"}`
         : "Verification · Pending";
     }
+    const laterCompletion = item?.receipt?.eventId;
+    if (earlier && laterCompletion && view.selectionStatus === "current" && usableText(view) && view.historicalDecisionRead !== laterCompletion) {
+      view.historicalDecisionRead = laterCompletion;
+      client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
+        if (!usableText(view) || view.historicalDecisionRead !== laterCompletion
+          || getState().workItems[view.workItemId]?.receipt?.eventId !== laterCompletion
+          || value?.selection.status !== "historical" || !matchesReceipt(view.receipt, value.result.receipt)) return;
+        view.selectionStatus = "historical";
+        view.historicalApproval = value.workThread?.historicalApproval;
+        resultStatus();
+      }).catch(() => {});
+    }
+    const previousApproval = earlier && exactDecisionFor(view, view.historicalApproval) ? view.historicalApproval : null;
+    const previousSource = visibleDecisionNote(previousApproval?.source) ? previousApproval.source : null;
+    if (historicalDecisionRow) {
+      historicalDecisionRow.hidden = !previousApproval;
+      historicalDecisionRow.firstElementChild.textContent = uiText("result.previouslyApproved") + " · "
+        + (previousSource ? "" : uiText("result.decisionNoteUnavailable"));
+    }
     if (decisionLink) {
-      decisionLink.hidden = true;
-      decisionLink.removeAttribute("href");
+      const row = previousSource ? historicalDecisionRow : activeDecisionRow;
+      if (row && decisionLink.parentElement !== row) row.append(decisionLink);
+      decisionLink.hidden = !previousSource;
+      if (previousSource) decisionLink.href = previousSource.href;
+      else decisionLink.removeAttribute("href");
     }
     if (current && context && item) {
       const next = nextWorkStep(item, Date.now(), getState().room.ownerId);
@@ -402,8 +430,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       }
       const source = view.decisionSource;
       if (accepted && decisionLink && source?.decisionEventId === item.decision?.eventId
-        && matchesReceipt(source, item.receipt)
-        && !getState().messages.some(message => message.id === source.messageId && (message.deletedAt || message.editedAt))) {
+        && exactDecisionFor(view, source) && visibleDecisionNote(source)) {
         decisionLink.hidden = false;
         decisionLink.href = source.href;
       }
@@ -429,6 +456,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement(action).hidden = !usableText(view);
       resultElement(action).disabled = action !== "result-download" && Boolean(view.copying || clipboard.busy);
     }
+    if (view.focusDecision && view.loaded) {
+      view.focusDecision = false;
+      if (!decisionLink?.hidden && document.activeElement === resultElement("result-title")) decisionLink.focus();
+    }
     if (focused && (!focused.getClientRects().length || focused.disabled)) resultElement(view.focused ? "result-title" : "close-result").focus({ preventScroll: true });
     if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
   }
@@ -442,6 +473,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     showReleaseChecks(null);
     showOutcome(null);
     resultElement("result-verdict").hidden = true;
+    if (historicalDecisionRow) historicalDecisionRow.hidden = true;
     resultElement("result-work-context")?.setAttribute("hidden", "");
     resultElement("result-work-action")?.setAttribute("hidden", "");
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
@@ -566,6 +598,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.selectionStatus = value.selection.status;
       view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
       view.decisionSource = value.workThread?.decisionSource;
+      view.historicalApproval = value.workThread?.historicalApproval;
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
       }
@@ -630,6 +663,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function openResult(view, title, focus = true) {
       resultView = view;
       resultElement("result-verdict").hidden = true;
+      if (historicalDecisionRow) historicalDecisionRow.hidden = true;
       showCorrection(null);
       showReleaseChecks(null);
       showOutcome(null);
@@ -698,7 +732,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!resultView || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     resultView.followingCurrent = event.currentTarget.href;
   });
-  function openLinked({ roomId, workItemId, completionEventId }) {
+  function openLinked({ roomId, workItemId, completionEventId }, { focusDecision = false } = {}) {
     const session = getSession();
     if (!session || session.roomId !== roomId) return;
     if (resultView?.linked && resultView.roomId === roomId && resultView.workItemId === workItemId
@@ -707,7 +741,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const compareFrom = from?.roomId === roomId && usableText(from) && sameSession(from.generation, roomId, from.memberId)
       && from.workItemId === workItemId && from.followingCurrent === location.href ? from.receipt.completionEventId : null;
     forgetSelection();
-    openResult({ compareFrom, linked: true, focused: true, generation: client.generation, roomId,
+    openResult({ compareFrom, focusDecision, linked: true, focused: true, generation: client.generation, roomId,
       memberId: session.member.id, workItemId, receipt: { completionEventId } }, "Result");
   }
   function closeLinked() {
