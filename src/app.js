@@ -5198,14 +5198,15 @@ function submitRequest(form) {
       const sourceChanged = mode.sourceReference && error.code === "source_reference_changed" && error.status === 409;
       if (sourceChanged || draftRefused(error, hadPending)) pendingMessage = null;
       saveComposer();
-      if (sourceChanged) throw new Error(uiText("work.focus.referenceRequestChanged"));
+      if (sourceChanged) throw Object.assign(new Error(uiText("work.focus.referenceRequestChanged")), { code: error.code });
       // A DM refused by the consent gate names the recipient and the next
       // step, instead of surfacing the raw gate message.
       const consentRefusal = mapDmConsentRefusal(command, error);
       if (consentRefusal) throw consentRefusal;
       throw error;
     }
-  }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
+  }, { failureHint: error => error.code === "source_reference_changed" ? ""
+    : "Draft kept. Retry the original, or refresh context after a refusal." });
 }
 // The menu lifting click listener is no longer needed (content-visibility
 // removed from .message). The menu positions correctly without it.
