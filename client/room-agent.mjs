@@ -1774,6 +1774,7 @@ export function workContextMarkdown(result, { sourceGuidance } = {}) {
     ...(result.replyRequestContext ? [
       `Pending linked reply requests: ${result.replyRequestContext.total} (${result.replyRequestContext.shown} shown). Conversations, separate from work completion.`,
       ...result.replyRequestContext.requests.map(request => `${request.direction}: ${request.id} · ${request.requesterId} → ${request.recipientId}. Next read: ${JSON.stringify(request.nextRead)}`),
+      ...(result.replyRequestContext.latestAnswer ? [`Latest answer to your request on this work: ${JSON.stringify(result.replyRequestContext.latestAnswer.nextRead)}`] : []),
       ...(result.replyRequestContext.truncated ? ["More pending requests: " + JSON.stringify(result.replyRequestContext.nextRead) + "; select this workItemId."] : [])
     ] : []),
     ...(sourceGuidance ? [sourceGuidance] : []),

@@ -264,11 +264,15 @@ test(`${representation} a configured join prints a pickup read for the same agen
   assert.equal((await cli(["next"], undefined, reviewerProject)).value.viewerId, reviewer.identityId);
 });
 
-test(`${representation} a denied document read leads to one private request on the original assignment`, async t => {
-  const { store, owner, producer, reviewer, origin, rpc, cli } = await fixture(t, representation);
+test(`${representation} a denied document read leads to one private request and returns its answer on the original assignment`, async t => {
+  const { store, owner, producer, reviewer, reviewerProject, env, origin, rpc, cli } = await fixture(t, representation);
   const providerReads = [];
   const docs = createServer((request, response) => {
     providerReads.push(request.headers.authorization);
+    if (request.url === "/shared/revision/7" && request.headers.authorization === "Bearer coworker-docs-fixture") {
+      response.writeHead(200).end("Release note revision 7");
+      return;
+    }
     response.writeHead(403).end();
   });
   await new Promise(resolve => docs.listen(0, "127.0.0.1", resolve));
@@ -280,7 +284,7 @@ test(`${representation} a denied document read leads to one private request on t
   send("document-link", T.MESSAGE_POSTED, { messageId: sourceId, body: `Review ${url}`, toMemberId: producer.identityId });
   send("document-assignment", T.WORK_PROPOSED, {
     workItemId, title: "Review the release note", definitionOfDone: "Verify the date",
-    sourceMessageId: sourceId, accountableMemberId: producer.identityId, mode: "read"
+    sourceMessageId: sourceId, accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId, mode: "read"
   });
   const head = store.headSequence("commons");
   const next = await rpc("room_next", { view: "pickup" });
@@ -342,6 +346,45 @@ test(`${representation} a denied document read leads to one private request on t
   const after = await rpc("room_read_work", { workItemId });
   assert.equal(after.continuation.action, "accept");
   assert.equal(after.work.receipt, null);
+  assert.equal(after.replyRequestContext.latestAnswer, undefined);
+  const cachedBeforeAnswer = await cli(["work", workItemId]);
+
+  const responseBasis = exchange.current.answerBasis;
+  const replacement = new URL("/shared/revision/7", url).href;
+  send("share-accessible-reference", T.MESSAGE_POSTED, {
+    messageId: "accessible-document", body: `Use the accessible copy of revision 7 at ${replacement}`,
+    replyToId: sent.requestMessageId, responseToRequestId: sent.requestMessageId,
+    responseOutcome: "answered", expectedRequestRevision: responseBasis.expectedRequestRevision,
+    contextEventId: responseBasis.contextEventId, contextSequence: responseBasis.contextSequence,
+    toMemberId: producer.identityId, workItemId
+  });
+  const answeredThrough = store.headSequence("commons");
+  const { stdout } = await promisify(execFile)(process.execPath,
+    [fileURLToPath(new URL("../bin/room.mjs", import.meta.url)), "--connection", "producer", "work", workItemId], { cwd: reviewerProject, env });
+  const reopened = JSON.parse(stdout);
+  const returned = reopened.latestAnswer;
+  assert.notEqual(reopened.briefVersion, cachedBeforeAnswer.value.briefVersion);
+  assert.deepEqual(returned?.nextRead, { tool: "room_read_request",
+    arguments: { roomId: "commons", requestMessageId: sent.requestMessageId } });
+  assert.equal(returned.recipientId, "owner");
+  assert.doesNotMatch(stdout, /accessible copy of revision 7|\/shared\/revision\/7/);
+  const unchanged = await cli(["work", workItemId, "--since", reopened.briefVersion]);
+  assert.equal(unchanged.value.briefUnchanged, true);
+  assert.deepEqual(unchanged.value.latestAnswer, returned);
+  const supplied = await rpc(returned.nextRead.tool, returned.nextRead.arguments);
+  assert.equal(supplied.request.status, "answered");
+  assert.equal(supplied.request.workItemId, workItemId);
+  assert.equal(supplied.request.responseMessageId, "accessible-document");
+  assert.ok(JSON.stringify(supplied).includes(replacement));
+  const external = await fetch(replacement, { headers: { Authorization: "Bearer coworker-docs-fixture" } });
+  assert.equal(await external.text(), "Release note revision 7");
+  assert.deepEqual(providerReads, ["Bearer coworker-docs-fixture", "Bearer coworker-docs-fixture"]);
+  const currentWork = await rpc("room_read_work", { workItemId, includeSource: true });
+  assert.equal(currentWork.continuation.action, "accept");
+  assert.equal(currentWork.context.source.message.body, `Still review ${url}`);
+  assert.equal(currentWork.work.receipt, null);
+  assert.equal((await rpc("room_read_work", { workItemId }, reviewer)).replyRequestContext.latestAnswer, undefined);
+  assert.equal(store.headSequence("commons"), answeredThrough);
 });
 
 test(`${representation} pickup opens only the linked assignment source with the project connection`, async t => {

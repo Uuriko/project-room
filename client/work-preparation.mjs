@@ -202,6 +202,7 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
       if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = context.roomId;
       for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = context.roomId;
       if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = context.roomId;
+      if (context.replyRequestContext?.latestAnswer) context.replyRequestContext.latestAnswer.nextRead.arguments.roomId = context.roomId;
     }
     const availability = context.accessSummary?.conversation?.sourceAvailability;
     const missingSource = availability === "unavailable" || availability === "deleted";
@@ -221,9 +222,11 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     const sourceRead = availability === "available"
       ? { tool: "room_read_work", arguments: { ...(hosted ? { roomId: context.roomId } : {}),
         workItemId: context.work.id, includeSource: true } } : null;
+    const latestAnswer = context.replyRequestContext?.latestAnswer;
     const identity = { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
-      continuation: workContinuation(context, { hosted }), briefVersion: brief.version, ...(sourceRead ? { sourceRead } : {}) };
+      continuation: workContinuation(context, { hosted }), briefVersion: brief.version, ...(sourceRead ? { sourceRead } : {}),
+      ...(latestAnswer ? { latestAnswer } : {}) };
     if (args.knownBriefVersion === brief.version) return { ...identity, briefUnchanged: true,
       evaluatedAt: context.evaluatedAt,
       guidance: [

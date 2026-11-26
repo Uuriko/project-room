@@ -19,22 +19,25 @@ export function workRoleHolder(item, memberId) {
   return [item.proposedById, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId, item.claim?.holderId].includes(memberId);
 }
 
-// Current conversation pointers belong to their two participants, even when
-// linked to room-visible work. Neither a request body nor another member's
-// pending conversation is part of this selected task read.
-function openWorkReplies(state, workItemId, viewerId, floor) {
-  const requests = Object.values(state.replyRequests ?? {}).filter(request =>
-    request.workItemId === workItemId && request.status === "open"
+// Conversation pointers stay separate from task state and private message bodies.
+function workReplies(state, workItemId, viewerId, floor) {
+  const linked = Object.values(state.replyRequests ?? {}).filter(request =>
+    request.workItemId === workItemId
     && [request.requesterId, request.recipientId].includes(viewerId)
-    && messageInHistory(request, floor))
+    && messageInHistory(request, floor));
+  const readRequest = id => ({ tool: "room_read_request", arguments: { requestMessageId: id } });
+  const requests = linked.filter(request => request.status === "open")
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
   const shown = requests.slice(0, 25).map(request => ({
     ...pick(request, "id requesterId recipientId workItemId status revision createdAt"),
     direction: request.recipientId === viewerId ? "incoming" : "outgoing",
-    nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
+    nextRead: readRequest(request.id)
   }));
+  const latestAnswer = linked.filter(request => request.status === "answered" && request.requesterId === viewerId && request.closedAt)
+    .sort((a, b) => b.closedAt.localeCompare(a.closedAt) || b.id.localeCompare(a.id))[0];
   return { version: 1, total: requests.length, shown: shown.length, truncated: shown.length < requests.length,
     requests: shown,
+    ...(latestAnswer ? { latestAnswer: { ...pick(latestAnswer, "id recipientId closedAt"), nextRead: readRequest(latestAnswer.id) } } : {}),
     nextRead: requests.length > shown.length ? { tool: "room_list_requests", arguments: { direction: "both", status: "open" } } : null,
     guidance: "Open conversations linked to this work where you are requester or recipient, oldest first. Metadata only; reads do not answer requests. Follow room_read_request and finish its context before answering. These conversations are separate from task completion and required checks. The overflow read lists all your open conversations; select this workItemId." };
 }
@@ -229,7 +232,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
     workThread: { workItemId, href: workThreadHref(workItemId) },
-    replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor),
+    replyRequestContext: workReplies(state, workItemId, viewerId, floor),
     publishedVerdicts: workPublishedVerdicts(item),
     resume: workResume(work, now, state.room.ownerId, next),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
