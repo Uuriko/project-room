@@ -1021,6 +1021,69 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
   assert.equal(await guest.locator("#result-body").textContent(), "");
 });
 
+for (const withdraw of [false, true]) {
+  test(`a failed decision-note read can be retried ${withdraw ? "after note withdrawal" : "on the exact accepted result"}`,
+    { timeout: 30000 }, async t => {
+    const f = await setup(t, 390);
+    const completion = f.first.event;
+    const exact = exactResultHref({ roomId: "commons", workItemId: f.item().id, completionEventId: completion.id }, new URL(f.origin));
+    const reviewer = await f.login("human-checker", exact);
+    await reviewer.locator("#result-body").getByText(/Result A/).waitFor();
+    const basis = { workItemId: f.item().id, completionEventId: completion.id, evidenceVersion: completion.data.evidenceVersion };
+    f.send("human-checker", T.VERIFICATION_RECORDED, { ...basis, expectedRevision: f.item().revision,
+      result: "pass", summary: "The received evidence was checked." });
+    await reviewer.getByText("Verification · Passed", { exact: true }).waitFor();
+
+    let attempts = 0;
+    const readResult = response => new URL(response.url()).searchParams.get("completionEventId") === completion.id;
+    await reviewer.route("**/work-result?**", route => {
+      if (++attempts === 1) return route.fulfill({ status: 503, json: { error: "Temporary failure" } });
+      return route.continue();
+    });
+    const failed = reviewer.waitForResponse(response => readResult(response) && response.status() === 503);
+    const note = f.send("owner", T.MESSAGE_POSTED, { messageId: "exact-owner-note", body: "Accepted after reviewing the exact evidence." });
+    const decision = f.send("owner", T.OWNER_DECISION_RECORDED, { ...basis, expectedRevision: f.item().revision,
+      decision: "approved", reason: "Accepted", sourceMessageId: note.event.data.messageId });
+    await failed;
+    await reviewer.locator("#result-work-next").getByText("Accepted", { exact: true }).waitFor();
+    if (process.env.ROOM_TEST_CAPTURE && !withdraw) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "decision-note-temporary-failure.png") });
+    const retry = reviewer.getByRole("button", { name: "Retry decision note", exact: true });
+    await retry.waitFor({ timeout: 1500 });
+    assert.equal(await reviewer.locator("#result-body").textContent(), "Result A\nKeep this line\nMissing named owner");
+    assert.equal(attempts, 1, "the failure must not trigger automatic retries");
+
+    if (withdraw) f.send("owner", T.MESSAGE_DELETED, { messageId: note.event.data.messageId, expectedMessageRevision: 0 });
+    const readAgain = reviewer.waitForResponse(response => readResult(response) && response.ok());
+    await retry.press("Enter");
+    const reread = await (await readAgain).json();
+    const link = reviewer.getByRole("link", { name: "Open decision note", exact: true });
+    if (withdraw) {
+      assert.equal(reread.workThread.decisionSource, undefined);
+      assert.equal(await link.count(), 0);
+      assert.equal(await reviewer.locator("#result-decision-source").getAttribute("href"), null);
+      assert.doesNotMatch(await reviewer.locator("#result-dialog").textContent(), /Accepted after reviewing the exact evidence/);
+    } else {
+      await link.waitFor();
+      assert.equal(reread.workThread.decisionSource.decisionEventId, decision.event.id);
+      assert.equal(await link.getAttribute("href"), "#pr-record/message/" + note.event.data.messageId);
+      if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "decision-note-recovered.png") });
+    }
+    assert.equal(await retry.count(), 0);
+    assert.equal(reviewer.url(), exact);
+    assert.equal(await reviewer.locator("#result-work-next").textContent(), "Accepted");
+    assert.equal(f.item().decision.eventId, decision.event.id);
+    assert.equal(attempts, 2, "the user requested one bounded retry");
+    if (!withdraw) {
+      await link.press("Enter");
+      await reviewer.locator('[data-message-record-id="exact-owner-note"]')
+        .getByText("Accepted after reviewing the exact evidence.", { exact: true }).waitFor();
+      await reviewer.goBack();
+      await reviewer.waitForURL(exact);
+      await reviewer.locator("#result-work-next").getByText("Accepted", { exact: true }).waitFor();
+    }
+  });
+}
+
 test("catch-up labels each review with its visible work and preserves withheld history", async t => {
   const f = await setup(t, 390, { approveBoth: true });
   f.store.markCaughtUp(f.keys.owner, "commons", f.store.headSequence("commons"));

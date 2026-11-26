@@ -624,6 +624,7 @@ export default {
   "result.priorApproval": "Previously accepted · no longer in effect",
   "result.decisionLabel": "Decision",
   "result.openDecisionSource": "Open decision note",
+  "result.retryDecisionSource": "Retry decision note",
   "result.nextLabel": "Next",
   "result.openCurrentVersion": "Open current result",
   "result.releaseRecord": "Open recorded evidence",

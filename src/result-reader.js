@@ -282,6 +282,17 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (onOpenDecision(source.messageId, { roomId, workItemId, completionEventId: receipt.completionEventId })) event.preventDefault();
     });
   }
+  const decisionRetry = resultElement("result-decision-retry");
+  if (decisionRetry) {
+    decisionRetry.textContent = uiText("result.retryDecisionSource");
+    decisionRetry.addEventListener("click", () => {
+      const view = resultView;
+      if (decisionRetry.hidden || !usableText(view) || isBusy()) return;
+      view.decisionReadId = null;
+      view.decisionReadFailed = null;
+      resultStatus();
+    });
+  }
   function resultStatus() {
     mountResultReader();
     const view = resultView;
@@ -396,6 +407,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const priorApproval = resultElement("result-prior-approval");
     priorApproval.hidden = !usableText(view) || !view.priorApproval
       || Boolean(item && currentApproval(item) && matchesReceipt(item.decision, view.receipt));
+    if (decisionRetry) decisionRetry.hidden = true;
     if (decisionLink) {
       decisionLink.hidden = true;
       decisionLink.removeAttribute("href");
@@ -410,17 +422,23 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (accepted && decisionId && view.decisionReadId !== decisionId) {
         view.decisionReadId = decisionId;
         const completionEventId = view.receipt.completionEventId;
+        const ownsDecisionRead = () => usableText(view) && view.decisionReadId === decisionId
+          && getState().workItems[view.workItemId]?.decision?.eventId === decisionId;
         client.workResult(view.workItemId, { completionEventId }).then(value => {
-          if (!usableText(view) || view.decisionReadId !== decisionId
-            || getState().workItems[view.workItemId]?.decision?.eventId !== decisionId) return;
+          if (!ownsDecisionRead()) return;
           const source = value?.workThread?.decisionSource;
           if (value?.selection.status === "current" && source?.decisionEventId === decisionId
             && matchesReceipt(view.receipt, value.result?.receipt) && matchesReceipt(source, value.result.receipt)) {
             view.decisionSource = source;
             resultStatus();
           }
-        }).catch(() => {});
+        }).catch(error => {
+          if (!ownsDecisionRead() || (error?.status >= 400 && error.status < 500 && ![408, 429].includes(error.status))) return;
+          view.decisionReadFailed = decisionId;
+          resultStatus();
+        });
       }
+      if (decisionRetry) decisionRetry.hidden = !(accepted && decisionId && view.decisionReadFailed === decisionId);
       const source = view.decisionSource;
       if (accepted && decisionLink && source?.decisionEventId === item.decision?.eventId
         && matchesReceipt(source, item.receipt)
