@@ -347,27 +347,33 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const latest = item?.receipt;
     const hasNewer = earlier && usableText(view) && item?.state === S.COMPLETED && !item.supersededBy
       && latest?.eventId && latest.eventId !== view.receipt.completionEventId;
-    // Compact Room snapshots hold the completion ID but omit native result metadata.
-    // Confirm the exact replacement with the same member before offering its link.
-    const basis = hasNewer && !latest.nativeText && latest.evidenceUrl === null
-      ? [item.revision, latest.eventId, latest.evidenceVersion].join("/") : null;
-    if (basis && view.newerRead?.basis !== basis) {
+    const basis = hasNewer ? [item.revision, latest.eventId].join("/") : null;
+    const observed = view.currentResult;
+    // Recheck an earlier result when its observed continuation is superseded.
+    // Older Room endpoints still need the compatibility read of the replacement.
+    const refresh = basis && (observed ? item.revision > observed.revision : !latest.nativeText && latest.evidenceUrl === null);
+    if (refresh && view.newerRead?.basis !== basis) {
       const read = view.newerRead = { basis, messageId: null };
-      const completionEventId = latest.eventId;
-      const selected = { completionEventId, evidenceVersion: latest.evidenceVersion };
+      const completionEventId = observed ? view.receipt.completionEventId : latest.eventId;
       client.workResult(view.workItemId, { completionEventId }).then(value => {
-        if (!usableText(view) || view.newerRead !== read) return;
-        if (value?.selection.status === "current" && value.result.kind === "room_text"
-          && !value.result.text.withdrawnAt && matchesReceipt(selected, value.result.receipt)) {
+        if (!usableText(view) || view.newerRead !== read || !value) return;
+        if (observed) {
+          view.currentResult = {
+            revision: value.current.workRevision, reference: value.workThread.currentResult ?? null
+          };
+        } else if (value.selection.status === "current" && value.result.kind === "room_text"
+          && !value.result.text.withdrawnAt && matchesReceipt({ completionEventId, evidenceVersion: latest.evidenceVersion }, value.result.receipt)) {
           read.messageId = value.result.text.messageId;
         }
         resultStatus();
       }).catch(() => {});
     }
-    const selectedMessageId = basis && view.newerRead?.basis === basis ? view.newerRead.messageId : null;
-    const canOpenNewer = hasNewer && (latest.nativeText
-      ? !latest.nativeText.withdrawnAt
-      : selectedMessageId && !getState().messages.some(message => message.id === selectedMessageId && message.deletedAt));
+    const reference = observed?.reference;
+    const selectedMessageId = observed
+      ? observed.revision >= item?.revision && matchesReceipt(reference, latest) && reference.messageId
+      : latest?.nativeText?.messageId ?? (basis && view.newerRead?.basis === basis ? view.newerRead.messageId : null);
+    const canOpenNewer = hasNewer && selectedMessageId && !latest.nativeText?.withdrawnAt
+      && !getState().messages.some(message => message.id === selectedMessageId && message.deletedAt);
     newer.hidden = !canOpenNewer;
     if (canOpenNewer) {
       newer.href = exactResultHref({ ...view, completionEventId: latest.eventId });
@@ -602,6 +608,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
       view.decisionSource = value.workThread?.decisionSource;
       view.priorApproval = value.workThread?.priorApproval;
+      if (value.workThread?.currentResult !== undefined) {
+        view.currentResult = { revision: value.current.workRevision, reference: value.workThread.currentResult };
+      }
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
       }

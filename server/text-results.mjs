@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer, validateResultSegments } from "../src/work-packet.js";
 import { currentApproval, matchesReceipt, nextWorkStep, workActions, workThreadHref } from "../src/workflow.js";
 import { messageInHistory } from "./history-visibility.mjs";
-import { WORK_REVISION_TYPES } from "../src/events.js";
+import { WORK_REVISION_TYPES, WORK_STATES } from "../src/events.js";
 
 const check = condition => { if (!condition) throw new Error("Native result evidence requires reconciliation"); };
 export const textVersion = body => {
@@ -254,6 +254,21 @@ function selectedPriorApproval(db, roomId, work, receipt, floor) {
   return { eventId, completionEventId, evidenceVersion };
 }
 
+function currentResultReference(db, state, work, viewerId, floor, messageRecords) {
+  const receipt = work.receipt, native = receipt?.nativeText;
+  if (work.state !== WORK_STATES.COMPLETED || work.supersededBy || !native || native.withdrawnAt) return null;
+  if (!textVisibleToViewer(db, state, native.messageId, viewerId, floor, messageRecords)) return null;
+  try {
+    const text = storedText(db, state, work.id, native.messageId, native.messageEventId, messageRecords);
+    if (text.body === null || text.evidenceVersion !== receipt.evidenceVersion) return null;
+    // The message ID lets the browser invalidate the link on a visible withdrawal,
+    // which need not change the work revision.
+    return { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion, messageId: text.messageId };
+  } catch {
+    return null; // The earlier result remains readable if the replacement cannot be reconciled.
+  }
+}
+
 export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null, readOutcomeWork = null }) {
   const work = state.workItems[workItemId];
   let result;
@@ -275,6 +290,8 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const selectionStatus = result.receipt
     ? (result.receipt.eventId === work.receipt?.eventId ? "current" : "historical")
     : result.kind;
+  const currentResult = selectionStatus === "historical" && result.kind === "room_text" && result.text.body !== null
+    ? currentResultReference(db, state, work, viewerId, floor, messageRecords) : null;
   const review = selectionStatus === "current" && next.action === "verify"
     && result.text?.body !== null && workActions(work, reviewer, now).some(([action]) => action === "verify")
     ? { criteria: work.definitionOfDone, runtimeDispatchFence: true,
@@ -314,7 +331,7 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
             }, inputRequired: ["resolution"] } } : {}) }
     : null;
   return { contractVersion: 1, roomId: state.room.id, workItemId,
-    workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
+    workThread: { workItemId, href: workThreadHref(workItemId), currentResult, ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
       ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
       ...(decisionSource ? { decisionSource } : {}), ...(priorApproval ? { priorApproval } : {}),
       ...(releaseChecks ? { releaseChecks } : {}), ...(outcome ? { outcome } : {}) },

@@ -134,6 +134,13 @@ export async function verifyWorkResult(value, { roomId, workItemId, completionEv
         && native.withdrawnAt === text.withdrawnAt && native.withdrawnBy === text.withdrawnBy);
     }
   }
+  const newer = value.workThread?.currentResult;
+  if (newer !== undefined && newer !== null) {
+    check(selection.status === "historical" && result.kind === "room_text" && typeof result.text?.body === "string"
+      && id(newer.messageId) && newer.completionEventId === current.completionEventId
+      && id(newer.completionEventId) && newer.completionEventId !== result.receipt.eventId
+      && /^sha256:[a-f0-9]{64}$/.test(newer.evidenceVersion));
+  }
   if (value.workThread?.priorApproval !== undefined) {
     const prior = value.workThread.priorApproval;
     check(result.kind === "room_text" && typeof result.text?.body === "string" && id(prior?.eventId)

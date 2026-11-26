@@ -267,12 +267,25 @@ test("returning from the first submission compares all changes across two revisi
     result: "fail", summary: "Confirm the owner", nextAction: "Check with Maya" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Maya confirmed" });
   f.mutate(T.WORK_STARTED, {});
-  f.complete("Owner: Maya");
+  const third = f.complete("Owner: Maya");
   await f.restart();
   const firstUrl = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
-  const page = await f.login("human-checker", firstUrl);
+  const page = await f.login("human-checker");
+  const requested = [];
+  let opened = false;
+  await page.route("**/work-result?**", route => {
+    const id = new URL(route.request().url()).searchParams.get("completionEventId");
+    requested.push(id);
+    return id === third.event.id && !opened ? route.fulfill({ status: 503, json: { error: "Unavailable" } }) : route.continue();
+  });
+  await page.goto(firstUrl);
   const next = page.getByRole("link", { name: "Open current result" });
+  await next.waitFor({ timeout: 2000 });
   const currentUrl = await next.getAttribute("href");
+  assert.equal(requested.filter(id => id === third.event.id).length, 0);
+  assert.doesNotMatch(await page.locator("#result-body").textContent(), /Owner: Maya/);
+  if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "old-result-followup.png") });
+  opened = true;
   await next.click();
   for (const id of ["result-diff", "action-result-diff"]) {
     const diff = page.locator("#" + id);
@@ -304,9 +317,15 @@ test("returning from the first submission compares all changes across two revisi
   f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Name the backup owner" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Named the backup" });
   f.mutate(T.WORK_STARTED, {});
-  f.complete("Owner: Maya, backup: Lee");
-  await page.getByRole("link", { name: "Open current result" }).waitFor();
+  const replacement = f.complete("Owner: Maya, backup: Lee");
+  const liveLink = page.getByRole("link", { name: "Open current result" });
+  await liveLink.waitFor();
+  assert.equal(new URL(await liveLink.getAttribute("href")).hash,
+    "#pr-record/result/revision-journey/" + replacement.event.id);
   await page.locator("#result-diff").getByText("- Owner: undecided", { exact: true }).waitFor();
+  f.send("producer", T.MESSAGE_DELETED, { messageId: replacement.event.data.evidenceMessageId, expectedMessageRevision: 0 });
+  await liveLink.waitFor({ state: "hidden" });
+  assert.equal(await page.locator("#result-current-version").getAttribute("href"), null);
 });
 
 test("a passage reply identifies the reviewed submission when two receipts cite one message", { timeout: 30000 }, async t => {

@@ -50,3 +50,33 @@ test("a room_text completion whose evidence is a DM reads only for the DM's part
   // The owner is not exempt from the DM party rule (RC-2026-09-19-070).
   assert.throws(() => read(f, f.keys.owner), { code: "result_unavailable" });
 });
+
+test("an earlier result only offers an authorized and unwithdrawn replacement", async t => {
+  const f = await setup(t);
+  const first = f.send(T.MESSAGE_POSTED, {
+    messageId: "public-first", workItemId: f.workItemId, body: "First result for the room"
+  });
+  f.mutate(T.WORK_STARTED);
+  const earlier = f.mutate(T.WORK_COMPLETED, f.input(first));
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Submit a correction" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Ready" });
+  f.mutate(T.WORK_STARTED);
+  const body = "Replacement shared only with the selected party";
+  const posted = f.send(T.MESSAGE_POSTED, {
+    messageId: "private-replacement", workItemId: f.workItemId, toMemberId: f.guest, body
+  });
+  const latest = f.mutate(T.WORK_COMPLETED, f.input(posted));
+  const readEarlier = key => read(f, key, { completionEventId: earlier.event.id });
+  const nonparty = readEarlier(f.keys.reviewer);
+  assert.equal(nonparty.workThread.currentResult, null);
+  assert.doesNotMatch(JSON.stringify(nonparty), /private-replacement|Replacement shared only/);
+  const party = readEarlier(f.keys.guest);
+  assert.deepEqual(party.workThread.currentResult, {
+    completionEventId: latest.event.id, evidenceVersion: textVersion(body), messageId: posted.event.data.messageId
+  });
+  assert.doesNotMatch(JSON.stringify(party), /Replacement shared only/);
+  assert.equal(read(f, f.keys.guest, { completionEventId: latest.event.id }).result.text.body, body);
+  f.send(T.MESSAGE_DELETED, { messageId: posted.event.data.messageId, expectedMessageRevision: 0 });
+  assert.equal(readEarlier(f.keys.guest).workThread.currentResult, null);
+  assert.equal(read(f, f.keys.guest, { completionEventId: latest.event.id }).result.text.body, null);
+});
