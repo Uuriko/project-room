@@ -1,5 +1,5 @@
 import { exactResultHref } from "./room-deep-link.js";
-import { roomFileChangeSelection } from "./workspace-artifact-link.js";
+import { displayWorkspaceFile, messageUrlTokens, roomFileChangeSelection } from "./workspace-artifact-link.js";
 import { clipboard } from "./clipboard.js";
 import { canReplyToResult, exactResultRecovery } from "./result-availability.js";
 import { uiText } from "./strings.js";
@@ -14,7 +14,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, discussionMessage, loadDiscussion, memberLabel, workRecord, focusRecord,
   clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, onOpenWorkspace, onOpenDecision, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
-  let resultView = null, pointerSelection = null;
+  let resultView = null, pointerSelection = null, renderedBody = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
   const wide = matchMedia("(min-width: 1100px)");
   const savedKey = "project-room:result-selection:v1";
@@ -165,24 +165,34 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function showResultBody(text) {
     const body = resultElement("result-body");
     body.replaceChildren();
-    // Preserve the submitted characters, including punctuation around plain URLs.
+    const shortened = [];
+    renderedBody = { text, shortened };
+    // Only the label changes. The destination and passage offsets name the submitted URL.
     const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
-    let offset = 0;
-    for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
+    let offset = 0, sourceDifference = 0;
+    for (const match of messageUrlTokens(text)) {
       const href = match[0];
       const url = URL.parse(href);
       if (!url || url.href !== href) continue;
-      if (!githubFile.test(href) && !(url.pathname === location.pathname
-          && roomFileChangeSelection(url, location.origin, getSession().roomId))) continue;
+      const artifact = url.pathname === location.pathname && roomFileChangeSelection(url, location.origin, getSession().roomId);
+      if (!artifact && !githubFile.test(href)) continue;
       const link = document.createElement("a");
       link.href = href;
       if (url.origin !== location.origin) {
         link.target = "_blank";
         link.rel = "noopener noreferrer";
       }
-      link.textContent = href;
-      body.append(text.slice(offset, match.index), link);
-      offset = match.index + href.length;
+      const file = displayWorkspaceFile(artifact?.file);
+      const label = file ? uiText("work.source.openFileChanges", { file }) : href;
+      link.textContent = label;
+      const sourceStart = match.index, sourceEnd = sourceStart + href.length;
+      if (label !== href) {
+        const displayStart = sourceStart - sourceDifference;
+        shortened.push({ sourceStart, sourceEnd, displayStart, displayEnd: displayStart + label.length });
+        sourceDifference += href.length - label.length;
+      }
+      body.append(text.slice(offset, sourceStart), link);
+      offset = sourceEnd;
     }
     body.append(text.slice(offset));
   }
@@ -291,6 +301,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       showReleaseChecks(null);
       showOutcome(null);
       showOutcome(null);
+      renderedBody = null;
       resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = true;
       resultElement("result-original").hidden = true;
@@ -445,6 +456,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-verdict").hidden = true;
     resultElement("result-work-context")?.setAttribute("hidden", "");
     resultElement("result-work-action")?.setAttribute("hidden", "");
+    renderedBody = null;
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
@@ -501,16 +513,34 @@ export function installResultReader({ client, getState, getSession, sameSession,
   resultElement("result-discuss").textContent = uiText("result.discuss");
   function selectedPassage() {
     const view = resultView, body = resultElement("result-body"), selection = window.getSelection();
-    if (!usableText(view) || !selection?.rangeCount || selection.isCollapsed || body.textContent !== view.body) return null;
+    if (!usableText(view) || selection?.rangeCount !== 1 || selection.isCollapsed || renderedBody?.text !== view.body) return null;
     const range = selection.getRangeAt(0);
     if (!body.contains(range.startContainer) || !body.contains(range.endContainer)) return null;
     const prefix = range.cloneRange();
     prefix.selectNodeContents(body);
     prefix.setEnd(range.startContainer, range.startOffset);
-    const start = prefix.toString().length;
-    return { body: view.body, start, end: start + range.toString().length,
+    const first = prefix.toString().length, last = first + range.toString().length;
+    if (first === last) return null;
+    const sourceOffset = (displayOffset, end) => {
+      let difference = 0;
+      for (const span of renderedBody.shortened) {
+        if (displayOffset <= span.displayStart) break;
+        // A selection through any part of a label includes the original URL as a unit.
+        if (displayOffset < span.displayEnd) return end ? span.sourceEnd : span.sourceStart;
+        difference += (span.sourceEnd - span.sourceStart) - (span.displayEnd - span.displayStart);
+      }
+      return displayOffset + difference;
+    };
+    return { body: view.body, start: sourceOffset(first, false), end: sourceOffset(last, true),
       sourceHref: exactResultHref({ ...view, completionEventId: view.receipt.completionEventId }) };
   }
+  document.addEventListener("copy", event => {
+    if (event.defaultPrevented || !event.clipboardData || !renderedBody?.shortened.length) return;
+    const passage = selectedPassage();
+    if (!passage) return;
+    event.clipboardData.setData("text/plain", passage.body.slice(passage.start, passage.end));
+    event.preventDefault();
+  });
   // Pointer focus may collapse a text selection before click is dispatched.
   resultElement("result-discuss").addEventListener("pointerdown", () => {
     pointerSelection = { view: resultView, selection: selectedPassage() };
@@ -589,7 +619,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
       showOutcome(view.withdrawn ? null : value.workThread?.outcome);
       const text = view.withdrawn ? "" : value.result.text.body;
-      if (!view.readAfterReplacement || resultElement("result-body").textContent !== text) showResultBody(text);
+      if (!view.readAfterReplacement || renderedBody?.text !== text) showResultBody(text);
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);
@@ -620,6 +650,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         resultElement("result-diff"), () => owns() && !view.withdrawn, undefined, view.compareFrom);
     }).catch(error => {
       if (!owns() || view.withdrawn) return;
+      renderedBody = null;
       resultElement("result-body").replaceChildren();
       view.refusalHint = exactResultRecovery(error?.status, error?.code);
       view.error = !view.refusalHint;
@@ -645,7 +676,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-options").open = false;
       resultElement("result-title").textContent = title;
       resultElement("result-status").textContent = view.readAfterReplacement ? "Earlier result · Loading exact text…" : "Loading exact text…";
-      if (!view.readAfterReplacement) resultElement("result-body").textContent = "";
+      if (!view.readAfterReplacement) {
+        renderedBody = null;
+        resultElement("result-body").textContent = "";
+      }
       resultElement("result-body").hidden = false;
       resultElement("result-current-version").hidden = true;
       resultElement("result-original").hidden = true;

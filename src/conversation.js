@@ -2,7 +2,7 @@ import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests
 import { uiText } from "./strings.js";
 import { terminalWork } from "./workflow.js";
 import { exactResultDestination, exactResultHref } from "./record-link.js";
-import { roomChangesSelection } from "./workspace-artifact-link.js";
+import { displayWorkspaceFile, roomChangesSelection } from "./workspace-artifact-link.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 
 // Composition, key repeat, and touch Return must never accidentally submit.
@@ -259,9 +259,8 @@ function assignmentLinkLabel(href, base) {
   if (!link || link.pathname !== base.pathname || link.href !== href) return null;
   const change = roomChangesSelection(link, base.origin, roomId);
   if (change) {
-    const file = change.file;
-    return file && file === file.trim() && !/\p{Bidi_Control}/u.test(file)
-      ? uiText("work.source.openFileChanges", { file }) : uiText("work.source.openChanges");
+    const file = displayWorkspaceFile(change.file);
+    return file ? uiText("work.source.openFileChanges", { file }) : uiText("work.source.openChanges");
   }
   const result = exactResultDestination(link);
   return result?.roomId === roomId && exactResultHref(result, base) === href ? uiText("work.source.openResult") : null;

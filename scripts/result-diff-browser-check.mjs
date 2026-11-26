@@ -4,7 +4,7 @@ import { openCatchUp, openWorkFromSearch, clickWorkAction } from "./room-chrome.
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
@@ -584,7 +584,10 @@ for (const audience of ["public", "private"]) {
     const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-old\n+submitted\n";
     const id = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
     const href = origin => origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, "brief.md"].join("/");
-    const text = origin => [href(origin), href(origin).replace("/?", "/other?"), href(origin).replace("commons#", "other#")].join("\n");
+    const otherFile = origin => href(origin).replace("brief.md", "docs%2F%EC%98%81%EB%AC%B8%2Fbrief.md");
+    const controls = origin => [href(origin).replace("/?", "/other?"), href(origin).replace("commons#", "other#"),
+      href(origin).replace("brief.md", "%ZZ"), "https://example.invalid/brief.md"];
+    const text = origin => [`Review ${href(origin)} first.`, otherFile(origin), href(origin), ...controls(origin)].join("\n");
     const f = await setup(t, 390, { firstBody: text, ...(audience === "private" && { firstDirectTo: "human-checker" }) });
     const publish = async (expectedRevision, patch) => {
       const res = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
@@ -602,10 +605,59 @@ for (const audience of ["public", "private"]) {
     }
     const reviewer = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
     const body = reviewer.locator("#result-body");
-    const link = body.getByRole("link", { name: href(f.origin), exact: true });
-    await link.waitFor();
-    assert.equal(await body.textContent(), text(f.origin));
-    assert.equal(await body.locator("a").count(), 1);
+    const link = body.getByRole("link", { name: "Open changes for brief.md", exact: true }).last();
+    await link.waitFor({ timeout: 2000 });
+    assert.equal(await body.textContent(), [`Review Open changes for brief.md first.`, "Open changes for docs/영문/brief.md",
+      "Open changes for brief.md", ...controls(f.origin)].join("\n"));
+    assert.deepEqual(await body.locator("a").evaluateAll(links => links.map(link => link.href)),
+      [href(f.origin), otherFile(f.origin), href(f.origin)]);
+
+    const selectPassage = body => {
+      const range = document.createRange();
+      range.setStart(body.firstChild, 0);
+      range.setEnd(body.querySelector("a").firstChild, 4);
+      const selection = getSelection();
+      selection.removeAllRanges(); selection.addRange(range);
+    };
+    await body.evaluate(selectPassage);
+    const copySelection = () => {
+      const clipboard = new DataTransfer();
+      document.body.dispatchEvent(new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: clipboard }));
+      return clipboard.getData("text/plain");
+    };
+    assert.equal(await reviewer.evaluate(copySelection), `Review ${href(f.origin)}`);
+    await body.evaluate(body => {
+      const node = body.querySelector("a").nextSibling;
+      const range = document.createRange();
+      range.setStart(node, 1); range.setEnd(node, 7);
+      const selection = getSelection();
+      selection.removeAllRanges(); selection.addRange(range);
+    });
+    assert.equal(await reviewer.evaluate(copySelection), "first.");
+    await reviewer.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: async text => { window.copiedResult = text; }
+      } });
+    });
+    await reviewer.locator("#result-options > summary").click();
+    await reviewer.locator("#result-copy-text").click();
+    await reviewer.getByText("Copied", { exact: true }).waitFor();
+    assert.equal(await reviewer.evaluate(() => window.copiedResult), text(f.origin));
+    const downloading = reviewer.waitForEvent("download");
+    await reviewer.locator("#result-download").click();
+    const download = await downloading;
+    assert.equal(readFileSync(await download.path(), "utf8"), text(f.origin));
+    await reviewer.locator("#result-options > summary").click();
+
+    if (audience === "public") {
+      const discussing = await f.login("human-checker", reviewer.url());
+      const discussionBody = discussing.locator("#result-body");
+      await discussionBody.locator("a").first().waitFor();
+      await discussionBody.evaluate(selectPassage);
+      await discussing.locator("#result-discuss").click();
+      await discussing.waitForFunction(href => document.querySelector("#message-input").value.includes(href), href(f.origin));
+      await discussing.close();
+    }
     const evidenceRead = audience === "public" && reviewer.waitForResponse(response => {
       const url = new URL(response.url());
       return response.ok() && url.pathname.endsWith("/conversation") && url.searchParams.get("messageId") === evidence;
@@ -625,7 +677,8 @@ for (const audience of ["public", "private"]) {
       await workspace.waitFor({ state: "hidden" });
       await reviewer.waitForURL(exactURL, { timeout: 2000 });
       await reviewer.waitForFunction(href => document.activeElement?.closest("#result-body")
-        && document.activeElement.href === href, href(f.origin), { timeout: 2000 });
+        && document.activeElement.href === href && document.activeElement === [...document.querySelectorAll("#result-body a")].at(-1),
+        href(f.origin), { timeout: 2000 });
       if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `result-return-${audience}.png`) });
       await link.press("Enter");
       await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
@@ -675,7 +728,7 @@ for (const audience of ["public", "private"]) {
       await route.continue();
     });
     try {
-      await leaving.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+      await leaving.locator("#result-body").getByRole("link", { name: "Open changes for brief.md", exact: true }).last().press("Enter");
       await held.promise;
       await leaving.locator("#topbar-updates").click();
       await leaving.locator("#result-dialog").waitFor({ state: "hidden" });
@@ -690,7 +743,7 @@ for (const audience of ["public", "private"]) {
     }
 
     const returning = await f.login("human-checker", exact);
-    await returning.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+    await returning.locator("#result-body").getByRole("link", { name: "Open changes for brief.md", exact: true }).last().press("Enter");
     const original = returning.getByRole("link", { name: "Open original discussion" });
     await original.waitFor();
     f.send("producer", T.MESSAGE_DELETED, { messageId: evidence, expectedMessageRevision: 0 });

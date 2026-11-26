@@ -24,6 +24,10 @@ export function roomFileChangeSelection(link, origin, roomId) {
   return target?.file ? target : null;
 }
 
+export function displayWorkspaceFile(file) {
+  return file && file === file.trim() && !/\p{Bidi_Control}/u.test(file) ? file : null;
+}
+
 export function messageUrlTokens(text) {
   return text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi);
 }
