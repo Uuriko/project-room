@@ -43,8 +43,10 @@ test("withdrawal removes loaded comparison text and fences pending reads", async
   const f = fixture(); f.load(); f.respond(0, "sensitive previous"); await settle();
   assert.match(f.box.innerHTML, /sensitive previous/);
   f.state.messages.push({ id: "old-message", deletedAt: 1 }); f.controller.sync();
-  assert.equal(f.box.innerHTML, ""); assert.match(f.box.textContent, /withdrawn/);
-  f.load(); f.respond(1, "sensitive previous"); await settle(); assert.equal(f.box.innerHTML, "");
+  const withdrawn = '<p class="form-hint">The earlier result was withdrawn. This version is still available.</p>';
+  assert.equal(f.box.innerHTML, withdrawn);
+  f.load(); f.respond(1, "sensitive previous"); await settle();
+  assert.equal(f.box.innerHTML, withdrawn);
 });
 test("comparison escapes result text before rendering", async () => {
   const f = fixture(); f.load(); f.respond(0, "<img src=x>"); await settle();

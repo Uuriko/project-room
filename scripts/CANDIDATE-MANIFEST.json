@@ -160,7 +160,7 @@
     "src/reply-requests.js": "sha256:2c38aad88a90eb323fa898d2f425e52f613abd84a3e7c81643f1c44d72b7059f",
     "src/request-access.js": "sha256:4d2714b80d5530b94ccd3cfd21780bc3461e8b15fb986eb90c3bfd68d8859d5b",
     "src/result-availability.js": "sha256:2a8b09755dcc1ad32e84b5f68715ff71abbafa83c95a0343b86cdc1031cebdee",
-    "src/result-comparison.js": "sha256:c0d08ddbb803bbea710c6f8e52a84c4a8171e3c437bc5ff7d460ffd8c014aea8",
+    "src/result-comparison.js": "sha256:853ef4d27212e424214236c10c29e36d2885345121953e7a9e5a2fccc886745f",
     "src/result-feedback.js": "sha256:16a54ba9531d5f37fc2cf1a1f6f19dd86cf8fa523296709d3a79078b1f8c8d57",
     "src/result-reader.js": "sha256:f7bfd515f1ee48c6e580997105109b467ee728b5d0b7307c2bce86abd806409a",
     "src/return-brief.js": "sha256:60fe009414d994d445baca3e7c36b36c8b6fce6490c7a0e0ab38bd674371e712",

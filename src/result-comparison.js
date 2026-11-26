@@ -64,10 +64,7 @@ export function createResultComparison({ client, getState, esc }) {
   function showEarlierWithdrawal(box, comparison) {
     comparison.withdrawn = true;
     if (comparison.previousId === comparison.correctionSourceId) box.querySelector(".result-correction")?.remove();
-    const notice = box.ownerDocument.createElement("p");
-    notice.className = "form-hint";
-    notice.textContent = uiText("result.earlierComparisonWithdrawn");
-    comparison.content.replaceChildren(notice);
+    comparison.content.innerHTML = `<p class="form-hint">${esc(uiText("result.earlierComparisonWithdrawn"))}</p>`;
     box.hidden = false;
   }
   function syncResultComparisons() {
