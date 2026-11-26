@@ -205,7 +205,7 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
           const { toMemberId, workItemId, responseOutcome } = event.data ?? {};
           if (event.type !== "message.posted" || responseOutcome !== "answered") continue;
           const binding = bindings.get(routeKey({ roomId, requesterId: toMemberId, recipientId: event.actorId, workItemId }));
-          if (binding && !binding.continuation && row.sequence > binding.route.after) {
+          if (binding && !binding.continuation && !binding.refill && row.sequence > binding.route.after) {
             const status = dispatchCompletionPickup(store, binding.route, binding.secret, event, row.sequence);
             if (status === "posted") log(JSON.stringify({ event: "completion_pickup.posted", roomId, settlement: row.sequence }));
           }
@@ -251,7 +251,7 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
   const unsubscribe = store.onEventAppended(wake);
   receiverServer?.on("agentReceiverConnected", wake);
   receiverServer?.on("agentReceiverDisconnected", wake);
-  receiverServer?.on("agentCapacityChanged", wake);
+  const unsubscribePause = store.wakeQueue.onPauseChanged(wake);
   for (const roomId of rooms.keys()) wake(roomId);
   return () => {
     stopped = true;
@@ -259,7 +259,7 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
     unsubscribe();
     receiverServer?.off("agentReceiverConnected", wake);
     receiverServer?.off("agentReceiverDisconnected", wake);
-    receiverServer?.off("agentCapacityChanged", wake);
+    unsubscribePause();
   };
 }
 

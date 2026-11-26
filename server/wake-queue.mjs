@@ -24,6 +24,9 @@ import { ServiceError } from "./store.mjs";
 import { wakeQueueLimits as limits } from "./wake-queue-limits.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
+export const CAPACITY_STOP = "provider_capacity_before_start";
+export const reportsCapacityStop = reason => reason === CAPACITY_STOP || reason?.startsWith(CAPACITY_STOP + ":");
+
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // Re-exported from the leaf module so existing importers keep working; the
 // object identity is shared with the enforcing WakeQueue code below.
@@ -80,6 +83,25 @@ const view = row => ({ queueKey: row.queue_key, intent: JSON.parse(row.intent), 
 
 export class WakeQueue {
   constructor(store) { this.store = store; this.db = store.db; }
+
+  #pauseListeners = new Set();
+
+  onPauseChanged(listener) {
+    this.#pauseListeners.add(listener);
+    return () => this.#pauseListeners.delete(listener);
+  }
+
+  // A recheck hint carries no assertion about availability. Subscribers
+  // re-read the durable state after the synchronous transaction has finished.
+  #notePauseChange(roomId) {
+    if (!this.#pauseListeners.size) return;
+    queueMicrotask(() => {
+      for (const listener of this.#pauseListeners) {
+        try { listener(roomId); } catch { /* readers can recheck on the next signal */ }
+      }
+    });
+  }
+
   // The wake queue is purely additive at v27, so a v27 store written before
   // W4-45 has none of these objects. A read-only open (backup verification,
   // invitation audit) must not migrate, so allowAbsent accepts a file where the
@@ -308,7 +330,10 @@ export class WakeQueue {
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, subject, request.requestId, fingerprint, JSON.stringify(receipt));
       // Research r7: a pause (or a hardening of one) changes what the member's
       // held wake poll should report, so release its waiters at once.
-      if (!existing || hardened) this.releasePauseWaiters(roomId, subject);
+      if (!existing || hardened) {
+        this.releasePauseWaiters(roomId, subject);
+        this.#notePauseChange(roomId);
+      }
       return this.outcome(auth, roomId, subject, { receipt, duplicate: false });
     });
   }
@@ -350,7 +375,10 @@ export class WakeQueue {
       const receipt = { requestId: request.requestId, state: "active", wasPaused: Boolean(existing),
         ...(existing ? { resumedAt: this.store.now() } : {}) };
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, subject, request.requestId, fingerprint, JSON.stringify(receipt));
-      if (existing) this.releasePauseWaiters(roomId, subject);
+      if (existing) {
+        this.releasePauseWaiters(roomId, subject);
+        this.#notePauseChange(roomId);
+      }
       return this.outcome(auth, roomId, subject, { receipt, duplicate: false });
     });
   }
