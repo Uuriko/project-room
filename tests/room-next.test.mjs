@@ -186,6 +186,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     });
     assert.equal(code, 0, errors.join("\n"));
     const cli = JSON.parse(output[0]);
+    assert.deepEqual(cli.nextRead.command, ["room", "work", "secret"]);
     // Opaque continuations intentionally differ on fresh issuance.
     for (const [source, command] of [["work", "work"], ["requests", "read"]]) {
       assert.deepEqual(cli[source].items.map(row => {
@@ -331,11 +332,46 @@ test("legacy pickup finds a failed formal request outside the first page without
   assert.equal(exact.value.current.answerBasis.contextEventId, correction.event.id);
   assert.equal(exact.value.page.items.find(item => item.kind === "context").message.id, "corrected-input");
 
+  const directory = await mkdtemp(join(tmpdir(), "room-first-shell-pickup-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const env = { HOME: directory, PROJECT_ROOM_KEYCHAIN: "0" };
+  const parent = connectionHome("coworker", env);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  const configDir = join(parent, "connection");
+  saveAgentConnection(configDir, {
+    version: 1, origin: f.origin, roomId: "commons", memberId: f.observer.id, token: f.observer.secret
+  });
+  writePointer("coworker", configDir, env);
+  writeProject(directory, { connection: "coworker" });
+  const cli = async (args, fetchImpl) => {
+    const output = [], errors = [];
+    const code = await main(args, { cwd: directory, env, fetchImpl, out: x => output.push(x), err: x => errors.push(x) });
+    assert.equal(code, 0, errors.join("\n"));
+    return JSON.parse(output[0]);
+  };
+  const before = f.stored();
+  const picked = await cli(["next", "--source", "requests"]);
+  assert.deepEqual(picked.nextRead.command, ["room", "read", requestMessageId]);
+  assert.ok(!picked.requests.items.some(row => row.id === requestMessageId));
+  assert.equal(picked.requests.nextRead.arguments.source, "requests");
+  const opened = await cli(picked.nextRead.command.slice(1));
+  assert.equal(opened.request.id, requestMessageId);
+  assert.equal(opened.current.answerBasis.contextEventId, correction.event.id);
+  assert.equal(opened.page.items.find(item => item.kind === "context").message.id, "corrected-input");
+  assert.equal(f.stored(), before, "pickup and selected read do not acknowledge or change work");
+  const wrongRoom = await cli(["next", "--source", "requests"], async () => Response.json({ id: "room-next",
+    result: { structuredContent: { ...picked, nextRead: { ...picked.nextRead,
+      arguments: { ...pointer.arguments, roomId: "other-room" } } } } }));
+  assert.equal(wrongRoom.nextRead.command, undefined);
+
   const observer = await f.mcp(f.triage, "room_next", { ...args, view: "pickup" });
   assert.notEqual(observer.value.nextRead?.arguments?.requestMessageId, requestMessageId);
   f.send(f.owner, "reply_request.cancelled", { requestMessageId, expectedRequestRevision: 0, reason: "Resolved separately." });
   const closed = await f.mcp(f.observer, pointer.tool, pointer.arguments);
   assert.deepEqual(closed.value.responseActions, []);
+  const closedFromShell = await cli(picked.nextRead.command.slice(1));
+  assert.equal(closedFromShell.request.status, "cancelled");
+  assert.deepEqual(closedFromShell.responseActions, []);
   const after = await f.mcp(f.observer, "room_next", { ...args, view: "pickup" });
   assert.notEqual(after.value.nextRead?.arguments?.requestMessageId, requestMessageId);
 });

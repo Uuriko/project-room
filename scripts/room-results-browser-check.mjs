@@ -609,6 +609,7 @@ for (const delayed of [false, true]) test(`withdrawing prior version clears comp
     const response = await route.fetch(); began(); await gate; await route.fulfill({ response });
   });
   await f.open(); await f.read();
+  await p.locator("#result-diff summary").click();
   if (delayed) await started;
   else await p.locator("#result-diff").filter({ hasText: "One useful result" }).waitFor();
   const messageId = previous.nativeText.messageId;

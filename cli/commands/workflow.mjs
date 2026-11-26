@@ -4,7 +4,7 @@ import { openPrivateJournal, privateDirectory } from "../../client/setup-journal
 import { workflowTools as actions, isRecord, hasRevision, selectedBasis, readSelectedBasis,
   fileInput, readInput, operationFingerprint, submissionOperationKey } from "../selected-basis.mjs";
 import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
-import { loadConnection } from "../paths.mjs";
+import { loadConnection, roomShellCommand } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { exactResultRecovery } from "../../src/result-availability.js";
 import { validId } from "../../src/events.js";
@@ -130,19 +130,20 @@ async function readResultThread(config, secret, fetchImpl, path) {
 }
 
 async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = process.env,
-  fetchImpl = fetch, out = console.log, includeResultDiscussion = false } = {}, action, selectedConnection) {
+  fetchImpl = fetch, out = console.log, connectionName, includeResultDiscussion = false } = {}, action, selectedConnection) {
+  const shell = (...tokens) => roomShellCommand(connectionName, ...tokens);
   const write = action !== undefined;
   const report = ({ value, ...status }, code) => {
     out(JSON.stringify(value ?? status));
     return code;
   };
   let connection;
-  try { connection = selectedConnection ?? loadConnection({ project: cwd, env }); }
+  try { connection = selectedConnection ?? loadConnection({ project: cwd, env, name: connectionName }); }
   catch { return report({ status: "refused", code: "saved_connection_required" }, 1); }
   const { config, name } = connection;
   if (args.roomId !== undefined && args.roomId !== config.roomId)
     return report({ status: "refused", code: "room_selection_mismatch" }, 1);
-  const receiptHint = id => validId(id) ? { requestId: id, receiptCommand: ["room", "receipt", id],
+  const receiptHint = id => validId(id) ? { requestId: id, receiptCommand: shell("receipt", id),
     receiptRead: { tool: "room_receipt", arguments: { roomId: config.roomId, operationId: id } } } : {};
   const recovery = receiptHint(args.requestId ?? args.invocationRequestId);
   const next = action === "respond"
@@ -195,7 +196,7 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
       const basis = selectedBasis(value, config);
       if (basis) {
         value.cliBasis = basis;
-        if (basis.actions.submit) value.submitCommand = ["room", "submit", "--from"];
+        if (basis.actions.submit) value.submitCommand = shell("submit", "--from");
       }
     }
     if (tool === "room_read_result") {
@@ -207,7 +208,7 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
         if (files.length) value.workspaceArtifacts = files;
       }
       if (hasDiscussion) value.discussionRead = { method: "GET", path: resultDiscussionPath(config.roomId, source.messageId),
-        command: ["room", "result", args.workItemId, "--completion", args.completionEventId, "--discussion"] };
+        command: shell("result", args.workItemId, "--completion", args.completionEventId, "--discussion") };
       if (includeResultDiscussion) {
         if (!hasDiscussion) return report({ status: "unavailable", code: "result_discussion_unavailable" }, 1);
         const read = await readResultThread(config, secret, fetchImpl, value.discussionRead.path);
@@ -223,47 +224,47 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
       }
     }
     if (tool === "room_read_result" && value.cliBasis?.actions.review)
-      value.review.action.command = ["room", "review", "--from"];
+      value.review.action.command = shell("review", "--from");
     if (tool === "room_read_work") {
       const sourceRead = value.sourceRead;
       if (sourceRead?.tool === "room_read_work" && sourceRead.arguments?.roomId === config.roomId
           && sourceRead.arguments.workItemId === args.workItemId && sourceRead.arguments.includeSource === true)
-        sourceRead.command = ["room", "work", args.workItemId, "--include-source"];
+        sourceRead.command = shell("work", args.workItemId, "--include-source");
       const source = value.context?.source;
       if (args.includeSource && source) {
         delete source.cliRefresh;
         if (validSourceObservation(source.observation)) source.cliRefresh = {
-          origin: config.origin, command: ["room", "work", args.workItemId, "--include-source", "--from", "-"],
+          origin: config.origin, command: shell("work", args.workItemId, "--include-source", "--from", "-"),
         };
       }
       const step = value.continuation;
       const shortcut = Object.keys(actions).find(name => actions[name] === step.tool);
-      if (value.cliBasis?.actions[shortcut]) step.command = ["room", shortcut, "--from"];
+      if (value.cliBasis?.actions[shortcut]) step.command = shell(shortcut, "--from");
       else if (step.tool === "room_read_work" && step.arguments?.workItemId === args.workItemId
           && step.arguments.includeResult === true)
-        step.command = ["room", "work", args.workItemId, "--result"];
+        step.command = shell("work", args.workItemId, "--result");
     }
     if (tool === "room_read_work_discussion") {
       value.workspaceArtifacts = exactDiscussionFiles(value.discussion.items.map(item => item.message), config, name);
       const cursor = value.discussion.nextCursor;
       if (validCursor(cursor))
-        value.nextCommand = ["room", "work", args.workItemId, "--discussion", "--cursor", cursor];
+        value.nextCommand = shell("work", args.workItemId, "--discussion", "--cursor", cursor);
     }
     if (tool === "room_read_request") {
       delete value.responseHttpActions;
       const cursor = value.nextRead?.arguments?.cursor ?? value.page?.nextCursor;
       const compactFlag = args.view === "compact" ? ["--compact"] : [];
-      if (validCursor(cursor)) value.nextCommand = ["room", "request", args.requestMessageId, ...compactFlag, "--cursor", cursor];
+      if (validCursor(cursor)) value.nextCommand = shell("request", args.requestMessageId, ...compactFlag, "--cursor", cursor);
       if (value.preparation?.previousExchangesNextRead && Array.isArray(value.preparation.olderExchangeReads)) {
-        value.previousExchangesCommand = ["room", "request", args.requestMessageId];
+        value.previousExchangesCommand = shell("request", args.requestMessageId);
         value.olderExchangeCommands = value.preparation.olderExchangeReads.map(read =>
-          ["room", "request", read.arguments.requestMessageId, "--compact"]);
+          shell("request", read.arguments.requestMessageId, "--compact"));
       }
       for (const response of value.responseActions ?? []) {
         if (response.tool === actions.respond && value.cliBasis?.actions.respond) {
-          response.command = ["room", "respond", "--from"];
+          response.command = shell("respond", "--from");
           if (response.arguments.responseOutcome === "answered")
-            value.answerCommand = ["room", "answer", args.requestMessageId, "--from"];
+            value.answerCommand = shell("answer", args.requestMessageId, "--from");
         }
       }
     }
@@ -291,7 +292,7 @@ export async function receiptCommand(argv, io = {}) {
   if (!validId(id) || argv.length > 2 || (stage !== undefined && !["--draft", "--submit"].includes(stage)))
     throw new Error(receiptHelp);
   let connection;
-  try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env }); }
+  try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env, name: io.connectionName }); }
   catch { out(JSON.stringify({ status: "refused", code: "saved_connection_required" })); return 1; }
   const { roomId, memberId } = connection.config;
   const operationId = stage ? `${stage.slice(2)}-${submissionOperationKey(roomId, memberId, id)}` : id;
@@ -338,7 +339,7 @@ function matchesSourceObservation(observation, workItemId, { roomId, memberId })
 async function readAssignmentSource(workItemId, previousFile, io) {
   const out = io.out ?? console.log;
   let connection, previous;
-  try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env }); }
+  try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env, name: io.connectionName }); }
   catch { out(JSON.stringify({ status: "refused", code: "saved_connection_required" })); return 1; }
   if (previousFile !== undefined) {
     try {
@@ -376,7 +377,7 @@ export async function resultCommand(argv, io = {}) {
     const url = URL.parse(argv[0]);
     const selected = url && exactResultDestination(url);
     if (!selected || url.username || url.password || !["https:", "http:"].includes(url.protocol)) throw new Error(help);
-    try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env }); }
+    try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env, name: io.connectionName }); }
     catch { out(JSON.stringify({ status: "refused", code: "saved_connection_required" })); return 1; }
     if (url.origin !== new URL(connection.config.origin).origin || selected.roomId !== connection.config.roomId) {
       out(JSON.stringify({ status: "refused", code: "room_selection_mismatch" })); return 1;
@@ -503,7 +504,7 @@ export function namedCommand(action, answer = false) {
         return refuse("invalid_action_input");
       flags = answer ? { ...values, answer: true, requestMessageId: positionals[0] } : values;
     } catch { return refuse("invalid_action_input"); }
-    try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env }); }
+    try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env, name: io.connectionName }); }
     catch { return refuse("saved_connection_required"); }
     const { config, configDirectory } = connection;
     try { fixed = await readSelectedBasis(flags.from, action, config, io); }

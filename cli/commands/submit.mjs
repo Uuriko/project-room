@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
-import { loadConnection } from "../paths.mjs";
+import { loadConnection, roomShellCommand } from "../paths.mjs";
 import { matchesOperationReceipt } from "./workflow.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { openPrivateJournal, privateDirectory } from "../../client/setup-journal.mjs";
@@ -96,7 +96,7 @@ function matchesEvidence(basis, operation) {
     && (basis.previousCompletionEventId === null || validId(basis.previousCompletionEventId));
 }
 
-export async function submitCommand(argv, { cwd = process.cwd(), env = process.env,
+export async function submitCommand(argv, { cwd = process.cwd(), env = process.env, connectionName,
   stdin = process.stdin, fetchImpl = fetch, out = console.log } = {}) {
   if (argv.length === 1 && argv[0] === "--help") { out(HELP); return 0; }
   const selected = argv[0] === "--from";
@@ -114,7 +114,7 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
     return status === "recorded" ? 0 : 1;
   };
   let connection;
-  try { connection = loadConnection({ project: cwd, env }); }
+  try { connection = loadConnection({ project: cwd, env, name: connectionName }); }
   catch { return report("refused", "input", { code: "saved_connection_required" }); }
   const { config, configDirectory, name } = connection;
   let basisInput;
@@ -139,7 +139,8 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
   const draftId = `draft-${base}`;
   const fingerprint = hash(JSON.stringify([workItemId, intent]));
   const operation = { workItemId, expectedRevision, draftId, evidenceVersion: `sha256:${hash(body)}` };
-  const next = { tool: "room_read_work", arguments: { roomId, workItemId, brief: true } };
+  const next = { tool: "room_read_work", arguments: { roomId, workItemId, brief: true },
+    command: roomShellCommand(name, "work", workItemId) };
   let journal;
   let stage = "local";
   try {
@@ -200,12 +201,13 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
       throw new Error("Unmatched submission receipt");
     return report("recorded", stage, { roomId, draftId, completionEventId: receipt.eventId,
       duplicate: receipt.duplicate, evidenceVersion: basis.evidenceVersion, currentStateVerified: false,
-      next: { tool: "room_read_result", arguments: { roomId, workItemId, completionEventId: receipt.eventId } } });
+      next: { tool: "room_read_result", arguments: { roomId, workItemId, completionEventId: receipt.eventId },
+        command: roomShellCommand(name, "result", workItemId, "--completion", receipt.eventId) } });
   } catch {
     return report(stage === "local" ? "refused" : "unknown", stage, {
       code: stage === "local" ? "local_operation_unavailable" : "retry_same_operation",
       ...(stage === "local" ? {} : {
-        receiptCommand: ["room", "receipt", operationId, stage === "submit" ? "--submit" : "--draft"],
+        receiptCommand: roomShellCommand(connectionName, "receipt", operationId, stage === "submit" ? "--submit" : "--draft"),
         receiptRead: { tool: "room_receipt", arguments: { roomId, operationId: stage === "submit" ? requestId : draftId } }
       }) });
   } finally {

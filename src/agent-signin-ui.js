@@ -186,7 +186,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
     const session = await res.json();
     // Clear credentials from memory the moment the session exists.
     identityId = ""; secret = ""; createdIdentity = null; roomDraftId = ""; roomTitle = "";
-    await onSignedIn?.(session);
+    if (await onSignedIn?.(session) === false) return; // The host is navigating away.
     try { mountAgentFirstRun({ actions: firstRunActions }); }
     catch { /* orientation is optional; never break sign-in */ }
   }

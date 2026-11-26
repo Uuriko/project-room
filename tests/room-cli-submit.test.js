@@ -4,11 +4,16 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
 import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
-import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
+import { connectionHome, connectionsRoot, loadConnection, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { RoomAgentClient } from "../client/room-agent.mjs";
+import { readWorkSelection } from "../client/work-preparation.mjs";
 import { mcpCallError } from "../server/mcp-arg-errors.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { RoomStore } from "../server/store.mjs";
@@ -79,6 +84,297 @@ async function fixture(t, representation) {
   };
   return { home, env, origin, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
 }
+
+for (const representation of ["legacy", "normalized-current-v1"])
+test(`coworker pickup through a stale draft, corrected revision and exact acceptance (${representation})`, async t => {
+  const { store, owner, producer, reviewer, cli, home, env, origin, reviewerProject } = await fixture(t, representation);
+  const workItemId = "coworker-patch";
+  const write = (key, type, data) => store.command(key, "commons", { id: crypto.randomUUID(), type, data });
+  write(owner, "work.proposed", {
+    workItemId, title: "Update reconnect handling", definitionOfDone: "Cover reconnect without duplicate replies",
+    accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId,
+    independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner", mode: "read"
+  });
+  const read = async (args, cwd, input) => {
+    const selected = await cli(args, input, cwd);
+    assert.equal(selected.code, 0, JSON.stringify(selected.value));
+    return selected.value;
+  };
+  const assigned = await read(["next"]);
+  assert.equal(assigned.viewerId, producer.identityId);
+  const pointer = assigned.work.items.find(item => item.id === workItemId).nextRead.command;
+  const received = await read(pointer.slice(1));
+  assert.equal((await read(["begin", "--from", "-"], home, received)).working, true);
+  const originalBasis = await read(["work", workItemId]);
+  const submit = (operation, basis, body) => cli(["submit", workItemId, "--operation", operation], {
+    body, producerId: producer.identityId, summary: "Ready for review", nextAction: "Check the reconnect case",
+    expectedRevision: basis.revision
+  });
+  const first = await submit("first-patch", originalBasis, "Patch A reconnects the adapter.");
+  assert.equal(first.code, 0, JSON.stringify(first.value));
+  const firstCompletion = first.value.next.arguments.completionEventId;
+  assert.deepEqual(first.value.next.command, ["room", "--connection", "producer", "result", workItemId, "--completion", firstCompletion]);
+  const followed = await read(first.value.next.command.slice(1), reviewerProject);
+  assert.equal(followed.viewerId, producer.identityId);
+  assert.equal(followed.result.receipt.eventId, firstCompletion);
+  const firstReview = await read(["work", workItemId, "--result"], reviewerProject);
+  assert.equal(firstReview.cliBasis.memberId, reviewer.identityId);
+  assert.equal(firstReview.review.result.receipt.eventId, firstCompletion);
+  await read(["review", "--from", "-", "--fail", "--summary", "Cover reconnect without duplicate replies."], reviewerProject, firstReview);
+
+  const beforeStale = store.headSequence("commons");
+  const stale = await submit("obsolete-patch", originalBasis, "Stale local draft must stay local.");
+  assert.equal(stale.code, 1, JSON.stringify(stale.value));
+  assert.equal(store.headSequence("commons"), beforeStale, "the stale attempt must create neither draft nor completion");
+  assert.equal((await read(["receipt", "obsolete-patch", "--draft"])).status, "not_recorded");
+
+  const corrected = await read(["work", workItemId]);
+  assert.match(JSON.stringify(corrected), /Cover reconnect without duplicate replies/);
+  await read(["resolve", "--from", "-", "--resolution", "Added a reconnect deduplication check."], home, corrected);
+  assert.equal((await read(["begin", "--from", "-"], home, await read(["work", workItemId]))).working, true);
+  const revisedBody = "Patch B reconnects the adapter and deduplicates repeated replies.";
+  const revised = await submit("corrected-patch", await read(["work", workItemId]), revisedBody);
+  assert.equal(revised.code, 0, JSON.stringify(revised.value));
+  const completionEventId = revised.value.next.arguments.completionEventId;
+  assert.notEqual(completionEventId, firstCompletion);
+  const secondReview = await read(["work", workItemId, "--result"], reviewerProject);
+  assert.equal(secondReview.review.result.text.body, revisedBody);
+  assert.equal(secondReview.review.result.receipt.eventId, completionEventId);
+  await read(["review", "--from", "-", "--pass", "--summary", "The reconnect fixture is covered."], reviewerProject, secondReview);
+  const approvedWork = store.workContext(producer.secret, "commons", workItemId).work;
+  const sourceMessageId = "accepted-reconnect-note";
+  write(owner, "message.posted", { messageId: sourceMessageId, body: "Approved the patch with the reconnect check." });
+  const decision = write(owner, "owner.decision_recorded", {
+    workItemId, expectedRevision: approvedWork.revision, decision: "approved", sourceMessageId,
+    reason: "The reconnect check covers the failure.", completionEventId, evidenceVersion: textVersion(revisedBody)
+  });
+
+  const resultUrl = exactResultHref({ roomId: "commons", workItemId, completionEventId }, new URL(origin));
+  const cold = await promisify(execFile)(process.execPath,
+    [fileURLToPath(new URL("../bin/room.mjs", import.meta.url)), "result", resultUrl], { cwd: reviewerProject, env });
+  const reopened = JSON.parse(cold.stdout);
+  assert.equal(reopened.viewerId, reviewer.identityId);
+  assert.equal(reopened.result.receipt.eventId, completionEventId);
+  assert.equal(reopened.result.text.body, revisedBody);
+  assert.equal(reopened.workThread.decisionSource.decisionEventId, decision.event.id);
+  assert.equal(reopened.workThread.decisionSource.messageId, sourceMessageId);
+});
+
+for (const representation of ["legacy", "normalized-current-v1"])
+test(`a document reviewer receives the exact earlier finding with the revision (${representation})`, async t => {
+  const { store, owner, cli, home, origin, producer, reviewer, reviewerProject } = await fixture(t, representation);
+  const workItemId = "handover-document";
+  const readWork = ["work", workItemId];
+  store.command(owner, "commons", { id: "handover-proposed", type: "work.proposed", data: {
+    workItemId, title: "Update the handover brief", definitionOfDone: "Name the escalation owner",
+    accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId,
+    independentVerificationRequired: true, mode: "read",
+  } });
+  const command = async (argv, input, cwd = home) => {
+    const { code, value } = await cli(argv, input, cwd, (url, options) => {
+      assert.equal(new URL(url).origin, origin, "the reviewer uses only their Room connection");
+      return fetch(url, options);
+    });
+    assert.equal(code, 0, JSON.stringify(value));
+    return value;
+  };
+  const submit = async (operation, body) => command(["submit", workItemId, "--operation", operation], {
+    body, producerId: producer.identityId, summary: "Handover excerpt", nextAction: "Check the escalation owner",
+    expectedRevision: (await command(readWork)).revision,
+  });
+  await command(["begin", "--from", "-"], await command(readWork));
+  const source = "https://docs.example.test/handover";
+  const original = await submit("handover-original", `Escalate urgent issues. Source: ${source}`);
+  const originalId = original.next.arguments.completionEventId;
+  const review = () => command([...readWork, "--result"], undefined, reviewerProject);
+  const first = await review();
+  assert.equal(first.review.correction, undefined);
+  const finding = "Name the escalation owner in the submitted excerpt.";
+  await command(["review", "--from", "-", "--fail", "--summary", finding], first, reviewerProject);
+  await command(["resolve", "--from", "-", "--resolution", "Named the support lead."], await command(readWork));
+  await command(["begin", "--from", "-"], await command(readWork));
+  const revisedBody = `The support lead owns urgent escalations. Source: ${source}`;
+  const revision = await submit("handover-revision", revisedBody);
+  const revisedId = revision.next.arguments.completionEventId;
+  const packet = await review();
+  assert.equal(packet.cliBasis.memberId, reviewer.identityId);
+  assert.equal(packet.review.result.text.body, revisedBody);
+  assert.equal(packet.review.completionEventId, revisedId);
+  assert.equal(packet.review.correction?.summary, finding);
+  assert.equal(packet.review.correction?.completionEventId, originalId);
+  assert.equal(packet.review.correction?.nextRead.arguments.completionEventId, originalId);
+  await command(["review", "--from", "-", "--pass", "--summary", "The excerpt names the support lead."], packet, reviewerProject);
+  const reviewerClient = new RoomAgentClient({ origin, roomId: "commons", memberId: reviewer.identityId, token: reviewer.secret });
+  const readResult = reviewerClient.workResult.bind(reviewerClient);
+  reviewerClient.workResult = async (...args) => {
+    const result = await readResult(...args);
+    assert.equal(result.workThread.correction?.summary, finding);
+    store.command(owner, "commons", { id: "remove-superseded-excerpt", type: "message.deleted",
+      data: { messageId: first.review.result.text.messageId, expectedMessageRevision: 0 } });
+    return result;
+  };
+  const duringRemoval = await readWorkSelection(reviewerClient, { workItemId, includeResult: true });
+  assert.equal(duringRemoval.review.result.text.body, revisedBody);
+  assert.equal(duringRemoval.review.correction, undefined);
+  const afterRemoval = await review();
+  assert.equal(afterRemoval.review.result.text.body, revisedBody);
+  assert.equal(afterRemoval.review.correction, undefined);
+});
+
+for (const representation of ["legacy", "normalized-current-v1"])
+test(`an invitation redeems into the first exact assignment and accepted result (${representation})`, async t => {
+  const { cli, env, origin, owner, producer, reviewer, reviewerProject, save, store } = await fixture(t, representation);
+  const mint = await fetch(`${origin}/api/rooms/commons/agent-invites`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${owner}` },
+    body: JSON.stringify({ profile: "contribute", displayName: "New coworker" }),
+  });
+  assert.equal(mint.status, 201);
+  const invitation = (await mint.json()).code;
+  const lines = [];
+  let redeemCalls = 0;
+  let redeemStatus;
+  const join = () => main(["join", `${origin}/join/${invitation}`, "--name", "New coworker", "--no-setup"], {
+    env, out: line => lines.push(line),
+    fetchImpl: async (url, options) => {
+      const target = new URL(url);
+      assert.equal(target.origin, origin);
+      const response = await fetch(url, options);
+      if (target.pathname === "/api/agent-invites/redeem" && ++redeemCalls === 1) {
+        redeemStatus = response.status;
+        await response.body.cancel();
+        throw new Error("Redemption response was lost");
+      }
+      return response;
+    },
+  });
+  await assert.rejects(join(), /Could not complete the request/);
+  assert.equal(redeemStatus, 201);
+  const afterRedemption = store.headSequence("commons");
+  assert.equal(await join(), 0, lines.join("\n"));
+  assert.equal(redeemCalls, 1);
+  assert.equal(store.headSequence("commons"), afterRedemption, "resume must reuse the already redeemed membership");
+  assert.ok(lines.every(line => !line.includes(invitation)), "successful join never echoes the invitation");
+  const { config: saved } = loadConnection({ name: "new-coworker", env });
+  assert.notEqual(saved.memberId, producer.identityId);
+  setTier(store.db, "commons", saved.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  const send = (type, data) => store.command(owner, "commons", { id: crypto.randomUUID(), type, data });
+  const source = "Use Friday's release brief at https://docs.example.test/release.";
+  send("message.posted", { messageId: "coworker-first-source", toMemberId: saved.memberId, body: source });
+  const workItemId = "first-coworker-task";
+  send("work.proposed", { workItemId, title: "Update the release brief", definitionOfDone: "Name the date and the release owner",
+    accountableMemberId: saved.memberId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true,
+    ownerDecisionRequired: true, humanDecisionMakerId: "owner", sourceMessageId: "coworker-first-source", mode: "read" });
+
+  const before = store.headSequence("commons");
+  lines.length = 0;
+  assert.equal(await join(), 0, lines.join("\n"));
+  assert.ok(lines.every(line => !line.includes(invitation)), "resuming join never echoes the invitation");
+  assert.equal(loadConnection({ name: "new-coworker", env }).config.memberId, saved.memberId);
+  assert.equal(store.headSequence("commons"), before, "redemption resume does not create another membership");
+  const prefix = ["--connection", "new-coworker"];
+  assert.ok(lines.some(line => line.includes(`${prefix.join(" ")} next`)), lines.join("\n"));
+  const command = async (argv, input, cwd) => {
+    const result = await cli(argv, input, cwd, (url, options) => {
+      assert.equal(new URL(url).origin, origin, "source reads must stay on the saved Room origin");
+      return fetch(url, options);
+    });
+    assert.equal(result.code, 0, JSON.stringify(result.value));
+    return result.value;
+  };
+  const pickup = await command([...prefix, "next"]);
+  assert.equal(pickup.viewerId, saved.memberId);
+  assert.deepEqual(pickup.nextRead.command, ["room", ...prefix, "work", "first-coworker-task"]);
+  const selected = await command(pickup.nextRead.command.slice(1));
+  assert.doesNotMatch(JSON.stringify(selected), /docs.example.test/);
+  assert.deepEqual(selected.sourceRead.command, ["room", ...prefix, "work", "first-coworker-task", "--include-source"]);
+  const packet = await command(selected.sourceRead.command.slice(1));
+  assert.equal(packet.viewerId, saved.memberId);
+  assert.equal(packet.context.source.message.body, source);
+  assert.equal(store.headSequence("commons"), before, "pickup and source selection only read Room state");
+
+  const defaultPickup = await command(["next"]);
+  assert.equal(defaultPickup.viewerId, producer.identityId);
+  assert.doesNotMatch(JSON.stringify(defaultPickup), /coworker-first-source|docs.example.test/);
+  const defaultSource = await command(["work", workItemId, "--include-source"]);
+  assert.equal(defaultSource.context.source.message, null);
+  const action = [...prefix, "begin", "--from", "-"];
+  assert.deepEqual(selected.continuation.command, ["room", ...action.slice(0, -1)]);
+  let unexpectedCalls = 0;
+  const wrongMember = await cli(["begin", "--from", "-"], selected, undefined, () => {
+    unexpectedCalls++;
+    throw new Error("Unexpected call");
+  });
+  assert.equal(wrongMember.code, 1);
+  assert.equal(unexpectedCalls, 0, "another connection refuses the coworker's saved basis before making a request");
+  const started = await cli(action, selected);
+  assert.equal(started.code, 0, JSON.stringify(started.value));
+  assert.equal(started.value.working, true);
+
+  const readWork = () => command([...prefix, "work", workItemId]);
+  const initialBasis = await readWork();
+  const submission = body => ({ body, producerId: saved.memberId, summary: "Release brief excerpt", nextAction: "Review the release details" });
+  const submitFrom = (basis, operation, body) => command([
+    ...basis.submitCommand.slice(1), save(`${operation}.json`, basis), "--operation", operation
+  ], submission(body));
+  const first = await submitFrom(initialBasis, "brief-original", "Release date: Friday.");
+  const firstId = first.next.arguments.completionEventId;
+  assert.deepEqual(first.next.command, ["room", ...prefix, "result", workItemId, "--completion", firstId]);
+  const ownResult = await command(first.next.command.slice(1));
+  assert.equal(ownResult.viewerId, saved.memberId);
+  assert.equal(ownResult.result.receipt.eventId, firstId);
+  const readForReview = () => command(["work", workItemId, "--result"], undefined, reviewerProject);
+  const beforeCorrection = await readForReview();
+  assert.equal(beforeCorrection.cliBasis.memberId, reviewer.identityId);
+  assert.equal(beforeCorrection.review.completionEventId, firstId);
+  const finding = "Name the release owner in the excerpt.";
+  await command(["review", "--from", "-", "--fail", "--summary", finding], beforeCorrection, reviewerProject);
+  const corrected = await readWork();
+  assert.match(corrected.brief, /Name the release owner in the excerpt/);
+  await command([...corrected.continuation.command.slice(1), "-", "--resolution", "Named the release lead."], corrected);
+  const ready = await readWork();
+  await command([...ready.continuation.command.slice(1), "-"], ready);
+  const newBasis = await readWork();
+  const revisedBody = "Release date: Friday. Release owner: Maya.";
+  const second = await submitFrom(newBasis, "brief-revised", revisedBody);
+  const revisedId = second.next.arguments.completionEventId;
+  assert.notEqual(revisedId, firstId);
+  const beforeReplay = store.headSequence("commons");
+  const replayed = await submitFrom(initialBasis, "brief-original", "Release date: Friday.");
+  assert.equal(replayed.duplicate, true);
+  assert.equal(replayed.currentStateVerified, false);
+  assert.deepEqual(replayed.next.command, first.next.command);
+  const earlier = await command(replayed.next.command.slice(1));
+  assert.equal(earlier.result.receipt.eventId, firstId);
+  assert.equal(earlier.selection.status, "historical");
+  assert.equal(earlier.current.completionEventId, revisedId);
+  assert.equal(earlier.cliBasis?.actions?.review, undefined);
+  assert.equal(store.headSequence("commons"), beforeReplay, "recovering the old receipt adds no result or review event");
+  const revised = await readForReview();
+  assert.equal(revised.review.completionEventId, revisedId);
+  assert.equal(revised.review.correction.completionEventId, firstId);
+  assert.equal(revised.review.correction.summary, finding);
+  await command(["review", "--from", "-", "--pass", "--summary", "The excerpt names Maya and Friday."], revised, reviewerProject);
+  const decisionSourceId = "invite-journey-decision";
+  send("message.posted", { messageId: decisionSourceId, body: "Accepted Maya's Friday release brief." });
+  const approved = send("owner.decision_recorded", {
+    workItemId, expectedRevision: (await readWork()).revision, decision: "approved", completionEventId: revisedId,
+    sourceMessageId: decisionSourceId, evidenceVersion: textVersion(revisedBody), reason: "The reviewed brief names the owner."
+  });
+  const resultLink = exactResultHref({ roomId: "commons", workItemId, completionEventId: revisedId }, new URL(origin));
+  const cold = await promisify(execFile)(process.execPath,
+    [fileURLToPath(new URL("../bin/room.mjs", import.meta.url)), "result", resultLink], { cwd: reviewerProject, env });
+  const reopened = JSON.parse(cold.stdout);
+  assert.equal(reopened.viewerId, reviewer.identityId);
+  assert.equal(reopened.result.receipt.eventId, revisedId);
+  assert.equal(reopened.result.text.body, revisedBody);
+  assert.equal(reopened.workThread.decisionSource.decisionEventId, approved.event.id);
+
+  store.identities.unlink(owner, "commons", saved.memberId);
+  const revoked = await cli([...prefix, "work", "first-coworker-task", "--include-source", "--from", "-"], packet);
+  assert.equal(revoked.code, 1);
+  assert.doesNotMatch(JSON.stringify(revoked.value), /docs.example.test|not_modified/);
+  assert.equal((await command(["next"])).viewerId, producer.identityId);
+});
 
 // Session heartbeats are a legacy writer operation.
 test("a returning agent submits from the fresh revision after a heartbeat", async t => {

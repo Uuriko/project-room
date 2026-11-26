@@ -4,7 +4,8 @@
 // cookie itself and this host takes the browser into the picked room.
 // First-run orientation: the component mounts the one-time card right
 // after onSignedIn; here its greet/discover steps ARE the trip into
-// the room, and a returning agent (card seen) goes straight in.
+// the room. A saved record in the selected room goes straight to its
+// authorized reader, as does ordinary sign-in after the card has been seen.
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { agentFirstRunSeen } from "./agent-first-run.js";
 import { withBoardDeepLink } from "./board-deeplink.js";
@@ -22,10 +23,14 @@ const ui = createAgentSigninUI({
   onSignedIn: (session) => {
     const roomId = session?.roomId;
     const roomQuery = roomId ? `?room=${encodeURIComponent(roomId)}` : "";
-    roomTarget = [mountPrefix, roomQuery].join("/") + (intendedRecord && intendedRecord.roomId === roomId ? intendedRecord.hash : "");
+    const record = intendedRecord && intendedRecord.roomId === roomId ? intendedRecord.hash : "";
+    roomTarget = [mountPrefix, roomQuery].join("/") + record;
     if (enterLink) enterLink.href = roomTarget;
     if (enterBox) enterBox.hidden = false;
-    if (agentFirstRunSeen()) location.assign(roomTarget);
+    if (record || agentFirstRunSeen()) {
+      location.assign(roomTarget);
+      return false;
+    }
   },
   firstRunActions: {
     greet: () => location.assign(roomTarget),

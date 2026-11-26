@@ -90,6 +90,10 @@ export function writeProject(project, value) {
   chmodSync(file, 0o600);
 }
 
+export function roomShellCommand(connectionName, ...args) {
+  return ["room", ...(connectionName ? ["--connection", connectionName] : []), ...args];
+}
+
 export function loadConnection({ project, name, env = process.env }) {
   const fromProject = name ? null : readProject(project);
   const selected = name ? safeName(name) : fromProject?.connection;

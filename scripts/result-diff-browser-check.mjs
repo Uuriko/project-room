@@ -13,6 +13,7 @@ import { textVersion } from "../server/text-results.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
+import { FIRST_RUN_SEEN_KEY } from "../src/agent-first-run.js";
 
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
@@ -133,10 +134,26 @@ for (const width of [1440, 390]) {
     await returnedReview.press("Enter");
     await reviewer.locator("#result-body").getByText(/Result B/).waitFor();
     await reviewer.locator("#result-work-action").waitFor();
+    let earlierReads = 0;
+    const countEarlierRead = request => {
+      if (new URL(request.url()).searchParams.get("completionEventId") === f.first.event.id) earlierReads++;
+    };
+    reviewer.on("request", countEarlierRead);
     await reviewer.locator("#result-work-action").press("Enter");
     await reviewer.locator("#action-text-body").getByText(/Result B/).waitFor();
     const diff = reviewer.locator("#action-result-diff");
+    const compare = diff.getByText("Compare versions", { exact: true });
+    await compare.waitFor();
+    assert.equal(await diff.locator("details").getAttribute("open"), null);
+    assert.equal(await diff.locator(".result-diff").count(), 0);
+    assert.equal(earlierReads, 0);
+    assert.match(await diff.innerText(), /Name the owner in the final line/);
+    assert.ok((await compare.boundingBox()).height >= 44);
+    await reviewer.screenshot({ path: `test-results/result-review-default-${width}.png`, fullPage: true });
+    await compare.press("Enter");
     await diff.getByText("- Result A", { exact: true }).waitFor();
+    assert.equal(earlierReads, 1);
+    reviewer.off("request", countEarlierRead);
     assert.match(await diff.innerText(), /Name the owner in the final line/);
     assert.doesNotMatch(await diff.innerText(), /Requested change:/);
     assert.match(await diff.innerText(), /- Result A/);
@@ -175,6 +192,7 @@ for (const width of [1440, 390]) {
     assert.equal(await owner.locator("#result-work-criteria").textContent(), "Name the owner");
     assert.equal(await owner.locator("#result-work-verification").textContent(), "Checked the named owner in result B");
     await owner.locator("#result-work-action").press("Enter");
+    await owner.locator("#action-result-diff summary").click();
     await owner.locator("#action-result-diff").getByText(/Resubmitted result/).waitFor();
     assert.match(await owner.locator("#action-text-body").textContent(), /Result B/);
     await owner.locator('#action-fields [name="decision"]').selectOption("approved");
@@ -194,6 +212,7 @@ for (const width of [1440, 390]) {
     await reviewer.reload(); await reviewer.locator("#main").waitFor({ state: "visible" });
     await openResult(reviewer);
     assert.equal(await reviewer.locator("#result-body").textContent(), revisedBody);
+    await reviewer.locator("#result-diff summary").click();
     // The comparison is a second, independent read of the previous version that
     // lands after #result-body; wait for its bytes instead of reading the box the
     // moment the current text appears (that race failed CI at both widths).
@@ -305,6 +324,7 @@ test("returning from the first submission compares all changes across two revisi
   await next.click();
   for (const id of ["result-diff", "action-result-diff"]) {
     const diff = page.locator("#" + id);
+    await diff.locator("summary").click();
     await diff.getByText("- Owner: undecided", { exact: true }).waitFor();
     assert.match(await diff.textContent(), /\+ Owner: Maya/);
     assert.equal(new URL(await diff.getByRole("link").getAttribute("href"), f.origin).hash, new URL(firstUrl).hash);
@@ -313,6 +333,7 @@ test("returning from the first submission compares all changes across two revisi
     else assert.match(await diff.textContent(), /Check with Maya/);
   }
   const fresh = await f.login("human-checker", currentUrl);
+  await fresh.locator("#result-diff summary").click();
   await fresh.locator("#result-diff").getByText(/No text changes from the previous version/).waitFor();
   await page.locator("#cancel-action").click();
   await page.route("**/work-result?**", route =>
@@ -320,6 +341,7 @@ test("returning from the first submission compares all changes across two revisi
       ? route.fulfill({ status: 404, json: { error: "Result unavailable" } }) : route.continue());
   await page.locator("#result-work-action").click();
   const limited = page.locator("#action-result-diff");
+  await limited.locator("summary").click();
   await limited.getByText(/earlier version could not be loaded/).waitFor();
   assert.match(await limited.textContent(), /Check with Maya/);
   assert.doesNotMatch(await limited.textContent(), /Owner: undecided/);
@@ -335,6 +357,7 @@ test("returning from the first submission compares all changes across two revisi
   f.mutate(T.WORK_STARTED, {});
   f.complete("Owner: Maya, backup: Lee");
   await page.getByRole("link", { name: "Open current result" }).waitFor();
+  await page.locator("#result-diff summary").click();
   await page.locator("#result-diff").getByText("- Owner: undecided", { exact: true }).waitFor();
 });
 
@@ -373,6 +396,88 @@ test("a passage reply identifies the reviewed submission when two receipts cite 
   assert.equal(await recipient.locator("#result-current-version").getAttribute("href"), url(second.event.id));
 });
 
+test("first browser sign-in opens the exact repository assignment", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const accountable = f.store.identities.create("Repository agent");
+  const teammate = f.store.identities.create("Separate agent");
+  for (const identity of [accountable, teammate]) {
+    linkWithProof(f.store, f.keys.owner, "commons", identity, { permissions: ["accept_work"] });
+  }
+  const workItemId = "repository-assignment", sourceId = "repository-source";
+  const sourceBody = "Use the pinned launch checklist at https://github.com/room-fixtures/launch-checklist/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/docs/launch.md.";
+  f.send("owner", T.MESSAGE_POSTED, { messageId: sourceId, toMemberId: accountable.identityId, body: sourceBody });
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "different-document", body: "Unrelated document for a different task." });
+  f.send("owner", T.WORK_PROPOSED, { workItemId, sourceMessageId: sourceId, title: "Update the repository checklist",
+    definitionOfDone: "Propose one changed checklist line", mode: "read", accountableMemberId: accountable.identityId });
+  const openingHead = f.store.headSequence("commons");
+  const target = f.origin + "/?room=commons#pr-record/work/" + workItemId;
+  async function chooseRoom(page, identity) {
+    await page.locator('[name="identityId"]').fill(identity.identityId);
+    await page.locator('[name="secret"]').fill(identity.secret);
+    await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+    await page.getByRole("button", { name: f.store.room("commons").state.room.title, exact: true }).press("Enter");
+  }
+  for (const identity of [accountable, teammate]) {
+    const page = await f.newPage();
+    const remoteRequests = [];
+    page.on("request", request => { if (new URL(request.url()).origin !== f.origin) remoteRequests.push(request.url()); });
+    await page.goto(target);
+    const signIn = page.locator("#agent-signin-button");
+    await page.locator("#agent-signin-button[href*='record=']").waitFor();
+    const params = new URL(await signIn.getAttribute("href"), f.origin).searchParams;
+    assert.equal(params.get("room"), "commons");
+    assert.equal(params.get("record"), new URL(target).hash);
+    await signIn.press("Enter");
+    await chooseRoom(page, identity);
+    const assignment = page.locator('[data-work-record-id="' + workItemId + '"]');
+    await assignment.waitFor({ timeout: 3000 });
+    assert.equal(page.url(), target);
+    assert.equal(await page.locator("#board-dialog").isVisible(), false);
+    assert.equal(await page.locator("#agent-first-run").count(), 0);
+    assert.equal(await page.evaluate(key => localStorage.getItem(key), FIRST_RUN_SEEN_KEY), null);
+    assert.equal(await page.locator("#identity-label").textContent(), identity.displayName);
+    const source = assignment.locator('[data-open-message="' + sourceId + '"]');
+    if (identity === accountable) {
+      const accept = assignment.locator('[data-action="accept"]');
+      assert.equal(await accept.isVisible(), true);
+      if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "first-repository-assignment.png") });
+      assert.equal(await accept.evaluate(button => {
+        const { x, width, bottom } = button.getBoundingClientRect();
+        return button.contains(document.elementFromPoint(x + width / 2, bottom - 3));
+      }), true, "the assignment arrival leaves the complete acceptance button above the composer");
+      await source.press("Enter");
+      const message = page.locator('[data-message-record-id="' + sourceId + '"]');
+      await message.getByText(/Use the pinned launch checklist/).waitFor();
+      assert.equal(new URL(page.url()).hash, "#pr-record/message/" + sourceId);
+      assert.equal(await message.getByRole("link", { name: /github.com/ }).count(), 1);
+      await page.goto(f.origin + "/agent-signin");
+      await chooseRoom(page, identity);
+      await page.locator("#agent-first-run").waitFor();
+      assert.equal(await page.locator("#agent-signin-enter-link").getAttribute("href"), "/?room=commons");
+    } else {
+      assert.equal(await assignment.locator('[data-action="accept"]').isVisible(), false);
+      assert.equal(await page.getByText(/Use the pinned launch checklist/).count(), 0);
+    }
+    assert.deepEqual(remoteRequests, []);
+    await page.close();
+  }
+  const mismatched = await f.newPage();
+  const signin = new URL("/agent-signin", f.origin);
+  signin.searchParams.set("room", "another-room");
+  signin.searchParams.set("record", new URL(target).hash);
+  await mismatched.goto(signin.href);
+  await chooseRoom(mismatched, accountable);
+  await mismatched.locator("#agent-first-run").waitFor();
+  const enter = mismatched.locator("#agent-signin-enter-link");
+  assert.equal(await enter.getAttribute("href"), "/?room=commons");
+  await mismatched.locator('#agent-first-run [data-step="dismiss"]').click();
+  await enter.press("Enter");
+  await mismatched.locator("#main").waitFor();
+  assert.equal(mismatched.url(), f.origin + "/?room=commons");
+  assert.notEqual(await mismatched.evaluate(() => document.activeElement?.closest("[data-work-record-id]")?.dataset.workRecordId), workItemId);
+  assert.equal(f.store.headSequence("commons"), openingHead, "opening the record and reading the source does not start work");
+});
+
 test("an existing agent signs in from a saved exact result without losing its version", { timeout: 30000 }, async t => {
   const f = await setup(t, 390);
   const identity = f.store.identities.create("Existing reviewer agent");
@@ -390,8 +495,6 @@ test("an existing agent signs in from a saved exact result without losing its ve
   await page.locator('[name="secret"]').fill(identity.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
   await page.getByRole("button", { name: f.store.room("commons").state.room.title, exact: true }).click();
-  await page.locator('#agent-first-run [data-step="dismiss"]').click();
-  await page.locator("#agent-signin-enter-link").click();
   await page.locator("#result-body").getByText(/Result A/).waitFor();
   assert.equal(page.url(), url.href);
 });
@@ -406,7 +509,16 @@ test("a returning reviewer can finish the correction from the original link afte
 
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Updated the final line." });
   f.mutate(T.WORK_STARTED, {});
-  const second = f.complete("Result B\nOwner: Maya · Friday");
+  const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-Owner: undecided\n+Owner: Maya · Friday\n";
+  const previewId = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
+  const file = f.origin + "/?room=commons#pr-workspace/" + [previewId, 1, "changes", digest, "producer", head, "brief.md"].join("/");
+  const published = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+    method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+    body: JSON.stringify({ id: previewId, expectedRevision: 0, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+  });
+  assert.ok(published.ok, await published.text());
+  const revisedBody = "Result B\nOwner: Maya · Friday\n" + file;
+  const second = f.complete(revisedBody);
   await f.restart();
 
   const returning = await f.login("human-checker", original);
@@ -416,8 +528,9 @@ test("a returning reviewer can finish the correction from the original link afte
   const currentUrl = await current.getAttribute("href");
   await current.click();
   await returning.locator("#result-correction-summary").getByText("Put the owner beside the deadline.").waitFor();
-  assert.equal(await returning.locator("#result-body").textContent(), "Result B\nOwner: Maya · Friday");
+  assert.equal(await returning.locator("#result-body").textContent(), revisedBody);
   await returning.locator("#result-work-action").click();
+  await returning.locator("#action-result-diff summary").click();
   await returning.locator("#action-result-diff").getByText("+ Owner: Maya · Friday", { exact: true }).waitFor();
   await review(returning, "pass", "Checked Maya against the Friday deadline.");
   assert.equal(f.item().verification.completionEventId, second.event.id);
@@ -431,14 +544,31 @@ test("a returning reviewer can finish the correction from the original link afte
   await owner.locator("#action-dialog").waitFor({ state: "hidden" });
   assert.equal(f.item().decision.completionEventId, second.event.id);
   assert.equal(f.item().decision.decision, "approved");
+  await returning.context().close();
+  await owner.context().close();
+  await f.restart();
+
+  const accepted = await f.login("human-checker", currentUrl);
+  await accepted.locator("#result-work-next").getByText("Accepted", { exact: true }).waitFor();
+  await accepted.locator("#result-body").getByRole("link", { name: file, exact: true }).click();
+  await accepted.locator("[data-workspace-primary]").getByText("+Owner: Maya · Friday", { exact: true }).waitFor();
+  const discussion = accepted.getByRole("link", { name: "Open full discussion" });
+  const acceptedMessage = second.event.data.evidenceMessageId;
+  assert.equal(new URL(await discussion.getAttribute("href")).hash, "#pr-record/message/" + acceptedMessage);
+  await discussion.press("Enter");
+  await accepted.waitForFunction(id => document.activeElement?.dataset?.messageRecordId === id, acceptedMessage);
+  assert.equal(await accepted.locator("#room-project-workspace").isVisible(), false);
 });
 
-test("late previous-result read cannot repopulate a different review after cancellation", { timeout: 30000 }, async t => {
+for (const withdraw of [false, true]) test(`late previous-result read respects ${withdraw ? "withdrawal" : "review cancellation"}`, { timeout: 30000 }, async t => {
   const f = await setup(t, 1440);
-  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Revise" });
+  f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: f.item().id,
+    expectedRevision: f.item().revision, completionEventId: f.first.event.id, evidenceVersion: f.first.event.data.evidenceVersion,
+    result: "fail", summary: "Name the owner before approval." });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Revised" });
   f.mutate(T.WORK_STARTED, {});
-  f.complete("Result B\nKeep this line\nOwner: Maya");
+  const revisedBody = "Result B\nKeep this line\nOwner: Maya";
+  const revised = f.complete(revisedBody);
   const page = await f.login("human-checker");
   let release, captured;
   const gate = new Promise(resolve => { release = resolve; });
@@ -450,7 +580,24 @@ test("late previous-result read cannot repopulate a different review after cance
     await route.fulfill({ response });
   });
   await clickWorkAction(await openWorkFromSearch(page, "revision-journey", "Revise a short result"), "verify");
+  const comparison = page.locator("#action-result-diff");
+  await comparison.getByText("Name the owner before approval.", { exact: false }).waitFor();
+  await comparison.locator("summary").press("Enter");
   await held;
+  if (withdraw) {
+    const messageId = f.first.event.data.evidenceMessageId;
+    const source = f.store.room("commons").state.messages.find(message => message.id === messageId);
+    f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: source.revision ?? 0 });
+    await comparison.locator(".result-correction").waitFor({ state: "hidden" });
+    release();
+    await comparison.getByText("A version was withdrawn", { exact: false }).waitFor();
+    assert.equal(await comparison.getByRole("link").count(), 0);
+    assert.doesNotMatch(await comparison.textContent(), /Result A|Name the owner before approval/);
+    assert.equal(await page.locator("#action-text-body").textContent(), revisedBody);
+    await review(page, "pass", "Checked the owner on the current result.");
+    assert.equal(f.item().verification.completionEventId, revised.event.id);
+    return;
+  }
   await page.locator("#cancel-action").click();
   await clickWorkAction(await openWorkFromSearch(page, "calm-result", "A first result"), "verify");
   await page.locator("#action-text-body").getByText("Only version of this result", { exact: true }).waitFor();
@@ -771,6 +918,7 @@ test("shared result links keep identical old and new text bound to different ver
   const current = await sender.evaluate(() => window.sharedLink);
   const expected = completion => f.origin + "/?room=commons#pr-record/result/revision-journey/" + completion;
   assert.equal(current, expected(second.event.id));
+  await sender.locator("#result-diff summary").click();
   const earlier = await sender.getByRole("link", { name: "Open earlier result" }).getAttribute("href");
   assert.equal(earlier, expected(f.first.event.id));
 

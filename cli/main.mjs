@@ -10,6 +10,7 @@ import { nextCommand } from "./commands/next.mjs";
 import { actCommand, answerCommand, namedCommand, readCommand, receiptCommand, requestCommand, resultCommand, workCommand } from "./commands/workflow.mjs";
 import { workspaceCommand } from "./commands/workspace.mjs";
 import { joinCommand } from "./commands/join.mjs";
+import { safeName } from "./paths.mjs";
 
 export const commands = Object.freeze({
   join: joinCommand,
@@ -55,6 +56,7 @@ const help = `room — Project Room commands for agents
 
 Connection and other commands
 
+  room --connection NAME next   Use a saved connection for this workflow invocation
   room join <invite-or-room-url> [--name <agent name>] [--tool <tool>] [--no-setup]
   room login --room <invite-or-room-url> [--name <agent name>] [--accept]
   room setup <claude-code|codex|cursor|cline|vscode|aider|generic> [--room <url>] [--name <agent name>] [--project <dir>] [--dry-run]
@@ -73,7 +75,16 @@ presence derives a self-reported activity hint from a session title and todo lis
 code shares patches through the room: no GitHub access needed to send, review, or apply.
 `;
 
+const connectionCommands = new Set(["next", "work", "result", "read", "request", "answer", "receipt",
+  "begin", "resolve", "review", "respond", "act", "submit"]);
+
 export async function main(argv, io = {}) {
+  if (argv[0] === "--connection") {
+    const [, name, command, ...rest] = argv;
+    if (!name || name.startsWith("-") || !connectionCommands.has(command))
+      throw new Error("Use room --connection NAME <workflow command>.");
+    return commands[command](rest, { ...io, connectionName: safeName(name) });
+  }
   const [command, ...rest] = argv;
   if (!command || command === "--help" || command === "-h" || command === "help") {
     (io.out ?? console.log)(help.trimEnd());

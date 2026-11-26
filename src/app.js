@@ -3552,8 +3552,9 @@ function revealWork(id, expandDetails = false) {
   }
   activeWorkNavigationId = id;
   card.querySelector(".work-details").open = expandDetails;
-  focusRecord(card);
+  // Show the return control before measuring the timeline for the focused card.
   syncWorkReturnControl();
+  focusRecord(card);
   return card;
 }
 async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = false } = {}) {
