@@ -7141,9 +7141,17 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   onOpenDecision(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result }); },
   onOpenWorkspace(url, message, artifactId, completionEventId, resultFile) {
     const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;
-    const workspaceDiscussion = discussion ? { ...discussion, artifactId } : null;
+    let workspaceDiscussion = discussion ? { ...discussion, artifactId } : null;
     const result = exactResultDestination(location);
     if (result?.completionEventId === completionEventId) {
+      const source = roomChangesSelection(url, location.origin, result.roomId);
+      if (source) {
+        const access = workNavigationContext(), resultHref = exactResultHref(result, location);
+        workspaceDiscussion = { ...workspaceDiscussion, artifactId,
+          resultReturn: item => access && access === workNavigationContext() && item.id === source.id
+            && item.revision === source.revision && item.publisherId === source.publisherId
+            && item.head === source.head && item.patchDigest === source.digest ? resultHref : null };
+      }
       pushWorkDestination(url.href, captureWorkOrigin({ type: "result", result, resultFile, workspaceDiscussion }));
     } else {
       history.pushState(workHistoryState(), "", url.href);

@@ -72,7 +72,7 @@ into your coding agent. It includes the selected source link, expected commit
 and worktree command. For direct CLI usage, copy the artifact link:
 
 ```sh
-room workspace continue --link 'ARTIFACT_URL' --path ../next-attempt
+room workspace continue --link 'ARTIFACT_URL' --repository-root 'CONFIRMED_LOCAL_REPOSITORY' --path ../next-attempt
 ```
 
 If the checkout succeeded but its response was lost, repeat the same `start`
@@ -84,9 +84,11 @@ When the same publisher replaces an artifact, a stale continuation can
 return the currently visible link. Inspect that commit before running a new
 continuation. The refusal does not create a checkout or choose it for you.
 
-Room checks the link against the current shared artifact through your saved
-connection. The command creates a new branch and worktree from the exact
-published commit. When the commit is missing, add `--fetch-from origin` or
+Confirm the intended repository with the requester. A Git commit can exist in
+more than one fork. With `--repository-root`, Room checks that the invoking
+checkout uses the same local Git repository as the supplied directory before
+fetching or creating a worktree. It checks the exact artifact through your
+saved Room connection. When the commit is missing, add `--fetch-from origin` or
 name another configured remote. Room fetches only the selected commit and
 rechecks the artifact before creating the worktree. Private drafts, unpublished files, and run history stay
 with the original workspace unless their author shares them.

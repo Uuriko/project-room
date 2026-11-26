@@ -4,7 +4,7 @@ import { openCatchUp, openWorkFromSearch, clickWorkAction } from "./room-chrome.
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "playwright";
@@ -14,7 +14,7 @@ import { textVersion } from "../server/text-results.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { exactResultHref } from "../src/record-link.js";
-import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
+import { workspaceArtifactLink, workspaceArtifactSelection } from "../src/workspace-artifact-link.js";
 
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
@@ -1376,6 +1376,62 @@ test("same-base forks compare as distinct publications beside an exact accepted 
   await peer.waitFor({ state: "hidden" });
   await primaryPanel.getByText(/Primary fork marker/).waitFor();
   assert.equal(new URL(reviewer.url()).hash, new URL(primaryLink).hash);
+
+  // Comparing and continuing a side must keep its own exact review and checkout basis.
+  await reviewer.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true,
+      value: { writeText: async () => { throw new Error("Use manual copy"); } } });
+  });
+  await picker.selectOption(comparison.id);
+  await peer.getByRole("button", { name: file, exact: true }).press("Enter");
+  await peer.getByRole("button", { name: /Continue this version/ }).press("Enter");
+  const packetField = dialog.locator("[data-workspace-link-fallback]");
+  const copyForAgent = async () => {
+    await dialog.getByRole("button", { name: "Copy for agent", exact: true }).press("Enter");
+    await packetField.waitFor();
+    const text = await packetField.inputValue();
+    const link = text.split("\n").find(line => line.startsWith(f.origin) && line.includes("#pr-workspace/"));
+    assert.ok(link);
+    return { text, link, selection: workspaceArtifactSelection(new URL(link).hash) };
+  };
+  const other = await copyForAgent();
+  assert.equal(other.selection.id, comparison.id);
+  assert.equal(other.selection.panel, "changes");
+  assert.equal(other.selection.file, file);
+  assert.ok(!other.text.includes(url));
+  assert.match(other.text, /No return link/);
+
+  await dialog.getByRole("button", { name: "Close", exact: true }).press("Enter");
+  await reviewer.locator("#result-body").getByRole("link", { name: "Open changes for brief.md", exact: true }).press("Enter");
+  await primaryPanel.getByText(/Primary fork marker/).waitFor();
+  await picker.selectOption(comparison.id);
+  const reviewHunk = primaryPanel.getByRole("button", { name: "Select hunk for review link", exact: true });
+  await reviewHunk.press("Enter");
+  const anchor = { side: await reviewHunk.getAttribute("data-review-side"), line: Number(await reviewHunk.getAttribute("data-review-line")) };
+  await primaryPanel.getByRole("button", { name: /Continue this version/ }).press("Enter");
+  const handoff = await copyForAgent();
+  assert.deepEqual(handoff.selection, { ...workspaceArtifactSelection(new URL(primaryLink).hash), anchor });
+  assert.ok(handoff.text.includes(url));
+  assert.match(handoff.text, /directed.*same audience/);
+  assert.match(handoff.text, /--repository-root/);
+  if (shots) await reviewer.screenshot({ path: join(shots, "exact-changes-handoff.png") });
+
+  // Both forks now have the exact object, so only the checkout confirmation distinguishes them.
+  git(comparisonRepo, "fetch", "--quiet", "--no-tags", primaryRepo, primary.head);
+  assert.equal(git(comparisonRepo, "rev-parse", primary.head), primary.head);
+  const next = join(f.directory, "receiver-worktree");
+  const args = ["continue", "--link", handoff.link, "--path", next, "--repository-root", primaryRepo];
+  const env = { ROOM_ORIGIN: f.origin, ROOM_ID: "commons", PROJECT_ROOM_SECRET: f.keys["human-checker"] };
+  await assert.rejects(workspaceCommand(args, { cwd: comparisonRepo, env }), /different Git repository/);
+  assert.equal(existsSync(next), false);
+  const launches = [];
+  const run = () => workspaceCommand(args, { cwd: primaryRepo, env, out: text => launches.push(JSON.parse(text)) });
+  await run();
+  await run();
+  assert.deepEqual(launches[1], launches[0]);
+  assert.equal(git(next, "rev-parse", "HEAD"), primary.head);
+  assert.equal(launches[0].source.file, file);
+
   const outsider = await f.login("guest", primaryLink);
   await outsider.locator("#room-project-workspace").getByText(/This shared artifact is unavailable/).waitFor();
   assert.doesNotMatch(await outsider.locator("#room-project-workspace").innerText(), /Primary fork marker|fixture\/primary/);

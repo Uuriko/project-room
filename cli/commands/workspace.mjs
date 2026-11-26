@@ -15,7 +15,7 @@ import { agentSigninRecord } from "../../src/record-link.js";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room workspace start --path DIRECTORY [--base REF] [--from-work URL] [--connection NAME]
-room workspace continue --link URL --path DIRECTORY [--fetch-from REMOTE] [--connection NAME]
+room workspace continue --link URL --path DIRECTORY [--repository-root DIRECTORY] [--fetch-from REMOTE] [--connection NAME]
 room workspace run [--cwd DIRECTORY] [--port PORT] [--log FILE.log] -- COMMAND [ARGS...]
 room workspace run --live ARTIFACT_URL [--publisher tls://HOST:PORT] [--publisher-ca FILE] -- COMMAND [ARGS...]
 room workspace list
@@ -35,6 +35,10 @@ function git(cwd, ...args) {
   if (output.status !== 0) throw new Error(output.stderr.trim() || "Git command failed");
   return output.stdout.trim();
 }
+function gitCommonDir(cwd) {
+  return realpathSync(git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"));
+}
+
 function pinned(cwd, ref) {
   return git(cwd, "rev-parse", "--verify", "--end-of-options", ref + "^{commit}");
 }
@@ -87,10 +91,10 @@ function selectedWorkThread(value, conn) {
 function recoverLaunch(cwd, path, base, scope) {
   const entry = lstatSync(path, { throwIfNoEntry: false });
   if (!entry) return null;
-  const gitRoot = realpathSync(git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"));
+  const gitRoot = gitCommonDir(cwd);
   try {
     if (entry.isDirectory() && realpathSync(git(path, "rev-parse", "--show-toplevel")) === realpathSync(path)
-      && realpathSync(git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")) === gitRoot) {
+      && gitCommonDir(path) === gitRoot) {
       const launch = workspaceMarker(path)?.launch;
       const receipt = launch?.receipt;
       if (launch?.version === 1 && isDeepStrictEqual(launch.scope, scope) && receipt?.base === base
@@ -230,14 +234,14 @@ export async function workspaceCommand(argv, io = {}) {
   const [action, ...extra] = positional;
   const out = data => (io.out ?? console.log)(JSON.stringify(data));
   const cwd = io.cwd ?? process.cwd();
+  if (flags["repository-root"] !== undefined && action !== "continue") throw new Error("--repository-root is available with workspace continue");
   if (flags["from-work"] !== undefined && action !== "start") throw new Error("--from-work is available with workspace start");
   if (flags.cwd !== undefined && action !== "run") throw new Error("--cwd is available with workspace run");
   const shareLive = ["live", "publisher", "publisher-ca"].some(flag => flags[flag] !== undefined);
   if (shareLive && action !== "run") throw new Error("Live sharing is available with workspace run");
   if (action === "run" && !extra.length && separator !== -1 && argv[separator + 1]) {
     const gitDir = git(cwd, "rev-parse", "--absolute-git-dir");
-    const commonDir = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
-    if (realpathSync(gitDir) === realpathSync(commonDir)) throw new Error("Start a separate Git worktree before running a preview");
+    if (realpathSync(gitDir) === gitCommonDir(cwd)) throw new Error("Start a separate Git worktree before running a preview");
     const root = realpathSync(git(cwd, "rev-parse", "--show-toplevel"));
     let workingDirectory = root;
     if (flags.cwd !== undefined) {
@@ -325,6 +329,10 @@ export async function workspaceCommand(argv, io = {}) {
       return room;
     };
     const room = await verify();
+    if (flags["repository-root"] !== undefined) {
+      if (gitCommonDir(cwd) !== gitCommonDir(resolve(cwd, flags["repository-root"])))
+        throw new Error("This checkout belongs to a different Git repository than --repository-root. Switch to the confirmed repository before continuing.");
+    }
     const { anchor: _reviewPosition, ...source } = target;
     const scope = { action, connection: inherited ? safeName(inherited) : null, room, source };
     const recovered = recoverLaunch(cwd, path, target.head, scope);

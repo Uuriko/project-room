@@ -185,7 +185,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     // A conversation can remain authorized after its artifact expires or changes.
     const canUseArtifact = !copyLink.hidden;
     const destination = discussionDestination();
-    const discussion = (canUseArtifact || linked) && destination?.discussion();
+    const discussion = (canUseArtifact || linked) && destination?.discussion?.();
     discussionAside.hidden = !discussion;
     addToThread.hidden = !canUseArtifact || !discussion || !destination?.append || Boolean(items.find(item => item.id === selected)?.recipientId);
     discussionMessages.replaceChildren();
@@ -316,12 +316,13 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
           pick.setAttribute("aria-label", uiText("workspace.chooseVersionNamed", { title: item.title, source: sourceLabel(item) }));
           pick.addEventListener("click", async () => {
             if (!stillOpen()) return;
-            const url = workspaceArtifactLink(location.href, session.roomId, item, "changes");
+            const position = selectedChangePosition(column);
+            const url = workspaceArtifactLink(location.href, session.roomId, item, "changes", position.file, position.anchor);
             clearPreview();
             linked = workspaceArtifactSelection(new URL(url).hash);
-            selected = item.id; pendingFile = null; reviewLocation = null;
+            selected = item.id; pendingFile = linked.file ?? null; reviewLocation = linked.anchor ? linked : null;
             showFileFirst(false);
-            activePanel = "preview";
+            activePanel = "changes";
             await load();
             if (dialog.open && selected === item.id && !noteLabel.hidden) noteInput.focus();
           });
@@ -490,36 +491,45 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     activePanel = "changes";
     void load();
   });
+  function selectedChangePosition(column) {
+    const file = column.querySelector("[aria-current=true]")?.dataset.file;
+    const marked = file && column.querySelector("[data-review-side][aria-pressed=true]");
+    const anchor = marked ? { side: marked.dataset.reviewSide, line: Number(marked.dataset.reviewLine) } : undefined;
+    return { file, anchor };
+  }
   function shareSelection() {
     const current = items.find(item => item.id === selected), session = client.session;
     if (!current || !session || copyLink.hidden) return null;
     const panel = activePanel;
-    const file = panel === "changes" && !columns.hidden ? primary.querySelector("[aria-current=true]")?.dataset.file : undefined;
-    const marked = file && primary.querySelector("[data-review-side][aria-pressed=true]");
-    const anchor = marked ? { side: marked.dataset.reviewSide, line: Number(marked.dataset.reviewLine) } : undefined;
+    const { file, anchor } = panel === "changes" && !columns.hidden ? selectedChangePosition(primary) : {};
     const link = workspaceArtifactLink(location.href, session.roomId, current, panel, file, anchor);
     return link ? { current, session, panel, link } : null;
   }
 
+  function agentReturn(item) {
+    const destination = discussionDestination();
+    const result = destination?.resultReturn?.(item);
+    if (result) return uiText("workspace.returnResult", { link: result });
+    const discussion = destination?.discussion?.()?.link;
+    return discussion ? uiText("workspace.returnDiscussion", { link: discussion }) : uiText("workspace.noReturn");
+  }
   let latestCopy = 0;
   async function copySelection(forAgent) {
     const snapshot = shareSelection();
     if (!snapshot) return;
     const { current, session, link } = snapshot;
     const copyTicket = ++latestCopy, view = generation;
-    const returnLink = threadDraft?.discussion()?.link;
+    const returnText = forAgent ? agentReturn(current) : "";
     const note = noteInput.value.trim();
     const copiedText = forAgent ? [
       uiText("workspace.share.agentText", { link, head: current.head }),
       note && uiText("workspace.versionInstruction", { note }),
-      returnLink && uiText("workspace.returnDiscussion", { link: returnLink }),
-      returnLink && (current.recipientId
-        ? "This publication is directed. Keep the returned artifact within the same audience."
-        : "Return your revised publication to that discussion for review."),
+      returnText,
+      current.recipientId && uiText("workspace.directedHandoff"),
     ].filter(Boolean).join("\n\n") : link;
     const result = await clipboard.copy(copiedText);
     if (copyTicket !== latestCopy || !owns(view, session) || shareSelection()?.link !== link
-      || (forAgent && (noteInput.value.trim() !== note || threadDraft?.discussion()?.link !== returnLink))) return;
+      || (forAgent && (noteInput.value.trim() !== note || agentReturn(current) !== returnText))) return;
     linkFallback.hidden = result === "copied";
     if (result === "copied") linkStatus.textContent = uiText(forAgent ? "workspace.share.agentCopied" : "workspace.share.copied");
     else {

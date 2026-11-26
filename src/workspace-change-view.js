@@ -84,7 +84,7 @@ function hunkLocation(hunk) {
 function renderFile(body, file, review, shareHunks) {
   body.replaceChildren();
   if (!file.hunks.length) body.append(node("p", "No text hunks in this file.", "form-hint"));
-  let target;
+  let target, exactReview = false;
   if (review) {
     const { side, line } = review.anchor;
     const spans = file.hunks.map(hunk => ({
@@ -97,12 +97,12 @@ function renderFile(body, file, review, shareHunks) {
       fallbackOwnerHunkIndex: reviewGapOwnerHunkIndex(spans, side, line),
     });
     target = placement.ownerHunkIndex;
-    const exact = review.exact && file.hunks[target]?.changes.some(row => rowNumber(row, side) === line);
+    exactReview = review.exact && Boolean(file.hunks[target]?.changes.some(row => rowNumber(row, side) === line));
     const message = target === undefined
       ? "The original review location has no text hunk in this patch."
-      : exact ? "Original review location." : "Original review location shown near the current hunk. Verify it before reviewing.";
+      : exactReview ? "Original review location." : "Original review location shown near the current hunk. Verify it before reviewing.";
     const location = node("p", message, "form-hint");
-    location.dataset.reviewPlacement = exact ? "exact" : "needs-reanchor";
+    location.dataset.reviewPlacement = exactReview ? "exact" : "needs-reanchor";
     location.setAttribute("role", "status");
     body.append(location);
   }
@@ -119,13 +119,14 @@ function renderFile(body, file, review, shareHunks) {
       lines.append(node("span", [prefix, line.content, "\n"].join(""), `workspace-line-${kind}`));
     }
     chunk.append(range);
-    const location = shareHunks && hunkLocation(hunk);
+    const selectedAnchor = exactReview && index === target;
+    const location = shareHunks && (selectedAnchor ? review.anchor : hunkLocation(hunk));
     if (location) {
       const button = node("button", "Select hunk for review link", "button ghost");
       button.type = "button";
       button.dataset.reviewSide = location.side;
       button.dataset.reviewLine = String(location.line);
-      button.setAttribute("aria-pressed", "false");
+      button.setAttribute("aria-pressed", String(selectedAnchor));
       button.addEventListener("click", () => {
         const pressed = button.getAttribute("aria-pressed") === "true";
         body.querySelector("[data-review-side][aria-pressed=true]")?.setAttribute("aria-pressed", "false");
