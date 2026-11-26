@@ -502,6 +502,10 @@ Use a browser smoke test to verify a running preview's behavior.
 For an exact Workspace Changes link, use `room_read_workspace_changes` on the
 same hosted connection. Follow `context.source.references` after reading an
 authorized assignment source to open its pinned file or native result.
+An exact result can include `result.text.references`. If someone shares a file
+in a reply, follow the result's `discussionRead` and use that reply's
+`references`. These read pointers use the current connection, and the file
+read checks its audience separately from the result or reply.
 A patch link can list files, then the same selection and file path can open
 one file. Hosted OAuth requires `rooms:read` and `work:read` for Changes.
 If the selected publication changed, ask for its current link before reviewing.

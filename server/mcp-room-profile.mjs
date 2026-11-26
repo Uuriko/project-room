@@ -574,19 +574,31 @@ function credentialRedactions(name, value) {
   ];
 }
 
-// Selected work reads: say whether THIS connection can run the suggested step.
-function selectedReadCapability(value, { store, secret, identity, oauthPrincipal, origin }) {
+function selectedReadCapability(value, name, { store, secret, identity, oauthPrincipal, origin }) {
   const agent = resolveCatalogAgent(store, identity);
   const exposed = tool => {
     const def = HOSTED_TOOLS.find(entry => entry.name === tool);
     return Boolean(def) && SUGGESTABLE_TOOLS.includes(tool) && !catalogCallDenial(agent, def);
   };
-  const source = value.context?.source;
-  if (source?.status === "included" && typeof source.message?.body === "string") {
-    const canRead = tool => exposed(tool) && (!oauthPrincipal || mcpOAuthToolAllowed(tool, oauthPrincipal.scopes));
-    const references = selectedSourceReferences(source.message.body, value.roomId, origin, canRead);
-    if (references.length) source.references = references;
+  const canRead = tool => exposed(tool) && (!oauthPrincipal || mcpOAuthToolAllowed(tool, oauthPrincipal.scopes));
+  let remaining = 16;
+  const addReferences = (entry, body) => {
+    if (typeof body !== "string" || remaining === 0) return;
+    const references = selectedSourceReferences(body, value.roomId, origin, canRead, remaining);
+    if (references.length) entry.references = references;
+    remaining -= references.length;
+  };
+  if (name === "room_read_result") {
+    const text = value.result?.text;
+    if (!text?.withdrawnAt) addReferences(text, text?.body);
+    return value;
   }
+  if (name === "room_read_work_discussion") {
+    for (const reply of value.discussion.replies) addReferences(reply, reply.body);
+    return value;
+  }
+  const source = value.context?.source;
+  if (source?.status === "included") addReferences(source, source.message?.body);
   return withConnectionCapability(value, {
     connection: oauthPrincipal ? { kind: "oauth", scopes: oauthPrincipal.scopes }
       : { kind: typeof secret === "string" && secret.startsWith(API_KEY_PREFIX) ? "api_key" : "identity" },
@@ -594,9 +606,10 @@ function selectedReadCapability(value, { store, secret, identity, oauthPrincipal
   });
 }
 
-function selectedSourceReferences(body, roomId, origin, canRead) {
+function selectedSourceReferences(body, roomId, origin, canRead, limit) {
   const changesTool = "room_read_workspace_changes", resultTool = "room_read_result";
   const changesAllowed = canRead(changesTool), resultAllowed = canRead(resultTool);
+  if (!changesAllowed && !resultAllowed) return [];
   const references = new Map();
   for (const [href] of messageUrlTokens(body)) {
     const url = URL.parse(href);
@@ -608,7 +621,7 @@ function selectedSourceReferences(body, roomId, origin, canRead) {
       const result = resultAllowed && exactResultDestination(url);
       if (result) references.set(href, { href, nextRead: { tool: resultTool, arguments: result } });
     }
-    if (references.size === 16) break;
+    if (references.size === limit) break;
   }
   return [...references.values()];
 }
@@ -1390,8 +1403,10 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       if (isHostedStdioTool(name)) {
         const origin = new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin;
         const outcome = await callHostedStdioTool(store, secret, name, args, { origin });
-        let value = name === "room_read_work" && !outcome.isError
-          ? selectedReadCapability(outcome.value, { store, secret, identity, oauthPrincipal, origin }) : boardIdHint(store, args, outcome);
+        const selectedRead = name === "room_read_work" || name === "room_read_result"
+          || (name === "room_read_work_discussion" && args.completionEventId !== undefined);
+        let value = selectedRead && !outcome.isError
+          ? selectedReadCapability(outcome.value, name, { store, secret, identity, oauthPrincipal, origin }) : boardIdHint(store, args, outcome);
         if (name === "room_read_result" && value.discussionRead?.tool) {
           const tool = value.discussionRead.tool;
           const definition = HOSTED_TOOLS.find(entry => entry.name === tool);

@@ -1033,10 +1033,10 @@ test(`hosted MCP follows the exact changes and result from an addressed assignme
   assert.ok(selection.length > 512, 'the Workspace link exceeds the old Preview selector limit');
   const doc = 'release-document';
   write(f.ownerKey, 'work.proposed', { workItemId: doc, title: 'Publish instructions', definitionOfDone: 'Document the release',
-    accountableMemberId: 'owner', mode: 'read' });
+    accountableMemberId: 'owner', verifierMemberId: 'friend-dot', independentVerificationRequired: true, mode: 'read' });
   write(f.ownerKey, 'work.accepted', { workItemId: doc, expectedRevision: 0 });
   write(f.ownerKey, 'work.started', { workItemId: doc, expectedRevision: 1 });
-  const body = 'The owner is Maya.';
+  const body = `The owner is Maya.\n${selection}`;
   const posted = write(f.ownerKey, 'message.posted', { workItemId: doc, messageId: 'release-document-body', body });
   const completed = write(f.ownerKey, 'work.completed', { workItemId: doc, expectedRevision: 2, evidenceKind: 'room_text',
     evidenceMessageId: posted.event.data.messageId, evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body),
@@ -1049,6 +1049,8 @@ test(`hosted MCP follows the exact changes and result from an addressed assignme
     accountableMemberId: 'friend-dot', sourceMessageId: sourceId, mode: 'read' });
   const originalRead = await call('room_read_result', { workItemId: doc, completionEventId: completed.event.id });
   assert.equal(value(originalRead)?.result.text.body, body);
+  const fileRead = { href: selection, nextRead: { tool, arguments: { roomId: 'commons', selection } } };
+  assert.deepEqual(value(originalRead).result.text.references, [fileRead]);
   const summaryLink = workspaceArtifactLink(origin, 'commons', artifact, 'changes');
   const inspection = await call('room_inspect_workspace_preview', { selection: summaryLink, expectedViewerId: 'friend-dot' });
   assert.equal(value(inspection)?.code, 'invalid_preview_selection');
@@ -1095,6 +1097,7 @@ test(`hosted MCP follows the exact changes and result from an addressed assignme
   const narrow = await grant('work:read');
   const narrowResult = await call('room_read_result', { workItemId: doc, completionEventId: completed.event.id }, narrow);
   assert.equal(value(narrowResult).result.receipt.eventId, completed.event.id);
+  assert.equal(value(narrowResult).result.text.references, undefined);
   const narrowList = await f.rpc('tools/list', {}, narrow);
   assert.ok(!narrowList.body.result.tools.some(entry => entry.name === tool));
   const deniedGrant = await call(tool, { selection }, narrow);
@@ -1110,7 +1113,51 @@ test(`hosted MCP follows the exact changes and result from an addressed assignme
   assert.equal(hidden.context.source.references, undefined);
   const foreign = await call(tool, { selection: selection.replace('room=commons', 'room=other') });
   assert.equal(value(foreign).code, 'invalid_changes_selection');
-  await publish(1, 'd'.repeat(40), patch.replace('+ready', '+replacement'));
+  const review = value(originalRead).review.action;
+  const failed = await call(review.tool, { ...review.arguments, result: 'fail', summary: 'Update the file.', nextAction: 'Share the revision.' });
+  assert.equal(value(failed)?.status, 'recorded', JSON.stringify(failed));
+  const blocked = f.store.workContext(f.ownerKey, 'commons', doc).work;
+  write(f.ownerKey, 'work.blocker_resolved', { workItemId: doc, expectedRevision: blocked.revision, resolution: 'Updated the file.' });
+  write(f.ownerKey, 'work.started', { workItemId: doc, expectedRevision: blocked.revision + 1 });
+  const replacement = await publish(1, 'd'.repeat(40), patch.replace('+ready', '+replacement'));
+  const replacementLink = workspaceArtifactLink(origin, 'commons', replacement, 'changes', filePath);
+  const revisedBody = 'Maya owns the release and the revised instructions.';
+  const revisedMessage = write(f.ownerKey, 'message.posted', { workItemId: doc, messageId: 'revised-document', body: revisedBody });
+  const revised = write(f.ownerKey, 'work.completed', { workItemId: doc, expectedRevision: blocked.revision + 2,
+    evidenceKind: 'room_text', evidenceMessageId: revisedMessage.event.data.messageId, evidenceMessageEventId: revisedMessage.event.id,
+    evidenceVersion: textVersion(revisedBody), previousCompletionEventId: completed.event.id,
+    summary: 'Updated the file', nextAction: 'Review the replacement', producerId: 'owner' });
+  const correctedRead = value(await call('room_read_result', { workItemId: doc, completionEventId: revised.event.id }));
+  assert.equal(correctedRead.result.receipt.eventId, revised.event.id);
+  assert.equal(correctedRead.workThread.correction.summary, 'Update the file.');
+  write(f.ownerKey, 'message.posted', { messageId: 'late-file-for-reviewer', replyToId: revisedMessage.event.data.messageId,
+    toMemberId: 'friend-dot', body: `Revised file:\n${replacementLink}` });
+  const discussion = value(await call(correctedRead.discussionRead.tool, correctedRead.discussionRead.arguments));
+  assert.ok(discussion?.discussion, JSON.stringify({ code: discussion?.code, reason: discussion?.reason, message: discussion?.message }));
+  assert.equal(discussion.discussion.messageId, revisedMessage.event.data.messageId);
+  const late = discussion.discussion.replies.find(reply => reply.id === 'late-file-for-reviewer');
+  assert.deepEqual(late.references, [{ href: replacementLink, nextRead: { tool,
+    arguments: { roomId: 'commons', selection: replacementLink } } }]);
+  const lateFile = value(await call(late.references[0].nextRead.tool, late.references[0].nextRead.arguments));
+  assert.equal(lateFile.changes.head, replacement.head);
+  assert.equal(lateFile.changes.file.hunks[0].changes.at(-1).content, 'replacement');
+  const otherDiscussion = await call(correctedRead.discussionRead.tool, correctedRead.discussionRead.arguments, otherKey);
+  assert.equal(value(otherDiscussion).discussion.messageId, revisedMessage.event.data.messageId);
+  assert.doesNotMatch(JSON.stringify(otherDiscussion), /late-file-for-reviewer/);
+  assert.equal(JSON.stringify(otherDiscussion).includes(replacementLink), false);
+  const chatOnly = await grant('chat:read work:read');
+  const narrowDiscussion = value(await call(correctedRead.discussionRead.tool, correctedRead.discussionRead.arguments, chatOnly));
+  const narrowLate = narrowDiscussion.discussion.replies.find(reply => reply.id === 'late-file-for-reviewer');
+  assert.equal(narrowLate.references, undefined);
+  const earlierDiscussion = value(await call(value(originalRead).discussionRead.tool, value(originalRead).discussionRead.arguments));
+  assert.equal(earlierDiscussion.discussion.messageId, posted.event.data.messageId);
+  assert.deepEqual(earlierDiscussion.discussion.replies, []);
+  const correctedReview = correctedRead.review.action;
+  const approved = value(await call(correctedReview.tool, { ...correctedReview.arguments, result: 'pass', summary: 'Reviewed the replacement.' }));
+  assert.equal(approved.status, 'recorded');
+  const accepted = value(await call('room_read_result', { workItemId: doc, completionEventId: revised.event.id }));
+  assert.equal(accepted.workThread.verdict.completionEventId, revised.event.id);
+  assert.equal(accepted.workThread.verdict.result, 'pass');
   const stale = await call(tool, { selection });
   assert.equal(value(stale).code, 'preview_changed');
   assert.doesNotMatch(JSON.stringify(stale), /replacement/);
