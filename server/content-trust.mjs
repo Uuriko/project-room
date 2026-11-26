@@ -19,6 +19,7 @@ export const MEMBER_TEXT_TOOLS = new Set([
   "room_read_work_discussion",
   "room_read_board",
   "room_read_result",
+  "room_read_workspace_changes",
   "room_list_work",
   "room_list_peer_dms",
   "room_list_events",

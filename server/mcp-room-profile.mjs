@@ -73,6 +73,8 @@ import {
 import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { ACTION_META_TOOL_NAMES, SEARCH_ACTIONS_TOOL, RUN_ACTION_TOOL, actionMetaToolDefs, isRunnableAction, searchActions, validRunActionArgs, validSearchActionsArgs } from "./mcp-action-search.mjs";
 import { CONTENT_TRUST, stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext, stampWorkListing, withContentTrust } from "./content-trust.mjs";
+import { exactResultDestination } from "../src/record-link.js";
+import { messageUrlTokens, roomChangesSelection } from "../src/workspace-artifact-link.js";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { withConnectionCapability } from "./mcp-next-capability.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
@@ -573,16 +575,42 @@ function credentialRedactions(name, value) {
 }
 
 // Selected work reads: say whether THIS connection can run the suggested step.
-function selectedReadCapability(value, { store, secret, identity, oauthPrincipal }) {
+function selectedReadCapability(value, { store, secret, identity, oauthPrincipal, origin }) {
   const agent = resolveCatalogAgent(store, identity);
+  const exposed = tool => {
+    const def = HOSTED_TOOLS.find(entry => entry.name === tool);
+    return Boolean(def) && SUGGESTABLE_TOOLS.includes(tool) && !catalogCallDenial(agent, def);
+  };
+  const source = value.context?.source;
+  if (source?.status === "included" && typeof source.message?.body === "string") {
+    const canRead = tool => exposed(tool) && (!oauthPrincipal || mcpOAuthToolAllowed(tool, oauthPrincipal.scopes));
+    const references = selectedSourceReferences(source.message.body, value.roomId, origin, canRead);
+    if (references.length) source.references = references;
+  }
   return withConnectionCapability(value, {
     connection: oauthPrincipal ? { kind: "oauth", scopes: oauthPrincipal.scopes }
       : { kind: typeof secret === "string" && secret.startsWith(API_KEY_PREFIX) ? "api_key" : "identity" },
-    exposed: tool => {
-      const def = HOSTED_TOOLS.find(entry => entry.name === tool);
-      return Boolean(def) && SUGGESTABLE_TOOLS.includes(tool) && !catalogCallDenial(agent, def);
-    }
+    exposed
   });
+}
+
+function selectedSourceReferences(body, roomId, origin, canRead) {
+  const changesTool = "room_read_workspace_changes", resultTool = "room_read_result";
+  const changesAllowed = canRead(changesTool), resultAllowed = canRead(resultTool);
+  const references = new Map();
+  for (const [href] of messageUrlTokens(body)) {
+    const url = URL.parse(href);
+    if (references.has(href) || !url || url.href !== href || url.origin !== origin || url.username || url.password
+        || url.searchParams.size !== 1 || url.searchParams.get("room") !== roomId) continue;
+    if (changesAllowed && roomChangesSelection(url, origin, roomId)) {
+      references.set(href, { href, nextRead: { tool: changesTool, arguments: { roomId, selection: href } } });
+    } else {
+      const result = resultAllowed && exactResultDestination(url);
+      if (result) references.set(href, { href, nextRead: { tool: resultTool, arguments: result } });
+    }
+    if (references.size === 16) break;
+  }
+  return [...references.values()];
 }
 
 function enforceMcpCallVisibility(store, identity, toolName) {
@@ -1360,9 +1388,10 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     try {
       if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
-        const outcome = await callHostedStdioTool(store, secret, name, args, { origin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin });
+        const origin = new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin;
+        const outcome = await callHostedStdioTool(store, secret, name, args, { origin });
         let value = name === "room_read_work" && !outcome.isError
-          ? selectedReadCapability(outcome.value, { store, secret, identity, oauthPrincipal }) : boardIdHint(store, args, outcome);
+          ? selectedReadCapability(outcome.value, { store, secret, identity, oauthPrincipal, origin }) : boardIdHint(store, args, outcome);
         if (name === "room_read_result" && !outcome.isError && oauthPrincipal && value.workThread?.pendingCorrection?.action) {
           const { tool } = value.workThread.pendingCorrection.action;
           const definition = HOSTED_TOOLS.find(entry => entry.name === tool);
@@ -1410,7 +1439,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           value.commandDiscovery = {
             tools: Object.fromEntries([
               "room_next", "room_receipt", "room_record_verification",
-              "room_read_public_review", "room_record_public_review", "room_inspect_workspace_preview"
+              "room_read_public_review", "room_record_public_review", "room_inspect_workspace_preview", "room_read_workspace_changes"
             ].map(tool => [tool,
               tool === "room_record_verification" && !value.permissions?.includes("verify") ? "withheld_by_room_policy"
                 : !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes) ? "outside_connected_grant"
@@ -1428,6 +1457,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             requiredOAuthScope: { room_record_verification: "work:write" },
             requiredOAuthScopes: {
               room_inspect_workspace_preview: ["rooms:read", "work:read"],
+              room_read_workspace_changes: ["rooms:read", "work:read"],
               room_read_public_review: ["work:read"],
               room_record_public_review: ["work:read", "work:write"]
             },

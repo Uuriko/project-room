@@ -33,6 +33,7 @@ export const CORE_REST_TWINS = Object.freeze({
   room_read_work: ["GET /api/rooms/{roomId}/work-claims/{claimId}"],
   room_activation_pack: ["GET /api/rooms/{roomId}/activation-pack"],
   room_read_result: ["GET /api/rooms/{roomId}/work-result"],
+  room_read_workspace_changes: ["GET /api/rooms/{roomId}/workspace-previews"],
   room_begin_work: [commands, { event: "work.accepted" }, { event: "claim.acquired" }, { event: "work.started" }],
   room_submit_text_result: [commands, { event: "work.completed" }],
   room_resolve_blocker: [commands, { event: "work.blocker_resolved" }],

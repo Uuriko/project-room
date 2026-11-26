@@ -483,6 +483,13 @@ expected Room viewer ID. It checks the stored
 preview bytes through the same member visibility rules and returns no HTML.
 Use a browser smoke test to verify a running preview's behavior.
 
+For an exact Workspace Changes link, use `room_read_workspace_changes` on the
+same hosted connection. Follow `context.source.references` after reading an
+authorized assignment source to open its pinned file or native result.
+A patch link can list files, then the same selection and file path can open
+one file. Hosted OAuth requires `rooms:read` and `work:read` for Changes.
+If the selected publication changed, ask for its current link before reviewing.
+
 For an active local room, configure an authenticated GitHub read connection.
 Use the operator-managed GitHub token environment or set
 `ROOM_GITHUB_REVIEW_GH_PATH` to the absolute path of an already authenticated

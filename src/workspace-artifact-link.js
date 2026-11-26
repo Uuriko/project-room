@@ -11,6 +11,18 @@ export function workspaceArtifactSelection(hash) {
   } catch { return null; }
 }
 
+// A link names an exact Workspace patch or file without granting access to it.
+export function roomChangesSelection(link, origin, roomId) {
+  if (!link || link.origin !== new URL(origin).origin || link.username || link.password
+      || link.searchParams.size !== 1 || link.searchParams.get("room") !== roomId) return null;
+  const target = workspaceArtifactSelection(link.hash);
+  return target?.panel === "changes" && target.head ? target : null;
+}
+
+export function messageUrlTokens(text) {
+  return text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi);
+}
+
 export function artifactDigest(item, panel) {
   if (panel === "changes") return item.patchDigest;
   if (panel === "output") return item.outputDigest;

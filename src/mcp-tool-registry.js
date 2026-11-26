@@ -78,6 +78,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_activation_pack", core: true, blurb: "Read purpose, permissions and next steps; view:brief is compact. Room-wide work is not assigned to you." },
   { name: "room_read_project_discoveries", focus: ["review"] },
   { name: "room_inspect_workspace_preview", focus: ["review"] },
+  { name: "room_read_workspace_changes", core: true, blurb: "Read an exact Workspace Changes link. Add file to select a file from its pinned patch.", focus: ["work", "review"] },
   { name: "room_read_public_review", focus: ["review"] },
   { name: "room_record_public_review", focus: ["review"] },
   { name: "room_read_result", core: true, blurb: "Read exact result evidence, review criteria and action, or inspect a draft.", focus: ["work", "review"] },
