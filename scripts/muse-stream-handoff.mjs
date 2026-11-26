@@ -274,10 +274,23 @@ export async function recoverMuseHandoff({ client, policy, signal, offers, curre
     await delay(Math.max(0, Date.parse(offer.offeredAt) + graceMs - now()), undefined, { signal });
     const pending = currentOffer();
     if (!sameRecoveryOffer(offer, pending)) continue;
-    const context = await client.replyContextForHint(pending.requestMessageId, { signal });
-    if (context.roomCreatedEventId !== pending.roomCreatedEventId) throw Error("muse_handoff_identity_changed");
     const receipt = pending.receiverAcknowledgment;
     const receiverAck = integer(receipt?.sequence) && receipt.sequence > pending.openingSequence;
+    let context;
+    try {
+      context = await client.replyContextForHint(pending.requestMessageId, { signal });
+    } catch (error) {
+      if (!receiverAck || error?.status !== 404 || error.code !== "reply_request_not_found") throw error;
+      // A missing read can disagree with an earlier receipt. Repeat only this
+      // selected read, then apply the same identity and current-offer checks.
+      if (!sameRecoveryOffer(pending, currentOffer())) continue;
+      await delay(250, undefined, { signal });
+      signal.throwIfAborted();
+      if (!sameRecoveryOffer(pending, currentOffer())) continue;
+      context = await client.replyContextForHint(pending.requestMessageId, { signal });
+    }
+    signal.throwIfAborted();
+    if (context.roomCreatedEventId !== pending.roomCreatedEventId) throw Error("muse_handoff_identity_changed");
     const exact = pointer(context, { id: pending.requestMessageId, openingEventId: pending.openingEventId },
       policy, pending.openingSequence - 1, receiverAck);
     if (!exact || exact.openingSequence !== pending.openingSequence || receiverAck && !exact.receiverSeen) continue;

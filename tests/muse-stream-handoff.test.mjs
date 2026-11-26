@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { setTimeout as pause } from "node:timers/promises";
 import test from "node:test";
+import { RoomClientError } from "../client/room-agent.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
 
@@ -496,6 +497,53 @@ test("interrupted delivery preserves the receiver’s ACK and still offers the w
   assert.equal(writes, 1);
   assert.equal(await recover(), undefined);
 });
+
+for (const outcome of ["readable", "missing", "replaced", "aborted", "forbidden", "unacknowledged"]) {
+  test(`exact interrupted Muse recovery: ${outcome}`, async () => {
+    const selected = request("ready", { contextEventId: "ctx-ready", progressState: "acknowledged",
+      progressNote: "Receiving runtime read and verified this exact request; model acceptance is separate." });
+    const offer = Object.freeze({ requestMessageId: selected.id, openingEventId: selected.openingEventId,
+      roomCreatedEventId: "room-birth", openingSequence: 15, requestRevision: 0,
+      offeredAt: "2026-11-20T19:48:01Z",
+      ...(outcome === "unacknowledged" ? {} : { receiverAcknowledgment: Object.freeze({ sequence: 16 }) }) });
+    let pending = offer;
+    const reads = [], drafts = [];
+    const stop = new AbortController();
+    const refusal = outcome === "forbidden" ? new RoomClientError(403, "forbidden", "Forbidden")
+      : new RoomClientError(404, "reply_request_not_found", "Request not found in this Room");
+    const run = recoverMuseHandoff({ policy, offers: [offer], currentOffer: () => pending,
+      signal: stop.signal, graceMs: 0, record: handoff => drafts.push(handoff),
+      delay: async ms => {
+        if (ms === 0) return;
+        if (outcome === "replaced") pending = { ...offer, offeredAt: "2026-11-20T19:48:02Z" };
+        if (outcome === "aborted") stop.abort();
+      },
+      client: {
+        replyContextForHint(id, { signal }) {
+          assert.equal(signal, stop.signal);
+          reads.push(id);
+          if (outcome !== "readable" || reads.length === 1) throw refusal;
+          return context(selected, 15);
+        },
+        command: () => assert.fail("recovery must never acknowledge or start work again")
+      }
+    });
+    if (outcome === "readable") {
+      const replay = await run;
+      assert.equal(replay.requestMessageId, offer.requestMessageId);
+      assert.deepEqual(replay.receiverAcknowledgment, offer.receiverAcknowledgment);
+      assert.equal(drafts.length, 1);
+    } else {
+      if (outcome === "replaced") assert.equal(await run, undefined);
+      else if (outcome === "aborted") await assert.rejects(run, { name: "AbortError" });
+      else await assert.rejects(run, error => error === refusal);
+      assert.deepEqual(drafts, []);
+    }
+    const expectedReads = ["readable", "missing"].includes(outcome) ? 2 : 1;
+    assert.deepEqual(reads, Array(expectedReads).fill(offer.requestMessageId));
+    if (outcome !== "replaced") assert.equal(pending, offer);
+  });
+}
 
 test("interrupted recovery drops an offer cleared during its exact read", async () => {
   const selected = request("ready", { contextEventId: "ctx-ready", progressState: "acknowledged",
