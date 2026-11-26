@@ -149,6 +149,9 @@ export function assertCodexConfigSafe(text) {
 export function planCodexConfig(before, block) {
   const span = assertCodexConfigSafe(before);
   const wrapped = planMarked(null, block);
-  if (span) return before.slice(0, span.start) + wrapped + before.slice(span.end);
+  if (span) {
+    // A different endpoint cannot inherit the credential environment of this Codex profile.
+    return before.slice(span.start, span.end).trimEnd() === wrapped.trimEnd() ? before : null;
+  }
   return (before ?? "") + (before && !before.endsWith("\n") ? "\n" : "") + wrapped;
 }

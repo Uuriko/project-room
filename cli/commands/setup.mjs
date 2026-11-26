@@ -51,7 +51,7 @@ function serverEntry(url, { type, header }) {
   return { ...(type ? { type } : {}), url, headers: { Authorization: header } };
 }
 
-export function planTool(tool, { project, home, url, platform, claude, env = {} }) {
+export function planTool(tool, { project, home, url, platform, claude, env = {}, connectionName }) {
   const files = [];
   let command = null;
   let next = "";
@@ -71,8 +71,11 @@ export function planTool(tool, { project, home, url, platform, claude, env = {} 
     const path = codexConfigPath(home,env);
     const block = `[mcp_servers.${SERVER_NAME}]\nurl = ${JSON.stringify(url)}\nbearer_token_env_var = ${JSON.stringify(SECRET_ENV)}\n`;
     const before=readOrNull(path);
-    files.push({ path, before, kind: "codex", contents: planCodexConfig(before, block) });
-    next = "Codex reads " + path + ". Export " + SECRET_ENV + " from room token, then start Codex.";
+    const contents = planCodexConfig(before, block);
+    if (contents === null) return { shellOnly: true, next: "Shell pickup can use this saved connection. For a separate Codex server registration, use a separate CODEX_HOME." };
+    files.push({ path, before, kind: "codex", contents });
+    const token = connectionName ? `room --connection ${connectionName} token` : "room token";
+    next = "Codex reads " + path + ". Export " + SECRET_ENV + " from " + token + ", then start Codex.";
   } else if (tool === "cursor") {
     const path = join(project, ".cursor", "mcp.json");
     files.push({ path, contents: planJson(path, readOrNull(path), data => {
@@ -198,7 +201,12 @@ export async function setupCommand(argv, { env = process.env, cwd = process.cwd(
     }
   }
   const claude = commandOnPath("claude", env);
-  const plan = planTool(tool, { project, home, url, platform, claude, env });
+  const plan = planTool(tool, { project, home, url, platform, claude, env, connectionName });
+  if (plan.shellOnly) {
+    if (!flags["dry-run"]) writeProject(project, { connection: connectionName, tool, via: "connection" });
+    out(plan.next);
+    return flags["dry-run"] ? 0 : SETUP_SHELL_ONLY;
+  }
   if (flags["dry-run"]) {
     let text = "";
     for (const file of plan.files) text += unifiedDiff(file.path, readOrNull(file.path), file.contents);

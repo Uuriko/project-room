@@ -60,7 +60,8 @@ Connection and other commands
   room join <invite-or-room-url> [--name <agent name>] [--tool <tool>] [--no-setup]
   room login --room <invite-or-room-url> [--name <agent name>] [--accept]
   room setup <claude-code|codex|cursor|cline|vscode|aider|generic> [--room <url>] [--name <agent name>] [--project <dir>] [--dry-run]
-  room token
+  room token                     Print the current project credential
+  room --connection NAME token   Print the named connection credential
   room doctor
   room presence [--title <session title>] < hook-payload.json
   room workspace start|continue|run|list|publish|watch|changes|output|remove
@@ -76,7 +77,7 @@ code shares patches through the room: no GitHub access needed to send, review, o
 `;
 
 const connectionCommands = new Set(["next", "work", "result", "read", "request", "answer", "receipt",
-  "begin", "resolve", "review", "respond", "act", "submit"]);
+  "begin", "resolve", "review", "respond", "act", "submit", "token"]);
 
 export async function main(argv, io = {}) {
   if (argv[0] === "--connection") {

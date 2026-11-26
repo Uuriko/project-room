@@ -175,22 +175,20 @@ test("setup switches the project connection when host configuration already matc
   assert.equal(statSync(join(project, ".cursor", "mcp.json")).mtimeMs, stamp);
 });
 
-test("setup keeps an existing tool config and only replaces its own block", async t => {
+test("setup preserves an existing Codex registration and appends a Cursor entry", async t => {
   const { home, project, cleanup } = layout();
   t.after(cleanup);
   const env = envFor(home);
   const toml = join(home, ".codex", "config.toml");
   mkdirSync(join(home, ".codex"), { recursive: true });
-  writeFileSync(toml, "model = \"kept\"\n# project-room:begin\nurl = \"old\"\n# project-room:end\nkeep = true\n");
+  const before = 'model = "kept"\n# project-room:begin\n[mcp_servers.project-room]\nurl = "https://prior.example/mcp"\nbearer_token_env_var = "PROJECT_ROOM_SECRET"\n# project-room:end\n';
+  writeFileSync(toml, before);
   const cursor = join(project, ".cursor", "mcp.json");
   mkdirSync(join(project, ".cursor"), { recursive: true });
   writeFileSync(cursor, JSON.stringify({ mcpServers: { other: { url: "https://example.test/mcp" } } }, null, 2) + "\n");
-  assert.equal((await run(["setup", "codex", "--project", project], { env, cwd: project, platform: "linux" })).code, 0);
-  const updated = readFileSync(toml, "utf8");
-  assert.match(updated, /^model = "kept"\n/);
-  assert.match(updated, /keep = true\n$/);
-  assert.match(updated, new RegExp("url = " + JSON.stringify(MCP)));
-  assert.equal(updated.includes("old"), false);
+  const setup = await run(["setup", "codex", "--project", project], { env, cwd: project, platform: "linux" });
+  assert.equal(setup.code, 2);
+  assert.equal(readFileSync(toml, "utf8"), before);
   assert.equal((await run(["setup", "cursor", "--project", project], { env, cwd: project, platform: "linux" })).code, 0);
   const json = JSON.parse(readFileSync(cursor, "utf8"));
   assert.equal(json.mcpServers.other.url, "https://example.test/mcp");
@@ -681,6 +679,31 @@ if (args[0] === "find-generic-password" || args[0] === "lookup") {
     assert.equal(picked.code, 0, picked.err);
     assert.equal(JSON.parse(picked.out).viewerId, saved.memberId);
   }
+  const codexEnv = { ...env, CODEX_HOME: join(home, "isolated-codex") };
+  const setupCodex = cwd => run(["setup", "codex"], { env: codexEnv, cwd, platform: "linux" });
+  const firstCodex = await setupCodex(project);
+  assert.equal(firstCodex.code, 0, firstCodex.err);
+  const configPath = join(codexEnv.CODEX_HOME, "config.toml");
+  const installed = readFileSync(configPath, "utf8");
+  assert.ok(installed.includes(first.origin + "/mcp"));
+  const secondCodex = await setupCodex(secondProject);
+  assert.equal(readFileSync(configPath, "utf8"), installed, "a second Room must not retarget the existing Codex MCP server");
+  assert.equal(secondCodex.code, 2);
+  assert.match(secondCodex.out, /shell pickup/i);
+  assert.equal(readProject(secondProject).connection, alias);
+  const namedToken = await run(["--connection", alias, "token"], { env: codexEnv, cwd: project, platform: "linux" });
+  assert.equal(namedToken.code, 0);
+  assert.ok(namedToken.out === secondConfig.token + "\n");
+  assert.doesNotMatch(firstCodex.out + secondCodex.out, /(?:pri_|rak_)[a-z0-9_-]{8,}/i);
+  const fallbackDoctor = await run(["doctor"], { env: codexEnv, cwd: secondProject, platform: "linux" });
+  assert.equal(fallbackDoctor.code, 1);
+  assert.match(fallbackDoctor.out, /shell pickup only/);
+  const separateEnv = { ...codexEnv, CODEX_HOME: join(home, "coworker-codex") };
+  const separate = await run(["setup", "codex"], { env: separateEnv, cwd: secondProject, platform: "linux" });
+  assert.equal(separate.code, 0, separate.err);
+  assert.match(separate.out, new RegExp("room --connection " + alias + " token"));
+  assert.ok(readFileSync(join(separateEnv.CODEX_HOME, "config.toml"), "utf8").includes(second.origin + "/mcp"));
+  assert.equal(readFileSync(configPath, "utf8"), installed);
   for (const { store } of [first, second]) {
     assert.equal(store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
     assert.equal(store.db.prepare("SELECT count(*) n FROM identity_links").get().n, 1);

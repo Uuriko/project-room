@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SECRET_ENV, SERVER_NAME } from "../../server/connect-snippets.mjs";
 import { checkAccess, checkReady, loadSecret } from "../auth.mjs";
+import { codexConfigPath } from "../codex-config.mjs";
 import { BEGIN } from "../files.mjs";
 import { homeOf, loadConnection, readProject } from "../paths.mjs";
 
@@ -25,10 +26,10 @@ function containsServer(path) {
   return readFileSync(path, "utf8").includes(`"${SERVER_NAME}"`) || readFileSync(path, "utf8").includes(BEGIN);
 }
 
-export function toolConfigReady({ tool, via, project, home, platform }) {
+export function toolConfigReady({ tool, via, project, home, platform, env }) {
   if (!tool || tool === "generic") return true;
   if (tool === "claude-code") return via === "file" && containsServer(join(project, ".mcp.json"));
-  if (tool === "codex") return containsServer(join(home, ".codex", "config.toml"));
+  if (tool === "codex") return via !== "connection" && containsServer(codexConfigPath(home, env));
   if (tool === "cursor") return containsServer(join(project, ".cursor", "mcp.json"));
   if (tool === "cline") return containsServer(clinePath(home, platform));
   if (tool === "vscode") return containsServer(join(project, ".vscode", "mcp.json"));
@@ -73,7 +74,11 @@ export async function doctorCommand(argv, { env = process.env, cwd = process.cwd
     out("Room accepted the shell credential. Use /mcp in Claude Code to check its Project Room connection.");
     return 1;
   }
-  if (!toolConfigReady({ tool, via: project.via, project: cwd, home: homeOf(env), platform })) {
+  if (tool === "codex" && project.via === "connection") {
+    out("Room accepted the shell credential. This project has shell pickup only in the selected Codex profile.");
+    return 1;
+  }
+  if (!toolConfigReady({ tool, via: project.via, project: cwd, home: homeOf(env), platform, env })) {
     out("room setup " + tool);
     return 1;
   }
