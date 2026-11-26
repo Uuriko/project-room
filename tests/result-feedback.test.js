@@ -53,6 +53,17 @@ test("feedback never retargets a composed reply to another message", () => {
     assert.deepEqual(f.calls, ["blocked"]);
   }
 });
+test("only an unsent reply to another public message offers discussion without replying", () => {
+  for (const extra of [{}, { pending: true }, { toMemberId: "private" }]) {
+    const f = fixture();
+    f.draft({ replyToId: "another-message", body: "Keep my draft", ...extra });
+    let offered = false;
+    assert.equal(f.reply("result", null, () => { offered = true; }), false);
+    assert.equal(offered, Object.keys(extra).length === 0);
+    assert.deepEqual(f.calls, offered ? [] : ["blocked"]);
+  }
+});
+
 test("feedback continues a draft already addressing this result", () => {
   const f = fixture(); f.draft({ replyToId: "result", body: "My feedback", files: ["attachment"] });
   assert.equal(f.reply("result"), true);

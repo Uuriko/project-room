@@ -3688,7 +3688,9 @@ function syncWorkReturnControl() {
   button.disabled = false;
   button.hidden = !workNavigationContext() || threadOwnsMessageReturn(origin)
     || !/^#pr-record\/(work|message|result)\//.test(location.hash);
-  button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
+  const destination = { updates: "work.backToUpdates", board: "work.backToBoard", result: "workspace.backToResult" };
+  button.textContent = uiText(origin ? destination[origin.type] ?? "result.backConversation"
+    : document.querySelector(".result-focused:not([hidden])") ? "work.backToUpdates" : "work.backToRoom");
 }
 function clearWorkNavigation() {
   confirmedWorkNavigation = null;
@@ -3749,7 +3751,7 @@ function showWorkDestination(kind, id, presentation = "focus") {
         syncWorkReturnControl();
       });
     }
-  } else revealMessage(id);
+  } else revealMessage(id, presentation === "thread");
   syncWorkReturnControl();
 }
 // #3795: open the board on one claim's record — the destination behind
@@ -3976,6 +3978,8 @@ function replayWorkNavigation() {
     const work = /^#pr-record\/work\/(.+)$/.exec(location.hash);
     if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
     else if (work && targetOrigin.presentation === "thread") showWorkDestination("work", decodeFragment(work[1]), "thread");
+    else if (targetOrigin.presentation === "thread" && location.hash.startsWith("#pr-record/message/"))
+      showWorkDestination("message", decodeFragment(location.hash.slice("#pr-record/message/".length)), "thread");
     else revealLocationHash();
     syncWorkReturnControl();
     return true;
@@ -7062,7 +7066,8 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
     selectedMessage.select(id, client.generation);
     return selectedMessage.sync(client.sequence);
   },
-  onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onDiscuss(message, selection, onExistingReply) { return replyToSharedResult(message.id, selection, onExistingReply); },
+  onOpenDiscussion(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result, presentation: "thread" }); },
   onOpenDecision(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result }); },
   onOpenWorkspace(url, message, artifactId) {
     const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;

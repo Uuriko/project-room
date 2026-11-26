@@ -398,6 +398,74 @@ test("a passage reply identifies the reviewed submission when two receipts cite 
   assert.equal(await recipient.locator("#result-current-version").getAttribute("href"), url(second.event.id));
 });
 
+for (const withdraw of [false, true]) {
+  test(`accepted result draft conflict ${withdraw ? "loses the option on withdrawal" : "opens the original discussion without retargeting"}`, { timeout: 30000 }, async t => {
+    const f = await setup(t, 390);
+    const resultId = f.first.event.data.evidenceMessageId;
+    const completionEventId = f.first.event.id, evidenceVersion = f.first.event.data.evidenceVersion;
+    f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: f.item().id,
+      expectedRevision: f.item().revision, completionEventId, evidenceVersion, result: "pass", summary: "Checked result" });
+    const acceptance = f.send("owner", T.MESSAGE_POSTED, {
+      workItemId: f.item().id, messageId: "accept-discussion-fixture", body: "Accepted this exact result.",
+    });
+    f.send("owner", T.OWNER_DECISION_RECORDED, { workItemId: f.item().id,
+      expectedRevision: f.item().revision, completionEventId, evidenceVersion, decision: "approved",
+      reason: "Checked the exact result", sourceMessageId: acceptance.event.data.messageId,
+    });
+    f.send("producer", T.MESSAGE_POSTED, { messageId: "later-continuation", replyToId: resultId, body: "Next contributor has a new question." });
+    const destination = f.origin + "/?room=commons#pr-record/message/later-continuation";
+    const page = await f.login("human-checker", destination);
+    const later = page.locator('[data-message-record-id="later-continuation"]');
+    await later.locator('[data-message-action="reply"]').click();
+    const draft = "My unsent answer to the newer question.";
+    const composer = page.locator("#message-input");
+    await composer.fill(draft);
+    await page.locator("#composer-file").setInputFiles({ name: "draft-only.txt", mimeType: "text/plain", buffer: Buffer.from("kept with my reply") });
+    await page.getByText("draft-only.txt", { exact: true }).waitFor();
+    const target = await page.locator("#reply-context").textContent();
+    assert.match(target, /Next contributor/);
+
+    const exact = f.origin + "/?room=commons#pr-record/result/revision-journey/" + completionEventId;
+    await page.goto(exact);
+    await page.locator("#result-work-next").getByText("Accepted", { exact: true }).waitFor();
+    const fallback = page.getByRole("button", { name: "Open original discussion", exact: true });
+    assert.equal(await fallback.isVisible(), false);
+    await page.locator("#result-discuss").press("Enter");
+    assert.equal(page.url(), exact);
+    if (process.env.ROOM_DRAFT_DISCUSSION_CAPTURE && !withdraw) {
+      await page.screenshot({ path: join(process.env.ROOM_DRAFT_DISCUSSION_CAPTURE, "draft-conflict.png") });
+    }
+    await fallback.waitFor({ timeout: 2500 });
+    if (withdraw) {
+      f.send("producer", T.MESSAGE_DELETED, { messageId: resultId, expectedMessageRevision: 0 });
+      await fallback.waitFor({ state: "hidden" });
+      assert.equal(await page.locator("#result-discuss").isVisible(), false);
+      assert.equal(page.url(), exact);
+      return;
+    }
+    assert.ok((await fallback.boundingBox()).height >= 44);
+    await fallback.press("Enter");
+    await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, resultId);
+    assert.equal(new URL(page.url()).hash, "#pr-record/message/" + resultId);
+    assert.equal(await page.locator("#message-list").getAttribute("data-view"), "thread:" + resultId);
+    assert.equal(await composer.inputValue(), draft);
+    assert.equal(await page.locator("#reply-context").textContent(), target);
+    assert.equal(await page.getByText("draft-only.txt", { exact: true }).isVisible(), true);
+    assert.equal(f.store.room("commons").state.messages.some(message => message.body === draft), false);
+    if (process.env.ROOM_DRAFT_DISCUSSION_CAPTURE) {
+      await page.screenshot({ path: join(process.env.ROOM_DRAFT_DISCUSSION_CAPTURE, "original-discussion.png") });
+    }
+
+    await page.getByRole("button", { name: "Back to result", exact: true }).press("Enter");
+    await page.locator("#result-work-next").getByText("Accepted", { exact: true }).waitFor();
+    assert.equal(page.url(), exact);
+    await page.goForward();
+    await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, resultId);
+    assert.equal(await composer.inputValue(), draft);
+    assert.equal(await page.locator("#reply-context").textContent(), target);
+  });
+}
+
 test("first browser sign-in opens the exact repository assignment", { timeout: 30000 }, async t => {
   const f = await setup(t, 390);
   const accountable = f.store.identities.create("Repository agent");

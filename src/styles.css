@@ -1838,6 +1838,8 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
 #result-resize:hover, #result-resize:focus-visible { background: var(--blue); outline-offset: -2px; }
 .preview-resizing { cursor: col-resize; user-select: none; }
 .inline-result .portable-actions .button { min-height: 32px; padding: var(--space-1) var(--space-2); background: transparent; border-color: transparent; }
+.inline-result .portable-actions:has(#result-open-discussion:not([hidden])) { margin-top: var(--space-2); }
+.inline-result .portable-actions:has(#result-open-discussion:not([hidden])) .button { min-height: 44px; }
 @media (min-width: 1100px) {
   .community-shell:has(> .result-docked:not([hidden])) { grid-template-columns: 12rem minmax(0, 1fr) var(--result-width, 340px); }
   #main > .result-docked { position: relative; grid-column: 3; grid-row: 1; min-width: 0; min-height: 0; overflow: visible; margin: 0; padding: var(--space-3); border: 0; border-left: 1px solid var(--line); border-radius: 0; background: var(--panel); display: flex; flex-direction: column; }

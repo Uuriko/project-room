@@ -28,7 +28,7 @@ export function renderResultText(body, text, roomId, { openInNewTab = false } = 
     }
     link.textContent = href;
     if (file && file.file === file.file.trim() && !/\p{Bidi_Control}/u.test(file.file)) {
-      const label = file.anchor ? `${file.file}:${file.anchor.line} (${file.anchor.side})` : file.file;
+      const label = file.anchor ? uiText("result.fileAnchor", { path: file.file, line: file.anchor.line, side: file.anchor.side }) : file.file;
       // The selector doesn't carry a repository name. Leave colliding labels as URLs.
       fileLinks.set(label, fileLinks.has(label) ? null : link);
     }
@@ -53,10 +53,12 @@ export function renderResultText(body, text, roomId, { openInNewTab = false } = 
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, discussionMessage, loadDiscussion, memberLabel, workRecord, focusRecord,
-  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, onOpenWorkspace, onOpenDecision, storage = null, recoveryScope = () => null }) {
+  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, onWorkAction, onReturn, onOpenWorkspace, onOpenDecision, onOpenDiscussion, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null, pointerSelection = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
+  const originalDiscussion = $("#result-open-discussion");
+  if (originalDiscussion) originalDiscussion.textContent = uiText("workspace.openOriginalDiscussion");
   const wide = matchMedia("(min-width: 1100px)");
   const savedKey = "project-room:result-selection:v1";
   const selectionLifetime = 12 * 60 * 60 * 1000;
@@ -445,6 +447,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const retry = resultElement("result-retry");
     resultElement("result-discuss").hidden = !resultDiscussionMessage(view) && !needsConversation(view);
     resultElement("result-discuss").disabled = !canDiscuss() || Boolean(view.resolving);
+    if (originalDiscussion) {
+      originalDiscussion.hidden = !view.replyConflict || !resultDiscussionMessage(view);
+      originalDiscussion.disabled = !canDiscuss();
+    }
     retry.hidden = !view.error && !view.retrying;
     retry.disabled = !view.error;
     for (const action of ["result-copy-link", "result-copy-text", "result-download"]) {
@@ -469,6 +475,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
+    if (originalDiscussion) originalDiscussion.hidden = true;
     resultElement("result-use-status").textContent = "";
     resultElement("result-copy-link").hidden = true;
     resultElement("result-copy-text").hidden = true;
@@ -559,13 +566,26 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const message = resultDiscussionMessage(view);
     if (!message) { resultElement("result-use-status").textContent = uiText("result.conversationUnavailable"); return; }
     resultElement("result-use-status").textContent = "";
-    if (onDiscuss(message, selection) === false) return;
+    view.replyConflict = false;
+    const replied = onDiscuss(message, selection, () => {
+      view.replyConflict = true;
+      resultElement("result-use-status").textContent = uiText("result.draftRepliesElsewhere");
+    });
+    if (replied === false) { resultStatus(); return; }
     if (!view.focused && wide.matches && resultView === view) {
       view.fromResults = false;
       saveSelection(view);
       resultStatus();
     } else closeResult(false);
     $("#message-input").focus({ preventScroll: true });
+  });
+  originalDiscussion?.addEventListener("click", () => {
+    const view = resultView;
+    if (!view?.replyConflict || !usableText(view) || !canDiscuss()) return;
+    const message = resultDiscussionMessage(view);
+    if (!message) return;
+    onOpenDiscussion(message.id, { roomId: view.roomId, workItemId: view.workItemId,
+      completionEventId: view.receipt.completionEventId });
   });
   resultElement("result-original").addEventListener("click", () => {
     const view = resultView;
@@ -672,6 +692,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-current-version").hidden = true;
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
+      if (originalDiscussion) originalDiscussion.hidden = true;
       resultElement("result-copy-link").hidden = true;
       resultElement("result-copy-text").hidden = true;
       resultElement("result-download").hidden = true;
