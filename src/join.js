@@ -683,7 +683,9 @@ async function boot() {
       if (await clipboard.copy(agentInstructions.value) !== "copied") throw new Error("clipboard");
       message.textContent = uiText("invite.copy.015");
     } catch {
-      agentInstructions.focus(); agentInstructions.select();
+      $("join-existing-agent-manual").open = true;
+      agentInstructions.focus();
+      agentInstructions.select();
       message.textContent = uiText("invite.native.select");
     }
   };

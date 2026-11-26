@@ -51,7 +51,8 @@ h1.join-brand { text-align: center; margin: 0 0 1.5rem; font-size: 1rem; font-we
 /* Keep the permissions disclosure tappable beside the browser join action. */
 .join-permissions-details > summary { min-height: 24px; }
 
-/* The Advanced browser join disclosure is a touch and keyboard action. */
+#join-existing-agent-copy { min-height: 44px; }
+#join-existing-agent-manual > summary,
 #join-browser-alternative > summary { box-sizing: border-box; min-height: 44px; padding-block: .5rem; cursor: pointer; }
 
 /* Standalone links under the sign-in forms (Back to log in, What is Project

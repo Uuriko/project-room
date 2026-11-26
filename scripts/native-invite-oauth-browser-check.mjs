@@ -59,14 +59,39 @@ test('native invitation HTTPS browser: review Back, lost-response retry and revo
   invitation = { code: new URL(invitationUrl).pathname.split('/').at(-1) };
   assert.match(invitation.code, /^RM-[A-Z0-9]{16}$/);
   await inviterContext.close();
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const context = await browser.newContext({
+    ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+  });
   const page = await context.newPage(); page.setDefaultTimeout(7000);
   await context.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { globalThis.copiedAgentInvite = text; } } }));
   await page.goto(invitationUrl);
   await page.locator('#join-consent:not([hidden])').waitFor();
+  const fitsViewport = () => page.evaluate(() => innerWidth === 390 && document.documentElement.scrollWidth <= innerWidth);
+  assert.ok(await fitsViewport(), 'the invitation fits the phone before copying');
   assert.equal(await page.locator('#join-existing-agent-copy').evaluate(button => button === globalThis.document.activeElement), true, 'keyboard starts with the non-consuming existing-agent option');
-  await page.getByRole('button', { name: 'Copy invitation for an agent', exact: true }).click();
-  assert.match(await page.evaluate(() => globalThis.copiedAgentInvite), /keep the invitation unused until/);
+  const instructions = page.getByRole('textbox', { name: 'Invitation for your existing agent', includeHidden: true });
+  assert.equal(await instructions.isVisible(), false, 'the invitation text starts collapsed');
+  const copyInvitation = page.getByRole('button', { name: 'Copy invitation for an agent', exact: true });
+  await copyInvitation.click();
+  const copiedInvitation = await page.evaluate(() => globalThis.copiedAgentInvite);
+  assert.match(copiedInvitation, /keep the invitation unused until/);
+  assert.equal(await instructions.isVisible(), false, 'a successful copy leaves the invitation text collapsed');
+  const manual = page.getByText('View invitation text', { exact: true });
+  await manual.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await instructions.inputValue(), copiedInvitation);
+  await page.keyboard.press('Enter');
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = async () => { throw new Error('clipboard blocked'); };
+  });
+  await copyInvitation.click();
+  await instructions.waitFor({ state: 'visible' });
+  assert.ok(await fitsViewport(), 'manual fallback fits the phone too');
+  assert.equal(await instructions.evaluate(field => (
+    field === globalThis.document.activeElement
+    && field.selectionStart === 0
+    && field.selectionEnd === field.value.length
+  )), true, 'a failed copy opens the fallback and selects the full invitation');
   assert.equal(store.db.prepare('SELECT redeemed_at FROM agent_invite_codes').get().redeemed_at, null, 'recipient copy preserves native consent capability');
   assert.equal(await page.locator('#join-name').isVisible(), false);
   await page.locator('#join-browser-alternative > summary').click();
