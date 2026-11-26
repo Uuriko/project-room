@@ -167,13 +167,14 @@ export function installResultReader({ client, getState, getSession, sameSession,
     body.replaceChildren();
     // Preserve the submitted characters, including punctuation around plain URLs.
     const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
+    const fileLinks = new Map();
     let offset = 0;
     for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
       const href = match[0];
       const url = URL.parse(href);
       if (!url || url.href !== href) continue;
-      if (!githubFile.test(href) && !(url.pathname === location.pathname
-          && roomFileChangeSelection(url, location.origin, getSession().roomId))) continue;
+      const file = url.pathname === location.pathname && roomFileChangeSelection(url, location.origin, getSession().roomId);
+      if (!githubFile.test(href) && !file) continue;
       const link = document.createElement("a");
       link.href = href;
       if (url.origin !== location.origin) {
@@ -181,10 +182,26 @@ export function installResultReader({ client, getState, getSession, sameSession,
         link.rel = "noopener noreferrer";
       }
       link.textContent = href;
+      if (file && file.file === file.file.trim() && !/\p{Bidi_Control}/u.test(file.file)) {
+        const label = file.anchor ? `${file.file}:${file.anchor.line} (${file.anchor.side})` : file.file;
+        // The selector doesn't carry a repository name. Leave colliding labels as URLs.
+        fileLinks.set(label, fileLinks.has(label) ? null : link);
+      }
       body.append(text.slice(offset, match.index), link);
       offset = match.index + href.length;
     }
     body.append(text.slice(offset));
+    for (const [label, link] of fileLinks) {
+      if (!link) continue;
+      const original = document.createElement("span");
+      original.className = "sr-only";
+      original.textContent = link.textContent;
+      // Keep the submitted URL in the selectable DOM for native Copy and Reply.
+      link.dataset.resultFile = label;
+      link.setAttribute("aria-label", label);
+      link.title = link.href;
+      link.replaceChildren(original);
+    }
   }
   resultElement("result-body").addEventListener("click", async event => {
     const link = event.target.closest("a");

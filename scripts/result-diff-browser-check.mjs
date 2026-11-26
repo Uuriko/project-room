@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { rmSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
@@ -18,10 +18,11 @@ import { FIRST_RUN_SEEN_KEY } from "../src/agent-first-run.js";
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
 
-async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody, firstCredit, approveBoth = false } = {}) {
+async function setup(t, width, { retained = false, credentialReadBurst, firstDirectTo, firstBody, firstCredit, approveBoth = false, browserType = chromium } = {}) {
   const f = createAcceptanceFixture();
   const makeServer = () => createRoomServer({ store: f.store, streamInterval: 60, credentialReadBurst });
   let server = makeServer(), browser;
+  const errors = [];
   async function stopServer() {
     server.closeStreams(); server.closeAllConnections();
     if (server.listening) await new Promise(resolve => server.close(resolve));
@@ -35,9 +36,11 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
     await new Promise(resolve => server.listen(port, "127.0.0.1", resolve));
   }
   t.after(async () => {
+    const pageErrors = [...errors];
     await browser?.close();
     await stopServer();
     rmSync(f.directory, { recursive: true, force: true });
+    assert.deepEqual(pageErrors, []);
   });
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
   const item = id => f.store.room("commons").state.workItems[id];
@@ -65,11 +68,11 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
   const origin = `http://127.0.0.1:${server.address().port}`;
   const body = typeof firstBody === "function" ? firstBody(origin) : firstBody;
   const first = completeWithText("revision-journey", body ?? (retained ? retainedBody : "Result A\nKeep this line\nMissing named owner"), firstDirectTo, firstCredit);
-  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const errors = [];
+  browser = await browserType.launch({ headless: true, ...(browserType === chromium && process.env.ROOM_TEST_CHROMIUM_PATH
+    ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   async function newPage() {
     const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-    await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    await context.route(url => url.origin !== origin, route => route.abort());
     const page = await context.newPage(); page.setDefaultTimeout(8000);
     page.on("pageerror", error => errors.push(error.message));
     return page;
@@ -81,7 +84,6 @@ async function setup(t, width, { retained = false, credentialReadBurst, firstDir
     return page;
   }
   const mutate = (type, data) => send("producer", type, { workItemId: "revision-journey", expectedRevision: item("revision-journey").revision, ...data });
-  t.after(() => assert.deepEqual(errors, []));
   return { ...f, get store() { return f.store; }, origin, restart, item: () => item("revision-journey"), first, newPage, login, mutate, send, complete: body => completeWithText("revision-journey", body) };
 }
 const card = page => page.locator('[data-work-record-id="revision-journey"]');
@@ -550,7 +552,7 @@ test("a returning reviewer can finish the correction from the original link afte
 
   const accepted = await f.login("human-checker", currentUrl);
   await accepted.locator("#result-work-next").getByText("Accepted", { exact: true }).waitFor();
-  await accepted.locator("#result-body").getByRole("link", { name: file, exact: true }).click();
+  await accepted.locator("#result-body").getByRole("link", { name: "brief.md", exact: true }).click();
   await accepted.locator("[data-workspace-primary]").getByText("+Owner: Maya · Friday", { exact: true }).waitFor();
   const discussion = accepted.getByRole("link", { name: "Open full discussion" });
   const acceptedMessage = second.event.data.evidenceMessageId;
@@ -801,7 +803,7 @@ for (const audience of ["public", "private"]) {
     }
     const reviewer = await f.login("human-checker", f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id);
     const body = reviewer.locator("#result-body");
-    const link = body.getByRole("link", { name: href(f.origin), exact: true });
+    const link = body.getByRole("link", { name: "brief.md", exact: true });
     await link.waitFor();
     assert.equal(await body.textContent(), text(f.origin));
     assert.equal(await body.locator("a").count(), 1);
@@ -846,7 +848,7 @@ for (const audience of ["public", "private"]) {
       await route.continue();
     });
     try {
-      await leaving.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+      await leaving.locator("#result-body").getByRole("link", { name: "brief.md", exact: true }).press("Enter");
       await held.promise;
       await leaving.locator("#topbar-updates").click();
       await leaving.locator("#result-dialog").waitFor({ state: "hidden" });
@@ -861,7 +863,7 @@ for (const audience of ["public", "private"]) {
     }
 
     const returning = await f.login("human-checker", exact);
-    await returning.locator("#result-body").getByRole("link", { name: href(f.origin), exact: true }).press("Enter");
+    await returning.locator("#result-body").getByRole("link", { name: "brief.md", exact: true }).press("Enter");
     const original = returning.getByRole("link", { name: "Open original discussion" });
     await original.waitFor();
     f.send("producer", T.MESSAGE_DELETED, { messageId: evidence, expectedMessageRevision: 0 });
@@ -1169,7 +1171,7 @@ test("a reviewer can return to the exact revised result after its file is withdr
   if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "01-review-needed.png") });
   await row.getByRole("button", { name: "Open Revise a short result", exact: true }).press("Enter");
   const resultBody = reviewer.locator("#result-body");
-  const link = resultBody.getByRole("link", { name: /brief\.md/ });
+  const link = resultBody.getByRole("link", { name: "brief.md", exact: true });
   await link.waitFor();
   const exact = reviewer.url();
   assert.equal(new URL(exact).hash, "#pr-record/result/revision-journey/" + revised.event.id);
@@ -1208,3 +1210,68 @@ test("a reviewer can return to the exact revised result after its file is withdr
   await link.waitFor();
   assert.equal(reviewer.url(), exact);
 });
+
+for (const browserType of process.env.ROOM_TEST_WEBKIT ? [chromium, webkit] : [chromium]) {
+  test(`pinned file label preserves native copy and reply in ${browserType.name()}`, { timeout: 30000 }, async t => {
+    const fileLink = (origin, file, id = "8".repeat(32)) => origin + "/?room=commons#pr-workspace/"
+      + [id, 1, "changes", "9".repeat(64), "producer", "7".repeat(40), encodeURIComponent(file)].join("/");
+    const text = origin => [
+      "Review the revised overview:",
+      fileLink(origin, "docs/Brief draft.md"),
+      "The owner is now named.",
+      fileLink(origin, "shared/README.md"),
+      fileLink(origin, "shared/README.md", "6".repeat(32)),
+      fileLink(origin, "docs/Café.md").replace("room=commons", "room=other")
+    ].join("\n");
+    const f = await setup(t, 390, { browserType, firstBody: text });
+    const exact = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+    const page = await f.login("human-checker", exact);
+    const body = page.locator("#result-body");
+    const href = fileLink(f.origin, "docs/Brief draft.md");
+    const renderedLink = body.locator("a").first();
+    await renderedLink.waitFor();
+    if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, browserType.name() + ".png") });
+    const link = body.getByRole("link", { name: "docs/Brief draft.md", exact: true });
+    assert.equal(await link.count(), 1);
+    assert.equal(await link.getAttribute("href"), href);
+    assert.equal(await link.evaluate(el => el.getClientRects().length), 1);
+    assert.equal(await body.textContent(), text(f.origin));
+    assert.equal(await body.getByRole("link", { name: fileLink(f.origin, "shared/README.md"), exact: true }).count(), 1);
+    assert.equal(await body.getByRole("link", { name: fileLink(f.origin, "shared/README.md", "6".repeat(32)), exact: true }).count(), 1);
+    assert.equal(await body.locator("a").count(), 3, "the other room stays plain text");
+
+    const selected = text(f.origin).split("\n").slice(0, 3).join("\n");
+    const selectExcerpt = () => body.evaluate(element => {
+      const range = document.createRange();
+      range.setStart(element.firstChild, 0);
+      const after = element.querySelector("a").nextSibling;
+      range.setEnd(after, "\nThe owner is now named.".length);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return selection.toString();
+    });
+    assert.equal(await selectExcerpt(), selected);
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(modifier + "+c");
+    const paste = await page.evaluateHandle(() => {
+      const target = document.createElement("textarea");
+      document.body.append(target);
+      target.focus();
+      return target;
+    });
+    await page.keyboard.press(modifier + "+v");
+    assert.equal(await paste.evaluate(el => el.value), selected);
+    await paste.evaluate(el => el.remove());
+
+    assert.equal(await selectExcerpt(), selected);
+    await page.locator("#result-discuss").click();
+    const draft = page.locator("#message-input");
+    await draft.waitFor();
+    const feedback = await draft.inputValue();
+    assert.ok(feedback.includes(href));
+    assert.ok(feedback.includes("Review the revised overview:"));
+    assert.ok(feedback.includes("The owner is now named."));
+    assert.ok(feedback.includes(exact));
+  });
+}
