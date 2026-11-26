@@ -1,4 +1,4 @@
-import { openComposerOptions } from "./room-chrome.mjs";
+import { openComposerOptions, openConversation } from "./room-chrome.mjs";
 // Synthetic human journeys against a disposable real service, not participant research.
 import { revealRecord } from "./reveal-record.mjs";
 import { join } from "node:path";
@@ -10,6 +10,8 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { event } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, viewport = { width: 1280, height: 900 }) {
@@ -23,11 +25,13 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  async function login(who) {
+  async function login(who, { roomId = null, key = fixture.keys[who] } = {}) {
     const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await signInFixture(page, fixture.keys[who]);
+    const destination = new URL(`http://127.0.0.1:${server.address().port}`);
+    if (roomId) destination.searchParams.set("room", roomId);
+    await page.goto(destination.href);
+    await signInFixture(page, key);
     await page.locator("#main").waitFor({ state: "visible" });
     return page;
   }
@@ -37,15 +41,6 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
 }
 const record = revealRecord;
 const input = page => page.locator("#message-input");
-async function enterConversation(page) {
-  const updates = page.locator("#updates-dialog");
-  await updates.waitFor({ state: "visible" });
-  assert.equal(await input(page).isVisible(), false);
-  await updates.getByRole("button", { name: "Conversation", exact: true }).click();
-  await updates.waitFor({ state: "hidden" });
-  await input(page).waitFor({ state: "visible" });
-}
-
 const idle = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled);
 const failed = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
 const saved = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#request-mode-bar").hidden);
@@ -57,8 +52,8 @@ async function mode(page, id, kind) {
 
 for (const width of [1280, 390, 320]) test(`request journey at ${width}px: request, clarify and answer stay in chat without closing work`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width, height: 900 }), owner = await f.login("owner"), guest = await f.login("guest");
-  await enterConversation(owner);
-  await enterConversation(guest);
+  await openConversation(owner);
+  await openConversation(guest);
   const before = structuredClone(f.state().workItems);
   await input(owner).fill("Keep my ordinary draft");
   await openComposerOptions(owner); await owner.locator("#request-reply").click();
@@ -160,7 +155,7 @@ test("lost committed answer remains exact and read-only across reload, then retr
 
 test("unconfirmed receipt locks the exact request; ordinary drafts remain separate", { timeout: 60000 }, async t => {
   const f = await setup(t), page = await f.login("owner");
-  await enterConversation(page);
+  await openConversation(page);
   await input(page).fill("Ordinary draft"); await openComposerOptions(page); await page.locator("#request-reply").click();
   await input(page).fill("An explicit question"); await page.locator("#message-to-select").selectOption("guest");
   let alter = true; const commands = [];
@@ -186,26 +181,73 @@ test("unconfirmed receipt locks the exact request; ordinary drafts remain separa
 
 
 test("original conversation shows host progress and recovery without changing the request", { timeout: 60000 }, async t => {
-  const f = await setup(t), requestMessageId = "host-visible";
+  const f = await setup(t, { width: 390, height: 844 }), requestMessageId = "host-visible";
   f.request(requestMessageId, "producer");
   const request = f.state().replyRequests[requestMessageId];
   const input = { requestMessageId, attemptId: "visible-host", action: "claim",
     expectedRequestRevision: request.revision, contextEventId: request.contextEventId };
   f.store.requestRuns.apply(f.keys.producer, "commons", input);
+  f.send("producer", "reply_request.progressed", { requestMessageId, expectedRequestRevision: request.revision, progress: "acknowledged" });
   const owner = await f.login("owner"), row = (await record(owner, requestMessageId));
-  await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent === "Agent working", requestMessageId);
+  const status = row.locator("[data-request-run]");
+  const shots = process.env.ROOM_REQUEST_STATUS_CAPTURE;
+  await owner.waitForFunction(id => Boolean(document.querySelector(`[data-request-run="${id}"]`)?.textContent), requestMessageId);
+  if (shots) await row.screenshot({ path: join(shots, "reserved.png") });
+  assert.equal(await status.textContent(), "Attempt reserved");
+  f.send("producer", "reply_request.progressed", { requestMessageId, expectedRequestRevision: request.revision, progress: "working" });
+  await row.getByText("Start previously reported", { exact: true }).waitFor();
+  if (shots) await row.screenshot({ path: join(shots, "reported.png") });
   assert.equal(f.state().replyRequests[requestMessageId].revision, request.revision);
+  const clarification = f.send("owner", "message.posted", { messageId: "host-visible-clarification",
+    replyToId: requestMessageId, toMemberId: "producer", body: "Please include the date in the release note." });
+  await (await record(owner, "host-visible-clarification")).waitFor();
+  assert.equal(await status.textContent(), "Start previously reported");
+  assert.equal(f.state().replyRequests[requestMessageId].contextEventId, clarification.event.id);
   f.store.requestRuns.apply(f.keys.producer, "commons", { ...input, action: "needs_attention" });
   // The operational poll does not require a new room event or a page reload.
   await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent.includes("Host needs attention"), requestMessageId, { timeout: 15000 });
   assert.equal(await row.locator('[data-message-action="request-cancelled"]').count(), 1);
+  f.send("producer", "message.posted", {
+    messageId: "host-visible-answer", replyToId: requestMessageId, responseToRequestId: requestMessageId,
+    toMemberId: "owner", body: "The release note is ready for review.", responseOutcome: "answered",
+    expectedRequestRevision: request.revision, contextEventId: clarification.event.id,
+    contextSequence: clarification.sequence, workItemId: null,
+  });
+  await row.getByText("Answered", { exact: true }).waitFor();
+  assert.equal(await status.textContent(), "");
+  assert.deepEqual(f.errors, []);
+});
+
+test("current room shows a durable start report without polling host attempts", { timeout: 30000 }, async t => {
+  const f = await setup(t, { width: 390, height: 844 });
+  const roomId = "normalized-request-status", worker = "reviewer";
+  const colleague = event({ roomId, actorId: "owner", type: "member.added",
+    data: { memberId: "colleague", displayName: "Colleague", kind: "human", permissions: [] } });
+  const member = event({ roomId, actorId: "owner", type: "member.added",
+    data: { memberId: worker, displayName: "Reviewer", kind: "agent", permissions: [], accountableHumanId: "colleague" } });
+  f.store.initialize([...initialRoom(roomId), colleague, member], { representation: "normalized-current-v1" });
+  const ownerKey = f.store.issueAccessKey(roomId, "owner"), agentKey = f.store.issueAccessKey(roomId, worker);
+  const colleagueKey = f.store.issueAccessKey(roomId, "colleague");
+  f.store.command(ownerKey, roomId, { id: "document-ask", type: "message.posted",
+    data: { messageId: "document-ask", body: "Check the release notes.", toMemberId: worker, requestKind: "reply" } });
+  const owner = await f.login("owner", { roomId, key: ownerKey });
+  const row = await record(owner, "document-ask");
+  await row.getByText("Execution status unavailable", { exact: true }).waitFor();
+  f.store.command(agentKey, roomId, { id: "document-start", type: "reply_request.progressed",
+    data: { requestMessageId: "document-ask", expectedRequestRevision: 0, progress: "working" } });
+  await row.getByText("Start previously reported", { exact: true }).waitFor();
+  assert.equal(await row.getByText("Answered", { exact: true }).count(), 0);
+  const colleaguePage = await f.login("colleague", { roomId, key: colleagueKey });
+  assert.throws(() => f.store.replyRequests.selected(colleagueKey, roomId, "document-ask"),
+    { code: "reply_request_not_found" }, "owning the recipient does not make the human a request party");
+  assert.equal(await colleaguePage.locator('[data-message-record-id="document-ask"]').count(), 0);
+  assert.equal(await colleaguePage.locator('[data-request-run="document-ask"]').count(), 0);
   assert.deepEqual(f.errors, []);
 });
 
 
 for (const width of [1280, 390]) test(`coding result stays readable and escaped at ${width}px`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width, height: 900 });
-  const owner = await f.login("owner");
   f.request("inspect-code", "producer");
   const body = hostReplyBody({ body: "Fixed the parser.", codeResult: {
     repositoryUrl: "https://example.com/repo", baseRevision: "a".repeat(40),
@@ -213,6 +255,7 @@ for (const width of [1280, 390]) test(`coding result stays readable and escaped 
     files: ["parser.js"], checks: [{ command: "node --test", outcome: "passed" }]
   } });
   f.send("producer", "message.posted", { messageId: "inspect-result", replyToId: "inspect-code", toMemberId: "owner", body });
+  const owner = await f.login("owner");
   await (await record(owner, "inspect-code")).locator('[data-message-action="reply"]').click();
   const content = (await record(owner, "inspect-result")).locator(".message-body");
   await content.waitFor();
@@ -275,7 +318,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
 test("host answer survives closing the requester and returning in an independent browser session", { timeout: 60000 }, async t => {
   const f = await setup(t, { width: 390, height: 844 });
   const owner = await f.login("owner");
-  await enterConversation(owner);
+  await openConversation(owner);
   await openComposerOptions(owner); await owner.locator("#request-reply").click();
   await input(owner).fill("Summarize the local reference task.");
   await owner.locator("#message-to-select").selectOption("producer");

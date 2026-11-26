@@ -3210,11 +3210,14 @@ function restoreComposer(draft) {
   autosizeComposer();
 }
 function requestRunLabel(id) {
-  if(client.sectionAvailability('requestRuns')?.available===false)return uiText("currentRoom.executionUnavailable");
+  const request = state?.replyRequests?.[id];
+  if (request?.status !== "open") return "";
+  const reportedLabel = request.progressState === "working" ? uiText("request.status.startReported") : "";
+  if (client.sectionAvailability("requestRuns")?.available === false) return reportedLabel || uiText("currentRoom.executionUnavailable");
   const run = requestRuns[id];
-  if (!run || state?.replyRequests?.[id]?.status !== "open") return "";
+  if (!run) return reportedLabel;
   const status = run.state === "working" && Date.now() - run.updatedAt > 120000 ? "unknown" : run.state;
-  return ({ working: "Agent working", result_ready: "Result saved · delivery pending",
+  return ({ working: reportedLabel || uiText("request.status.reserved"), result_ready: "Result saved · delivery pending",
     needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
 }
 async function refreshRequestRuns({ force = false } = {}) {

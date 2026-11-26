@@ -774,6 +774,8 @@
   "currentRoom.invalidFileSelection": "Invalid file selection",
   "currentRoom.uploadUnavailable": "Uploads are unavailable here. Existing files can still be downloaded.",
   "currentRoom.executionUnavailable": "Execution status unavailable",
+  "request.status.reserved": "Attempt reserved",
+  "request.status.startReported": "Start previously reported",
   "currentRoom.muteUnconfirmed": "Mute selection could not be confirmed",
   "currentRoom.checkMute": "Check mute state",
   "currentRoom.notificationsUnavailable": "Notifications are unavailable. Check Conversations, Work and History for requests.",
