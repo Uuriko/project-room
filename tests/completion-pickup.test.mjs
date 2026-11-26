@@ -571,14 +571,34 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.equal(receipt("claimed-alternate").status, "not_recorded");
     assert.equal(store.replyRequests.selected(owner, roomId, request.id).request.status, "open");
 
+    await capacityChange("resume", "after-claimed-stop");
+    const progressed = buildReplyCommand(identity, "room_request_reply", { requestId: "progressed-source",
+      toMemberId: recipientId, workItemId, body: "Keep the existing recipient progress." });
+    store.command(owner, roomId, progressed);
+    const progressId = progressed.data.messageId;
+    store.command(primary.secret, roomId, buildReplyCommand({ roomId, memberId: recipientId }, "room_progress_request", {
+      requestId: "progress-ack", requestMessageId: progressId, expectedRequestRevision: 0, progress: "acknowledged"
+    }));
+    atomicPrivateJson(plan, { checkpointPath, routes: [{
+      roomId, requesterId, recipientId, workItemId, credentialPath, after,
+      capacityHandoff: { sourceOperationId: "progressed-source", replacementOperationId: "progressed-alternate",
+        replacementMemberId: "alternate", body: "This replacement must not run." }
+    }] });
+    stop(); stop = start();
+    await capacityChange("pause", "reported-progressed-stop", `${CAPACITY_STOP}:request:${progressId}`);
+    await setImmediate();
+    assert.equal(latest("completion_pickup.capacity"), "inspect_existing_attempt");
+    assert.equal(receipt("progressed-alternate").status, "not_recorded");
+    assert.equal(store.replyRequests.selected(owner, roomId, progressId).request.status, "open");
+
   });
 }
 
-test("a stopped provider's unopened Work Thread becomes an authorized successor atomically", t => {
+async function checkCapacityWork(t, representation) {
   const store = new RoomStore(":memory:");
   t.after(() => store.close());
   const roomId = "commons", requesterId = "owner", recipientId = "primary", workItemId = "old-work";
-  store.initialize(initialRoom(), { representation: "normalized-current-v1" });
+  store.initialize(initialRoom(), representation ? { representation } : {});
   const secret = store.issueAccessKey(roomId, requesterId);
   const primary = store.identities.create("Primary agent");
   const replacement = store.identities.create("Replacement agent");
@@ -600,6 +620,12 @@ test("a stopped provider's unopened Work Thread becomes an authorized successor 
   propose("started-work");
   store.command(primary.secret, roomId, { id: "old-accept", type: "work.accepted", data: { workItemId: "started-work", expectedRevision: 0 } });
   store.command(primary.secret, roomId, { id: "old-start", type: "work.started", data: { workItemId: "started-work", expectedRevision: 1 } });
+  if (!representation) {
+    propose("stopping-work");
+    store.command(secret, roomId, { id: "request-session-stop", type: "session.stop_requested",
+      data: { workItemId: "stopping-work", expectedRevision: 0 } });
+    assert.equal(store.workContext(secret, roomId, "stopping-work").work.state, "proposed");
+  }
   store.wakeQueue.pause(primary.secret, roomId, { requestId: "provider-work-hold", reason: `${CAPACITY_STOP}:work:${workItemId}:0` });
   const originalCommand = store.command.bind(store);
   store.command = (token, room, command) => {
@@ -631,4 +657,17 @@ test("a stopped provider's unopened Work Thread becomes an authorized successor 
   store.wakeQueue.pause(primary.secret, roomId, { requestId: "provider-started-hold", reason: `${CAPACITY_STOP}:work:started-work:2` });
   const started = { ...route, workItemId: "started-work", capacityWork: { ...route.capacityWork, operationId: "move-started-work", expectedRevision: 2 } };
   assert.equal(capacityWorkHandoff(store, { ...binding, route: started, workHandoff: compileCapacityWork(started) }, receiver).state, "inspect_existing_work");
-});
+  if (!representation) {
+    store.wakeQueue.resume(primary.secret, roomId, { requestId: "provider-started-resumed" });
+    store.wakeQueue.pause(primary.secret, roomId, { requestId: "provider-stopping-hold", reason: `${CAPACITY_STOP}:work:stopping-work:1` });
+    const stopping = { ...route, workItemId: "stopping-work",
+      capacityWork: { ...route.capacityWork, operationId: "move-stopping-work", expectedRevision: 1 } };
+    assert.equal(capacityWorkHandoff(store, { ...binding, route: stopping, workHandoff: compileCapacityWork(stopping) }, receiver).state,
+      "inspect_existing_work");
+  }
+}
+
+test("an unopened legacy Work Thread transfers atomically while a session stop preserves ownership",
+  t => checkCapacityWork(t));
+test("an unopened normalized Work Thread transfers atomically with independent review",
+  t => checkCapacityWork(t, "normalized-current-v1"));

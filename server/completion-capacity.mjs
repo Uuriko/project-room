@@ -2,6 +2,7 @@
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
+import { SESSION_STATUSES, sessionRecord } from "../src/work-item-session.js";
 import { observeSelectedRuns } from "./request-runs.mjs";
 import { readWorkItem } from "./work-repository.mjs";
 
@@ -52,14 +53,14 @@ export function capacityHandoff(store, binding, receiver) {
     // A pause does not stop an already dispatched turn. The marker is an
     // operator/host attestation of pre-dispatch refusal; any recorded progress
     // or revised context makes this automatic path ineligible.
-    if (request.contextEventId !== request.openingEventId || page.hasMore || page.items.length !== 1
+    if (request.acknowledgedAt || request.progressState || request.contextEventId !== request.openingEventId || page.hasMore || page.items.length !== 1
         || page.items[0].kind !== "opened" || observeSelectedRuns(store, roomId, [request])[sourceId])
       return { state: "inspect_existing_attempt" };
     const target = capacity.replacementMemberId;
     if (store.wakeQueue.pauseStatus(roomId, target)) return { state: "replacement_paused" };
     if (binding.hasOpenRequest({ ...route, recipientId: target })) return { state: "replacement_busy_or_unknown" };
     const exact = { roomId, recipientId: target, requesterId, workItemId, id: capacity.successor.data.messageId };
-    if (!receiver?.hasRecoveryReceiver(exact, receipt.sequence, route.allowUnadvertisedReceiver === true))
+    if (!receiver?.hasRecoveryReceiver(exact, receipt.sequence, false))
       return { state: "replacement_unreachable" };
     const cancel = buildReplyCommand({ roomId, memberId: requesterId }, "room_cancel_request", {
       requestId: capacity.cancelId, requestMessageId: sourceId,
@@ -98,7 +99,7 @@ export function idleRefill(store, { route, secret, refill, hasOpenRequest }, rec
     const nextStep = work && nextWorkStep(work);
     if (hasOpenRequest(route) || nextStep?.memberId === recipientId) return { state: "pending_work" };
     if (!receiver?.hasRecoveryReceiver({ roomId, requesterId, recipientId, workItemId, id: refill.data.messageId },
-        after, route.allowUnadvertisedReceiver === true)) return { state: "receiver_unconfirmed" };
+        after, false)) return { state: "receiver_unconfirmed" };
     // This proves available in the configured lane. It does not prove the
     // agent has no work from another Room, provider or human.
     if (store.operationReceipt(secret, roomId, refill.id).status === "recorded") return { state: "lane_idle" };
@@ -129,19 +130,23 @@ export function capacityWorkHandoff(store, { route, secret, workHandoff, hasOpen
     const proposed = store.operationReceipt(secret, roomId, operationId);
     const superseded = store.operationReceipt(secret, roomId, supersedeId);
     const pickup = store.operationReceipt(secret, roomId, pickupId);
+    const item = readWorkItem(store.db, roomId, workItemId);
     if ([proposed, superseded, pickup].some(receipt => receipt.status === "recorded"))
       return { state: proposed.eventType === "work.proposed" && superseded.eventType === "work.superseded"
-        && pickup.eventType === "message.posted" && proposed.sequence + 1 === superseded.sequence
-        && superseded.sequence + 1 === pickup.sequence ? "work_handed_off" : "replacement_operation_conflict" };
+        && pickup.eventType === "message.posted" && proposed.sequence < superseded.sequence && superseded.sequence < pickup.sequence
+        && item?.supersededBy === replacementWorkItemId ? "work_handed_off" : "replacement_operation_conflict" };
     const pause = store.wakeQueue.pauseStatus(roomId, recipientId);
     if (!reportsCapacityStop(pause?.reason)) return { state: pause ? "paused" : "capacity_not_reported" };
     if (pause.reason !== `${CAPACITY_STOP}:work:${workItemId}:${expectedRevision}`)
       return { state: "awaiting_exact_stop" };
-    const item = readWorkItem(store.db, roomId, workItemId);
     if (item?.accountableMemberId !== recipientId || item.revision !== expectedRevision
         || item.proposedById !== requesterId || item.state !== "proposed" || item.mode !== "read"
         || item.claim || item.receipt || item.receiptHistory?.length || item.handoff?.open
         || item.verifierMemberId === replacementMemberId || item.humanDecisionMakerId === replacementMemberId)
+      return { state: "inspect_existing_work" };
+    const session = sessionRecord(item);
+    if (session.status !== SESSION_STATUSES.QUEUED || session.attempt_count || session.worker_member_id
+        || session.started_at || session.heartbeat_at || session.stop_requested_at)
       return { state: "inspect_existing_work" };
     if (store.wakeQueue.pauseStatus(roomId, replacementMemberId)) return { state: "replacement_paused" };
     if (hasOpenRequest({ ...route, recipientId: replacementMemberId })) return { state: "replacement_busy_or_unknown" };
@@ -150,7 +155,7 @@ export function capacityWorkHandoff(store, { route, secret, workHandoff, hasOpen
       body: `@(${replacementMemberId})\nOpen the linked Work Thread. Check its scope, then accept if you can take it. Reply here to confirm or decline.`
     });
     if (!receiver?.hasRecoveryReceiver({ roomId, recipientId: replacementMemberId, requesterId,
-      workItemId: replacementWorkItemId, id: pickupCommand.data.messageId }, after, route.allowUnadvertisedReceiver === true))
+      workItemId: replacementWorkItemId, id: pickupCommand.data.messageId }, after, false))
       return { state: "replacement_unreachable" };
     const recipient = store.roomAuthority(roomId, { memberId: replacementMemberId }).members[replacementMemberId];
     if (!recipient?.active || !recipient.permissions.includes("accept_work")) return { state: "replacement_cannot_accept" };
