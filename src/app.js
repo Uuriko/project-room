@@ -3679,11 +3679,15 @@ function currentWorkOrigin(id = activeWorkNavigation) {
   const origin = workNavigationOrigins.get(id);
   return origin?.context === workNavigationContext() ? origin : null;
 }
+function threadOwnsMessageReturn(origin = currentWorkOrigin()) {
+  return Boolean(currentThreadId && !origin && location.hash.startsWith("#pr-record/message/"));
+}
 function syncWorkReturnControl() {
   const button = $("#work-navigation-return");
   const origin = currentWorkOrigin();
   button.disabled = false;
-  button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message|result)\//.test(location.hash);
+  button.hidden = !workNavigationContext() || threadOwnsMessageReturn(origin)
+    || !/^#pr-record\/(work|message|result)\//.test(location.hash);
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
 }
 function clearWorkNavigation() {
@@ -5263,7 +5267,11 @@ $("#reply-mention").addEventListener("click", () => {
   } else applyMentionMember(author);
   updateReply();
 });
-$("#thread-back").addEventListener("click", () => switchThread(null));
+$("#thread-back").addEventListener("click", () => {
+  if (!threadOwnsMessageReturn()) { switchThread(null); return; }
+  if (!state || busy || composerFiles.some(file => file.status === "uploading")) return;
+  returnToCurrentRoom();
+});
 // Per-thread mutes: a private per-member row on the server (thread_mutes).
 // Muting suppresses the thread's activity from the notification/unread feed;
 // unmuting restores it on the next read. The server resolves any message id

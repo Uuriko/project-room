@@ -553,9 +553,14 @@ for (const storage of ["legacy", "normalized"]) {
         await returning.screenshot({ path: process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT + "-same-thread.png" });
       }
 
-      const threadBack = returning.locator("#thread-back");
+      const threadBack = returning.getByRole("button", { name: "Back to conversation", exact: true });
+      assert.equal(await returning.locator("#work-navigation-return").isVisible(), false);
+      assert.ok((await threadBack.boundingBox()).height >= 44);
       await threadBack.press("Enter");
+      assert.equal(new URL(returning.url()).hash, "#pr-view/rooms");
       assert.equal(await returning.locator("#conversation-title").evaluate(node => node === document.activeElement), true);
+      assert.equal(await returning.locator("#conversation-title").textContent(), "writer");
+      assert.equal(await returning.locator("#work-navigation-return").isVisible(), false);
       const draft = returning.locator("#message-input");
       assert.equal(await draft.inputValue(), "");
       await draft.fill("Different draft in the private conversation");
@@ -566,6 +571,10 @@ for (const storage of ["legacy", "normalized"]) {
       assert.equal(await draft.inputValue(), "Draft for the same discussion");
       await threadBack.press("Enter");
       assert.equal(await draft.inputValue(), "Different draft in the private conversation");
+      await returning.reload();
+      await returning.waitForFunction(() => document.querySelector("#message-input").value === "Different draft in the private conversation");
+      assert.equal(new URL(returning.url()).hash, "#pr-view/rooms");
+      assert.equal(await returning.locator("#thread-bar").isVisible(), false);
       assert.equal(requests.some(({ url, method }) => url.pathname.endsWith("/search") || method === "POST" && url.pathname.endsWith("/commands")), false);
     }
   });
