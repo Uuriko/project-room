@@ -1052,6 +1052,93 @@ test(`${representation} a newly attempted stale or closed submit is refused befo
   assert.equal(chat.event.data.workItemId, undefined);
 });
 
+test(`${representation} shares one staged file on a recovered CLI answer without posting another answer`, async t => {
+  const { home, origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
+  const opening = await rpc("room_request_reply", { requestId: "file-question",
+    toMemberId: producer.identityId, body: "Please share the decision brief." }, reviewer);
+  const basis = await cli(["read", opening.requestMessageId]);
+  const text = join(home, "brief-answer.txt");
+  writeFileSync(text, "Here is the decision brief.", { mode: 0o600 });
+  const answered = await cli(["answer", opening.requestMessageId, "--from", "-", "--body-file", text],
+    basis.value, home, async (url, init) => {
+      const response = await fetch(url, init);
+      if (JSON.parse(init.body).params.name === "room_respond_to_request") {
+        await response.arrayBuffer();
+        throw new Error("Answer response lost after commit");
+      }
+      return response;
+    });
+  assert.equal(answered.code, 0, JSON.stringify(answered));
+  assert.equal(answered.value.recoveredFromReceipt, true);
+  const answerSequence = store.headSequence("commons");
+  const brief = Buffer.from("The steering group accepted the proposal.");
+  const { attachment } = store.roomAttachments.stage(producer.secret, "commons", {
+    id: "retained-decision-brief", filename: "decision-brief.md", mediaType: "text/markdown", data: brief.toString("base64")
+  });
+  const share = ["answer", opening.requestMessageId, "--share-staged-file", attachment.id, "--sha256", attachment.sha256];
+  const reviewedFile = () => fetch(origin + "/api/rooms/commons/files/" + attachment.id,
+    { headers: { Authorization: "Bearer " + reviewer.secret } });
+  assert.equal((await reviewedFile()).status, 404);
+  let commits = 0;
+  const trace = async (url, init) => {
+    const target = new URL(url);
+    if (init.method === "POST") {
+      assert.ok(target.pathname.endsWith("/commit"), "file recovery never writes an answer");
+      assert.deepEqual(JSON.parse(init.body), { messageId: answered.value.messageId });
+      commits++;
+      const response = await fetch(url, init);
+      if (commits === 1) {
+        await response.arrayBuffer();
+        throw new Error("File response lost after commit");
+      }
+      return response;
+    }
+    return fetch(url, init);
+  };
+  const wrongDigest = await cli([...share.slice(0, -1), "0".repeat(64)], undefined, home, trace);
+  assert.equal(wrongDigest.value.code, "attachment_digest_mismatch");
+  const otherActor = await cli(share, undefined, reviewerProject, trace);
+  assert.equal(otherActor.code, 1);
+  assert.equal(commits, 0);
+  const uncertain = await cli(share, undefined, home, trace);
+  assert.equal(uncertain.value.status, "file_pending", JSON.stringify(uncertain));
+  assert.equal(uncertain.value.attachment.messageId, answered.value.messageId);
+  const finished = await cli(share, undefined, home, trace);
+  assert.equal(finished.code, 0, JSON.stringify(finished));
+  assert.deepEqual(finished.value.attachment, {
+    fileId: attachment.id, messageId: answered.value.messageId, sha256: attachment.sha256, state: "shared"
+  });
+  assert.equal(commits, 2);
+  assert.equal(store.headSequence("commons"), answerSequence);
+  const received = await reviewedFile();
+  assert.equal(received.status, 200);
+  const saved = (await received.json()).attachment;
+  assert.equal(saved.messageId, answered.value.messageId);
+  assert.equal(saved.sha256, attachment.sha256);
+  assert.deepEqual(Buffer.from(saved.data, "base64"), brief);
+  const outside = await fetch(origin + "/api/rooms/commons/files/" + attachment.id,
+    { headers: { Authorization: "Bearer " + owner } });
+  assert.equal(outside.status, 404);
+
+  const { attachment: late } = store.roomAttachments.stage(producer.secret, "commons", {
+    id: "brief-after-withdrawal", filename: attachment.filename, mediaType: attachment.mediaType,
+    data: brief.toString("base64")
+  });
+  const refused = await cli(["answer", opening.requestMessageId, "--share-staged-file", late.id, "--sha256", late.sha256],
+    undefined, home, (url, init) => {
+      if (init.method === "POST") {
+        assert.ok(new URL(url).pathname.endsWith("/commit"));
+        store.command(producer.secret, "commons", { id: "withdraw-brief-answer", type: "message.deleted",
+          data: { messageId: answered.value.messageId, expectedMessageRevision: 0 } });
+      }
+      return fetch(url, init);
+    });
+  assert.equal(refused.value.status, "refused");
+  assert.equal(refused.value.code, "message_not_found");
+  assert.equal(store.roomAttachments.get(producer.secret, "commons", late.id).attachment.state, "staged");
+  assert.equal((await reviewedFile()).status, 410);
+});
+
 test(`${representation} answers use the saved request, stop at a correction and recover a lost response`, async t => {
   const { home, store, producer, reviewer, rpc, cli } = await fixture(t, representation);
   const requested = await rpc("room_request_reply", { toMemberId: producer.identityId,

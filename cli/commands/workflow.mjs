@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { join } from "node:path";
+import { RoomAgentClient, RoomClientError } from "../../client/room-agent.mjs";
 import { openPrivateJournal, privateDirectory } from "../../client/setup-journal.mjs";
 import { workflowTools as actions, isRecord, hasRevision, selectedBasis, readSelectedBasis,
   fileInput, readInput, operationFingerprint, submissionOperationKey } from "../selected-basis.mjs";
@@ -482,30 +483,76 @@ async function suppliedInput(action, flags, io) {
   return input;
 }
 
+async function shareAnswerFile(requestMessageId, fileId, sha256, connection, io) {
+  const report = (value, code = 1) => {
+    (io.out ?? console.log)(JSON.stringify({ contractVersion: 1, requestMessageId, ...value }));
+    return code;
+  };
+  const { name, config } = connection;
+  let token;
+  try { token = await loadSecret(name, config.token, io.env ?? process.env); }
+  catch { return report({ status: "refused", code: "saved_connection_required" }); }
+  const client = new RoomAgentClient({ ...config, token, fetchImpl: io.fetchImpl });
+  let read;
+  try { read = await client.replyContextForHint(requestMessageId); }
+  catch (error) {
+    const refused = error instanceof RoomClientError &&
+      ([401, 403, 404, 410].includes(error.status) || error.code === "identity_mismatch");
+    return report({ status: refused ? "refused" : "unavailable", code: "answer_unavailable" });
+  }
+  const request = read.request;
+  const messageId = request.responseMessageId;
+  const answer = read.page.items.find(item => item.kind === "answered" && item.eventId === request.terminalEventId);
+  if (request.status !== "answered" || !validId(messageId) || answer?.message?.id !== messageId
+      || answer.message.authorId !== config.memberId || answer.message.toMemberId !== request.requesterId
+      || answer.message.deletedAt || typeof answer.message.body !== "string")
+    return report({ status: "refused", code: "answer_unavailable" });
+
+  const attachment = { fileId, messageId, sha256 };
+  try {
+    const observedDigest = await client.stagedAnswerFileDigest(fileId, { committedMessageId: messageId });
+    if (observedDigest !== sha256) return report({ status: "refused", code: "attachment_digest_mismatch", attachment });
+    await client.commitAnswerFile(fileId, messageId, sha256);
+    return report({ status: "shared", attachment: { ...attachment, state: "shared" } }, 0);
+  } catch (error) {
+    const refused = error instanceof RoomClientError && [401, 403, 404, 409, 410, 422].includes(error.status);
+    const code = refused && typeof error.code === "string" && /^[a-z][a-z0-9_]{0,79}$/.test(error.code)
+      ? error.code : "attachment_commit_unconfirmed";
+    return report({ status: refused ? "refused" : "file_pending", code, attachment });
+  }
+}
+
 export const answerCommand = namedCommand("respond", true);
 
 export function namedCommand(action, answer = false) {
   return async (argv, io = {}) => {
     const out = io.out ?? console.log;
     if (argv.length === 1 && argv[0] === "--help") {
+      const shareHelp = answer ? "\nroom answer REQUEST_ID --share-staged-file FILE_ID --sha256 DIGEST" : "";
       out((answer ? "room answer REQUEST_ID --from FILE --body-file FILE" : namedHelp[action])
-        + (action === "begin" ? "" : " [--operation ID]"));
+        + (action === "begin" ? "" : " [--operation ID]") + shareHelp);
       return 0;
     }
     const refuse = code => { out(JSON.stringify({ contractVersion: 1, status: "refused", code })); return 1; };
     let flags, connection, fixed, input;
     try {
       const { values, tokens, positionals } = parseArgs({ args: argv, tokens: true, allowPositionals: answer, options: { from: string,
-        ...(action === "begin" ? {} : { operation: string }), ...namedOptions[action] } });
+        ...(action === "begin" ? {} : { operation: string }), ...namedOptions[action],
+        ...(answer ? { "share-staged-file": string, sha256: string } : {}) } });
       const names = tokens.filter(token => token.kind === "option" && token.name !== "path").map(token => token.name);
-      if (!values.from || new Set(names).size !== names.length
-          || values.operation !== undefined && !validId(values.operation)) return refuse("invalid_action_input");
+      if (new Set(names).size !== names.length) return refuse("invalid_action_input");
+      const sharesFile = values["share-staged-file"] !== undefined || values.sha256 !== undefined;
+      if (sharesFile
+        ? names.length !== 2 || !validId(values["share-staged-file"]) || !/^[a-f0-9]{64}$/.test(values.sha256 ?? "")
+        : !values.from || values.operation !== undefined && !validId(values.operation)) return refuse("invalid_action_input");
       if (answer && (positionals.length !== 1 || !validId(positionals[0]) || values.answer || values.decline))
         return refuse("invalid_action_input");
       flags = answer ? { ...values, answer: true, requestMessageId: positionals[0] } : values;
     } catch { return refuse("invalid_action_input"); }
     try { connection = loadConnection({ project: io.cwd ?? process.cwd(), env: io.env ?? process.env, name: io.connectionName }); }
     catch { return refuse("saved_connection_required"); }
+    if (flags["share-staged-file"] !== undefined)
+      return shareAnswerFile(flags.requestMessageId, flags["share-staged-file"], flags.sha256, connection, io);
     const { config, configDirectory } = connection;
     try { fixed = await readSelectedBasis(flags.from, action, config, io); }
     catch { return refuse("invalid_action_basis"); }

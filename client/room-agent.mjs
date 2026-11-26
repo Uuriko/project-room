@@ -816,13 +816,16 @@ export class RoomAgentClient {
   replyAction(name, args, options = {}) {
     return submitReplyAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
-  async stagedAnswerFileDigest(fileId, { signal } = {}) {
-    if (!this.#memberId || !validId(fileId)) throw new Error("Choose a staged file");
+  async stagedAnswerFileDigest(fileId, { signal, committedMessageId } = {}) {
+    if (!this.#memberId || !validId(fileId) || committedMessageId !== undefined && !validId(committedMessageId))
+      throw new Error("Choose a staged file");
     const result = await this.#request(`/files/${encodeURIComponent(fileId)}`, undefined, signal);
     const file = result?.attachment;
-    if (result?.roomId !== this.#roomId || file?.id !== fileId || file.state !== "staged"
-      || file.uploaderId !== this.#memberId || file.messageId !== null || !/^[a-f0-9]{64}$/.test(file.sha256))
-      throw new RoomClientError(409, "file_not_staged", "Choose an available file staged by the responder");
+    const staged = file?.state === "staged" && file.messageId === null;
+    const sameCommit = committedMessageId !== undefined && file?.state === "committed" && file.messageId === committedMessageId;
+    if (result?.roomId !== this.#roomId || file?.id !== fileId || !staged && !sameCommit
+      || file.uploaderId !== this.#memberId || !/^[a-f0-9]{64}$/.test(file.sha256))
+      throw new RoomClientError(409, "file_not_staged", "Choose a file staged by the responder or already shared on this answer");
     return file.sha256;
   }
   async commitAnswerFile(fileId, messageId, digest, { signal } = {}) {
