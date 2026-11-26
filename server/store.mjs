@@ -6981,6 +6981,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const messageAfter = Math.max(after, historyAfter);
       const directMessages = [];
       let currentMessages;
+      let formalRequests;
       const dmStatement = this.db.prepare(
         `SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=?
          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
@@ -7005,6 +7006,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           dmScannedAfter = Math.max(dmScannedAfter, row.sequence);
           const current = records.get(messageId);
           if (current?.deletedAt) continue;
+          const requestId = parsed.data.responseToRequestId;
+          const settled = parsed.data.requestPolicyVersion === 1 && typeof requestId === "string"
+            ? (formalRequests ??= this.room(roomId).state.replyRequests ?? {})[requestId] : null;
+          const settledRead = settled?.requesterId === memberId && settled.recipientId === parsed.actorId
+            && settled.terminalEventId === parsed.id && settled.responseMessageId === messageId
+            && ["answered", "declined"].includes(settled.status) && messageInHistory(settled, floor)
+            ? { nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: requestId } } }
+            : {};
           directMessages.push({
             sequence: row.sequence,
             messageId,
@@ -7012,6 +7021,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             body: current ? current.body : parsed.data.body,
             at: parsed.at,
             channel: "room",
+            ...settledRead,
             ...(parsed.data.requestKind === "reply" && parsed.data.requestPolicyVersion === 1
               && [parsed.actorId, parsed.data.toMemberId].includes(memberId) ? {
                 requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: messageId } }
@@ -7071,7 +7081,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Idle polling needs no conversation/work hydration. A formal request
       // candidate already loaded canonical records; reuse that room cache.
       const requestStates = [...directMessages, ...directMentions].some(item => item.nextRead)
-        ? this.room(roomId).state.replyRequests
+        ? formalRequests ?? this.room(roomId).state.replyRequests
         : {};
       const inbox = stampInbox({
         agentId: memberId,
@@ -7794,7 +7804,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           && (!command.data.toMemberId || command.data.toMemberId === request.recipientId));
         const formal = requestMode === "open"
           ? { id: command.data.messageId, recipientId: command.data.toMemberId, opening: true }
-          : clarified ? { id: clarified.id, recipientId: clarified.recipientId, opening: false } : null;
+          : requestMode === "respond"
+            ? { id: command.data.responseToRequestId, recipientId: command.data.toMemberId, opening: false }
+            : clarified ? { id: clarified.id, recipientId: clarified.recipientId, opening: false } : null;
         wakeDelivery = this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id, formal);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
         this.humanPush.notifyPosted({
@@ -8134,7 +8146,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         openingContextEventId: addressedRequest?.opening ? eventId : undefined });
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
-      // Formal-request no-host fallback, addressee only. Existing connected
+      // Formal exchange no-host fallback, addressee only. Existing connected
       // delivery keeps its original kind (wakeForAgent / native emit / push
       // doorbell are unchanged). The fallback also uses a kind current
       // receivers already accept (dm or mention), never a new "ask" kind:

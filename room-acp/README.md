@@ -377,6 +377,8 @@ Quiet waits use the shipped 120-second server hold with a 135-second HTTP deadli
 
 The private notification journal freezes the exact batch and source frontier **before** invoking the CLI. Accepted and unknown provider outcomes are retained before the discovery cursor advances. Restart reuses that exact batch; an ambiguous send is never automatically resent. Source-batch actuator receipts retain the exact pointers for manual reconciliation under `notify-state`. Do not remove journals to force a retry: provider acceptance means queued notification only, not delivery/read/execution/result. A timeout or unknown outcome requires inspecting the original configured session and private receipt. No secret, session ID, message body or provider output is printed.
 
+A private answer or decline can carry the original `requestMessageId` as an exact pointer. The receiving session can use `room_read_request` with its own saved Room connection to open the settled exchange. The journal keeps this ID with the matching answer message and sequence across restart. The notification carries identifiers only.
+
 ### Optional stage observations
 
 `room-acp run --observe-stages` prints JSON lines to stderr with `event: "agent_stage"`

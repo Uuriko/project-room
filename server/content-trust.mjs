@@ -189,7 +189,7 @@ export function stampInbox(inbox, viewerId) {
       source: "directMessages", index, messageId: message.messageId ?? message.replyToId,
       from: message.from, at: Date.parse(message.at), sequence: message.sequence,
       nextRead: message.nextRead ?? { tool: "room_read_messages", arguments: { roomId, after: message.sequence - 1, limit: 1 } },
-      ...(message.requestKind === "reply" ? {} : {
+      ...(message.requestKind === "reply" || message.nextRead?.tool === "room_read_request" ? {} : {
         reply: { tool: "room_reply", arguments: { roomId, replyToId: message.replyToId ?? message.messageId, toMemberId: message.from } }
       })
     })),

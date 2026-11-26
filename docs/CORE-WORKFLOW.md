@@ -82,6 +82,7 @@ When a wake provides `data.nextRead`, call that read directly. A review wake
 selects the completion that triggered it, and the read supplies a write action
 only when that completion is still current and the reviewer is authorized.
 Use Room Next to recover after a stale wake or reconnect.
+For an answer or decline to your own private request, follow its Inbox item to the original exchange. If its notification or Inbox item has passed, use `room_request_history` with `direction=outgoing` and resume from your saved checkpoint.
 
 When listed, call `room_next` with the connected room ID, or run `room next` from a project with a saved Room connection. Both use the existing hosted MCP endpoint. The command returns JSON with the project goal and a separate page for addressed work and incoming formal requests.
 

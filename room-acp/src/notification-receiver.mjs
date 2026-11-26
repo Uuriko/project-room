@@ -8,7 +8,7 @@ import {configDir} from './credentials.mjs';
 import {normalizeBase} from './link.mjs';
 import {readPrivateJson} from './private-files.mjs';
 import {openJoinJournal} from './private-state.mjs';
-import {createCloudNotifier} from './cloud-notify.mjs';
+import {createCloudNotifier,validNotificationItem} from './cloud-notify.mjs';
 const closed=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===[...keys].sort().join(',');
 const id=(v,max)=>typeof v==='string'&&v.length<=max&&/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(v)&&!['constructor','prototype','__proto__'].includes(v);
 const integer=v=>Number.isSafeInteger(v)&&v>=0;
@@ -28,7 +28,7 @@ function configuration(path){
 }
 function batchValid(batch,roomId,after){
  return closed(batch,['roomId','items'])&&batch.roomId===roomId&&Array.isArray(batch.items)&&batch.items.length>=1&&batch.items.length<=16
-  &&batch.items.every(p=>closed(p,['messageId','sequence'])&&id(p.messageId,128)&&integer(p.sequence)&&p.sequence>0&&p.sequence<=after)
+  &&batch.items.every(p=>validNotificationItem(p)&&p.sequence<=after)
   &&new Set(batch.items.map(p=>p.messageId)).size===batch.items.length;
 }
 function stateValid(state,scope,roomId){
@@ -60,20 +60,28 @@ export function attentionResult(envelope,{requestId,roomId,memberId,after,timeou
   // A legal work id starts with a letter or digit, so 'work::' (two colons)
   // can never be produced by a short id: the two key spaces are disjoint.
   const messageId=!work?p.messageId:p.workItemId.length<=123?'work:'+p.workItemId:'work::'+createHash('sha256').update(p.workItemId).digest('hex').slice(0,48);
-  return{work,messageId,sequence:p.sequence};
+  let requestMessageId;
+  const read=p.nextRead;
+  if(['direct_message','reply'].includes(p.kind)&&read?.tool==='room_read_request'){
+   if(!closed(read,['tool','arguments'])||!closed(read.arguments,['roomId','requestMessageId'])
+    ||read.arguments.roomId!==roomId||!id(read.arguments.requestMessageId,128)
+    ||read.arguments.requestMessageId===messageId)throw invalid();
+   requestMessageId=read.arguments.requestMessageId;
+  }
+  return{work,item:{messageId,sequence:p.sequence,...(requestMessageId===undefined?{}:{requestMessageId})}};
  });
  // Messages keep the server's no-duplicate contract. A work pointer whose key
  // equals a message id in the same frame yields to it: either one wakes the
  // agent, which then reads its assigned work.
- for(const p of parsed)if(!p.work){if(seen.has(p.messageId))throw invalid();seen.add(p.messageId);}
+ for(const p of parsed)if(!p.work){if(seen.has(p.item.messageId))throw invalid();seen.add(p.item.messageId);}
  const items=[];
  for(const p of parsed){
-  if(p.work){if(seen.has(p.messageId))continue;seen.add(p.messageId);}
-  items.push({messageId:p.messageId,sequence:p.sequence});
+  if(p.work){if(seen.has(p.item.messageId))continue;seen.add(p.item.messageId);}
+  items.push(p.item);
  }
  if(value.status==='ready'?!items.length:items.length>0)throw invalid();
  if(value.status==='catch_up_required'&&value.after===after||value.status==='timeout'&&!value.sourceComplete)throw invalid();
- return{status:value.status,after:value.after,sourceComplete:value.sourceComplete,items}; // Discard every server nextRead.
+ return{status:value.status,after:value.after,sourceComplete:value.sourceComplete,items}; // Keep only a same-Room settled request ID.
 }
 export async function receiveCloudNotifications({connection,configFile,env=process.env,fetchImpl=fetch,print=()=>{},signal,
  openReceipt=openJoinJournal,notifierFactory=createCloudNotifier,now=()=>performance.now(),delay=sleep}){

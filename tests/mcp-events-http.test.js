@@ -67,6 +67,41 @@ test('authenticated modern Events subscribe -> atomic permitted wake -> signed c
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
   assert.equal((await f.rpc('events/list')).status, 401);
 });
+for (const normalized of [false, true]) for (const outcome of ['answered', 'declined'])
+test(`a private answer or decline wakes its requester once (${normalized ? 'normalized' : 'legacy'}, ${outcome})`, async t => {
+  const f = await fixture(t, { normalized });
+  const call = async (name, args) => {
+    const response = await f.rpc('tools/call', { name, arguments: { roomId: 'commons', ...args } });
+    assert.notEqual(response.result?.isError, true, JSON.stringify(response));
+    assert.ok(response.result?.structuredContent, JSON.stringify(response));
+    return response.result.structuredContent;
+  };
+  const opening = await call('room_request_reply', { requestId: 'request-document-copy', toMemberId: 'owner', body: 'Please share an accessible reference.' });
+  assert.ok((await f.subscribe()).result.id);
+  const answer = { id: 'private-replacement', type: 'message.posted', data: {
+    messageId: 'private-replacement', body: outcome === 'answered' ? 'The new reference is ready.' : 'I cannot share the reference.',
+    replyToId: opening.requestMessageId,
+    responseToRequestId: opening.requestMessageId, responseOutcome: outcome, expectedRequestRevision: 0,
+    contextEventId: opening.eventId, contextSequence: opening.sequence, toMemberId: f.grant.member_id, workItemId: null
+  } };
+  f.store.command(f.owner, 'commons', answer);
+  assert.equal(f.store.command(f.owner, 'commons', answer).duplicate, true);
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 1);
+  const data = JSON.parse(f.deliveries[0].body).data;
+  assert.deepEqual(data, { roomId: 'commons', memberId: f.grant.member_id, messageId: 'private-replacement',
+    requestId: opening.requestMessageId,
+    nextRead: { tool: 'room_read_request', arguments: { roomId: 'commons', requestMessageId: opening.requestMessageId, view: 'compact' } } });
+  const exchange = await call(data.nextRead.tool, data.nextRead.arguments);
+  assert.equal(exchange.request.status, outcome);
+  assert.equal(exchange.request.responseMessageId, 'private-replacement');
+  assert.equal(exchange.current.answerBasis, null);
+  const inbox = await call('room_read_inbox', { after: opening.sequence });
+  const saved = inbox.addressedMessages.find(item => item.messageId === 'private-replacement');
+  assert.deepEqual(saved?.nextRead, { tool: 'room_read_request',
+    arguments: { roomId: 'commons', requestMessageId: opening.requestMessageId } });
+  assert.equal(saved.reply, undefined);
+});
 for (const normalized of [false, true]) test(`native request wake carries the exact read pointer and reconnect recovers earlier requests (${normalized ? 'normalized' : 'legacy'})`, async t => {
   const f = await fixture(t, { normalized });
   const call = async (name, args = {}) => {
