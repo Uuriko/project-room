@@ -6,6 +6,10 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { mcpOAuthIdentityEpoch } from '../server/mcp-oauth.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
+import { workspaceArtifactLink } from '../src/workspace-artifact-link.js';
+import { exactResultHref } from '../src/record-link.js';
+import { textVersion } from '../server/text-results.mjs';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
 import { request } from 'node:http';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -207,7 +211,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 40, 'audit every advertised native tool, including designated project findings and preview inspection');
+  assert.equal(tools.length, 41, 'audit every advertised native tool, including exact Workspace changes');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -814,13 +818,13 @@ test('room next and receipt discovery distinguish server availability from a nar
     room_next: 'available_on_server', room_receipt: 'available_on_server',
     room_record_verification: 'available_on_server',
     room_read_public_review: 'available_on_server', room_record_public_review: 'available_on_server',
-    room_inspect_workspace_preview: 'available_on_server'
+    room_inspect_workspace_preview: 'available_on_server', room_read_workspace_changes: 'available_on_server'
   });
   for (const name of Object.keys(discovery.tools)) assert.ok(list.body.result.tools.some(entry => entry.name === name));
   assert.deepEqual(discovery.requiredOAuthScope, { room_record_verification: 'work:write' });
   assert.deepEqual(discovery.requiredOAuthScopes, {
     room_read_public_review: ['work:read'], room_record_public_review: ['work:read', 'work:write'],
-    room_inspect_workspace_preview: ['rooms:read', 'work:read']
+    room_inspect_workspace_preview: ['rooms:read', 'work:read'], room_read_workspace_changes: ['rooms:read', 'work:read']
   });
   assert.match(discovery.next, /refresh the existing connection's tool catalog/);
   assert.deepEqual(discovery.whenMissingFromHost, {
@@ -854,7 +858,7 @@ test('room next and receipt discovery distinguish server availability from a nar
     room_next: 'outside_connected_grant', room_receipt: 'outside_connected_grant',
     room_record_verification: 'outside_connected_grant',
     room_read_public_review: 'outside_connected_grant', room_record_public_review: 'outside_connected_grant',
-    room_inspect_workspace_preview: 'outside_connected_grant'
+    room_inspect_workspace_preview: 'outside_connected_grant', room_read_workspace_changes: 'outside_connected_grant'
   });
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
@@ -1004,4 +1008,114 @@ test('the preview inspection connector preserves audience and OAuth consent', as
   assert.match(JSON.stringify(deniedByGrant.body), /outside the connected agent grant/);
   const listed = await f.rpc('tools/list', {}, narrow);
   assert.ok(!listed.body.result.tools.some(entry => entry.name === tool));
+});
+
+for (const normalized of [false, true])
+test(`hosted MCP follows the exact changes and result from an addressed assignment (${normalized ? 'normalized' : 'legacy'})`, async t => {
+  const f = await setup(t, { normalized });
+  const tool = 'room_read_workspace_changes';
+  const call = async (name, args, token) => (await f.rpc('tools/call', { name, arguments: args }, token)).body;
+  const value = response => response.result?.structuredContent;
+  const write = (actor, type, data) => f.store.command(actor, 'commons', { id: randomUUID(), type, data });
+  const filePath = `docs/${'é'.repeat(72)}/${'ñ'.repeat(72)}/brief.md`;
+  const patch = `diff --git a/${filePath} b/${filePath}\n--- a/${filePath}\n+++ b/${filePath}\n@@ -1 +1 @@\n-old\n+ready\n`;
+  const publish = async (expectedRevision, head, patch) => {
+    const response = await fetch(f.base + '/api/rooms/commons/workspace-previews', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + f.ownerKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'a'.repeat(32), title: 'Brief', base: 'b'.repeat(40), head, patch,
+        expectedRevision, html: '<p>Brief</p>', recipientId: 'friend-dot' })
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const artifact = await publish(0, 'c'.repeat(40), patch);
+  const selection = workspaceArtifactLink(origin, 'commons', artifact, 'changes', filePath, { side: 'new', line: 1 });
+  assert.ok(selection.length > 512, 'the Workspace link exceeds the old Preview selector limit');
+  const doc = 'release-document';
+  write(f.ownerKey, 'work.proposed', { workItemId: doc, title: 'Publish instructions', definitionOfDone: 'Document the release',
+    accountableMemberId: 'owner', mode: 'read' });
+  write(f.ownerKey, 'work.accepted', { workItemId: doc, expectedRevision: 0 });
+  write(f.ownerKey, 'work.started', { workItemId: doc, expectedRevision: 1 });
+  const body = 'The owner is Maya.';
+  const posted = write(f.ownerKey, 'message.posted', { workItemId: doc, messageId: 'release-document-body', body });
+  const completed = write(f.ownerKey, 'work.completed', { workItemId: doc, expectedRevision: 2, evidenceKind: 'room_text',
+    evidenceMessageId: posted.event.data.messageId, evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body),
+    previousCompletionEventId: null, summary: 'Named the owner', nextAction: 'Check the file', producerId: 'owner' });
+  const docLink = exactResultHref({ roomId: 'commons', workItemId: doc, completionEventId: completed.event.id }, new URL(origin));
+  const assignmentId = 'review-brief', sourceId = 'brief-references';
+  write(f.ownerKey, 'message.posted', { messageId: sourceId, toMemberId: 'friend-dot',
+    body: [selection, docLink, docLink, docLink.replace('room=commons', 'room=other')].join('\n') });
+  write(f.ownerKey, 'work.proposed', { workItemId: assignmentId, title: 'Check both versions', definitionOfDone: 'Cross-check the release',
+    accountableMemberId: 'friend-dot', sourceMessageId: sourceId, mode: 'read' });
+  const originalRead = await call('room_read_result', { workItemId: doc, completionEventId: completed.event.id });
+  assert.equal(value(originalRead)?.result.text.body, body);
+  const summaryLink = workspaceArtifactLink(origin, 'commons', artifact, 'changes');
+  const inspection = await call('room_inspect_workspace_preview', { selection: summaryLink, expectedViewerId: 'friend-dot' });
+  assert.equal(value(inspection)?.code, 'invalid_preview_selection');
+
+  const listed = await f.rpc('tools/list', {});
+  assert.ok(listed.body.result.tools.some(entry => entry.name === tool), 'the default coworker catalog includes the Changes read');
+  const source = value(await call('room_read_work', { workItemId: assignmentId, includeSource: true })).context.source;
+  assert.equal(source.message.id, sourceId);
+  assert.deepEqual(source.references.map(row => row.nextRead.tool), [tool, 'room_read_result']);
+  const [changes, result] = await Promise.all(source.references.map(({ nextRead }) => call(nextRead.tool, nextRead.arguments)));
+  assert.equal(value(changes).viewerId, 'friend-dot');
+  assert.equal(value(changes).changes.head, artifact.head);
+  assert.equal(value(changes).changes.file.hunks[0].changes.at(-1).content, 'ready');
+  assert.equal(value(changes).untrusted, true);
+  assert.equal(value(result).result.receipt.eventId, completed.event.id);
+  const exactParams = new URLSearchParams({id:artifact.id, changes:'1', view:'file', path:filePath, artifact:new URL(selection).hash});
+  const rest = await fetch(f.base + '/api/rooms/commons/workspace-previews?' + exactParams, {
+    headers: {Authorization: 'Bearer ' + f.identity.secret}
+  });
+  assert.equal(rest.status, 200);
+  assert.deepEqual((await rest.json()).changes, value(changes).changes);
+  const summary = await call(tool, { selection: summaryLink });
+  assert.deepEqual(value(summary).changes.files.map(file => file.path), [filePath]);
+  const byPath = await call(tool, { selection: summaryLink, file: filePath });
+  assert.deepEqual(value(byPath).changes, value(changes).changes);
+  const conflictingPath = await call(tool, { selection, file: 'another.md' });
+  assert.equal(value(conflictingPath).code, 'invalid_changes_selection');
+
+  const grant = async scope => {
+    const consent = await f.consent({ scope });
+    const code = new URL(consent.headers.get('location')).searchParams.get('code');
+    const exchanged = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+      redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+    const { access_token: token } = await exchanged.json();
+    assert.ok(token);
+    return token;
+  };
+  const artifactOnly = await grant('rooms:read work:read');
+  const directArtifact = await call(tool, { selection }, artifactOnly);
+  assert.deepEqual(value(directArtifact).changes, value(changes).changes);
+  const deniedSource = await call('room_read_work', { workItemId: assignmentId, includeSource: true }, artifactOnly);
+  assert.match(JSON.stringify(deniedSource), /outside the connected agent grant/);
+  assert.equal(JSON.stringify(deniedSource).includes(selection), false);
+  const narrow = await grant('work:read');
+  const narrowResult = await call('room_read_result', { workItemId: doc, completionEventId: completed.event.id }, narrow);
+  assert.equal(value(narrowResult).result.receipt.eventId, completed.event.id);
+  const narrowList = await f.rpc('tools/list', {}, narrow);
+  assert.ok(!narrowList.body.result.tools.some(entry => entry.name === tool));
+  const deniedGrant = await call(tool, { selection }, narrow);
+  assert.match(JSON.stringify(deniedGrant), /outside the connected agent grant/);
+
+  const other = f.store.identities.create('Other member');
+  linkWithProof(f.store, f.ownerKey, 'commons', other, { permissions: [] });
+  const otherKey = other.secret;
+  const unavailable = await call(tool, { roomId: 'commons', selection }, otherKey);
+  assert.equal(value(unavailable)?.code, 'preview_not_found', JSON.stringify(unavailable));
+  assert.doesNotMatch(JSON.stringify(unavailable), /ready|patchDigest|digest/);
+  const hidden = value(await call('room_read_work', { roomId: 'commons', workItemId: assignmentId, includeSource: true }, otherKey));
+  assert.equal(hidden.context.source.references, undefined);
+  const foreign = await call(tool, { selection: selection.replace('room=commons', 'room=other') });
+  assert.equal(value(foreign).code, 'invalid_changes_selection');
+  await publish(1, 'd'.repeat(40), patch.replace('+ready', '+replacement'));
+  const stale = await call(tool, { selection });
+  assert.equal(value(stale).code, 'preview_changed');
+  assert.doesNotMatch(JSON.stringify(stale), /replacement/);
+  const extendedPatch = patch.replace('@@ -1 +1 @@\n-old\n+ready\n', '@@ -1 +1,3000 @@\n-old\n' + '+new line\n'.repeat(3000));
+  const large = await publish(2, 'e'.repeat(40), extendedPatch);
+  const oversized = await call(tool, { selection: workspaceArtifactLink(origin, 'commons', large, 'changes', filePath) });
+  assert.equal(value(oversized).code, 'changes_too_large');
 });

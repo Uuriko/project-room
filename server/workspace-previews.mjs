@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { fileLabel, parsePatch, workspaceChangePath } from "../src/workspace-diff-parser.js";
 
 export const previewBytes = 384 * 1024;
 export const patchBytes = 192 * 1024;
@@ -9,6 +10,29 @@ const ownerLimit = 6;
 const fields = "id, publisher_id AS publisherId, title, base, head, digest, revision, updated_at AS updatedAt";
 const previewId = /^[a-f0-9]{32}$/;
 const gitId = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+
+export function matchesWorkspaceChanges(item, target) {
+  return item.revision === target.revision && item.head === target.head
+    && item.publisherId === target.publisherId && item.patchDigest === target.digest;
+}
+
+export function workspaceChangesView(item, view, path, reject) {
+  if (view === null) return item;
+  const { patch, ...source } = item;
+  if (patch === null) return { ...source, status: "not_published" };
+  const files = parsePatch(patch);
+  if (!files) return { ...source, status: "raw_available" };
+  if (view === "file") {
+    const file = files.find(value => workspaceChangePath(value) === path)
+      ?? files.find(value => path !== "/dev/null" && (value.oldPath === path || value.newPath === path));
+    if (!file) reject(404, "preview_file_not_found", "This path is absent from the published changes");
+    return { ...source, file };
+  }
+  return { ...source, files: files.map(file => {
+    const path = fileLabel(file), filePath = workspaceChangePath(file);
+    return { path, ...(filePath && filePath !== path ? { filePath } : {}), type: file.type, hunks: file.hunks.length };
+  }) };
+}
 
 export function workspacePreviews(db, { create = true } = {}) {
   const installed = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='room_workspace_previews'").get();

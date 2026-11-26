@@ -161,6 +161,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "identity_read_verification",
   "identity_list_verified",
   "room_inspect_workspace_preview",
+  "room_read_workspace_changes",
   "room_read_public_review",
   "room_record_public_review"
 ]);

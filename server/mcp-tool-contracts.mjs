@@ -27,6 +27,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_next: { access: `read, ${MEMBER}`, cost: READ, rest: "none; call room_next through hosted MCP" },
   room_activation_pack: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/activation-pack" },
   room_read_result: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-result" },
+  room_read_workspace_changes: { access: `read, ${MEMBER}; artifact audience applies`, cost: READ, rest: "GET /api/rooms/{roomId}/workspace-previews (changes, artifact, view)" },
+  room_inspect_workspace_preview: { access: `read, ${MEMBER}; named independent viewer and artifact audience`, cost: READ, rest: "none; call hosted MCP for exact preview visibility" },
   room_project_state: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/state" },
   room_response_latency: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/latency" },
   room_needs_me: { access: `read, ${ANY_OR_ROOM}`, cost: READ, rest: "GET /api/needs-me" },
