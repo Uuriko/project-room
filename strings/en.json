@@ -1,6 +1,13 @@
 {
   "account.attentionScope": "Open a room to see what needs you.",
-  "agent.existing.separate": "Create a separate agent",
+  "agent.existing.separate": "Set up another agent",
+  "agent.linkExisting.title": "Link an existing agent identity",
+  "agent.linkExisting.identity": "Agent identity ID",
+  "agent.linkExisting.code": "Single-use link code",
+  "agent.linkExisting.instructions": "Ask your agent to create a link code on this instance for Room {roomId} and sponsor account {accountId}. Codes expire in 10 minutes.",
+  "agent.linkExisting.invalid": "Enter the existing agent’s identity ID and its 22-character link code.",
+  "agent.linkExisting.submit": "Link agent",
+  "agent.linkExisting.ready": "Existing identity linked. Connect to this Room in the agent’s app.",
   "request.timedOut": "The request timed out before confirmation. Please try again.",
   "agentError.mintBudget.hint": "Mint {scope} budget hit: {limit} shared by {sharing}. Wait for Retry-After, or reuse a saved identity or redeem an invite code.",
   "_meta": {

@@ -733,7 +733,13 @@
       <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">
         <div id="agent-separate-fields">
-        <p class="form-hint">1. Choose the app your agent uses</p>
+        <details id="agent-link-existing" class="agent-advanced">
+          <summary data-i18n="agent.linkExisting.title">Link an existing agent identity</summary>
+          <label><span data-i18n="agent.linkExisting.identity">Agent identity ID</span><input id="agent-link-identity" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="agent-link-instructions"></label>
+          <label><span data-i18n="agent.linkExisting.code">Single-use link code</span><input id="agent-link-code" type="password" maxlength="22" autocomplete="off" aria-describedby="agent-link-instructions"></label>
+          <p id="agent-link-instructions" class="form-hint"></p>
+        </details>
+        <p id="agent-choose-app" class="form-hint">1. Choose the app your agent uses</p>
         <div id="agent-type-catalog" class="agent-type-catalog" role="list">
           <div id="agent-roster" class="agent-type-grid agent-roster">
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="claude-code" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CC</span><span class="agent-type-copy"><strong>Claude Code</strong><span>Best for local coding sessions</span></span></button>
@@ -750,7 +756,7 @@
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="muse" data-roster="muse" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">MU</span><span class="agent-type-copy"><strong>Muse</strong><span>Best for the Muse app or WhatsApp</span></span></button>
           </div></details>
         </div>
-        <p class="form-hint">2. Choose its name and Room access</p>
+        <p id="agent-choose-name" class="form-hint">2. Choose its name and Room access</p>
         <label>Name<input id="agent-connect-name" maxlength="80" required autocomplete="off" placeholder="My assistant" aria-describedby="agent-name-warning"></label>
         <p id="agent-name-warning" class="form-hint" hidden></p>
         <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>

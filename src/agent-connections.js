@@ -19,6 +19,8 @@ export function installAgentConnections({ client, getState }) {
   existingButton.type = 'button'; existingButton.textContent = uiText('agent.existing.add');
   existingLabel.append(existingSelect); existingBox.append(existingLabel, existingButton); form.prepend(existingBox);
   const ordinaryFields = $('#agent-separate-fields'), accessFields = $('#agent-connect-access-fields'), managedConnections = $('#agent-manage-connections');
+  const linkExisting = $("#agent-link-existing"), linkSummary = linkExisting.querySelector("summary");
+  const linkIdentity = $("#agent-link-identity"), linkCode = $("#agent-link-code");
   const accessHome = document.createComment(''), manageHome = document.createComment('');
   accessFields.before(accessHome); managedConnections.before(manageHome);
   const separateAgent = document.createElement('details'), separateSummary = document.createElement('summary');
@@ -26,6 +28,11 @@ export function installAgentConnections({ client, getState }) {
   separateSummary.textContent = uiText('agent.existing.separate'); separateAgent.append(separateSummary); ordinaryFields.after(separateAgent);
   separateSummary.addEventListener('click', event => { if (existingPending || pending || busy || setup) event.preventDefault(); });
   separateAgent.addEventListener('toggle', render);
+  linkSummary.addEventListener("click", event => { if (existingPending || pending || busy || setup) event.preventDefault(); });
+  linkExisting.addEventListener("toggle", () => {
+    if (!linkExisting.open) linkCode.value = "";
+    describeRoute(); render();
+  });
   const existingFirst = () => Boolean(existingPending || (!pending && !setup && existingChoices.length));
   function syncAgentPaths() {
     const primary = existingFirst(), locked = Boolean(existingPending || pending || busy || setup);
@@ -123,7 +130,7 @@ export function installAgentConnections({ client, getState }) {
   function describeName() {
     const warning = $("#agent-name-warning");
     const taken = rosterNameTaken(getState()?.members, $("#agent-connect-name").value);
-    warning.hidden = !taken;
+    warning.hidden = !taken || linkExisting.open;
     warning.textContent = taken ? "A member with this name already exists. Create access only if you want a second identity." : "";
   }
   function constrainAccess() {
@@ -152,7 +159,7 @@ export function installAgentConnections({ client, getState }) {
     const route = currentRoute();
     if ($("#agent-route-hint")) $("#agent-route-hint").textContent = routeHint(route);
     if ($("#agent-packet-today")) $("#agent-packet-today").hidden = route !== "packet";
-    const packet = route === "packet";
+    const packet = route === "packet" && !linkExisting.open;
     if ($("#agent-create")) $("#agent-create").hidden = packet;
     if ($("#agent-create-note")) {
       $("#agent-create-note").hidden = packet;
@@ -198,7 +205,17 @@ export function installAgentConnections({ client, getState }) {
     if (setup) describeImport();
     for (const input of form.querySelectorAll("input,select")) input.disabled = busy || Boolean(pending) || Boolean(existingPending) || (existingFirst() && !separateAgent.open && ordinaryFields.contains(input));
     $("#agent-create").disabled = busy || Boolean(existingPending);
-    $("#agent-create").textContent = pending ? "Retry original" : "Create access";
+    const linkLocked = Boolean(busy || pending || existingPending || setup);
+    linkSummary.tabIndex = linkLocked ? -1 : 0;
+    linkSummary.setAttribute("aria-disabled", String(linkLocked));
+    linkIdentity.disabled ||= !linkExisting.open;
+    linkCode.disabled ||= !linkExisting.open;
+    $("#agent-choose-app").hidden = linkExisting.open;
+    $("#agent-type-catalog").hidden = linkExisting.open;
+    $("#agent-choose-name").hidden = linkExisting.open;
+    $("#agent-create").textContent = pending ? "Retry original" : linkExisting.open ? uiText("agent.linkExisting.submit") : "Create access";
+    $("#agent-create-later").textContent = $("#agent-create").textContent;
+    describeName();
     if ($("#agent-create-later")) $("#agent-create-later").disabled = busy || Boolean(existingPending);
     $("#agent-private-copy").disabled = copying || !setup || !owns();
     if ($("#agent-copy-checklist")) $("#agent-copy-checklist").disabled = copying || !setup || !allowed();
@@ -212,7 +229,7 @@ export function installAgentConnections({ client, getState }) {
   }
   function reset() {
     flow++; listVersion++; existingChoices = []; existingPending = null; existingBox.hidden = true; owner = null; generation = null; ownerRevision = null; pending = null; forget(); busy = false;
-    conceal(); form.reset(); rosterId = null; $("#agent-other-types").open = false;
+    conceal(); form.reset(); linkExisting.open = false; rosterId = null; $("#agent-other-types").open = false;
     if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
     if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
     list.replaceChildren(); status(""); render(); dialog.close();
@@ -310,6 +327,7 @@ export function installAgentConnections({ client, getState }) {
     const receipt = result?.receipt, connection = result?.connection;
     return (receipt?.version === 1 || receipt?.version === 2 && Number.isSafeInteger(receipt.authoritySequence) && receipt.authoritySequence >= 0) && receipt.action === request.action && receipt.requestId === request.requestId
       && receipt.roomId === owner.roomId && receipt.memberId === request.memberId
+      && receipt.identityId === request.identityId
       && receipt.generation === (request.action === "create" ? 1 : request.expectedGeneration + 1)
       && receipt.status === (request.action === "disconnect" ? "disconnected" : "issued")
       && (request.action === "disconnect" || receipt.expiresAt === request.expiresAt)
@@ -338,7 +356,9 @@ export function installAgentConnections({ client, getState }) {
       setupMeta = usable ? { generation: result.receipt.generation, memberRevision: result.connection.memberRevision, expiresAt: result.receipt.expiresAt,
         sequence: result.receipt.membershipSequence ?? client.sequence } : null;
       armExpiry();
-      status(usable ? "Access ready. Setup does not start an AI." : operation.request.action === "disconnect" ? "Room access ended." : "Original request confirmed. That key is no longer active.");
+      status(usable ? (operation.request.identityId ? uiText("agent.linkExisting.ready") : "Access ready. Setup does not start an AI.")
+        : operation.request.action === "disconnect" ? "Room access ended." : "Original request confirmed. That key is no longer active.");
+      if (operation.request.identityId) { linkIdentity.value = ""; linkExisting.open = false; }
       conceal(); render();
       if (setup && dialog.open) $("#agent-setup-title").focus();
       void load(); void client.refresh().catch(() => {});
@@ -358,13 +378,23 @@ export function installAgentConnections({ client, getState }) {
   async function prepare(action, row) {
     if (!owns() || busy || pending || existingPending || setup) return;
     if (action === "create" && existingFirst() && !separateAgent.open) return;
+    const linking = action === "create" && linkExisting.open;
+    const identityId = linkIdentity.value.trim(), identityLinkCode = linkCode.value.trim();
+    const validIdentity = /^[A-Za-z0-9_-]{1,64}$/.test(identityId);
+    if (linking && (!validIdentity || !/^[A-Za-z0-9_-]{22}$/.test(identityLinkCode))) {
+      status(uiText("agent.linkExisting.invalid"));
+      (validIdentity ? linkCode : linkIdentity).focus();
+      return;
+    }
+    const link = linking ? { identityId, identityLinkCode } : {};
+    linkCode.value = "";
     busy = true; render();
     const identity = owner, epoch = generation, currentFlow = flow;
     try {
       const token = action === "disconnect" ? null : newToken();
       const request = { action, requestId: crypto.randomUUID(), memberId: row?.memberId ?? `agent-${crypto.randomUUID()}`, expectedOwnerRevision: member().revision,
         ...(action === "create" ? { displayName: $("#agent-connect-name").value.trim(), access: $("#agent-connect-access").value,
-          ...(rosterId ? { agentType: rosterId } : {}) }
+          ...(rosterId ? { agentType: rosterId } : {}), ...link }
           : { expectedGeneration: row.generation, expectedMemberRevision: row.memberRevision }),
         ...(token ? { keyHash: await digest(token), expiresAt: Date.now() + Number($("#agent-connect-expiry").value) * 86400000 - 60000 } : {}) };
       if (!owns() || owner !== identity || generation !== epoch || flow !== currentFlow) return;
@@ -384,13 +414,14 @@ export function installAgentConnections({ client, getState }) {
     if (!allowed()) return;
     if (!owner) { owner = client.session; generation = client.generation; ownerRevision = member().revision; }
     if (!owns()) { reset(); return; }
+    $("#agent-link-instructions").textContent = uiText("agent.linkExisting.instructions", { roomId: owner.roomId, accountId: owner.account.id });
     checkExpiry(); conceal(); describeRoute(); render(); dialog.showModal(); void load();
     if (pending) status("Change not confirmed. Retry the original.");
     if (setup) $("#agent-setup-title").focus();
     else if (!pending) (existingFirst() ? existingSelect : rosterId ? $("#agent-connect-name") : catalogButtons()[0])?.focus();
   });
   $("#agent-connect-close").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", conceal);
+  dialog.addEventListener("close", () => { conceal(); linkCode.value = ""; });
   form.addEventListener("submit", event => { event.preventDefault(); if (existingFirst() && !separateAgent.open) void enrollExisting(); else if (pending) void submit(); else void prepare("create"); });
   $("#agent-connect-name").addEventListener("input", describeName);
   $("#agent-connect-access")?.addEventListener("change", describeAccess);
@@ -398,7 +429,7 @@ export function installAgentConnections({ client, getState }) {
   $("#agent-retry").addEventListener("click", () => { void submit(); });
   $("#agent-connect-done").addEventListener("click", () => {
     if (!busy && !copying && !existingPending) {
-      forget(); form.reset(); rosterId = null;
+      forget(); form.reset(); linkExisting.open = false; rosterId = null;
       if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
       if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
       describeRoute(); status(""); render(); catalogButtons()[0]?.focus();

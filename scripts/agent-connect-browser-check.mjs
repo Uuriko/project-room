@@ -48,9 +48,9 @@ async function setup(t, mobile = false, friend = false) {
   await reveal();
   const open = async () => { await reveal(); await clickChrome(page, "#connect-agent-button"); await page.locator("#agent-connect-dialog").waitFor({ state: "visible" }); };
   const create = async () => { await page.locator("#agent-connect-name").fill("Synthetic Claude"); await page.locator("#agent-create").click(); };
-  const config = async () => { await page.locator("#agent-private-details > summary").click(); await page.waitForFunction(() => document.querySelector("#agent-private-config").value.length > 0); return JSON.parse(await page.locator("#agent-private-config").inputValue()); };
+  const config = async () => { await page.locator("#agent-private-details > summary").click(); await page.waitForFunction(() => document.querySelector("#agent-private-config").value.length > 0); return JSON.parse((await page.locator("#agent-private-config").inputValue()).split("\n", 1)[0]); };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/agent-connect-${name}.png` }); };
-  return { ...f, page, origin, open, create, config, capture };
+  return { ...f, browser, page, origin, open, create, config, capture };
 }
 
 test("Invite reveals agent setup independently of the People disclosure", { timeout: 20000 }, async t => {
@@ -433,6 +433,98 @@ test("signed-in friend connects own agent without room-owner permission", { time
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
 
+test("signed-in coworker links an existing agent and it picks up the first assigned work", { timeout: 30000 }, async t => {
+  const f = await setup(t, true, true);
+  const existing = f.store.identities.create("Existing coworker agent");
+  const mint = async sponsorAccountId => {
+    const response = await fetch(`${f.origin}/api/identities/${existing.identityId}/link-code`, {
+      method: "POST", headers: { authorization: `Bearer ${existing.secret}`, "content-type": "application/json" },
+      body: JSON.stringify({ roomId: "commons", sponsorAccountId }),
+    });
+    assert.equal(response.status, 201);
+    return (await response.json()).linkCode;
+  };
+  const deniedCode = await mint("another-sponsor");
+  const validCode = await mint("friend-browser-account");
+  await f.open();
+  await f.page.locator("#agent-connect-name").fill("Existing coworker agent");
+  const choice = f.page.getByText("Link an existing agent identity", { exact: true });
+  await choice.focus({ timeout: 1500 });
+  await f.page.keyboard.press("Enter");
+  await f.page.waitForFunction(() => !document.querySelector("#agent-link-identity").disabled);
+  await f.page.keyboard.press("Tab");
+  const identityInput = f.page.getByLabel("Agent identity ID");
+  const proofInput = f.page.getByLabel("Single-use link code");
+  assert.equal(await identityInput.evaluate(node => document.activeElement === node), true);
+  assert.equal(await f.page.locator("#agent-type-catalog").isVisible(), false);
+  await f.capture("friend-mobile-link");
+  assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+  await identityInput.fill(existing.identityId);
+  await proofInput.fill(deniedCode);
+  const submit = f.page.locator("#agent-create");
+  const watchAttempt = () => f.page.waitForResponse(response =>
+    response.url().endsWith("/agent-connections") && response.request().method() === "POST");
+  const denied = watchAttempt();
+  await submit.click();
+  assert.equal((await denied).status(), 422);
+  assert.ok((await proofInput.inputValue()).length === 0);
+  const linkCount = () => f.store.db.prepare("SELECT count(*) AS total FROM identity_links WHERE identity_id = ?").get(existing.identityId).total;
+  assert.equal(linkCount(), 0);
+
+  let originalRequest;
+  let exactRetry = false;
+  await f.page.route("**/agent-connections", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postData();
+    if (originalRequest) {
+      exactRetry = body === originalRequest;
+      return route.continue();
+    }
+    originalRequest = body;
+    const saved = await route.fetch();
+    if (!saved.ok()) return route.fulfill({ response: saved });
+    // Save against the real authority, then lose the receipt in transit.
+    return route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+  });
+  await proofInput.fill(validCode);
+  await submit.click();
+  await f.page.getByRole("button", { name: "Retry original", exact: true }).click();
+  await f.page.locator("#agent-setup").waitFor({ state: "visible" });
+  assert.equal(exactRetry, true);
+  assert.equal(linkCount(), 1);
+  assert.equal(await proofInput.inputValue(), "");
+  const config = await f.config();
+  assert.equal(f.store.bonds.identityForMember("commons", config.memberId), existing.identityId);
+  assert.equal(f.store.room("commons").state.members[config.memberId].accountableHumanId, "friend-browser");
+  assert.equal(f.store.room("commons").state.room.ownerId, "owner");
+
+  f.store.command(f.keys.owner, "commons", { id: "linked-friend-first-work", type: T.WORK_PROPOSED, data: {
+    workItemId: "check-release-note", title: "Check the release note", definitionOfDone: "Confirm the date",
+    accountableMemberId: config.memberId, mode: "read",
+  } });
+  const pickup = await new RoomAgentClient(config).orient({ focus: "needs_me", paginate: true });
+  assert.equal(pickup.viewerId, config.memberId);
+  assert.ok(pickup.work.some(item => item.id === "check-release-note" && item.nextRead));
+
+  // A separate browser signs in using only the agent's original identity.
+  const agentPage = await f.browser.newPage();
+  const record = "#pr-record/work/check-release-note";
+  const signin = new URL("/agent-signin", f.origin);
+  signin.search = new URLSearchParams({ room: "commons", record });
+  await agentPage.goto(signin.href);
+  await agentPage.locator('[name="identityId"]').fill(existing.identityId);
+  await agentPage.locator('[name="secret"]').fill(existing.secret);
+  await agentPage.locator('[data-agent-form="credentials"] button[type="submit"]').press("Enter");
+  await agentPage.getByRole("button", { name: f.store.room("commons").state.room.title, exact: true }).press("Enter");
+  const assignment = agentPage.locator('[data-work-record-id="check-release-note"]').getByText("Check the release note", { exact: true });
+  await assignment.waitFor();
+  assert.equal(await agentPage.locator("#agent-first-run").count(), 0);
+  await agentPage.reload();
+  await assignment.waitFor();
+  assert.equal(new URL(agentPage.url()).hash, record);
+  assert.doesNotThrow(() => f.store.agentConnections.verify());
+});
+
 for (const count of [1, 5]) test(`agent invitation clipboard handoff keeps ${count} canonical links and optional local setup`, { timeout: 25000 }, async t => {
   const f = await setup(t), page = f.page;
   await page.evaluate(() => { globalThis.inviteCopied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { globalThis.inviteCopied.push(text); } } }); });
@@ -488,7 +580,7 @@ test('existing owned agent is primary; separate-agent creation is explicit and u
  assert.equal(await f.page.locator('#agent-create').isVisible(),false);
  assert.equal(await f.page.locator('#agent-connect-access').isVisible(),true);
  assert.equal(await f.page.locator('#agent-manage-connections').isVisible(),true);
- const reveal=f.page.getByText('Create a separate agent',{exact:true});await reveal.click();
+ const reveal=f.page.getByText('Set up another agent',{exact:true});await reveal.click();
  assert.equal(await f.page.locator('#agent-type-catalog').isVisible(),true);await f.page.waitForFunction(()=>!document.querySelector('#agent-connect-name').disabled);assert.equal(await f.page.locator('#agent-connect-name').isDisabled(),false);
  await reveal.click();assert.equal(await f.page.locator('#agent-type-catalog').isVisible(),false);assert.equal(requests.length,0);
  f.page.once('dialog',dialog=>dialog.dismiss());await add.click();assert.equal(requests.length,0,'declined explicit consent grants no access');
