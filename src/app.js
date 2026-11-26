@@ -3034,7 +3034,7 @@ function scheduleRoomFilesRefresh() {
   roomFilesRefreshTimers.forEach(clearTimeout);
   roomFilesRefreshTimers = ROOM_FILE_REFRESH_DELAYS_MS.map(delay => setTimeout(() => void refreshRoomFiles(), delay));
 }
-async function refreshRoomFiles(more=false, selectedIds=null) {
+async function refreshRoomFiles(more=false, selectedIds=null, { preserveInventory = false } = {}) {
   if (!state || !session || !client.session || roomFilesLoading) return;
   const generation = client.generation;
   const roomId = state.room?.id, authSession=client.session, viewKey=conversationViewKey(), ticket={};
@@ -3058,9 +3058,14 @@ async function refreshRoomFiles(more=false, selectedIds=null) {
       if(!list.some(held=>held.id===file.id))list.push(file);
       next.set(file.messageId, list);
     }
-    roomFilesByMessage = next;roomFilesSelection=selection;roomFilesNextCursor=body.page?.nextCursor??null;
+    const nextCursor = body.page?.nextCursor ?? null;
+    roomFilesByMessage = next;
+    if (!preserveInventory || nextCursor) {
+      roomFilesSelection = selection;
+      roomFilesNextCursor = nextCursor;
+    }
     if (state) renderMessages();
-    return true;
+    return { hasMore: Boolean(nextCursor) };
   } catch { /* The last chips stay until the next successful read. */ }
   finally{if(roomFilesFlight===ticket){roomFilesFlight=null;roomFilesLoading=false;if(generation===client.generation&&state?.room?.id===roomId)renderMessages();}}
 }
@@ -3069,11 +3074,10 @@ async function checkAnswerFiles(messageId) {
   if (!message || !receivedFormalAnswer(message)) return;
   const generation = client.generation, viewKey = conversationViewKey();
   answerFileCheck = null;
-  const selection = roomFilesSelection.includes(messageId) ? roomFilesSelection : [messageId];
-  const checked = await refreshRoomFiles(false, selection);
+  const checked = await refreshRoomFiles(false, [messageId], { preserveInventory: true });
   if (generation !== client.generation || conversationViewKey() !== viewKey) return;
   const text = !checked ? uiText("file.answer.checkFailed")
-    : roomFilesByMessage.get(messageId)?.length || roomFilesNextCursor ? "" : uiText("file.answer.none");
+    : roomFilesByMessage.get(messageId)?.length || checked.hasMore ? "" : uiText("file.answer.none");
   answerFileCheck = text ? { messageId, text } : null;
   renderMessages();
 }

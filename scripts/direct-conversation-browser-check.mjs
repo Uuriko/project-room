@@ -9,6 +9,7 @@ import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
+import { ensureSidebarOpen, openConversation } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
 
 for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard navigation, audience, drafts and reload`, { timeout: 60000 }, async t => {
@@ -37,6 +38,7 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
   page.setDefaultTimeout(10000);
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await signInFixture(page, owner);
+  await openConversation(page);
   const input = page.locator('#message-input');
   await page.locator('#message-list').getByText('Public room topic', { exact: true }).waitFor();
   assert.equal(await page.locator('#message-list').getByText('Private hello', { exact: true }).count(), 0);
@@ -133,6 +135,7 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
   await page.unroute('**/api/rooms/commons/commands');
   assert.equal(await page.locator('#conversation-title').innerText(), 'Alice');
   await page.reload();
+  await openConversation(page);
   await page.waitForFunction(() => document.querySelector('#conversation-title').textContent === 'Alice');
   assert.equal(await input.inputValue(), '');
   await input.fill('Alice after send');
@@ -164,6 +167,7 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
   await page.locator('#thread-back').click();
   assert.equal(await input.inputValue(), 'Alice after send');
   await page.reload();
+  await openConversation(page);
   await page.waitForFunction(() => document.querySelector('#message-input').value === 'Alice after send');
   assert.equal(await page.locator('#conversation-title').innerText(), 'Alice');
   if (width === 320) await page.locator('#sidebar-toggle').click();
@@ -202,6 +206,8 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
     await peerPage.goto(page.url());
     await signInFixture(peerPage, key);
     if (canRead) {
+      await openConversation(peerPage);
+      await ensureSidebarOpen(peerPage);
       await peerPage.locator('#direct-message-list [data-direct-member="owner"]').click();
       await peerPage.locator('#message-list').getByText('Reply only to Alice', { exact: true }).waitFor();
     } else {

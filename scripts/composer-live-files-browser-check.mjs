@@ -360,7 +360,18 @@ for (const storage of ["legacy", "normalized"]) {
     const recipient = createRoomClient({ origin, roomId, token: owner });
     assert.deepEqual(await recipient.files([messageId]), []);
 
+    let followUpAnswerId;
     if (storage === "normalized") {
+      send(owner, T.MESSAGE_POSTED, {
+        messageId: "follow-up", toMemberId: "writer", replyToId: messageId, requestKind: "reply", body: "Confirm the review is complete",
+      });
+      const followUp = await runRequestOnce({
+        connection: { origin, roomId, memberId: "writer", token: writer }, db, requestMessageId: "follow-up",
+        execute: async () => ({ body: "The review is complete." }),
+      });
+      assert.equal(followUp.status, "delivered");
+      followUpAnswerId = followUp.receipt.messageId;
+
       store.roomFlood = createRoomFloodGuard({ now: () => store.now(), capacity: 300 });
       for (let index = 0; index < 50; index++) send(writer, T.MESSAGE_POSTED, {
         messageId: `new-direct-${index}`, toMemberId: ownerId, body: `New direct note ${index}`,
@@ -412,7 +423,7 @@ for (const storage of ["legacy", "normalized"]) {
       return request;
     };
     const emptyRead = await checkSelectedFiles(true);
-    if (storage === "legacy") assert.deepEqual(new URL(emptyRead.url()).searchParams.getAll("messageId"), [messageId]);
+    assert.deepEqual(new URL(emptyRead.url()).searchParams.getAll("messageId"), [messageId]);
     await row.getByRole("status").getByText("No files on this answer.", { exact: true }).waitFor();
     assert.equal(await menu.evaluate(node => node === document.activeElement), true);
     offline = false;
@@ -478,6 +489,73 @@ for (const storage of ["legacy", "normalized"]) {
       assert.equal(await bystander.getByText("I finished reviewing the project brief.", { exact: true }).count(), 0);
       assert.equal(await bystander.getByText("brief.md", { exact: true }).count(), 0);
       assert.equal(observerReads.some(url => url.pathname.endsWith("/reply-context") || url.searchParams.getAll("messageId").includes(messageId) && url.pathname.endsWith("/files")), false);
+
+      const returning = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
+      const firstContext = url => url.pathname.endsWith("/reply-context") && url.searchParams.get("requestMessageId") === "question";
+      const captured = deferred("the original answer context");
+      const release = deferred("release the original answer context");
+      t.after(() => release.resolve());
+      await returning.route(firstContext, async route => {
+        const authorized = await route.fetch();
+        captured.resolve(authorized.status());
+        await release.promise;
+        await route.fulfill({ response: authorized });
+      });
+      const requests = [];
+      returning.on("request", request => requests.push({ url: new URL(request.url()), method: request.method() }));
+      await returning.goto(`${origin}/?room=${roomId}#pr-record/message/${messageId}`);
+      await signInFixture(returning, owner);
+      assert.equal(await captured.promise, 200);
+      const oldRow = returning.locator(`[data-message-record-id="${messageId}"]`);
+      await oldRow.waitFor();
+      await returning.locator("#message-input").fill("Draft for the same discussion");
+      const newHash = `#pr-record/message/${followUpAnswerId}`;
+      await returning.evaluate(hash => { location.hash = hash; }, newHash);
+      const newRow = returning.locator(`[data-message-record-id="${followUpAnswerId}"]`);
+      await newRow.locator('[data-message-action="check-answer-files"]').waitFor({ state: "attached", timeout: 3500 });
+      assert.equal(await returning.locator("#message-list").getAttribute("data-view"), "thread:question");
+      assert.equal(await newRow.evaluate(node => node === document.activeElement), true);
+      const delayed = returning.waitForResponse(response => firstContext(new URL(response.url())), { timeout: 3500 });
+      release.resolve();
+      assert.equal(await (await delayed).finished(), null);
+      await returning.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(new URL(returning.url()).hash, newHash);
+      assert.equal(await newRow.evaluate(node => node === document.activeElement), true);
+      assert.equal(await returning.locator("#message-input").inputValue(), "Draft for the same discussion");
+      assert.equal(await oldRow.locator('[data-message-action="check-answer-files"]').count(), 0);
+      await oldRow.locator(`[data-download-file="${fileId}"]`).waitFor({ timeout: 3500 });
+      const answerMenu = newRow.locator(".message-more summary");
+      const checkFollowUp = newRow.getByRole("button", { name: "Check files on this answer", exact: true });
+      await answerMenu.press("Enter");
+      await checkFollowUp.press("Escape");
+      assert.equal(await checkFollowUp.count(), 0);
+      assert.equal(await answerMenu.evaluate(node => node === document.activeElement), true);
+
+      await answerMenu.press("Enter");
+      const fileReading = returning.waitForRequest(request => new URL(request.url()).pathname.endsWith("/files"), { timeout: 3500 });
+      await checkFollowUp.press("Enter");
+      assert.deepEqual(new URL((await fileReading).url()).searchParams.getAll("messageId"), [followUpAnswerId]);
+      await newRow.getByRole("status").getByText("No files on this answer.", { exact: true }).waitFor({ timeout: 3500 });
+      assert.equal(await answerMenu.evaluate(node => node === document.activeElement), true);
+      assert.equal(await oldRow.locator(`[data-download-file="${fileId}"]`).isVisible(), true);
+      if (process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT) {
+        await returning.screenshot({ path: process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT + "-same-thread.png" });
+      }
+
+      const threadBack = returning.locator("#thread-back");
+      await threadBack.press("Enter");
+      assert.equal(await returning.locator("#conversation-title").evaluate(node => node === document.activeElement), true);
+      const draft = returning.locator("#message-input");
+      assert.equal(await draft.inputValue(), "");
+      await draft.fill("Different draft in the private conversation");
+      await returning.evaluate(id => { location.hash = `#pr-record/message/${id}`; }, messageId);
+      await returning.waitForFunction(id => document.activeElement?.dataset?.messageRecordId === id, messageId);
+      await returning.evaluate(hash => { location.hash = hash; }, newHash);
+      await returning.waitForFunction(id => document.activeElement?.dataset?.messageRecordId === id, followUpAnswerId);
+      assert.equal(await draft.inputValue(), "Draft for the same discussion");
+      await threadBack.press("Enter");
+      assert.equal(await draft.inputValue(), "Different draft in the private conversation");
+      assert.equal(requests.some(({ url, method }) => url.pathname.endsWith("/search") || method === "POST" && url.pathname.endsWith("/commands")), false);
     }
   });
 }
