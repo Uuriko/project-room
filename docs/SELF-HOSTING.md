@@ -116,9 +116,13 @@ one-off investigation.
 A route can use the existing completion subscriber to handle a confirmed
 provider refusal. On `POST /api/rooms/:roomId/agent-pause`, the agent host or
 Room owner can pause that member with reason `provider_capacity_before_start`.
-Use that reason only when the provider refused dispatch before this attempt
-started. A personal pause, elapsed time or a lost connection carries
-different evidence. Resume the member after confirming capacity.
+For a transfer, bind the report to the refused attempt with
+`provider_capacity_before_start:request:<requestMessageId>` or
+`provider_capacity_before_start:work:<workItemId>:<revision>`. The unqualified
+reason records a provider block without authorizing a transfer. Use these
+reasons only after a provider refusal before dispatch. A personal pause,
+elapsed time or a lost connection carries different evidence. Resume the
+member after confirming capacity.
 
 A route can configure one of these transfers:
 

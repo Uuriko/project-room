@@ -509,7 +509,12 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.equal(latest("completion_pickup.capacity"), "paused");
     assert.equal(selected().status, "open");
     await capacityChange("resume", "manual-resume");
-    await capacityChange("pause", "provider-stop", CAPACITY_STOP);
+    await capacityChange("pause", "generic-provider-stop", CAPACITY_STOP);
+    await setImmediate();
+    assert.equal(latest("completion_pickup.capacity"), "awaiting_exact_stop");
+    assert.equal(selected().status, "open");
+    await capacityChange("resume", "generic-provider-resume");
+    await capacityChange("pause", "provider-stop", `${CAPACITY_STOP}:request:${source.data.messageId}`);
     await setImmediate();
     assert.equal(latest("completion_pickup.capacity"), "replacement_unreachable");
     assert.equal(latest("completion_pickup.refill"), "capacity_blocked");
@@ -574,7 +579,7 @@ test("a stopped provider's unopened Work Thread becomes an authorized successor 
   propose("started-work");
   store.command(primary.secret, roomId, { id: "old-accept", type: "work.accepted", data: { workItemId: "started-work", expectedRevision: 0 } });
   store.command(primary.secret, roomId, { id: "old-start", type: "work.started", data: { workItemId: "started-work", expectedRevision: 1 } });
-  store.wakeQueue.pause(primary.secret, roomId, { requestId: "provider-work-hold", reason: CAPACITY_STOP });
+  store.wakeQueue.pause(primary.secret, roomId, { requestId: "provider-work-hold", reason: `${CAPACITY_STOP}:work:${workItemId}:0` });
   const originalCommand = store.command.bind(store);
   store.command = (token, room, command) => {
     if (command.type === "message.posted") throw new Error("injected write failure");
@@ -601,6 +606,8 @@ test("a stopped provider's unopened Work Thread becomes an authorized successor 
   const head = store.headSequence(roomId);
   assert.equal(capacityWorkHandoff(store, binding, receiver).state, "work_handed_off");
   assert.equal(store.headSequence(roomId), head);
+  store.wakeQueue.resume(primary.secret, roomId, { requestId: "provider-work-resumed" });
+  store.wakeQueue.pause(primary.secret, roomId, { requestId: "provider-started-hold", reason: `${CAPACITY_STOP}:work:started-work:2` });
   const started = { ...route, workItemId: "started-work", capacityWork: { ...route.capacityWork, operationId: "move-started-work", expectedRevision: 2 } };
   assert.equal(capacityWorkHandoff(store, { ...binding, route: started, workHandoff: compileCapacityWork(started) }, receiver).state, "inspect_existing_work");
 });

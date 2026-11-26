@@ -6,6 +6,7 @@ import { readWorkItem } from "./work-repository.mjs";
 
 export const investigation = "Room investigation pass.";
 export const CAPACITY_STOP = "provider_capacity_before_start";
+const reportsCapacityStop = reason => reason === CAPACITY_STOP || reason?.startsWith(CAPACITY_STOP + ":");
 
 export function compileCapacityHandoff(route) {
   if (route.capacityHandoff === undefined) return null;
@@ -37,7 +38,9 @@ export function capacityHandoff(store, binding, receiver) {
     }
     const pause = store.wakeQueue.pauseStatus(roomId, recipientId);
     if (!pause) return { state: "capacity_not_reported" };
-    if (pause.reason !== CAPACITY_STOP) return { state: "paused" };
+    if (!reportsCapacityStop(pause.reason)) return { state: "paused" };
+    if (pause.reason !== `${CAPACITY_STOP}:request:${capacity.source.data.messageId}`)
+      return { state: "awaiting_exact_stop" };
     const receipt = store.operationReceipt(secret, roomId, capacity.source.id);
     if (receipt.status !== "recorded" || receipt.sequence <= route.after || receipt.eventType !== "message.posted")
       return { state: "waiting_for_source" };
@@ -88,7 +91,7 @@ export function idleRefill(store, { route, secret, refill, hasOpenRequest }, rec
   return store.transaction(() => {
     if (store.authenticate(secret, roomId).member.id !== requesterId) throw new Error("Pickup requester identity changed");
     const pause = store.wakeQueue.pauseStatus(roomId, recipientId);
-    if (pause) return { state: pause.reason === CAPACITY_STOP ? "capacity_blocked" : "paused" };
+    if (pause) return { state: reportsCapacityStop(pause.reason) ? "capacity_blocked" : "paused" };
     const work = readWorkItem(store.db, roomId, workItemId);
     const nextStep = work && nextWorkStep(work);
     if (hasOpenRequest(route) || nextStep?.memberId === recipientId) return { state: "pending_work" };
@@ -129,7 +132,9 @@ export function capacityWorkHandoff(store, { route, secret, workHandoff, hasOpen
         && pickup.eventType === "message.posted" && proposed.sequence + 1 === superseded.sequence
         && superseded.sequence + 1 === pickup.sequence ? "work_handed_off" : "replacement_operation_conflict" };
     const pause = store.wakeQueue.pauseStatus(roomId, recipientId);
-    if (pause?.reason !== CAPACITY_STOP) return { state: pause ? "paused" : "capacity_not_reported" };
+    if (!reportsCapacityStop(pause?.reason)) return { state: pause ? "paused" : "capacity_not_reported" };
+    if (pause.reason !== `${CAPACITY_STOP}:work:${workItemId}:${expectedRevision}`)
+      return { state: "awaiting_exact_stop" };
     const item = readWorkItem(store.db, roomId, workItemId);
     if (item?.accountableMemberId !== recipientId || item.revision !== expectedRevision
         || item.proposedById !== requesterId || item.state !== "proposed" || item.mode !== "read"
