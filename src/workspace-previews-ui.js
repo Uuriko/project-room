@@ -58,7 +58,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
           <button type="button" class="button ghost" role="tab" id="workspace-tab-output" aria-controls="workspace-panel-output" data-workspace-tab="output">Run output</button>
         </div>
         <section id="workspace-panel-changes" role="tabpanel" aria-labelledby="workspace-tab-changes" data-workspace-changes hidden>
-          <label hidden>Compare with <select data-workspace-compare><option value="">Choose another attempt</option></select></label>
+          <div data-workspace-compare-controls hidden>
+            <label><span data-workspace-compare-label></span>
+              <select data-workspace-compare aria-describedby="workspace-compare-scope"></select>
+            </label>
+            <p id="workspace-compare-scope" class="form-hint" data-workspace-compare-scope></p>
+          </div>
           <p data-workspace-change-status class="form-hint" role="status"></p>
           <div class="workspace-change-columns"><section data-workspace-primary></section><section data-workspace-peer hidden></section></div>
         </section>
@@ -126,7 +131,13 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   latest.textContent = uiText("workspace.share.openCurrent");
   const changesView = dialog.querySelector("[data-workspace-changes]");
   const compare = dialog.querySelector("[data-workspace-compare]");
-  const compareLabel = compare.closest("label");
+  const compareControls = dialog.querySelector("[data-workspace-compare-controls]");
+  const sourceLabel = item => uiText("workspace.preview.source", {
+    name: memberLabel(item.publisherId) || item.publisherId,
+    head: item.head.slice(0, 12), revision: item.revision,
+  });
+  dialog.querySelector("[data-workspace-compare-label]").textContent = uiText("workspace.changes.compareSameBase");
+  dialog.querySelector("[data-workspace-compare-scope]").textContent = uiText("workspace.changes.repositoryUnknown");
   const changeStatus = dialog.querySelector("[data-workspace-change-status]");
   const columns = dialog.querySelector(".workspace-change-columns");
   const primary = dialog.querySelector("[data-workspace-primary]");
@@ -141,12 +152,12 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     if (enabled) {
       inventory.before(detail);
       meta.after(status, tabs, changesView);
-      columns.after(compareLabel);
+      columns.after(compareControls);
     } else {
       detail.before(inventory);
       start.after(status);
       linkFallback.after(tabs, changesView);
-      changeStatus.before(compareLabel);
+      changeStatus.before(compareControls);
     }
   }
 
@@ -296,11 +307,13 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       else peer.replaceChildren();
       if (comparison) {
         for (const [column, item] of [[primary, current], [peer, comparison]]) {
+          const title = column.querySelector("h4");
+          title.textContent = uiText(column === primary ? "workspace.changes.selectedTitle" : "workspace.changes.comparisonTitle", { title: item.title });
           const pick = document.createElement("button");
           pick.type = "button";
           pick.className = "button secondary";
           pick.textContent = uiText("workspace.chooseVersion");
-          pick.setAttribute("aria-label", uiText("workspace.chooseVersionNamed", { title: item.title }));
+          pick.setAttribute("aria-label", uiText("workspace.chooseVersionNamed", { title: item.title, source: sourceLabel(item) }));
           pick.addEventListener("click", async () => {
             if (!stillOpen()) return;
             const url = workspaceArtifactLink(location.href, session.roomId, item, "changes");
@@ -312,7 +325,11 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
             await load();
             if (dialog.open && selected === item.id && !noteLabel.hidden) noteInput.focus();
           });
-          column.querySelector("h4").after(pick);
+          const origin = document.createElement("p");
+          origin.className = "form-hint";
+          origin.dataset.workspacePatchOrigin = "";
+          origin.textContent = sourceLabel(item);
+          title.after(origin, pick);
         }
       }
       columns.hidden = false;
@@ -333,8 +350,9 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     if (!current.patchDigest) return;
     const previous = compare.value;
     const eligible = items.filter(item => item.id !== current.id && item.base === current.base && item.patchDigest);
-    compare.replaceChildren(new Option("Choose another attempt", ""), ...eligible.map(item => new Option(item.title, item.id)));
-    compare.closest("label").hidden = eligible.length === 0;
+    compare.replaceChildren(new Option(uiText("workspace.changes.selectedOnly"), ""), ...eligible.map(item =>
+      new Option(uiText("workspace.changes.publication", { title: item.title, source: sourceLabel(item) }), item.id)));
+    compareControls.hidden = eligible.length === 0;
     if (eligible.some(item => item.id === previous)) compare.value = previous;
     void loadChanges();
   }
@@ -349,7 +367,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     output.textContent = ""; outputStatus.textContent = "";
     latest.hidden = true; openLive.hidden = true; copyLink.hidden = true; copyForAgent.hidden = true; addToThread.hidden = true; linkFallback.hidden = true; linkStatus.textContent = "";
     primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
-    compare.value = ""; changeStatus.textContent = "";
+    compare.value = ""; compareControls.hidden = true; changeStatus.textContent = "";
     frame?.remove(); frame = null;
     heading.textContent = "Open a shared preview";
     meta.textContent = "";
@@ -430,10 +448,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       updateComparisons(current);
       void loadOutput();
       heading.textContent = current.title;
-      meta.textContent = uiText("workspace.preview.source", {
-        name: memberLabel(current.publisherId) || current.publisherId,
-        head: current.head.slice(0, 12), revision: current.revision,
-      });
+      meta.textContent = sourceLabel(current);
       showPreview(current, session);
     } catch (error) {
       if (!owns(ticket, session)) return;

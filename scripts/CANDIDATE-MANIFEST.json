@@ -179,7 +179,7 @@
     "src/signin-navigation.js": "sha256:494f2537099c152a1711d4a5c9087f89b67a35d1153ee9658e1aea6d71b35f25",
     "src/spend-pricing-ui.js": "sha256:907de1a2bdbb39ef6c6dab568515946276467dcf7803d4473fbc0ace503e3cff",
     "src/strings.js": "sha256:16d9742fc2ef6f0e9dad2e933857a4c120bc923dc3a71ec86e255c0aa7561615",
-    "src/styles.css": "sha256:c4aa034d9e7be4b60e54f0ea67ab3d5b7453f3a6a1bd0a6ac360c8a757270958",
+    "src/styles.css": "sha256:400fa13ec07b5de1efcd39452e64a7beb1c225731cd5abf86760f4bfd5e4b527",
     "src/updates-ui.js": "sha256:409ed364b70923d9ac074c2731048ca123869f62711d9e48e2748eabf1360fc7",
     "src/vendor-gitdiff-parser.js": "sha256:a5b93c44784a9adabed77de47f9774a28cb492bcc66681c359dd74e0d19eee2c",
     "src/vendor-jsdiff-patch.js": "sha256:73253d9445561433580f38da6870b5d9ec2c310a1ee069169b41985325859a68",
@@ -198,9 +198,9 @@
     "src/workspace-change-view.js": "sha256:0d48219f7b3043f95718c4004542032afe9e46d284c9f822a81176c5ebd6cda7",
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "src/workspace-previews-ui.js": "sha256:51f23a04299e481befafbf4cc3430caf998c9c2d4445304ba86c546c7b7c2ebc",
-    "strings/en.js": "sha256:2e9c1ac4c868c2340277f6d34156440225cf21fe56662c20b56f7f66d33b6ec3",
-    "strings/en.json": "sha256:629b873331f9ad3543f9dc5d9e506dd7a38f13bbd41ef9d274ec1bb629b4ee6d"
+    "src/workspace-previews-ui.js": "sha256:31bedb52363c0b603e51957fded3b8d147271f7a8c83c691846f10d631b5d5a2",
+    "strings/en.js": "sha256:6bfce74199741011cb681b4c56ba3ad67578ebf86032e0d8c8cc26b408ffb44f",
+    "strings/en.json": "sha256:372a28316b15d56672e7080d006513432c15b6fcf23cecbbc95e0e1c1f582110"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

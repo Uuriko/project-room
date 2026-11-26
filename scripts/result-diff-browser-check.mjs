@@ -4,7 +4,8 @@ import { openCatchUp, openWorkFromSearch, clickWorkAction } from "./room-chrome.
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
@@ -1286,4 +1287,96 @@ test("private document handoff keeps source access with the recipient's document
   assert.equal(await outsider.locator(`a[href="${doc}"]`).count(), 0);
   assert.equal(await outsider.getByRole("button", { name: "Ask for an accessible reference", exact: true }).count(), 0);
   assert.equal(reads, 2);
+});
+
+
+test("same-base forks compare as distinct publications beside an exact accepted result", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const { workspaceCommand } = await import("../cli/commands/workspace.mjs");
+  const { attachGithubWork, updateGithubWorkObservation } = await import("../server/github-work-attachment.mjs");
+  const primaryRepo = join(f.directory, "primary-repo"), comparisonRepo = join(f.directory, "comparison-repo");
+  const file = "brief.md";
+  const git = (cwd, ...args) => execFileSync("git", ["-c", "user.email=fixture@example.test", "-c", "user.name=Fixture", ...args], { cwd, encoding: "utf8" }).trim();
+  mkdirSync(primaryRepo);
+  git(primaryRepo, "init", "--quiet");
+  writeFileSync(join(primaryRepo, file), "Shared base\n");
+  git(primaryRepo, "add", file);
+  git(primaryRepo, "commit", "--quiet", "-m", "Shared base");
+  const base = git(primaryRepo, "rev-parse", "HEAD");
+  git(f.directory, "clone", "--quiet", "--no-local", primaryRepo, comparisonRepo);
+  git(primaryRepo, "remote", "add", "origin", "https://github.com/fixture/primary");
+  git(comparisonRepo, "remote", "set-url", "origin", "https://github.com/fixture/comparison");
+  async function publish(cwd, id, actor, line, recipient) {
+    writeFileSync(join(cwd, file), line + "\n");
+    writeFileSync(join(cwd, "preview.html"), "<h1>Shared brief</h1>");
+    git(cwd, "add", file, "preview.html");
+    git(cwd, "commit", "--quiet", "-m", line);
+    let result;
+    await workspaceCommand(["publish", "--id", id, "--title", "Shared brief", "--base", base,
+      "--file", "preview.html", "--include-changes", "yes", ...(recipient ? ["--share-with", recipient] : [])],
+    { cwd, env: { ROOM_ORIGIN: f.origin, ROOM_ID: "commons", PROJECT_ROOM_SECRET: f.keys[actor] },
+      out: raw => { result = JSON.parse(raw); } });
+    return result;
+  }
+  const primary = await publish(primaryRepo, "a".repeat(32), "producer", "Primary fork marker", "human-checker");
+  const comparison = await publish(comparisonRepo, "b".repeat(32), "owner", "Comparison fork marker");
+  assert.equal(primary.base, comparison.base);
+  assert.notEqual(primary.head, comparison.head);
+  const workId = "fork-review-work";
+  f.send("owner", T.WORK_PROPOSED, { workItemId: workId, title: "Review the primary patch", definitionOfDone: "Check the exact file",
+    accountableMemberId: "producer", mode: "read", ownerDecisionRequired: true, humanDecisionMakerId: "owner" });
+  const work = () => f.store.room("commons").state.workItems[workId];
+  f.send("producer", T.WORK_ACCEPTED, { workItemId: workId, expectedRevision: work().revision });
+  f.send("producer", T.WORK_STARTED, { workItemId: workId, expectedRevision: work().revision });
+  const repository = "fixture/primary";
+  await attachGithubWork(f.store, { token: f.keys.producer, roomId: "commons",
+    input: { workItemId: workId, expectedRevision: work().revision, expectedHead: primary.head,
+      operationId: "attach-primary-fork", pullRequest: "https://github.com/fixture/primary/pull/1" },
+    recipe: { roomId: "commons", repository },
+    observe: async () => ({ snapshot: { repository, number: 1, head: primary.head, state: "open" } }) });
+  const primaryLink = workspaceArtifactLink(f.origin, "commons", primary, "changes", file);
+  const body = ["Review the submitted file.", primaryLink].join("\n");
+  const source = f.send("producer", T.MESSAGE_POSTED, { messageId: "submitted-fork-file", workItemId: workId, body, toMemberId: "human-checker" });
+  const completion = f.send("producer", T.WORK_COMPLETED, { workItemId: workId, expectedRevision: work().revision,
+    evidenceKind: "room_text", evidenceMessageId: source.event.data.messageId, evidenceMessageEventId: source.event.id,
+    evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: "producer", summary: "Primary fork change", nextAction: "Review the file" });
+  const approval = f.send("owner", T.MESSAGE_POSTED, { workItemId: workId, messageId: "accept-primary-patch", body: "Accepted this patch." });
+  f.send("owner", T.OWNER_DECISION_RECORDED, { workItemId: workId, expectedRevision: work().revision,
+    completionEventId: completion.event.id, evidenceVersion: textVersion(body), decision: "approved",
+    reason: "Reviewed the exact file", sourceMessageId: approval.event.data.messageId });
+  assert.equal(work().decision.decision, "approved");
+
+  const url = exactResultHref({ roomId: "commons", workItemId: workId, completionEventId: completion.event.id }, new URL(f.origin));
+  const reviewer = await f.login("human-checker", url);
+  await reviewer.locator("#result-body").getByRole("link", { name: "Open changes for brief.md", exact: true }).press("Enter");
+  const dialog = reviewer.locator("#room-project-workspace"), primaryPanel = dialog.locator("[data-workspace-primary]"), peer = dialog.locator("[data-workspace-peer]");
+  await primaryPanel.getByText(/Primary fork marker/).waitFor();
+  assert.equal(await peer.isVisible(), false);
+  assert.equal(await reviewer.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+  const picker = dialog.locator("[data-workspace-compare]");
+  const shots = process.env.ROOM_TEST_CAPTURE;
+  await picker.focus();
+  assert.equal(await picker.evaluate(node => node === document.activeElement), true);
+  await picker.selectOption(comparison.id);
+  assert.equal(await picker.inputValue(), comparison.id);
+  await peer.getByRole("button", { name: file, exact: true }).press("Enter");
+  await peer.getByText(/Comparison fork marker/).waitFor();
+  if (shots) await reviewer.screenshot({ path: join(shots, "same-base-forks.png") });
+  assert.equal(await dialog.getByLabel("Compare patches with the same base").count(), 1);
+  assert.match(await picker.locator("option:checked").textContent(), new RegExp(comparison.head.slice(0, 12)));
+  assert.match(await primaryPanel.locator("[data-workspace-patch-origin]").textContent(), new RegExp(primary.head.slice(0, 12)));
+  assert.match(await peer.locator("[data-workspace-patch-origin]").textContent(), new RegExp(comparison.head.slice(0, 12)));
+  assert.equal(await primaryPanel.getByRole("heading", { name: "Selected patch · Shared brief", exact: true }).count(), 1);
+  assert.equal(await peer.getByRole("heading", { name: "Comparison patch · Shared brief", exact: true }).count(), 1);
+  assert.match(await peer.getByRole("button", { name: /Continue this version/ }).getAttribute("aria-label"), new RegExp(comparison.head.slice(0, 12)));
+  assert.match(await dialog.locator("[data-workspace-compare-scope]").textContent(), /Repository not recorded/);
+  assert.doesNotMatch(await peer.innerText(), /fixture\/primary/);
+  updateGithubWorkObservation(f.store, "commons", repository, 1, { head: comparison.head, state: "open" });
+  await picker.selectOption("");
+  await peer.waitFor({ state: "hidden" });
+  await primaryPanel.getByText(/Primary fork marker/).waitFor();
+  assert.equal(new URL(reviewer.url()).hash, new URL(primaryLink).hash);
+  const outsider = await f.login("guest", primaryLink);
+  await outsider.locator("#room-project-workspace").getByText(/This shared artifact is unavailable/).waitFor();
+  assert.doesNotMatch(await outsider.locator("#room-project-workspace").innerText(), /Primary fork marker|fixture\/primary/);
 });
