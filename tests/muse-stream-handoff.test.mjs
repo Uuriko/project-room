@@ -82,15 +82,20 @@ test("a prearmed receiver preserves the unresolved offer through rollover and st
     binding: [policy.origin, policy.roomId, policy.memberId, policy.requesters, policy.workItems, policy.requests, policy.bootstrapAfter],
     after: 11, inFlight: pending });
   put("receiver-status.json", offer);
-  const preload = join(directory, "stub-room.mjs");
+  const preload = join(directory, "stub-room.mjs"), exactTrace = join(directory, "exact-reads.log");
   writeFileSync(preload, `
+    import { appendFileSync } from "node:fs";
     import { RoomAgentClient, RoomClientError } from ${JSON.stringify(new URL("../client/room-agent.mjs", import.meta.url).href)};
     import { setTimeout } from "node:timers/promises";
     const read = async () => (${JSON.stringify({ ...context(first, 11), evaluatedThrough: 12 })});
     RoomAgentClient.prototype.replyContext = read;
-    RoomAgentClient.prototype.replyContextForHint = process.env.ROOM_FIXTURE_DENY_EXACT === "1"
-      ? async () => { throw new RoomClientError(404, "reply_request_not_found", "Request not found in this Room"); }
-      : read;
+    RoomAgentClient.prototype.replyContextForHint = async id => {
+      appendFileSync(${JSON.stringify(exactTrace)}, id + "\\n");
+      if (process.env.ROOM_FIXTURE_DENY_EXACT === "1")
+        throw new RoomClientError(404, "reply_request_not_found", "Request not found in this Room");
+      return read();
+    };
+    RoomAgentClient.prototype.command = async () => { throw Error("Unexpected new acknowledgment or work command"); };
     RoomAgentClient.prototype.waitForChange = async (after, { signal }) => setTimeout(60000, null, { signal });
   `);
   const args = ["--import", pathToFileURL(preload).href,
@@ -137,6 +142,33 @@ test("a prearmed receiver preserves the unresolved offer through rollover and st
   assert.equal(replay.source, "interrupted_delivery");
   assert.equal(replay.openingEventId, pending.openingEventId);
   assert.deepEqual(replay.receiverAcknowledgment, offer.receiverAcknowledgment);
+  assert.equal(replay.seenAction, undefined);
+  assert.equal(readFileSync(exactTrace, "utf8"), "first\nfirst\nfirst\n");
+  const receiptPath = join(directory, "recovery-receipt.json");
+  const receipt = readFileSync(receiptPath);
+  assert.equal(JSON.parse(receipt).openingEventId, pending.openingEventId);
+
+  const repeat = spawn(process.execPath, [...args, "--recover"]);
+  const repeatExited = once(repeat, "exit");
+  let repeatedOutput = "", repeatedError = "";
+  repeat.stdout.setEncoding("utf8").on("data", chunk => { repeatedOutput += chunk; });
+  repeat.stderr.setEncoding("utf8").on("data", chunk => { repeatedError += chunk; });
+  t.after(async () => {
+    if (repeat.exitCode === null && repeat.signalCode === null) repeat.kill();
+    await repeatExited;
+  });
+  repeat.stdin.end(connectionInput);
+  const armedPid = () => JSON.parse(readFileSync(join(directory, "recovery-status.json"))).pid;
+  const repeatDeadline = Date.now() + 3000;
+  while (armedPid() !== repeat.pid && repeat.exitCode === null && Date.now() < repeatDeadline) await pause(25);
+  assert.equal(armedPid(), repeat.pid);
+  repeat.kill();
+  assert.deepEqual(await repeatExited, [0, null]);
+  assert.equal(repeatedOutput, "");
+  assert.equal(repeatedError, "");
+  assert.equal(readFileSync(exactTrace, "utf8"), "first\nfirst\nfirst\n");
+  assert.deepEqual(readFileSync(receiptPath), receipt);
+  assert.deepEqual(readFileSync(join(directory, "stream-checkpoint.json")), checkpointBeforeRecovery);
 });
 
 for (const interruption of ["before_ack", "after_ack"]) {
