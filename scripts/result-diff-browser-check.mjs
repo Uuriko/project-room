@@ -1507,6 +1507,50 @@ test("same-base forks compare as distinct publications beside an exact accepted 
   assert.doesNotMatch(await outsider.locator("#room-project-workspace").innerText(), /Primary fork marker|fixture\/primary/);
 });
 
+test("a reviewer without the shared patch returns to the exact result and unsent reply", { timeout: 30000 }, async t => {
+  const file = "release.md", id = "d".repeat(32), head = "b".repeat(40);
+  const patch = "diff --git a/release.md b/release.md\n--- a/release.md\n+++ b/release.md\n@@ -1 +1 @@\n-before\n+Private patch marker\n";
+  const digest = createHash("sha256").update(patch).digest("hex");
+  const href = origin => origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", digest, "producer", head, file].join("/");
+  const resultText = origin => "Submitted release note needs a line check.\n" + href(origin);
+  const f = await setup(t, 390, { firstBody: resultText });
+  const publication = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+    method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+    body: JSON.stringify({ id, expectedRevision: 0, recipientId: "guest", title: "Private patch title",
+      base: "a".repeat(40), head, patch, html: "<p>Private preview body</p>" })
+  });
+  assert.equal(publication.status, 200);
+  const exact = exactResultHref({ roomId: "commons", workItemId: f.item().id, completionEventId: f.first.event.id }, new URL(f.origin));
+  const reviewer = await f.login("human-checker", exact);
+  const body = reviewer.locator("#result-body");
+  await body.getByText(/Submitted release note needs a line check/).waitFor();
+  await reviewer.locator("#result-discuss").click();
+  const unsent = "I still need to check the release line.";
+  const input = reviewer.locator("#message-input");
+  await input.fill(unsent);
+  await reviewer.goto(f.origin);
+  await reviewer.goto(exact);
+  const link = body.getByRole("link", { name: "Open changes for release.md" });
+  await link.press("Enter");
+  const workspace = reviewer.locator("#room-project-workspace");
+  await workspace.getByText("This shared artifact is unavailable.", { exact: true }).waitFor();
+  if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "result-file-unavailable.png") });
+  assert.doesNotMatch(await workspace.innerText(), /Private patch marker|Private patch title|Private preview body|No previews shared yet/);
+  assert.equal(await workspace.getByRole("button", { name: "Open current revision" }).count(), 0);
+  assert.equal(await workspace.getByRole("button", { name: "Copy for agent" }).count(), 0);
+  await workspace.getByRole("button", { name: "Back to result", exact: true }).press("Enter");
+  await reviewer.waitForURL(exact);
+  await reviewer.waitForFunction(() => document.activeElement?.textContent === "Open changes for release.md");
+  assert.equal(await body.getByText(/Submitted release note needs a line check/).isVisible(), true);
+  assert.equal(f.item().verification, null);
+  await reviewer.locator("#result-discuss").click();
+  assert.equal(await input.inputValue(), unsent);
+
+  const allowed = await f.login("guest", exact);
+  await allowed.locator("#result-body").getByRole("link", { name: "Open changes for release.md" }).press("Enter");
+  await allowed.locator("#room-project-workspace").getByText("+Private patch marker", { exact: true }).waitFor();
+});
+
 test("the receiving agent can read each handoff link only through its own access", { timeout: 30000 }, async t => {
   const f = await setup(t, 390);
   const { workspaceCommand } = await import("../cli/commands/workspace.mjs");

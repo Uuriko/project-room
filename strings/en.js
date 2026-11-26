@@ -918,5 +918,7 @@ export default {
   "workspace.changes.fileLoading": "Loading file…",
   "workspace.changes.openRaw": "Open raw patch",
   "workspace.share.missing": "This shared artifact is unavailable.",
+  "workspace.share.fileEvidence": "File evidence",
+  "workspace.share.backToResult": "Back to result",
   "workspace.share.openCurrent": "Open current revision"
 };

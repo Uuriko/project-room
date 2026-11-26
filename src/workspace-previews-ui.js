@@ -105,6 +105,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     }
   });
 
+  const closeButton = dialog.querySelector("[data-preview-close]");
+  const closeLabel = closeButton.textContent;
   const list = dialog.querySelector("[data-preview-list]");
   const inventory = dialog.querySelector("[data-workspace-inventory]");
   const layout = inventory.parentElement;
@@ -359,6 +361,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   }
   const owns = (ticket, session) => dialog.open && generation === ticket && client.session === session;
   function clearPreview() {
+    closeButton.textContent = closeLabel;
     noteLabel.hidden = true; noteKey = null; noteInput.value = "";
     discussionAside.hidden = true; discussionMessages.replaceChildren();
     frameDigest = null; changeGeneration++; outputGeneration++;
@@ -378,12 +381,17 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     const hadDialogFocus = focused !== dialog && dialog.contains(focused);
     clearPreview();
     linkStatus.textContent = uiText(changed ? "workspace.share.stale" : "workspace.share.missing");
+    if (!changed && linked?.file && threadDraft?.resultReturn) {
+      heading.textContent = uiText("workspace.share.fileEvidence");
+      closeButton.textContent = uiText("workspace.share.backToResult");
+      status.textContent = "";
+    }
     latest.hidden = !current;
     latest.textContent = linked?.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
       ? "Locate note in current patch" : uiText("workspace.share.openCurrent");
     refreshDiscussion();
     if (hadDialogFocus && (!focused.isConnected || focused.closest("[hidden]")))
-      dialog.querySelector("[data-preview-close]").focus();
+      closeButton.focus();
   }
   function reset() {
     notes.clear(); selectStart(null);
@@ -620,7 +628,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   function dismiss() {
     if (!onDismiss?.()) reset();
   }
-  dialog.querySelector("[data-preview-close]").addEventListener("click", dismiss);
+  closeButton.addEventListener("click", dismiss);
   dialog.addEventListener("cancel", event => {
     event.preventDefault();
     dismiss();
