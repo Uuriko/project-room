@@ -66,27 +66,28 @@ test("a saved predecessor resumes when its missing exact read becomes available"
   const checkpoint = { after: 11, inFlight: { requestMessageId: first.id, openingEventId: first.openingEventId,
     roomCreatedEventId: "room-birth", openingSequence: 11 } };
   const saves = [], acknowledgments = [], exactReads = [];
-  let reappeared = false;
+  const roomChanges = [13, 17, 19];
+  let readWaits = 0;
   const result = await holdMuseHandoff({ policy, checkpoint, receiverAck: true, advertiseScope: true,
     afterSettlement: first.id, signal: AbortSignal.timeout(3000), save: value => saves.push(value), client: {
       async replyContext(id, options) {
         exactReads.push(id);
         assert.equal(options.view, "compact");
         if (id === first.id) {
-          if (!reappeared) throw new RoomClientError(404, "reply_request_not_found", "Request not found in this Room");
+          if (readWaits < roomChanges.length) throw new RoomClientError(404, "reply_request_not_found", "Request not found in this Room");
           return { ...context({ ...first, status: "answered" }, 11), evaluatedThrough: 19 };
         }
         return context({ ...successor, contextEventId: "successor-basis" }, 15);
       },
       async waitForChange(after, options) {
-        assert.equal(after, 11);
+        assert.equal(after, roomChanges[readWaits - 1] ?? 11);
         assert.equal(options.waitingForWork, undefined);
         assert.deepEqual(saves, []);
-        reappeared = true;
-        return { changed: true, sequence: 19 };
+        assert.deepEqual(acknowledgments, []);
+        return { changed: true, sequence: roomChanges[readWaits++] };
       },
       async replyRequests() {
-        assert.equal(reappeared, true);
+        assert.equal(readWaits, roomChanges.length);
         return { requests: [successor], evaluatedThrough: 19 };
       },
       async command(command) {
@@ -94,7 +95,7 @@ test("a saved predecessor resumes when its missing exact read becomes available"
         return { event: { id: "seen-successor" }, sequence: 20 };
       },
     } });
-  assert.deepEqual(exactReads, [first.id, first.id, successor.id]);
+  assert.deepEqual(exactReads, [first.id, first.id, first.id, first.id, successor.id]);
   assert.deepEqual(saves.map(value => value.after), [11, 15]);
   assert.deepEqual(acknowledgments, [successor.id]);
   assert.equal(result.requestMessageId, successor.id);
