@@ -1138,3 +1138,64 @@ for (const anchor of ["root", "reply"]) {
     }
   });
 }
+
+test("a reviewer can return to the exact revised result after its file is withdrawn", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  f.send("human-checker", T.VERIFICATION_RECORDED, {
+    workItemId: f.item().id, expectedRevision: f.item().revision, completionEventId: f.first.event.id,
+    evidenceVersion: f.first.event.data.evidenceVersion, result: "fail", summary: "Name an owner.", nextAction: "Revise the brief."
+  });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Added an owner to the brief." });
+  f.mutate(T.WORK_STARTED, {});
+  const id = "8".repeat(32), head = "7".repeat(40);
+  const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-No owner\n+Owner: Taylor\n";
+  const url = f.origin + "/api/rooms/commons/workspace-previews";
+  const changePreview = (method, body) => fetch(url, {
+    method, headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const published = await changePreview("POST", {
+    id, head, patch, base: "6".repeat(40), expectedRevision: 0,
+    title: "Revised brief", html: "<p>Owner: Taylor</p>", recipientId: "human-checker"
+  });
+  assert.ok(published.ok, await published.clone().text());
+  const { patchDigest } = await published.json();
+  const href = f.origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", patchDigest, "producer", head, "brief.md"].join("/");
+  const revised = f.complete("Result B — Named owner\n" + href);
+  const exact = f.origin + "/?room=commons#pr-record/result/revision-journey/" + revised.event.id;
+  const reviewer = await f.login("human-checker", exact);
+  const link = reviewer.locator("#result-body").getByRole("link", { name: href, exact: true });
+  await link.waitFor();
+  const capture = async name => {
+    if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, name + ".png") });
+  };
+  await capture("01-exact-revision");
+  await link.press("Enter");
+  const workspace = reviewer.getByRole("dialog", { name: "Workspace" });
+  await workspace.getByText("+Owner: Taylor", { exact: true }).waitFor();
+  assert.ok((await changePreview("DELETE", { id, expectedRevision: 1 })).ok);
+  await workspace.getByRole("button", { name: "Refresh previews" }).click();
+  await workspace.getByText("This shared artifact is unavailable.", { exact: true }).waitFor();
+  assert.equal(await workspace.getByText("Owner: Taylor", { exact: true }).count(), 0);
+  await capture("02-file-unavailable");
+  f.send("human-checker", T.VERIFICATION_RECORDED, {
+    workItemId: f.item().id, expectedRevision: f.item().revision, completionEventId: revised.event.id,
+    evidenceVersion: revised.event.data.evidenceVersion, result: "fail", summary: "Restore the file.", nextAction: "Reshare the file."
+  });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Replaced the withdrawn file." });
+  f.mutate(T.WORK_STARTED, {});
+  f.complete("Result C — Replacement file");
+  await workspace.getByRole("button", { name: "Back to result", exact: true }).press("Enter");
+  await workspace.waitFor({ state: "hidden" });
+  await link.waitFor({ timeout: 2000 });
+  assert.equal(reviewer.url(), exact);
+  assert.equal(await reviewer.locator("#result-body").getByText("Result C", { exact: false }).count(), 0);
+  await capture("03-after-leaving-workspace");
+  await reviewer.goForward();
+  await workspace.getByRole("button", { name: "Back to result", exact: true }).waitFor();
+  await workspace.getByText("This shared artifact is unavailable.", { exact: true }).waitFor();
+  assert.equal(await workspace.getByText("+Owner: Taylor", { exact: true }).count(), 0);
+  await reviewer.keyboard.press("Escape");
+  await link.waitFor();
+  assert.equal(reviewer.url(), exact);
+});

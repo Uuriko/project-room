@@ -102,7 +102,7 @@
     "src/agent-invite-ui.js": "sha256:59dd07a3da0379ea0b5214d9462dbe5d82c5f9acad46c4b8ee08190835c17571",
     "src/agent-signin-page.js": "sha256:8a9f63a58fa41465db4e1dafbd58beba1cd6b1f7b8df5bb6bc347a5870015507",
     "src/agent-signin-ui.js": "sha256:526d005ba3dc85ce75beb96b381f19d2c600dcf83d5ecd224ee72d7f76bfe3d2",
-    "src/app.js": "sha256:e5a6fa2ddfa90c9f65b9b544c27ab788b13233de5dca48cb32c74eacc09ff0ac",
+    "src/app.js": "sha256:74ead760bfd8fde7245327c914dc5ce3ac8331861c00970022571a4654dd3eb8",
     "src/auth-signin-ui.js": "sha256:144766e0999763ded6f81ac249d2d69899ef1bc8673c49b138d2ee5bf9bf8c73",
     "src/board-deeplink.js": "sha256:1c0829f21cafacfb78d01d0429083dffdd09aa7e329bcd23d2146e47ab24ecf9",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
@@ -198,9 +198,9 @@
     "src/workspace-change-view.js": "sha256:0d48219f7b3043f95718c4004542032afe9e46d284c9f822a81176c5ebd6cda7",
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "src/workspace-previews-ui.js": "sha256:235b3e326b8dd9db15d9218f78910daee65dc1b98f6e2a9dd85652827b11fdc9",
-    "strings/en.js": "sha256:474a6bebf4447ca17458b3c715da30c01cc1779d6eac2b13bb61228dfea19bcb",
-    "strings/en.json": "sha256:5e8e0a86ba40469513b8c8d468e23abc88248f293de1a89b6e59558395e6ce49"
+    "src/workspace-previews-ui.js": "sha256:69588222a374d67631bfed4b61331b910da8b5256dbaad463c485d821454a053",
+    "strings/en.js": "sha256:d4475114961df7b4a5e01e8fd38afc9454f36fee25097a1e307d99021d0c0226",
+    "strings/en.json": "sha256:0b2fcb49832a56db199d8de91618a4c4b01e1ecff8414489e3d8f54f49fa7d44"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

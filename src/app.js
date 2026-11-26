@@ -3610,7 +3610,7 @@ function workNavigationContext() {
 }
 function workHistoryState() {
   const value = history.state && typeof history.state === "object" ? { ...history.state } : {};
-  delete value.roomWorkOrigin; delete value.roomWorkTarget;
+  delete value.roomWorkOrigin; delete value.roomWorkTarget; delete value.roomResultWorkspaceEntry;
   return value;
 }
 function currentWorkOrigin(id = activeWorkNavigation) {
@@ -4040,7 +4040,8 @@ function revealLocationHash(workspaceDiscussion = null) {
   }
   // JDOT-COH-NAV end
   if (hash.startsWith("#pr-workspace/")) {
-    workspacePreviewsUI?.openLink(hash, workspaceDiscussion);
+    const onReturn = history.state?.roomResultWorkspaceEntry === true ? () => history.back() : null;
+    workspacePreviewsUI?.openLink(hash, workspaceDiscussion, onReturn);
     return;
   }
   if (hash.startsWith("#pr-record/result/")) {
@@ -6986,7 +6987,9 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   onOpenDecision(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result }); },
   onOpenWorkspace(url, message, artifactId) {
     const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;
-    history.pushState(workHistoryState(), "", url.href);
+    const entry = workHistoryState();
+    if (exactResultDestination(location)?.roomId === session?.roomId) entry.roomResultWorkspaceEntry = true;
+    history.pushState(entry, "", url.href);
     revealLocationHash(discussion ? { ...discussion, artifactId } : null);
   },
   onReturn() { $("#work-navigation-return").click(); },

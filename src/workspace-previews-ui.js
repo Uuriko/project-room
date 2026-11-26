@@ -72,6 +72,9 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     </div>`;
   document.body.append(dialog);
 
+  const close = dialog.querySelector("[data-preview-close]");
+  const closeLabel = close.textContent;
+  let returnToResult = null;
   const start = dialog.querySelector("[data-workspace-start]");
   const startButton = start.querySelector("button");
   const startStatus = start.querySelector("[role=status]");
@@ -339,6 +342,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     refreshDiscussion();
   }
   function reset() {
+    returnToResult = null;
+    close.textContent = closeLabel;
     notes.clear(); selectStart(null);
     generation++; selected = null; linked = null; pendingFile = null; reviewLocation = null; threadDraft = null; clearPreview();
     status.textContent = ""; list.replaceChildren(); items = []; changeCache.clear();
@@ -558,16 +563,28 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     dialog.showModal();
     void load();
   });
-  dialog.querySelector("[data-preview-close]").addEventListener("click", reset);
+  function dismiss() {
+    const returnTo = returnToResult;
+    reset();
+    returnTo?.();
+  }
+  close.addEventListener("click", dismiss);
+  dialog.addEventListener("cancel", event => {
+    if (!returnToResult) return;
+    event.preventDefault();
+    dismiss();
+  });
   dialog.querySelector("[data-preview-refresh]").addEventListener("click", () => void load());
   dialog.addEventListener("close", () => { if (!dialog.open) reset(); });
   return {
     reset, refreshDiscussion,
     refresh() { if (dialog.open) void load(); },
-    openLink(hash, destination = null) {
+    openLink(hash, destination = null, onReturn = null) {
       const target = workspaceArtifactSelection(hash);
       if (!target || !client.session) return;
       notes.clear(); clearPreview();
+      returnToResult = onReturn;
+      close.textContent = onReturn ? uiText("workspace.backToResult") : closeLabel;
       selectStart(null);
       threadDraft = destination; linked = target; reviewLocation = target.anchor ? target : null; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
       if (!dialog.open) dialog.showModal();
