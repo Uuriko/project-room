@@ -21,6 +21,7 @@ import { ensureReplayCutoverRestoreSchema } from "./replay-cutover.mjs";
 import { Buffer } from "node:buffer";
 import { ensureOAuthProviderSchema, OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
 import { ensureMcpInviteOAuthSchema, inviteOAuthDatabase } from "./mcp-invite-oauth.mjs";
+import { workspacePreviews, WORKSPACE_PREVIEW_TABLES } from "./workspace-previews.mjs";
 import { mcpEventSubscriptionsSchema } from "./mcp-event-subscriptions.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
@@ -918,6 +919,7 @@ export const CONTENT_DIGEST_SKIPPED_TABLES = Object.freeze([...REPLAY_SKIPPED_TA
 // restore calls this when it encounters the first row in a native namespace.
 export function ensureNativeAgentRestoreSchema(db, names) {
   if (names.has("message_replay_units")) ensureReplayCutoverRestoreSchema(db);
+  if (WORKSPACE_PREVIEW_TABLES.some(table => names.has(table))) workspacePreviews(db);
   // Production also creates these application schemas lazily. Restore their
   // rows using code-owned DDL; never accept schema supplied by the export.
   if (["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_host_disconnects"].some(table => names.has(table))) db.exec(wakeListenerLeaseSchema);

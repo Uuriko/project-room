@@ -35,6 +35,7 @@ import { verifyCurrentRoomSchema, invalidateCurrentRoomSchema, restoredCurrentFo
 import { createHash, timingSafeEqual, randomUUID } from "node:crypto";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
+import { WORKSPACE_PREVIEW_TABLES } from "./workspace-previews.mjs";
 import { verifyRestoredTableCounts, restoreSourceSchemaVersion, restoreLegacyWriteProofs, withRestoreTableRows, ensureNativeAgentRestoreSchema, cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey, writeKvBackup } from "../cloudflare/room-backup.mjs";
@@ -718,22 +719,22 @@ export function createBackupReplaySession(store, { audit = "strict", sourceSchem
     }
     if (!existing.has(record.table)) {
       ensureNativeAgentRestoreSchema(db, new Set([record.table]));
-      // These lazy native tables have no foreign keys. Extend the streaming
-      // order only after inspecting real schema; unknown backup names still fail.
+      // Extend the streaming order only after inspecting code-owned schema.
+      // Unknown backup names still fail.
       for (const table of tableNames(db)) {
         if (existing.has(table)) continue;
         const foreignKeys = db.prepare(`PRAGMA foreign_key_list(${quoteIdent(table)})`).all();
-        // The replay sidecar has one code-owned rooms FK. Its schema has just
-        // been verified; feed that parent into the existing buffered cascade.
-        const replayChild = table === "message_replay_units" && foreignKeys.length === 1
+        // These lazy tables have a single code-owned rooms foreign key.
+        const roomChild = (table === "message_replay_units" || WORKSPACE_PREVIEW_TABLES.includes(table))
+          && foreignKeys.length === 1
           && foreignKeys[0].table === "rooms" && foreignKeys[0].from === "room_id"
           && foreignKeys[0].to === "id" && existing.has("rooms");
-        if (foreignKeys.length && !replayChild) throw new Error("Lazy restore table requires dependency ordering");
+        if (foreignKeys.length && !roomChild) throw new Error("Lazy restore table requires dependency ordering");
         existing.add(table);
         topoIndex.set(table, topo.length);
         topo.push(table);
-        deps.set(table, new Set(replayChild ? ["rooms"] : []));
-        ancestors.set(table, new Set(replayChild ? ["rooms", ...(ancestors.get("rooms") ?? [])] : []));
+        deps.set(table, new Set(roomChild ? ["rooms"] : []));
+        ancestors.set(table, new Set(roomChild ? ["rooms", ...(ancestors.get("rooms") ?? [])] : []));
       }
     }
     if (!existing.has(record.table)) throw new Error("Export names a table this store does not have");

@@ -4,6 +4,8 @@ export const previewBytes = 384 * 1024;
 export const patchBytes = 192 * 1024;
 export const outputBytes = 24 * 1024;
 export const previewJsonBytes = (previewBytes + patchBytes + outputBytes) * 6 + 4096;
+export const WORKSPACE_PREVIEW_TABLES = Object.freeze(["room_workspace_previews", "room_workspace_directed_previews"]);
+const [shared, directed] = WORKSPACE_PREVIEW_TABLES;
 const roomLimit = 24;
 const ownerLimit = 6;
 const fields = "id, publisher_id AS publisherId, title, base, head, digest, revision, updated_at AS updatedAt";
@@ -31,7 +33,6 @@ export function workspacePreviews(db, { create = true } = {}) {
   }
   // Earlier runtimes only know the shared table. A rollback must never turn a
   // directed artifact into a room-wide one.
-  const shared = "room_workspace_previews", directed = "room_workspace_directed_previews";
   if (create) db.exec(`CREATE TABLE IF NOT EXISTS ${directed} (
     room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, id TEXT NOT NULL,
     publisher_id TEXT NOT NULL, title TEXT NOT NULL, base TEXT NOT NULL, head TEXT NOT NULL,
