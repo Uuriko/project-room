@@ -1,4 +1,4 @@
-import { clickChrome, ensureSidebarOpen, ensureSidebarClosed, openComposerOptions, openSearch } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarOpen, ensureSidebarClosed, openComposerOptions, openConversation, openSearch } from "./room-chrome.mjs";
 // Simulated local people. Search must not submit, acknowledge or create work.
 import './discovery-contribution-browser-check.mjs';
 import test from 'node:test';
@@ -42,6 +42,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   page.setDefaultTimeout(8000); const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await signInFixture(page, f.keys.owner); await page.locator('#main').waitFor({ state: 'visible' });
+  await openConversation(page);
   const search = page.locator('#message-search'), hits = page.locator('#search-list');
   const workHit = id => hits.locator(`[data-open-work="${id}"]`);
   const before = auditRecovery(f.store).dataSha256;
