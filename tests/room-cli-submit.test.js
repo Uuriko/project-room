@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
 import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
-import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
+import { connectionHome, connectionsRoot, loadConnection, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { mcpCallError } from "../server/mcp-arg-errors.mjs";
@@ -122,6 +122,97 @@ test("a returning agent submits from the fresh revision after a heartbeat", asyn
 });
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
+test(`${representation} a coworker joins despite conflicting Codex settings and opens their first assignment`, async t => {
+  const { cli, env, home, origin, owner, reviewer, reviewerProject, save, store } = await fixture(t, representation);
+  const mint = await fetch(`${origin}/api/rooms/commons/agent-invites`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${owner}` },
+    body: JSON.stringify({ profile: "contribute", displayName: "New coworker" })
+  });
+  assert.equal(mint.status, 201);
+  const { code: invitation } = await mint.json();
+  const codexHome = join(home, ".codex");
+  mkdirSync(codexHome);
+  const config = join(codexHome, "config.toml");
+  const originalConfig = '[mcp_servers.project-room]\nurl = "https://original.example/mcp"\n';
+  writeFileSync(config, originalConfig);
+  const joinArgs = ["join", `${origin}/join/${invitation}`, "--name", "New coworker", "--tool", "codex"];
+  const beforeConflict = store.headSequence("commons");
+  const lines = [];
+  let networkCalls = 0;
+  await assert.rejects(main(joinArgs, { env, cwd: reviewerProject, out: line => lines.push(line),
+    fetchImpl: async () => { networkCalls++; throw new Error("Unexpected preflight request"); } }), error => {
+    assert.match(error.message, /repeat your join command with --no-setup/i);
+    assert.equal(error.message.includes(invitation), false);
+    return true;
+  });
+  assert.equal(networkCalls, 0);
+  assert.equal(store.headSequence("commons"), beforeConflict);
+
+  let redeemCalls = 0, redeemStatus;
+  const joinWithoutSetup = () => main([...joinArgs, "--no-setup"], {
+    env, cwd: reviewerProject, out: line => lines.push(line),
+    fetchImpl: async (url, options) => {
+      const target = new URL(url);
+      assert.equal(target.origin, origin);
+      const response = await fetch(url, options);
+      if (target.pathname === "/api/agent-invites/redeem" && ++redeemCalls === 1) {
+        redeemStatus = response.status;
+        await response.body.cancel();
+        throw new Error("Redemption response was lost");
+      }
+      return response;
+    }
+  });
+  await assert.rejects(joinWithoutSetup(), /Could not complete the request/);
+  assert.equal(redeemStatus, 201);
+  const afterRedemption = store.headSequence("commons");
+  assert.equal(await joinWithoutSetup(), 0);
+  assert.equal(redeemCalls, 1);
+  assert.equal(store.headSequence("commons"), afterRedemption);
+  assert.equal(readFileSync(config, "utf8"), originalConfig);
+  assert.ok(lines.every(line => !line.includes(invitation)));
+  const printed = lines.map(line => line.match(/project-room --connection ([a-z-]+) next and follow nextRead\.command\./)).find(Boolean);
+  assert.ok(printed);
+  const { config: saved } = loadConnection({ name: printed[1], env });
+  assert.notEqual(saved.memberId, reviewer.identityId);
+  setTier(store.db, "commons", saved.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  const send = (type, data) => store.command(owner, "commons", { id: crypto.randomUUID(), type, data });
+  const body = "Use Friday’s release brief at https://docs.example.test/release.";
+  const sourceMessageId = "first-brief-source", workItemId = "first-brief-assignment";
+  send("message.posted", { messageId: sourceMessageId, toMemberId: saved.memberId, body });
+  send("work.proposed", { workItemId, sourceMessageId, title: "Update the release brief", definitionOfDone: "Name the release owner",
+    accountableMemberId: saved.memberId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" });
+  const command = async (argv, input) => {
+    const result = await cli(argv, input, reviewerProject, (url, options) => {
+      assert.equal(new URL(url).origin, origin);
+      return fetch(url, options);
+    });
+    assert.equal(result.code, 0, JSON.stringify(result.value));
+    return result.value;
+  };
+  const explicit = ["--connection", printed[1]];
+  const next = await command([...explicit, "next"]);
+  assert.equal(next.viewerId, saved.memberId);
+  assert.deepEqual(next.nextRead.command, ["room", ...explicit, "work", workItemId]);
+  const brief = await command(next.nextRead.command.slice(1));
+  const evidence = await command(brief.sourceRead.command.slice(1));
+  assert.equal(evidence.context.source.message.body, body);
+  assert.equal((await command(["next"])).viewerId, reviewer.identityId);
+  assert.equal((await command(["work", workItemId, "--include-source"])).context.source.message, null);
+
+  await command([...brief.continuation.command.slice(1), "-"], brief);
+  const working = await command([...explicit, "work", workItemId]);
+  const result = await command([...explicit, "submit", "--from", save("first-brief.json", working), "--operation", "first-brief-result"], {
+    body: "Maya owns Friday’s release.", producerId: saved.memberId, summary: "Named the owner", nextAction: "Review the brief" });
+  const review = await command(["work", workItemId, "--result"]);
+  await command(["review", "--from", "-", "--pass", "--summary", "Confirmed the owner"], review);
+  const receipt = await command([...explicit, "receipt", "first-brief-result", "--submit"]);
+  assert.equal(receipt.eventId, result.completionEventId);
+  const reopened = await command(receipt.nextRead.command.slice(1));
+  assert.equal(reopened.workThread.verdict.completionEventId, receipt.eventId);
+  assert.equal(reopened.workThread.verdict.result, "pass");
+});
+
 test(`${representation} pickup opens only the linked assignment source with the project connection`, async t => {
   const { store, owner, producer, reviewer, reviewerProject, origin, cli } = await fixture(t, representation);
   const workItemId = "first-assignment", body = "The agreed contract is https://docs.example.test/contract.";

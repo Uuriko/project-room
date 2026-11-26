@@ -109,7 +109,13 @@ export async function joinCommand(argv, io = {}) {
   const { target, flags } = parse(argv);
   const name = flags.name ?? "Room agent";
   const tool = flags.tool ?? detectTool(env);
-  if (flags.setup) preflightSetup(tool, { env });
+  if (flags.setup) {
+    try { preflightSetup(tool, { env }); }
+    catch (error) {
+      if (error?.code !== "CODEX_CONFIG_CONFLICT") throw error;
+      throw new Error("Existing Codex config conflicts with the project-room server. Repeat your join command with --no-setup to save the Room connection and find your assignments while keeping your current Codex settings.", { cause: error });
+    }
+  }
   let joined = null;
   const loginArgs = ["--room", target, "--name", name, "--accept"];
   const code = await login(loginArgs, { ...io, out: line => { try { joined = JSON.parse(line); } catch { joined = null; } } });

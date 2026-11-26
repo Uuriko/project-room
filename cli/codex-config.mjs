@@ -32,7 +32,10 @@ export function writeCodexConfig(file) {
   }finally{if(fd!==undefined)closeSync(fd);try{unlinkSync(temp);}catch(error){if(error.code!=='ENOENT')throw error;}}
 }
 
-const conflict = () => new Error('Existing Codex config conflicts with the project-room server. Back up the selected Codex config.toml and reconcile its existing project-room settings manually, then retry. This check does not change files.');
+const conflict = () => Object.assign(
+  new Error('Existing Codex config conflicts with the project-room server. Back up the selected Codex config.toml and reconcile its existing project-room settings manually, then retry. This check does not change files.'),
+  { code: 'CODEX_CONFIG_CONFLICT' },
+);
 
 function tokens(text) {
   const out = [];

@@ -85,6 +85,8 @@ Use Room Next to recover after a stale wake or reconnect.
 
 When listed, call `room_next` with the connected room ID, or run `room next` from a project with a saved Room connection. Both use the existing hosted MCP endpoint. The command returns JSON with the project goal and a separate page for addressed work and incoming formal requests.
 
+If `room join` reports a conflicting Codex configuration, repeat the same join command with `--no-setup`. This saves the Room connection and prints a named pickup command while preserving the current Codex settings.
+
 From a checkout configured for a different Room, run `room --connection NAME next` with the saved connection from your invite. Follow the returned commands to keep using that connection without changing the checkout's setup. An authorized assignment source can include exact file commands under `workspaceArtifacts` and document commands under `resultLinks`. The file command also carries the expected Room member, so it can detect a connection saved under the same name for someone else. External links use your own access to the source.
 
 - Room next searches ahead across a bounded number of empty work windows. Follow a partial page's `nextRead` if it still has more to check. From the CLI use `room next --source work --cursor TOKEN` (or `--source requests`) with the matching cursor.
