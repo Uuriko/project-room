@@ -24,6 +24,21 @@ test("cached body HTML is byte-identical to messageBodyHtml", () => {
   for (const m of history) assert.equal(cache.html(m.body, roster, esc, m.id), messageBodyHtml(m.body, roster, esc, m.id));
 });
 
+test("assignment aliases stay in their own Room and leave code spans literal", () => {
+  const { cache } = counting(), roster = members();
+  const origin = "https://room.example/";
+  const exact = origin + "?room=commons#pr-record/result/work/receipt";
+  const foreign = exact.replace("room.example", "another.example");
+  const body = [exact, foreign, `\`${exact}\``].join("\n");
+  const selected = cache.html(body, roster, esc, "evidence", origin + "?room=commons");
+  assert.equal(selected.match(/Open submitted result/g)?.length, 1);
+  assert.ok(selected.includes(`<code>${exact}</code>`));
+  assert.ok(selected.includes(`>${foreign}</a>`));
+  for (const assignment of [origin + "?room=another", undefined]) {
+    assert.doesNotMatch(cache.html(body, roster, esc, "evidence", assignment), /Open submitted result/);
+  }
+});
+
 test("a second render pass over unchanged history renders no bodies", () => {
   const { cache, calls } = counting();
   for (const m of history) cache.html(m.body, members(), esc, m.id);

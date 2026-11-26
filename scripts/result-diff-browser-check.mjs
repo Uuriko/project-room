@@ -12,6 +12,8 @@ import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { exactResultHref } from "../src/record-link.js";
+import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
 
 
 const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
@@ -873,6 +875,97 @@ test("catch-up labels each review with its visible work and preserves withheld h
     assert.equal(await historical.locator(".rb-detail").textContent(), workItemId + " · approved");
     assert.equal(await historical.getAttribute("data-open-work"), workItemId);
   }
+});
+
+test("phone assignment opens both exact inputs and returns to the draft", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390, { firstDirectTo: "human-checker" });
+  const file = "docs/release.md", head = "c".repeat(40);
+  const patch = `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-old\n+Maya owns the release\n`;
+  const published = await fetch(`${f.origin}/api/rooms/commons/workspace-previews`, {
+    method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+    body: JSON.stringify({ id: "f".repeat(32), expectedRevision: 0, patch, base: "b".repeat(40), head,
+      title: "Release instructions", recipientId: "human-checker", html: "<p>Release instructions</p>" })
+  });
+  assert.equal(published.status, 200);
+  const fileLink = workspaceArtifactLink(f.origin, "commons", await published.json(), "changes", file);
+  const resultLink = exactResultHref({ roomId: "commons", workItemId: "revision-journey", completionEventId: f.first.event.id }, new URL(f.origin));
+  const assignment = "cross-check-instructions", source = "compare-two-inputs";
+  f.send("owner", T.MESSAGE_POSTED, { messageId: source, body: `Check the proposed change against the submitted instructions.\n${fileLink}\n${resultLink}` });
+  f.send("owner", T.WORK_PROPOSED, { workItemId: assignment, title: "Cross-check release instructions",
+    definitionOfDone: "Check the exact changes and instructions", accountableMemberId: "human-checker", mode: "read", sourceMessageId: source });
+  const assignmentUrl = `${f.origin}/?room=commons#pr-record/work/${assignment}`;
+  const page = await f.login("human-checker", assignmentUrl);
+  const assignmentSource = page.locator(`[data-work-record-id="${assignment}"] [data-open-message="${source}"]`);
+  await assignmentSource.press("Enter");
+  const message = page.locator(`[data-message-record-id="${source}"]`);
+  await message.getByRole("button", { name: "Reply", exact: true }).press("Enter");
+  const input = page.locator("#message-input"), draft = "Check Maya’s name before sending.";
+  await input.fill(draft);
+  await input.evaluate(el => el.setSelectionRange(6, 10));
+  const sourceUrl = page.url();
+  const capture = name => process.env.ROOM_TEST_CAPTURE && page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, name + ".png") });
+  await capture("assignment-source");
+  const documentLink = message.locator(`a[href="${resultLink}"]`);
+  const fileAnchor = message.locator(`a[href="${fileLink}"]`);
+  const result = page.locator("#result-body").getByText(/Missing named owner/);
+  const activated = Promise.race([
+    page.context().waitForEvent("page", { timeout: 5000 }).then(() => "new tab"),
+    result.waitFor({ timeout: 5000 }).then(() => "same tab"),
+  ]);
+  await documentLink.press("Enter");
+  assert.equal(await activated, "same tab");
+  await capture("pinned-document");
+  const opener = await documentLink.elementHandle();
+  f.send("owner", T.MESSAGE_EDITED, { messageId: source, expectedMessageRevision: 0,
+    body: `Check the corrected instructions against the change.\n${fileLink}\n${resultLink}` });
+  await page.waitForFunction(el => !el.isConnected, opener);
+  await page.locator("#work-navigation-return").press("Enter");
+  await documentLink.waitFor();
+  assert.equal(page.url(), sourceUrl);
+  assert.equal(await input.inputValue(), draft);
+  assert.equal(await documentLink.evaluate(el => el === document.activeElement), true);
+  assert.equal(await documentLink.textContent(), "Open submitted result");
+  assert.equal(await fileAnchor.textContent(), "Open changes for docs/release.md");
+  assert.deepEqual(await input.evaluate(el => [el.selectionStart, el.selectionEnd]), [6, 10]);
+  await capture("returned-draft");
+  for (const locator of [documentLink, fileAnchor]) {
+    const native = await locator.evaluate(link => {
+      let observed = false;
+      document.addEventListener("click", event => {
+        observed = !event.defaultPrevented;
+        event.preventDefault();
+      }, { once: true });
+      link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true }));
+      return observed && link.target === "_blank";
+    });
+    assert.equal(native, true);
+  }
+  const workspace = page.getByRole("dialog", { name: "Workspace" });
+  await fileAnchor.press("Enter");
+  const exactLine = workspace.getByText("+Maya owns the release", { exact: true });
+  await exactLine.waitFor();
+  if (process.env.ROOM_TEST_CAPTURE) await exactLine.scrollIntoViewIfNeeded();
+  await capture("pinned-file");
+  await page.keyboard.press("Escape");
+  await workspace.waitFor({ state: "hidden" });
+  assert.equal(await fileAnchor.evaluate(el => el === document.activeElement), true);
+  assert.equal(await input.inputValue(), draft);
+  assert.equal(page.context().pages().length, 1);
+  f.send("owner", T.MESSAGE_EDITED, { messageId: source, expectedMessageRevision: 1,
+    body: `Check both references.\n${fileLink}\n${resultLink}\n${resultLink}` });
+  const lastDocumentLink = message.locator(`a[href="${resultLink}"]`).nth(1);
+  await lastDocumentLink.press("Enter");
+  await result.waitFor();
+  const lastOpener = await lastDocumentLink.elementHandle();
+  f.send("owner", T.MESSAGE_EDITED, { messageId: source, expectedMessageRevision: 2,
+    body: `Here are both references.\n${fileLink}\n${resultLink}\n${resultLink}` });
+  await page.waitForFunction(el => !el.isConnected, lastOpener);
+  await page.goBack();
+  await page.waitForFunction(href => document.activeElement?.href === href
+    && document.activeElement?.dataset.focusKey?.endsWith(":2"), resultLink);
+  await page.locator("#work-navigation-return").press("Enter");
+  await assignmentSource.waitFor();
+  assert.equal(page.url(), assignmentUrl);
 });
 
 for (const anchor of ["root", "reply"]) {

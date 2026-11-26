@@ -258,7 +258,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /messageCluster/);
   assert.match(app, /bodyHtmlCache\.html\(/); // body HTML renders through the per-message cache (conversation.js messageBodyHtml)
   const conversation = readFileSync(join(checkout, "src/conversation.js"), "utf8");
-  assert.match(conversation, /const full = mentionHtml\(text, members, esc\)/);
+  assert.match(conversation, /const full = mentionHtml\(text, members, esc, labelLink\)/);
   assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /syncComposerChrome/);
   assert.match(app, /escapeChatAction, messageCluster/);

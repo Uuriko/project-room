@@ -55,7 +55,8 @@ import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-nav
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, exactResultHref, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { roomChangesSelection } from "./workspace-artifact-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -3107,11 +3108,13 @@ function messageContent(m, cluster = {}, unreadStart = false, members = Object.v
     : "";
   const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
   const parent = conversation.byId.get(m.replyToId);
+  const assignmentUrl = currentWorkOrigin()?.assignmentSourceId === m.id
+    ? `${location.origin}${location.pathname}?room=${encodeURIComponent(session.roomId)}` : undefined;
   const count = (conversation.threads.get(m.id)?.length || 1) - 1;
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(parent.body ?? "", 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${bodyHtmlCache.html(m.body, members, esc, m.id)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div>${messageLinksHTML(m, { linked, moderation, count, muted })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(parent.body ?? "", 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${bodyHtmlCache.html(m.body, members, esc, m.id, assignmentUrl)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div>${messageLinksHTML(m, { linked, moderation, count, muted })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -3722,7 +3725,8 @@ function navigateWorkRecord(kind, id, extra = {}) {
     notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
   const presentation = extra.presentation ?? "focus";
-  const target = recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
+  const target = extra.exactResultUrl ?? recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
+  const showTarget = () => extra.exactResultUrl ? revealLocationHash() : showWorkDestination(kind, id, presentation);
   const current = currentWorkOrigin();
   if (current?.target === target && location.hash === target && history.state?.roomWorkTarget === activeWorkNavigation) {
     // A new surface can inspect the same task without a second URL entry.
@@ -3730,7 +3734,7 @@ function navigateWorkRecord(kind, id, extra = {}) {
     if (!sameWorkOrigin(current, origin)) workNavigationOrigins.set(activeWorkNavigation,
       { ...origin, url: current.url, previous: current.previous, target, targetUrl: current.targetUrl });
     else if (current.presentation !== presentation) workNavigationOrigins.set(activeWorkNavigation, { ...current, presentation });
-    workHistoryReplayKey = null; showWorkDestination(kind, id, presentation);
+    workHistoryReplayKey = null; showTarget();
     return true;
   }
   const ticket = crypto.randomUUID();
@@ -3749,7 +3753,7 @@ function navigateWorkRecord(kind, id, extra = {}) {
   // its echo. Key format matches replayWorkNavigation's computed key, with
   // an empty back segment (the pushed entry carries no roomWorkOrigin).
   workHistoryReplayKey = [new URL(target, location.href).href, ticket, "", workNavigationContext()].join("|");
-  showWorkDestination(kind, id, presentation);
+  showTarget();
   return true;
 }
 // #3795: navigate to a board claim's record. The destination is the board
@@ -3803,6 +3807,7 @@ async function restoreWorkOrigin(ticket) {
   if (!origin || busy) { returnToCurrentRoom(); return; }
   const epoch = ++workNavigationEpoch;
   if (origin.presentation === "thread") closeResult(false);
+  else closeLinkedResult();
   updatesUi?.cancelPending();
   activeWorkNavigation = currentWorkOrigin(origin.previous) ? origin.previous : null;
   workspaceUI?.showRooms();
@@ -5111,9 +5116,18 @@ $("#message-list").addEventListener("click", e => {
     const url = new URL(artifact.href);
     const messageId = artifact.closest("[data-message-record-id]")?.dataset.messageRecordId;
     if (messageId && url.origin === location.origin && url.pathname === location.pathname
-      && url.searchParams.get("room") === session?.roomId && url.hash.startsWith("#pr-workspace/")) {
-      const destination = captureWorkspaceThreadDraft(messageId);
-      if (destination && workspacePreviewsUI?.openLink(url.hash, destination)) {
+      && url.searchParams.get("room") === session?.roomId) {
+      const assignmentSource = !busy && !url.username && !url.password && url.searchParams.size === 1
+        && currentWorkOrigin()?.assignmentSourceId === messageId;
+      if (url.hash.startsWith("#pr-workspace/")) {
+        const destination = captureWorkspaceThreadDraft(messageId);
+        if ((destination || assignmentSource && roomChangesSelection(url, location.origin, session.roomId))
+          && workspacePreviewsUI?.openLink(url.hash, destination)) {
+          e.preventDefault();
+          return;
+        }
+      } else if (assignmentSource && exactResultHref(exactResultDestination(url) ?? {}, location) === url.href
+        && navigateWorkRecord("message", messageId, { exactResultUrl: url.href })) {
         e.preventDefault();
         return;
       }
@@ -5905,8 +5919,12 @@ $("#main").addEventListener("click", e => {
   if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   e.preventDefault();
   if (busy) return;
-  if (link.dataset.openMessage && link.closest("[data-work-record-id]")) {
-    navigateWorkRecord("message", link.dataset.openMessage); return;
+  const workCard = link.closest("[data-work-record-id]");
+  if (link.dataset.openMessage && workCard) {
+    const id = link.dataset.openMessage;
+    const item = state.workItems[workCard.dataset.workRecordId];
+    navigateWorkRecord("message", id, item?.sourceMessageId === id ? { assignmentSourceId: id } : {});
+    return;
   }
   // JDOT-COH-NAV begin
   if (!link.dataset.openWork) { updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++; $("#work-navigation-return").hidden = true; }

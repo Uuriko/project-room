@@ -1,6 +1,8 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
 import { uiText } from "./strings.js";
 import { terminalWork } from "./workflow.js";
+import { exactResultDestination, exactResultHref } from "./record-link.js";
+import { roomChangesSelection } from "./workspace-artifact-link.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 
 // Composition, key repeat, and touch Return must never accidentally submit.
@@ -234,13 +236,35 @@ const escapeMentionName = value => [...String(value)].map(ch => mentionRegExpSpe
 
 // Presentation only: the original body remains the source for copy, search and
 // message links. Native details keeps expansion usable without another handler.
-export function messageBodyHtml(body, members, esc, messageId) {
+export function messageBodyHtml(body, members, esc, messageId, assignmentUrl) {
   const text = String(body ?? "");
   const lines = text.split("\n");
-  const full = mentionHtml(text, members, esc);
+  const base = assignmentUrl && new URL(assignmentUrl);
+  const occurrences = base && new Map();
+  const labelLink = base ? href => {
+    const label = assignmentLinkLabel(href, base);
+    if (!label) return null;
+    const occurrence = (occurrences.get(href) ?? 0) + 1;
+    occurrences.set(href, occurrence);
+    return { label: esc(label), focusKey: esc(`assignment-link:${messageId}:${href}:${occurrence}`) };
+  } : null;
+  const full = mentionHtml(text, members, esc, labelLink);
   if (text.length <= 1200 && lines.length <= 12) return full;
   const preview = [...lines.slice(0, 6).join("\n")].slice(0, 600).join("");
   return `<details class="message-expansion"><summary data-focus-key="message-expand:${esc(messageId)}"><span class="message-preview" aria-hidden="true">${esc(preview)}…</span><span class="message-show-more">Show more · ${lines.length} ${lines.length === 1 ? "line" : "lines"}</span><span class="message-show-less">Show less</span></summary><div class="message-full">${full}</div></details>`;
+}
+
+function assignmentLinkLabel(href, base) {
+  const link = URL.parse(href), roomId = base.searchParams.get("room");
+  if (!link || link.pathname !== base.pathname || link.href !== href) return null;
+  const change = roomChangesSelection(link, base.origin, roomId);
+  if (change) {
+    const file = change.file;
+    return file && file === file.trim() && !/\p{Bidi_Control}/u.test(file)
+      ? uiText("work.source.openFileChanges", { file }) : uiText("work.source.openChanges");
+  }
+  const result = exactResultDestination(link);
+  return result?.roomId === roomId && exactResultHref(result, base) === href ? uiText("work.source.openResult") : null;
 }
 
 // Chat renders run on every arrival and used to rebuild every body's HTML
@@ -254,30 +278,30 @@ export function createBodyHtmlCache(render = messageBodyHtml, limit = 20000) {
   const entries = new Map();
   let lastMembers = null, lastEsc = null, membersKey = null;
   return {
-    html(body, members, esc, messageId) {
+    html(body, members, esc, messageId, assignmentUrl) {
       if (members !== lastMembers || esc !== lastEsc) {
         const key = [...(members || [])].map(m => [m?.id, m?.displayName ?? "", m?.kind ?? ""].join("\u0001")).join("\u0002");
         if (key !== membersKey || esc !== lastEsc) entries.clear();
         lastMembers = members; lastEsc = esc; membersKey = key;
       }
       const text = String(body ?? ""), hit = entries.get(messageId);
-      if (hit && hit.body === text) return hit.html;
+      if (hit && hit.body === text && hit.assignmentUrl === assignmentUrl) return hit.html;
       if (entries.size >= limit) entries.clear();
-      const html = render(text, members, esc, messageId);
-      entries.set(messageId, { body: text, html });
+      const html = render(text, members, esc, messageId, assignmentUrl);
+      entries.set(messageId, { body: text, assignmentUrl, html });
       return html;
     }
   };
 }
 
-export function mentionHtml(body, members, esc) {
+export function mentionHtml(body, members, esc, labelLink) {
   const text = String(body ?? "");
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
-  if (!names.length) return markdownHtml(esc(text));
+  if (!names.length) return markdownHtml(esc(text), labelLink);
   const pattern = new RegExp(`@(?:\\(([A-Za-z0-9_.:-]{1,128})\\)|${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");
   let out = "", last = 0, match;
   while ((match = pattern.exec(text))) {
-    out += markdownHtml(esc(text.slice(last, match.index)));
+    out += markdownHtml(esc(text.slice(last, match.index)), labelLink);
     const label = match[0].slice(1);
     const member = names.find(m => match[1] ? m.id === match[1] : m.displayName === label);
     const kind = member?.kind === "agent" ? " agent" : "";
@@ -288,13 +312,13 @@ export function mentionHtml(body, members, esc) {
     out += chip;
     last = match.index + match[0].length;
   }
-  return out + markdownHtml(esc(text.slice(last)));
+  return out + markdownHtml(esc(text.slice(last)), labelLink);
 }
 
 // Discord-style markdown for message bodies. Input MUST already be HTML-escaped
 // (esc() applied); output is safe HTML. Store raw, render at view — no server change.
 const mdSlot = "\u0000md";
-export function markdownHtml(escaped) {
+export function markdownHtml(escaped, labelLink) {
   let text = String(escaped ?? "");
   const saved = [];
   const stash = html => {
@@ -323,7 +347,8 @@ export function markdownHtml(escaped) {
   text = text.replace(/(^|[\s(])(https?:\/\/[^\s<>"')]+)/g, (m, pre, url) => {
     const clean = url.replace(/[.,;:!?]+$/, "");
     const tail = url.slice(clean.length);
-    return `${pre}<a href="${clean}" target="_blank" rel="noopener noreferrer">${clean}</a>${tail}`;
+    const named = labelLink?.(clean);
+    return `${pre}<a href="${clean}" target="_blank" rel="noopener noreferrer"${named ? ` data-focus-key="${named.focusKey}"` : ""}>${named ? `<bdi>${named.label}</bdi>` : clean}</a>${tail}`;
   });
   // Simple lists, after inline marks so **bold** inside an item still works,
   // and before code is restored so a fence that contains "- item" stays literal.
