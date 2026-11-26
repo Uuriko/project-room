@@ -886,6 +886,15 @@ export class RoomAgentClient {
         || source.editedAt !== null && (typeof source.editedAt !== "string" || !Number.isFinite(Date.parse(source.editedAt))))
         throw new RoomClientError(200, "invalid_response", "Invalid source freshness observation");
     } else if (sourceObservation !== undefined) throw new RoomClientError(200, "source_freshness_unavailable", "This service does not support source comparison");
+    if (source?.referenceRequest !== undefined) {
+      const action = source.referenceRequest, observation = source.observation, assigner = result.work.proposedById;
+      if (!includeSource || !validSourceObservation(observation) || result.work.accountableMemberId !== result.viewer.id
+        || observation.messageId !== result.work.sourceMessageId || !validId(assigner) || assigner === result.viewer.id
+        || action?.tool !== "room_request_reply" || typeof action.guidance !== "string"
+        || !isDeepStrictEqual(action.arguments, { workItemId, toMemberId: assigner,
+          assignmentSource: { messageId: observation.messageId, revision: observation.revision } }))
+        throw new RoomClientError(200, "invalid_response", "Assignment reference request does not match the selected source");
+    }
     if (Object.hasOwn(result.next, "replacement")) {
       const link = result.next.replacement;
       const expectedRead = { tool: "room_read_work", arguments: { workItemId: result.work.supersededBy } };

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { nextWorkStep, workActions, workCollaboration, workResume, workThreadHref } from "../src/workflow.js";
+import { nextWorkStep, terminalWork, workActions, workCollaboration, workResume, workThreadHref } from "../src/workflow.js";
+import { isRoomArchived } from "../src/events.js";
+import { sourceReferenceRequest } from "../src/reply-requests.js";
 import { PREREQUISITE_GATED_STEPS, prerequisiteHold, stepWithPrerequisiteHold } from "../client/begin-work.mjs";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
@@ -191,6 +193,12 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     source.editedAt = observable && typeof message.editedAt === "string" ? message.editedAt : null;
     if (source.freshness === "unchanged") { source.status = "not_modified"; source.message = null; }
     source.nextRead = observable ? { tool: "room_read_work", arguments: { workItemId, includeSource: true, sourceObservation: { ...source.observation } } } : null;
+    const request = observable && !terminalWork(item) && !isRoomArchived(state) && sourceReferenceRequest(state, item, viewerId);
+    if (request) source.referenceRequest = {
+      tool: "room_request_reply",
+      arguments: { workItemId, toMemberId: request.recipientId, assignmentSource: { messageId: message.id, revision } },
+      guidance: "If you cannot open the source and need the assigner's help, supply a body asking for an accessible reference. Keep the request private and reuse the same requestId and input if the outcome is unknown."
+    };
   }
   let next = nextWorkStep(item, now, state.room.ownerId);
   // One link, not recursive traversal or target-content delivery. Work is

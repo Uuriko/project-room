@@ -13,6 +13,8 @@ const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[\\s\\S
 const responseBody = { ...text, maxLength: MAX_REPLY_RESPONSE_CHARS };
 const replyBody = { type: "string", minLength: 1, maxLength: MAX_MESSAGE_BODY_CHARS, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" };
 const revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
+const assignmentSource = { type: "object", additionalProperties: false, required: ["messageId", "revision"],
+  properties: { messageId: id, revision } };
 const token = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+$" };
 const limit = { type: "integer", minimum: 1, maximum: 50 };
 const direction = { type: "string", enum: ["incoming", "outgoing", "both"] };
@@ -26,7 +28,7 @@ const definitions = [
   ["room_request_history", "/reply-history", "Read an anchored incoming/outgoing request history, including requests answered between polls. Follow nextCursor; retain completedCheckpoint only after draining the window. Never mix cursor/checkpoint or silently reset on changed history/identity. Reading does not acknowledge anything.",
     { direction, cursor: token, checkpoint: token, limit }, []],
   ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. Does not start a model or grant permission." + retry,
-    { requestId: requestKey, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["toMemberId", "body"]],
+    { requestId: requestKey, toMemberId: id, body: text, workItemId: id, replyToId: id, assignmentSource }, ["toMemberId", "body"]],
   ["room_reply", null, "Post an ordinary clarification under a message. This does not answer or close a reply request, even when addressed to someone." + retry,
     { requestId: requestKey, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
@@ -47,7 +49,8 @@ export const isReplyTool = name => actions.has(name);
 export const replyRoute = name => actions.get(name)?.route;
 export function validReplyArguments(name, args) {
   return actions.has(name) && conforms(args, actions.get(name).tool.inputSchema)
-    && !(Object.hasOwn(args, "cursor") && Object.hasOwn(args, "checkpoint"));
+    && !(Object.hasOwn(args, "cursor") && Object.hasOwn(args, "checkpoint"))
+    && (!Object.hasOwn(args, "assignmentSource") || Boolean(args.workItemId) && !Object.hasOwn(args, "replyToId"));
 }
 export function buildReplyCommand(identity, name, args) {
   const prepared = replyRoute(name) === null && validId(identity?.roomId) && validId(identity?.memberId)
@@ -61,6 +64,7 @@ export function buildReplyCommand(identity, name, args) {
   const { requestId: _requestId, ...data } = structuredClone(prepared), type = name === "room_cancel_request" ? "reply_request.cancelled" : name === "room_progress_request" ? "reply_request.progressed" : "message.posted";
   if (type === "message.posted") data.messageId = "reply-" + createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, requestId])).digest("hex");
   if (name === "room_request_reply") data.requestKind = "reply";
+  if (data.assignmentSource) data.replyToId = null;
   if (name === "room_respond_to_request") {
     data.replyToId = data.responseToRequestId;
     // F-S6a-2: the context pair and workItemId are schema-optional, but a
@@ -145,6 +149,11 @@ export function replyRefusal(cause, { name, args = {} } = {}) {
       : ["This read failed; no answer was submitted by it. Retry the same read and selection after service recovery. Preserve saved continuations until reconciled.", [{ tool: name, arguments: args }]];
     return { type: "reply_read_refused", code, outcome: "read_failed", message,
       status: ax.status, reason: code, hint: message, next };
+  }
+  if (name === "room_request_reply" && cause?.code === "source_reference_changed" && args.assignmentSource) {
+    return { type: "reply_refused", code: "source_reference_changed", outcome: "this_attempt_refused",
+      message: "Reopen the current assignment source before sending. Keep the original input if you are reconciling an earlier unknown attempt.",
+      next: [{ tool: "room_read_work", arguments: { workItemId: args.workItemId, includeSource: true } }] };
   }
   const allowed = ["invalid_reply_action", "reply_action_too_large", "invalid_reply_selection", "invalid_reply_cursor", "reply_request_not_found", "reply_context_unavailable",
     "reply_cursor_identity_changed", "reply_history_changed", "reply_entry_too_large", "reply_list_too_large", "command_rejected", "idempotency_conflict", "invalid_command",

@@ -197,6 +197,7 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     if (args.includeResult) context = await prepareReview(client, id, context, options);
     if (hosted) {
       if (context.context?.source?.nextRead) context.context.source.nextRead.arguments.roomId = context.roomId;
+      if (context.context?.source?.referenceRequest) context.context.source.referenceRequest.arguments.roomId = context.roomId;
       if (context.next?.replacement?.nextRead) context.next.replacement.nextRead.arguments.roomId = context.roomId;
       if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = context.roomId;
       for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = context.roomId;

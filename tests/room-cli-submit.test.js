@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -261,6 +262,86 @@ test(`${representation} a configured join prints a pickup read for the same agen
   const started = await cli([...work.value.continuation.command.slice(1), "-"], work.value, reviewerProject);
   assert.equal(started.value.working, true);
   assert.equal((await cli(["next"], undefined, reviewerProject)).value.viewerId, reviewer.identityId);
+});
+
+test(`${representation} a denied document read leads to one private request on the original assignment`, async t => {
+  const { store, owner, producer, reviewer, origin, rpc, cli } = await fixture(t, representation);
+  const providerReads = [];
+  const docs = createServer((request, response) => {
+    providerReads.push(request.headers.authorization);
+    response.writeHead(403).end();
+  });
+  await new Promise(resolve => docs.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => docs.close(resolve)));
+  const url = `http://127.0.0.1:${docs.address().port}/revision/7`;
+  const workItemId = "document-review";
+  const sourceId = "document-source";
+  const send = (id, type, data) => store.command(owner, "commons", { id, type, data });
+  send("document-link", T.MESSAGE_POSTED, { messageId: sourceId, body: `Review ${url}`, toMemberId: producer.identityId });
+  send("document-assignment", T.WORK_PROPOSED, {
+    workItemId, title: "Review the release note", definitionOfDone: "Verify the date",
+    sourceMessageId: sourceId, accountableMemberId: producer.identityId, mode: "read"
+  });
+  const head = store.headSequence("commons");
+  const next = await rpc("room_next", { view: "pickup" });
+  const brief = await rpc(next.nextRead.tool, next.nextRead.arguments);
+  const read = () => rpc(brief.sourceRead.tool, brief.sourceRead.arguments);
+  const work = await read();
+  assert.equal(work.context.source.message.body, `Review ${url}`);
+  assert.deepEqual(providerReads, []);
+  const response = await fetch(url, { headers: { Authorization: "Bearer coworker-docs-fixture" } });
+  assert.equal(response.status, 403);
+  assert.deepEqual(providerReads, ["Bearer coworker-docs-fixture"]);
+  const action = work.context.source.referenceRequest;
+  assert.equal(action?.tool, "room_request_reply");
+  assert.deepEqual(action.arguments, {
+    roomId: "commons", workItemId, toMemberId: "owner", assignmentSource: { messageId: sourceId, revision: 0 }
+  });
+  const local = await cli(["work", workItemId, "--include-source"]);
+  assert.deepEqual(local.value.context.source.referenceRequest.arguments, action.arguments);
+  assert.equal(store.headSequence("commons"), head);
+  assert.equal((await rpc("room_read_work", { workItemId, includeSource: true }, reviewer)).context.source.referenceRequest, undefined);
+
+  send("document-update", T.MESSAGE_EDITED, { messageId: sourceId, expectedMessageRevision: 0, body: `Review revision 7 at ${url}` });
+  const editedThrough = store.headSequence("commons");
+  const body = "My document account cannot open revision 7. Could you share an accessible reference?";
+  const stale = await fetch(`${origin}/mcp`, { method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${producer.secret}` },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
+      name: action.tool, arguments: { ...action.arguments, body, requestId: "stale-document-access" }
+    } })
+  });
+  assert.match(JSON.stringify(await stale.json()), /source_reference_changed/);
+  assert.equal(store.headSequence("commons"), editedThrough);
+
+  const updated = (await read()).context.source.referenceRequest;
+  assert.equal(updated.arguments.assignmentSource.revision, 1);
+  const args = { ...updated.arguments, body, requestId: "document-access" };
+  const sent = await rpc(updated.tool, args);
+  assert.equal(sent.status, "recorded");
+  send("document-permissions-note", T.MESSAGE_EDITED, { messageId: sourceId, expectedMessageRevision: 1, body: `Still review ${url}` });
+  const retryThrough = store.headSequence("commons");
+  const retry = await rpc(updated.tool, args);
+  assert.equal(retry.requestMessageId, sent.requestMessageId);
+  assert.equal(retry.duplicate, true);
+  assert.equal(store.headSequence("commons"), retryThrough);
+  const query = new URLSearchParams({ requestMessageId: sent.requestMessageId, view: "full" });
+  const requestPath = new URL("/api/rooms/commons/reply-context", origin);
+  requestPath.search = query;
+  const readRequest = secret => fetch(requestPath, { headers: { Authorization: `Bearer ${secret}` } });
+  const assignerRead = await readRequest(owner);
+  assert.equal(assignerRead.status, 200);
+  const exchange = await assignerRead.json();
+  assert.equal(exchange.request.workItemId, workItemId);
+  assert.equal(exchange.request.requesterId, producer.identityId);
+  assert.equal(exchange.request.recipientId, "owner");
+  assert.match(JSON.stringify(exchange), /My document account cannot open revision 7/);
+  assert.doesNotMatch(JSON.stringify(exchange), /coworker-docs-fixture/);
+  assert.equal((await readRequest(reviewer.secret)).status, 404);
+  assert.deepEqual(providerReads, ["Bearer coworker-docs-fixture"]);
+  const after = await rpc("room_read_work", { workItemId });
+  assert.equal(after.continuation.action, "accept");
+  assert.equal(after.work.receipt, null);
 });
 
 test(`${representation} pickup opens only the linked assignment source with the project connection`, async t => {

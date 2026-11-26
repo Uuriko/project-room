@@ -243,6 +243,10 @@ export function confirmsAgentCommand(receipt, command, { roomId, memberId }) {
       data = progress;
     }
     const mode = command.type === T.MESSAGE_POSTED ? replyPostMode(data) : null;
+    if (mode === "open" && data.assignmentSource) {
+      const { assignmentSource: _source, ...recorded } = data;
+      data = recorded;
+    }
     if (mode) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
     // The server stamps which credential answered; it is never in the command.
     if (mode === "respond" && ANSWER_CREDENTIALS.includes(entry?.data?.answerCredential)) data = { ...data, answerCredential: entry.data.answerCredential };
