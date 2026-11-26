@@ -472,7 +472,7 @@ test("restored cancellation draft does not submit by keyboard after another sess
   assert.deepEqual(f.errors, []);
 });
 
-for (const scenario of ["unsent", "uncertain", "refused"]) test(`current Room handles an ${scenario} assignment reference after reload`, { timeout: 30000 }, async t => {
+for (const scenario of ["unsent", "uncertain", "refused", "edited"]) test(`current Room handles an ${scenario} assignment reference after reload`, { timeout: 30000 }, async t => {
   const uncertain = scenario === "uncertain";
   const f = await setup(t, { width: 390, height: 844 });
   const roomId = "private-reference-room", workItemId = "private-document-review", sourceMessageId = "private-source-assignment";
@@ -501,6 +501,10 @@ for (const scenario of ["unsent", "uncertain", "refused"]) test(`current Room ha
     const command = route.request().postDataJSON();
     if (command.type !== "message.posted" || command.data?.requestKind !== "reply") return route.continue();
     attempts.push(command);
+    if (scenario === "edited" && attempts.length === 1) {
+      send("message.edited", { messageId: sourceMessageId, expectedMessageRevision: 0,
+        body: "Read the updated https://docs.example.test/replacement" });
+    }
     if (!uncertain || attempts.length > 1) return route.continue();
     const committed = await route.fetch();
     assert.ok(committed.ok());
@@ -546,10 +550,33 @@ for (const scenario of ["unsent", "uncertain", "refused"]) test(`current Room ha
   assert.equal(await page.locator("#message-to-select").isDisabled(), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `cold-reference-${scenario}.png`) });
+  const sourceWrite = scenario === "edited" && page.waitForResponse(response =>
+    response.url().endsWith(`/api/rooms/${roomId}/commands`) && response.request().method() === "POST");
   await input(page).press("Enter");
+  if (sourceWrite) {
+    assert.equal((await sourceWrite).status(), 409);
+    await failed(page);
+    assert.equal(requests().length, 0);
+    assert.equal(await input(page).inputValue(), draft);
+    assert.equal(await input(page).getAttribute("readonly"), null);
+    await page.getByText(/This assignment changed.*Draft kept/).first().waitFor();
+    if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "reference-source-changed.png") });
+    await page.evaluate(url => history.replaceState(null, "", url), workUrl.href);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.locator(`[data-work-record-id="${workItemId}"] [data-open-message="${sourceMessageId}"]`).press("Enter");
+    await page.getByText("https://docs.example.test/replacement", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Ask for an accessible reference", exact: true }).press("Enter");
+    assert.equal(await input(page).inputValue(), draft);
+    await input(page).press("Enter");
+  }
   await saved(page);
   assert.equal(requests().length, 1);
-  assert.equal(attempts.length, uncertain ? 2 : 1);
+  assert.equal(attempts.length, uncertain || scenario === "edited" ? 2 : 1);
   if (uncertain) assert.deepEqual(attempts[1], attempts[0]);
+  if (scenario === "edited") {
+    assert.equal(attempts[0].data.assignmentSource.revision, 0);
+    assert.equal(attempts[1].data.assignmentSource.revision, 1);
+    assert.notEqual(attempts[0].id, attempts[1].id);
+  }
   assert.deepEqual(f.errors, []);
 });

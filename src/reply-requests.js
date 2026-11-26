@@ -98,8 +98,10 @@ export function validReplyDraft(mode, state) {
     if (own(mode, "sourceReference")) {
       const work = state.workItems?.[mode.workItemId];
       const basis = work && sourceReferenceRequest(state, work, work.accountableMemberId);
-      return Boolean(basis) && Object.keys(mode).length === Object.keys(basis).length
-        && Object.keys(basis).every(key => mode[key] === basis[key]);
+      const hasRevision = own(mode, "sourceRevision");
+      return Boolean(basis) && Object.keys(mode).length === Object.keys(basis).length + Number(hasRevision)
+        && Object.keys(basis).every(key => mode[key] === basis[key])
+        && (!hasRevision || mode.sourceRevision === null || revision(mode.sourceRevision));
     }
     const keys = ["kind", "workItemId", "resultEventId", "resultMessageId"], receipt = resultReceipt(state, mode);
     return Object.keys(mode).length === keys.length && keys.every(key => own(mode, key))
@@ -124,7 +126,9 @@ export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, c
       ...(channelId === undefined ? {} : { channelId }),
       ...(mode.followUpRequestId ? { toMemberId: mode.recipientId, replyToId: mode.responseMessageId, workItemId: mode.workItemId } : {}),
       ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}),
-      ...(mode.sourceReference ? { workItemId: mode.workItemId, toMemberId: mode.recipientId, replyToId: null } : {}) }
+      ...(mode.sourceReference ? { workItemId: mode.workItemId, toMemberId: mode.recipientId, replyToId: null,
+        ...(own(mode, "sourceRevision") ? { assignmentSource: mode.sourceRevision === null
+          ? { unavailable: true } : { messageId: mode.sourceReference, revision: mode.sourceRevision } } : {}) } : {}) }
     : { messageId, body, toMemberId: mode.requesterId, replyToId: mode.requestMessageId,
       workItemId: mode.workItemId, responseToRequestId: mode.requestMessageId,
       expectedRequestRevision: mode.expectedRequestRevision, responseOutcome: mode.kind,
@@ -135,6 +139,7 @@ export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, c
 }
 export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
   const event = receipt?.event, expected = { ...command.data };
+  delete expected.assignmentSource;
   if (command.type === "message.posted") expected.requestPolicyVersion = REPLY_POLICY_VERSION;
   if (command.type === "message.posted" && own(command.data, "responseToRequestId") && own(event?.data ?? {}, "answerCredential")
     && ANSWER_CREDENTIALS.includes(event.data.answerCredential)) expected.answerCredential = event.data.answerCredential;
@@ -151,6 +156,13 @@ export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
 // unmarked events may contain ignored fields; they must remain ordinary messages.
 export function replyPostMode(data) {
   const fields = REPLY_FIELDS.filter(key => own(data, key));
+  if (own(data, "assignmentSource")) {
+    const source = data.assignmentSource;
+    const validBasis = source && (Object.keys(source).length === 1 && source.unavailable === true
+      || Object.keys(source).length === 2 && id(source.messageId) && revision(source.revision));
+    requireValid(data.requestKind === "reply" && id(data.workItemId) && data.replyToId === null
+      && !data.alsoSendToChannel && validBasis, "Invalid assignment source basis");
+  }
   if (!fields.length) return null;
   const bodyKept = text(data.body, own(data, "responseToRequestId") ? MAX_REPLY_RESPONSE_CHARS : 4096) || (data.redacted === true && data.body == null);
   requireValid(id(data.messageId) && bodyKept, "Reply requests require an explicit message and text");

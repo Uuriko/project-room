@@ -126,7 +126,7 @@ import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord, workRoleHolder, withheldWorkItem, withheldWorkEvent, privateWorkEvent, privateWorkEventId, withheldBoardRow, outsidePrivateWork } from "./work-context.mjs";
-import { nextWorkStep, workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
+import { nextWorkStep, workItemChanges, mayWriteBoardClaims, terminalWork } from "../src/workflow.js";
 import { assertDependsOnKnown } from "./work-claim-integrity.mjs";
 import { normalizeWorkDependencies } from "../src/work-dependencies.js";
 import { nativePrerequisiteState, boardPrerequisiteState } from "./work-item-state.mjs";
@@ -754,7 +754,7 @@ const shapes = {
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
-  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll assignmentSource ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -844,7 +844,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedHumanRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option", "attempt", "pullNumber"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", "quiet", "reworkRequested", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "dependsOn", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedHumanRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option", "attempt", "pullNumber"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", "quiet", "reworkRequested", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "dependsOn", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll", "assignmentSource"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -7441,6 +7441,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(409, "request_already_acknowledged", "The request already has recipient progress");
         // This is a live-write precondition, not a new event format. Keep it in
         // the command fingerprint and replay the existing progress event.
+        command = { ...command, data };
+      }
+      if (command.type === T.MESSAGE_POSTED && command.data.assignmentSource) {
+        const { assignmentSource, ...data } = command.data;
+        const item = room.state.workItems?.[data.workItemId];
+        const viewerId = auth.member.id;
+        const changed = () => fail(409, "source_reference_changed", "The assignment source changed. Reopen it before sending.");
+        if (!item || item.accountableMemberId !== viewerId || item.proposedById !== data.toMemberId
+          || !item.sourceMessageId || terminalWork(item)) changed();
+        assertSelectedWorkVisible(this, roomId, item.id, item, viewerId);
+        const source = selectedMessageRecord(this, roomId, item.sourceMessageId, true);
+        const floor = this.historyFloor(roomId, viewerId, room.sequence);
+        const currentRevision = messageVisibleToViewer(source, viewerId, floor) ? source.revision ?? 0 : null;
+        const matches = assignmentSource.unavailable ? currentRevision === null
+          : currentRevision === assignmentSource.revision && item.sourceMessageId === assignmentSource.messageId;
+        if (!matches) changed();
+        // Admission checks apply only to a new command. Keep the observation in
+        // the fingerprint while recording the ordinary private request event.
         command = { ...command, data };
       }
       room = prepareMessageCommand(this, roomId, room, command, auth.member.id);

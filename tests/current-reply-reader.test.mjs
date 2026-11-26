@@ -442,3 +442,46 @@ for (const representation of [null, 'normalized-current-v1']) test(`selected del
   assert.ok(Date.parse(show().recipientProgressAt));
   assert.equal(show().nextAction,undefined);
 });
+
+for (const representation of [null, "normalized-current-v1"]) {
+  test(`assignment reference checks current source before first write and replays its receipt on ${representation ?? "legacy"}`, t => {
+    const {store, keys} = fixture(t, (_events, add) => {
+      add('message.posted', {messageId: 'brief', body: 'First document path', toMemberId: 'reader'});
+      add('message.posted', {messageId: 'hidden-brief', body: 'Other participant only', toMemberId: 'other'});
+      for (const [workItemId, sourceMessageId] of [['document-work', 'brief'], ['hidden-source-work', 'hidden-brief']]) {
+        add('work.proposed', {workItemId, title: 'Review the brief', definitionOfDone: 'Check the date',
+          accountableMemberId: 'reader', sourceMessageId, mode: 'read'});
+      }
+    }, representation);
+    const make = (id, source = {messageId: 'brief', revision: 0}, workItemId = 'document-work') => ({
+      id, type: 'message.posted', data: {messageId: id, body: 'Please share an accessible reference.',
+        toMemberId: 'owner', replyToId: null, workItemId, requestKind: 'reply', assignmentSource: source},
+    });
+    const submit = command => store.command(keys.reader, 'commons', command);
+    const first = make('committed-before-edit');
+    const receipt = submit(first);
+    assert.equal(receipt.event.data.assignmentSource, undefined);
+
+    const hidden = make('fresh-unavailable', {unavailable: true}, 'hidden-source-work');
+    assert.equal(submit(hidden).duplicate, false);
+    assert.equal(submit(hidden).event.data.assignmentSource, undefined);
+    store.command(keys.owner, 'commons', {id: 'edit-hidden-brief', type: 'message.edited',
+      data: {messageId: 'hidden-brief', body: 'Updated for the other participant only', expectedMessageRevision: 0}});
+    assert.equal(submit(hidden).duplicate, true);
+    assert.equal(submit(make('still-unavailable', {unavailable: true}, 'hidden-source-work')).duplicate, false);
+    const forgedRevision = make('forged-hidden-revision', {messageId: 'hidden-brief', revision: 0}, 'hidden-source-work');
+    assert.throws(() => submit(forgedRevision), {code: 'source_reference_changed'});
+
+    store.command(keys.owner, 'commons', {id: 'edit-brief', type: 'message.edited',
+      data: {messageId: 'brief', body: 'Replacement document path', expectedMessageRevision: 0}});
+    assert.equal(store.workContext(keys.reader, 'commons', 'document-work').work.revision, 0);
+    const before = store.headSequence('commons');
+    assert.throws(() => submit(make('wrong-unavailable-basis', {unavailable: true})), {code: 'source_reference_changed'});
+    assert.throws(() => submit(make('draft-before-edit')), {code: 'source_reference_changed'});
+    const replay = submit(first);
+    assert.deepEqual(replay.event, receipt.event);
+    assert.equal(replay.duplicate, true);
+    assert.equal(store.headSequence('commons'), before);
+    assert.equal(submit(make('reviewed-after-edit', {messageId: 'brief', revision: 1})).duplicate, false);
+  });
+}

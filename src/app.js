@@ -3414,7 +3414,10 @@ document.addEventListener("click", event => {
     const mode = (unavailable || external) && assignmentReferenceMode(work);
     if (!mode) return;
     switchThread(null, false, true, null);
-    setRequestMode(mode, { toMemberId: mode.recipientId, body: uiText("work.focus.referenceRequestBody", { title: work.title }) });
+    const pending = drafts.entries.get(replyDraftKey(mode));
+    const observed = external ? sourceMessage.revision ?? 0 : null;
+    setRequestMode(pending?.pending ? pending.mode : { ...mode, sourceRevision: observed },
+      { toMemberId: mode.recipientId, body: uiText("work.focus.referenceRequestBody", { title: work.title }) });
     $("#message-input").scrollIntoView({ block: "nearest", behavior: "instant" });
     return;
   }
@@ -5160,7 +5163,8 @@ function submitRequest(form) {
   if (mode?.sourceReference && !pendingMessage) {
     const work = state.workItems[mode.workItemId] ?? (inspectedWorkRecord?.id === mode.workItemId ? inspectedWorkRecord : null);
     const current = work && !terminalWork(work) && sourceReferenceRequest(state, work, identity.member.id);
-    if (current?.sourceReference !== mode.sourceReference || current.recipientId !== mode.recipientId) {
+    if (!Object.hasOwn(mode, "sourceRevision") || current?.sourceReference !== mode.sourceReference
+      || current.recipientId !== mode.recipientId) {
       setComposerError(uiText("work.focus.referenceRequestChanged"));
       return;
     }
@@ -5191,8 +5195,10 @@ function submitRequest(form) {
       if (generation !== client.generation || session !== identity || !state) return;
       // draftRefused: only a refusal issued after the exact-operation lookup
       // (command_rejected, channel_archived) unlocks an earlier uncertain send.
-      if (draftRefused(error, hadPending)) pendingMessage = null;
+      const sourceChanged = mode.sourceReference && error.code === "source_reference_changed" && error.status === 409;
+      if (sourceChanged || draftRefused(error, hadPending)) pendingMessage = null;
       saveComposer();
+      if (sourceChanged) throw new Error(uiText("work.focus.referenceRequestChanged"));
       // A DM refused by the consent gate names the recipient and the next
       // step, instead of surfacing the raw gate message.
       const consentRefusal = mapDmConsentRefusal(command, error);

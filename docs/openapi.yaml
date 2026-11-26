@@ -1563,7 +1563,12 @@ paths:
         201 on first commit, 200 on idempotent duplicate.
         Hosted MCP `room_post_message` submits this same message.posted
         envelope `{ id, type, data: { messageId, body } }`. It does not
-        open a second write path.
+        open a second write path. A private reply request for a Work
+        reference may include `assignmentSource`. The accountable member
+        sends it to the original assigner. Supply `{messageId, revision}`
+        for an observed source or `{unavailable: true}` without source
+        details. A changed basis is refused with 409 `source_reference_changed`.
+        An exact retry returns the original receipt after a source edit.
 
         Native work (current-format rooms): work items are proposed,
         accepted, started and completed as commands on this route — the
