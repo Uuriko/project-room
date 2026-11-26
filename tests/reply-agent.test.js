@@ -302,31 +302,59 @@ for (const failure of ["before file commit", "after file commit", "with a mismat
   });
 }
 
-test("a permanently unavailable file can be explicitly replaced on the original delivered answer", async t => {
+test("an expired file can be recovered only with the original bytes on the delivered answer", async t => {
   const f = await fixture(t), args = runner(t, f);
   const requestMessageId = f.open().command.data.messageId;
-  const stage = id => f.store.roomAttachments.stage(f.keys.producer, "commons",
-    { id, filename: "design.md", mediaType: "text/markdown", data: "YQ==" });
-  stage("original");
-  let answers = 0, executions = 0;
+  const stage = (id, contents) => f.store.roomAttachments.stage(f.keys.producer, "commons",
+    { id, filename: "design.md", mediaType: "text/markdown", data: Buffer.from(contents).toString("base64") });
+  const original = stage("original", "Approved design");
+  let answers = 0, executions = 0, interrupted = true, commits = 0;
   const connection = { ...f.config, fetchImpl: (url, options) => {
-    if (new URL(url).pathname.endsWith("/commands")) answers++;
+    const path = new URL(url).pathname;
+    if (path.endsWith("/commands")) answers++;
+    if (path.endsWith("/commit")) {
+      commits++;
+      if (interrupted) throw new TypeError("Upload interrupted");
+    }
     return fetch(url, options);
   } };
-  const execute = () => {
-    executions++;
-    f.store.roomAttachments.discard(f.keys.producer, "commons", "original");
-    return { body: "Review the design" };
-  };
+  const execute = () => { executions++; return { body: "Here is the approved design" }; };
   const run = stagedFileId => runRequestOnce({ ...args, connection, requestMessageId, stagedFileId, execute });
-  const unavailable = await run("original");
+  const pending = await run("original");
+  assert.equal(pending.status, "file_pending");
+  const messageId = pending.attachment.messageId;
+  const selectedFiles = () => fetch(f.origin + "/api/rooms/commons/files?" + new URLSearchParams({ messageId }),
+    { headers: { Authorization: "Bearer " + f.keys.owner } }).then(response => response.json());
+  assert.deepEqual((await selectedFiles()).files, []);
+
+  interrupted = false;
+  f.store.now = () => original.attachment.expiresAt + 1;
+  const unavailable = await run();
   assert.equal(unavailable.status, "file_needs_attention");
   assert.equal(unavailable.reason, "attachment_unavailable");
-  stage("replacement");
-  const recovered = await run("replacement");
-  assert.equal(recovered.attachment.state, "shared");
-  assert.equal(recovered.attachment.messageId, unavailable.attachment.messageId);
-  assert.equal(f.store.roomAttachments.get(f.keys.owner, "commons", "replacement").attachment.messageId, recovered.attachment.messageId);
+  assert.equal(unavailable.attachment.messageId, messageId);
+  stage("wrong-document", "Unreviewed design");
+  assert.deepEqual({ ...f.store.db.prepare("SELECT state,bytes FROM room_attachments WHERE id='original'").get() },
+    { state: "expired", bytes: null });
+  const refused = await run("wrong-document");
+  assert.equal(refused.status, "file_needs_attention");
+  assert.equal(refused.reason, "attachment_digest_mismatch");
+  assert.match(refused.hint, /original file/);
+  assert.equal(commits, 2, "a different file never reaches the commit endpoint");
+  assert.deepEqual((await selectedFiles()).files, []);
+  assert.deepEqual({ ...args.db.prepare("SELECT file_id,file_sha256,file_state FROM request_runs").get() },
+    { file_id: "original", file_sha256: original.attachment.sha256, file_state: "expired" });
+
+  stage("restaged-original", "Approved design");
+  const recovered = await run("restaged-original");
+  assert.deepEqual(recovered.attachment, { fileId: "restaged-original", messageId, state: "shared" });
+  assert.deepEqual((await selectedFiles()).files.map(file => [file.messageId, file.sha256]), [[messageId, original.attachment.sha256]]);
+  const fetched = f.store.roomAttachments.get(f.keys.owner, "commons", "restaged-original").attachment;
+  assert.equal(Buffer.from(fetched.data, "base64").toString(), "Approved design");
+  assert.throws(() => f.store.roomAttachments.get(f.keys.reviewer, "commons", "restaged-original"), { status: 404 });
+  const response = await f.client.replyContext(requestMessageId);
+  assert.equal(response.request.responseMessageId, messageId);
+  assert.equal(response.request.requesterId, "owner");
   assert.equal(answers, 1);
   assert.equal(executions, 1);
 });

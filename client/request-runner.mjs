@@ -124,7 +124,8 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
         const state = expired ? "expired" : refused ? "attention" : "pending";
         db.prepare("UPDATE request_runs SET file_state=? WHERE id=? AND file_id=? AND file_state!='shared'").run(state, id, record.file_id);
         return { ...result, status: refused ? "file_needs_attention" : "file_pending",
-          attachment, reason: error.code ?? "attachment_commit_unconfirmed" };
+          attachment, reason: error.code ?? "attachment_commit_unconfirmed",
+          ...(expired && { hint: "The upload expired. Stage the original file again to finish sharing it." }) };
       }
       db.prepare("UPDATE request_runs SET file_state='shared' WHERE id=? AND file_id=?").run(id, record.file_id);
     }
@@ -146,11 +147,15 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     if (stagedFileId !== undefined && prior.file_id !== stagedFileId) {
       if (prior.file_id && prior.file_state !== "expired") throw new Error("This answer already has a different selected file");
       const digest = await client.stagedAnswerFileDigest(stagedFileId, { signal });
-      // Explicit selection can replace a permanently unavailable file. Pin the
-      // observed old ID so two operators cannot replace one another's choices.
+      if (prior.file_id && digest !== prior.file_sha256) {
+        return { status: "file_needs_attention", requestId: id, requestMessageId, hostExecuted: false,
+          reason: "attachment_digest_mismatch", hint: "The selected file has different contents. Stage the original file to finish sharing on the same answer." };
+      }
+      // Replace only the staging ID when recovering the original file.
+      // A concurrent selection must still see the same saved ID and digest.
       db.prepare(`UPDATE request_runs SET file_id=?, file_sha256=?, file_state='pending'
-        WHERE id=? AND file_id IS ? AND (file_id IS NULL OR file_state='expired')`)
-        .run(stagedFileId, digest, id, prior.file_id);
+        WHERE id=? AND file_id IS ? AND file_sha256 IS ? AND (file_id IS NULL OR file_state='expired')`)
+        .run(stagedFileId, digest, id, prior.file_id, prior.file_sha256);
       Object.assign(prior, db.prepare("SELECT file_id,file_sha256,file_state FROM request_runs WHERE id=?").get(id));
       if (prior.file_id !== stagedFileId) throw new Error("The selected file changed during recovery");
     }
