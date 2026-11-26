@@ -359,7 +359,7 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
-let partialWorkSnapshot = false, inspectedWorkRecord = null, inspectedWorkReplacementId = null;
+let partialWorkSnapshot = false, inspectedWorkRecord = null, inspectedWorkReplacementId = null, inspectedWorkSource = null;
 // JDOT-COH-NAV begin
 let workspacePreviewsUI = null, updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -521,7 +521,7 @@ const client = new RoomClient({
     if (presenceBoundary) stopPresencePoll();
     const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
     partialWorkSnapshot = snapshot.snapshotVersion === 2;
-    inspectedWorkRecord = null; inspectedWorkReplacementId = null;
+    inspectedWorkRecord = null; inspectedWorkReplacementId = null; inspectedWorkSource = null;
     state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
     session = identity;
     // A successful room snapshot supersedes a denied deep link from an
@@ -619,6 +619,8 @@ const client = new RoomClient({
     else if (partialWorkSnapshot && !presenceBoundary && activeWorkNavigationId
       && !(pendingWorkReturn?.id === activeWorkNavigationId && pendingWorkReturn.epoch === workNavigationEpoch)) {
       void revealWork(activeWorkNavigationId, Boolean(priorWorkDetailsOpen));
+    } else if (!partialWorkSnapshot && !presenceBoundary && needsLegacySourceRead(state.workItems[activeWorkNavigationId])) {
+      void readSelectedWorkRecord(activeWorkNavigationId, false, { restoreInPlace: true, legacySourceOnly: true });
     }
     retryPendingHashReveal();
     resumeConfirmedWorkNavigation();
@@ -650,7 +652,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
-    partialWorkSnapshot = false; inspectedWorkRecord = null; inspectedWorkReplacementId = null;
+    partialWorkSnapshot = false; inspectedWorkRecord = null; inspectedWorkReplacementId = null; inspectedWorkSource = null;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
@@ -3542,16 +3544,21 @@ function revealWorkTimeline(id) {
   return workRecord(id);
 }
 // JDOT-COH-NAV begin
+function needsLegacySourceRead(item) {
+  return item?.title != null && item.sourceMessageId && !conversation?.byId.has(item.sourceMessageId);
+}
 function revealWork(id, expandDetails = false) {
-  // A normalized snapshot carries a bounded summary window. Missing entries
-  // are unknown, and held summaries are not full records or action authority.
-  if (partialWorkSnapshot && inspectedWorkRecord !== state?.workItems?.[id]) {
+  const item = state?.workItems?.[id];
+  const legacySourceOnly = !partialWorkSnapshot && needsLegacySourceRead(item);
+  // A normalized summary is not action authority. In legacy Rooms reuse the
+  // selected read only when the held conversation cannot account for the source.
+  if ((partialWorkSnapshot || legacySourceOnly) && inspectedWorkRecord !== item) {
     if (activeWorkNavigationId && activeWorkNavigationId !== id) {
       const previous = workRecord(activeWorkNavigationId)?.querySelector(".work-details");
       if (previous) previous.open = false;
     }
     activeWorkNavigationId = id;
-    return readSelectedWorkRecord(id, expandDetails);
+    return readSelectedWorkRecord(id, expandDetails, { legacySourceOnly });
   }
   // #3795: a record id the legacy workItems projection does not hold may be
   // a board claim — its record lives on the board. Reveal it there instead
@@ -3574,7 +3581,7 @@ function revealWork(id, expandDetails = false) {
   syncWorkReturnControl();
   return card;
 }
-async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = false } = {}) {
+async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = false, legacySourceOnly = false } = {}) {
   const context = workNavigationContext();
   if (!context || busy) return null;
   const generation = client.generation, identity = session;
@@ -3601,8 +3608,15 @@ async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = fals
       inspectedWorkReplacementId = replacement?.status === "available" && replacement.workItemId === item.supersededBy
         && replacement.nextRead?.tool === "room_read_work" && replacement.nextRead.arguments?.workItemId === item.supersededBy
         ? item.supersededBy : null;
-      inspectedWorkRecord = structuredClone(item);
-      state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
+      if (legacySourceOnly) {
+        const heldItem = held.workItems[id];
+        if (heldItem.sourceMessageId !== item.sourceMessageId || heldItem.revision !== item.revision) return null;
+        inspectedWorkRecord = heldItem;
+      } else {
+        inspectedWorkRecord = structuredClone(item);
+        state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
+      }
+      inspectedWorkSource = selected.accessSummary.conversation.sourceAvailability;
       if (restoreInPlace) {
         renderMessages();
         return workRecord(id);
@@ -3726,7 +3740,10 @@ async function revealClaimRecord(id) {
 }
 function navigateWorkRecord(kind, id, extra = {}) {
   if (!workNavigationContext() || busy) return false;
-  if (kind === "work" ? !partialWorkSnapshot && (!Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id) : !conversation?.byId.has(id) && !client.owesHistory) {
+  const confirmedSource = extra.assignmentSourceId === id && inspectedWorkSource === "available"
+    && inspectedWorkRecord?.sourceMessageId === id && inspectedWorkRecord === state.workItems[inspectedWorkRecord.id];
+  if (kind === "work" ? !partialWorkSnapshot && (!Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id)
+    : !confirmedSource && !conversation?.byId.has(id) && !client.owesHistory) {
     notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
   const presentation = extra.presentation ?? "focus";
@@ -4292,9 +4309,10 @@ function workCard(i, now, drafts, messages = []) {
     : esc(status.next);
   const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${nextContent}</p>`;
   const sourceKey = `work-source:${esc(i.id)}`;
-  const sourceWithdrawn = i.sourceMessageId && conversation?.byId.get(i.sourceMessageId)?.deletedAt;
+  const sourceUnavailable = i.sourceMessageId && (conversation?.byId.get(i.sourceMessageId)?.deletedAt
+    || i === inspectedWorkRecord && ["deleted", "unavailable"].includes(inspectedWorkSource));
   const sourceHintId = `${workDomId(i.id)}-source-unavailable`;
-  const source = !i.sourceMessageId ? "" : sourceWithdrawn
+  const source = !i.sourceMessageId ? "" : sourceUnavailable
     ? uiText("work.focus.sourceUnavailableHtml", { id: esc(sourceHintId), focusKey: sourceKey })
     : `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="${sourceKey}">From this conversation</a>`;
   const continuity = terminalWork(i) ? null : workContinuity(i, now);
@@ -4320,7 +4338,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"${sourceWithdrawn ? ` aria-describedby="${sourceHintId}"` : ""}><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${goal}${resultSummary}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now, next)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"${sourceUnavailable ? ` aria-describedby="${sourceHintId}"` : ""}><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${goal}${resultSummary}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now, next)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the

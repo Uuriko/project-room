@@ -282,8 +282,34 @@ for (const representation of [null, "normalized-current-v1"]) {
 
     const reviewer = await openLink("reader"), card = reviewer.locator(`[data-work-record-id="${workItemId}"]`);
     await card.locator(".state").getByText("Awaiting acceptance", { exact: true }).waitFor();
+    const sourceHint = card.getByText(/Source unavailable\. Ask the teammate/);
+    if (shots) await reviewer.screenshot({ path: join(shots, `${representation ?? "legacy"}-source.png`) });
+    await sourceHint.waitFor();
+    assert.equal(await card.getByRole("link", { name: "From this conversation" }).count(), 0);
     assert.doesNotMatch(await card.innerText(), /Private source marker|Private request marker/);
     assert.throws(() => f.store.replyRequests.selected(keys.reader, roomId, "agent-only-ask"), { code: "reply_request_not_found" });
+    let now = Date.now();
+    f.store.now = () => now;
+    const newerMessages = representation ? 12 : 102;
+    for (let i = 0; i < newerMessages; i++) {
+      now += 2100;
+      command("owner", "message.posted", { messageId: `newer-${i}`, body: `Later update ${i}` });
+    }
+    const owner = await openLink("owner"), ownerCard = owner.locator(`[data-work-record-id="${workItemId}"]`);
+    const snapshot = await owner.context().request.get(`${f.origin}/api/rooms/${roomId}?messages=recent`);
+    assert.equal(snapshot.status(), 200);
+    assert.equal((await snapshot.json()).state.messages.some(message => message.id === "private-brief"), false);
+    const openSource = ownerCard.getByRole("link", { name: "From this conversation", exact: true });
+    assert.equal(f.store.workContext(keys.owner, roomId, workItemId).accessSummary.conversation.sourceAvailability, "available");
+    await openSource.press("Enter");
+    await owner.locator('[data-message-record-id="private-brief"]').getByText("Private source marker", { exact: true }).waitFor();
+    await owner.locator("#work-navigation-return").press("Enter");
+    await openSource.waitFor();
+    now += 2100;
+    command("owner", "message.deleted", { messageId: "private-brief", expectedMessageRevision: 0 });
+    await ownerCard.getByText(/Source unavailable\. Ask the teammate/).waitFor();
+    assert.equal(await openSource.count(), 0);
+
     const transition = (type, data = {}) => command("writer", type, { workItemId,
       expectedRevision: f.store.workContext(keys.writer, roomId, workItemId).work.revision, ...data });
     transition("work.accepted");
@@ -306,6 +332,7 @@ for (const representation of [null, "normalized-current-v1"]) {
     assert.equal((await response.json()).error.code, "result_unavailable");
     await reviewer.getByText("Ask the sender to share the intended result version somewhere you can read it.", { exact: true }).waitFor();
     assert.equal(await reviewer.locator("#result-body").textContent(), "");
+
     assert.deepEqual(f.errors, []);
   });
 }
