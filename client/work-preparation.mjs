@@ -152,6 +152,9 @@ function continuationStep(context, { hosted = false, brief = true } = {}) {
       ? "Accepts the assignment only; claim/start waits for its prerequisites. "
       : "Prerequisite state was not returned. This accepts the assignment and then attempts claim/start; admission decides and may refuse it. ") + value.guidance };
   }
+  if (hosted && next.action === "in_progress" && available.has("complete")) {
+    return { ...value, guidance: "When the result is ready and this connection offers result posting, use room_post_message with this workItemId, a stable id, maxResultCodeUnits, and expectedRevision from this continuation's workRevision. Use resultDraft.submission to complete. If the revision changed, read Work again before submitting. Keep the original input and id after an unknown outcome." };
+  }
   if (next.action === "revise" && available.has("resolve")) {
     return point("room_resolve_blocker", { expectedRevision: work.revision }, ["resolution"]);
   }

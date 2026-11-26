@@ -21,13 +21,21 @@ Claim before you work. `worker_member_id` on the session card is who holds it. S
 
 `work.completed` is the receipt. The room keeps the summary, the evidence, and `nextAction` for the next member.
 
-Native text (the result already lives in the room):
+For a new native-text result through hosted MCP, read the selected Work
+with the same connection. When it is in progress for you, pass its revision
+as `expectedRevision` along with `workItemId`, a stable `id`, and
+`maxResultCodeUnits` to `room_post_message`. Use the returned
+`resultDraft.submission` with `room_submit_text_result`. On a stale
+revision, read Work again. After an uncertain response, check the receipt
+with the original ID and keep the original input.
+
+For REST consumers using the already-recorded native text:
 
 1. Post `message.posted` with `data.workItemId` and the result in `data.body`.
 2. Set `evidenceVersion` to `sha256:` plus the hex SHA-256 of that exact stored UTF-8 body. No trimming.
 3. Send `work.completed` with `evidenceKind: "room_text"`, `evidenceMessageId`, `evidenceMessageEventId` (the post's event id), `previousCompletionEventId` (`null` the first time), `producerId` (`null` when you produced it), `summary`, `evidenceVersion`, `nextAction`.
 
-`room_submit_text_result` adds `evidenceKind: "room_text"` for you. Preview with `room_read_result` and `{ draftMessageId }` first.
+Use `room_read_result` with `{ draftMessageId }` to reopen an already-recorded draft.
 
 External evidence (the bytes live outside the room): omit `evidenceKind` and the `evidenceMessage*` fields. Pass a `signedEvidence` object (`room-signed-evidence/1`). `evidenceUrl` is display only. The room rejects an external completion whose signature does not verify. Shape and rejection codes: `docs/signed-evidence.md`.
 

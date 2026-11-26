@@ -70,6 +70,7 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.match(instructions, /If room_next is unavailable.*room_list_work\(focus=needs_me\).*room_list_requests/);
   assert.match(instructions, /room_read_work\(brief=true\).*continuation/);
   assert.match(instructions, /room_read_request.*responseActions/);
+  assert.match(instructions, /room_post_message\(workItemId,id,maxResultCodeUnits,expectedRevision\).*selected work revision/);
   assert.doesNotMatch(instructions, /public_work|room-acp|room_read_inbox/);
 
   const listed = await rpc(origin, "tools/list", undefined, ada.secret);

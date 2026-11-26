@@ -108,8 +108,16 @@ test(`${representation}: default catalog supports task pickup, correction, exact
   assert.deepEqual(pickup.inputRequired, []);
   await call(producer, pickup.tool, pickup.arguments);
   assert.equal((await read()).work.state, 'working');
-  assert.equal((await call(producer, 'room_read_work', { workItemId, brief: true })).continuation.tool, null,
-    'Room working state must not invent or execute host work');
+  const activeBrief = await call(producer, 'room_read_work', { workItemId, brief: true });
+  assert.equal(activeBrief.continuation.tool, null, 'Room working state must not invent or execute host work');
+  assert.match(activeBrief.continuation.guidance, /room_post_message.*expectedRevision.*workRevision/);
+  const activeFull = await read();
+  assert.equal(activeFull.continuation.guidance, activeBrief.continuation.guidance);
+  const unchanged = await call(producer, 'room_read_work', { workItemId, brief: true, knownBriefVersion: activeBrief.briefVersion });
+  assert.equal(unchanged.briefUnchanged, true);
+  assert.equal(unchanged.continuation.guidance, activeBrief.continuation.guidance);
+  const other = await call(reviewer, 'room_read_work', { workItemId, brief: true });
+  assert.doesNotMatch(other.continuation.guidance, /room_post_message/);
   const submit = async (id, text) => {
     await call(producer, 'room_post_message', { id, workItemId, body: text });
     const preview = await call(producer, 'room_read_result', { workItemId, draftMessageId: id });
@@ -177,8 +185,15 @@ test(`${representation}: default catalog supports task pickup, correction, exact
     resolution: 'Add reconnect and duplicate-result checks' });
   await call(producer, 'room_begin_work', { workItemId });
   const revisedBody = 'Reconnect the existing agent and verify its exact saved result appears once. 🧭';
-  const post = { workItemId, id: 'revised-draft', body: revisedBody, maxResultCodeUnits: revisedBody.length };
+  const currentDraft = (await call(producer, 'room_read_work', { workItemId, brief: true })).continuation;
+  const post = { workItemId, id: 'revised-draft', body: revisedBody, maxResultCodeUnits: revisedBody.length,
+    expectedRevision: currentDraft.workRevision };
   const headBeforePost = store.headSequence('commons');
+  const staleDraft = await invoke(producer, 'room_post_message', { ...post, expectedRevision: resumed.revision });
+  assert.equal(staleDraft.result.isError, true);
+  assert.equal(staleDraft.result.structuredContent.code, 'stale_revision');
+  assert.equal(store.headSequence('commons'), headBeforePost, 'an obsolete observed revision creates no draft');
+
   const refused = await invoke(producer, 'room_post_message', { ...post, maxResultCodeUnits: revisedBody.length - 1 });
   assert.equal(refused.result.isError, true);
   assert.equal(refused.result.structuredContent.code, 'result_draft_invalid');

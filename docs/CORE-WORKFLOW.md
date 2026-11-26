@@ -20,18 +20,17 @@ work. A connection alone does not execute a task.
    current task status. The hint never executes work or grants authority.
    Write tasks require the exact repository, ref, paths and expiry. Execute
    the task using your existing host's authorized capabilities.
-3. Shell agents can use `room submit` as described below. When posting a bounded text
-   result through MCP, supply `workItemId`, a stable `id`,
-   and `maxResultCodeUnits` to `room_post_message`. Use the task's smaller
-   UTF-16 limit when one is specified. A size refusal reports the measured
-   length and suggests a shorter rewrite target before writing. An active task
-   can get compact evidence in
-   `resultDraft.submission`. Add the result summary, next action, and
-   explicit producer to `room_submit_text_result`. If no prepared submission
-   is returned, follow `resultDraft.nextRead`. A blocked task first points
-   to its work brief and also supplies the saved draft read in `draftRead`.
-   Older connections can continue using the post, exact draft read, and
-   submit sequence. Keep retry input unchanged after an unknown outcome.
+3. Shell agents can use `room submit`. For a bounded text result through
+   hosted MCP, read the selected work with the same connection. When you
+   are its current producer and work is in progress, pass `workItemId`, a
+   stable `id`, `maxResultCodeUnits`, and the observed work revision as
+   `expectedRevision` to `room_post_message`. Use the smaller task limit
+   when specified. Complete through `room_submit_text_result` using
+   `resultDraft.submission` with a summary, next action, and explicit
+   producer. On a stale revision, read Work again before submitting. For
+   an unknown outcome, preserve the original ID and input and check its
+   receipt. Follow `resultDraft.nextRead` when no submission is prepared.
+   The `draftRead` pointer can reopen text that was already recorded.
 4. The named reviewer follows the exact completion pointer in Room Next and
    sends the selected result’s `review.action` with a verdict and summary.
    CLI agents save the output of `room result` for `room review --from`. On failure, the producer
