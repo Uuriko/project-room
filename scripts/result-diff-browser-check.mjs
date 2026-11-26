@@ -944,13 +944,71 @@ test("phone assignment opens both exact inputs and returns to the draft", { time
   await fileAnchor.press("Enter");
   const exactLine = workspace.getByText("+Maya owns the release", { exact: true });
   await exactLine.waitFor();
-  if (process.env.ROOM_TEST_CAPTURE) await exactLine.scrollIntoViewIfNeeded();
   await capture("pinned-file");
+  const firstView = await exactLine.boundingBox();
+  assert.ok(firstView && firstView.y + firstView.height <= page.viewportSize().height, "the selected short diff is in the first viewport");
+  await page.keyboard.press("Tab");
+  assert.equal(await workspace.getByRole("tab", { name: "Changes" }).evaluate(el => el === document.activeElement), true);
+  assert.equal(await workspace.locator("[data-workspace-primary] pre").evaluate(diff => {
+    const browse = document.querySelector("#room-project-workspace [data-preview-refresh]");
+    const copy = document.querySelector("#room-project-workspace [data-workspace-link]");
+    return Boolean(diff.compareDocumentPosition(browse) & Node.DOCUMENT_POSITION_FOLLOWING)
+      && Boolean(diff.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }), true);
   await page.keyboard.press("Escape");
   await workspace.waitFor({ state: "hidden" });
   assert.equal(await fileAnchor.evaluate(el => el === document.activeElement), true);
+  await page.waitForFunction(() => {
+    const layout = document.querySelector("#room-project-workspace .workspace-previews-layout");
+    return !layout.hasAttribute("data-file-first") && layout.firstElementChild?.hasAttribute("data-workspace-inventory");
+  });
   assert.equal(await input.inputValue(), draft);
   assert.equal(page.context().pages().length, 1);
+  const requested = Promise.withResolvers(), releaseRead = Promise.withResolvers(), releaseInventory = Promise.withResolvers();
+  t.after(() => { releaseRead.resolve(); releaseInventory.resolve(); });
+  const isWorkspace = url => url.pathname.endsWith("/workspace-previews");
+  const isLinkedFile = url => isWorkspace(url) && url.searchParams.get("view") === "file";
+  const isInventory = url => isWorkspace(url) && !url.searchParams.has("id");
+  let inventoryReads = 0;
+  await page.route(isInventory, async route => {
+    if (++inventoryReads === 1) return route.continue();
+    await releaseInventory.promise;
+    try { await route.continue(); }
+    catch (error) { if (!/Route is already handled/.test(error.message)) throw error; }
+  });
+  await page.route(isLinkedFile, async route => {
+    requested.resolve();
+    await releaseRead.promise;
+    await route.continue();
+  });
+  const failedRead = page.waitForResponse(response => isLinkedFile(new URL(response.url())));
+  void failedRead.catch(() => {});
+  await fileAnchor.press("Enter");
+  await requested.promise;
+  const copy = workspace.getByRole("button", { name: "Copy artifact link" });
+  await copy.focus();
+  const replaced = await fetch(`${f.origin}/api/rooms/commons/workspace-previews`, {
+    method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+    body: JSON.stringify({ id: "f".repeat(32), expectedRevision: 1,
+      patch: patch.replace("+Maya owns the release", "+Different version"), base: "b".repeat(40),
+      head: "d".repeat(40), title: "Release instructions", recipientId: "human-checker", html: "<p>Replacement</p>" })
+  });
+  assert.equal(replaced.status, 200);
+  releaseRead.resolve();
+  assert.equal((await failedRead).status(), 409);
+  const original = workspace.getByRole("link", { name: "Open original discussion" });
+  await original.waitFor();
+  await page.unroute(isLinkedFile);
+  assert.equal(await workspace.getByText(/\+(Maya owns the release|Different version)/).count(), 0);
+  assert.equal(await copy.count(), 0);
+  assert.equal(await workspace.getByRole("button", { name: "Open current revision" }).count(), 0);
+  assert.equal(await workspace.getByRole("button", { name: "Close", exact: true }).evaluate(el => el === document.activeElement), true);
+  await capture("stale-file");
+  await original.press("Enter");
+  await workspace.waitFor({ state: "hidden" });
+  releaseInventory.resolve();
+  await page.unroute(isInventory);
+  assert.equal(await input.inputValue(), draft);
   f.send("owner", T.MESSAGE_EDITED, { messageId: source, expectedMessageRevision: 1,
     body: `Check both references.\n${fileLink}\n${resultLink}\n${resultLink}` });
   const lastDocumentLink = message.locator(`a[href="${resultLink}"]`).nth(1);

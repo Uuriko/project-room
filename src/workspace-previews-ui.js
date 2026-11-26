@@ -22,7 +22,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   dialog.innerHTML = `<div class="dialog-head"><h2 id="workspace-preview-title">Workspace</h2>
     <button type="button" data-preview-close class="button ghost">Close</button></div>
     <div class="workspace-previews-layout">
-      <section aria-label="Shared previews">
+      <section aria-label="Shared previews" data-workspace-inventory>
         <button type="button" data-preview-refresh class="button secondary">Refresh previews</button>
         <div data-workspace-start hidden>
           <button type="button" class="button secondary" aria-describedby="workspace-start-status"></button>
@@ -101,6 +101,9 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   });
 
   const list = dialog.querySelector("[data-preview-list]");
+  const inventory = dialog.querySelector("[data-workspace-inventory]");
+  const layout = inventory.parentElement;
+  const detail = dialog.querySelector(".workspace-preview-detail");
   const heading = dialog.querySelector("[data-preview-heading]");
   const meta = dialog.querySelector("[data-preview-meta]");
   const status = dialog.querySelector("[data-preview-status]");
@@ -123,6 +126,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   latest.textContent = uiText("workspace.share.openCurrent");
   const changesView = dialog.querySelector("[data-workspace-changes]");
   const compare = dialog.querySelector("[data-workspace-compare]");
+  const compareLabel = compare.closest("label");
   const changeStatus = dialog.querySelector("[data-workspace-change-status]");
   const columns = dialog.querySelector(".workspace-change-columns");
   const primary = dialog.querySelector("[data-workspace-primary]");
@@ -130,6 +134,21 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   const changeCache = new Map();
   let selected = null, frame = null, frameDigest = null, generation = 0, changeGeneration = 0, outputGeneration = 0;
   let items = [], renderedChanges = null, renderedOutput = null, activePanel = "preview", linked = null, pendingFile = null, reviewLocation = null, threadDraft = null;
+
+  function showFileFirst(enabled) {
+    if (layout.hasAttribute("data-file-first") === enabled) return;
+    layout.toggleAttribute("data-file-first", enabled);
+    if (enabled) {
+      inventory.before(detail);
+      meta.after(status, tabs, changesView);
+      columns.after(compareLabel);
+    } else {
+      detail.before(inventory);
+      start.after(status);
+      linkFallback.after(tabs, changesView);
+      changeStatus.before(compareLabel);
+    }
+  }
 
   const discussionAside = dialog.querySelector("[data-workspace-discussion]");
   const discussionMessages = discussionAside.querySelector("[data-discussion-messages]");
@@ -288,6 +307,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
             clearPreview();
             linked = workspaceArtifactSelection(new URL(url).hash);
             selected = item.id; pendingFile = null; reviewLocation = null;
+            showFileFirst(false);
             activePanel = "preview";
             await load();
             if (dialog.open && selected === item.id && !noteLabel.hidden) noteInput.focus();
@@ -300,6 +320,10 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       renderedChanges = key;
     } catch (error) {
       if (!stillOpen()) return;
+      if (linked?.panel === "changes" && linked.file && ["preview_changed", "preview_not_found"].includes(error.code)) {
+        showUnavailable(null, error.code === "preview_changed");
+        return;
+      }
       primary.replaceChildren(); peer.replaceChildren(); peer.hidden = true;
       renderedChanges = null;
       changeStatus.textContent = error.message || "Could not read changes.";
@@ -330,22 +354,28 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     heading.textContent = "Open a shared preview";
     meta.textContent = "";
   }
-  function showUnavailable(current) {
+  function showUnavailable(current, changed = Boolean(current)) {
+    const focused = document.activeElement;
+    const hadDialogFocus = focused !== dialog && dialog.contains(focused);
     clearPreview();
-    linkStatus.textContent = uiText(current ? "workspace.share.stale" : "workspace.share.missing");
+    linkStatus.textContent = uiText(changed ? "workspace.share.stale" : "workspace.share.missing");
     latest.hidden = !current;
     latest.textContent = linked?.anchor && current?.publisherId === linked.publisherId && current?.patchDigest
       ? "Locate note in current patch" : uiText("workspace.share.openCurrent");
     refreshDiscussion();
+    if (hadDialogFocus && (!focused.isConnected || focused.closest("[hidden]")))
+      dialog.querySelector("[data-preview-close]").focus();
   }
   function reset() {
     notes.clear(); selectStart(null);
     generation++; selected = null; linked = null; pendingFile = null; reviewLocation = null; threadDraft = null; clearPreview();
     status.textContent = ""; list.replaceChildren(); items = []; changeCache.clear();
     if (dialog.open) dialog.close();
+    showFileFirst(false);
   }
   function select(id) {
     selected = id; linked = null; pendingFile = null; reviewLocation = null;
+    showFileFirst(false);
     clearPreview();
     return load();
   }
@@ -553,6 +583,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   });
   button.addEventListener("click", () => {
     if (!client.session || dialog.open) return;
+    if (linked) reset();
     threadDraft = captureThreadDraft?.() ?? null;
     selectStart(workThread?.());
     dialog.showModal();
@@ -569,6 +600,7 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       if (!target || !client.session) return;
       notes.clear(); clearPreview();
       selectStart(null);
+      showFileFirst(target.panel === "changes" && Boolean(target.file));
       threadDraft = destination; linked = target; reviewLocation = target.anchor ? target : null; pendingFile = target.file ?? null; selected = target.id; activePanel = target.panel;
       if (!dialog.open) dialog.showModal();
       void load();
