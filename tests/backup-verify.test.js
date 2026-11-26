@@ -14,7 +14,8 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { parseSchedule, nextRunAfter, scheduleIsDue, runBackupCycle, verifyRestoredBackup } from "../scripts/backup-verify.mjs";
-import { reconcileRestoredAuthority } from "../server/backup.mjs";
+import { backupRoom, reconcileRestoredAuthority } from "../server/backup.mjs";
+import { workspacePreviews } from "../server/workspace-previews.mjs";
 
 const execFileAsync = promisify(execFile);
 const checkout = fileURLToPath(new URL("..", import.meta.url));
@@ -42,6 +43,31 @@ function backupDest(t) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
+
+test("SQLite backup preserves shared and directed Workspace previews", async t => {
+  const source = liveDb(t);
+  const store = new RoomStore(source);
+  const sharedId = "1".repeat(32);
+  const directedId = "2".repeat(32);
+  const input = { title: "Workspace report", base: "a".repeat(40), head: "b".repeat(40),
+    html: "<p>Preview</p>", patch: "diff --git a/brief.md b/brief.md\n", expectedRevision: 0 };
+  const reject = (_status, code) => assert.fail(code);
+  try {
+    const previews = workspacePreviews(store.db);
+    previews.publish("commons", "owner", { ...input, id: sharedId }, Date.now(), reject);
+    previews.publish("commons", "owner", { ...input, id: directedId, recipientId: "reviewer" }, Date.now(), reject);
+  } finally { store.close(); }
+  const backup = await backupRoom(source, backupDest(t));
+  const result = await verifyRestoredBackup({ backupFilename: backup.filename, watermarkPath: backup.watermark });
+  assert.equal(result.ok, true, JSON.stringify(result.checks.filter(check => !check.ok)));
+  const restored = new RoomStore(backup.filename, { readOnly: true });
+  try {
+    const previews = workspacePreviews(restored.db, { create: false });
+    assert.deepEqual(previews.get("commons", sharedId, "other", "changes").patch, input.patch);
+    assert.equal(previews.get("commons", directedId, "other", "changes"), undefined);
+    assert.equal(previews.get("commons", directedId, "reviewer", "changes").patch, input.patch);
+  } finally { restored.close(); }
+});
 
 test("parseSchedule: named intervals", () => {
   assert.equal(parseSchedule("hourly").intervalMs, 3_600_000);
