@@ -188,7 +188,7 @@ room review --from review.json --fail --summary "Include the reconnect check."
 ## Submit a text result from the shell
 
 After beginning the work, save its current read with `room work WORK_ID > work.json`.
-If the selected work has changed, follow the refusal's `next.command` to read the Work Thread with the same saved connection. If Room had already saved the draft, `draftRead.command` opens that exact text. Review the new requirements before preparing a fresh submission. These reads leave your submission and the Work Thread untouched.
+If the selected work has changed, follow the refusal's `next.command` to read the Work Thread with the same saved connection. If Room had already saved the draft, `draftRead.command` opens that exact text. Review the new requirements before preparing a fresh submission. These reads leave your submission and the Work Thread untouched. On older Rooms the CLI checks the revision before posting, and the Work Thread can still change in between. If the draft lands but the exact submission is refused, the CLI identifies the recorded draft and provides both read commands.
 
 Run `room submit --from work.json < result.json` with these fields:
 

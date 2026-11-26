@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
 import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
@@ -22,10 +22,14 @@ import { createRoomServer } from "../server/http.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
-async function fixture(t, representation, { sinceJoin = false } = {}) {
+async function fixture(t, representation, { sinceJoin = false, serverSource } = {}) {
   const home = mkdtempSync(join(realpathSync(tmpdir()), "room-submit-"));
   const env = { HOME: home, PROJECT_ROOM_KEYCHAIN: "0" };
-  const store = new RoomStore(join(home, "fixture.sqlite"));
+  const Storage = serverSource
+    ? (await import(pathToFileURL(join(serverSource, "server/store.mjs")).href)).RoomStore : RoomStore;
+  const makeServer = serverSource
+    ? (await import(pathToFileURL(join(serverSource, "server/http.mjs")).href)).createRoomServer : createRoomServer;
+  const store = new Storage(join(home, "fixture.sqlite"));
   const seed = initialRoom();
   if (sinceJoin) seed.push(event({ type: T.ROOM_HISTORY_VISIBILITY_SET, actorId: "owner", roomId: "commons",
     data: { historyVisibility: "since_join" } }));
@@ -36,7 +40,7 @@ async function fixture(t, representation, { sinceJoin = false } = {}) {
     displayName: "Producer", permissions: ["accept_work", "complete_work"]
   });
   setTier(store.db, "commons", producer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
-  const server = createRoomServer({ store });
+  const server = makeServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams();
@@ -927,6 +931,68 @@ test(`${representation} a recorded stale draft can be read from another checkout
   assert.deepEqual(mismatchedDraft, { code: 1, value: { status: "unavailable", code: "room_read_unavailable" } });
   assert.equal(store.headSequence("commons"), unchangedHead, "both recovery routes are reads");
 });
+
+for (const older of [false, true]) {
+  const serverSource = older ? process.env.ROOM_PREVIOUS_SUBMIT_SERVER_ROOT : undefined;
+  const pairing = older ? "older server" : "updated server";
+  test(`${representation} revision changes between eligibility and draft on an ${pairing}`,
+    { skip: older && !serverSource }, async t => {
+    const { store, owner, producer, cli, rpc } = await fixture(t, representation, { serverSource });
+    const id = "revision-turn";
+    const operation = "same-submission-attempt";
+    store.command(owner, "commons", { id: "propose-revision-turn", type: T.WORK_PROPOSED, data: {
+      workItemId: id, title: "Check the repository note", definitionOfDone: "Name the owner",
+      accountableMemberId: producer.identityId, mode: "read"
+    } });
+    const work = await cli(["work", id]);
+    assert.equal((await cli(["begin", "--from", "-"], work.value)).value.working, true);
+    const selected = (await cli(["work", id])).value;
+    const intent = { body: "Text written for the earlier scope.", summary: "Recorded the owner", nextAction: "Review",
+      producerId: producer.identityId, expectedRevision: selected.revision };
+    const submit = ["submit", id, "--operation", operation];
+    const calls = [];
+    let conflictHead;
+    const changeWork = async () => {
+      await rpc("room_block_work", { workItemId: id, reason: "The scope changed", nextAction: "Revisit the note" });
+      conflictHead = store.headSequence("commons");
+    };
+    const result = await cli(submit, intent, undefined, async (url, init) => {
+      const frame = JSON.parse(init.body);
+      calls.push(frame.params.name);
+      if (!older && frame.params.name === "room_post_message") await changeWork();
+      const response = await fetch(url, init);
+      if (older && frame.params.name === "room_read_work") {
+        const observed = (await response.clone().json()).result.structuredContent;
+        assert.equal(observed.revision, selected.revision, "the previous server had just confirmed eligibility");
+        await changeWork();
+      }
+      return response;
+    });
+    assert.equal(result.code, 1);
+    assert.equal((await cli(["receipt", operation, "--submit"])).value.status, "not_recorded");
+    const draft = (await cli(["receipt", operation, "--draft"])).value;
+    const settledHead = store.headSequence("commons");
+    if (older) {
+      assert.equal(result.value.code, "draft_recorded_basis_unavailable");
+      assert.deepEqual(calls, ["room_post_message", "room_read_work", "room_post_message"]);
+      assert.equal(draft.status, "recorded");
+      assert.equal(settledHead, conflictHead + 1, "only the exact legacy draft was recorded");
+      const readable = await cli(result.value.draftRead.command.slice(1));
+      assert.equal(readable.value.result.text.body, intent.body);
+      assert.match(result.value.hint, /older Room.*before posting/i);
+    } else {
+      assert.equal(result.value.code, "stale_revision");
+      assert.deepEqual(calls, ["room_post_message"]);
+      assert.equal(result.value.draftRead, undefined);
+      assert.equal(result.value.hint, undefined);
+      assert.equal(draft.status, "not_recorded");
+      assert.equal(settledHead, conflictHead, "the updated server refused before recording any draft");
+    }
+    const retry = await cli(submit, intent);
+    assert.equal(retry.value.code, result.value.code);
+    assert.equal(store.headSequence("commons"), settledHead, "retry adds no draft or completion");
+  });
+}
 
 test(`${representation} a newly attempted stale or closed submit is refused before any draft is posted`, async t => {
   const { home, env, store, owner, producer, rpc, cli, origin } = await fixture(t, representation);

@@ -86,7 +86,7 @@ async function postDraft(call, config, draft, expectedRevision) {
     if (prior.value.status !== "recorded" || prior.value.eventType !== "message.posted")
       return { refused: "result_draft_unavailable" };
   }
-  return call("room_post_message", draft);
+  return { ...(await call("room_post_message", draft)), legacyPreflight: true };
 }
 
 function matchesEvidence(basis, operation) {
@@ -188,7 +188,10 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
         }
       }
       if (!matchesEvidence(basis, operation) || basis.evidenceMessageEventId !== post.eventId)
-        return report("refused", stage, { code: "draft_recorded_basis_unavailable", draftId, draftRead, next });
+        return report("refused", stage, { code: "draft_recorded_basis_unavailable", draftId, draftRead, next,
+          ...(posted.legacyPreflight && {
+            hint: "This older Room checks fresh drafts before posting. The draft was recorded. No result was submitted."
+          }) });
       // Keep the exact write before the request leaves the host.
       journal.save({ fingerprint, basis, attributes });
     } else if (!matchesEvidence(basis, operation)
