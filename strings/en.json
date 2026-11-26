@@ -866,7 +866,7 @@
   "work.source.openChanges": "Open workspace changes",
   "work.source.openResult": "Open submitted result",
   "work.link.unavailable": "Work unavailable. Ask the sender for a reference you can open.",
-  "work.focus.sourceUnavailableHtml": "<p id=\"{id}\" class=\"form-hint\" tabindex=\"-1\" data-focus-key=\"{focusKey}\">Source unavailable.</p>",
+  "work.focus.sourceUnavailableHtml": "<p id=\"{id}\" class=\"form-hint\" tabindex=\"-1\" data-focus-key=\"{focusKey}\">Source unavailable. Ask the teammate who assigned this work for an accessible reference.</p>",
   "work.focus.sourceUnavailable": "Source unavailable.",
   "work.focus.askReference": "Ask for an accessible reference",
   "work.focus.askReferenceHtml": "<div id=\"{id}\" class=\"form-hint\"><span>{unavailable}</span> <button type=\"button\" class=\"text-button work-source-reference\" data-ask-source-reference=\"{workId}\" data-focus-key=\"{focusKey}\">{action}</button></div>",
