@@ -16,7 +16,8 @@ import { validSourceObservation } from "../../src/work-packet.js";
 
 const actionHelp = "room act begin|resolve|review|respond < action.json\nUse the selected read's arguments and supply its required inputs. Writes run only when you call this command.";
 const workHelp = "room work WORK_ID [--result | --include-source [--from FILE] | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]\nRead the compact task brief. Add --include-source for the linked assignment message, or --discussion for shared files and discussion. Add --result for exact review evidence.\nWith --since, retain the full brief for this task and connection. A matching briefUnchanged response reuses that text with fresh action arguments. Otherwise read the returned full brief.\nTo refresh a linked source, pass its previous JSON read with --include-source --from FILE (or - for stdin). Keep the last body for not_modified. If the source is unavailable, stop using the saved body.";
-const requestHelp = "room request REQUEST_ID [--compact] [--cursor TOKEN]\nRead the selected request and follow its next page before responding.";
+const requestHelp = "room request REQUEST_ID [--compact] [--cursor TOKEN]\n"
+  + "room request --answered [--cursor TOKEN]\nList answers to requests you sent, or open one exact request. Follow the next page when offered.";
 const validCursor = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(value);
 
 async function readArguments(stdin) {
@@ -404,13 +405,39 @@ export function readCommand(argv, io = {}) {
   return requestCommand([...argv, "--compact"], io);
 }
 
+async function answeredRequestList(cursor, { cwd = process.cwd(), env = process.env, fetchImpl, out = console.log }) {
+  const report = (value, status) => { out(JSON.stringify(value)); return status; };
+  let connection, token;
+  try {
+    connection = loadConnection({ project: cwd, env });
+    token = await loadSecret(connection.name, connection.config.token, env);
+  } catch { return report({ status: "refused", code: "saved_connection_required" }, 1); }
+  try {
+    const client = new RoomAgentClient({ ...connection.config, token, fetchImpl });
+    const value = await client.replyRequests({ direction: "outgoing", status: "answered", ...(cursor ? { cursor } : {}) });
+    if (value.viewerId !== connection.config.memberId ||
+      JSON.stringify(value).includes(token)) throw new Error("Unmatched Room result");
+    for (const request of value.requests) request.command = ["room", "request", request.id];
+    if (value.page?.hasMore) value.nextCommand = ["room", "request", "--answered", "--cursor", value.page.nextCursor];
+    return report(value, 0);
+  } catch (error) {
+    if (error instanceof RoomClientError && ["invalid_reply_cursor", "reply_cursor_identity_changed"].includes(error.code))
+      return report({ status: "unavailable", code: error.code, restartCommand: ["room", "request", "--answered"] }, 1);
+    return report({ status: "unavailable", code: "room_read_unavailable" }, 1);
+  }
+}
+
 export async function requestCommand(argv, io = {}) {
   if (argv.length === 1 && argv[0] === "--help") { (io.out ?? console.log)(requestHelp); return 0; }
   const { positionals, values } = parseArgs({ args: argv, allowPositionals: true,
-    options: { compact: { type: "boolean" }, cursor: { type: "string" } } });
+    options: { answered: { type: "boolean" }, compact: { type: "boolean" }, cursor: { type: "string" } } });
+  if (values.cursor !== undefined && !validCursor(values.cursor)) throw new Error(requestHelp);
+  if (values.answered) {
+    if (positionals.length || values.compact) throw new Error(requestHelp);
+    return answeredRequestList(values.cursor, io);
+  }
   const [requestMessageId] = positionals;
-  if (positionals.length !== 1 || !validId(requestMessageId)
-      || values.cursor !== undefined && !validCursor(values.cursor)) throw new Error(requestHelp);
+  if (positionals.length !== 1 || !validId(requestMessageId)) throw new Error(requestHelp);
   return runWorkflow("room_read_request", { requestMessageId, ...(values.cursor ? { cursor: values.cursor } : {}),
     ...(values.compact ? { view: "compact" } : {}) },
     (value, config) => selectedRequest(value, config, requestMessageId), io);

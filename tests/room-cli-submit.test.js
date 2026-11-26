@@ -1052,6 +1052,66 @@ test(`${representation} a newly attempted stale or closed submit is refused befo
   assert.equal(chat.event.data.workItemId, undefined);
 });
 
+test(`${representation} a fresh CLI finds its answered request and file without a saved link`, async t => {
+  const { home, env, origin, store, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
+  const open = id => store.command(reviewer.secret, "commons", { id: `open-${id}`, type: "message.posted",
+    data: { messageId: id, toMemberId: producer.identityId, requestKind: "reply", body: "Please share the review." } });
+  const target = "z-review-request";
+  open(target);
+  const read = await rpc("room_read_request", { requestMessageId: target });
+  const answer = await rpc("room_respond_to_request", { ...read.responseActions[0].arguments,
+    requestId: "review-18", body: "The review is ready." });
+  let now = store.now();
+  store.now = () => now;
+  for (let i = 0; i < 35; i++) {
+    now += 3000;
+    open(`a-queued-${String(i).padStart(2, "0")}`);
+  }
+  const bytes = Buffer.from("Review result for the requester.");
+  const { attachment } = store.roomAttachments.stage(producer.secret, "commons", {
+    id: "review-file", filename: "review.md", mediaType: "text/markdown", data: bytes.toString("base64")
+  });
+  store.roomAttachments.commit(producer.secret, "commons", { id: attachment.id, messageId: answer.messageId });
+  const before = store.headSequence("commons");
+
+  const executable = fileURLToPath(new URL("../bin/room.mjs", import.meta.url));
+  const fresh = async (args, cwd = reviewerProject) => {
+    const { stdout } = await promisify(execFile)(process.execPath, [executable, ...args],
+      { cwd, env, timeout: 5000 });
+    return JSON.parse(stdout);
+  };
+  let page = await fresh(["request", "--answered"]);
+  const initial = page;
+  if (representation === "normalized-current-v1") {
+    assert.deepEqual(page.requests, []);
+    assert.equal(page.page.hasMore, true);
+    assert.deepEqual(page.nextCommand.slice(0, 4), ["room", "request", "--answered", "--cursor"]);
+    const mismatched = await cli(page.nextCommand.slice(1), undefined, home);
+    assert.equal(mismatched.code, 1);
+    assert.equal(mismatched.value.code, "reply_cursor_identity_changed");
+    assert.deepEqual(mismatched.value.restartCommand, ["room", "request", "--answered"]);
+  }
+  const discoveries = [...page.requests];
+  for (let followed = 0; page.nextCommand && followed < 5; followed++) {
+    page = await fresh(page.nextCommand.slice(1));
+    discoveries.push(...page.requests);
+  }
+  assert.equal(page.nextCommand, undefined);
+  assert.equal(discoveries.length, 1);
+  const selected = await fresh(discoveries[0].command.slice(1));
+  assert.equal(selected.request.id, target);
+  assert.equal(selected.request.responseMessageId, answer.messageId);
+  const headers = { Authorization: "Bearer " + reviewer.secret };
+  const listing = await fetch(new URL(selected.answerFilesRead.http.path, origin), { headers });
+  assert.equal(listing.status, 200);
+  const files = (await listing.json()).files;
+  assert.deepEqual(files.map(file => [file.messageId, file.sha256]), [[answer.messageId, attachment.sha256]]);
+  const file = await fetch(origin + "/api/rooms/commons/files/" + files[0].id, { headers });
+  assert.deepEqual(Buffer.from((await file.json()).attachment.data, "base64"), bytes);
+  assert.equal(initial.viewerId, reviewer.identityId);
+  assert.equal(store.headSequence("commons"), before);
+});
+
 test(`${representation} shares one staged file on a recovered CLI answer without posting another answer`, async t => {
   const { home, origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
   const opening = await rpc("room_request_reply", { requestId: "file-question",
