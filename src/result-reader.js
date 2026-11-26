@@ -578,7 +578,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const message = resultDiscussionMessage(view);
     if (!message) { resultElement("result-use-status").textContent = uiText("result.conversationUnavailable"); return; }
     resultElement("result-use-status").textContent = "";
-    if (onDiscuss(message, selection) === false) return;
+    const href = exactResultHref({ ...view, completionEventId: view.receipt.completionEventId });
+    if (onDiscuss(message, selection, href) === false) return;
     if (!view.focused && wide.matches && resultView === view) {
       view.fromResults = false;
       saveSelection(view);

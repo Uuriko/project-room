@@ -557,7 +557,7 @@ function recoveredFiles(files) {
 // No credentials or server receipts are stored. Browser storage is untrusted.
 export class DraftRecovery {
   constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; }
-  clear() { try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
+  clear() { this.deferredReply = null; try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
   // An authenticated account is not enough to restore a room draft, but it
   // can rule one out before another account is shown its room list.
   reconcileAccount(identity) {
@@ -586,13 +586,30 @@ export class DraftRecovery {
           ...(d.assistantDraft ? { assistantDraft: d.assistantDraft } : {}),
           pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null,
           files: recoveredFiles(d.files) }]);
+      const saved = this.deferredReply;
+      if (saved?.scope === scope && saved.expires > this.now() && !entries.some(([id]) => id === saved.key)) {
+        if (entries.length === 50) entries.shift();
+        entries.unshift([saved.key, { ...saved.entry, deferredUntil: saved.expires }]);
+      }
       this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
       this.storage.removeItem("project-room:drafts:v2");
       return true;
     } catch { this.clear(); return false; }
   }
-  read(scope, state) {
+  restoreResultReply(scope, state, { href, messageId, rootId }) {
+    const saved = this.deferredReply;
+    if (saved?.scope !== scope || saved.expires <= this.now() || saved.href !== href
+      || saved.entry.replyToId !== messageId || saved.key !== rootId) return null;
+    const index = conversationIndex(state.messages);
+    const source = index.byId.get(messageId);
+    if (!source || source.deletedAt || source.toMemberId || index.rootById.get(messageId) !== rootId) return null;
+    const restored = this.read(scope, state, { onlyKey: rootId })?.drafts.entries.get(rootId);
+    if (restored) this.deferredReply = null;
+    return restored ?? null;
+  }
+  read(scope, state, { deferResultHref = null, onlyKey = null } = {}) {
     try {
+      if (onlyKey === null) this.deferredReply = null;
       if (typeof scope !== "string" || !scope) { this.clear(); return null; }
       const raw = this.storage?.getItem(this.key) ?? this.storage?.getItem("project-room:drafts:v2");
       if (!raw) return null;
@@ -601,6 +618,18 @@ export class DraftRecovery {
       if (saved.scope !== scope || !Number.isFinite(saved.expires) || saved.expires <= this.now() || saved.expires > this.now() + 12 * 60 * 60 * 1000 || !Array.isArray(saved.entries) || saved.entries.length > 50) throw new Error("scope or expiry");
       const index = conversationIndex(state.messages), drafts = new ConversationDrafts(), restoredKeys = new Map();
       for (const [id, d] of saved.entries) {
+        if (onlyKey !== null && id !== onlyKey) continue;
+        if (d?.deferredUntil !== undefined && (!Number.isFinite(d.deferredUntil) || d.deferredUntil <= this.now())) continue;
+        // The first compact snapshot may omit the exact quoted reply's root or
+        // target. Keep it outside the composer until that result is authorized.
+        if (deferResultHref && typeof id === "string" && typeof d?.replyToId === "string"
+          && !d.mode && !d.assistantDraft && !d.pending && d.toMemberId === ""
+          && typeof d.body === "string" && d.body.startsWith("> ") && d.body.includes("\n" + deferResultHref + "\n\n")
+          && (!index.threads.has(id) || !index.byId.has(d.replyToId))) {
+          const expires = Math.min(saved.expires, d.deferredUntil ?? saved.expires);
+          this.deferredReply = { scope, key: id, entry: d, href: deferResultHref, expires };
+          continue;
+        }
         let channelId = typeof d?.channelId === "string" ? d.channelId : undefined;
         // The old writer saved channel only inside the pending command. Recover
         // that field, then validate the entire reconstructed payload below.

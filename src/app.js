@@ -594,7 +594,10 @@ const client = new RoomClient({
       // JDOT-MEMBER-PERMS-UI begin
       // render() synchronizes the existing attention card for owners/admins.
       // JDOT-MEMBER-PERMS-UI end
-      const saved = recovery.read(draftScope(identity), state);
+      const exact = partialWorkSnapshot && exactResultDestination(location);
+      const saved = recovery.read(draftScope(identity), state, {
+        deferResultHref: exact?.roomId === identity.roomId ? exactResultHref(exact) : null
+      });
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
         activeDirectMemberId = saved.directMemberId ?? directMessagePeer(conversation.byId.get(saved.threadId), session.member.id);
@@ -7052,7 +7055,19 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
     selectedMessage.select(id, client.generation);
     return selectedMessage.sync(client.sequence);
   },
-  onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
+  onDiscuss(message, selection, href) {
+    const rootId = conversation.rootById.get(message.id);
+    const existing = drafts.entries.get(rootId);
+    if (rootId && !existing?.body.trim() && !existing?.pending && !existing?.files?.length && !existing?.toMemberId) {
+      const restored = recovery.restoreResultReply(draftScope(session), { ...state, messages: [...conversation.byId.values()] },
+        { href, messageId: message.id, rootId });
+      if (restored) {
+        drafts.save(rootId, restored);
+        if (rootId === composerKey()) restoreComposer(restored);
+      }
+    }
+    return replyToSharedResult(message.id, selection);
+  },
   onOpenDecision(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result }); },
   onOpenWorkspace(url, message, artifactId, completionEventId, resultFile) {
     const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;

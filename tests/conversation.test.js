@@ -437,6 +437,35 @@ test("assistant drafts recover independently of the destination thread and rejec
   }
 });
 
+test("a quoted reply waits for the same readable result and preserves other drafts", () => {
+  const href = "https://room.example/?room=commons#pr-record/result/work/completion-a";
+  const target = { href, messageId: "source-a", rootId: "thread-a" };
+  const root = { id: "thread-a", channelId: "general", replyToId: null, toMemberId: null, body: "Editorial discuss" };
+  const reply = { id: "source-a", channelId: "general", replyToId: root.id, toMemberId: null, body: "Friday" };
+  const state = { messages: [root, reply], members: {} };
+  const memory = new Map();
+  let now = 1000;
+  const recovery = new DraftRecovery({
+    getItem: key => memory.get(key), setItem: (key, value) => memory.set(key, value), removeItem: key => memory.delete(key)
+  }, () => now);
+  const drafts = new ConversationDrafts();
+  const text = `> Friday\n${href}\n\nUnsent reply to this version.`;
+  drafts.save(root.id, { body: text, replyToId: reply.id, channelId: "general" });
+  recovery.write("scope", drafts, root.id);
+  const partial = recovery.read("scope", { ...state, messages: [] }, { deferResultHref: href });
+  assert.equal(partial.drafts.entries.has(root.id), false);
+  partial.drafts.save(null, { body: "Different room draft" });
+  recovery.write("scope", partial.drafts, null);
+  assert.equal(recovery.restoreResultReply("scope", state, { ...target, href: href.replace("-a", "-b") }), null);
+  assert.equal(recovery.restoreResultReply("other", state, target), null);
+  assert.equal(recovery.restoreResultReply("scope", { ...state, messages: [root, { ...reply, deletedAt: "withdrawn" }] }, target), null);
+  assert.equal(recovery.restoreResultReply("scope", state, target).body, text);
+  assert.equal(partial.drafts.get(null).body, "Different room draft");
+  recovery.read("scope", { ...state, messages: [] }, { deferResultHref: href });
+  now += 12 * 60 * 60 * 1000 + 1;
+  assert.equal(recovery.restoreResultReply("scope", state, target), null);
+});
+
 test("a message overflow menu opens upward only when it does not fit below and fits better above", () => {
   const box = { limitTop: 0, limitBottom: 600, menuHeight: 213 };
   assert.equal(menuOpensUp({ ...box, triggerTop: 100, triggerBottom: 120 }), false, "room below keeps it downward");
