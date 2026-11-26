@@ -365,7 +365,10 @@ test("a passage reply identifies the reviewed submission when two receipts cite 
 });
 
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
-  const f = await setup(t, 390);
+  const unchanged = Array.from({ length: 240 }, (_, i) => `Checklist ${i + 1}`).join("\n");
+  const earlierText = unchanged + "\nFriday launch owner: undecided";
+  const revisedText = unchanged + "\nOwner: Maya · Friday";
+  const f = await setup(t, 390, { firstBody: earlierText });
   const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
   const reviewer = await f.login("human-checker", original);
   await reviewer.locator("#result-work-action").click();
@@ -390,7 +393,7 @@ test("a returning reviewer can finish the correction from the original link afte
 
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Updated the final line." });
   f.mutate(T.WORK_STARTED, {});
-  const second = f.complete("Result B\nOwner: Maya · Friday");
+  const second = f.complete(revisedText);
   await f.restart();
 
   const returning = await f.login("human-checker", original);
@@ -406,10 +409,37 @@ test("a returning reviewer can finish the correction from the original link afte
   await current.click();
   await returning.locator("#result-correction-summary").getByText("Put the owner beside the deadline.").waitFor();
   assert.equal(await returning.locator("#result-prior-approval").isVisible(), false);
-  assert.equal(await returning.locator("#result-body").textContent(), "Result B\nOwner: Maya · Friday");
+  const body = returning.locator("#result-body");
+  const diff = returning.locator("#result-diff");
+  const change = diff.getByText("+ Owner: Maya · Friday", { exact: true });
+  await change.waitFor();
+  if (process.env.ROOM_TEST_CAPTURE) await returning.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "revised-document-phone.png") });
+  assert.equal(await body.textContent(), revisedText);
+  assert.ok(await change.evaluate(node => node.getBoundingClientRect().bottom <= innerHeight),
+    "the changed final passage is visible on the first screen of the revised document");
+  const earlier = diff.getByRole("link", { name: "Open earlier result", exact: true });
+  assert.equal(await earlier.getAttribute("href"), original);
+  assert.ok(await earlier.evaluate(node => node.getBoundingClientRect().bottom <=
+    node.closest("#result-diff").querySelector("pre").getBoundingClientRect().top),
+    "the return link precedes the diff rows");
   await returning.locator("#result-work-action").click();
   await returning.locator("#action-result-diff").getByText("+ Owner: Maya · Friday", { exact: true }).waitFor();
-  await review(returning, "pass", "Checked Maya against the Friday deadline.");
+  if (process.env.ROOM_TEST_CAPTURE) await returning.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "review-comparison-phone.png") });
+  const draftSummary = "Checked Maya against the Friday deadline.";
+  const reviewDraft = returning.locator('#action-fields [name="summary"]');
+  await reviewDraft.fill(draftSummary);
+  const previousInReview = returning.locator("#action-result-diff").getByRole("link", { name: /Open earlier result/ });
+  if (process.env.ROOM_TEST_CAPTURE) await returning.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "review-draft-phone.png") });
+  const popupOpened = returning.waitForEvent("popup");
+  await previousInReview.press("Enter");
+  const previousPage = await popupOpened;
+  await previousPage.getByText("Previously accepted · no longer in effect", { exact: true }).waitFor();
+  assert.equal(previousPage.url(), original);
+  assert.equal(await previousPage.locator("#result-body").textContent(), earlierText);
+  await previousPage.close();
+  assert.equal(await returning.locator("#action-dialog").isVisible(), true);
+  assert.equal(await reviewDraft.inputValue(), draftSummary);
+  await review(returning, "pass", draftSummary);
   assert.equal(f.item().verification.completionEventId, second.event.id);
   assert.equal(f.item().verificationHistory.findLast(v => v.completionEventId === f.first.event.id)?.result, "fail");
   const owner = await f.login("owner", currentUrl);

@@ -123,9 +123,13 @@ export function createResultComparison({ client, getState, esc }) {
         const paragraph = document.createElement("p");
         const link = document.createElement("a");
         link.href = earlierLink;
-        link.textContent = uiText("result.openEarlier");
+        link.textContent = uiText(reviewing ? "result.openEarlierInNewTab" : "result.openEarlier");
+        if (reviewing) {
+          link.target = "_blank";
+          link.rel = "noopener";
+        }
         paragraph.append(link);
-        content.append(paragraph);
+        content.prepend(paragraph);
       }
       const report = previous.workThread?.releaseChecks;
       if (report?.completionEventId === previousId && typeof report.evidenceVersion === "string" && report.evidenceVersion.length > 0

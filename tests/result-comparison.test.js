@@ -90,7 +90,7 @@ test("long results show the late correction with local context", async () => {
   const before = lines.join("\n");
   lines[511] = "Updated review decision";
   f.load(lines.join("\n")); f.respond(0, before); await settle();
-  assert.match(f.box.innerHTML, /1 lines removed, 1 added/);
+  assert.match(f.box.innerHTML, /Removed 1 · Added 1/);
   assert.match(f.box.innerHTML, /- Section 511/);
   assert.match(f.box.innerHTML, /\+ Updated review decision/);
   assert.match(f.box.innerHTML, /Section 510/);
@@ -104,7 +104,7 @@ test("newline-only edits remain visible and a large rewrite stays bounded", asyn
   assert.doesNotMatch(f.box.innerHTML, /Previous approval never carries over/);
   assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)|No text changes/);
   f.load("a\n\nend"); f.respond(1, "a\nend"); await settle();
-  assert.match(f.box.innerHTML, /0 lines removed, 1 added/);
+  assert.match(f.box.innerHTML, /Removed 0 · Added 1/);
   f.load("new\n".repeat(600)); f.respond(2, "old\n".repeat(600)); await settle();
   assert.match(f.box.innerHTML, /Too many changed lines/);
 });
@@ -118,7 +118,7 @@ test("exact prose comparisons explain a changed file ending once", async () => {
 
   f.load("New proposal\nClosing line"); f.respond(1, "Old proposal\nClosing line\n"); await settle();
   assert.equal(f.box.innerHTML.match(/Final line break removed/g)?.length, 1);
-  assert.match(f.box.innerHTML, /1 lines removed, 1 added/);
+  assert.match(f.box.innerHTML, /Removed 1 · Added 1/);
   assert.doesNotMatch(f.box.innerHTML, /[+-] Closing line|No newline at end of file/);
 
   f.load("One line\r\n"); f.respond(2, "One line"); await settle();
@@ -126,7 +126,7 @@ test("exact prose comparisons explain a changed file ending once", async () => {
   assert.doesNotMatch(f.box.innerHTML, /diff-(removed|added)/);
 
   f.load("One line\n\n"); f.respond(3, "One line\n"); await settle();
-  assert.match(f.box.innerHTML, /0 lines removed, 1 added/);
+  assert.match(f.box.innerHTML, /Removed 0 · Added 1/);
   assert.doesNotMatch(f.box.innerHTML, /Final line break/);
 });
 
