@@ -60,20 +60,25 @@ export function createResultComparison({ client, getState, esc }) {
     resultComparisons.delete(box);
     box.hidden = true; box.replaceChildren();
   }
+  function showWithdrawal(box, key) {
+    clearResultComparison(box);
+    box.innerHTML = `<p class="form-hint">${esc(uiText(key))}</p>`;
+    box.hidden = false;
+  }
   function syncResultComparisons() {
     for (const [box, comparison] of resultComparisons) {
       if (!comparison.owns()) { clearResultComparison(box); continue; }
-      if ([comparison.currentId, comparison.previousId].some(id => getState()?.messages.find(message => message.id === id)?.deletedAt)) {
-        clearResultComparison(box);
-        box.textContent = uiText("result.comparisonWithdrawn"); box.hidden = false;
-      } else if (comparison.evidenceIds && getState()?.messages.some(message =>
+      const deleted = id => id && getState()?.messages.some(message => message.id === id && message.deletedAt);
+      if (deleted(comparison.currentId)) showWithdrawal(box, "result.comparisonWithdrawn");
+      else if (deleted(comparison.previousId)) showWithdrawal(box, "result.earlierComparisonWithdrawn");
+      else if (comparison.evidenceIds && getState()?.messages.some(message =>
         (message.deletedAt || message.editedAt) && comparison.evidenceIds.has(message.id))) {
         box.querySelector("[data-previous-release-checks]")?.remove();
         comparison.evidenceIds = null;
       }
     }
   }
-  function loadResultComparison(workItemId, previousId, text, box, owns, correction) {
+  function loadResultComparison(workItemId, previousId, text, box, owns, correction, reviewing = false) {
     clearResultComparison(box);
     if (!previousId) return;
     const comparison = { currentId: text.messageId, previousId: null, owns };
@@ -88,12 +93,8 @@ export function createResultComparison({ client, getState, esc }) {
       if (!current()) return;
       if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
       const before = previous.result?.text?.body;
-      if (previous.result?.text?.withdrawnAt || text.withdrawnAt) {
-        box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
-          previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
-            : "This version's text has been withdrawn, so the two cannot be compared."
-        } Previous approval never carries over.</p>`;
-        box.hidden = false;
+      if (text.withdrawnAt || previous.result?.text?.withdrawnAt) {
+        showWithdrawal(box, text.withdrawnAt ? "result.comparisonWithdrawn" : "result.earlierComparisonWithdrawn");
         return;
       }
       if (typeof before !== "string") throw new Error("Previous version has no exact text");
@@ -110,9 +111,13 @@ export function createResultComparison({ client, getState, esc }) {
         const paragraph = document.createElement("p");
         const link = document.createElement("a");
         link.href = earlierLink;
-        link.textContent = uiText("result.openEarlier");
+        link.textContent = uiText(reviewing ? "result.openEarlierInNewTab" : "result.openEarlier");
+        if (reviewing) {
+          link.target = "_blank";
+          link.rel = "noopener";
+        }
         paragraph.append(link);
-        box.append(paragraph);
+        box.insertBefore(paragraph, box.querySelector(".result-diff"));
       }
       const report = previous.workThread?.releaseChecks;
       if (report?.completionEventId === previousId && typeof report.evidenceVersion === "string" && report.evidenceVersion.length > 0

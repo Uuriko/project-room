@@ -579,3 +579,57 @@ test("an exact result link refuses a nonparty without falling forward", { timeou
   assert.equal(await guest.locator("#result-retry").isVisible(), false);
   assert.equal(await guest.locator("#result-body").textContent(), "");
 });
+
+test("withdrawing the earlier document leaves the revised review and its draft usable", { timeout: 30000 }, async t => {
+  const unchanged = Array.from({ length: 240 }, (_, i) => `Checklist ${i + 1}`).join("\n");
+  const earlierText = unchanged + "\nOld draft · ownership is private";
+  const revisedText = unchanged + "\nRevised draft · Maya owns the launch";
+  const f = await setup(t, 390, { firstBody: earlierText });
+  const original = f.first.event;
+  f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: f.item().id,
+    expectedRevision: f.item().revision, completionEventId: original.id, evidenceVersion: original.data.evidenceVersion,
+    result: "fail", summary: "Private rationale about the old draft.", nextAction: "Name the current owner." });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Corrected the draft." });
+  f.mutate(T.WORK_STARTED, {});
+  const revised = f.complete(revisedText).event;
+  const link = f.origin + "/?room=commons#pr-record/result/revision-journey/" + revised.id;
+  const reviewer = await f.login("human-checker", link);
+  const comparison = reviewer.locator("#result-diff");
+  const changed = comparison.getByText("+ Revised draft · Maya owns the launch", { exact: true });
+  await changed.waitFor();
+  if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "6579-revised-phone.png") });
+  assert.ok(await changed.evaluate(node => node.getBoundingClientRect().bottom <= innerHeight),
+    "the late edit appears on the first screen of the exact revised result");
+  await reviewer.locator("#result-work-action").click();
+  const reviewing = reviewer.locator("#action-result-diff");
+  await reviewing.getByText("Private rationale about the old draft.", { exact: false }).waitFor();
+  const summary = reviewer.locator('#action-fields [name="summary"]');
+  await summary.fill("The revised draft names Maya.");
+  const opened = reviewer.waitForEvent("popup");
+  await reviewing.getByRole("link", { name: "Open earlier result in a new tab" }).press("Enter");
+  const originalTab = await opened;
+  await originalTab.locator("#result-body").getByText(/ownership is private/).waitFor();
+  assert.equal(new URL(originalTab.url()).hash, "#pr-record/result/revision-journey/" + original.id);
+  await originalTab.close();
+  assert.equal(await summary.inputValue(), "The revised draft names Maya.");
+  f.send("producer", T.MESSAGE_DELETED, { messageId: original.data.evidenceMessageId, expectedMessageRevision: 0 });
+
+  // Wait for the real withdrawal event before checking the resulting copy.
+  await reviewing.getByRole("link").waitFor({ state: "hidden" });
+  if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "withdrawn-in-review.png") });
+  const expected = "The earlier result was withdrawn. This version is still available.";
+  await reviewing.getByText(expected, { exact: true }).waitFor({ timeout: 1500 });
+  assert.doesNotMatch(await reviewing.textContent(), /ownership is private|Private rationale/);
+  assert.equal(await summary.inputValue(), "The revised draft names Maya.");
+  await review(reviewer, "pass", "The revised draft names Maya.");
+  assert.equal(f.item().verification.completionEventId, revised.id);
+
+  const owner = await f.login("owner", link);
+  await owner.locator("#result-diff").getByText(expected, { exact: true }).waitFor();
+  assert.equal(await owner.locator("#result-body").textContent(), revisedText);
+  assert.equal(await owner.locator("#result-correction").isVisible(), false);
+  assert.equal(await owner.locator("#result-diff a").count(), 0);
+  if (process.env.ROOM_TEST_CAPTURE) await owner.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "withdrawn-cold-result.png") });
+
+  assert.equal(await owner.locator("#result-work-action").isVisible(), true, "owner can still decide on the revised evidence");
+});
