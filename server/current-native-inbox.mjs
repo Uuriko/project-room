@@ -8,6 +8,7 @@ import {ServiceError} from './service-error.mjs';
 import {readCurrentEventWindow,CURRENT_EVENT_SOURCE_BYTES} from './current-room-events.mjs';
 import {effectiveMentionState} from './mention-lifecycle.mjs';
 import {stampInbox} from './content-trust.mjs';
+import {messageInHistory} from './history-visibility.mjs';
 // Bounded, conservative skip-ahead. An event is skipped only when trusted
 // sources positively show catch-up would never surface it to this viewer:
 // - not message.posted (catch-up returns only message.posted), from the event log;
@@ -174,10 +175,22 @@ export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,older
     page=readCurrentEventWindow(store,roomId,memberId,{after,limit:Math.min(limit,4),types:['message.posted'],boundedWindow:true});
     examined=page.next-after;
   }
-  const directMessages=[],directMentions=[],replies=[],parents=new Map();
+  const directMessages=[],directMentions=[],replies=[],parents=new Map(),requestStates={};
   for(const {sequence,event:e}of page.events){if(e.type!=='message.posted'||e.actorId===memberId||e.data.body===null)continue;
    const id=e.data.messageId??e.id,row={sequence,eventId:e.id,messageId:id,replyToId:id,from:e.actorId,body:e.data.body,at:e.at,channel:e.data.channelId??'general',private:Boolean(e.data.toMemberId),...(e.data.toMemberId?{replyToMemberId:e.actorId}:{}),...(e.data.requestKind==='reply'&&e.data.requestPolicyVersion===1?{requestKind:'reply',nextRead:{tool:'room_read_request',arguments:{roomId,requestMessageId:id}}}:{})};
-   if(e.data.toMemberId===memberId)directMessages.push(row);
+   if(e.data.toMemberId===memberId){
+    const requestId=e.data.responseToRequestId;
+    if(e.data.requestPolicyVersion===1&&typeof requestId==='string'){
+     const request=readCurrentRecord(store.db,roomId,'replyRequests',requestId,b);
+     if(request?.requesterId===memberId&&request.recipientId===e.actorId
+       &&request.terminalEventId===e.id&&request.responseMessageId===id
+       &&['answered','declined'].includes(request.status)&&messageInHistory(request,floor)){
+      requestStates[requestId]=request;
+      row.nextRead={tool:'room_read_request',arguments:{roomId,requestMessageId:requestId}};
+     }
+    }
+    directMessages.push(row);
+   }
    const chip=e.mentions?.find(x=>x.memberId===memberId&&['delivered','acknowledged','timed_out'].includes(x.state));if(chip){
     const observed=store.db.prepare('SELECT responded_at,late_acknowledged_at FROM mention_observations WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?').get(roomId,e.id,memberId);chargeCurrentReadBudget(b,256);
     if(observed?.responded_at==null&&observed?.late_acknowledged_at==null)directMentions.push({...row,state:chip.state});
@@ -193,7 +206,6 @@ export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,older
    coverage:{conversation:{examined:recent?older.examined:examined}}};
   const ownerId=store.roomAuthority(roomId,{memberId}).ownerId,discovery=readCurrentInboxDiscovery(store,roomId,auth.member,ownerId,floor,b),replyRequests=discovery.requests;
   const workNext={tool:'room_list_work',arguments:{roomId,focus:'needs_me',limit:1}};
-  const requestStates={};
   for(const item of [...directMessages,...directMentions])if(item.requestKind==='reply'){
    const request=readCurrentRecord(store.db,roomId,'replyRequests',item.messageId,b);
    if(request&&[request.requesterId,request.recipientId].includes(memberId))requestStates[item.messageId]=request;

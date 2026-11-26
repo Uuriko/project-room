@@ -9,6 +9,12 @@ export const CLOUD_NOTIFY_LIMITS=Object.freeze({signals:50,outputBytes:8192,time
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const closed=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
 const id=(value,max)=>typeof value==='string'&&value.length<=max&&/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value)&&!['constructor','prototype','__proto__'].includes(value);
+export function validNotificationItem(item){
+ const requestMessageId=item?.requestMessageId;
+ return closed(item,['messageId','sequence',...(requestMessageId===undefined?[]:['requestMessageId'])])
+  &&id(item.messageId,128)&&Number.isSafeInteger(item.sequence)&&item.sequence>0
+  &&(requestMessageId===undefined||id(requestMessageId,128)&&requestMessageId!==item.messageId);
+}
 const invoke=(file,args,options)=>new Promise(resolve=>{
  const child=execFile(file,args,options,(error,stdout)=>resolve({error,stdout}));
  // The prompt is argv-only. Never allow ambient input or leave the CLI awaiting EOF.
@@ -18,8 +24,8 @@ const result=(receipt,duplicate)=>Object.freeze({state:receipt.phase,operationId
 function pointerOf(pointer){
  if(closed(pointer,['roomId','items'])&&id(pointer.roomId,64)&&Array.isArray(pointer.items)&&pointer.items.length>=1&&pointer.items.length<=16){
   const items=pointer.items.map(item=>{
-   if(!closed(item,['messageId','sequence'])||!id(item.messageId,128)||!Number.isSafeInteger(item.sequence)||item.sequence<1)throw Error('Invalid notification pointer');
-   return {messageId:item.messageId,sequence:item.sequence};
+   if(!validNotificationItem(item))throw Error('Invalid notification pointer');
+   return {messageId:item.messageId,sequence:item.sequence,...(item.requestMessageId===undefined?{}:{requestMessageId:item.requestMessageId})};
   }).sort((a,b)=>a.sequence-b.sequence||(a.messageId<b.messageId?-1:a.messageId>b.messageId?1:0));
   if(new Set(items.map(item=>item.messageId)).size!==items.length)throw Error('Invalid notification pointer');
   return {roomId:pointer.roomId,items};
@@ -62,7 +68,9 @@ export function createCloudNotifier({executable,sessionId,roomId,stateRoot,timeo
    }
    saved={version:selected.items?2:1,...(selected.items?{input:selected}:{}),inputDigest,targetDigest,phase:'intent',operationId:randomUUID(),createdAt:now(),updatedAt:now()};
    checkedReceipt(saved,inputDigest,targetDigest,selected);journal.save(saved); // durable before spawning
-   const prompt='Root-generated notification (not John).\n'+input;
+   const prompt='Root-generated notification (not John).\n'+input
+    +(selected.items?.some(item=>item.requestMessageId)
+      ? '\nRead each requestMessageId with room_read_request using your own saved Room connection. These exchanges are settled and do not need an answer or acknowledgment.' : '');
    let reason='command_unconfirmed',responseDigest;
    try{
     const reply=await runCli(executable,['-p',prompt,'--cloud',sessionId,'--output-format','json'],{shell:false,windowsHide:true,encoding:'utf8',timeout:timeoutMs,maxBuffer:CLOUD_NOTIFY_LIMITS.outputBytes,env:childEnvFor(env)});

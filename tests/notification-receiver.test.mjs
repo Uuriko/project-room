@@ -4,6 +4,8 @@ import {mkdtempSync,rmSync,writeFileSync,readdirSync,readFileSync} from 'node:fs
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:http';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {receiveCloudNotifications,attentionResult} from '../room-acp/src/notification-receiver.mjs';
 import {createCloudNotifier} from '../room-acp/src/cloud-notify.mjs';
 import {saveConnection} from '../room-acp/src/credentials.mjs';
@@ -46,6 +48,12 @@ test('response validation refuses foreign scope, bodies, bad cursor, duplicates 
  const args={roomId,memberId,after:10,timeoutSec:120},requestId='read';const valid=result(args,{after:11,status:'ready',items:[row(11)]});
  const parse=value=>attentionResult({jsonrpc:'2.0',id:requestId,result:{structuredContent:value}},{...args,requestId});
  assert.deepEqual(parse(valid).items,[{messageId:'message-11',sequence:11}]);
+ const settled={...row(11),kind:'direct_message',nextRead:{tool:'room_read_request',arguments:{roomId,requestMessageId:'original-request'}}};
+ assert.deepEqual(parse({...valid,items:[settled]}).items,[{messageId:'message-11',sequence:11,requestMessageId:'original-request'}]);
+ for (const arguments_ of [{roomId:'foreign',requestMessageId:'original-request'},
+   {roomId,requestMessageId:'message-11'},{roomId,requestMessageId:'original-request',body:'private'}])
+  assert.throws(()=>parse({...valid,items:[{...settled,nextRead:{...settled.nextRead,arguments:arguments_}}]}),
+   e=>e.code==='notification_context_unavailable');
  for(const altered of [{...valid,roomId:'foreign'},{...valid,memberId:'foreign'},{...valid,after:9},{...valid,status:'answered'},{...valid,acknowledges:true},{...valid,items:[{...row(11),body:'PRIVATE'}]},{...valid,items:[row(11),row(11)]},{...valid,items:[row(12)]},{...valid,items:[]},{...result(args),status:'catch_up_required'}])assert.throws(()=>parse(altered),e=>e.code==='notification_context_unavailable');
  assert.throws(()=>attentionResult({jsonrpc:'2.0',id:requestId,result:{isError:true,structuredContent:{status:403,code:'insufficient_scope'}}},{...args,requestId}),e=>e.status===403&&e.code==='insufficient_scope');
 });
@@ -174,6 +182,74 @@ test('head-complete ready frame sends immediately without a redundant timeout-ze
  const f=fixture(t),cancel=new AbortController(),calls=[];
  await receiveCloudNotifications({...f,signal:cancel.signal,fetchImpl:fetcher(args=>{calls.push(args.timeoutSec);return result(args,{after:11,status:'ready',items:[row(11)]});}),notifierFactory:()=>async()=>({state:'accepted'}),print:line=>{if(line.startsWith('Notification accepted'))cancel.abort();}});
  assert.deepEqual(calls,[120]);assert.deepEqual(f.waits,[]);
+});
+
+test('settled private answer survives the notification receiver process restart', async t => {
+ const {RoomStore}=await import('../server/store.mjs'), {initialRoom}=await import('../server/bootstrap.mjs');
+ const {createRoomServer}=await import('../server/http.mjs'), {linkWithProof}=await import('./helpers/link-with-proof.mjs');
+ const store=new RoomStore(':memory:');
+ store.initialize(initialRoom(), {representation: 'normalized-current-v1'});
+ const owner=store.issueAccessKey(roomId,'owner');
+ const coworker=store.identities.create('Coworker');
+ const verifier=store.identities.create('Verifier');
+ linkWithProof(store,owner,roomId,coworker,{memberId,displayName:'Coworker',permissions:[]});
+ linkWithProof(store,owner,roomId,verifier,{displayName:'Verifier',permissions:[]});
+ const post=(token,id,data)=>store.command(token,roomId,{id,type:'message.posted',data:{messageId:id,...data}});
+ const opened=post(coworker.secret,'request-reference',{body:'Share an accessible reference.',toMemberId:'owner',requestKind:'reply'});
+ const answer=post(owner,'answer-reference',{
+  body:'Private document: https://docs.example.test/only-participants',toMemberId:memberId,replyToId:'request-reference',
+  responseToRequestId:'request-reference',expectedRequestRevision:0,responseOutcome:'answered',workItemId:null,
+  contextEventId:opened.event.id,contextSequence:opened.sequence
+ });
+ const f=fixture(t,{bootstrapAfter:opened.sequence});
+ const server=createRoomServer({store});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));store.close();});
+ f.connection.apiBase=`http://127.0.0.1:${server.address().port}`;
+ f.connection.credential=coworker.secret;
+ const script=`
+  import {receiveCloudNotifications} from ${JSON.stringify(new URL('../room-acp/src/notification-receiver.mjs',import.meta.url).href)};
+  import {createCloudNotifier} from ${JSON.stringify(new URL('../room-acp/src/cloud-notify.mjs',import.meta.url).href)};
+  const {connection,configFile,mode}=JSON.parse(process.env.ROOM_RECEIVER_FIXTURE);
+  const cancel=new AbortController();
+  const notifierFactory=options=>createCloudNotifier({...options,runCli:async(_file,args)=>{
+   if(mode==='park')throw Error('Must not reach the actuator');
+   console.log(JSON.stringify({hint:JSON.parse(args[1].split('\\n')[1]),guidance:args[1].split('\\n')[2]}));
+   return {stdout:JSON.stringify({ok:true,session_id:options.sessionId,url:'https://claude.ai/code/'+options.sessionId})};
+  }});
+  const fetchImpl=async(url,options)=>{
+   if(mode==='inspect'){
+    console.log(JSON.stringify({after:JSON.parse(options.body).params.arguments.after}));
+    cancel.abort();
+    throw cancel.signal.reason;
+   }
+   return fetch(url,options);
+  };
+  await receiveCloudNotifications({connection,configFile,fetchImpl,signal:cancel.signal,
+   notifierFactory:mode==='park'?()=>()=>{throw Error('Fixture stopped before dispatch');}:notifierFactory,
+   print:line=>{if(line.startsWith('Notification accepted'))cancel.abort();}});
+ `;
+ const run=mode=>promisify(execFile)(process.execPath,['--input-type=module','-e',script],{
+  env:{...f.env,ROOM_RECEIVER_FIXTURE:JSON.stringify({connection:f.connection,configFile:f.configFile,mode})}
+ });
+ await assert.rejects(run('park'),/Fixture stopped before dispatch/);
+ const delivered=JSON.parse((await run('deliver')).stdout);
+ assert.deepEqual(delivered.hint,{roomId,items:[{messageId:'answer-reference',sequence:answer.sequence,requestMessageId:'request-reference'}]});
+ assert.match(delivered.guidance,/room_read_request.*settled/);
+ assert.doesNotMatch(JSON.stringify(delivered),/only-participants|Private document/);
+ assert.deepEqual(JSON.parse((await run('inspect')).stdout),{after:answer.sequence});
+ const call=async(token,name,args)=>{
+  const response=await fetch(f.connection.apiBase+'/mcp',{method:'POST',
+   headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
+   body:JSON.stringify({jsonrpc:'2.0',id:'fixture',method:'tools/call',params:{name,arguments:{roomId,...args}}})});
+  return (await response.json()).result.structuredContent;
+ };
+ const other=await call(verifier.secret,'room_wait_for_attention',{after:opened.sequence,timeoutSec:0});
+ assert.deepEqual(other.items,[]);
+ const exact=await call(coworker.secret,'room_read_request',{requestMessageId:delivered.hint.items[0].requestMessageId});
+ assert.equal(exact.request.responseMessageId,'answer-reference');
+ assert.equal(exact.current.answerBasis,null);
+ assert.equal(store.headSequence(roomId),answer.sequence);
 });
 
 test('a newer re-mention of the same message across valid frames coalesces once at its newest sequence',async t=>{
