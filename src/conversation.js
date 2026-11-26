@@ -556,8 +556,14 @@ function recoveredFiles(files) {
 // an authenticated room snapshot.
 // No credentials or server receipts are stored. Browser storage is untrusted.
 export class DraftRecovery {
-  constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; }
-  clear() { this.deferredReply = null; try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
+  constructor(storage, now = Date.now) {
+    this.storage = storage; this.now = now; this.key = "project-room:drafts:v3";
+    this.deferredSourceReferences = new Map();
+  }
+  clear() {
+    this.deferredReply = null; this.deferredSourceReferences.clear();
+    try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {}
+  }
   // An authenticated account is not enough to restore a room draft, but it
   // can rule one out before another account is shown its room list.
   reconcileAccount(identity) {
@@ -591,6 +597,12 @@ export class DraftRecovery {
         if (entries.length === 50) entries.shift();
         entries.unshift([saved.key, { ...saved.entry, deferredUntil: saved.expires }]);
       }
+      const present = new Set(entries.map(([key]) => key));
+      for (const [key, held] of this.deferredSourceReferences) {
+        if (held.scope !== scope || held.expires <= this.now() || present.has(key)) continue;
+        if (entries.length === 50) break;
+        entries.unshift([key, { ...held.entry, deferredUntil: held.expires, deferredActive: held.active }]);
+      }
       this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
       this.storage.removeItem("project-room:drafts:v2");
       return true;
@@ -607,9 +619,20 @@ export class DraftRecovery {
     if (restored) this.deferredReply = null;
     return restored ?? null;
   }
-  read(scope, state, { deferResultHref = null, onlyKey = null, viewerId = null } = {}) {
+  restoreSourceReference(scope, state, workItemId, viewerId) {
+    const work = state.workItems?.[workItemId];
+    if (work?.accountableMemberId !== viewerId) return null;
+    const key = replyDraftKey({ kind: "request", workItemId, sourceReference: work.sourceMessageId });
+    const held = this.deferredSourceReferences.get(key);
+    if (held?.scope !== scope || held.expires <= this.now()) return null;
+    const draft = this.read(scope, state, { onlyKey: key, viewerId })?.drafts.entries.get(key);
+    if (!draft || terminalWork(work) && !draft.pending) return null;
+    this.deferredSourceReferences.delete(key);
+    return { key, draft, active: held.active };
+  }
+  read(scope, state, { deferResultHref = null, deferSourceReferences = false, onlyKey = null, viewerId = null } = {}) {
     try {
-      if (onlyKey === null) this.deferredReply = null;
+      if (onlyKey === null) { this.deferredReply = null; this.deferredSourceReferences.clear(); }
       if (typeof scope !== "string" || !scope) { this.clear(); return null; }
       const raw = this.storage?.getItem(this.key) ?? this.storage?.getItem("project-room:drafts:v2");
       if (!raw) return null;
@@ -640,6 +663,18 @@ export class DraftRecovery {
           } catch { /* malformed contents never become a retained command */ }
         }
         if (d?.mode) {
+          // A bounded work summary lacks the source and proposer. Keep the
+          // saved entry inert until the ordinary selected Work read verifies it.
+          const work = d.mode.sourceReference && state.workItems?.[d.mode.workItemId];
+          if (deferSourceReferences && d.mode.kind === "request" && typeof d.mode.sourceReference === "string"
+            && replyDraftKey(d.mode) === id && !work?.sourceMessageId
+            && (!work?.accountableMemberId || work.accountableMemberId === viewerId)
+            && Object.hasOwn(state.members, d.mode.recipientId)
+            && d.threadId === null && d.replyToId === null && d.toMemberId === d.mode.recipientId && typeof d.body === "string") {
+            this.deferredSourceReferences.set(id, { scope, entry: d,
+              expires: Math.min(saved.expires, d.deferredUntil ?? saved.expires), active: id === saved.activeKey || d.deferredActive === true });
+            continue;
+          }
           if (!validReplyDraft(d.mode, state) || replyDraftKey(d.mode, d.threadId) !== id
             || d.threadId !== null && !index.threads.has(d.threadId)
             || typeof d.body !== "string" || typeof d.toMemberId !== "string"

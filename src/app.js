@@ -597,6 +597,7 @@ const client = new RoomClient({
       const exact = partialWorkSnapshot && exactResultDestination(location);
       const saved = recovery.read(draftScope(identity), state, {
         viewerId: identity.member.id,
+        deferSourceReferences: partialWorkSnapshot,
         deferResultHref: exact?.roomId === identity.roomId ? exactResultHref(exact) : null
       });
       if (saved) {
@@ -3590,7 +3591,9 @@ function revealWorkTimeline(id) {
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   workspaceUI?.showRooms();
   activeWorkNavigationId = id;
-  switchThread(null, false, true);
+  const referenceDraftOpen = requestMode?.sourceReference && requestMode.workItemId === id
+    && !currentThreadId && !activeDirectMemberId;
+  if (!referenceDraftOpen) switchThread(null, false, true);
   const channelId = timelineWorkEntries(id)[0]?.channelId;
   if (activeDirectMemberId || channelId && channelId !== activeChannelId) setActiveChannel(channelId ?? DEFAULT_CHANNEL_ID, true);
   renderMessages();
@@ -3670,11 +3673,17 @@ async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = fals
         state = { ...state, workItems: { ...state.workItems, [id]: inspectedWorkRecord } };
       }
       inspectedWorkSource = selected.accessSummary.conversation.sourceAvailability;
-      if (restoreInPlace) {
-        renderMessages();
-        return workRecord(id);
+      if (restoreInPlace) renderMessages();
+      const card = restoreInPlace ? workRecord(id) : revealWork(id, expandDetails);
+      const restored = card && recovery.restoreSourceReference(draftScope(identity), state, id, identity.member.id);
+      if (restored && !drafts.entries.has(restored.key)) {
+        drafts.save(restored.key, restored.draft);
+        if (restored.active && !requestMode && !assistantDraft && !pendingMessage
+          && !$("#message-input").value && !composerFiles.length) {
+          setRequestMode(restored.draft.mode);
+        } else persistDrafts();
       }
-      return revealWork(id, expandDetails);
+      return card;
     } catch (error) {
       if (!current()) return null;
       if (held !== state) continue;

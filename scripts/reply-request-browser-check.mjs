@@ -471,3 +471,85 @@ test("restored cancellation draft does not submit by keyboard after another sess
   assert.equal(f.state().replyRequests['cancel-history'].reason, "The winning cancellation reason");
   assert.deepEqual(f.errors, []);
 });
+
+for (const scenario of ["unsent", "uncertain", "refused"]) test(`current Room handles an ${scenario} assignment reference after reload`, { timeout: 30000 }, async t => {
+  const uncertain = scenario === "uncertain";
+  const f = await setup(t, { width: 390, height: 844 });
+  const roomId = "private-reference-room", workItemId = "private-document-review", sourceMessageId = "private-source-assignment";
+  const worker = event({ roomId, actorId: "owner", type: "member.added", data: {
+    memberId: "coworker", displayName: "Coworker", kind: "human", permissions: ["accept_work"],
+  } });
+  f.store.initialize([...initialRoom(roomId), worker], { representation: "normalized-current-v1" });
+  const owner = f.store.issueAccessKey(roomId, "owner"), coworker = f.store.issueAccessKey(roomId, "coworker");
+  const send = (type, data) => f.store.command(owner, roomId, { id: crypto.randomUUID(), type, data });
+  send("message.posted", { messageId: sourceMessageId, body: "Review https://docs.example.test/assignment", toMemberId: "coworker" });
+  send("work.proposed", { workItemId, title: "Read the private brief", definitionOfDone: "Confirm the date",
+    sourceMessageId, accountableMemberId: "coworker", mode: "read" });
+  const page = await f.login("coworker", { roomId, key: coworker });
+  const workUrl = new URL(workThreadHref(workItemId), f.origin);
+  workUrl.searchParams.set("room", roomId);
+  await page.goto(workUrl.href);
+  await page.locator(`[data-work-record-id="${workItemId}"] [data-open-message="${sourceMessageId}"]`).press("Enter");
+  await page.getByRole("button", { name: "Ask for an accessible reference", exact: true }).press("Enter");
+  const draft = "Please share an approved copy of the brief.";
+  await input(page).fill(draft);
+  const requests = () => f.store.db.prepare(
+    "SELECT record_key FROM current_room_records WHERE room_id = ? AND domain = 'replyRequests' AND json_extract(payload, '$.workItemId') = ?"
+  ).all(roomId, workItemId);
+  const attempts = [];
+  await page.route(`**/api/rooms/${roomId}/commands`, async route => {
+    const command = route.request().postDataJSON();
+    if (command.type !== "message.posted" || command.data?.requestKind !== "reply") return route.continue();
+    attempts.push(command);
+    if (!uncertain || attempts.length > 1) return route.continue();
+    const committed = await route.fetch();
+    assert.ok(committed.ok());
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable", message: "Retry the original" } }) });
+  });
+  if (uncertain) {
+    await input(page).press("Enter");
+    await failed(page);
+    assert.equal(requests().length, 1);
+  }
+
+  let releaseRead;
+  const held = new Promise(resolve => { releaseRead = resolve; });
+  const selectedRead = url => url.pathname === `/api/rooms/${roomId}/work-context` && url.searchParams.get("workItemId") === workItemId;
+  await page.route(selectedRead, async route => {
+    await held;
+    if (scenario !== "refused") return route.continue();
+    await route.fulfill({ status: 403, contentType: "application/json",
+      body: JSON.stringify({ error: { code: "work_private", message: "Work unavailable" } }) });
+  });
+  try {
+    await page.evaluate(url => history.replaceState(null, "", url), workUrl.href);
+    const started = page.waitForRequest(request => selectedRead(new URL(request.url())), { timeout: 5000 });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await started;
+    assert.equal(await page.locator("#request-mode-bar").isVisible(), false);
+    assert.equal(await input(page).inputValue(), "");
+    assert.equal(attempts.length, uncertain ? 1 : 0);
+  } finally { releaseRead(); }
+  if (scenario === "refused") {
+    await page.getByText("Work unavailable. Ask the sender for a reference you can open.", { exact: true }).waitFor();
+    assert.equal(await page.locator("#request-mode-bar").isVisible(), false);
+    assert.equal(await input(page).inputValue(), "");
+    assert.equal(requests().length, 0);
+    assert.equal(attempts.length, 0);
+    // A later explicit read can recover the draft for the same authorized seat.
+    await page.unroute(selectedRead);
+    await page.reload({ waitUntil: "domcontentloaded" });
+  }
+  await page.waitForFunction(text => document.querySelector("#message-input").value === text, draft, { timeout: 3000 });
+  assert.equal(await page.locator("#message-to-select").inputValue(), "owner");
+  assert.equal(await input(page).getAttribute("readonly") !== null, uncertain);
+  assert.equal(await page.locator("#message-to-select").isDisabled(), true);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+  if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `cold-reference-${scenario}.png`) });
+  await input(page).press("Enter");
+  await saved(page);
+  assert.equal(requests().length, 1);
+  assert.equal(attempts.length, uncertain ? 2 : 1);
+  if (uncertain) assert.deepEqual(attempts[1], attempts[0]);
+  assert.deepEqual(f.errors, []);
+});
