@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { connectRoom } from "../../client/agent-setup.mjs";
+import { connectRoom, setupTarget } from "../../client/agent-setup.mjs";
 import { openPrivateJournal } from "../../client/setup-journal.mjs";
 import { readAgentConnection } from "../../client/agent-connection.mjs";
+import { readPrivateJson } from "../../room-acp/src/private-files.mjs";
 import { rememberSecret } from "../auth.mjs";
 import { connectionHome, connectionsRoot, readPointer, safeName, tightenConnection, writePointer } from "../paths.mjs";
 
@@ -74,15 +75,29 @@ function publicResult(result) {
   };
 }
 
+function setupDirectory(directory, origin) {
+  try {
+    const legacy = readPrivateJson(join(directory, "setup.json"));
+    if (setupTarget(legacy.origin).origin === origin) return directory;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  // Use the full canonical origin (scheme, host and port) for independent services.
+  const scope = createHash("sha256").update(origin).digest("hex");
+  return join(directory, "services", scope);
+}
+
 export async function loginCommand(argv, { env = process.env, fetchImpl, out = console.log } = {}) {
   const flags = parse(argv);
   if (!flags.room) throw new Error("Use room login --room <invite-or-room-url>.");
   const name = flags.name ?? "Room agent";
   const slug = safeName(name);
-  const directory = connectionHome(slug, env);
+  const origin = setupTarget(flags.room).origin;
+  const directory = setupDirectory(connectionHome(slug, env), origin);
   mkdirSync(join(directory, ".."), { recursive: true, mode: 0o700 });
   const result = await connectRoom({
     target: flags.room,
+    origin,
     directory,
     name,
     accept: flags.accept,

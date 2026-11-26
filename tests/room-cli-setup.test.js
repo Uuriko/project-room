@@ -7,6 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
+import { connectRoom } from "../client/agent-setup.mjs";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, readPointer, readProject, safeName, writePointer } from "../cli/paths.mjs";
 import { nodeSatisfies } from "../cli/commands/doctor.mjs";
@@ -588,4 +589,100 @@ test("joining another Room as the same agent preserves the first repository's pi
   }), /Run room login/);
   assert.equal(store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
   assert.equal(store.db.prepare("SELECT count(*) n FROM identity_links").get().n, 2);
+});
+
+for (const legacy of [false, true]) test(`a coworker's separate Room server uses a separate credential (${legacy ? "legacy" : "new"} setup)`, async t => {
+  const { root, home, project, cleanup } = layout();
+  t.after(cleanup);
+  const secondProject = join(root, "coworker-project");
+  mkdirSync(secondProject);
+  const keychainTool = { darwin: "security", linux: "secret-tool" }[process.platform];
+  let env = envFor(home);
+  if (keychainTool) {
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    // Exercise the named keychain lookup without touching the OS keychain.
+    writeFileSync(join(bin, keychainTool), `#!${process.execPath}
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const account = args.includes("-a") ? args[args.indexOf("-a")+1] : args.at(-1);
+if (!/^[a-z0-9._-]+$/.test(account)) process.exit(1);
+const file = path.join(process.env.HOME, "key-" + account);
+if (args[0] === "find-generic-password" || args[0] === "lookup") {
+  if (!fs.existsSync(file)) process.exit(1);
+  process.stdout.write(fs.readFileSync(file));
+} else {
+  const token = args.includes("-w") ? args[args.indexOf("-w")+1] : fs.readFileSync(0, "utf8");
+  fs.writeFileSync(file, token, { mode: 0o600 });
+}
+`, { mode: 0o755 });
+    env = envFor(home, { PATH: bin, PROJECT_ROOM_KEYCHAIN: "1" });
+  }
+  async function instance() {
+    const store = new RoomStore(":memory:");
+    store.initialize(initialRoom("commons"));
+    const owner = store.issueAccessKey("commons", "owner");
+    const invite = store.invites.create(owner, "commons", { profile: "chat", displayName: "Ada" });
+    const server = createRoomServer({ store });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    t.after(async () => {
+      server.closeStreams();
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+      store.close();
+    });
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    return { store, origin, url: origin + "/join/" + invite.code };
+  }
+  const first = await instance(), second = await instance();
+  const joinRoom = (url, cwd, fetchImpl) => run(["join", url, "--name", "Ada", "--tool", "generic"],
+    { env, cwd, fetchImpl, platform: "linux" });
+  if (legacy) {
+    const config = await connectRoom({ target: first.url, name: "Ada", accept: true, directory: connectionHome("ada", env) });
+    assert.equal(config.status, "connected");
+    writePointer("ada", config.configDirectory, env);
+  }
+  const firstJoin = await joinRoom(first.url, project);
+  assert.equal(firstJoin.code, 0, firstJoin.err);
+  const firstPointer = readPointer("ada", env);
+  const firstConfig = readAgentConnection(firstPointer.configDirectory);
+  const firstNetworkSecret = firstConfig.token;
+  const firstIdentitySecret = JSON.parse(readFileSync(join(firstPointer.configDirectory, "..", "..", "setup.json"), "utf8")).secret;
+  let checked = 0;
+  let secondJoin = await joinRoom(second.url, secondProject, (url, options) => {
+    assert.equal(new URL(url).origin, second.origin);
+    const payload = JSON.stringify({ headers: [...new Headers(options.headers)], body: options.body });
+    assert.ok(!payload.includes(firstNetworkSecret) && !payload.includes(firstIdentitySecret),
+      "the first server's credentials must stay local to the first connection");
+    checked++;
+    return fetch(url, options);
+  });
+  assert.equal(secondJoin.code, 0, secondJoin.err);
+  assert.ok(checked > 0);
+  const alias = readProject(secondProject).connection;
+  const secondConfig = readAgentConnection(readPointer(alias, env).configDirectory);
+  assert.equal(secondConfig.origin, second.origin);
+  assert.ok(secondConfig.token !== firstNetworkSecret);
+  if (keychainTool) {
+    assert.ok(readFileSync(join(home, "key-ada"), "utf8") === firstNetworkSecret);
+    assert.ok(readFileSync(join(home, "key-" + alias), "utf8") === secondConfig.token);
+  }
+  assert.deepEqual(readPointer("ada", env), firstPointer);
+  secondJoin = await joinRoom(second.url, secondProject);
+  assert.equal(secondJoin.code, 0, secondJoin.err);
+  assert.equal(readProject(secondProject).connection, alias);
+  for (const [cwd, saved, origin] of [[project, firstConfig, first.origin], [secondProject, secondConfig, second.origin]]) {
+    const picked = await run(["next"], { env, cwd, platform: "linux", fetchImpl: (url, options) => {
+      assert.equal(new URL(url).origin, origin);
+      assert.ok(new Headers(options.headers).get("authorization") === "Bearer " + saved.token);
+      return fetch(url, options);
+    } });
+    assert.equal(picked.code, 0, picked.err);
+    assert.equal(JSON.parse(picked.out).viewerId, saved.memberId);
+  }
+  for (const { store } of [first, second]) {
+    assert.equal(store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
+    assert.equal(store.db.prepare("SELECT count(*) n FROM identity_links").get().n, 1);
+  }
 });
