@@ -3,6 +3,7 @@ import { validId } from "./events.js";
 import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, connectionSeat, connectionStanding, setupChecklist, localClientSteps, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
+const mcpRecoveryPath = roomId => `/api/agent-rooms/${encodeURIComponent(roomId)}/token/rotate`;
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 const digest = async value => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, "0")).join("");
 const statuses = { key_issued: "Access ready · setup not verified", access_changed: "Access changed", revoked: "Key revoked", expired: "Expired", disconnected: "Disconnected" };
@@ -183,16 +184,17 @@ export function installAgentConnections({ client, getState }) {
     describeAccess();
     describeImport();
   }
-  async function copyPlain(text, ok) {
+  async function copyPlain(text, ok, fallback = "Select and copy the text below. No key in this text.") {
     if (!allowed() || !dialog.open || copying || typeof text !== "string" || !text) return;
+    const currentFlow = flow;
     copying = true; render();
     try {
       const write = navigator.clipboard?.writeText?.(text);
       if (!write) throw new Error("clipboard");
       await Promise.race([write, new Promise((_, reject) => setTimeout(() => reject(new Error("clipboard")), 800))]);
-      if (allowed() && dialog.open) status(ok);
+      if (flow === currentFlow && allowed() && dialog.open) status(ok);
     } catch {
-      if (allowed() && dialog.open) status("Select and copy the text below. No key in this text.");
+      if (flow === currentFlow && allowed() && dialog.open) status(fallback);
     } finally { copying = false; render(); }
   }
   function render() {
@@ -209,7 +211,7 @@ export function installAgentConnections({ client, getState }) {
     const needsMcpRecovery = Boolean(setupMeta?.needsMcpRecovery);
     $("#agent-mcp-recovery").hidden = !needsMcpRecovery;
     if (needsMcpRecovery) {
-      $("#agent-mcp-recovery-path").textContent = `/api/agent-rooms/${encodeURIComponent(setup.roomId)}/token/rotate`;
+      $("#agent-mcp-recovery-path").textContent = mcpRecoveryPath(setup.roomId);
       $("#agent-host-snippets").hidden = true;
     }
     $("#agent-import-route").hidden = needsMcpRecovery && currentRoute() === "mcp";
@@ -228,7 +230,10 @@ export function installAgentConnections({ client, getState }) {
     describeName();
     if ($("#agent-create-later")) $("#agent-create-later").disabled = busy || Boolean(existingPending);
     $("#agent-private-copy").disabled = copying || !setup || !owns();
-    if ($("#agent-copy-checklist")) $("#agent-copy-checklist").disabled = copying || !setup || !allowed();
+    if ($("#agent-copy-checklist")) {
+      $("#agent-copy-checklist").disabled = copying || !setup || !allowed();
+      $("#agent-copy-checklist").textContent = uiText(needsMcpRecovery ? "agent.linkExisting.mcpRecovery.copy" : "agent.setup.copyChecklist");
+    }
     $("#agent-connect-done").disabled = busy || copying || Boolean(existingPending);
     $("#agent-retry").hidden = !pending || pending.request.action === "create";
     $("#agent-retry").disabled = busy || Boolean(existingPending);
@@ -474,6 +479,13 @@ export function installAgentConnections({ client, getState }) {
   $("#agent-create-later")?.addEventListener("click", () => { if (!busy && !pending && !existingPending && !setup) $("#agent-create").click(); });
   $("#agent-copy-checklist")?.addEventListener("click", () => {
     if (!setup || !allowed()) return;
+    if (setupMeta.needsMcpRecovery) {
+      if (!owns() || !checkExpiry()) return;
+      const endpoint = new URL(mcpRecoveryPath(setup.roomId), setup.origin).href;
+      void copyPlain(uiText("agent.linkExisting.mcpRecovery.handoff", { endpoint, roomId: setup.roomId }),
+        uiText("agent.linkExisting.mcpRecovery.copied"), uiText("agent.linkExisting.mcpRecovery.copyFailed"));
+      return;
+    }
     void copyPlain(reconnectCopy({
       displayName: $("#agent-connect-name")?.value,
       route: currentRoute(),

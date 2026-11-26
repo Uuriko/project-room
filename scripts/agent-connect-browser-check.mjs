@@ -503,6 +503,31 @@ test("signed-in coworker links an existing agent and it picks up the first assig
   assert.equal(f.store.bonds.identityForMember("commons", config.memberId), existing.identityId);
   assert.equal(f.store.room("commons").state.members[config.memberId].accountableHumanId, "friend-browser");
   assert.equal(f.store.room("commons").state.room.ownerId, "owner");
+  await f.page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async text => { globalThis.copiedRecovery = text; },
+    } });
+  });
+  const beforeCopy = f.store.headSequence("commons");
+  let browserRotations = 0;
+  f.page.on("request", request => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === rotatePath) browserRotations++;
+  });
+  const copyRecovery = f.page.getByRole("button", { name: "Copy recovery steps" });
+  await copyRecovery.press("Enter");
+  const instructions = await f.page.evaluate(() => globalThis.copiedRecovery);
+  const copiedEndpoint = /POST (\S+)/.exec(instructions)?.[1];
+  assert.equal(copiedEndpoint, new URL(rotatePath, f.origin).href);
+  assert.ok(instructions.includes("room_next"));
+  assert.ok([existing.secret, config.token, validCode].every(secret => !instructions.includes(secret)));
+  await f.page.evaluate(() => {
+    navigator.clipboard.writeText = async () => { throw new Error("Clipboard unavailable"); };
+  });
+  await copyRecovery.press("Enter");
+  await f.page.getByText("Copy unavailable. Share the recovery instructions and endpoint shown above.", { exact: true }).waitFor();
+  assert.equal(await f.page.locator("#agent-mcp-recovery-path").textContent(), rotatePath);
+  assert.equal(browserRotations, 0);
+  assert.equal(f.store.headSequence("commons"), beforeCopy);
 
   f.store.command(f.keys.owner, "commons", { id: "linked-friend-first-work", type: T.WORK_PROPOSED, data: {
     workItemId: "check-release-note", title: "Check the release note", definitionOfDone: "Confirm the date",
@@ -512,7 +537,7 @@ test("signed-in coworker links an existing agent and it picks up the first assig
   assert.equal(pickup.viewerId, config.memberId);
   assert.ok(pickup.work.some(item => item.id === "check-release-note" && item.nextRead));
 
-  const replacement = await fetch(new URL(rotatePath, f.origin), {
+  const replacement = await fetch(copiedEndpoint, {
     method: "POST", headers: { authorization: `Bearer ${existing.secret}` },
   });
   assert.equal(replacement.status, 200);
@@ -528,8 +553,14 @@ test("signed-in coworker links an existing agent and it picks up the first assig
   const access = await mcp("room_check_access", { roomId: "commons" });
   assert.equal(access.identityId, existing.identityId);
   assert.equal(access.memberId, config.memberId);
+  const beforePickup = f.store.headSequence("commons");
   const next = await mcp("room_next", { roomId: "commons", view: "pickup" });
+  assert.equal(next.viewerId, config.memberId);
   assert.equal(next.nextRead.arguments.workItemId, "check-release-note");
+  const work = await mcp(next.nextRead.tool, next.nextRead.arguments);
+  assert.equal(work.continuation.action, "accept");
+  assert.equal(work.continuation.arguments.workItemId, "check-release-note");
+  assert.equal(f.store.headSequence("commons"), beforePickup);
   assert.equal(linkCount(), 1);
 
   // A separate browser signs in using only the agent's original identity.

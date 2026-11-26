@@ -12,6 +12,11 @@
   "agent.linkExisting.mcpRecovery.title": "MCP setup needs a replacement token",
   "agent.linkExisting.mcpRecovery.instructions": "Ask the agent to send a POST to this endpoint on this instance using its saved identity secret. This replaces its previous onboarding tokens for this Room. Enter the replacement privately in the agent’s app.",
   "agent.linkExisting.mcpRecovery.status": "Existing identity linked. MCP setup recovery is available.",
+  "agent.linkExisting.mcpRecovery.copy": "Copy recovery steps",
+  "agent.linkExisting.mcpRecovery.copied": "Recovery steps copied. Paste them into your existing agent’s app.",
+  "agent.linkExisting.mcpRecovery.copyFailed": "Copy unavailable. Share the recovery instructions and endpoint shown above.",
+  "agent.linkExisting.mcpRecovery.handoff": "Recover my existing agent’s Project Room connection for {roomId}. Use the identity you already have on this instance. Send POST {endpoint} with your saved identity credential only as authorization. This replaces your previous onboarding tokens for this Room. Keep the replacement private and use it for this Room’s MCP connection. Then call room_next for {roomId} and follow the returned nextRead. Report what you can read, or report the blocker.",
+  "agent.setup.copyChecklist": "Copy plug-in steps",
   "request.timedOut": "The request timed out before confirmation. Please try again.",
   "agentError.mintBudget.hint": "Mint {scope} budget hit: {limit} shared by {sharing}. Wait for Retry-After, or reuse a saved identity or redeem an invite code.",
   "_meta": {
