@@ -440,8 +440,8 @@ test("a validated continuation plan replaces only its subscriber and preserves o
   assert.equal(receipt("second-next").status, "recorded", "a broken lane does not consume another lane's retry");
 });
 
-for (const representation of [undefined, "normalized-current-v1"]) {
-  test(`verified provider stop transfers a queued request and recovery refills once (${representation ?? "legacy"})`, async t => {
+for (const representation of [undefined, "normalized-current-v1"]) for (const ingress of ["REST", "MCP"]) {
+  test(`verified provider stop transfers a queued request and recovery refills once (${representation ?? "legacy"}, ${ingress})`, async t => {
     const directory = mkdtempSync(join(tmpdir(), "room-capacity-handoff-"));
     const store = new RoomStore(join(directory, "room.sqlite"));
     const roomId = "commons", requesterId = "owner", recipientId = "primary", workItemId = "qa-capacity";
@@ -482,7 +482,7 @@ for (const representation of [undefined, "normalized-current-v1"]) {
       return response;
     };
     const capacityChange = async (action, requestId, reason) => {
-      if (representation) {
+      if (ingress === "MCP") {
         const response = await fetch(origin + "/mcp", {
           method: "POST", headers: { Authorization: "Bearer " + primary.secret, "Content-Type": "application/json" },
           body: JSON.stringify({ jsonrpc: "2.0", id: requestId, method: "tools/call", params: {
@@ -577,7 +577,8 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     const evidenceWork = "new-room-evidence";
     const send = (token, type, data) => store.command(token, roomId, { id: randomUUID(), type, data });
     send(owner, "work.proposed", { workItemId: evidenceWork, title: "Fresh setup observation",
-      definitionOfDone: "Reproduce the public setup", accountableMemberId: "alternate", mode: "read" });
+      definitionOfDone: "Reproduce the public setup", accountableMemberId: "alternate", mode: "read",
+      ownerDecisionRequired: true, humanDecisionMakerId: requesterId });
     send(alternate.secret, "work.accepted", { workItemId: evidenceWork, expectedRevision: 0 });
     send(alternate.secret, "work.started", { workItemId: evidenceWork, expectedRevision: 1 });
     const resultText = "Verified the updated public example.";
@@ -590,6 +591,14 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.deepEqual(currentRefills().map(item => item.id), [fresh.data.messageId], "pending work wins over new evidence");
     settle(fresh.data.messageId);
     await setImmediate();
+    assert.equal(currentRefills().length, 0, "an unapproved result cannot generate new work");
+    const reason = "Exact room evidence accepted.";
+    const rationaleId = "public-evidence-decision";
+    send(owner, "message.posted", { messageId: rationaleId, body: reason, workItemId: evidenceWork });
+    send(owner, "owner.decision_recorded", { workItemId: evidenceWork, expectedRevision: 3,
+      decision: "approved", completionEventId: completion.event.id, evidenceVersion: textVersion(resultText),
+      reason, sourceMessageId: rationaleId });
+    await setImmediate();
     if (representation) {
       const [followup] = currentRefills();
       assert.equal(currentRefills().length, 1);
@@ -599,6 +608,15 @@ for (const representation of [undefined, "normalized-current-v1"]) {
       await connect(primary.secret);
       await setImmediate();
       assert.deepEqual(currentRefills().map(item => item.id), [followup.id], "reconnect and restart preserve the exact offer");
+      assert.match(exact.page.items[0].message.body, /current.next.action is complete/);
+      assert.match(exact.page.items[0].message.body, /Do not substitute another source/);
+      const readExact = () => store.workResult(primary.secret, roomId, evidenceWork, { completionEventId: completion.event.id });
+      assert.equal(readExact().current.next.action, "complete");
+      assert.equal(readExact().scope.workVisibility, "room");
+      send(owner, "work.superseded", { workItemId: evidenceWork, expectedRevision: 4,
+        supersededByWorkItemId: workItemId, reason: "Replaced by the current setup check." });
+      assert.equal(readExact().selection.status, "current", "a superseded Work Thread can still have a readable selected result");
+      assert.equal(readExact().current.next.action, "superseded", "the investigation preflight rejects the superseded source");
       settle(followup.id);
     }
     send(owner, "message.posted", { messageId: "unrelated-conversation", body: "Unrelated discussion" });

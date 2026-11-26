@@ -90,8 +90,10 @@ export function compileIdleRefill(route, result = null) {
     body: [route.firstLine ?? `@(${recipientId})`, ...(discover === true ? [
       investigation,
       "Check room_next or room_list_work for authorized work before investigating. If you already have work, continue it and close this request with its ID.",
-      ...(result ? [`Start from Room result ${result.workItemId}, exact completion ${result.completionEventId}. Only use it if the existing Room read still gives you access to that result.`] : []),
-      "Otherwise inspect one public or explicitly shared source in this lane for a current issue. Propose one bounded task with the exact source, evidence and permissions needed. Say what you checked if no useful task was found. Read-only."
+      result
+        ? `Before investigating, call room_read_result with workItemId=${result.workItemId} and completionEventId=${result.completionEventId}. Proceed only if selection.status is current, current.next.action is complete, scope.workVisibility is room, and the evidence is available. If the read is denied, stale, superseded, withdrawn, or still awaiting a gate, settle this request as no longer eligible and stop. Do not substitute another source.`
+        : "Otherwise inspect one public or explicitly shared source in this lane for a current issue.",
+      "Propose one bounded task with the exact source, evidence and permissions needed. Say what you checked if no useful task was found. Read-only."
     ] : [body.trim()])].join("\n")
   });
 }
