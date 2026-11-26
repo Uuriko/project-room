@@ -1236,7 +1236,10 @@ for (const browserType of process.env.ROOM_TEST_WEBKIT ? [chromium, webkit] : [c
     ].join("\n");
     const f = await setup(t, 390, { browserType, firstBody: text });
     const exact = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
-    const page = await f.login("human-checker", exact);
+    const page = await f.newPage();
+    // Bind the fixture credential before any Room startup read can overlap navigation.
+    await page.goto(f.origin + "/api/health");
+    await signInFixture(page, f.keys["human-checker"], { returnTo: exact });
     const body = page.locator("#result-body");
     const href = fileLink(f.origin, "docs/Brief draft.md");
     const renderedLink = body.locator("a").first();
