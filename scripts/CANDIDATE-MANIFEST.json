@@ -66,7 +66,7 @@
     "room-acp/src/agent-host.mjs": "sha256:96bd38681ea15d1e04d833277339c13d542b38f28daf6cc1cf1ae13d554d9a75",
     "room-acp/src/agents.mjs": "sha256:16b072c892accd9fbb80006ad5aaf3fbc9ef93e396d33e33c2bd6a1ca135283f",
     "room-acp/src/args.mjs": "sha256:0504f3a710ffe13c0bcb3da2925b1ddf678fba499750ddab8cffb253cffcae3d",
-    "room-acp/src/bridge.mjs": "sha256:8c424e5f8fb7dfbcbcb810e1dd735856e3ebc0fc7cfb08661145ac66017ca879",
+    "room-acp/src/bridge.mjs": "sha256:844ef7088ae62037cb4977c96ec91bbb34b51f35ebd9037bebdabde276074771",
     "room-acp/src/cli.mjs": "sha256:12be91880ac65cffe0732d0b9a059cb85a9eb8ac58dd13dd168d71be4765a314",
     "room-acp/src/cloud-notify.mjs": "sha256:f31ef904dd458e574601ae8c92f4b53448ad75af1a4e4192c48a8c7144771252",
     "room-acp/src/credentials.mjs": "sha256:d43ef5f73136bcc338e30c9dfa6721ae7a313ba06f4d0c12989a7e5c511001a3",

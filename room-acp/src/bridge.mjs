@@ -1165,8 +1165,13 @@ export class Bridge {
   }
 
   async run() {
-    await this.host.start();
-    await this.refreshRoom();
+    try {
+      await this.host.start();
+      await this.refreshRoom();
+    } catch (error) {
+      try { this.stop(); } catch { /* Keep the startup failure for the caller. */ }
+      throw error;
+    }
     let failures = 0;
     while (!this.controller.signal.aborted) {
       try { await this.pollOnce(); failures = 0; }

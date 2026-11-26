@@ -3,6 +3,7 @@
 // when the agent cannot load sessions).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { Bridge, CRASH_LIMIT } from "../room-acp/src/bridge.mjs";
 import { join } from "../room-acp/src/join.mjs";
 import { SessionMap } from "../room-acp/src/sessions.mjs";
@@ -53,6 +54,34 @@ test('failed or interrupted initialization clears and terminates its process', a
     assert.equal(exits,0,'a failed startup is reported by start, not as a second crash');
   }
 });
+
+for (const cleanupFails of [false, true]) {
+  test(`failed initial Room authority read terminates the initialized adapter (cleanup error=${cleanupFails})`, async t => {
+    const host = new AgentHost({ candidate: { command: process.execPath, args: [FAKE_AGENT] } });
+    const stop = host.stop.bind(host);
+    t.after(stop);
+    if (cleanupFails) host.stop = () => { stop(); throw Error("Fixture cleanup failure"); };
+    const startupError = new Error("Fixture initial Room authority refusal");
+    const network = [];
+    const bridge = new Bridge({
+      connection: { apiBase: "https://example.test", roomId: "r", memberId: "m", credential: "test" },
+      host, env: {}, persistSessions: false,
+      fetchImpl: async url => { network.push(new URL(url).pathname); throw Error("Unexpected Room call"); }
+    });
+    let childExit;
+    bridge.refreshRoom = async () => {
+      assert.ok(host.running);
+      childExit = once(host.process.child, "exit");
+      throw startupError;
+    };
+    await assert.rejects(bridge.run(), error => error === startupError);
+    assert.equal(host.running, false);
+    assert.equal(bridge.controller.signal.aborted, true);
+    await childExit;
+    assert.equal(bridge.ready, null);
+    assert.deepEqual(network, []);
+  });
+}
 
 test('stopping during initialization cannot publish stale readiness', async () => {
   const host = new AgentHost({candidate:{command:process.execPath,args:[FAKE_AGENT]},env:{...process.env,FAKE_ACP_MODE:'init-stall'}});
