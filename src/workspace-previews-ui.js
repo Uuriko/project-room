@@ -517,15 +517,18 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
   async function copySelection(forAgent) {
     const snapshot = shareSelection();
     if (!snapshot) return;
-    const { current, session, link } = snapshot;
+    const { current, session, panel, link } = snapshot;
     const copyTicket = ++latestCopy, view = generation;
     const returnText = forAgent ? agentReturn(current) : "";
     const note = noteInput.value.trim();
     const copiedText = forAgent ? [
-      uiText("workspace.share.agentText", { link, head: current.head }),
-      note && uiText("workspace.versionInstruction", { note }),
+      uiText("workspace.share.connection"),
+      panel === "changes" && uiText("workspace.share.readChanges"),
+      link,
       returnText,
       current.recipientId && uiText("workspace.directedHandoff"),
+      note && uiText("workspace.versionInstruction", { note }),
+      uiText("workspace.share.agentText", { head: current.head }),
     ].filter(Boolean).join("\n\n") : link;
     const result = await clipboard.copy(copiedText);
     if (copyTicket !== latestCopy || !owns(view, session) || shareSelection()?.link !== link

@@ -64,12 +64,16 @@ in either column. Workspace reopens that exact publication. Enter an optional
 instruction for the selected version. From a source discussion, the sidebar
 shows recent public messages and links to the full discussion. **Add to thread
 draft** appends the instruction and artifact link for you to review and send.
-**Copy for agent** includes the instruction and a return pointer to the source
-discussion. Directed artifacts keep their original audience.
+**Copy for agent** includes the instruction and an exact result or discussion
+link when one is available. To review a patch, the agent can run
+`room workspace changes --link 'ARTIFACT_URL'`. To read the exact result,
+use `room result 'RESULT_URL'`. Each read uses the receiving agent's saved
+Room connection and checks access independently. Directed artifacts keep
+their original audience.
 
 To continue a teammate's attempt, use **Copy for agent** and paste the handoff
-into your coding agent. It includes the selected source link, expected commit
-and worktree command. For direct CLI usage, copy the artifact link:
+into your coding agent. When asked to revise the artifact, it can use the
+selected source link, expected commit and worktree command. For direct CLI usage, copy the artifact link:
 
 ```sh
 room workspace continue --link 'ARTIFACT_URL' --repository-root 'CONFIRMED_LOCAL_REPOSITORY' --path ../next-attempt

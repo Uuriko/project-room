@@ -1436,3 +1436,94 @@ test("same-base forks compare as distinct publications beside an exact accepted 
   await outsider.locator("#room-project-workspace").getByText(/This shared artifact is unavailable/).waitFor();
   assert.doesNotMatch(await outsider.locator("#room-project-workspace").innerText(), /Primary fork marker|fixture\/primary/);
 });
+
+test("the receiving agent can read each handoff link only through its own access", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const { workspaceCommand } = await import("../cli/commands/workspace.mjs");
+  const { resultCommand } = await import("../cli/commands/workflow.mjs");
+  const { connectionHome, connectionsRoot, writePointer } = await import("../cli/paths.mjs");
+  const { saveAgentConnection } = await import("../client/agent-connection.mjs");
+  const home = join(f.directory, "agent-connections");
+  const env = { HOME: home, PROJECT_ROOM_KEYCHAIN: "0" };
+  mkdirSync(connectionsRoot(env), { recursive: true });
+  function agent(name) {
+    const invite = f.store.invites.create(f.keys.owner, "commons", { profile: "contribute" });
+    const member = f.store.invites.redeem(invite.code, { displayName: name });
+    const directory = connectionHome(name, env);
+    saveAgentConnection(directory, { version: 1, origin: f.origin, roomId: "commons", memberId: member.memberId, token: member.identitySecret });
+    writePointer(name, directory, env);
+    return member;
+  }
+  const patchAgent = agent("patch-agent"), resultAgent = agent("result-agent");
+  const file = "brief.md", id = "e".repeat(32);
+  async function publish(expectedRevision, marker) {
+    const response = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+      method: "POST", headers: { authorization: "Bearer " + patchAgent.identitySecret, "content-type": "application/json" },
+      body: JSON.stringify({ id, expectedRevision, recipientId: "human-checker", title: "Scoped change",
+        base: "a".repeat(40), head: "b".repeat(40), html: "<h1>Scoped change</h1>",
+        patch: ["diff --git a/brief.md b/brief.md", "--- a/brief.md", "+++ b/brief.md", "@@ -1 +1 @@", "-base", "+" + marker, ""].join("\n") }),
+    });
+    assert.ok(response.ok, await response.clone().text());
+    return response.json();
+  }
+  const item = await publish(0, "ARTIFACT-ONLY");
+  const artifact = workspaceArtifactLink(f.origin, "commons", item, "changes", file);
+  const workItemId = "split-audience-review";
+  f.send("owner", T.WORK_PROPOSED, { workItemId, title: "Check the scoped release", definitionOfDone: "Review the exact files",
+    accountableMemberId: resultAgent.memberId, mode: "read" });
+  const post = (type, data) => f.store.command(resultAgent.identitySecret, "commons", { id: randomUUID(), type, data: { workItemId, ...data } });
+  post(T.WORK_ACCEPTED, { expectedRevision: 0 });
+  post(T.WORK_STARTED, { expectedRevision: 1 });
+  const body = ["RESULT-ONLY", artifact].join("\n");
+  const source = post(T.MESSAGE_POSTED, { messageId: "split-result", body, toMemberId: "human-checker" });
+  const done = post(T.WORK_COMPLETED, { expectedRevision: 2, evidenceKind: "room_text",
+    evidenceMessageId: source.event.data.messageId, evidenceMessageEventId: source.event.id, evidenceVersion: textVersion(body),
+    previousCompletionEventId: null, producerId: resultAgent.memberId, summary: "Scoped review", nextAction: "Open the exact result" });
+  const result = exactResultHref({ roomId: "commons", workItemId, completionEventId: done.event.id }, new URL(f.origin));
+
+  const sender = await f.login("human-checker", result);
+  await sender.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true,
+    value: { writeText: async () => { throw new Error("Use manual copy"); } } }));
+  await sender.locator("#result-body").getByRole("link", { name: "Open changes for brief.md", exact: true }).press("Enter");
+  const dialog = sender.locator("#room-project-workspace");
+  await dialog.getByRole("button", { name: "Copy for agent", exact: true }).press("Enter");
+  const fallback = dialog.locator("[data-workspace-link-fallback]");
+  await fallback.waitFor();
+  if (process.env.ROOM_TEST_CAPTURE) await sender.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "split-agent-handoff.png") });
+  const handoff = await fallback.inputValue();
+  assert.match(handoff, /room workspace changes --link/);
+  assert.match(handoff, /room result/);
+  assert.match(handoff, /checks access to each link separately/);
+  assert.ok(handoff.includes(artifact) && handoff.includes(result));
+  assert.doesNotMatch(handoff, /RESULT-ONLY|ARTIFACT-ONLY|#pr-record\/message\//);
+
+  const runResult = async name => {
+    const output = [];
+    const code = await resultCommand([result], { env, cwd: home, connectionName: name, out: text => output.push(JSON.parse(text)) });
+    return { code, output };
+  };
+  const readChanges = (name, viewer) => {
+    const output = [];
+    return workspaceCommand(["changes", "--link", artifact, "--connection", name, "--viewer", viewer],
+      { env, cwd: home, out: text => output.push(JSON.parse(text)) }).then(() => output);
+  };
+  const changes = await readChanges("patch-agent", patchAgent.memberId);
+  assert.match(JSON.stringify(changes), /ARTIFACT-ONLY/);
+  const noResult = await runResult("patch-agent");
+  assert.equal(noResult.code, 1);
+  assert.doesNotMatch(JSON.stringify(noResult.output), /RESULT-ONLY|#pr-record\/message\//);
+
+  const resultOnly = await runResult("result-agent");
+  assert.equal(resultOnly.code, 0);
+  assert.match(JSON.stringify(resultOnly.output), /RESULT-ONLY/);
+  await assert.rejects(readChanges("result-agent", resultAgent.memberId), { code: "preview_not_found" });
+
+  await publish(1, "REPLACEMENT-PRIVATE");
+  await assert.rejects(readChanges("patch-agent", patchAgent.memberId), { code: "preview_changed" });
+  await assert.rejects(readChanges("result-agent", resultAgent.memberId), { code: "preview_not_found" });
+  const reread = await runResult("result-agent");
+  assert.equal(reread.code, 0);
+  assert.deepEqual(reread.output[0].selection, resultOnly.output[0].selection);
+  assert.deepEqual(reread.output[0].result, resultOnly.output[0].result);
+  assert.doesNotMatch(JSON.stringify(reread.output), /REPLACEMENT-PRIVATE/);
+});
