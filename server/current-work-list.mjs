@@ -145,6 +145,9 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
           &&stepFor(item).needsAttention).map(item=>({
         id:item.id,title:item.title,state:item.state,revision:item.revision,mode:item.mode,
         next:stepFor(item),
+        ...(focus==='needs_me'&&['verify','decide'].includes(stepFor(item).action)
+          && item.receipt?.evidenceVersion && !item.receipt.evidenceUrl
+          ? {reviewCompletionEventId:item.receipt.eventId}:{}),
         ...(focus==='needs_me'&&stepFor(item).action==='verify'
           ? {reviewRuntime:reviewRuntimeFor(store,roomId,item,stepFor(item),store.now())}:{}),
         nextRead:{tool:'room_read_work',arguments:{workItemId:item.id}},

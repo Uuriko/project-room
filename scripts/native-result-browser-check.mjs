@@ -849,3 +849,16 @@ for (const current of [false, true]) test(`reply with an old result passage whil
     assert.equal(command.data.body, feedback);
   } finally { release(); }
 });
+
+test("Needs me opens a native review at its exact submitted result", { timeout: 25000 }, async t => {
+  const f = await setup(t, { current: true, mobile: true, review: true });
+  await f.page.locator("#topbar-updates").press("Enter");
+  const row = f.page.locator("#updates-dialog .updates-row").filter({ hasText: "A quiet room" });
+  await row.getByText("Review needed", { exact: true }).waitFor();
+  const open = row.getByRole("button", { name: "Open A quiet room", exact: true });
+  await open.press("Enter");
+  await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+  assert.equal(new URL(f.page.url()).hash, "#pr-record/result/" + f.workItemId + "/" + f.reviewEventId);
+  await f.page.reload();
+  await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+});

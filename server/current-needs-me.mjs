@@ -62,7 +62,14 @@ function readPage(store,secret,roomId,{cursor,after,freshWindow=500,expectedMode
    workPages++;
    const itemsBefore=items.length;
    const page=store.currentWorkListing(secret,roomId,{focus:'needs_me',limit:1,expectedSessionBinding,...(state.workCursor?{cursor:state.workCursor}:{})});
-   for(const item of page.work)items.push({kind:'work',roomId,seq:item.revision,id:item.id,summary:clip(item.title),...(item.next.action==='revise'?{needsRevision:true}:{}),...(['verify','decide'].includes(item.next.action)?{reviewAction:item.next.action}:{}),...(item.reviewRuntime?{reviewRuntime:item.reviewRuntime}:{}),next:{...item.nextRead,arguments:{roomId,...item.nextRead.arguments}}});
+   for(const item of page.work){
+    const reviewAction=['verify','decide'].includes(item.next.action)?item.next.action:null;
+    const completionEventId=item.reviewCompletionEventId;
+    items.push({kind:'work',roomId,seq:item.revision,id:item.id,summary:clip(item.title),
+     ...(item.next.action==='revise'?{needsRevision:true}:{}),...(reviewAction?{reviewAction}:{}),
+     ...(completionEventId?{completionEventId}:{}),...(item.reviewRuntime?{reviewRuntime:item.reviewRuntime}:{}),
+     next:{...item.nextRead,arguments:{roomId,...item.nextRead.arguments}}});
+   }
    for(const request of page.replyRequests??[]){
     const seq=store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
      const value=readCurrentRecord(store.db,roomId,'replyRequests',request.id);chargeCurrentReadBudget(b,256);

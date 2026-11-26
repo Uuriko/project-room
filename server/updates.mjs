@@ -332,6 +332,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false,
       continue;
     }
     const review = ["verify", "decide"].includes(next.action);
+    const completionEventId = review && item.receipt?.nativeText ? item.receipt.eventId : null;
     const at = iso(item.updatedAt ?? item.createdAt ?? now);
     items.push(draft({
       kind: review ? "review_requested" : "work_assigned", roomId, key: `${review ? "review" : "work"}|${item.id}|${next.action}`,
@@ -341,7 +342,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false,
       reviewRuntime: reviewRuntimeFor(store,roomId,item,next,now),
       reviewAction: review ? next.action : null,
       needsRevision: next.action === "revise",
-      sourceRef: { workItemId: item.id },
+      sourceRef: { workItemId: item.id, ...(completionEventId ? { completionEventId } : {}) },
       next: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(item.id)}` }
     }));
   }

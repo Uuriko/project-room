@@ -55,7 +55,7 @@ import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-nav
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, exactResultHref, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -3712,15 +3712,18 @@ function navigateWorkRecord(kind, id, extra = {}) {
     notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
   const presentation = extra.presentation ?? "focus";
-  const target = recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
+  const completionEventId = kind === "work" && extra.updates?.resultCompletionEventId;
+  const exact = completionEventId && exactResultHref({ roomId: session.roomId, workItemId: id, completionEventId });
+  const target = exact || recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
+  const showTarget = () => exact ? revealLocationHash() : showWorkDestination(kind, id, presentation);
   const current = currentWorkOrigin();
-  if (current?.target === target && location.hash === target && history.state?.roomWorkTarget === activeWorkNavigation) {
+  if (current?.target === target && location.href === current.targetUrl && history.state?.roomWorkTarget === activeWorkNavigation) {
     // A new surface can inspect the same task without a second URL entry.
     // Its return context changes, while the existing origin entry/ticket survives.
     if (!sameWorkOrigin(current, origin)) workNavigationOrigins.set(activeWorkNavigation,
       { ...origin, url: current.url, previous: current.previous, target, targetUrl: current.targetUrl });
     else if (current.presentation !== presentation) workNavigationOrigins.set(activeWorkNavigation, { ...current, presentation });
-    workHistoryReplayKey = null; showWorkDestination(kind, id, presentation);
+    workHistoryReplayKey = null; showTarget();
     return true;
   }
   const ticket = crypto.randomUUID();
@@ -3739,7 +3742,7 @@ function navigateWorkRecord(kind, id, extra = {}) {
   // its echo. Key format matches replayWorkNavigation's computed key, with
   // an empty back segment (the pushed entry carries no roomWorkOrigin).
   workHistoryReplayKey = [new URL(target, location.href).href, ticket, "", workNavigationContext()].join("|");
-  showWorkDestination(kind, id, presentation);
+  showTarget();
   return true;
 }
 // #3795: navigate to a board claim's record. The destination is the board
@@ -4040,6 +4043,7 @@ function revealLocationHash(workspaceDiscussion = null) {
   }
   // JDOT-COH-NAV end
   if (hash.startsWith("#pr-workspace/")) {
+    workHistoryReplayKey = null;
     const onReturn = history.state?.roomResultWorkspaceEntry === true ? () => history.back() : null;
     workspacePreviewsUI?.openLink(hash, workspaceDiscussion, onReturn);
     return;

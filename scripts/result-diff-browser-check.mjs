@@ -1162,14 +1162,23 @@ test("a reviewer can return to the exact revised result after its file is withdr
   const { patchDigest } = await published.json();
   const href = f.origin + "/?room=commons#pr-workspace/" + [id, 1, "changes", patchDigest, "producer", head, "brief.md"].join("/");
   const revised = f.complete("Result B — Named owner\n" + href);
-  const exact = f.origin + "/?room=commons#pr-record/result/revision-journey/" + revised.event.id;
-  const reviewer = await f.login("human-checker", exact);
-  const link = reviewer.locator("#result-body").getByRole("link", { name: href, exact: true });
+  const reviewer = await f.login("human-checker");
+  await reviewer.locator("#topbar-updates").press("Enter");
+  const row = reviewer.locator("#updates-dialog .updates-row").filter({ hasText: "Revise a short result" });
+  await row.getByText("Review needed", { exact: true }).waitFor();
+  if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "01-review-needed.png") });
+  await row.getByRole("button", { name: "Open Revise a short result", exact: true }).press("Enter");
+  const resultBody = reviewer.locator("#result-body");
+  const link = resultBody.getByRole("link", { name: /brief\.md/ });
   await link.waitFor();
+  const exact = reviewer.url();
+  assert.equal(new URL(exact).hash, "#pr-record/result/revision-journey/" + revised.event.id);
+  assert.equal(await link.getAttribute("href"), href);
+  assert.equal(await resultBody.textContent(), "Result B — Named owner\n" + href);
   const capture = async name => {
     if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, name + ".png") });
   };
-  await capture("01-exact-revision");
+  await capture("02-exact-revision");
   await link.press("Enter");
   const workspace = reviewer.getByRole("dialog", { name: "Workspace" });
   await workspace.getByText("+Owner: Taylor", { exact: true }).waitFor();

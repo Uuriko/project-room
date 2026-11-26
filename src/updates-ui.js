@@ -281,7 +281,18 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       for(let step=0;step<(append?1:Math.max(1,budget));step++){
         const page=await client.roomRead('/needs-me'+(after?'?cursor='+encodeURIComponent(after):''));if(!page||!current())return false;
         if(page.contractVersion!==2||!Array.isArray(page.items)||typeof page.complete!=='boolean'||page.coverage?.mode!=='native_bounded'||page.complete!==(page.cursor===null))throw Error('Could not verify this attention page.');
-        for(const source of page.items){if(!source||typeof source.id!=='string'||typeof source.kind!=='string'||typeof source.summary!=='string')throw Error('Could not verify this attention item.');const item={id:source.kind+':'+source.id,roomId:source.roomId,kind:source.kind,title:source.summary,state:'open',reviewRuntime:source.reviewRuntime,reviewAction:source.kind==='work'?source.reviewAction:null,needsRevision:source.kind==='work'&&source.needsRevision===true,sourceRef:source.kind==='work'?{workItemId:source.id}:{messageId:source.id}};merged.set(item.id,item);}
+        for (const source of page.items) {
+          if (!source || typeof source.id !== "string" || typeof source.kind !== "string" || typeof source.summary !== "string")
+            throw Error("Could not verify this attention item.");
+          const work = source.kind === "work";
+          const item = {
+            id: source.kind + ":" + source.id, roomId: source.roomId, kind: source.kind,
+            title: source.summary, state: "open", reviewRuntime: source.reviewRuntime,
+            reviewAction: work ? source.reviewAction : null, needsRevision: work && source.needsRevision === true,
+            sourceRef: work ? { workItemId: source.id, completionEventId: source.completionEventId } : { messageId: source.id }
+          };
+          merged.set(item.id, item);
+        }
         pages++;more=!page.complete;const following=page.cursor;if(more&&(typeof following!=='string'||!following||seen.has(following)))throw Error('Attention page did not advance. Refresh to continue.');after=following;if(!more)break;seen.add(after);
       }
       items=[...merged.values()];cursor=after;hasMore=more;loadedPages=pages;visitedCursors=seen;incomplete=true;filter='needs';actionable=items.length;badgeMore=hasMore;badgeIncomplete=false;loading=false;paintBadge();paint({keepPosition:background});status.textContent=notice;return true;
@@ -354,9 +365,16 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     }
   }
   async function mark(item, action) {
-    if(nativeAttention()){
-      if(action!=='open')return;const origin=capture(item.id,action),opened=item.sourceRef?.workItemId&&onOpenWork?onOpenWork(item.sourceRef.workItemId,origin):item.sourceRef?.messageId&&onOpenMessage?onOpenMessage(item.sourceRef.messageId,origin):false;
-      if(opened===false){status.textContent='That source is no longer available in this room.';return;}cancelPending();hidePage();return;
+    if (nativeAttention()) {
+      if (action !== "open") return;
+      const origin = capture(item.id, action);
+      origin.resultCompletionEventId = item.sourceRef?.completionEventId;
+      const opened = item.sourceRef?.workItemId && onOpenWork ? onOpenWork(item.sourceRef.workItemId, origin)
+        : item.sourceRef?.messageId && onOpenMessage ? onOpenMessage(item.sourceRef.messageId, origin) : false;
+      if (opened === false) { status.textContent = "That source is no longer available in this room."; return; }
+      cancelPending();
+      hidePage();
+      return;
     }
     const owned = currentContext();
     if (!owned) return;
@@ -378,6 +396,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     const mine = ++interaction, flight = ++operation.flight;
     const origin = capture(item.id, action);
     if (operation.item.kind === "release_accepted") origin.completionEventId = operation.item.sourceRef.completionEventId;
+    if (operation.item.kind === "review_requested") origin.resultCompletionEventId = operation.item.sourceRef.completionEventId;
     const path = action === "open" ? "read" : action;
     const current = () => mine === interaction && owns(owned) && isOpen();
     operation.busy = true; paintOperations(); status.textContent = "";
