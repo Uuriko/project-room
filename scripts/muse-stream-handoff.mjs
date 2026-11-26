@@ -267,6 +267,10 @@ function sameRecoveryOffer(first, second) {
     && first.receiverAcknowledgment?.sequence === second.receiverAcknowledgment?.sequence;
 }
 
+function requestNotFound(error) {
+  return error?.status === 404 && error.code === "reply_request_not_found";
+}
+
 export async function recoverMuseHandoff({ client, policy, signal, offers, currentOffer, record,
   graceMs = 6500, now = Date.now, delay = pause }) {
   for await (const offer of offers) {
@@ -280,14 +284,22 @@ export async function recoverMuseHandoff({ client, policy, signal, offers, curre
     try {
       context = await client.replyContextForHint(pending.requestMessageId, { signal });
     } catch (error) {
-      if (!receiverAck || error?.status !== 404 || error.code !== "reply_request_not_found") throw error;
+      if (!receiverAck || !requestNotFound(error)) throw error;
       // A missing read can disagree with an earlier receipt. Repeat only this
       // selected read, then apply the same identity and current-offer checks.
       if (!sameRecoveryOffer(pending, currentOffer())) continue;
       await delay(250, undefined, { signal });
       signal.throwIfAborted();
       if (!sameRecoveryOffer(pending, currentOffer())) continue;
-      context = await client.replyContextForHint(pending.requestMessageId, { signal });
+      try {
+        context = await client.replyContextForHint(pending.requestMessageId, { signal });
+      } catch (retryError) {
+        signal.throwIfAborted();
+        if (!requestNotFound(retryError)) throw retryError;
+        if (!sameRecoveryOffer(pending, currentOffer())) continue;
+        throw Object.assign(new Error("The same acknowledged offer could not be read", { cause: retryError }),
+          { code: "offer_unreadable" });
+      }
     }
     signal.throwIfAborted();
     if (context.roomCreatedEventId !== pending.roomCreatedEventId) throw Error("muse_handoff_identity_changed");

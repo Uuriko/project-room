@@ -84,11 +84,13 @@ test("a prearmed receiver preserves the unresolved offer through rollover and st
   put("receiver-status.json", offer);
   const preload = join(directory, "stub-room.mjs");
   writeFileSync(preload, `
-    import { RoomAgentClient } from ${JSON.stringify(new URL("../client/room-agent.mjs", import.meta.url).href)};
+    import { RoomAgentClient, RoomClientError } from ${JSON.stringify(new URL("../client/room-agent.mjs", import.meta.url).href)};
     import { setTimeout } from "node:timers/promises";
     const read = async () => (${JSON.stringify({ ...context(first, 11), evaluatedThrough: 12 })});
     RoomAgentClient.prototype.replyContext = read;
-    RoomAgentClient.prototype.replyContextForHint = read;
+    RoomAgentClient.prototype.replyContextForHint = process.env.ROOM_FIXTURE_DENY_EXACT === "1"
+      ? async () => { throw new RoomClientError(404, "reply_request_not_found", "Request not found in this Room"); }
+      : read;
     RoomAgentClient.prototype.waitForChange = async (after, { signal }) => setTimeout(60000, null, { signal });
   `);
   const args = ["--import", pathToFileURL(preload).href,
@@ -116,6 +118,17 @@ test("a prearmed receiver preserves the unresolved offer through rollover and st
   assert.deepEqual(stoppedOffer, offer);
   assert.equal(stopped.status, "stopped");
   assert.equal(JSON.parse(readFileSync(join(directory, "stream-checkpoint.json"))).inFlight.openingEventId, pending.openingEventId);
+  const checkpointBeforeRecovery = readFileSync(join(directory, "stream-checkpoint.json"));
+  const unreadable = spawnSync(process.execPath, [...args, "--recover"], {
+    encoding: "utf8", input: connectionInput, timeout: 3000,
+    env: { ...process.env, ROOM_FIXTURE_DENY_EXACT: "1" },
+  });
+  assert.equal(unreadable.status, 1, unreadable.stderr);
+  assert.equal(unreadable.stdout, "");
+  assert.equal(unreadable.stderr.trim(), "offer_unreadable");
+  assert.deepEqual(readFileSync(join(directory, "stream-checkpoint.json")), checkpointBeforeRecovery);
+  assert.deepEqual(status(), { ...stoppedOffer, prearmedReceiver: stopped });
+  assert.ok(!readdirSync(directory).includes("recovery-receipt.json"));
   const recovery = spawnSync(process.execPath, [...args, "--recover"], {
     encoding: "utf8", input: connectionInput, timeout: 3000,
   });
@@ -498,7 +511,7 @@ test("interrupted delivery preserves the receiver’s ACK and still offers the w
   assert.equal(await recover(), undefined);
 });
 
-for (const outcome of ["readable", "missing", "replaced", "aborted", "forbidden", "unacknowledged"]) {
+for (const outcome of ["readable", "missing", "replaced", "aborted", "replaced_during_retry", "aborted_during_retry", "forbidden", "unacknowledged"]) {
   test(`exact interrupted Muse recovery: ${outcome}`, async () => {
     const selected = request("ready", { contextEventId: "ctx-ready", progressState: "acknowledged",
       progressNote: "Receiving runtime read and verified this exact request; model acceptance is separate." });
@@ -522,6 +535,8 @@ for (const outcome of ["readable", "missing", "replaced", "aborted", "forbidden"
         replyContextForHint(id, { signal }) {
           assert.equal(signal, stop.signal);
           reads.push(id);
+          if (reads.length === 2 && outcome === "replaced_during_retry") pending = null;
+          if (reads.length === 2 && outcome === "aborted_during_retry") stop.abort();
           if (outcome !== "readable" || reads.length === 1) throw refusal;
           return context(selected, 15);
         },
@@ -534,14 +549,15 @@ for (const outcome of ["readable", "missing", "replaced", "aborted", "forbidden"
       assert.deepEqual(replay.receiverAcknowledgment, offer.receiverAcknowledgment);
       assert.equal(drafts.length, 1);
     } else {
-      if (outcome === "replaced") assert.equal(await run, undefined);
-      else if (outcome === "aborted") await assert.rejects(run, { name: "AbortError" });
+      if (["replaced", "replaced_during_retry"].includes(outcome)) assert.equal(await run, undefined);
+      else if (["aborted", "aborted_during_retry"].includes(outcome)) await assert.rejects(run, { name: "AbortError" });
+      else if (outcome === "missing") await assert.rejects(run, { code: "offer_unreadable" });
       else await assert.rejects(run, error => error === refusal);
       assert.deepEqual(drafts, []);
     }
-    const expectedReads = ["readable", "missing"].includes(outcome) ? 2 : 1;
+    const expectedReads = ["readable", "missing", "replaced_during_retry", "aborted_during_retry"].includes(outcome) ? 2 : 1;
     assert.deepEqual(reads, Array(expectedReads).fill(offer.requestMessageId));
-    if (outcome !== "replaced") assert.equal(pending, offer);
+    if (!["replaced", "replaced_during_retry"].includes(outcome)) assert.equal(pending, offer);
   });
 }
 

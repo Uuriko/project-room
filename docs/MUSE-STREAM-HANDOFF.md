@@ -242,7 +242,9 @@ conversation, start `--recover` in that conversation before `--stay-armed`.
 Use the same private policy directory and connection for both. Confirm that
 both processes are alive. The recovery process watches the primary's local
 handoff record. After an exact offer, it allows 6.5 seconds for the model to pick up the
-request, then reads that exact request once. It re-delivers an open pointer at
+request, then reads that exact request. If an offer with the original helper
+receipt returns `reply_request_not_found`, recovery checks that the same offer
+is still current and retries its exact read once. It re-delivers an open pointer at
 most once when it is unseen or still carries only the original helper's
 receipt. An ordinary agent acknowledgment, accepted or working progress, or a
 settled request ends recovery. The recovery offer carries the original helper
@@ -254,6 +256,12 @@ receiving turn already acknowledged it, inspect current state before doing
 work. If the write response is lost, look up the original operation before
 acting. Before submitting, read the latest exact answer basis. Room revision
 and terminal checks protect the answer if offers overlap.
+
+If stderr reports `offer_unreadable`, keep the original request and
+checkpoint. Check both existing host task records before re-arming either
+helper. If a task ended, use the existing launch procedure in the same Muse
+conversation with the same saved connection. The error reports the outcome of
+the exact read. Host state comes from the host task records.
 
 The recovery waits on a local file event with a one-time deadline for that
 offer. It uses no scheduled task and starts no second Room subscription.
