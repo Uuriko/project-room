@@ -125,6 +125,96 @@ test("a prearmed receiver preserves the unresolved offer through rollover and st
   assert.deepEqual(replay.receiverAcknowledgment, offer.receiverAcknowledgment);
 });
 
+for (const interruption of ["before_ack", "after_ack"]) {
+  test(`the same prearmed command resumes a saved successor after an exit ${interruption}`, t => {
+    const directory = mkdtempSync(join(realpathSync(tmpdir()), "muse-prearmed-restart-"));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const put = (name, value) => writeFileSync(join(directory, name), JSON.stringify(value), { mode: 0o600 });
+    const read = name => JSON.parse(readFileSync(join(directory, name)));
+    const first = request("first", { status: "answered", contextEventId: "first-basis" });
+    const next = request("next", { contextEventId: "next-basis" });
+    const pending = { requestMessageId: first.id, requesterId: first.requesterId, recipientId: first.recipientId,
+      roomCreatedEventId: "room-birth", openingEventId: first.openingEventId, openingSequence: 11, requestRevision: 0 };
+    put("handoff.json", policy);
+    put("stream-checkpoint.json", { version: 1,
+      binding: [policy.origin, policy.roomId, policy.memberId, policy.requesters, policy.workItems, policy.requests, policy.bootstrapAfter],
+      after: 11, inFlight: pending });
+    const previousOffer = { ...pending, status: "handoff", offeredAt: new Date(0).toISOString() };
+    put("receiver-status.json", previousOffer);
+    const preload = join(directory, "stub-room.mjs");
+    writeFileSync(preload, `
+      import { RoomAgentClient } from ${JSON.stringify(new URL("../client/room-agent.mjs", import.meta.url).href)};
+      import assert from "node:assert/strict";
+      import { existsSync, readFileSync, writeFileSync } from "node:fs";
+      import { fileURLToPath } from "node:url";
+      const ackFile = fileURLToPath(new URL("fixture-ack.json", import.meta.url));
+      const phase = process.env.MUSE_RESTART_FIXTURE_PHASE;
+      const first = ${JSON.stringify({ ...context(first, 11), evaluatedThrough: 15 })};
+      const next = ${JSON.stringify(context(next, 15))};
+      RoomAgentClient.prototype.replyContext = async id => {
+        if (id === first.request.id) {
+          if (phase === "changed_birth") first.roomCreatedEventId = "replacement-room";
+          if (phase === "changed_opening") first.page.items[0].sequence = 12;
+          return first;
+        }
+        assert.equal(id, next.request.id);
+        if (existsSync(ackFile)) {
+          const ack = JSON.parse(readFileSync(ackFile));
+          next.request.contextEventId = "acknowledged-basis";
+          next.request.progressState = "acknowledged";
+          next.request.progressNote = ack.data.note;
+        }
+        return next;
+      };
+      RoomAgentClient.prototype.replyRequests = async () => ({ requests: [next.request], evaluatedThrough: 15 });
+      RoomAgentClient.prototype.command = async command => {
+        assert.equal(command.id, "muse-seen-open-next");
+        assert.equal(command.data.ifUnacknowledgedContextEventId, "next-basis");
+        if (phase === "before_ack") process.exit(73);
+        const duplicate = existsSync(ackFile);
+        if (duplicate) assert.deepEqual(command, JSON.parse(readFileSync(ackFile)));
+        else writeFileSync(ackFile, JSON.stringify(command), { flag: "wx", mode: 0o600 });
+        if (phase === "after_ack") process.exit(73);
+        return { event: { id: "next-ack" }, sequence: 17, duplicate };
+      };
+    `);
+    const args = ["--import", pathToFileURL(preload).href,
+      fileURLToPath(new URL("../scripts/muse-stream-handoff.mjs", import.meta.url)),
+      join(directory, "handoff.json"), "-", "--stay-armed", "--receiver-ack", "--after-settlement=first"];
+    const run = phase => spawnSync(process.execPath, args, {
+      encoding: "utf8", input: JSON.stringify({ ...connection, version: 1, token: "T".repeat(43) }),
+      timeout: 5000, env: { ...process.env, MUSE_RESTART_FIXTURE_PHASE: phase },
+    });
+
+    const interrupted = run(interruption);
+    assert.equal(interrupted.status, 73, interrupted.stderr);
+    assert.equal(interrupted.stdout, "");
+    assert.deepEqual(read("receiver-status.json"), previousOffer);
+    assert.equal(read("stream-checkpoint.json").inFlight.requestMessageId, next.id);
+    const saved = read("stream-checkpoint.json");
+    for (const altered of ["changed_birth", "changed_opening"]) {
+      const refused = run(altered);
+      assert.equal(refused.status, 1);
+      assert.match(refused.stderr, /muse_handoff_identity_changed/);
+      assert.deepEqual(read("stream-checkpoint.json"), saved);
+      assert.deepEqual(read("receiver-status.json"), previousOffer);
+    }
+    const resumed = run("resume");
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const handoff = JSON.parse(resumed.stdout);
+    assert.equal(handoff.requestMessageId, next.id);
+    assert.equal(handoff.replay, true);
+    assert.equal(handoff.receiverAcknowledgment.sequence, 17);
+    assert.equal(handoff.receiverAcknowledgment.duplicate, interruption === "after_ack");
+    assert.equal(read("receiver-status.json").openingEventId, next.openingEventId);
+    assert.equal(read("fixture-ack.json").id, "muse-seen-open-next");
+    const published = run("resume");
+    assert.equal(published.status, 1);
+    assert.match(published.stderr, /muse_successor_offer_already_published/);
+    assert.equal(published.stdout, "");
+  });
+}
+
 test("route check distinguishes requester, work and exact request scope without exposing configuration", t => {
   const directory = mkdtempSync(join(realpathSync(tmpdir()), "muse-route-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

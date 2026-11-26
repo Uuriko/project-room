@@ -85,12 +85,14 @@ async function waitForSettlement({ client, policy, saved, requestId, signal, obs
       || current.roomCreatedEventId !== saved.roomCreatedEventId || request.id !== saved.requestMessageId
       || request.openingEventId !== saved.openingEventId || request.recipientId !== policy.memberId
       || checkMuseRoute(policy, request) !== "matches_scope") throw Error("muse_handoff_identity_changed");
+    if (!integer(current.evaluatedThrough) || current.evaluatedThrough < saved.openingSequence)
+      throw Error("muse_settlement_horizon_missing");
+    const opening = current.page.items.find(item => item.kind === "opened" && item.eventId === saved.openingEventId);
+    if (opening?.sequence !== saved.openingSequence) throw Error("muse_handoff_identity_changed");
     if (["answered", "declined", "cancelled"].includes(request.status)) return;
     if (request.status !== "open") throw Error("muse_settlement_status_unknown");
     // Do not advertise spare capacity or advance the saved cursor here.
     // The queued successor may have opened while this work was still active.
-    if (!integer(current.evaluatedThrough) || current.evaluatedThrough < saved.openingSequence)
-      throw Error("muse_settlement_horizon_missing");
     observation.through = Math.max(observation.through, current.evaluatedThrough);
     for (;;) {
       const change = await client.waitForChange(observation.through, { timeoutMs: 12000, signal })
@@ -102,9 +104,9 @@ async function waitForSettlement({ client, policy, saved, requestId, signal, obs
   }
 }
 
-export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, afterSettlement, settlementObservation = { through: 0 }, onSettlement = () => {}, setWaiting = () => {} }) {
+export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, afterSettlement, settlementObservation = { through: 0 }, onSettlement = () => {}, hasPublishedOffer = () => false, setWaiting = () => {} }) {
   let state = checkpoint;
-  const remember = (after, inFlight = null) => { state = { after, inFlight }; save(state); };
+  const remember = (after, inFlight = null) => { state = { ...state, after, inFlight }; save(state); };
   const offer = async handoff => {
     if (!receiverAck) return handoff;
     const ackStartedAt = new Date().toISOString();
@@ -121,18 +123,29 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
   };
   // A process may stop after saving the pointer and before delivering stdout.
   // Read back the same request before replaying that exact pointer.
+  const resumedSettlement = afterSettlement && state.settledPredecessor?.requestMessageId === afterSettlement;
   if (afterSettlement) {
     setWaiting(false);
-    await waitForSettlement({ client, policy, saved: state.inFlight, requestId: afterSettlement, signal, observation: settlementObservation });
-    remember(state.after);
+    const predecessor = resumedSettlement ? state.settledPredecessor : state.inFlight;
+    await waitForSettlement({ client, policy, saved: predecessor, requestId: afterSettlement, signal, observation: settlementObservation });
+    if (resumedSettlement) {
+      if (state.inFlight && state.inFlight.roomCreatedEventId !== predecessor.roomCreatedEventId)
+        throw Error("muse_handoff_identity_changed");
+    } else {
+      const { requestMessageId, roomCreatedEventId, openingEventId, openingSequence } = predecessor;
+      state = { ...state, settledPredecessor: { requestMessageId, roomCreatedEventId, openingEventId, openingSequence } };
+      remember(state.after);
+    }
     onSettlement();
-  } else if (state.inFlight) {
+  }
+  if (state.inFlight) {
     const saved = state.inFlight;
     const current = await client.replyContext(saved.requestMessageId, { view: "compact", signal });
     if (current.roomCreatedEventId !== saved.roomCreatedEventId || current.request.openingEventId !== saved.openingEventId)
       throw Error("muse_handoff_identity_changed");
     const recovered = pointer(current, { id: saved.requestMessageId, openingEventId: saved.openingEventId }, policy, saved.openingSequence - 1, receiverAck);
     if (recovered) {
+      if (resumedSettlement && hasPublishedOffer(saved)) throw Error("muse_successor_offer_already_published");
       // Replay our own recorded acknowledgment with its original inspected context.
       if (recovered.receiverSeen && validId(saved.contextEventId)) recovered.contextEventId = saved.contextEventId;
       // Checkpoint a changed revision or exact inspected context before writing,
@@ -200,12 +213,15 @@ function loadCheckpoint(file, policy) {
     value = { version: 1, binding, after: policy.bootstrapAfter, inFlight: null };
   }
   if (!value || Array.isArray(value)) throw Error("invalid_muse_handoff_checkpoint");
-  const p = value.inFlight;
+  const p = value.inFlight, settled = value.settledPredecessor;
+  if (settled !== undefined && (!settled || !integer(settled.openingSequence) || settled.openingSequence > value.after
+    || ![settled.requestMessageId, settled.roomCreatedEventId, settled.openingEventId].every(validId)))
+    throw Error("invalid_muse_handoff_checkpoint");
   if (value.version !== 1 || JSON.stringify(value.binding) !== JSON.stringify(binding) || !integer(value.after)
     || p !== null && (!p || p.openingSequence !== value.after || !integer(p.requestRevision)
       || ![p.requestMessageId, p.requesterId, p.recipientId, p.openingEventId, p.roomCreatedEventId].every(validId)))
     throw Error("invalid_muse_handoff_checkpoint");
-  return { checkpoint: { after: value.after, inFlight: p },
+  return { checkpoint: { after: value.after, inFlight: p, ...(settled === undefined ? {} : { settledPredecessor: settled }) },
     save: state => atomicPrivateJson(file, { version: 1, binding, ...state }) };
 }
 
@@ -276,7 +292,7 @@ function readOptionalPrivate(file) {
 
 function offerMatchesCheckpoint(status, pending) {
   return status?.status === "handoff" && Number.isFinite(Date.parse(status.offeredAt))
-    && pending && pending.openingEventId === status.openingEventId
+    && pending && pending.roomCreatedEventId === status.roomCreatedEventId && pending.openingEventId === status.openingEventId
     && pending.requestMessageId === status.requestMessageId && pending.openingSequence === status.openingSequence;
 }
 
@@ -361,7 +377,9 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
         onRollover: facts => recordReceiverStatus({ status: "rolled_over", ...facts }),
         run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
           signal, receiverAck, advertiseScope, afterSettlement: pendingSettlement, settlementObservation,
-          onSettlement: () => { pendingSettlement = undefined; }, wait: mode !== "--once" }) });
+          onSettlement: () => { pendingSettlement = undefined; },
+          hasPublishedOffer: pending => offerMatchesCheckpoint(readOptionalPrivate(statusFile), pending),
+          wait: mode !== "--once" }) });
     if (mode === "--stay-armed") {
       if (result.status === "handoff") result.offeredAt = new Date().toISOString();
       recordReceiverStatus(result);

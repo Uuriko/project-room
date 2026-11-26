@@ -121,6 +121,14 @@ The outer handoff retains its original time and receipt so `--recover` can
 recheck the exact open request. Compare the nested status with the host's
 current background-task state before treating the successor as running.
 
+If the host confirms that the prearmed helper exited before publishing its
+next handoff, it can restart the exact approved command on the same private
+checkpoint. The helper verifies the saved predecessor's terminal state,
+then resumes any still-eligible unpublished successor through its original
+acknowledgment operation. When the successor's offer was already published,
+use the existing interruption recovery for that offer. A saved checkpoint or
+duplicate acknowledgment alone provides no evidence that a model turn ran.
+
 If the host has a working stream listener of its own, let that listener
 invoke the helper with `--once` after a matching event. The helper verifies
 the open scope and returns `handoff` or `no_work` without opening another
