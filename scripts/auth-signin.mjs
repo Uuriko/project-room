@@ -42,3 +42,12 @@ export async function signInFixture(page, accessKey, { returnTo = page.url() } =
   await page.locator("#main").waitFor({ state: "visible" });
   return session;
 }
+
+// Composer fixtures use the same visible Conversation action as a member.
+export async function openConversationAfterSignIn(page) {
+  const conversation = page.locator("#updates-close");
+  if (await conversation.isVisible()) {
+    await conversation.click();
+    await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  }
+}

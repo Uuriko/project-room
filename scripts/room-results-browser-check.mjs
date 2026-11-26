@@ -8,7 +8,7 @@ import { chromium } from "playwright";
 import { textVersion } from "../server/text-results.mjs";
 import { createResultsFixture } from "./results-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { signInFixture } from "./auth-signin.mjs";
+import { openConversationAfterSignIn, signInFixture } from "./auth-signin.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 async function openDirectConversation(page, memberId) {
@@ -59,6 +59,7 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   });
   await p.goto(origin); await signInFixture(p, f.keys[guest ? "guest" : "owner"]);
   await p.locator("#main").waitFor({ state: "visible" });
+  await openConversationAfterSignIn(p);
   p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/") && !new URL(request.url()).pathname.endsWith("/typing")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
   const row = id => p.locator(`#room-results-list [data-result-work-id="${id}"]`);
@@ -458,6 +459,7 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   await p.addInitScript(() => document.addEventListener("click", () => { void window.recordTransportJourneyClick(); }));
   const errors = []; p.on("pageerror", error => errors.push(error.message));
   await p.goto(f.origin); await signInFixture(p, f.ownerKey);
+  await openConversationAfterSignIn(p);
   await f.connectAgent();
   await p.locator(`[data-member-record-id="${f.connection.memberId}"]`).waitFor({ state: "attached" });
   await openComposerOptions(p); await p.locator("#new-work-button").click();
