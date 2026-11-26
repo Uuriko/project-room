@@ -349,16 +349,51 @@ test(`${representation} a denied document read leads to one private request and 
   assert.equal(after.replyRequestContext.latestAnswer, undefined);
   const cachedBeforeAnswer = await cli(["work", workItemId]);
 
+  const history = async ({ checkpoint } = {}) => {
+    const items = [];
+    let cursor;
+    do {
+      const { page } = await rpc("room_request_history", { direction: "outgoing", limit: 1,
+        ...(cursor ? { cursor } : checkpoint ? { checkpoint } : {}) });
+      items.push(...page.items);
+      cursor = page.nextCursor;
+      if (!cursor) return { items, checkpoint: page.completedCheckpoint };
+    } while (cursor);
+  };
+  const beforeOffline = await history();
+  assert.ok(beforeOffline.checkpoint);
+  send("offline-unrelated-note", T.MESSAGE_POSTED, { messageId: "offline-unrelated-note", body: "Unrelated note" });
   const responseBasis = exchange.current.answerBasis;
   const replacement = new URL("/shared/revision/7", url).href;
-  send("share-accessible-reference", T.MESSAGE_POSTED, {
+  const answer = send("share-accessible-reference", T.MESSAGE_POSTED, {
     messageId: "accessible-document", body: `Use the accessible copy of revision 7 at ${replacement}`,
     replyToId: sent.requestMessageId, responseToRequestId: sent.requestMessageId,
     responseOutcome: "answered", expectedRequestRevision: responseBasis.expectedRequestRevision,
     contextEventId: responseBasis.contextEventId, contextSequence: responseBasis.contextSequence,
     toMemberId: producer.identityId, workItemId
   });
+  assert.deepEqual(answer.wakeDelivery, [{ memberId: producer.identityId, status: "queued" }]);
+  const authorization = { Authorization: `Bearer ${producer.secret}` };
+  const hostId = "returning-coworker";
+  const registration = await fetch(`${origin}/api/agent-heartbeats`, { method: "POST",
+    headers: { ...authorization, "Content-Type": "application/json" },
+    body: JSON.stringify({ hostId, mode: "pull-only", listenerLease: { roomId: "commons" } })
+  });
+  assert.equal(registration.status, 200);
+  assert.equal((await registration.json()).listener.acquired, true);
+  const poll = await fetch(`${origin}/api/agent-wakes/poll?hostId=${hostId}&roomId=commons&waitMs=0`, { headers: authorization });
+  assert.equal(poll.status, 200);
+  const { pendingWakes } = await poll.json();
+  const returnedWakes = pendingWakes.filter(wake => wake.messageId === "accessible-document");
+  assert.deepEqual(returnedWakes.map(wake => wake.kind), ["dm"]);
   const answeredThrough = store.headSequence("commons");
+  const replayed = await history({ checkpoint: beforeOffline.checkpoint });
+  assert.deepEqual(replayed.items.map(row => [row.kind, row.requestMessageId, row.workItemId]),
+    [["answered", sent.requestMessageId, workItemId]]);
+  assert.deepEqual((await history({ checkpoint: replayed.checkpoint })).items, []);
+  const recovered = await rpc("room_read_request", { requestMessageId: replayed.items[0].requestMessageId });
+  assert.equal(recovered.request.responseMessageId, "accessible-document");
+  assert.equal(recovered.current.answerBasis, null);
   const { stdout } = await promisify(execFile)(process.execPath,
     [fileURLToPath(new URL("../bin/room.mjs", import.meta.url)), "--connection", "producer", "work", workItemId], { cwd: reviewerProject, env });
   const reopened = JSON.parse(stdout);

@@ -67,6 +67,34 @@ test('authenticated modern Events subscribe -> atomic permitted wake -> signed c
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
   assert.equal((await f.rpc('events/list')).status, 401);
 });
+test('a private answer wakes its subscribed requester with the exact settled request and no acknowledgment action', async t => {
+  const f = await fixture(t, { normalized: true });
+  const call = async (name, args) => {
+    const response = await f.rpc('tools/call', { name, arguments: { roomId: 'commons', ...args } });
+    assert.notEqual(response.result?.isError, true, JSON.stringify(response));
+    assert.ok(response.result?.structuredContent, JSON.stringify(response));
+    return response.result.structuredContent;
+  };
+  const opening = await call('room_request_reply', { requestId: 'request-document-copy', toMemberId: 'owner', body: 'Please share an accessible reference.' });
+  assert.ok((await f.subscribe()).result.id);
+  const answer = { id: 'private-replacement', type: 'message.posted', data: {
+    messageId: 'private-replacement', body: 'The new reference is ready.', replyToId: opening.requestMessageId,
+    responseToRequestId: opening.requestMessageId, responseOutcome: 'answered', expectedRequestRevision: 0,
+    contextEventId: opening.eventId, contextSequence: opening.sequence, toMemberId: f.grant.member_id, workItemId: null
+  } };
+  f.store.command(f.owner, 'commons', answer);
+  assert.equal(f.store.command(f.owner, 'commons', answer).duplicate, true);
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 1);
+  const data = JSON.parse(f.deliveries[0].body).data;
+  assert.deepEqual(data, { roomId: 'commons', memberId: f.grant.member_id, messageId: 'private-replacement',
+    requestId: opening.requestMessageId,
+    nextRead: { tool: 'room_read_request', arguments: { roomId: 'commons', requestMessageId: opening.requestMessageId, view: 'compact' } } });
+  const exchange = await call(data.nextRead.tool, data.nextRead.arguments);
+  assert.equal(exchange.request.status, 'answered');
+  assert.equal(exchange.request.responseMessageId, 'private-replacement');
+  assert.equal(exchange.current.answerBasis, null);
+});
 for (const normalized of [false, true]) test(`native request wake carries the exact read pointer and reconnect recovers earlier requests (${normalized ? 'normalized' : 'legacy'})`, async t => {
   const f = await fixture(t, { normalized });
   const call = async (name, args = {}) => {

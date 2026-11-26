@@ -7864,7 +7864,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           && (!command.data.toMemberId || command.data.toMemberId === request.recipientId));
         const formal = requestMode === "open"
           ? { id: command.data.messageId, recipientId: command.data.toMemberId, opening: true }
-          : clarified ? { id: clarified.id, recipientId: clarified.recipientId, opening: false } : null;
+          : requestMode === "respond"
+            ? { id: command.data.responseToRequestId, recipientId: command.data.toMemberId, opening: false }
+            : clarified ? { id: clarified.id, recipientId: clarified.recipientId, opening: false } : null;
         wakeDelivery = this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id, formal);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
         this.humanPush.notifyPosted({
@@ -8204,7 +8206,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         openingContextEventId: addressedRequest?.opening ? eventId : undefined });
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
-      // Formal-request no-host fallback, addressee only. Existing connected
+      // Formal exchange no-host fallback, addressee only. Existing connected
       // delivery keeps its original kind (wakeForAgent / native emit / push
       // doorbell are unchanged). The fallback also uses a kind current
       // receivers already accept (dm or mention), never a new "ask" kind:
