@@ -33,6 +33,17 @@ test('public ACP archive contains only declared source inputs, regardless of loc
   assert.match(manifest.assets['scripts/build-room-acp-pack.mjs'], /^sha256:/);
 });
 
+test('checked-in public ACP archive matches the reviewed sources', () => {
+  const archive = join(root, 'room-acp.tgz');
+  const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n').sort();
+  assert.deepEqual(entries, roomAcpInputs.map(path => `package/${path}`).sort());
+  for (const path of roomAcpInputs) {
+    const archived = execFileSync('tar', ['-xOf', archive, `package/${path}`]);
+    assert.ok(archived.equals(readFileSync(join(root, 'room-acp', path))),
+      `room-acp.tgz differs at ${path}. Rebuild with node scripts/build-room-acp-pack.mjs.`);
+  }
+});
+
 test('literal module closure detects whitespace, dollar and escaped paths in static and dynamic imports', () => {
   for (const source of [
     'import "./missing part.mjs";', 'import { x } from "./missing$part.mjs";',
