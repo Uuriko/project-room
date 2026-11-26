@@ -391,6 +391,7 @@ let choosingComposerRecipient = false;
 // A deep link resolves its selected message and bounded reply ancestry.
 // Navigation and identity fences prevent a late response stealing the view.
 let pendingHashReveal = null;
+let selectedAnswerContext = null;
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let assistantDraft = null;
 let requestMode = null, requestReading = false, requestEpoch = 0;
@@ -650,7 +651,7 @@ const client = new RoomClient({
     displayNames = createMemberDisplayNames({});
     partialWorkSnapshot = false; inspectedWorkRecord = null; inspectedWorkReplacementId = null;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
-    pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
+    pendingHashReveal = null; selectedAnswerContext = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset(); workspacePreviewsUI?.reset();
     // JDOT-COH-NAV end
@@ -2871,9 +2872,37 @@ return `<p class="form-hint"><a class="source-link draft-state" href="${esc(work
 // Every action keeps its
 // data-message-action wiring, so the work loop is untouched.
 function receivedFormalAnswer(message) {
-  const request = state.replyRequests?.[message.replyToId];
+  const selected = selectedAnswerContext;
+  const request = state.replyRequests?.[message.replyToId]
+    ?? (selected?.messageId === message.id && selected.isCurrent() ? selected.request : null);
   return !message.deletedAt && request?.status === "answered"
     && request.requesterId === session.member.id && request.responseMessageId === message.id;
+}
+async function readSelectedAnswerContext(message) {
+  if (!partialWorkSnapshot || !message.replyToId || message.deletedAt || message.toMemberId !== session.member.id
+    || state.replyRequests?.[message.replyToId]) return;
+  if (selectedAnswerContext?.messageId === message.id && selectedAnswerContext.isCurrent()) return;
+
+  const identity = session, generation = client.generation, hash = location.hash, view = conversationViewKey();
+  const read = {
+    messageId: message.id, request: null,
+    isCurrent: () => session === identity && client.generation === generation
+      && location.hash === hash && conversationViewKey() === view,
+  };
+  selectedAnswerContext = read;
+  try {
+    const { request, page } = await client.replyContext(message.replyToId);
+    if (selectedAnswerContext !== read || !read.isCurrent() || request.status !== "answered"
+      || request.requesterId !== identity.member.id || request.recipientId !== message.authorId
+      || request.responseMessageId !== message.id || !page.items.some(row => row.kind === "answered"
+        && row.eventId === request.terminalEventId && row.message?.id === message.id
+        && row.message.toMemberId === identity.member.id && typeof row.message.body === "string")) return;
+    read.request = request;
+    renderMessages();
+  } catch {
+    // An ordinary directed reply can have no formal request.
+    if (selectedAnswerContext === read) selectedAnswerContext = null;
+  }
 }
 function messageLinksHTML(m, { linked, moderation, count, muted }) {
   if (muted) return `<div class="message-links">${moderation}</div>`;
@@ -3523,6 +3552,7 @@ function revealMessage(id, openThread = false) {
   // inside the conversation without moving the surrounding page unnecessarily.
   const list = $("#message-list");
   if (row && row.offsetHeight > list.clientHeight) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+  if (row && location.hash === recordHref("message", id)) void readSelectedAnswerContext(message);
   // JDOT-COH-NAV begin
   syncWorkReturnControl();
   // JDOT-COH-NAV end

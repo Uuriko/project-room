@@ -3,10 +3,11 @@
 // appear live (12650), and the composer grows with its text (12680).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
+import { createRoomFloodGuard } from "../server/room-flood-guard.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
@@ -359,13 +360,32 @@ for (const storage of ["legacy", "normalized"]) {
     const recipient = createRoomClient({ origin, roomId, token: owner });
     assert.deepEqual(await recipient.files([messageId]), []);
 
+    if (storage === "normalized") {
+      store.roomFlood = createRoomFloodGuard({ now: () => store.now(), capacity: 300 });
+      for (let index = 0; index < 50; index++) send(writer, T.MESSAGE_POSTED, {
+        messageId: `new-direct-${index}`, toMemberId: ownerId, body: `New direct note ${index}`,
+      });
+      for (let index = 0; index < 205; index++) send(owner, T.MESSAGE_POSTED, {
+        messageId: `new-public-${index}`, body: `Unrelated public update ${index}`,
+      });
+    }
+
     const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
     t.after(() => browser.close());
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
+    const reads = [];
+    page.on("response", response => reads.push({ url: new URL(response.url()), status: response.status() }));
     await page.goto(`${origin}/?room=${roomId}#pr-record/message/${messageId}`);
     await signInFixture(page, owner);
     const row = page.locator(`[data-message-record-id="${messageId}"]`);
     await row.getByText("I finished reviewing the project brief.", { exact: true }).waitFor();
+    if (storage === "normalized") {
+      for (const id of [messageId, "question"]) {
+        assert.ok(reads.some(({ url, status }) => url.pathname.endsWith("/conversation") && status === 200
+          && url.searchParams.get("messageId") === id), `read exact out-of-window record ${id}`);
+      }
+    }
+
     await page.clock.install();
     await page.clock.fastForward(6000);
     assert.equal(await row.locator('[data-download-file="brief-file"]').count(), 0);
@@ -378,8 +398,12 @@ for (const storage of ["legacy", "normalized"]) {
     const promptCheckCount = await promptCheck.count();
     const menu = row.locator(".message-more summary");
     const checkFiles = row.getByRole("button", { name: "Check files on this answer", exact: true });
-    const checkSelectedFiles = async () => {
+    const checkSelectedFiles = async (captureMenu = false) => {
+      await row.locator('[data-message-action="check-answer-files"]').waitFor({ state: "attached", timeout: 3500 });
       await menu.press("Enter");
+      if (captureMenu && process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT && storage === "normalized") {
+        await page.screenshot({ path: process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT + "-menu.png" });
+      }
       const request = page.waitForRequest(value => {
         const url = new URL(value.url());
         return url.pathname.endsWith("/files") && url.searchParams.getAll("messageId").includes(messageId);
@@ -387,7 +411,7 @@ for (const storage of ["legacy", "normalized"]) {
       await checkFiles.press("Enter", { timeout: 2500 });
       return request;
     };
-    const emptyRead = await checkSelectedFiles();
+    const emptyRead = await checkSelectedFiles(true);
     if (storage === "legacy") assert.deepEqual(new URL(emptyRead.url()).searchParams.getAll("messageId"), [messageId]);
     await row.getByRole("status").getByText("No files on this answer.", { exact: true }).waitFor();
     assert.equal(await menu.evaluate(node => node === document.activeElement), true);
@@ -433,6 +457,27 @@ for (const storage of ["legacy", "normalized"]) {
     assert.equal(await row.getByText("I finished reviewing the project brief.", { exact: true }).count(), 1);
     const download = page.waitForEvent("download");
     await file.press("Enter");
-    assert.equal((await download).suggestedFilename(), "brief.md");
+    const downloaded = await download;
+    assert.equal(downloaded.suggestedFilename(), "brief.md");
+    assert.deepEqual(readFileSync(await downloaded.path()), content);
+    assert.equal(reads.some(({ url }) => url.pathname.endsWith("/search") || url.pathname.endsWith("/conversation") && url.searchParams.has("cursor")), false);
+    if (storage === "normalized") {
+      assert.ok(reads.some(({ url, status }) => url.pathname.endsWith("/reply-context") && status === 200
+        && url.searchParams.get("requestMessageId") === "question"));
+      const bystander = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
+      const observerReads = [];
+      bystander.on("request", request => observerReads.push(new URL(request.url())));
+      await bystander.goto(`${origin}/?room=${roomId}#pr-record/message/${messageId}`);
+      const denied = bystander.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname.endsWith("/conversation") && url.searchParams.get("messageId") === messageId;
+      });
+      await signInFixture(bystander, observer);
+      assert.equal((await denied).status(), 404);
+      await bystander.getByText("That source is no longer available in this room.", { exact: true }).waitFor({ timeout: 3500 });
+      assert.equal(await bystander.getByText("I finished reviewing the project brief.", { exact: true }).count(), 0);
+      assert.equal(await bystander.getByText("brief.md", { exact: true }).count(), 0);
+      assert.equal(observerReads.some(url => url.pathname.endsWith("/reply-context") || url.searchParams.getAll("messageId").includes(messageId) && url.pathname.endsWith("/files")), false);
+    }
   });
 }
