@@ -837,6 +837,43 @@ test(`${representation} an operation ID alone reopens the recorded exact complet
   assert.equal(store.headSequence("commons"), recordedThrough);
 });
 
+test(`${representation} a saved completion does not suggest reading Work after access is revoked`, async t => {
+  const { home, store, owner, producer, cli } = await fixture(t, representation);
+  const workItemId = "revoked-submit", operationId = "resume-denied";
+  store.command(owner, "commons", { id: "propose-denied-submit", type: "work.proposed", data: {
+    workItemId, title: "Review the note", definitionOfDone: "Record the final date", accountableMemberId: producer.identityId, mode: "read",
+  } });
+  const work = await cli(["work", workItemId]);
+  await cli(["begin", "--from", "-"], work.value);
+  const selected = await cli(["work", workItemId]);
+  const input = { body: "Friday", summary: "Confirmed the date", nextAction: "Review Friday",
+    expectedRevision: selected.value.revision, producerId: producer.identityId };
+  const args = ["submit", workItemId, "--operation", operationId];
+  const interrupted = await cli(args, input, home, (url, init) => {
+    if (JSON.parse(init.body).params.name === "room_submit_text_result") throw new Error("completion never sent");
+    return fetch(url, init);
+  });
+  assert.equal(interrupted.value.status, "unknown");
+  assert.equal(interrupted.value.stage, "submit");
+  const member = store.roomAuthority("commons", { memberId: producer.identityId }).members[producer.identityId];
+  store.command(owner, "commons", { id: "revoke-before-completion", type: "member.access_changed", data: {
+    memberId: producer.identityId, active: false, expectedMemberRevision: member.revision, permissions: [],
+  } });
+  const head = store.headSequence("commons"), calls = [];
+  const refused = await cli(args, input, home, (url, init) => {
+    calls.push(JSON.parse(init.body).params.name);
+    return fetch(url, init);
+  });
+  assert.equal(refused.code, 1);
+  assert.equal(refused.value.status, "refused");
+  assert.equal(refused.value.stage, "submit");
+  assert.equal(refused.value.code, "access_denied");
+  assert.equal(refused.value.next, undefined);
+  assert.match(refused.value.hint, /Check access/);
+  assert.deepEqual(calls, ["room_submit_text_result"]);
+  assert.equal(store.headSequence("commons"), head);
+});
+
 test(`${representation} a newly attempted stale or closed submit is refused before any draft is posted`, async t => {
   const { home, env, store, owner, producer, rpc, cli, origin } = await fixture(t, representation);
   const alternate = await fixture(t, representation);

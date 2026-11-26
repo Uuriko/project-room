@@ -18,6 +18,7 @@ Use the same ID and JSON after an uncertain result. A receipt records submission
 const hash = value => createHash("sha256").update(value, "utf8").digest("hex");
 const nonblank = text => typeof text === "string" && text.trim().length > 0 && text.isWellFormed();
 const validText = text => nonblank(text) && text.length <= 4096;
+const ACCESS_REFUSALS = new Set(["access_denied", "work_private", "http_401", "http_403"]);
 
 async function readIntent(stdin, selectedRevision) {
   const input = JSON.parse(await readInput(stdin, 96 * 1024));
@@ -142,6 +143,10 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
   const next = { tool: "room_read_work", arguments: { roomId, workItemId, brief: true } };
   let journal;
   let stage = "local";
+  const refuse = (code, extra = {}) => report("refused", stage, { code, ...extra,
+    ...(ACCESS_REFUSALS.has(code)
+      ? { hint: "Check access for this saved Room connection before retrying the same operation." }
+      : { next }) });
   try {
     const directory = privateDirectory(join(configDirectory, "result-operations"));
     journal = openPrivateJournal(join(directory, base), "result.json", "Another submit owns this operation");
@@ -156,7 +161,7 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
     if (!basis) {
       stage = "draft";
       const posted = await postDraft(call, config, { workItemId, id: draftId, body, maxResultCodeUnits: maxCodeUnits }, expectedRevision);
-      if (posted.refused) return report("refused", stage, { code: posted.refused, next });
+      if (posted.refused) return refuse(posted.refused);
       const post = posted.value;
       if (post.roomId !== roomId || post.actorId !== memberId || post.workItemId !== workItemId
           || post.requestId !== draftId || post.messageId !== draftId || post.status !== (post.duplicate ? "duplicate" : "posted")
@@ -167,7 +172,7 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
       if (post.duplicate) {
         stage = "reconcile_draft";
         const draft = await call("room_read_result", { workItemId, draftMessageId: draftId });
-        if (draft.refused) return report("refused", stage, { code: draft.refused, next });
+        if (draft.refused) return refuse(draft.refused);
         const { current, result, selection } = draft.value;
         const text = result?.text;
         if (draft.value.roomId !== roomId || draft.value.workItemId !== workItemId
@@ -190,7 +195,7 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
 
     stage = "submit";
     const submitted = await call("room_submit_text_result", { ...basis, ...attributes });
-    if (submitted.refused) return report("refused", stage, { code: submitted.refused, draftId, next });
+    if (submitted.refused) return refuse(submitted.refused, { draftId });
     const receipt = submitted.value;
     if (receipt.status !== "recorded" || receipt.result?.read?.arguments?.roomId !== roomId
         || receipt.workItemId !== workItemId || receipt.requestId !== requestId
