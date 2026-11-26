@@ -437,6 +437,16 @@ for (const representation of [null, 'normalized-current-v1']) test(`selected del
   assert.equal(show().recipientProgressAt,null);
   assert.equal(show().nextAction,'check_recipient_progress');
   assert.equal(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery.nextAction,undefined);
+  const secret=receiver.secret;
+  store.wakeQueue.pause(secret,'commons',{requestId:'private-provider-pause',reason:'provider_capacity_before_start:private-marker'});
+  assert.equal(show().pickupPause.state,'capacity_blocked');
+  assert.ok(Number.isSafeInteger(show().pickupPause.since));
+  assert.equal(show().nextAction,'wait_for_receiver_resume');
+  assert.equal(JSON.stringify(show()).includes('private-marker'),false);
+  assert.equal(store.replyRequests.selected(keys.reader,'commons','question').current.wakeDelivery.pickupPause,undefined);
+  store.wakeQueue.resume(secret,'commons',{requestId:'private-provider-resume'});
+  assert.equal(show().pickupPause,undefined);
+  assert.equal(show().nextAction,'check_recipient_progress');
   const progress=event({roomId:'commons',actorId:'reader',type:'reply_request.progressed',data:{requestMessageId:'question',expectedRequestRevision:0,progress:'acknowledged'}});
   store.command(keys.reader,'commons',{id:progress.id,type:progress.type,data:progress.data});
   assert.ok(Date.parse(show().recipientProgressAt));

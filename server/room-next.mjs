@@ -240,10 +240,10 @@ function boundedPage(roomId, source, getPage) {
 
 // Check the four newest completion events by the existing room/type index.
 // Only a still-current Room-wide result can become a shared investigation.
-function recentRoomResult(store, roomId) {
+export function recentRoomResult(store, roomId, after = 0) {
   const rows = store.db.prepare(`SELECT id, json_extract(body, '$.data.workItemId') AS workItemId
-    FROM events WHERE room_id=? AND json_extract(body, '$.type')='work.completed'
-    ORDER BY rowid DESC LIMIT 4`).all(roomId);
+    FROM events WHERE room_id=? AND json_extract(body, '$.type')='work.completed' AND sequence>?
+    ORDER BY rowid DESC LIMIT 4`).all(roomId, after);
   const restricted = store.privateWorkParties(roomId, { workIds: rows.map(row => row.workItemId) });
   for (const row of rows) {
     if (restricted.has(row.workItemId)) continue;

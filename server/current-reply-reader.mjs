@@ -1,3 +1,4 @@
+import { reportsCapacityStop } from "./wake-queue.mjs";
 import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
 import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
 import {validId} from '../src/events.js';
@@ -78,9 +79,15 @@ export function selectedRequestWakeDelivery(store, { roomId, request, viewerId }
   const pull = retainedPullStatus(store.db, roomId, request);
   const recipientProgressAt = request.acknowledgedAt ?? null;
   const value = { webhook, pull, hostEligibility: "unknown", recipientProgressAt };
-  if (request.status === "open" && viewerId === request.requesterId && !recipientProgressAt) {
-    value.nextAction = webhook === "queued" || pull === "queued" ? "check_delivery"
-      : webhook === "delivered" || pull === "settled" ? "check_recipient_progress" : "check_receiver_connection";
+  if (request.status === "open" && viewerId === request.requesterId) {
+    const pause = store.wakeQueue.pauseStatus(roomId, request.recipientId);
+    if (pause) {
+      value.pickupPause = { state: reportsCapacityStop(pause.reason) ? "capacity_blocked" : "paused", since: pause.pausedAt };
+      if (!recipientProgressAt) value.nextAction = "wait_for_receiver_resume";
+    } else if (!recipientProgressAt) {
+      value.nextAction = webhook === "queued" || pull === "queued" ? "check_delivery"
+        : webhook === "delivered" || pull === "settled" ? "check_recipient_progress" : "check_receiver_connection";
+    }
   }
   return value;
 }

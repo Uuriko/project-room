@@ -15,6 +15,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
+import { textVersion } from "../server/text-results.mjs";
 
 async function checkScopedInvestigation(t, firstLine) {
   const f = createAcceptanceFixture(), roomId = "commons", workItemId = "qa-work", recipientId = "pickup-reviewer";
@@ -450,7 +451,7 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     const primary = store.identities.create("Primary QA");
     const alternate = store.identities.create("Alternate QA");
     linkWithProof(store, owner, roomId, primary, { memberId: recipientId, permissions: ["accept_work"] });
-    linkWithProof(store, owner, roomId, alternate, { memberId: "alternate", permissions: ["accept_work"] });
+    linkWithProof(store, owner, roomId, alternate, { memberId: "alternate", permissions: ["accept_work", "complete_work"] });
     store.command(owner, roomId, { id: "capacity-work", type: "work.proposed", data: {
       workItemId, title: "Review capacity handoff", definitionOfDone: "Return source evidence.",
       accountableMemberId: requesterId, mode: "read"
@@ -481,6 +482,19 @@ for (const representation of [undefined, "normalized-current-v1"]) {
       return response;
     };
     const capacityChange = async (action, requestId, reason) => {
+      if (representation) {
+        const response = await fetch(origin + "/mcp", {
+          method: "POST", headers: { Authorization: "Bearer " + primary.secret, "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: requestId, method: "tools/call", params: {
+            name: "wake_" + action, arguments: { roomId, requestId, ...(reason === undefined ? {} : { reason }) }
+          } })
+        });
+        const rpc = await response.json();
+        assert.equal(response.status, 200);
+        assert.ok(!rpc.error && !rpc.result?.isError, JSON.stringify(rpc));
+        assert.equal(rpc.result.structuredContent.receipt.state, action === "pause" ? "paused" : "active");
+        return;
+      }
       const response = await fetch(`${origin}/api/rooms/${roomId}/agent-pause`, {
         method: "POST", headers: { Authorization: "Bearer " + primary.secret, "Content-Type": "application/json" },
         body: JSON.stringify({ action, requestId, memberId: recipientId, reason })
@@ -550,6 +564,47 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     await setImmediate();
     assert.equal(receipt("capacity-restored").eventId, recoveredEvent);
     assert.equal(receipt("capacity-alternate").eventId, fallbackEvent);
+    const currentRefills = () => store.replyRequests.list(owner, roomId, { direction: "outgoing", status: "open" })
+      .requests.filter(item => item.recipientId === recipientId);
+    const settle = requestId => {
+      const exact = store.replyRequests.selected(primary.secret, roomId, requestId);
+      const { tool, arguments: { roomId: _roomId, ...args } } = exact.responseActions.find(action =>
+        action.arguments.responseOutcome === "answered");
+      store.command(primary.secret, roomId, buildReplyCommand({ roomId, memberId: recipientId }, tool, {
+        ...args, requestId: randomUUID(), body: "Checked the source. No new task needed."
+      }));
+    };
+    const evidenceWork = "new-room-evidence";
+    const send = (token, type, data) => store.command(token, roomId, { id: randomUUID(), type, data });
+    send(owner, "work.proposed", { workItemId: evidenceWork, title: "Fresh setup observation",
+      definitionOfDone: "Reproduce the public setup", accountableMemberId: "alternate", mode: "read" });
+    send(alternate.secret, "work.accepted", { workItemId: evidenceWork, expectedRevision: 0 });
+    send(alternate.secret, "work.started", { workItemId: evidenceWork, expectedRevision: 1 });
+    const resultText = "Verified the updated public example.";
+    const message = send(alternate.secret, "message.posted", { messageId: "public-evidence-text", body: resultText, workItemId: evidenceWork });
+    const completion = send(alternate.secret, "work.completed", { workItemId: evidenceWork, expectedRevision: 2,
+      evidenceKind: "room_text", evidenceMessageId: "public-evidence-text", evidenceMessageEventId: message.event.id,
+      evidenceVersion: textVersion(resultText), previousCompletionEventId: null, producerId: "alternate",
+      summary: "Verified", nextAction: "None", checksClaimed: ["setup"] });
+    await setImmediate();
+    assert.deepEqual(currentRefills().map(item => item.id), [fresh.data.messageId], "pending work wins over new evidence");
+    settle(fresh.data.messageId);
+    await setImmediate();
+    if (representation) {
+      const [followup] = currentRefills();
+      assert.equal(currentRefills().length, 1);
+      const exact = store.replyRequests.selected(primary.secret, roomId, followup.id, { view: "compact" });
+      assert.ok(exact.page.items[0].message.body.includes(completion.event.id));
+      stop(); stop = start();
+      await connect(primary.secret);
+      await setImmediate();
+      assert.deepEqual(currentRefills().map(item => item.id), [followup.id], "reconnect and restart preserve the exact offer");
+      settle(followup.id);
+    }
+    send(owner, "message.posted", { messageId: "unrelated-conversation", body: "Unrelated discussion" });
+    await setImmediate();
+    assert.equal(currentRefills().length, 0, "a named task or an already checked result does not recur");
+    assert.equal(latest("completion_pickup.refill"), "no_work_ready");
     // An owned run can have a saved result before its first Room progress event.
     const claimed = buildReplyCommand(identity, "room_request_reply", { requestId: "claimed-source",
       toMemberId: recipientId, workItemId, body: "Keep this exact attempt and its saved result." });

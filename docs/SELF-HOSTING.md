@@ -149,8 +149,12 @@ the agent to check existing assignments first and investigate one authorized
 lead if no work is available. A receiver that is paused, disconnected, or
 has outstanding work in the configured lane won't receive this refill.
 Room activity and changes in receiver connection or capacity recheck the
-plan. The route logs its decision and records each refill once. Pair it
-with explicit continuation steps for a longer sequence of approved work.
+plan. A named task is sent once. A discovery route can also pick up a newer,
+still-current Room-wide result as an exact evidence lead. Each lane and
+completion can produce one request. Ordinary messages, reconnects and
+unchanged results do not generate more work. When the available receiver
+has exhausted the lane’s eligible work, the route reports `no_work_ready`.
+Pair it with explicit continuation steps for a prepared sequence of work.
 
 ## Back up and verify
 

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 // Reuse Room's formal requests, authorization and operation receipts.
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { validId } from "../src/events.js";
@@ -5,10 +6,12 @@ import { nextWorkStep } from "../src/workflow.js";
 import { SESSION_STATUSES, sessionRecord } from "../src/work-item-session.js";
 import { observeSelectedRuns } from "./request-runs.mjs";
 import { readWorkItem } from "./work-repository.mjs";
+import { recentRoomResult } from "./room-next.mjs";
+import { CAPACITY_STOP, reportsCapacityStop } from "./wake-queue.mjs";
+
+export { CAPACITY_STOP };
 
 export const investigation = "Room investigation pass.";
-export const CAPACITY_STOP = "provider_capacity_before_start";
-const reportsCapacityStop = reason => reason === CAPACITY_STOP || reason?.startsWith(CAPACITY_STOP + ":");
 
 export function compileCapacityHandoff(route) {
   if (route.capacityHandoff === undefined) return null;
@@ -72,18 +75,22 @@ export function capacityHandoff(store, binding, receiver) {
   });
 }
 
-export function compileIdleRefill(route) {
+export function compileIdleRefill(route, result = null) {
   if (route.idleRefill === undefined) return null;
   const { requestId, body, discover } = route.idleRefill ?? {};
   const hasBody = typeof body === "string" && !!body.trim();
   if (!validId(requestId) || (discover === true ? body !== undefined : discover !== undefined || !hasBody))
     throw new Error("Invalid idle refill request");
   const { roomId, requesterId, recipientId, workItemId } = route;
+  const operation = result ? "idle-evidence-" + createHash("sha256").update(JSON.stringify([
+    roomId, requesterId, recipientId, workItemId, requestId, result.workItemId, result.completionEventId
+  ])).digest("hex") : requestId;
   return buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
-    requestId, toMemberId: recipientId, workItemId,
+    requestId: operation, toMemberId: recipientId, workItemId,
     body: [route.firstLine ?? `@(${recipientId})`, ...(discover === true ? [
       investigation,
       "Check room_next or room_list_work for authorized work before investigating. If you already have work, continue it and close this request with its ID.",
+      ...(result ? [`Start from Room result ${result.workItemId}, exact completion ${result.completionEventId}. Only use it if the existing Room read still gives you access to that result.`] : []),
       "Otherwise inspect one public or explicitly shared source in this lane for a current issue. Propose one bounded task with the exact source, evidence and permissions needed. Say what you checked if no useful task was found. Read-only."
     ] : [body.trim()])].join("\n")
   });
@@ -98,12 +105,16 @@ export function idleRefill(store, { route, secret, refill, hasOpenRequest }, rec
     const work = readWorkItem(store.db, roomId, workItemId);
     const nextStep = work && nextWorkStep(work);
     if (hasOpenRequest(route) || nextStep?.memberId === recipientId) return { state: "pending_work" };
-    if (!receiver?.hasRecoveryReceiver({ roomId, requesterId, recipientId, workItemId, id: refill.data.messageId },
+    const seed = store.operationReceipt(secret, roomId, refill.id);
+    const result = seed.status === "recorded" && seed.eventType === "message.posted"
+      && seed.sequence > after && route.idleRefill.discover === true
+      ? recentRoomResult(store, roomId, seed.sequence) : null;
+    const offer = result ? compileIdleRefill(route, result) : refill;
+    if (!receiver?.hasRecoveryReceiver({ roomId, requesterId, recipientId, workItemId, id: offer.data.messageId },
         after, false)) return { state: "receiver_unconfirmed" };
-    // This proves available in the configured lane. It does not prove the
-    // agent has no work from another Room, provider or human.
-    if (store.operationReceipt(secret, roomId, refill.id).status === "recorded") return { state: "lane_idle" };
-    const next = store.command(secret, roomId, refill);
+    // This proves availability in the configured lane only.
+    if (store.operationReceipt(secret, roomId, offer.id).status === "recorded") return { state: "no_work_ready" };
+    const next = store.command(secret, roomId, offer);
     return { state: "refill_requested", opening: next.sequence };
   });
 }

@@ -5538,7 +5538,6 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
         const target = { memberId: data.memberId };
         const result = data.action === "pause" ? store.wakeQueue.pause(selected.token, roomId, { requestId: data.requestId, reason: data.reason }, fence, target)
           : store.wakeQueue.resume(selected.token, roomId, { requestId: data.requestId }, fence, target);
-        if (!result.duplicate) server.emit("agentCapacityChanged", roomId);
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "access-review" && req.method === "GET") {
