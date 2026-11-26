@@ -128,7 +128,9 @@ A route can configure one of these transfers:
 
 - `capacityHandoff` takes `sourceOperationId`, `replacementOperationId`,
   `replacementMemberId` and `body`. Room cancels the exact unopened request
-  and records the replacement together. Write the replacement body for its
+  and records the replacement together. Any existing host run reservation,
+  including a saved but undelivered answer, keeps the original request.
+  Write the replacement body for its
   intended recipient. The original private message stays in its own thread.
 - `capacityWork` takes `operationId`, `replacementMemberId`,
   `replacementWorkItemId`, `expectedRevision`, `title` and

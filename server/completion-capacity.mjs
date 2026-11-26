@@ -2,6 +2,7 @@
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
+import { observeSelectedRuns } from "./request-runs.mjs";
 import { readWorkItem } from "./work-repository.mjs";
 
 export const investigation = "Room investigation pass.";
@@ -51,7 +52,8 @@ export function capacityHandoff(store, binding, receiver) {
     // A pause does not stop an already dispatched turn. The marker is an
     // operator/host attestation of pre-dispatch refusal; any recorded progress
     // or revised context makes this automatic path ineligible.
-    if (request.contextEventId !== request.openingEventId || page.hasMore || page.items.length !== 1 || page.items[0].kind !== "opened")
+    if (request.contextEventId !== request.openingEventId || page.hasMore || page.items.length !== 1
+        || page.items[0].kind !== "opened" || observeSelectedRuns(store, roomId, [request])[sourceId])
       return { state: "inspect_existing_attempt" };
     const target = capacity.replacementMemberId;
     if (store.wakeQueue.pauseStatus(roomId, target)) return { state: "replacement_paused" };

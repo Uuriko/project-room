@@ -550,6 +550,27 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     await setImmediate();
     assert.equal(receipt("capacity-restored").eventId, recoveredEvent);
     assert.equal(receipt("capacity-alternate").eventId, fallbackEvent);
+    // An owned run can have a saved result before its first Room progress event.
+    const claimed = buildReplyCommand(identity, "room_request_reply", { requestId: "claimed-source",
+      toMemberId: recipientId, workItemId, body: "Keep this exact attempt and its saved result." });
+    store.command(owner, roomId, claimed);
+    const { request } = store.replyRequests.selected(primary.secret, roomId, claimed.data.messageId);
+    const run = { requestMessageId: request.id, attemptId: "first-host", expectedRequestRevision: request.revision,
+      contextEventId: request.contextEventId };
+    store.requestRuns.apply(primary.secret, roomId, { ...run, action: "claim" });
+    store.requestRuns.apply(primary.secret, roomId, { ...run, action: "result_ready" });
+    atomicPrivateJson(plan, { checkpointPath, routes: [{
+      roomId, requesterId, recipientId, workItemId, credentialPath, after,
+      capacityHandoff: { sourceOperationId: "claimed-source", replacementOperationId: "claimed-alternate",
+        replacementMemberId: "alternate", body: "This replacement must not run." }
+    }] });
+    stop(); stop = start();
+    await capacityChange("pause", "reported-claimed-stop", `${CAPACITY_STOP}:request:${request.id}`);
+    await setImmediate();
+    assert.equal(latest("completion_pickup.capacity"), "inspect_existing_attempt");
+    assert.equal(receipt("claimed-alternate").status, "not_recorded");
+    assert.equal(store.replyRequests.selected(owner, roomId, request.id).request.status, "open");
+
   });
 }
 
