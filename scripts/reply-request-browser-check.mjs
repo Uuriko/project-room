@@ -559,7 +559,7 @@ for (const scenario of ["unsent", "uncertain", "refused", "edited"]) test(`curre
     assert.equal(requests().length, 0);
     assert.equal(await input(page).inputValue(), draft);
     assert.equal(await input(page).getAttribute("readonly"), null);
-    assert.equal(await page.locator("#composer-status").textContent(), "This assignment changed. Reopen it before sending. Draft kept.");
+    assert.equal((await page.locator("#composer-status").textContent()).trim(), "This assignment changed. Reopen it before sending. Draft kept.");
     if (process.env.ROOM_TEST_CAPTURE) await page.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "reference-source-changed.png") });
     await page.evaluate(url => history.replaceState(null, "", url), workUrl.href);
     await page.reload({ waitUntil: "domcontentloaded" });
