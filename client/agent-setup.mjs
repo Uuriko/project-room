@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomAgentClient, assertServiceOrigin, createAgentIdentity, previewAgentInvite, redeemAgentInvite, previewSharedInvite, joinSharedInvite, requestAccess, listAgentRooms } from "./room-agent.mjs";
@@ -62,6 +63,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
   const requestedAccess = { preset: access, permissions: [...ACCESS_PRESETS[access].permissions], requiresReview: access !== "chat" };
   const destination = setupTarget(target, origin);
   let openPublicRoom = false;
+  let publicApproval = null;
   if (destination.publicRoom) {
     // Resolve without credentials or redirects. A public page is a stable door,
     // not an authority to send this identity to a different service or room.
@@ -84,13 +86,17 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       if (!invitation.sharedToken) throw new Error("Public room entrance is not a shared invitation");
       destination.sharedToken = invitation.sharedToken;
     } else if (!accept) {
-      return { status: "approval_required", requestedAccess, preview: { roomId: page.slug, permissions: [], admission: page.join.mode },
+      publicApproval = { status: "approval_required", requestedAccess, preview: { roomId: page.slug, permissions: [], admission: page.join.mode },
         next: openPublicRoom ? "Repeat with --accept to join this room with read/chat guest access; no owner approval is needed" : "This room requires approval. Repeat with --accept to request read/chat access" };
+      // A first preview never creates a setup journal. Only an existing setup
+      // can recheck access here without consent to join or ask for privileges.
+      if (access !== "chat" || typeof directory !== "string" || !existsSync(join(directory, "setup.json"))) return publicApproval;
     }
   }
   const journal = openSetupJournal(directory);
   try {
     let saved = journal.read();
+    if (publicApproval && !saved?.identityId) return publicApproval;
     if (!saved) {
       const imported = identityFrom ? readAgentConnection(identityFrom) : null;
       if (imported && (canonicalOrigin(imported.origin) !== destination.origin || !/^pri_[A-Za-z0-9_-]{43}$/.test(imported.token))) throw new Error("Choose an identity connection on the same service");
@@ -107,6 +113,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     const options = { identitySecret: saved.secret, fetchImpl };
     const key = createHash("sha256").update(JSON.stringify(destination)).digest("hex");
     let step = saved.targets[key];
+    if (publicApproval && step?.joined !== true) return publicApproval;
     if (!step) {
       if (Object.keys(saved.targets).length >= 100) throw new Error("Setup destination limit reached");
       step = saved.targets[key] = { ...destination, requestId: randomUUID(), approved: null, roomId: destination.roomId ?? null };
@@ -153,6 +160,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
         next: "Run join again with an invited or public room URL and the same private directory" };
     }
     let membership = memberships.find(room => room.roomId === step.roomId);
+    if (publicApproval && !membership) return publicApproval;
     if (!membership && (destination.code || destination.sharedToken)) {
       const joined = destination.sharedToken ? await joinSharedInvite(saved.origin, destination.sharedToken, saved.name, options)
         : await redeemAgentInvite(saved.origin, destination.code, saved.name, { ...options, requestId: step.requestId });
@@ -182,6 +190,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     } catch (error) {
       if (error.code !== "config_not_found") throw error;
     }
+    if (publicApproval && !kept) throw new Error("Saved room connection is unavailable or differs; no connection was changed");
     if (step.roomCredential !== undefined && (typeof step.roomCredential !== "string" || !step.roomCredential.startsWith("rak_")))
       throw new Error("Saved room credential is invalid; no new key was issued");
     let token = kept ?? issued ?? step.roomCredential;

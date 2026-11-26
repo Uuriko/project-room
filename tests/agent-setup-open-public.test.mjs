@@ -5,3 +5,31 @@ test('actual HTTP open public preview requires host acceptance, then connects ex
 test('request-to-open transition and lost admission ACK reuse exact saved destination and request',async t=>{const f=await fixture(t,false),pending=await f.connect();assert.equal(pending.status,'pending');const before=f.journal(),key=Object.keys(before.targets)[0],requestId=before.targets[key].requestId;f.s.command(f.owner.secret,'open-target',{id:'open',type:'room.join_link_set',data:{enabled:true}});let lose=true;await assert.rejects(f.connect({fetchImpl:async(url,options)=>{const res=await fetch(url,options);if(lose&&new URL(url).pathname==='/api/access-requests'){lose=false;throw TypeError('synthetic lost admission response');}return res;}}));const result=await f.connect();assert.equal(result.status,'connected');assert.equal(result.identityId,f.peer.identityId);assert.deepEqual(Object.keys(f.journal().targets),[key]);assert.equal(f.journal().targets[key].requestId,requestId);assert.equal(f.s.db.prepare('SELECT count(*) n FROM access_requests WHERE identity_id=?').get(f.peer.identityId).n,1);assert.equal(f.s.db.prepare('SELECT count(*) n FROM identity_links WHERE room_id=? AND identity_id=?').get('open-target',f.peer.identityId).n,1);});
 test('received room key is checkpointed before verification and reused after interrupted read',async t=>{const f=await fixture(t);let issued=false,interrupted=false;await assert.rejects(f.connect({fetchImpl:async(url,options)=>{const path=new URL(url).pathname;if(issued&&!interrupted&&new Headers(options?.headers).get('authorization')?.startsWith('Bearer rak_')){interrupted=true;throw TypeError('synthetic interrupted verification');}const res=await fetch(url,options);if(path==='/api/agent-keys'&&options?.method==='POST')issued=true;return res;}}));assert.equal(interrupted,true);assert.equal(f.s.db.prepare('SELECT count(*) n FROM agent_api_keys').get().n,f.initialKeys+1);const step=Object.values(f.journal().targets)[0];assert.ok(step.roomCredential.startsWith('rak_'));const result=await f.connect();assert.equal(result.status,'connected');assert.equal(readAgentConnection(result.configDirectory).token,step.roomCredential);assert.equal(f.s.db.prepare('SELECT count(*) n FROM agent_api_keys').get().n,f.initialKeys+1);});
 test('unknown open-room key issuance stops rather than minting a second one-time key',async t=>{const f=await fixture(t);let lost=false;await assert.rejects(f.connect({fetchImpl:async(url,options)=>{const res=await fetch(url,options);if(!lost&&new URL(url).pathname==='/api/agent-keys'&&options?.method==='POST'){lost=true;throw TypeError('synthetic lost key issuance ACK');}return res;}}));assert.equal(lost,true);assert.equal(f.s.db.prepare('SELECT count(*) n FROM agent_api_keys').get().n,f.initialKeys+1);await assert.rejects(f.connect(),/issuance is unconfirmed/);assert.equal(f.s.db.prepare('SELECT count(*) n FROM agent_api_keys').get().n,f.initialKeys+1);});
+
+test('a completed public setup reopens with the same identity and credential without asking again', async t => {
+  const f = await fixture(t);
+  const original = await f.connect();
+  const saved = readAgentConnection(original.configDirectory);
+  const counts = () => ['agent_identities', 'identity_links', 'agent_api_keys', 'access_requests'].map(table =>
+    f.s.db.prepare(`SELECT count(*) n FROM ${table}`).get().n);
+  const before = counts();
+  const reopened = await f.connect({ accept: false });
+  assert.equal(reopened.status, 'connected');
+  assert.equal(reopened.identityId, original.identityId);
+  assert.equal(reopened.memberId, original.memberId);
+  assert.deepEqual(readAgentConnection(reopened.configDirectory), saved);
+  assert.deepEqual(counts(), before);
+  const escalation = await f.connect({ accept: false, access: 'work' });
+  assert.equal(escalation.status, 'approval_required');
+  assert.deepEqual(counts(), before);
+  await assert.rejects(f.connect({ accept: false, fetchImpl: (url, options) =>
+    new URL(url).pathname === '/api/agent-rooms'
+      ? Promise.resolve(new Response('{}', { status: 503 }))
+      : fetch(url, options)
+  }));
+  assert.deepEqual(readAgentConnection(original.configDirectory), saved);
+  assert.deepEqual(counts(), before);
+  rmSync(join(original.configDirectory, 'connection.json'));
+  await assert.rejects(f.connect({ accept: false }), /Saved room connection is unavailable/);
+  assert.deepEqual(counts(), before);
+});
