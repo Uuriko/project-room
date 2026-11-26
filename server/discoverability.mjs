@@ -139,7 +139,18 @@ const operationReceiptVariant = status => {
       eventId: { type: "string" }, eventType: { type: "string" }, sequence: { type: "integer", minimum: 1 }
     } : {}),
   };
-  return { type: "object", additionalProperties: false, required: Object.keys(properties), properties };
+  const required = Object.keys(properties);
+  if (status === "recorded") properties.nextRead = {
+    type: "object", additionalProperties: false, required: ["tool", "arguments"],
+    properties: {
+      tool: { type: "string", enum: ["room_read_result"] },
+      arguments: {
+        type: "object", additionalProperties: false, required: ["roomId", "workItemId", "completionEventId"],
+        properties: { roomId: { type: "string" }, workItemId: { type: "string" }, completionEventId: { type: "string" } },
+      },
+    },
+  };
+  return { type: "object", additionalProperties: false, required, properties };
 };
 const ROOM_EVENTS_RESPONSES = {
   "200": {

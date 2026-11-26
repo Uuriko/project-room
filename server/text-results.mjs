@@ -95,6 +95,10 @@ export function verifyTextCompletion(db, state, work, data, { allowWithdrawn = f
 function textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecords = null) {
   if (viewerId === null) return true;
   const message = (messageRecords ?? messageRepository({ db }, state.room.id, state)).get(messageId);
+  return resultTextVisibleToViewer(message, viewerId, floor);
+}
+
+export function resultTextVisibleToViewer(message, viewerId, floor) {
   if (!message) return false;
   if (message.toMemberId && message.authorId !== viewerId && message.toMemberId !== viewerId) return false;
   return messageInHistory(message, floor);

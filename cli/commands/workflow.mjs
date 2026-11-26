@@ -9,7 +9,7 @@ import { boundedJson } from "../room-response.mjs";
 import { exactResultRecovery } from "../../src/result-availability.js";
 import { validId } from "../../src/events.js";
 import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
-import { exactResultDestination, exactResultHref, resultDiscussionPath } from "../../src/record-link.js";
+import { exactResultDestination, exactResultHref, exactResultReadFromReceipt, resultDiscussionPath } from "../../src/record-link.js";
 import { messageUrlTokens, roomFileChangeSelection } from "../../src/workspace-artifact-link.js";
 import { validSourceObservation } from "../../src/work-packet.js";
 
@@ -210,6 +210,12 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
         ...(selectedConnection ? { nextRead: next } : {}) }, 1);
     }
     if (!validate(value, config)) throw new Error("Unmatched Room result");
+    if (tool === "room_receipt" && value.nextRead !== undefined) {
+      const read = exactResultReadFromReceipt(value);
+      delete value.nextRead;
+      if (read) value.nextRead = { ...read, command: roomShellCommand(name, "result",
+        read.arguments.workItemId, "--completion", read.arguments.completionEventId) };
+    }
     if (["room_read_work", "room_read_request", "room_read_result"].includes(tool)) {
       const basis = selectedBasis(value, config);
       if (basis) {

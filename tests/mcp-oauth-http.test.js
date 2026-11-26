@@ -864,6 +864,9 @@ test('room next and receipt discovery distinguish server availability from a nar
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
   const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
   assert.match(denied.body.error?.data?.hint ?? '', /outside the connected agent grant/);
+  const deniedReceipt = await f.rpc('tools/call', { name: 'room_receipt', arguments: { operationId: 'private-operation' } }, partial);
+  assert.match(deniedReceipt.body.error?.data?.hint ?? '', /outside the connected agent grant/);
+  assert.equal(deniedReceipt.body.result?.structuredContent?.nextRead, undefined);
 
   for (const [scope, readStatus] of [['work:read', 'available_on_server'], ['work:write', 'outside_connected_grant']]) {
     const reviewConsent = await f.consent({ scope: 'rooms:read ' + scope });

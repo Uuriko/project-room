@@ -4,24 +4,32 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
 import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { RoomAgentClient } from "../client/room-agent.mjs";
 import { mcpCallError } from "../server/mcp-arg-errors.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { event, EVENT_TYPES as T } from "../src/events.js";
 import { createRoomServer } from "../server/http.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
-async function fixture(t, representation) {
+async function fixture(t, representation, { sinceJoin = false } = {}) {
   const home = mkdtempSync(join(realpathSync(tmpdir()), "room-submit-"));
   const env = { HOME: home, PROJECT_ROOM_KEYCHAIN: "0" };
   const store = new RoomStore(join(home, "fixture.sqlite"));
-  store.initialize(initialRoom(), representation === "legacy" ? {} : { representation });
+  const seed = initialRoom();
+  if (sinceJoin) seed.push(event({ type: T.ROOM_HISTORY_VISIBILITY_SET, actorId: "owner", roomId: "commons",
+    data: { historyVisibility: "since_join" } }));
+  store.initialize(seed, representation === "legacy" ? {} : { representation });
   const owner = store.issueAccessKey("commons", "owner");
   const producer = store.identities.create("Producer");
   linkWithProof(store, owner, "commons", producer, {
@@ -233,7 +241,7 @@ test(`${representation} pickup opens only the linked assignment source with the 
 });
 
 test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {
-  const { env, origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
+  const { env, origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation, { sinceJoin: true });
   const workItemId = "handoff";
   store.command(owner, "commons", { id: "request", type: "work.proposed", data: { workItemId,
     title: "Draft the brief", definitionOfDone: "Share the brief", accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
@@ -404,6 +412,9 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   const earlier = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject);
   assert.equal(earlier.value.discussion.replies[0].body, quoted);
   assert.equal(earlier.value.selection.status, "historical");
+  const originalReceipt = (await cli(["receipt", "handoff-result", "--submit"])).value;
+  assert.equal(originalReceipt.nextRead.arguments.completionEventId, completionEventId);
+  assert.equal((await cli(originalReceipt.nextRead.command.slice(1))).value.selection.status, "historical");
   assert.equal(earlier.value.result.text.body, firstBody);
   assert.deepEqual(earlier.value.workspaceArtifacts, [file]);
   assert.equal(current.value.workspaceArtifacts, undefined);
@@ -435,6 +446,16 @@ test(`${representation} a colleague reads an exact shared result URL with their 
     assert.equal(refused.value.code, "room_selection_mismatch");
     assert.equal(calls, 0);
   }
+  for (const active of [false, true]) {
+    const member = store.roomAuthority("commons", { memberId: producer.identityId }).members[producer.identityId];
+    store.command(owner, "commons", { id: `restore-producer-${active}`, type: "member.access_changed", data: {
+      memberId: producer.identityId, active, expectedMemberRevision: member.revision, permissions: member.permissions } });
+  }
+  const afterRejoin = (await cli(["receipt", "handoff-result", "--submit"])).value;
+  assert.equal(afterRejoin.status, "recorded");
+  assert.equal(afterRejoin.eventId, completionEventId);
+  assert.equal(afterRejoin.nextRead, undefined);
+  assert.equal((await cli(originalReceipt.nextRead.command.slice(1))).code, 1);
 });
 
 test(`${representation} unavailable shared result gives the reviewer a safe next step`, async t => {
@@ -557,6 +578,7 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   const draftReceipt = await cli(draftUnknown.receiptCommand.slice(1));
   assert.equal(draftReceipt.value.status, "recorded");
   assert.equal(draftReceipt.value.eventType, "message.posted");
+  assert.equal(draftReceipt.value.nextRead, undefined);
   assert.equal((await cli(["receipt", "lost-draft", "--submit"])).value.status, "not_recorded");
   assert.equal(store.headSequence("commons"), draftHead);
   const recoveredDraft = await run("lost-draft", draft);
@@ -575,11 +597,11 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   assert.ok(completionReceipt.value.sequence <= recordedThrough);
   assert.equal(completionReceipt.value.checkedThrough, recordedThrough);
   assert.equal(completionReceipt.value.currentStateVerified, false);
-  assert.doesNotMatch(JSON.stringify(completionReceipt), /The exact contribution|fingerprint|body/);
   const otherActor = await cli(["receipt", completionReceipt.value.operationId], undefined, reviewerProject);
   assert.equal(otherActor.value.status, "not_recorded");
   assert.equal(otherActor.value.checkedThrough, recordedThrough);
   assert.equal(Object.hasOwn(otherActor.value, "eventId"), false);
+  assert.equal(otherActor.value.nextRead, undefined);
   assert.equal(store.headSequence("commons"), recordedThrough, "lookup adds no event");
   assert.equal((await run("lost-completion", { ...completion, summary: "Changed intent" })).output.code,
     "operation_input_changed");
@@ -681,6 +703,47 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   assert.equal(answered.code, 0, JSON.stringify(answered));
   assert.doesNotMatch(JSON.stringify([accepted, answered]), new RegExp(producer.secret));
 
+});
+
+test(`${representation} an operation ID alone reopens the recorded exact completion`, async t => {
+  const { home, env, origin, store, owner, producer, reviewerProject, rpc, cli } = await fixture(t, representation);
+  const workItemId = "lost-completion";
+  store.command(owner, "commons", { id: "propose-cold-receipt", type: "work.proposed", data: {
+    workItemId, title: "Review the evidence", definitionOfDone: "Record a durable result", accountableMemberId: producer.identityId, mode: "read" } });
+  const work = await cli(["work", workItemId]);
+  await cli(["begin", "--from", "-"], work.value);
+  const current = await cli(["work", workItemId]);
+  const completion = { body: "Maya owns the release", summary: "Named the owner", nextAction: "Check the result",
+    expectedRevision: current.value.revision, producerId: producer.identityId };
+  const uncertain = await cli(["submit", workItemId, "--operation", "lost-completion"], completion, home,
+    async (url, init) => {
+      const response = await fetch(url, init);
+      if (JSON.parse(init.body).params.name !== "room_submit_text_result") return response;
+      await response.arrayBuffer();
+      throw new Error("simulated lost completion response");
+    });
+  const completionUnknown = uncertain.value;
+  assert.equal(completionUnknown.status, "unknown");
+  const recordedThrough = store.headSequence("commons");
+  const cold = async args => JSON.parse((await promisify(execFile)(process.execPath,
+    [fileURLToPath(new URL("../bin/room.mjs", import.meta.url)), ...args], { cwd: reviewerProject, env })).stdout);
+  const selected = await cold(["--connection", "producer", "receipt", "lost-completion", "--submit"]);
+  assert.equal(selected.currentStateVerified, false);
+  const next = { tool: "room_read_result", arguments: { roomId: "commons", workItemId: "lost-completion", completionEventId: selected.eventId } };
+  assert.deepEqual(selected.nextRead, { ...next,
+    command: ["room", "--connection", "producer", "result", "lost-completion", "--completion", selected.eventId] });
+  assert.equal((await cold(selected.nextRead.command.slice(1))).result.text.body, completion.body);
+  assert.deepEqual((await rpc("room_receipt", { operationId: selected.operationId })).nextRead, next);
+  const sdk = new RoomAgentClient({ origin, roomId: "commons", memberId: producer.identityId, token: producer.secret });
+  assert.deepEqual((await sdk.operationReceipt(selected.operationId)).nextRead, next);
+  const wrongCompletion = await cli(completionUnknown.receiptCommand.slice(1), undefined, home, async (_url, init) =>
+    Response.json({ jsonrpc: "2.0", id: JSON.parse(init.body).id, result: { structuredContent: {
+      ...selected, nextRead: { ...next, arguments: { ...next.arguments, completionEventId: "wrong-completion" } }
+    } } }));
+  assert.equal(wrongCompletion.value.status, "recorded");
+  assert.equal(wrongCompletion.value.nextRead, undefined);
+  assert.doesNotMatch(JSON.stringify(selected), /Maya owns the release|fingerprint|body/);
+  assert.equal(store.headSequence("commons"), recordedThrough);
 });
 
 test(`${representation} a newly attempted stale or closed submit is refused before any draft is posted`, async t => {

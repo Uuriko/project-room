@@ -15,6 +15,16 @@ export function exactResultDestination({ search = "", hash = "" }) {
   return { roomId: rooms[0], workItemId: route[1], completionEventId: route[2] };
 }
 
+export function exactResultReadFromReceipt(receipt) {
+  const read = receipt?.nextRead;
+  const args = read?.arguments;
+  if (receipt?.status !== "recorded" || receipt.eventType !== "work.completed" || read?.tool !== "room_read_result"
+      || !args || args.roomId !== receipt.roomId || args.completionEventId !== receipt.eventId
+      || ![args.roomId, args.workItemId, args.completionEventId].every(validRecordId)) return null;
+  const { roomId, workItemId, completionEventId } = args;
+  return { tool: "room_read_result", arguments: { roomId, workItemId, completionEventId } };
+}
+
 export function exactResultHref({ roomId, workItemId, completionEventId }, locationLike = globalThis.location) {
   if (![roomId, workItemId, completionEventId].every(validRecordId)) return "";
   const url = new URL(locationLike.origin);

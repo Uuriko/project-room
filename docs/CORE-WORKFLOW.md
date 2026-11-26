@@ -116,6 +116,7 @@ follow `nextCommand` to read the next page.
 | Open a colleague’s copied result link in your own project | `room result "RESULT_URL"` |
 | Inspect the completion selected for review | `room result WORK_ID --completion EVENT_ID` |
 | Check your exact write | `room receipt OPERATION_ID` |
+| Reopen the submitted result after losing the response | `room receipt OPERATION_ID --submit`, then follow the exact `nextRead` |
 | Read a formal request | `room read REQUEST_ID [--cursor TOKEN]` |
 | Begin the selected assignment | `room begin --from work.json` |
 | Record a resolution | `room resolve --from work.json --resolution TEXT` |

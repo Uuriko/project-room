@@ -99,13 +99,17 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   const eventResponses = docs.paths["/api/rooms/{roomId}/events"].get.responses;
   const variants = eventResponses["200"].content["application/json"].schema.oneOf;
   assert.ok(variants.some(variant => variant.required.includes("events")));
+  const recorded = variants.find(entry => entry.properties.status?.enum.includes("recorded"));
+  assert.deepEqual(recorded.properties.nextRead.properties.tool.enum, ["room_read_result"]);
+  assert.equal(recorded.required.includes("nextRead"), false);
   for (const observed of [receipt, absent]) {
     const variant = variants.find(entry => entry.properties.status?.enum.includes(observed.status));
     assert.ok(variant, "Document each exact receipt status");
     assert.equal(variant.additionalProperties, false);
     assert.deepEqual(Object.keys(observed).sort(), [...variant.required].sort());
-    assert.deepEqual(Object.keys(variant.properties).sort(), [...variant.required].sort());
-    for (const [key, property] of Object.entries(variant.properties)) {
+    for (const key of Object.keys(observed)) {
+      const property = variant.properties[key];
+      assert.ok(property, `Document the field ${key}`);
       if (property.type === "integer") {
         assert.ok(Number.isSafeInteger(observed[key]));
         if (property.minimum !== undefined) assert.ok(observed[key] >= property.minimum);

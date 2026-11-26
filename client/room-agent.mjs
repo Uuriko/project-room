@@ -1,3 +1,4 @@
+import { exactResultReadFromReceipt } from "../src/record-link.js";
 import { digestMessagePage } from "../src/message-digest.js";
 import { filterMessagePage, validMessageQuery } from "../src/message-query.js";
 import { validWorkPage } from "../server/work-list-page.mjs";
@@ -1218,6 +1219,11 @@ export class RoomAgentClient {
           && Number.isSafeInteger(value.sequence) && value.sequence > 0 && value.sequence <= value.checkedThrough
         : value.status === "not_recorded" && value.eventId === undefined && value.sequence === undefined && value.eventType === undefined)) {
       throw new RoomClientError(200, "invalid_operation_receipt", "Room returned an unconfirmed operation receipt");
+    }
+    if (value.nextRead !== undefined) {
+      const read = exactResultReadFromReceipt(value);
+      delete value.nextRead;
+      if (read) value.nextRead = read;
     }
     return value;
   }

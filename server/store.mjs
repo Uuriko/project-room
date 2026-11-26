@@ -167,7 +167,7 @@ import { ensurePayoutColumns, ensureGrowthFundingColumn } from "./growth-loop.mj
 import { squadSchema, squadMentionTargets } from "./squads.mjs";
 import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema, ensureVerifiedEmailSchema } from "./account-login-methods.mjs";
-import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
+import { verifyTextCompletion, selectedWorkResult, resultTextVisibleToViewer } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
 import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gate (docs/JEV-GATES.md): pure scorer, no imports of its own.
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
@@ -3954,15 +3954,32 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const { member } = this.authenticate(token, roomId, expectedSessionBinding);
       const checkedThrough = this.headSequence(roomId);
       const row = this.db.prepare(`
-        SELECT c.sequence, e.id, json_extract(e.body, '$.type') AS eventType
+        SELECT c.sequence, e.id, json_extract(e.body, '$.type') AS eventType,
+          CASE WHEN json_extract(e.body, '$.type') = 'work.completed'
+            THEN json_extract(e.body, '$.data.workItemId') END AS completedWorkId
         FROM commands c LEFT JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence
         WHERE c.room_id=? AND c.actor_id=? AND c.id=?
       `).get(roomId, member.id, operationId);
       if (row && (!validId(row.id) || typeof row.eventType !== "string" || row.sequence > checkedThrough))
         throw new Error("Operation receipt is unavailable");
+      const workItemId = row?.completedWorkId;
+      let nextRead;
+      if (validId(workItemId)) {
+        const floor = this.historyFloor(roomId, member.id, checkedThrough);
+        const item = row.sequence >= (floor?.sequence ?? 0) ? readWorkItem(this.db, roomId, workItemId) : null;
+        if (item && selectedWorkVisible(this, roomId, workItemId, item, member.id)) {
+          const completion = item.receipt?.eventId === row.id ? item.receipt
+            : item.receiptHistory?.find(receipt => receipt.eventId === row.id);
+          const messageId = completion?.nativeText?.messageId;
+          if (completion && (!messageId || resultTextVisibleToViewer(selectedMessageRecord(this, roomId, messageId, true), member.id, floor))) {
+            nextRead = { tool: "room_read_result", arguments: { roomId, workItemId, completionEventId: row.id } };
+          }
+        }
+      }
       return { contractVersion: 1, roomId, viewerId: member.id, operationId, checkedThrough,
         status: row ? "recorded" : "not_recorded", currentStateVerified: false,
-        ...(row ? { eventId: row.id, eventType: row.eventType, sequence: row.sequence } : {}) };
+        ...(row ? { eventId: row.id, eventType: row.eventType, sequence: row.sequence } : {}),
+        ...(nextRead ? { nextRead } : {}) };
     });
   }
   headSequence(roomId) {

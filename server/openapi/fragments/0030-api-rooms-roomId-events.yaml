@@ -10,6 +10,7 @@
         To recover one uncertain command, send `operationId` instead of an event
         selection. The receipt is scoped to the current member and proves only
         whether that operation was recorded through the observed room head.
+        A visible work completion can include an exact result read.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: operationId
@@ -109,6 +110,20 @@
                       eventId: { type: string }
                       eventType: { type: string }
                       sequence: { type: integer, minimum: 1 }
+                      nextRead:
+                        type: object
+                        additionalProperties: false
+                        required: [tool, arguments]
+                        properties:
+                          tool: { type: string, enum: [room_read_result] }
+                          arguments:
+                            type: object
+                            additionalProperties: false
+                            required: [roomId, workItemId, completionEventId]
+                            properties:
+                              roomId: { type: string }
+                              workItemId: { type: string }
+                              completionEventId: { type: string }
                   - type: object
                     additionalProperties: false
                     required: [contractVersion, roomId, viewerId, operationId, checkedThrough, status, currentStateVerified]
