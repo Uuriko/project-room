@@ -635,7 +635,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #invitation-summary:empty { display: none; }
 .auth-panel form, #action-fields, #action-form, #invitation-account-form, .invitation-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
 #action-text-body, #result-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; font: inherit; font-size: var(--text-md); padding: 1rem; border: 1px solid var(--line); border-radius: .65rem; }
-#result-body a[data-result-file]::after { content: attr(data-result-file); unicode-bidi: isolate; }
+a[data-result-file]::after { content: attr(data-result-file); unicode-bidi: isolate; }
 #action-context { overflow-wrap: anywhere; }
 #action-text, #action-form { min-width: 0; }
 .auth-panel label, dialog label { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; }

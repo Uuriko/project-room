@@ -8,6 +8,47 @@ import { matchesReceipt, nextWorkStep, workActions, reviewRuntimeLabel } from ".
 import { previousReviewText } from "./result-comparison.js";
 import { currentResult } from "./work-selectors.js";
 
+export function renderResultText(body, text, roomId, { openInNewTab = false } = {}) {
+  body.replaceChildren();
+  // Preserve the submitted characters, including punctuation around plain URLs.
+  const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
+  const fileLinks = new Map();
+  let offset = 0;
+  for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
+    const href = match[0];
+    const url = URL.parse(href);
+    if (!url || url.href !== href) continue;
+    const file = url.pathname === location.pathname && roomFileChangeSelection(url, location.origin, roomId);
+    if (!githubFile.test(href) && !file) continue;
+    const link = document.createElement("a");
+    link.href = href;
+    if (openInNewTab || url.origin !== location.origin) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    link.textContent = href;
+    if (file && file.file === file.file.trim() && !/\p{Bidi_Control}/u.test(file.file)) {
+      const label = file.anchor ? `${file.file}:${file.anchor.line} (${file.anchor.side})` : file.file;
+      // The selector doesn't carry a repository name. Leave colliding labels as URLs.
+      fileLinks.set(label, fileLinks.has(label) ? null : link);
+    }
+    body.append(text.slice(offset, match.index), link);
+    offset = match.index + href.length;
+  }
+  body.append(text.slice(offset));
+  for (const [label, link] of fileLinks) {
+    if (!link) continue;
+    const original = document.createElement("span");
+    original.className = "sr-only";
+    original.textContent = link.textContent;
+    // Keep the submitted URL in the selectable DOM for native Copy and Reply.
+    link.dataset.resultFile = label;
+    link.setAttribute("aria-label", label);
+    link.title = link.href;
+    link.replaceChildren(original);
+  }
+}
+
 // Owns only the pinned reader view. Session, composer, and work mutations stay
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
@@ -166,47 +207,6 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (resultView?.focused) { link.target = "_blank"; link.rel = "noopener"; }
     else link.addEventListener("click", () => closeResult(false));
     return link;
-  }
-  function showResultBody(text) {
-    const body = resultElement("result-body");
-    body.replaceChildren();
-    // Preserve the submitted characters, including punctuation around plain URLs.
-    const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
-    const fileLinks = new Map();
-    let offset = 0;
-    for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
-      const href = match[0];
-      const url = URL.parse(href);
-      if (!url || url.href !== href) continue;
-      const file = url.pathname === location.pathname && roomFileChangeSelection(url, location.origin, getSession().roomId);
-      if (!githubFile.test(href) && !file) continue;
-      const link = document.createElement("a");
-      link.href = href;
-      if (url.origin !== location.origin) {
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-      }
-      link.textContent = href;
-      if (file && file.file === file.file.trim() && !/\p{Bidi_Control}/u.test(file.file)) {
-        const label = file.anchor ? `${file.file}:${file.anchor.line} (${file.anchor.side})` : file.file;
-        // The selector doesn't carry a repository name. Leave colliding labels as URLs.
-        fileLinks.set(label, fileLinks.has(label) ? null : link);
-      }
-      body.append(text.slice(offset, match.index), link);
-      offset = match.index + href.length;
-    }
-    body.append(text.slice(offset));
-    for (const [label, link] of fileLinks) {
-      if (!link) continue;
-      const original = document.createElement("span");
-      original.className = "sr-only";
-      original.textContent = link.textContent;
-      // Keep the submitted URL in the selectable DOM for native Copy and Reply.
-      link.dataset.resultFile = label;
-      link.setAttribute("aria-label", label);
-      link.title = link.href;
-      link.replaceChildren(original);
-    }
   }
   resultElement("result-body").addEventListener("click", async event => {
     const link = event.target.closest("a");
@@ -617,7 +617,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       showReleaseChecks(view.withdrawn ? null : view.releaseChecks);
       showOutcome(view.withdrawn ? null : value.workThread?.outcome);
       const text = view.withdrawn ? "" : value.result.text.body;
-      if (!view.readAfterReplacement || resultElement("result-body").textContent !== text) showResultBody(text);
+      if (!view.readAfterReplacement || resultElement("result-body").textContent !== text) renderResultText(resultElement("result-body"), text, view.roomId);
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);

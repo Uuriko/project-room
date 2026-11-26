@@ -600,6 +600,7 @@ test(`${representation} a colleague reads an exact shared result URL with their 
     assert.equal(partial.value.result, undefined);
   }
   const review = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
+  assert.deepEqual(review.value.review.workspaceArtifacts, [file]);
   assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Name the owner."],
     review.value, reviewerProject)).code, 0);
   const blocked = await cli(["work", workItemId]);
@@ -614,6 +615,8 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   const revisedUrl = exactResultHref({ roomId: "commons", workItemId,
     completionEventId: revised.value.next.arguments.completionEventId }, new URL(origin));
   const current = await cli(["result", revisedUrl], undefined, reviewerProject);
+  const currentReview = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
+  assert.equal(currentReview.value.review.workspaceArtifacts, undefined, "no prior file joins the revised review");
   assert.equal(current.value.result.text.body, "Owner: Maya.");
   assert.equal(current.value.workThread.correction.summary, "Name the owner.");
   const revisedDiscussion = await cli(["result", revisedUrl, "--discussion"]);

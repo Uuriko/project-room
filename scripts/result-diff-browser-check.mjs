@@ -502,7 +502,20 @@ test("an existing agent signs in from a saved exact result without losing its ve
 });
 
 test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
-  const f = await setup(t, 390);
+  const oldPatch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-Owner: undecided\n+Owner: tentative\n";
+  const oldId = "a".repeat(32), oldHead = "e".repeat(40);
+  const oldDigest = createHash("sha256").update(oldPatch).digest("hex");
+  const oldFile = origin => origin + "/?room=commons#pr-workspace/"
+    + [oldId, 1, "changes", oldDigest, "producer", oldHead, "brief.md"].join("/");
+  const f = await setup(t, 390, { firstBody: origin => "Result A\nOwner undecided\n" + oldFile(origin) });
+  const publish = async (id, head, patch) => {
+    const response = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
+      method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
+      body: JSON.stringify({ id, expectedRevision: 0, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+    });
+    assert.ok(response.ok, await response.text());
+  };
+  await publish(oldId, oldHead, oldPatch);
   const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
   const reviewer = await f.login("human-checker", original);
   await reviewer.locator("#result-work-action").click();
@@ -514,11 +527,7 @@ test("a returning reviewer can finish the correction from the original link afte
   const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-Owner: undecided\n+Owner: Maya · Friday\n";
   const previewId = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
   const file = f.origin + "/?room=commons#pr-workspace/" + [previewId, 1, "changes", digest, "producer", head, "brief.md"].join("/");
-  const published = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
-    method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
-    body: JSON.stringify({ id: previewId, expectedRevision: 0, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
-  });
-  assert.ok(published.ok, await published.text());
+  await publish(previewId, head, patch);
   const revisedBody = "Result B\nOwner: Maya · Friday\n" + file;
   const second = f.complete(revisedBody);
   await f.restart();
@@ -526,12 +535,30 @@ test("a returning reviewer can finish the correction from the original link afte
   const returning = await f.login("human-checker", original);
   await returning.getByText("Verification · Failed", { exact: true }).waitFor();
   assert.equal(await returning.locator("#result-work-action").isVisible(), false);
+  const earlierFile = returning.locator("#result-body").getByRole("link", { name: "brief.md", exact: true });
+  assert.equal(await earlierFile.getAttribute("href"), oldFile(f.origin));
   const current = returning.getByRole("link", { name: "Open current result" });
   const currentUrl = await current.getAttribute("href");
   await current.click();
   await returning.locator("#result-correction-summary").getByText("Put the owner beside the deadline.").waitFor();
   assert.equal(await returning.locator("#result-body").textContent(), revisedBody);
   await returning.locator("#result-work-action").click();
+  const evidence = returning.locator("#action-text-body");
+  const selectedFile = evidence.getByRole("link", { name: "brief.md", exact: true });
+  await selectedFile.waitFor({ timeout: 2500 });
+  assert.equal(await selectedFile.getAttribute("href"), file);
+  assert.equal(await evidence.locator("a").count(), 1);
+  assert.equal(await evidence.textContent(), revisedBody);
+  await returning.locator('#action-fields [name="summary"]').fill("Checked Maya against the Friday deadline.");
+  const opened = returning.waitForEvent("popup");
+  await selectedFile.press("Enter");
+  const filePage = await opened;
+  const filePanel = filePage.locator("[data-workspace-primary]");
+  await filePanel.getByText("+Owner: Maya · Friday", { exact: true }).waitFor();
+  assert.equal(await filePanel.getByText("+Owner: tentative", { exact: true }).count(), 0);
+  await filePage.close();
+  assert.equal(await returning.locator('#action-fields [name="summary"]').inputValue(), "Checked Maya against the Friday deadline.");
+  if (process.env.ROOM_REVIEW_CUE_CAPTURE) await returning.screenshot({ path: join(process.env.ROOM_REVIEW_CUE_CAPTURE, "revised-file-in-review.png") });
   await returning.locator("#action-result-diff summary").click();
   await returning.locator("#action-result-diff").getByText("+ Owner: Maya · Friday", { exact: true }).waitFor();
   await review(returning, "pass", "Checked Maya against the Friday deadline.");

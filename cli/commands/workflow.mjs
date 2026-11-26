@@ -115,6 +115,15 @@ function exactDiscussionFiles(messages, { origin, roomId }, connectionName) {
   return [...files.values()];
 }
 
+function addResultFiles(packet, config, connectionName) {
+  const { result } = packet;
+  const source = result?.text;
+  if (result?.kind !== "room_text" || source?.withdrawnAt || typeof source?.body !== "string"
+      || !validId(source.messageId) || source.messageId !== result.receipt?.nativeText?.messageId) return;
+  const files = exactDiscussionFiles([{ id: source.messageId, body: source.body }], config, connectionName);
+  if (files.length) packet.workspaceArtifacts = files;
+}
+
 async function readResultThread(config, secret, fetchImpl, path) {
   const response = await fetchImpl(config.origin.replace(/\/$/, "") + edgeDoorApiPath(config.origin, path), {
     headers: { Accept: "application/json", Authorization: bearerHeader(secret) },
@@ -205,10 +214,7 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
       const source = value.result?.text;
       const hasDiscussion = value.result?.kind === "room_text" && typeof source?.body === "string"
         && validId(source.messageId) && source.messageId === value.result.receipt?.nativeText?.messageId;
-      if (hasDiscussion && !source.withdrawnAt) {
-        const files = exactDiscussionFiles([{ id: source.messageId, body: source.body }], config, name);
-        if (files.length) value.workspaceArtifacts = files;
-      }
+      addResultFiles(value, config, name);
       if (hasDiscussion) value.discussionRead = { method: "GET", path: resultDiscussionPath(config.roomId, source.messageId),
         command: shell("result", args.workItemId, "--completion", args.completionEventId, "--discussion") };
       if (includeResultDiscussion) {
@@ -228,6 +234,7 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
     if (tool === "room_read_result" && value.cliBasis?.actions.review)
       value.review.action.command = shell("review", "--from");
     if (tool === "room_read_work") {
+      if (args.includeResult && value.review) addResultFiles(value.review, config, name);
       const sourceRead = value.sourceRead;
       if (sourceRead?.tool === "room_read_work" && sourceRead.arguments?.roomId === config.roomId
           && sourceRead.arguments.workItemId === args.workItemId && sourceRead.arguments.includeSource === true)

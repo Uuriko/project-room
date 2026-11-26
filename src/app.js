@@ -3,7 +3,7 @@ import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
 import { roomContributionSharePrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
-import { installResultReader } from "./result-reader.js";
+import { installResultReader, renderResultText } from "./result-reader.js";
 import { uiText } from "./strings.js";
 import { directDraftKey, directDraftPeer, directMessagePeer } from "./conversation.js";
 import { createSigninNavigation } from "./signin-navigation.js";
@@ -7176,7 +7176,9 @@ function loadActionText(item, action) {
     if (!entry.draftMessageId && (value.result.receipt?.eventId !== entry.receipt.completionEventId || value.result.receipt?.evidenceVersion !== entry.receipt.evidenceVersion)) throw new Error("Pinned evidence changed");
     entry.text = value.result.text;
     if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns, value.workThread?.correction, entry.compareFrom, true);
-    $("#action-text-body").textContent = entry.text.body;
+    const body = $("#action-text-body");
+    if (entry.draftMessageId) body.textContent = entry.text.body;
+    else renderResultText(body, entry.text.body, roomId, { openInNewTab: true });
     const proposal = entry.text.proposal;
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
     if (value.current.workRevision !== entry.revision) { entry.needsReview = true; entry.error = "Work changed. Review current work before saving."; }
