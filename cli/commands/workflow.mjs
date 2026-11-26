@@ -250,6 +250,14 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
     if (tool === "room_read_result" && value.cliBasis?.actions.review)
       value.review.action.command = shell("review", "--from");
     if (tool === "room_read_work") {
+      const answer = value.latestAnswer ?? value.replyRequestContext?.latestAnswer;
+      const answerRead = answer?.nextRead;
+      if (answerRead && typeof answerRead === "object") {
+        delete answerRead.command;
+        if (answerRead.tool === "room_read_request" && answerRead.arguments?.roomId === config.roomId
+            && validId(answer.id) && answerRead.arguments.requestMessageId === answer.id)
+          answerRead.command = roomShellCommand(name, "read", answer.id);
+      }
       const sourceRead = value.sourceRead;
       if (sourceRead?.tool === "room_read_work" && sourceRead.arguments?.roomId === config.roomId
           && sourceRead.arguments.workItemId === args.workItemId && sourceRead.arguments.includeSource === true)

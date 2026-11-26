@@ -394,19 +394,20 @@ test(`${representation} a denied document read leads to one private request and 
   const recovered = await rpc("room_read_request", { requestMessageId: replayed.items[0].requestMessageId });
   assert.equal(recovered.request.responseMessageId, "accessible-document");
   assert.equal(recovered.current.answerBasis, null);
-  const { stdout } = await promisify(execFile)(process.execPath,
-    [fileURLToPath(new URL("../bin/room.mjs", import.meta.url)), "--connection", "producer", "work", workItemId], { cwd: reviewerProject, env });
-  const reopened = JSON.parse(stdout);
+  const cold = async args => JSON.parse((await promisify(execFile)(process.execPath,
+    [fileURLToPath(new URL("../bin/room.mjs", import.meta.url)), ...args], { cwd: reviewerProject, env })).stdout);
+  const reopened = await cold(["--connection", "producer", "work", workItemId]);
   const returned = reopened.latestAnswer;
   assert.notEqual(reopened.briefVersion, cachedBeforeAnswer.value.briefVersion);
   assert.deepEqual(returned?.nextRead, { tool: "room_read_request",
-    arguments: { roomId: "commons", requestMessageId: sent.requestMessageId } });
+    arguments: { roomId: "commons", requestMessageId: sent.requestMessageId },
+    command: ["room", "--connection", "producer", "read", sent.requestMessageId] });
   assert.equal(returned.recipientId, "owner");
-  assert.doesNotMatch(stdout, /accessible copy of revision 7|\/shared\/revision\/7/);
+  assert.doesNotMatch(JSON.stringify(reopened), /accessible copy of revision 7|\/shared\/revision\/7/);
   const unchanged = await cli(["work", workItemId, "--since", reopened.briefVersion]);
   assert.equal(unchanged.value.briefUnchanged, true);
   assert.deepEqual(unchanged.value.latestAnswer, returned);
-  const supplied = await rpc(returned.nextRead.tool, returned.nextRead.arguments);
+  const supplied = await cold(returned.nextRead.command.slice(1));
   assert.equal(supplied.request.status, "answered");
   assert.equal(supplied.request.workItemId, workItemId);
   assert.equal(supplied.request.responseMessageId, "accessible-document");
@@ -418,6 +419,16 @@ test(`${representation} a denied document read leads to one private request and 
   assert.equal(currentWork.continuation.action, "accept");
   assert.equal(currentWork.context.source.message.body, `Still review ${url}`);
   assert.equal(currentWork.work.receipt, null);
+  const selectedSource = await cli(["work", workItemId, "--include-source"]);
+  assert.deepEqual(selectedSource.value.replyRequestContext.latestAnswer.nextRead.command, returned.nextRead.command);
+  const mismatched = await cli(["work", workItemId], undefined, undefined, async (url, options) => {
+    const envelope = await (await fetch(url, options)).json();
+    const pointer = envelope.result.structuredContent.latestAnswer.nextRead;
+    pointer.arguments.roomId = "different-room";
+    pointer.command = ["room", "--connection", "reviewer", "read", sent.requestMessageId];
+    return Response.json(envelope);
+  });
+  assert.equal(mismatched.value.latestAnswer?.nextRead?.command, undefined);
   assert.equal((await rpc("room_read_work", { workItemId }, reviewer)).replyRequestContext.latestAnswer, undefined);
   assert.equal(store.headSequence("commons"), answeredThrough);
 });
