@@ -349,7 +349,23 @@ test("a returning reviewer can finish the correction from the original link afte
   const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
   const reviewer = await f.login("human-checker", original);
   await reviewer.locator("#result-work-action").click();
-  await review(reviewer, "fail", "Put the owner beside the deadline.");
+  await review(reviewer, "pass", "The first review passed.");
+  const firstOwner = await f.login("owner", original);
+  await firstOwner.locator("#result-work-action").click();
+  await firstOwner.locator('#action-fields [name="decision"]').selectOption("approved");
+  await firstOwner.locator('#action-fields [name="reason"]').fill("Accepted after the initial check.");
+  await firstOwner.locator('#action-form button[type="submit"]').click();
+  await firstOwner.locator("#action-dialog").waitFor({ state: "hidden" });
+  const prior = f.item().decision;
+  assert.equal(prior.completionEventId, f.first.event.id);
+  await firstOwner.context().close();
+  f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: f.item().id, expectedRevision: f.item().revision,
+    completionEventId: f.first.event.id, evidenceVersion: f.first.event.data.evidenceVersion, result: "fail",
+    summary: "Put the owner beside the deadline.", nextAction: "Correct the release note." });
+  assert.equal(f.item().decision, null);
+  const openedWhileBlocked = await f.login("owner", original);
+  await openedWhileBlocked.getByText("Previously accepted · no longer in effect", { exact: true }).waitFor({ timeout: 2000 });
+  await openedWhileBlocked.context().close();
   await reviewer.context().close();
 
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Updated the final line." });
@@ -359,17 +375,23 @@ test("a returning reviewer can finish the correction from the original link afte
 
   const returning = await f.login("human-checker", original);
   await returning.getByText("Verification · Failed", { exact: true }).waitFor();
+  await returning.getByText("Previously accepted · no longer in effect", { exact: true }).waitFor();
+  assert.deepEqual(f.store.workResult(f.keys["human-checker"], "commons", f.item().id,
+    { completionEventId: f.first.event.id }).workThread.priorApproval, {
+    eventId: prior.eventId, completionEventId: prior.completionEventId, evidenceVersion: prior.evidenceVersion
+  });
   assert.equal(await returning.locator("#result-work-action").isVisible(), false);
   const current = returning.getByRole("link", { name: "Open current result" });
   const currentUrl = await current.getAttribute("href");
   await current.click();
   await returning.locator("#result-correction-summary").getByText("Put the owner beside the deadline.").waitFor();
+  assert.equal(await returning.locator("#result-prior-approval").isVisible(), false);
   assert.equal(await returning.locator("#result-body").textContent(), "Result B\nOwner: Maya · Friday");
   await returning.locator("#result-work-action").click();
   await returning.locator("#action-result-diff").getByText("+ Owner: Maya · Friday", { exact: true }).waitFor();
   await review(returning, "pass", "Checked Maya against the Friday deadline.");
   assert.equal(f.item().verification.completionEventId, second.event.id);
-  assert.equal(f.item().verificationHistory.find(v => v.completionEventId === f.first.event.id)?.result, "fail");
+  assert.equal(f.item().verificationHistory.findLast(v => v.completionEventId === f.first.event.id)?.result, "fail");
   const owner = await f.login("owner", currentUrl);
   await owner.getByText("Verification · Passed", { exact: true }).waitFor();
   await owner.locator("#result-work-action").click();
@@ -379,6 +401,11 @@ test("a returning reviewer can finish the correction from the original link afte
   await owner.locator("#action-dialog").waitFor({ state: "hidden" });
   assert.equal(f.item().decision.completionEventId, second.event.id);
   assert.equal(f.item().decision.decision, "approved");
+  const historical = await f.login("owner", original);
+  await historical.getByText("Previously accepted · no longer in effect", { exact: true }).waitFor();
+  assert.equal(await historical.locator("#result-work-action").isVisible(), false);
+  assert.doesNotMatch(await historical.locator("#result-body").textContent(), /Owner: Maya/);
+  if (process.env.ROOM_TEST_CAPTURE) await historical.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "earlier-approval-phone.png") });
 });
 
 test("late previous-result read cannot repopulate a different review after cancellation", { timeout: 30000 }, async t => {

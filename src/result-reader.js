@@ -4,7 +4,7 @@ import { clipboard } from "./clipboard.js";
 import { canReplyToResult, exactResultRecovery } from "./result-availability.js";
 import { uiText } from "./strings.js";
 import { WORK_STATES as S, isRoomArchived } from "./events.js";
-import { matchesReceipt, nextWorkStep, workActions, reviewRuntimeLabel } from "./workflow.js";
+import { currentApproval, matchesReceipt, nextWorkStep, workActions, reviewRuntimeLabel } from "./workflow.js";
 import { previousReviewText } from "./result-comparison.js";
 import { currentResult } from "./work-selectors.js";
 
@@ -387,6 +387,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
         ? `Verification · ${finding.result === "pass" ? "Passed" : finding.result === "fail" ? "Failed" : "Recorded"}`
         : "Verification · Pending";
     }
+    const priorApproval = resultElement("result-prior-approval");
+    priorApproval.hidden = !usableText(view) || !view.priorApproval
+      || Boolean(item && currentApproval(item) && matchesReceipt(item.decision, view.receipt));
     if (decisionLink) {
       decisionLink.hidden = true;
       decisionLink.removeAttribute("href");
@@ -479,6 +482,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   }
   resultElement("close-result").addEventListener("click", () => closeResult());
   resultElement("result-copy-link").textContent = uiText("result.copyLink");
+  resultElement("result-prior-approval").textContent = uiText("result.priorApproval");
   resultElement("result-copy-text").textContent = uiText("result.copyText");
   resultElement("result-download").textContent = uiText("result.download");
   async function copyResult(link) {
@@ -597,6 +601,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.selectionStatus = value.selection.status;
       view.selectedVerdict = matchesReceipt(value.workThread?.verdict, value.result.receipt) ? value.workThread.verdict : null;
       view.decisionSource = value.workThread?.decisionSource;
+      view.priorApproval = value.workThread?.priorApproval;
       if (view.linked && !value.result.text.withdrawnAt) {
         resultElement("result-title").textContent = getState().workItems[view.workItemId]?.title ?? "Result";
       }
@@ -668,6 +673,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function openResult(view, title, focus = true) {
       resultView = view;
       resultElement("result-verdict").hidden = true;
+      resultElement("result-prior-approval").hidden = true;
       showCorrection(null);
       showReleaseChecks(null);
       showOutcome(null);

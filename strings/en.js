@@ -608,6 +608,7 @@ export default {
   "result.releaseStageEvidence": "Open {stage} receipt",
   "result.invalidLink": "This result link is invalid. Ask the sender to copy the result link again.",
   "result.accepted": "Accepted",
+  "result.priorApproval": "Previously accepted · no longer in effect",
   "result.decisionLabel": "Decision",
   "result.openDecisionSource": "Open decision note",
   "result.nextLabel": "Next",

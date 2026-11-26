@@ -240,6 +240,20 @@ function selectedVerdict(db, roomId, work, receipt, floor) {
   return { eventId, result, verifierId, completionEventId, evidenceVersion, independenceConfirmed };
 }
 
+// An archived approval describes only the selected evidence. It never supplies
+// the rationale or decides what the current result is allowed to do.
+function selectedPriorApproval(db, roomId, work, receipt, floor) {
+  if (currentApproval(work) && matchesReceipt(work.decision, receipt)) return null;
+  const prior = work.decisionHistory.findLast(decision => decision.decision === "approved" && matchesReceipt(decision, receipt));
+  if (!prior) return null;
+  if (floor) {
+    const row = db.prepare("SELECT sequence FROM events WHERE room_id=? AND id=?").get(roomId, prior.eventId);
+    if (!row || row.sequence < floor.sequence) return null;
+  }
+  const { eventId, completionEventId, evidenceVersion } = prior;
+  return { eventId, completionEventId, evidenceVersion };
+}
+
 export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, reviewer = null, floor = null, messageRecords = null, readOutcomeWork = null }) {
   const work = state.workItems[workItemId];
   let result;
@@ -285,6 +299,8 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   const visibleReceipt = result.text?.body === null ? null : result.receipt;
   const start = visibleReceipt ? selectedStart(db, state.room.id, workItemId, visibleReceipt.eventId, floor) : null;
   const verdict = visibleReceipt ? selectedVerdict(db, state.room.id, work, visibleReceipt, floor) : null;
+  const priorApproval = visibleReceipt && result.kind === "room_text"
+    ? selectedPriorApproval(db, state.room.id, work, visibleReceipt, floor) : null;
   const decisionSource = selectionStatus === "current" && visibleReceipt && result.kind === "room_text"
     ? selectedDecisionSource(db, state, work, visibleReceipt, viewerId, floor, messageRecords) : null;
   const pendingCorrection = selectionStatus === "current" && next.action === "revise"
@@ -300,7 +316,7 @@ export function selectedWorkResult({ db, state, workItemId, sequence, now, compl
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     workThread: { workItemId, href: workThreadHref(workItemId), ...(start ? { start } : {}), ...(verdict ? { verdict } : {}),
       ...(correction ? { correction } : {}), ...(pendingCorrection ? { pendingCorrection } : {}),
-      ...(decisionSource ? { decisionSource } : {}),
+      ...(decisionSource ? { decisionSource } : {}), ...(priorApproval ? { priorApproval } : {}),
       ...(releaseChecks ? { releaseChecks } : {}), ...(outcome ? { outcome } : {}) },
     selection: { completionEventId, draftMessageId, status: selectionStatus }, result,
     ...(result.kind === "room_text" && typeof result.text?.body === "string"
