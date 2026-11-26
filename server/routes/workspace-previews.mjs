@@ -1,8 +1,7 @@
 import { workspaceArtifactSelection } from "../../src/workspace-artifact-link.js";
 import { ownMember } from "../../src/events.js";
-import { fileLabel, parsePatch, workspaceChangePath } from "../../src/workspace-diff-parser.js";
 import { readAccountRoomRow } from "../room-lifecycle.mjs";
-import { previewJsonBytes, validatePreviewInput, validPreviewSelection, workspacePreviews } from "../workspace-previews.mjs";
+import { matchesWorkspaceChanges, previewJsonBytes, validatePreviewInput, validPreviewSelection, workspaceChangesView, workspacePreviews } from "../workspace-previews.mjs";
 
 // The frame response supplies its own policy instead of inheriting the Room
 // application's style and script restrictions through srcdoc.
@@ -32,23 +31,8 @@ function renderFrame(ctx, item) {
 function changeResponse(ctx, params, item, viewer) {
   if (params.has("revision") && String(item.revision) !== params.get("revision"))
     ctx.reject(409, "preview_changed", "This preview changed. Open the latest version.");
-  const { patch, ...source } = item;
-  const view = params.get("view");
-  if (view === null) return ctx.json(ctx.res, 200, { ...viewer, changes: item });
-  if (patch === null) return ctx.json(ctx.res, 200, { ...viewer, changes: { ...source, status: "not_published" } });
-  const files = parsePatch(patch);
-  if (!files) return ctx.json(ctx.res, 200, { ...viewer, changes: { ...source, status: "raw_available" } });
-  if (view === "file") {
-    const path = params.get("path");
-    const file = files.find(value => workspaceChangePath(value) === path)
-      ?? files.find(value => path !== "/dev/null" && (value.oldPath === path || value.newPath === path));
-    if (!file) ctx.reject(404, "preview_file_not_found", "This path is absent from the published changes");
-    return ctx.json(ctx.res, 200, { ...viewer, changes: { ...source, file } });
-  }
-  return ctx.json(ctx.res, 200, { ...viewer, changes: { ...source, files: files.map(file => {
-    const path = fileLabel(file), filePath = workspaceChangePath(file);
-    return { path, ...(filePath && filePath !== path ? { filePath } : {}), type: file.type, hunks: file.hunks.length };
-  }) } });
+  const changes = workspaceChangesView(item, params.get("view"), params.get("path"), ctx.reject);
+  return ctx.json(ctx.res, 200, { ...viewer, changes });
 }
 
 function authorize(ctx, place, needed) {
@@ -108,8 +92,8 @@ async function serveWorkspacePreviews(ctx) {
     }
     const item = previews?.get(roomId, id, viewerId, changeRead ? "changes" : outputRead ? "output" : undefined);
     if (!item) ctx.reject(404, "preview_not_found", "This preview is unavailable");
-    if (exact && (item.revision !== exact.revision || item.head !== exact.head || item.publisherId !== exact.publisherId
-      || item.patchDigest !== exact.digest)) ctx.reject(409, "preview_changed", "This preview changed. Open the latest version.");
+    if (exact && !matchesWorkspaceChanges(item, exact))
+      ctx.reject(409, "preview_changed", "This preview changed. Open the latest version.");
     const { base, head, revision, patch, output } = item;
     if (changeRead) return changeResponse(ctx, params, { id, base, head, revision, patch }, viewer);
     if (outputRead) {

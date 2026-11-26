@@ -72,9 +72,15 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
     // Core and lean stay under their byte budget (tests/mcp-core-profile.test.js);
     // the full profile carries the access/cost/REST line (AUX-08).
     const description = profile === "full" ? withMcpToolContract(entry.name, base) : base;
+    const input = entry.inputSchema, room = input?.properties?.roomId;
+    const inputSchema = profile === "core" && focus === undefined
+      && room?.description === "Room id this identity is linked to."
+      ? { ...input, properties: { ...input.properties, roomId: { ...room, description: "Room ID." } } }
+      : input;
     const alias = mcpToolAlias(entry.name);
     return {
       ...entry,
+      inputSchema,
       description,
       ...(aliases && alias ? { aliases: [alias] } : {})
     };
