@@ -129,7 +129,6 @@ export async function joinCommand(argv, io = {}) {
     return 1;
   }
   out(`Joined room ${joined.roomId} as ${name}.`);
-  let projectConfigured = false;
   const setupArgs = [tool, "--name", name, ...(flags.project ? ["--project", flags.project] : [])];
   if (flags.setup) {
     const lines = [];
@@ -137,14 +136,9 @@ export async function joinCommand(argv, io = {}) {
     try { setupCode = await setup(setupArgs, { ...io, out: line => lines.push(String(line)), err: line => lines.push(String(line)) }); }
     catch (error) { lines.push(String(error?.message ?? error)); setupCode = 1; }
     for (const line of lines) out(scrub(line));
-    projectConfigured = setupCode === 0 || setupCode === SETUP_SHELL_ONLY;
-    if (!projectConfigured) out(`Tool setup for ${tool} did not finish; the room connection is saved.`);
+    if (setupCode !== 0 && setupCode !== SETUP_SHELL_ONLY) out(`Tool setup for ${tool} did not finish; the room connection is saved.`);
   }
-  if (projectConfigured) {
-    const pickup = "npx -y github:Uuriko/project-room next";
-    const command = flags.project ? `cd -- ${shellQuote(flags.project)} && ${pickup}` : pickup;
-    out(scrub(`Find your assignments: run ${command} and follow the selected item's nextRead.`));
-  } else if (typeof joined.connection === "string" && joined.connection) {
+  if (typeof joined.connection === "string" && joined.connection) {
     out(scrub(`Find your assignments: run npx -y github:Uuriko/project-room --connection ${shellQuote(joined.connection)} next and follow nextRead.command.`));
   } else {
     out(scrub(`Select this saved connection before pickup: run npx -y github:Uuriko/project-room setup ${setupArgs.map(shellQuote).join(" ")}.`));

@@ -217,6 +217,52 @@ test(`${representation} a coworker joins despite conflicting Codex settings and 
   assert.equal(reopened.workThread.verdict.result, "pass");
 });
 
+test(`${representation} a configured join prints a pickup read for the same agent from another checkout`, async t => {
+  const { cli, env, home, origin, owner, reviewer, reviewerProject, store } = await fixture(t, representation);
+  const invite = await fetch(`${origin}/api/rooms/commons/agent-invites`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${owner}` },
+    body: JSON.stringify({ profile: "contribute", displayName: "Phone release helper" })
+  });
+  assert.equal(invite.status, 201);
+  const { code } = await invite.json();
+  const project = join(home, "release project");
+  mkdirSync(project);
+  const lines = [];
+  const joined = await main(["join", `${origin}/join/${code}`, "--name", "Phone release helper", "--tool", "generic", "--project", project],
+    { cwd: reviewerProject, env, out: line => lines.push(line), err: line => lines.push(line) });
+  assert.equal(joined, 0);
+  const alias = "phone-release-helper";
+  const config = loadConnection({ project, env });
+  assert.equal(config.name, alias);
+  assert.notEqual(config.config.memberId, reviewer.identityId);
+  const pickup = lines.map(line => line.match(/project-room --connection ([a-z-]+) next and follow nextRead\.command/)).find(Boolean);
+  assert.equal(pickup?.[1], alias);
+  assert.ok(lines.every(line => !line.includes(code)));
+  const exactConnection = ["--connection", pickup[1]];
+  setTier(store.db, "commons", config.config.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  const joinedThrough = store.headSequence("commons");
+  const waiting = await cli([...exactConnection, "next"], undefined, reviewerProject);
+  assert.equal(waiting.value.viewerId, config.config.memberId);
+  assert.equal(waiting.value.work.items.length, 0);
+  assert.equal(store.headSequence("commons"), joinedThrough);
+
+  const workItemId = "phone-release-note";
+  store.command(owner, "commons", { id: "assign-release-note", type: T.WORK_PROPOSED, data: {
+    workItemId, title: "Write Friday’s release note", definitionOfDone: "Name the owner",
+    accountableMemberId: config.config.memberId, mode: "read"
+  } });
+  const assignedThrough = store.headSequence("commons");
+  const next = await cli([...exactConnection, "next"], undefined, reviewerProject);
+  assert.equal(next.value.viewerId, config.config.memberId);
+  assert.deepEqual(next.value.nextRead.command, ["room", ...exactConnection, "work", workItemId]);
+  const work = await cli(next.value.nextRead.command.slice(1), undefined, reviewerProject);
+  assert.equal(work.value.continuation.action, "accept");
+  assert.equal(store.headSequence("commons"), assignedThrough, "the first assignment read does not start work");
+  const started = await cli([...work.value.continuation.command.slice(1), "-"], work.value, reviewerProject);
+  assert.equal(started.value.working, true);
+  assert.equal((await cli(["next"], undefined, reviewerProject)).value.viewerId, reviewer.identityId);
+});
+
 test(`${representation} pickup opens only the linked assignment source with the project connection`, async t => {
   const { store, owner, producer, reviewer, reviewerProject, origin, cli } = await fixture(t, representation);
   const workItemId = "first-assignment", body = "The agreed contract is https://docs.example.test/contract.";
