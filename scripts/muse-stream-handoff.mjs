@@ -274,14 +274,19 @@ function readOptionalPrivate(file) {
   catch (error) { if (error.code !== "ENOENT") throw error; }
 }
 
+function offerMatchesCheckpoint(status, pending) {
+  return status?.status === "handoff" && Number.isFinite(Date.parse(status.offeredAt))
+    && pending && pending.openingEventId === status.openingEventId
+    && pending.requestMessageId === status.requestMessageId && pending.openingSequence === status.openingSequence;
+}
+
 async function runRecovery({ client, directory, file, policy, statusFile, signal }) {
   const receiptFile = join(directory, "recovery-receipt.json");
   const currentOffer = () => {
     const status = readOptionalPrivate(statusFile);
-    if (status?.status !== "handoff" || !Number.isFinite(Date.parse(status.offeredAt))) return null;
+    if (status?.status !== "handoff") return null;
     const pending = loadCheckpoint(file, policy).checkpoint.inFlight;
-    if (!pending || pending.openingEventId !== status.openingEventId
-      || pending.requestMessageId !== status.requestMessageId || pending.openingSequence !== status.openingSequence
+    if (!offerMatchesCheckpoint(status, pending)
       || readOptionalPrivate(receiptFile)?.openingEventId === pending.openingEventId) return null;
     return { ...pending, offeredAt: status.offeredAt, receiverAcknowledgment: status.receiverAcknowledgment };
   };
@@ -334,16 +339,32 @@ async function main([configFile, connectionDirectory, mode, ...extra]) {
     const statusFile = join(directory, "receiver-status.json");
     let pendingSettlement = afterSettlement;
     const settlementObservation = { through: 0 };
+    const recordReceiverStatus = status => {
+      const next = { pid: process.pid, ...status };
+      if (pendingSettlement) {
+        const offered = readOptionalPrivate(statusFile);
+        // A prearmed successor is a different process from the offered handoff.
+        // Keep the original offer readable until Room confirms settlement.
+        if (offered?.status === "handoff") {
+          const pending = loadCheckpoint(file, policy).checkpoint.inFlight;
+          if (pending?.requestMessageId === pendingSettlement && offerMatchesCheckpoint(offered, pending)) {
+            atomicPrivateJson(statusFile, { ...offered, prearmedReceiver: next });
+          }
+          return;
+        }
+      }
+      atomicPrivateJson(statusFile, next);
+    };
     const result = mode === "--recover"
       ? await runRecovery({ client, directory, file, policy, statusFile, signal: stop.signal })
       : await runMuseHandoff({ mode, windowMs: policy.windowSeconds * 1000, stop: stop.signal,
-        onRollover: facts => atomicPrivateJson(statusFile, { status: "rolled_over", pid: process.pid, ...facts }),
+        onRollover: facts => recordReceiverStatus({ status: "rolled_over", ...facts }),
         run: (signal, progress) => holdMuseHandoff({ client, policy, ...loadCheckpoint(file, policy), ...progress,
           signal, receiverAck, advertiseScope, afterSettlement: pendingSettlement, settlementObservation,
           onSettlement: () => { pendingSettlement = undefined; }, wait: mode !== "--once" }) });
     if (mode === "--stay-armed") {
       if (result.status === "handoff") result.offeredAt = new Date().toISOString();
-      atomicPrivateJson(statusFile, { pid: process.pid, ...result });
+      recordReceiverStatus(result);
     }
     if (result.status === "handoff" && !result.receiverAcknowledgment) result.seenAction = museSeenAction(result, policy.roomId);
     console.log(JSON.stringify(result));

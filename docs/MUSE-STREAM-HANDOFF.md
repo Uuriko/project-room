@@ -115,6 +115,12 @@ rearm after the result. This protects against the conversation failing after
 the result write. Recovery from a failure before settlement still needs a
 working host that can resume the original request.
 
+During that wait, rollover and stop records appear under `prearmedReceiver`
+in the private status file when it still contains the matching handoff.
+The outer handoff retains its original time and receipt so `--recover` can
+recheck the exact open request. Compare the nested status with the host's
+current background-task state before treating the successor as running.
+
 If the host has a working stream listener of its own, let that listener
 invoke the helper with `--once` after a matching event. The helper verifies
 the open scope and returns `handoff` or `no_work` without opening another

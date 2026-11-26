@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { once } from "node:events";
+import { setTimeout as pause } from "node:timers/promises";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkMuseRoute, holdMuseHandoff, museHandoffPolicy, museSeenAction, recoverMuseHandoff, runMuseHandoff } from "../scripts/muse-stream-handoff.mjs";
 
 const connection = { origin: "https://room.example.org", roomId: "build", memberId: "muse" };
@@ -62,6 +64,65 @@ test("prearming refuses a different request before opening a stream", async () =
   await assert.rejects(holdMuseHandoff({ policy, client: {}, checkpoint: { after: 11,
     inFlight: { requestMessageId: "first" } }, signal: AbortSignal.timeout(3000), afterSettlement: "other" }),
   /muse_settlement_checkpoint_mismatch/);
+});
+
+test("a prearmed receiver preserves the unresolved offer through rollover and stop", { timeout: 8000 }, async t => {
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), "muse-prearmed-offer-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const put = (name, value) => writeFileSync(join(directory, name), JSON.stringify(value), { mode: 0o600 });
+  const first = request("first", { progressState: "acknowledged", contextEventId: "first-basis",
+    progressNote: "Receiving runtime read and verified this exact request; model acceptance is separate." });
+  const pending = { requestMessageId: first.id, requesterId: first.requesterId, recipientId: first.recipientId,
+    roomCreatedEventId: "room-birth", openingEventId: first.openingEventId, openingSequence: 11, requestRevision: 0 };
+  const offer = { ...pending, status: "handoff", pid: 1, offeredAt: new Date(0).toISOString(),
+    receiverAcknowledgment: { sequence: 12 } };
+  put("handoff.json", { ...policy, windowSeconds: 1 });
+  put("stream-checkpoint.json", { version: 1,
+    binding: [policy.origin, policy.roomId, policy.memberId, policy.requesters, policy.workItems, policy.requests, policy.bootstrapAfter],
+    after: 11, inFlight: pending });
+  put("receiver-status.json", offer);
+  const preload = join(directory, "stub-room.mjs");
+  writeFileSync(preload, `
+    import { RoomAgentClient } from ${JSON.stringify(new URL("../client/room-agent.mjs", import.meta.url).href)};
+    import { setTimeout } from "node:timers/promises";
+    const read = async () => (${JSON.stringify({ ...context(first, 11), evaluatedThrough: 12 })});
+    RoomAgentClient.prototype.replyContext = read;
+    RoomAgentClient.prototype.replyContextForHint = read;
+    RoomAgentClient.prototype.waitForChange = async (after, { signal }) => setTimeout(60000, null, { signal });
+  `);
+  const args = ["--import", pathToFileURL(preload).href,
+    fileURLToPath(new URL("../scripts/muse-stream-handoff.mjs", import.meta.url)), join(directory, "handoff.json"), "-"];
+  const connectionInput = JSON.stringify({ ...connection, version: 1, token: "T".repeat(43) });
+  const child = spawn(process.execPath, [...args, "--stay-armed", "--receiver-ack", "--after-settlement=first"]);
+  let stderr = "";
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  const exited = once(child, "exit");
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    await exited;
+  });
+  child.stdin.end(connectionInput);
+  const status = () => JSON.parse(readFileSync(join(directory, "receiver-status.json")));
+  const deadline = Date.now() + 5000;
+  while (!status().prearmedReceiver && status().status === "handoff" && child.exitCode === null && Date.now() < deadline) await pause(30);
+  const { prearmedReceiver, ...rolledOffer } = status();
+  assert.deepEqual(rolledOffer, offer);
+  assert.equal(prearmedReceiver?.status, "rolled_over", stderr || "prearmed receiver status was not recorded");
+  assert.equal(prearmedReceiver.pid, child.pid);
+  child.kill();
+  assert.deepEqual(await exited, [0, null]);
+  const { prearmedReceiver: stopped, ...stoppedOffer } = status();
+  assert.deepEqual(stoppedOffer, offer);
+  assert.equal(stopped.status, "stopped");
+  assert.equal(JSON.parse(readFileSync(join(directory, "stream-checkpoint.json"))).inFlight.openingEventId, pending.openingEventId);
+  const recovery = spawnSync(process.execPath, [...args, "--recover"], {
+    encoding: "utf8", input: connectionInput, timeout: 3000,
+  });
+  assert.equal(recovery.status, 0, recovery.stderr);
+  const replay = JSON.parse(recovery.stdout);
+  assert.equal(replay.source, "interrupted_delivery");
+  assert.equal(replay.openingEventId, pending.openingEventId);
+  assert.deepEqual(replay.receiverAcknowledgment, offer.receiverAcknowledgment);
 });
 
 test("route check distinguishes requester, work and exact request scope without exposing configuration", t => {
