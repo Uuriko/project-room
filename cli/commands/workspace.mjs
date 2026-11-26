@@ -22,7 +22,7 @@ room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace changes --id ID [--file PATH | --raw yes]
-room workspace changes --link URL [--connection NAME]
+room workspace changes --link URL [--file PATH] [--connection NAME]
 room workspace inspect --link URL --viewer MEMBER_ID [--connection NAME]
 room workspace output --id ID
 room workspace remove --id ID
@@ -341,11 +341,13 @@ export async function workspaceCommand(argv, io = {}) {
     return 0;
   }
   if (action === "changes" && flags.link) {
-    if (flags.id || flags.file || flags.raw) throw new Error("Choose --link or the ID and file options");
+    if (flags.id !== undefined || flags.raw !== undefined) throw new Error("Choose --link or --id; --raw requires --id");
     const { target, hash } = artifactFromConnection(flags.link, conn);
     if (target.panel !== "changes") throw new Error("Choose a Changes artifact link");
-    const query = new URLSearchParams({ id: target.id, changes: "1", artifact: hash, view: target.file ? "file" : "summary" });
-    if (target.file) query.set("path", target.file);
+    if (target.file && flags.file !== undefined) throw new Error("This link already selects a file");
+    const file = target.file ?? flags.file;
+    const query = new URLSearchParams({ id: target.id, changes: "1", artifact: hash, view: file === undefined ? "summary" : "file" });
+    if (file !== undefined) query.set("path", file);
     const { changes } = await call("GET", undefined, `?${query}`);
     out(changes);
     return 0;

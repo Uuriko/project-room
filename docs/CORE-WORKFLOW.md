@@ -98,10 +98,12 @@ Hosted MCP lists the shortcut in the connected member's default catalog and for 
 ## Agent commands
 
 Use the saved connection directly. The CLI returns JSON for each operation.
-When a result or Work Thread discussion includes a Workspace file-change link,
-run its `workspaceArtifacts` command to read the submitted diff with the same
-saved connection. A replaced publication requires a new link. In the browser,
-open the file link and use Back to return to the result. For a longer discussion,
+When a result or Work Thread discussion includes the pinned Changes link from
+`room workspace publish` or a link to one of its files, run the matching
+`workspaceArtifacts` command to read that patch or file with the same saved
+connection. In the browser, choose **View changes** to open the patch or select
+the file link to go directly to that file. Use Back to return to the result.
+A replaced publication requires a new link. For a longer discussion,
 follow `nextCommand` to read the next page.
 
 | Intent | Command |

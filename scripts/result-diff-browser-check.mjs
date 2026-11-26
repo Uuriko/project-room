@@ -569,7 +569,7 @@ test("an existing agent signs in from a saved exact result without losing its ve
   assert.equal(page.url(), url.href);
 });
 
-test("a returning reviewer can finish the correction from the original link after a cold restart", { timeout: 30000 }, async t => {
+for (const patchOnly of [false, true]) test(`a returning reviewer can finish the correction from the original link after a cold restart (${patchOnly ? "whole patch" : "one file"})`, { timeout: 30000 }, async t => {
   const oldPatch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-Owner: undecided\n+Owner: tentative\n";
   const oldId = "a".repeat(32), oldHead = "e".repeat(40);
   const oldDigest = createHash("sha256").update(oldPatch).digest("hex");
@@ -594,7 +594,9 @@ test("a returning reviewer can finish the correction from the original link afte
   f.mutate(T.WORK_STARTED, {});
   const patch = "diff --git a/brief.md b/brief.md\n--- a/brief.md\n+++ b/brief.md\n@@ -1 +1 @@\n-Owner: undecided\n+Owner: Maya · Friday\n";
   const previewId = "f".repeat(32), head = "c".repeat(40), digest = createHash("sha256").update(patch).digest("hex");
-  const file = f.origin + "/?room=commons#pr-workspace/" + [previewId, 1, "changes", digest, "producer", head, "brief.md"].join("/");
+  const file = f.origin + "/?room=commons#pr-workspace/"
+    + [previewId, 1, "changes", digest, "producer", head, ...(patchOnly ? [] : ["brief.md"])].join("/");
+  const label = patchOnly ? "View changes" : "brief.md";
   await publish(previewId, head, patch);
   const revisedBody = "Result B\nOwner: Maya · Friday\n" + file;
   const second = f.complete(revisedBody);
@@ -612,7 +614,11 @@ test("a returning reviewer can finish the correction from the original link afte
   assert.equal(await returning.locator("#result-body").textContent(), revisedBody);
   await returning.locator("#result-work-action").click();
   const evidence = returning.locator("#action-text-body");
-  const selectedFile = evidence.getByRole("link", { name: "brief.md", exact: true });
+  if (patchOnly && process.env.ROOM_GIT_RESULT_CAPTURE) {
+    await returning.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, revisedBody);
+    await returning.screenshot({ path: join(process.env.ROOM_GIT_RESULT_CAPTURE, "patch-link-review.png") });
+  }
+  const selectedFile = evidence.getByRole("link", { name: label, exact: true });
   await selectedFile.waitFor({ timeout: 2500 });
   assert.equal(await selectedFile.getAttribute("href"), file);
   assert.equal(await evidence.locator("a").count(), 1);
@@ -622,6 +628,7 @@ test("a returning reviewer can finish the correction from the original link afte
   await selectedFile.press("Enter");
   const filePage = await opened;
   const filePanel = filePage.locator("[data-workspace-primary]");
+  if (patchOnly) await filePanel.locator('[data-file="brief.md"]').press("Enter");
   await filePanel.getByText("+Owner: Maya · Friday", { exact: true }).waitFor();
   assert.equal(await filePanel.getByText("+Owner: tentative", { exact: true }).count(), 0);
   await filePage.close();
@@ -647,8 +654,10 @@ test("a returning reviewer can finish the correction from the original link afte
 
   const accepted = await f.login("human-checker", currentUrl);
   await accepted.locator("#result-work-next").getByText("Accepted", { exact: true }).waitFor();
-  await accepted.locator("#result-body").getByRole("link", { name: "brief.md", exact: true }).click();
-  await accepted.locator("[data-workspace-primary]").getByText("+Owner: Maya · Friday", { exact: true }).waitFor();
+  await accepted.locator("#result-body").getByRole("link", { name: label, exact: true }).click();
+  const acceptedPanel = accepted.locator("[data-workspace-primary]");
+  if (patchOnly) await acceptedPanel.locator('[data-file="brief.md"]').press("Enter");
+  await acceptedPanel.getByText("+Owner: Maya · Friday", { exact: true }).waitFor();
   const discussion = accepted.getByRole("link", { name: "Open full discussion" });
   const acceptedMessage = second.event.data.evidenceMessageId;
   assert.equal(new URL(await discussion.getAttribute("href")).hash, "#pr-record/message/" + acceptedMessage);

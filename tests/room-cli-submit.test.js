@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { workspaceArtifactLink } from "../src/workspace-artifact-link.js";
@@ -110,7 +110,34 @@ test(`coworker pickup through a stale draft, corrected revision and exact accept
     body, producerId: producer.identityId, summary: "Ready for review", nextAction: "Check the reconnect case",
     expectedRevision: basis.revision
   });
-  const first = await submit("first-patch", originalBasis, "Patch A reconnects the adapter.");
+  const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  const repo = join(home, "project"), reviewRepo = join(reviewerProject, "project");
+  git(home, "init", "-q", repo);
+  const commit = (cwd, body, message) => {
+    writeFileSync(join(cwd, "adapter.js"), body);
+    git(cwd, "add", "adapter.js");
+    git(cwd, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "commit", "-qm", message);
+    return git(cwd, "rev-parse", "HEAD");
+  };
+  const base = commit(repo, "export const reconnect = () => false;\n", "base");
+  git(reviewerProject, "clone", "-q", "--no-local", repo, reviewRepo);
+  writeProject(repo, { connection: "producer" });
+  writeProject(reviewRepo, { connection: "reviewer" });
+  const worktree = join(home, "reconnect-attempt");
+  const workUrl = origin + "/?room=commons#pr-record/work/" + workItemId;
+  const launch = await read(["workspace", "start", "--path", worktree, "--base", base, "--from-work", workUrl], repo);
+  const publish = async (body, message) => {
+    const head = commit(worktree, body, message);
+    writeFileSync(join(worktree, "preview.html"), "<p>Reconnect fixture</p>");
+    const published = await read(["workspace", "publish", "--id", launch.id, "--title", "Reconnect",
+      "--base", base, "--file", "preview.html", "--include-changes", "yes", "--share-with", reviewer.identityId], worktree);
+    assert.equal(published.head, head);
+    assert.equal(published.base, base);
+    assert.equal(published.workThread.workItemId, workItemId);
+    return published;
+  };
+  const patchA = await publish("export const reconnect = () => true;\n", "reconnect");
+  const first = await submit("first-patch", originalBasis, "Patch A reconnects the adapter.\n" + patchA.links.changes);
   assert.equal(first.code, 0, JSON.stringify(first.value));
   const firstCompletion = first.value.next.arguments.completionEventId;
   assert.deepEqual(first.value.next.command, ["room", "--connection", "producer", "result", workItemId, "--completion", firstCompletion]);
@@ -120,6 +147,12 @@ test(`coworker pickup through a stale draft, corrected revision and exact accept
   const firstReview = await read(["work", workItemId, "--result"], reviewerProject);
   assert.equal(firstReview.cliBasis.memberId, reviewer.identityId);
   assert.equal(firstReview.review.result.receipt.eventId, firstCompletion);
+  const [earlierDiff] = firstReview.review.workspaceArtifacts ?? [];
+  assert.ok(earlierDiff, "the Workspace publisher's normal Changes link is directly usable in review");
+  assert.equal(earlierDiff.file, undefined);
+  const filesA = await read(earlierDiff.command.slice(1), reviewRepo);
+  assert.equal(filesA.head, patchA.head);
+  assert.deepEqual(filesA.files.map(file => file.path), ["adapter.js"]);
   await read(["review", "--from", "-", "--fail", "--summary", "Cover reconnect without duplicate replies."], reviewerProject, firstReview);
 
   const beforeStale = store.headSequence("commons");
@@ -132,7 +165,9 @@ test(`coworker pickup through a stale draft, corrected revision and exact accept
   assert.match(JSON.stringify(corrected), /Cover reconnect without duplicate replies/);
   await read(["resolve", "--from", "-", "--resolution", "Added a reconnect deduplication check."], home, corrected);
   assert.equal((await read(["begin", "--from", "-"], home, await read(["work", workItemId]))).working, true);
-  const revisedBody = "Patch B reconnects the adapter and deduplicates repeated replies.";
+  const correctedCode = "export const reconnect = (alreadyReplied) => !alreadyReplied;\n";
+  const patchB = await publish(correctedCode, "guard duplicate reconnect");
+  const revisedBody = "Patch B reconnects the adapter and deduplicates repeated replies.\n" + patchB.links.changes;
   const revised = await submit("corrected-patch", await read(["work", workItemId]), revisedBody);
   assert.equal(revised.code, 0, JSON.stringify(revised.value));
   const completionEventId = revised.value.next.arguments.completionEventId;
@@ -140,6 +175,21 @@ test(`coworker pickup through a stale draft, corrected revision and exact accept
   const secondReview = await read(["work", workItemId, "--result"], reviewerProject);
   assert.equal(secondReview.review.result.text.body, revisedBody);
   assert.equal(secondReview.review.result.receipt.eventId, completionEventId);
+  const [correctedDiff] = secondReview.review.workspaceArtifacts;
+  const filesB = await read(correctedDiff.command.slice(1), reviewRepo);
+  assert.equal(filesB.head, patchB.head);
+  assert.equal(filesB.base, base);
+  const selectedFile = await read([...correctedDiff.command.slice(1), "--file", "adapter.js"], reviewRepo);
+  assert.equal(selectedFile.head, patchB.head);
+  assert.equal(selectedFile.file.hunks[0].changes.at(-1).content, correctedCode.trim());
+  assert.notEqual(filesB.head, filesA.head);
+  assert.deepEqual(filesB.files.map(file => file.path), ["adapter.js"]);
+  const selectedPatch = new URL(patchB.links.changes);
+  const forbiddenPatch = new URL("/api/rooms/commons/workspace-previews", origin);
+  forbiddenPatch.search = new URLSearchParams({ id: patchB.id, changes: "1", view: "summary", artifact: selectedPatch.hash });
+  const denied = await fetch(forbiddenPatch, { headers: { Authorization: "Bearer " + owner } });
+  assert.equal(denied.status, 404, "the result does not widen the directed patch audience");
+  await assert.rejects(() => read([...earlierDiff.command.slice(1), "--file", "adapter.js"], reviewRepo), { status: 409 });
   await read(["review", "--from", "-", "--pass", "--summary", "The reconnect fixture is covered."], reviewerProject, secondReview);
   const approvedWork = store.workContext(producer.secret, "commons", workItemId).work;
   const sourceMessageId = "accepted-reconnect-note";
@@ -158,6 +208,14 @@ test(`coworker pickup through a stale draft, corrected revision and exact accept
   assert.equal(reopened.result.text.body, revisedBody);
   assert.equal(reopened.workThread.decisionSource.decisionEventId, decision.event.id);
   assert.equal(reopened.workThread.decisionSource.messageId, sourceMessageId);
+  assert.deepEqual(reopened.workspaceArtifacts, [correctedDiff]);
+  const continuation = await read(["workspace", "continue", "--link", patchB.links.changes,
+    "--path", join(home, "reviewed-reconnect"), "--fetch-from", "origin"], reviewRepo);
+  assert.equal(continuation.base, patchB.head);
+  assert.equal(git(continuation.path, "show", "HEAD:adapter.js"), correctedCode.trim());
+  assert.equal(git(reviewRepo, "rev-parse", "HEAD"), base);
+  t.diagnostic(JSON.stringify({ representation, gitBase: base, firstGitHead: patchA.head,
+    acceptedGitHead: patchB.head, completionEventId, approvalEventId: decision.event.id }));
 });
 
 for (const representation of ["legacy", "normalized-current-v1"])

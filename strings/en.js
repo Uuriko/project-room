@@ -515,6 +515,7 @@ export default {
   "result.quoteTooLong": "This quote would exceed the message limit. Select a shorter passage or shorten your draft.",
   "result.replyBlocked": "Finish or clear the existing reply in this conversation first.",
   "result.draftRepliesElsewhere": "Your draft replies to another message.",
+  "result.openChanges": "View changes",
   "result.fileAnchor": "{path}:{line} ({side})",
   "record.invalidView": "Choose a supported record view.",
   "record.loadingHtml": "<li role=\"status\">Loading the record…</li>",

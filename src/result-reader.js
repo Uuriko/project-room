@@ -1,5 +1,5 @@
 import { exactResultHref } from "./room-deep-link.js";
-import { roomFileChangeSelection } from "./workspace-artifact-link.js";
+import { roomChangesSelection } from "./workspace-artifact-link.js";
 import { clipboard } from "./clipboard.js";
 import { canReplyToResult, exactResultRecovery } from "./result-availability.js";
 import { uiText } from "./strings.js";
@@ -12,14 +12,14 @@ export function renderResultText(body, text, roomId, { openInNewTab = false } = 
   body.replaceChildren();
   // Preserve the submitted characters, including punctuation around plain URLs.
   const githubFile = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/blob\/[a-f0-9]{40}\/[a-z0-9_.%+~/-]+(?:#L[1-9]\d*(?:-L[1-9]\d*)?)?$/i;
-  const fileLinks = new Map();
+  const changeLinks = new Map();
   let offset = 0;
   for (const match of text.matchAll(/(?<!\S)https?:\/\/[^\s]+/gi)) {
     const href = match[0];
     const url = URL.parse(href);
     if (!url || url.href !== href) continue;
-    const file = url.pathname === location.pathname && roomFileChangeSelection(url, location.origin, roomId);
-    if (!githubFile.test(href) && !file) continue;
+    const change = url.pathname === location.pathname && roomChangesSelection(url, location.origin, roomId);
+    if (!githubFile.test(href) && !change) continue;
     const link = document.createElement("a");
     link.href = href;
     if (openInNewTab || url.origin !== location.origin) {
@@ -27,16 +27,18 @@ export function renderResultText(body, text, roomId, { openInNewTab = false } = 
       link.rel = "noopener noreferrer";
     }
     link.textContent = href;
-    if (file && file.file === file.file.trim() && !/\p{Bidi_Control}/u.test(file.file)) {
-      const label = file.anchor ? uiText("result.fileAnchor", { path: file.file, line: file.anchor.line, side: file.anchor.side }) : file.file;
+    const file = change?.file;
+    if (change && (!file || file === file.trim() && !/\p{Bidi_Control}/u.test(file))) {
+      const label = change.anchor ? uiText("result.fileAnchor", { path: file, line: change.anchor.line, side: change.anchor.side })
+        : file ?? uiText("result.openChanges");
       // The selector doesn't carry a repository name. Leave colliding labels as URLs.
-      fileLinks.set(label, fileLinks.has(label) ? null : link);
+      changeLinks.set(label, changeLinks.has(label) ? null : link);
     }
     body.append(text.slice(offset, match.index), link);
     offset = match.index + href.length;
   }
   body.append(text.slice(offset));
-  for (const [label, link] of fileLinks) {
+  for (const [label, link] of changeLinks) {
     if (!link) continue;
     const original = document.createElement("span");
     original.className = "sr-only";
@@ -215,7 +217,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const view = resultView, url = new URL(link.href);
     if (!usableText(view)) return;
-    const artifact = roomFileChangeSelection(url, location.origin, view.roomId);
+    const artifact = roomChangesSelection(url, location.origin, view.roomId);
     if (!artifact) return;
 
     event.preventDefault();

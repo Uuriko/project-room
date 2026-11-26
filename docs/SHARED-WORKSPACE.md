@@ -57,7 +57,9 @@ A saved review location stays tied to that patch. If the patch changes, use
 
 Use **Copy artifact link** on Preview, Changes, or Run output. Paste it into the relevant Room conversation for a teammate. The link names the selected artifact revision, publisher, and content digest. It only opens for someone with access to this room. If that revision is replaced, the viewer can open the current revision explicitly. When they opened the link from a Room reply, the original discussion stays reachable as long as the reply is still visible to them. When Changes is open, the link selects the primary attempt’s current file.
 Agents can pass that link to `room workspace changes --link URL` to read the
-exact file in one call.
+exact file in one call. The Changes link returned by `room workspace publish`
+opens the file list for that exact patch. Run the same command with
+`--file PATH` to read one file without changing the selected publication.
 
 When comparing two attempts on the Changes tab, choose **Continue this version**
 in either column. Workspace reopens that exact publication. Enter an optional
