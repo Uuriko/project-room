@@ -574,7 +574,23 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   store.command(reviewer.secret, "commons", { id: "private-feedback", type: "message.posted",
     data: { messageId: "private-feedback", replyToId: shared.value.result.text.messageId, body: "Private aside", toMemberId: "owner" } });
   const exact = await rpc("room_read_result", { workItemId, completionEventId });
-  const connectorRead = await rpc(exact.discussionRead.tool, exact.discussionRead.arguments);
+  assert.equal(shared.value.discussionRead.tool, exact.discussionRead.tool);
+  assert.deepEqual(shared.value.discussionRead.arguments, exact.discussionRead.arguments);
+  for (const offered of [undefined, {
+    ...exact.discussionRead, arguments: { ...exact.discussionRead.arguments, completionEventId: "some-other-completion" },
+  }]) {
+    const fallback = await cli(["result", sharedUrl], undefined, reviewerProject, async (url, init) => {
+      const response = await fetch(url, init);
+      const wire = await response.json();
+      wire.result.structuredContent.discussionRead = offered;
+      return Response.json(wire);
+    });
+    assert.equal(fallback.code, 0);
+    assert.equal(fallback.value.discussionRead.tool, undefined);
+    assert.equal(fallback.value.discussionRead.path, shared.value.discussionRead.path);
+    assert.deepEqual(fallback.value.discussionRead.command, shared.value.discussionRead.command);
+  }
+  const connectorRead = await rpc(shared.value.discussionRead.tool, shared.value.discussionRead.arguments);
   assert.equal(connectorRead.completionEventId, completionEventId);
   assert.equal(connectorRead.discussion.messageId, shared.value.result.text.messageId);
   assert.deepEqual(connectorRead.discussion.replies.map(reply => reply.body), [quoted]);
@@ -666,12 +682,48 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   assert.equal(fromFeedback.code, 0);
   assert.equal(fromFeedback.value.result.receipt.eventId, completionEventId);
   assert.equal(fromFeedback.value.selection.status, "historical");
+  const acceptedReview = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
+  assert.equal((await cli(["review", "--from", "-", "--pass", "--summary", "The restored brief is ready."],
+    acceptedReview.value, reviewerProject)).code, 0);
+  const acceptedUrl = exactResultHref({ roomId: "commons", workItemId, completionEventId: reused.event.id }, new URL(origin));
+  const accepted = await cli(["result", acceptedUrl, "--discussion"], undefined, reviewerProject);
+  assert.equal(accepted.code, 0);
+  assert.equal(accepted.value.review, undefined);
+  const read = accepted.value.discussionRead;
+  assert.deepEqual(read.arguments, { roomId: "commons", workItemId, completionEventId: reused.event.id });
+  const thread = await rpc(read.tool, read.arguments, reviewer);
+  assert.equal(thread.completionEventId, reused.event.id);
+  assert.equal(thread.discussion.messageId, source.messageId);
+
+  assert.equal(accepted.value.workThread.verdict.result, "pass");
+  const continuation = { id: "accepted-brief-continuation", replyToId: thread.discussion.messageId,
+    body: "I will cross-check the accepted brief against the repository notes.", compact: true };
+  const posted = await rpc("room_post_message", continuation, reviewer);
+  const repeated = await rpc("room_post_message", continuation, reviewer);
+  assert.equal(posted.replyToId, source.messageId);
+  assert.equal(posted.actorId, reviewer.identityId);
+  assert.equal(repeated.duplicate, true);
+  assert.equal(repeated.eventId, posted.eventId);
+  const reread = await rpc(read.tool, read.arguments, reviewer);
+  assert.equal(reread.discussion.replies.filter(reply => reply.id === posted.messageId).length, 1);
+  const afterReply = await cli(["result", acceptedUrl], undefined, reviewerProject);
+  assert.deepEqual(afterReply.value.workThread.verdict, accepted.value.workThread.verdict);
+  assert.deepEqual(afterReply.value.result.receipt, accepted.value.result.receipt);
+  assert.equal(afterReply.value.current.workRevision, accepted.value.current.workRevision, "continuation only posts chat");
+
   for (const other of [sharedUrl.replace("room=commons", "room=other"), sharedUrl.replace(origin, "https://other.example")]) {
     let calls = 0;
     const refused = await cli(["result", other], undefined, reviewerProject, () => { calls++; throw new Error("unexpected call"); });
     assert.equal(refused.value.code, "room_selection_mismatch");
     assert.equal(calls, 0);
   }
+  store.command(producer.secret, "commons", { id: "withdraw-accepted-source", type: "message.deleted",
+    data: { messageId: source.messageId, expectedMessageRevision: 0 } });
+  const withdrawn = await cli(["result", acceptedUrl], undefined, reviewerProject);
+  assert.equal(withdrawn.value.discussionRead, undefined);
+  const unavailable = await cli(read.command.slice(1), undefined, reviewerProject);
+  assert.equal(unavailable.value.code, "result_discussion_unavailable");
+  assert.equal(unavailable.value.discussion, undefined);
 });
 
 test(`${representation} unavailable shared result gives the reviewer a safe next step`, async t => {

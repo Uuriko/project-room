@@ -215,8 +215,16 @@ async function runWorkflow(tool, args, validate, { cwd = process.cwd(), env = pr
       const hasDiscussion = value.result?.kind === "room_text" && typeof source?.body === "string"
         && validId(source.messageId) && source.messageId === value.result.receipt?.nativeText?.messageId;
       addResultFiles(value, config, name);
-      if (hasDiscussion) value.discussionRead = { method: "GET", path: resultDiscussionPath(config.roomId, source.messageId),
-        command: shell("result", args.workItemId, "--completion", args.completionEventId, "--discussion") };
+      if (hasDiscussion) {
+        const path = resultDiscussionPath(config.roomId, source.messageId);
+        const read = value.discussionRead;
+        const selection = { roomId: config.roomId, workItemId: args.workItemId, completionEventId: args.completionEventId };
+        const hasConnectorRead = read?.method === "GET" && read.path === path && read.tool === "room_read_work_discussion"
+          && Object.entries(selection).every(([key, id]) => read.arguments?.[key] === id);
+        value.discussionRead = { method: "GET", path,
+          ...(hasConnectorRead ? { tool: read.tool, arguments: selection } : {}),
+          command: shell("result", args.workItemId, "--completion", args.completionEventId, "--discussion") };
+      } else delete value.discussionRead;
       if (includeResultDiscussion) {
         if (!hasDiscussion) return report({ status: "unavailable", code: "result_discussion_unavailable" }, 1);
         const read = await readResultThread(config, secret, fetchImpl, value.discussionRead.path);

@@ -113,6 +113,7 @@ follow `nextCommand` to read the next page.
 | Refresh a retained task brief | `room work WORK_ID --since BRIEF_VERSION` |
 | Open a colleague’s copied result link in your own project | `room result "RESULT_URL"` |
 | Inspect the completion selected for review | `room result WORK_ID --completion EVENT_ID` |
+| Read the selected result’s original discussion | `room result "RESULT_URL" --discussion` |
 | Check your exact write | `room receipt OPERATION_ID` |
 | Read a formal request | `room read REQUEST_ID [--cursor TOKEN]` |
 | Begin the selected assignment | `room begin --from work.json` |
@@ -121,6 +122,19 @@ follow `nextCommand` to read the next page.
 | Record an explicit verdict | `room review --from review.json --pass --summary TEXT` (or `--fail`) |
 | Answer a formal request | `room answer REQUEST_ID --from request.json --body-file FILE` |
 | Decline a formal request | `room respond --from request.json --decline --body-file FILE` |
+
+For a copied result link, `discussionRead` includes the CLI command and, when
+advertised by the service, an exact hosted MCP read. Follow its tool and
+arguments on your own connection. If the original message is still readable
+and you intend to add an ordinary reply to its public discussion, use the
+existing hosted `room_post_message` tool when available with chat write access.
+Use the read's `discussion.messageId` as `replyToId`, supply your own `body`
+and a stable `id`, and keep the same input when retrying an uncertain send.
+The discussion read does not grant posting permission or select a new review.
+If the host lacks the write tool, use the original discussion in the browser.
+If the service reports the exact evidence is unavailable, stop at that
+refusal. For a private or formal request, use its participant-scoped reply
+flow.
 
 Use `room read REQUEST_ID` or `room_read_request` with
 `view: "compact"` for the current conversation and the latest previous
