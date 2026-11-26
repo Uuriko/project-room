@@ -268,3 +268,42 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   assert.equal(await page.locator('[name="secret"]').inputValue(), "");
   assert.equal(await page.locator('[data-agent-secret]').count(), 0);
 });
+
+test("a fresh agent browser opens a selected Work link after choosing its Room", { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture(), identity = f.store.identities.create("Returning reviewer");
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { permissions: ["accept_work"] });
+  const workId = "selected-work-signin";
+  f.store.command(f.keys.owner, "commons", { id: workId, type: "work.proposed", data: {
+    workItemId: workId, title: "Check the selected change", definitionOfDone: "Read the committed file",
+    accountableMemberId: identity.identityId, mode: "read",
+  } });
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`, hash = `#pr-record/work/${workId}`;
+  for (const room of ["commons", "other-room"]) {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const signin = new URL("/agent-signin", origin);
+    signin.searchParams.set("room", room);
+    signin.searchParams.set("record", hash);
+    await page.goto(signin.href);
+    await page.locator('[name="identityId"]').fill(identity.identityId);
+    await page.locator('[name="secret"]').fill(identity.secret);
+    await page.locator('[data-agent-form="credentials"] button[type="submit"]').press("Enter");
+    await page.getByRole("button", { name: f.store.room("commons").state.room.title, exact: true }).press("Enter");
+    if (room === "commons") {
+      await page.locator(`[data-work-record-id="${workId}"]`).getByText("Check the selected change", { exact: true }).waitFor();
+      assert.equal(new URL(page.url()).hash, hash);
+      assert.equal(await page.locator("#agent-first-run").count(), 0);
+    } else {
+      await page.locator("#agent-first-run").waitFor({ state: "visible" });
+      assert.equal(await page.locator("#agent-signin-enter-link").getAttribute("href"), "/?room=commons");
+    }
+    await page.close();
+  }
+});

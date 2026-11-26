@@ -22,10 +22,13 @@ const ui = createAgentSigninUI({
   onSignedIn: (session) => {
     const roomId = session?.roomId;
     const roomQuery = roomId ? `?room=${encodeURIComponent(roomId)}` : "";
-    roomTarget = [mountPrefix, roomQuery].join("/") + (intendedRecord && intendedRecord.roomId === roomId ? intendedRecord.hash : "");
+    const record = intendedRecord && intendedRecord.roomId === roomId ? intendedRecord.hash : "";
+    roomTarget = [mountPrefix, roomQuery].join("/") + record;
     if (enterLink) enterLink.href = roomTarget;
     if (enterBox) enterBox.hidden = false;
-    if (agentFirstRunSeen()) location.assign(roomTarget);
+    if (!record && !agentFirstRunSeen()) return false;
+    location.assign(roomTarget);
+    return true;
   },
   firstRunActions: {
     greet: () => location.assign(roomTarget),

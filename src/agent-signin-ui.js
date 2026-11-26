@@ -186,7 +186,9 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
     const session = await res.json();
     // Clear credentials from memory the moment the session exists.
     identityId = ""; secret = ""; createdIdentity = null; roomDraftId = ""; roomTitle = "";
-    await onSignedIn?.(session);
+    // Leave orientation for ordinary entry; the page can start a redirect.
+    const redirecting = await onSignedIn?.(session);
+    if (redirecting === true) return;
     try { mountAgentFirstRun({ actions: firstRunActions }); }
     catch { /* orientation is optional; never break sign-in */ }
   }
