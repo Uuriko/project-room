@@ -613,8 +613,36 @@ for (const audience of ["public", "private"]) {
     await link.click();
     if (evidenceRead) await evidenceRead;
     await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
+    const exactURL = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
+    const workspace = reviewer.locator("#room-project-workspace");
+    if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `result-file-${audience}.png`) });
+    for (const dismiss of [
+      () => workspace.getByRole("button", { name: "Close", exact: true }).click(),
+      () => reviewer.keyboard.press("Escape"),
+      () => reviewer.goBack(),
+    ]) {
+      await dismiss();
+      await workspace.waitFor({ state: "hidden" });
+      await reviewer.waitForURL(exactURL, { timeout: 2000 });
+      await reviewer.waitForFunction(href => document.activeElement?.closest("#result-body")
+        && document.activeElement.href === href, href(f.origin), { timeout: 2000 });
+      if (process.env.ROOM_TEST_CAPTURE) await reviewer.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, `result-return-${audience}.png`) });
+      await link.press("Enter");
+      await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
+    }
     await reviewer.goBack();
     await link.waitFor();
+    await reviewer.goForward();
+    await reviewer.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
+    await reviewer.keyboard.press("Escape");
+    await reviewer.waitForURL(exactURL);
+    await link.waitFor();
+    const direct = await f.login("human-checker", href(f.origin));
+    await direct.locator("[data-workspace-primary]").getByText("+submitted", { exact: true }).waitFor();
+    await direct.keyboard.press("Escape");
+    await direct.locator("#room-project-workspace").waitFor({ state: "hidden" });
+    assert.equal(direct.url(), href(f.origin));
+    assert.equal(await direct.locator("#result-dialog").isVisible(), false);
     await publish(1, patch.replace("+submitted", "+replacement"));
     await link.click();
     await reviewer.getByText("This preview revision changed.", { exact: true }).waitFor();

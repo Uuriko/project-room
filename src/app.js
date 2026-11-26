@@ -874,6 +874,16 @@ updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), g
 // JDOT-COH-NAV end
 workspacePreviewsUI = installWorkspacePreviews({ client, toolbar: document.querySelector(".room-main .topbar-actions"),
   memberLabel: id => state?.members[id]?.displayName, captureThreadDraft: captureWorkspaceThreadDraft,
+  onDismiss() {
+    const origin = currentWorkOrigin();
+    if (!origin?.resultFile || history.state?.roomWorkTarget !== activeWorkNavigation
+      || location.href !== origin.targetUrl) return false;
+    if (!origin.dismissPending) {
+      origin.dismissPending = true;
+      history.back();
+    }
+    return true;
+  },
   workThread: () => {
     if (!session || !state?.workItems[activeWorkNavigationId]) return null;
     const url = new URL(location.pathname, location.origin);
@@ -3759,6 +3769,11 @@ function navigateWorkRecord(kind, id, extra = {}) {
     workHistoryReplayKey = null; showTarget();
     return true;
   }
+  pushWorkDestination(target, origin);
+  showTarget();
+  return true;
+}
+function pushWorkDestination(target, origin) {
   const ticket = crypto.randomUUID();
   origin.target = target; origin.targetUrl = new URL(target, location.href).href;
   workNavigationOrigins.set(ticket, origin);
@@ -3769,14 +3784,11 @@ function navigateWorkRecord(kind, id, extra = {}) {
   history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
   activeWorkNavigation = ticket;
   // Pre-seed the replay key so a late hashchange/popstate for this navigation
-  // dedupes instead of reprocessing stale state (which would close a board
-  // dialog the user reopened after navigating). The navigation itself is
-  // processed synchronously by showWorkDestination below; the event is only
-  // its echo. Key format matches replayWorkNavigation's computed key, with
+  // dedupes instead of reprocessing stale state. The caller opens the
+  // destination synchronously; the event is only
+  // its echo. The key matches replayWorkNavigation, with
   // an empty back segment (the pushed entry carries no roomWorkOrigin).
-  workHistoryReplayKey = [new URL(target, location.href).href, ticket, "", workNavigationContext()].join("|");
-  showTarget();
-  return true;
+  workHistoryReplayKey = [origin.targetUrl, ticket, "", workNavigationContext()].join("|");
 }
 // #3795: navigate to a board claim's record. The destination is the board
 // itself — the claim's card with its record disclosure open — so this
@@ -3828,6 +3840,7 @@ async function restoreWorkOrigin(ticket) {
   const origin = currentWorkOrigin(ticket);
   if (!origin || busy) { returnToCurrentRoom(); return; }
   const epoch = ++workNavigationEpoch;
+  if (origin.resultFile) workspacePreviewsUI?.reset();
   if (origin.presentation === "thread") closeResult(false);
   else closeLinkedResult();
   updatesUi?.cancelPending();
@@ -3892,7 +3905,7 @@ async function restoreWorkOrigin(ticket) {
   if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
   window.scrollTo(...origin.windowScroll);
   if (origin.type === "result") {
-    openLinkedResult(origin.result);
+    openLinkedResult(origin.result, origin.resultFile);
   } else if (origin.type !== "updates") {
     const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
     const keyed = origin.focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === origin.focusKey) : null;
@@ -3942,7 +3955,10 @@ function replayWorkNavigation() {
     // record destination starts with it closed.
     if (!targetOrigin.targetClaimId && $("#board-dialog").open) $("#board-dialog").close();
     const work = /^#pr-record\/work\/(.+)$/.exec(location.hash);
-    if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
+    if (targetOrigin.resultFile) {
+      targetOrigin.dismissPending = false;
+      revealLocationHash(targetOrigin.workspaceDiscussion);
+    } else if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
     else if (work && targetOrigin.presentation === "thread") showWorkDestination("work", decodeFragment(work[1]), "thread");
     else revealLocationHash();
     syncWorkReturnControl();
@@ -7038,10 +7054,16 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   },
   onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
   onOpenDecision(messageId, result) { return navigateWorkRecord("message", messageId, { type: "result", result }); },
-  onOpenWorkspace(url, message, artifactId) {
+  onOpenWorkspace(url, message, artifactId, completionEventId, resultFile) {
     const discussion = message ? captureWorkspaceThreadDraft(message.id, message) : null;
-    history.pushState(workHistoryState(), "", url.href);
-    revealLocationHash(discussion ? { ...discussion, artifactId } : null);
+    const workspaceDiscussion = discussion ? { ...discussion, artifactId } : null;
+    const result = exactResultDestination(location);
+    if (result?.completionEventId === completionEventId) {
+      pushWorkDestination(url.href, captureWorkOrigin({ type: "result", result, resultFile, workspaceDiscussion }));
+    } else {
+      history.pushState(workHistoryState(), "", url.href);
+    }
+    revealLocationHash(workspaceDiscussion);
   },
   onReturn() { $("#work-navigation-return").click(); },
   onWorkAction(item, action, compareFrom) { openWorkAction(item, action, null, null, compareFrom); },

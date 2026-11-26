@@ -8,7 +8,7 @@ const changesIdentity = item => item && JSON.stringify([
 ]);
 
 // Preview code runs in an opaque frame with a separate response policy.
-export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft, workThread }) {
+export function installWorkspacePreviews({ client, toolbar, memberLabel, captureThreadDraft, workThread, onDismiss }) {
   const button = document.createElement("button");
   button.type = "button"; button.className = "topbar-button workspace-open";
   button.setAttribute("aria-label", "Workspace");
@@ -589,7 +589,14 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
     dialog.showModal();
     void load();
   });
-  dialog.querySelector("[data-preview-close]").addEventListener("click", reset);
+  function dismiss() {
+    if (!onDismiss?.()) reset();
+  }
+  dialog.querySelector("[data-preview-close]").addEventListener("click", dismiss);
+  dialog.addEventListener("cancel", event => {
+    event.preventDefault();
+    dismiss();
+  });
   dialog.querySelector("[data-preview-refresh]").addEventListener("click", () => void load());
   dialog.addEventListener("close", () => { if (!dialog.open) reset(); });
   return {

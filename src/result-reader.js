@@ -197,6 +197,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     event.preventDefault();
     if (view.openingWorkspace) return;
     const origin = location.href;
+    const occurrence = [...link.parentElement.querySelectorAll("a")].filter(candidate => candidate.href === url.href).indexOf(link);
     if (needsConversation(view)) {
       view.openingWorkspace = true;
       resultElement("result-use-status").textContent = uiText("result.loadingConversation");
@@ -206,7 +207,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
     if (!usableText(view) || location.href !== origin) return;
     resultElement("result-use-status").textContent = "";
-    onOpenWorkspace(url, resultDiscussionMessage(view), artifact.id);
+    onOpenWorkspace(url, resultDiscussionMessage(view), artifact.id, view.receipt.completionEventId, { href: url.href, occurrence });
   });
   function showOutcome(outcome) {
     const panel = resultElement("result-outcome");
@@ -609,6 +610,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.loaded = true; view.retrying = false;
       if (document.activeElement === resultElement("result-retry")) resultElement(view.focused ? "result-title" : "close-result").focus({ preventScroll: true });
       resultStatus();
+      const returnFile = view.returnFile;
+      view.returnFile = null;
+      if (returnFile && !view.withdrawn && document.activeElement === resultElement("result-title")) {
+        const links = [...resultElement("result-body").querySelectorAll("a")].filter(link => link.href === returnFile.href);
+        links[returnFile.occurrence]?.focus();
+      }
       if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
         resultElement("result-diff"), () => owns() && !view.withdrawn, undefined, view.compareFrom);
     }).catch(error => {
@@ -698,7 +705,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!resultView || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     resultView.followingCurrent = event.currentTarget.href;
   });
-  function openLinked({ roomId, workItemId, completionEventId }) {
+  function openLinked({ roomId, workItemId, completionEventId }, returnFile = null) {
     const session = getSession();
     if (!session || session.roomId !== roomId) return;
     if (resultView?.linked && resultView.roomId === roomId && resultView.workItemId === workItemId
@@ -707,7 +714,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const compareFrom = from?.roomId === roomId && usableText(from) && sameSession(from.generation, roomId, from.memberId)
       && from.workItemId === workItemId && from.followingCurrent === location.href ? from.receipt.completionEventId : null;
     forgetSelection();
-    openResult({ compareFrom, linked: true, focused: true, generation: client.generation, roomId,
+    openResult({ compareFrom, returnFile, linked: true, focused: true, generation: client.generation, roomId,
       memberId: session.member.id, workItemId, receipt: { completionEventId } }, "Result");
   }
   function closeLinked() {
