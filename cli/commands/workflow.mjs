@@ -405,11 +405,12 @@ export function readCommand(argv, io = {}) {
   return requestCommand([...argv, "--compact"], io);
 }
 
-async function answeredRequestList(cursor, { cwd = process.cwd(), env = process.env, fetchImpl, out = console.log }) {
+async function answeredRequestList(cursor, { cwd = process.cwd(), env = process.env, connectionName, fetchImpl, out = console.log }) {
+  const shell = (...tokens) => roomShellCommand(connectionName, ...tokens);
   const report = (value, status) => { out(JSON.stringify(value)); return status; };
   let connection, token;
   try {
-    connection = loadConnection({ project: cwd, env });
+    connection = loadConnection({ project: cwd, env, name: connectionName });
     token = await loadSecret(connection.name, connection.config.token, env);
   } catch { return report({ status: "refused", code: "saved_connection_required" }, 1); }
   try {
@@ -417,12 +418,12 @@ async function answeredRequestList(cursor, { cwd = process.cwd(), env = process.
     const value = await client.replyRequests({ direction: "outgoing", status: "answered", ...(cursor ? { cursor } : {}) });
     if (value.viewerId !== connection.config.memberId ||
       JSON.stringify(value).includes(token)) throw new Error("Unmatched Room result");
-    for (const request of value.requests) request.command = ["room", "request", request.id];
-    if (value.page?.hasMore) value.nextCommand = ["room", "request", "--answered", "--cursor", value.page.nextCursor];
+    for (const request of value.requests) request.command = shell("request", request.id);
+    if (value.page?.hasMore) value.nextCommand = shell("request", "--answered", "--cursor", value.page.nextCursor);
     return report(value, 0);
   } catch (error) {
     if (error instanceof RoomClientError && ["invalid_reply_cursor", "reply_cursor_identity_changed"].includes(error.code))
-      return report({ status: "unavailable", code: error.code, restartCommand: ["room", "request", "--answered"] }, 1);
+      return report({ status: "unavailable", code: error.code, restartCommand: shell("request", "--answered") }, 1);
     return report({ status: "unavailable", code: "room_read_unavailable" }, 1);
   }
 }

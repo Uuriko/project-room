@@ -358,7 +358,18 @@ for (const storage of ["legacy", "normalized"]) {
     assert.equal(first.answerDelivered, true);
     const messageId = first.attachment.messageId;
     const recipient = createRoomClient({ origin, roomId, token: owner });
-    assert.deepEqual(await recipient.files([messageId]), []);
+    const headers = { Authorization: "Bearer " + owner };
+    const exchange = await fetch(`${origin}/api/rooms/${roomId}/reply-context?requestMessageId=question`, { headers });
+    assert.equal(exchange.status, 200);
+    const selection = (await exchange.json()).answerFilesRead.http;
+    const selectedFiles = async () => {
+      const response = await fetch(new URL(selection.path, origin), {
+        method: selection.method, headers,
+      });
+      assert.equal(response.status, 200);
+      return (await response.json()).files;
+    };
+    assert.deepEqual(await selectedFiles(), []);
 
     let followUpAnswerId;
     if (storage === "normalized") {
@@ -447,7 +458,7 @@ for (const storage of ["legacy", "normalized"]) {
     assert.deepEqual(repaired.attachment, { fileId, messageId, state: "shared" });
     assert.equal(runs, 1);
     assert.equal(answers, 1);
-    const files = await recipient.files([messageId]);
+    const files = await selectedFiles();
     assert.deepEqual(files.map(file => [file.id, file.messageId, file.sha256]), [[fileId, messageId, staged.sha256]]);
     assert.deepEqual(Buffer.from((await recipient.file(fileId)).data, "base64"), content);
     const other = createRoomClient({ origin, roomId, token: observer });

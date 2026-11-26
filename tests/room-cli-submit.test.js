@@ -1109,6 +1109,22 @@ test(`${representation} a fresh CLI finds its answered request and file without 
   const file = await fetch(origin + "/api/rooms/commons/files/" + files[0].id, { headers });
   assert.deepEqual(Buffer.from((await file.json()).attachment.data, "base64"), bytes);
   assert.equal(initial.viewerId, reviewer.identityId);
+
+  // Run the returned commands from the producer's checkout with the requester
+  // explicitly selected. Losing that selection must not silently switch seats.
+  let namedPage = await fresh(["--connection", "reviewer", "request", "--answered"], home);
+  const namedDiscoveries = [];
+  for (let followed = 0; followed < 6; followed++) {
+    assert.equal(namedPage.viewerId, reviewer.identityId);
+    namedDiscoveries.push(...namedPage.requests);
+    if (!namedPage.nextCommand) break;
+    assert.deepEqual(namedPage.nextCommand.slice(0, 3), ["room", "--connection", "reviewer"]);
+    namedPage = await fresh(namedPage.nextCommand.slice(1), home);
+  }
+  assert.equal(namedDiscoveries.length, 1);
+  assert.deepEqual(namedDiscoveries[0].command.slice(0, 3), ["room", "--connection", "reviewer"]);
+  const namedSelected = await fresh(namedDiscoveries[0].command.slice(1), home);
+  assert.equal(namedSelected.answerFilesRead.http.path, selected.answerFilesRead.http.path);
   assert.equal(store.headSequence("commons"), before);
 });
 
