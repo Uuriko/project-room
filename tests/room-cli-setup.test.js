@@ -494,3 +494,98 @@ test("Aider setup installs bounded contribution instructions, not an implied liv
   assert.equal(statSync(path).mtimeMs, before);
   assert.equal(requests, 0);
 });
+
+test("joining another Room as the same agent preserves the first repository's pickup", async t => {
+  const { root, home, project, cleanup } = layout();
+  t.after(cleanup);
+  const secondProject = join(root, "second project");
+  mkdirSync(secondProject);
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  store.initialize(initialRoom("workshop"));
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const invitation = room => {
+    const owner = store.issueAccessKey(room, "owner");
+    const invite = store.invites.create(owner, room, { profile: "chat", displayName: "Ada" });
+    return { owner, url: origin + "/join/" + invite.code };
+  };
+  const first = invitation("commons"), second = invitation("workshop");
+  const env = envFor(home);
+  const joinRoom = async (url, cwd, fetchImpl) => {
+    const result = await run(["join", url, "--name", "Ada", "--tool", "generic"], { env, cwd, platform: "linux", fetchImpl });
+    assert.equal(result.code, 0, result.err);
+    return result.out;
+  };
+  await joinRoom(first.url, project);
+  const firstPointer = readPointer("ada", env);
+  const firstBinding = readProject(project);
+  let lostRedemption = false;
+  await assert.rejects(joinRoom(second.url, secondProject, async (url, options) => {
+    const response = await fetch(url, options);
+    if (response.ok && new URL(url).pathname.endsWith("/agent-invites/redeem")) {
+      lostRedemption = true;
+      throw new TypeError("lost Workshop redemption response");
+    }
+    return response;
+  }), /Could not complete the request/);
+  assert.equal(lostRedemption, true);
+  const after = await joinRoom(second.url, secondProject);
+  assert.deepEqual(readPointer("ada", env), firstPointer);
+  assert.deepEqual(readProject(project), firstBinding);
+  const alias = readProject(secondProject).connection;
+  assert.notEqual(alias, "ada");
+  assert.ok(after.includes("--connection " + alias + " next"));
+  await joinRoom(second.url, secondProject);
+  assert.equal(readProject(secondProject).connection, alias);
+  const firstMember = readAgentConnection(firstPointer.configDirectory).memberId;
+  const secondMember = readAgentConnection(readPointer(alias, env).configDirectory).memberId;
+
+  for (const [room, owner, recipient, messageId] of [
+    ["commons", first.owner, firstMember, "commons-brief"],
+    ["workshop", second.owner, secondMember, "workshop-brief"]
+  ]) {
+    store.command(owner, room, { id: messageId + "-post", type: "message.posted", data: {
+      toMemberId: recipient, messageId, requestKind: "reply", body: "Review the " + room + " brief."
+    } });
+  }
+
+  const configured = await run(["setup", "generic", "--room", second.url, "--name", "Ada", "--accept"],
+    { env, cwd: secondProject, platform: "linux" });
+  assert.equal(configured.code, 0, configured.err);
+  assert.equal(readProject(secondProject).connection, alias);
+
+  const pickup = async (cwd, command = ["next"]) => {
+    const result = await run(command, { env, cwd, platform: "linux" });
+    assert.equal(result.code, 0, result.err || result.out);
+    return JSON.parse(result.out);
+  };
+  const one = await pickup(project);
+  assert.equal(one.roomId, "commons");
+  assert.equal(one.viewerId, firstMember);
+  assert.deepEqual(one.requests.items.map(row => row.id), ["commons-brief"]);
+  const two = await pickup(secondProject);
+  assert.equal(two.roomId, "workshop");
+  assert.equal(two.viewerId, secondMember);
+  assert.deepEqual(two.requests.items.map(row => row.id), ["workshop-brief"]);
+  const override = await pickup(project, ["--connection", alias, "next"]);
+  assert.equal(override.roomId, two.roomId);
+  assert.equal(override.viewerId, two.viewerId);
+  assert.deepEqual(override.nextRead.arguments, two.nextRead.arguments);
+  assert.deepEqual(override.nextRead.command, ["room", "--connection", alias, "read", "workshop-brief"]);
+  const read = await pickup(project, override.nextRead.command.slice(1));
+  assert.equal(read.request.id, "workshop-brief");
+  assert.equal((await pickup(project)).roomId, "commons");
+  await assert.rejects(run(["--connection", "missing", "next"], {
+    env, cwd: project, fetchImpl: () => assert.fail("a missing connection must not use another Room")
+  }), /Run room login/);
+  assert.equal(store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
+  assert.equal(store.db.prepare("SELECT count(*) n FROM identity_links").get().n, 2);
+});

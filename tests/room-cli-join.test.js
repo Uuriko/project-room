@@ -24,12 +24,12 @@ test("one sentence joins, sets up the detected tool, and ends with a shareable i
   });
   assert.equal(code, 0);
   assert.deepEqual(calls[0], ["--room", `https://room.example/?invite=${CODE}`, "--name", "Peer", "--accept"]);
-  assert.equal(setups[0][0], "claude-code");
+  assert.deepEqual(setups[0], ["claude-code", "--name", "peer"]);
   const last = lines.at(-1);
   assert.equal(last, oneLinePrompt("https://room.example/r/muse-room"));
   assert.match(last, /^Join my Project Room: run `npx -y github:Uuriko\/project-room join https:\/\/room\.example\/r\/muse-room` and follow what it prints\.$/);
   const all = lines.join("\n");
-  assert.match(all, /project-room next and follow/);
+  assert.match(all, /project-room --connection peer next and follow/);
   assert.match(all, /Let them take work/);
   assert.doesNotMatch(all, /pri_A/);
   assert.doesNotMatch(all, new RegExp(CODE));

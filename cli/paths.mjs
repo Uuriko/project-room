@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
+import { atomicPrivateJson } from "../client/setup-journal.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 
 export function homeOf(env = process.env) {
@@ -38,8 +39,7 @@ function privateFile(path) {
 
 export function writePrivateJson(path, value) {
   mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
-  writeFileSync(path, JSON.stringify(value) + "\n", { mode: 0o600 });
-  chmodSync(path, 0o600);
+  atomicPrivateJson(path, value);
 }
 
 export function writePointer(name, configDirectory, env = process.env) {
@@ -102,7 +102,7 @@ export function loadConnection({ project, name, env = process.env }) {
     const names = listConnectionNames(env);
     if (names.length === 1) pointer = readPointer(names[0], env);
     else if (names.length === 0) throw new Error("Run room login --room <invite-or-room-url>.");
-    else throw new Error("More than one saved connection. Run room setup --name <agent name>.");
+    else throw new Error("More than one saved connection. Run room setup <tool> --name <saved connection>.");
   }
   if (!pointer) throw new Error("Run room login --room <invite-or-room-url>.");
   let config;

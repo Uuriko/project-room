@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { connectRoom } from "../../client/agent-setup.mjs";
+import { openPrivateJournal } from "../../client/setup-journal.mjs";
 import { readAgentConnection } from "../../client/agent-connection.mjs";
 import { rememberSecret } from "../auth.mjs";
-import { connectionHome, safeName, tightenConnection, writePointer } from "../paths.mjs";
+import { connectionHome, connectionsRoot, readPointer, safeName, tightenConnection, writePointer } from "../paths.mjs";
 
 function parse(argv) {
   const flags = { accept: false };
@@ -55,7 +57,7 @@ function publicResult(result) {
       roomId: result.roomId,
       memberId: result.memberId,
       connection: result.connection,
-      next: "Run room setup <tool> in the repo. The tool config does not contain the identity secret.",
+      next: `Run room setup <tool> --name ${result.connection} in the repo. The tool config does not contain the identity secret.`,
     };
   }
   const preview = result.preview ? {
@@ -86,13 +88,24 @@ export async function loginCommand(argv, { env = process.env, fetchImpl, out = c
     accept: flags.accept,
     fetchImpl,
   });
+  let connection = slug;
   if (result.status === "connected") {
-    tightenConnection(result.configDirectory);
-    const saved = readAgentConnection(result.configDirectory);
-    await rememberSecret(slug, saved.token, env);
-    writePointer(slug, result.configDirectory, env);
+    const journal = openPrivateJournal(connectionsRoot(env), "pointer.json", "Another Room connection is being saved. Retry login.");
+    try {
+      tightenConnection(result.configDirectory);
+      const saved = readAgentConnection(result.configDirectory);
+      const existing = readPointer(slug, env);
+      if (existing && existing.configDirectory !== result.configDirectory) {
+        const suffix = createHash("sha256").update(JSON.stringify([saved.origin, saved.roomId])).digest("hex").slice(0, 16);
+        connection = `${slug.slice(0, 63)}-${suffix}`;
+      }
+      const prior = readPointer(connection, env);
+      if (prior && prior.configDirectory !== result.configDirectory) throw new Error("The saved connection name is already in use. Choose a different agent name.");
+      await rememberSecret(connection, saved.token, env);
+      if (!prior) writePointer(connection, result.configDirectory, env);
+    } finally { journal.close(); }
   }
-  const printed = publicResult({ ...result, connection: slug });
+  const printed = publicResult({ ...result, connection });
   out(JSON.stringify(printed));
   return result.status === "connected" ? 0 : 1;
 }

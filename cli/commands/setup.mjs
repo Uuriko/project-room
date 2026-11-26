@@ -176,11 +176,18 @@ export async function setupCommand(argv, { env = process.env, cwd = process.cwd(
     try { url = mcpUrl(new URL(flags.room).origin); }
     catch { /* A bare invite code keeps the hosted server until login saves the origin. */ }
   }
+  let connectionName = flags.name ? safeName(flags.name) : null;
   if (flags.room && !flags["dry-run"]) {
-    const code = await loginCommand(["--room", flags.room, "--name", flags.name ?? "Room agent", ...(flags.accept ? ["--accept"] : [])], { env, fetchImpl, out });
+    const code = await loginCommand(["--room", flags.room, "--name", flags.name ?? "Room agent", ...(flags.accept ? ["--accept"] : [])], {
+      env, fetchImpl,
+      out(line) {
+        const joined = JSON.parse(line);
+        if (joined.status === "connected") connectionName = joined.connection;
+        out(line);
+      },
+    });
     if (code !== 0) return code;
   }
-  let connectionName = flags.name ? safeName(flags.name) : null;
   if (!flags["dry-run"] || !flags.room) {
     try {
       const loaded = loadConnection({ project, name: connectionName, env });
