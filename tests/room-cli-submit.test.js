@@ -874,6 +874,60 @@ test(`${representation} a saved completion does not suggest reading Work after a
   assert.equal(store.headSequence("commons"), head);
 });
 
+test(`${representation} a recorded stale draft can be read from another checkout without posting again`, async t => {
+  const { origin, store, owner, producer, reviewerProject, rpc, cli } = await fixture(t, representation);
+  const id = "changed-after-draft";
+  store.command(owner, "commons", { id: "propose-recovery", type: T.WORK_PROPOSED, data: {
+    workItemId: id, title: "Write a release note", definitionOfDone: "Name the owner",
+    accountableMemberId: producer.identityId, mode: "read"
+  } });
+  const work = await cli(["work", id]);
+  assert.equal((await cli(["begin", "--from", "-"], work.value)).value.working, true);
+  const current = await cli(["work", id]);
+  const changed = { body: "Draft from the first scope", summary: "Drafted the note", nextAction: "Review",
+    producerId: producer.identityId, expectedRevision: current.value.revision };
+  const submit = ["submit", id, "--operation", "keep-this-draft"];
+  const lost = await cli(submit, changed, undefined, async (url, init) => {
+    const response = await fetch(url, init);
+    await response.arrayBuffer();
+    throw new Error("Draft response was lost");
+  });
+  assert.equal(lost.value.status, "unknown");
+  await rpc("room_block_work", { workItemId: id, reason: "New requirement", nextAction: "Revise the note" });
+  const stale = { output: (await cli(submit, changed)).value };
+  assert.equal(stale.output.code, "draft_recorded_basis_unavailable");
+  const unchangedHead = store.headSequence("commons");
+  assert.deepEqual(stale.output.next.command, ["room", "--connection", "producer", "work", "changed-after-draft"]);
+  assert.deepEqual(stale.output.draftRead, {
+    tool: "room_read_result",
+    arguments: { roomId: "commons", workItemId: "changed-after-draft", draftMessageId: stale.output.draftId },
+    command: ["room", "--connection", "producer", "result", "changed-after-draft", "--draft", stale.output.draftId]
+  });
+  const currentWork = await cli(stale.output.next.command.slice(1), undefined, reviewerProject, async (url, init) => {
+    assert.equal(new URL(url).origin, origin);
+    assert.equal(new Headers(init.headers).get("Authorization"), "Bearer " + producer.secret);
+    return fetch(url, init);
+  });
+  assert.equal(currentWork.code, 0);
+  assert.ok(currentWork.value.revision > changed.expectedRevision);
+  const preserved = await cli(stale.output.draftRead.command.slice(1), undefined, reviewerProject);
+  assert.equal(preserved.code, 0);
+  assert.equal(preserved.value.viewerId, producer.identityId);
+  assert.equal(preserved.value.result.kind, "draft");
+  assert.equal(preserved.value.selection.draftMessageId, stale.output.draftId);
+  assert.equal(preserved.value.result.text.body, changed.body);
+  assert.equal(preserved.value.cliBasis, undefined);
+  const mismatchedDraft = await cli(stale.output.draftRead.command.slice(1), undefined, reviewerProject,
+    async (url, init) => {
+      const response = await fetch(url, init);
+      const packet = await response.json();
+      packet.result.structuredContent.result.text.messageId = "another-draft";
+      return Response.json(packet);
+    });
+  assert.deepEqual(mismatchedDraft, { code: 1, value: { status: "unavailable", code: "room_read_unavailable" } });
+  assert.equal(store.headSequence("commons"), unchangedHead, "both recovery routes are reads");
+});
+
 test(`${representation} a newly attempted stale or closed submit is refused before any draft is posted`, async t => {
   const { home, env, store, owner, producer, rpc, cli, origin } = await fixture(t, representation);
   const alternate = await fixture(t, representation);
@@ -924,6 +978,15 @@ test(`${representation} a newly attempted stale or closed submit is refused befo
   assert.equal(staleAttempt.code, 1, JSON.stringify(staleAttempt));
   assert.equal(staleAttempt.output.status, "refused");
   assert.equal(staleAttempt.output.code, "stale_revision");
+  assert.deepEqual(staleAttempt.output.next.command, ["room", ...explicit, "work", "stale-new-op"]);
+  assert.equal(staleAttempt.output.draftRead, undefined);
+  const selectedWork = await cli(staleAttempt.output.next.command.slice(1), undefined, alternateCheckout, async (url, init) => {
+    assert.equal(new URL(url).origin, origin);
+    assert.equal(new Headers(init.headers).get("Authorization"), "Bearer " + producer.secret);
+    return fetch(url, init);
+  });
+  assert.equal(selectedWork.code, 0);
+  assert.ok(selectedWork.value.revision > stale.revision);
   assert.deepEqual(staleAttempt.calls, ["room_post_message"]);
   assert.equal(store.headSequence("commons"), beforeStale, "a stale new draft must not be recorded");
   assert.equal((await cli(["receipt", "stale-new-op-attempt", "--draft"])).value.status, "not_recorded");

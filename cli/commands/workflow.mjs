@@ -392,7 +392,7 @@ async function readAssignmentSource(workItemId, previousFile, io) {
 }
 
 export async function resultCommand(argv, io = {}) {
-  const help = "room result RESULT_URL [--discussion]\nroom result WORK_ID --completion EVENT_ID [--discussion]\nRead the exact version using this project’s saved connection. Add --discussion to read replies to the original message. Result versions that cite the same message share its discussion.";
+  const help = "room result RESULT_URL [--discussion]\nroom result WORK_ID --completion EVENT_ID [--discussion]\nroom result WORK_ID --draft MESSAGE_ID\nRead the exact version using this project’s saved connection. Add --discussion to read replies to the original message. Result versions that cite the same message share its discussion.";
   const out = io.out ?? console.log;
   if (argv.length === 1 && argv[0] === "--help") { out(help); return 0; }
   const includeResultDiscussion = argv.at(-1) === "--discussion";
@@ -409,14 +409,17 @@ export async function resultCommand(argv, io = {}) {
     }
     args = selected;
   } else {
-    const [workItemId, flag, completionEventId] = argv;
-    if (argv.length !== 3 || flag !== "--completion" || !validId(workItemId) || !validId(completionEventId))
-      throw new Error(help);
-    args = { workItemId, completionEventId };
+    const [workItemId, flag, evidenceId] = argv;
+    if (argv.length !== 3 || !validId(workItemId) || !validId(evidenceId)
+        || !(flag === "--completion" || flag === "--draft" && !includeResultDiscussion)) throw new Error(help);
+    args = flag === "--draft" ? { workItemId, draftMessageId: evidenceId } : { workItemId, completionEventId: evidenceId };
   }
   return runWorkflow("room_read_result", args, (value, { roomId, memberId }) =>
     value.viewerId === memberId && value.roomId === roomId && value.workItemId === args.workItemId
-    && value.selection?.completionEventId === args.completionEventId && value.result?.receipt?.eventId === args.completionEventId,
+    && (args.draftMessageId
+      ? value.selection?.draftMessageId === args.draftMessageId && value.result?.kind === "draft"
+        && value.result.text?.messageId === args.draftMessageId
+      : value.selection?.completionEventId === args.completionEventId && value.result?.receipt?.eventId === args.completionEventId),
   { ...io, includeResultDiscussion }, undefined, connection);
 }
 

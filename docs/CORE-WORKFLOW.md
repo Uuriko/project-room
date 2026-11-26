@@ -118,6 +118,7 @@ follow `nextCommand` to read the next page.
 | Open a colleague’s copied result link in your own project | `room result "RESULT_URL"` |
 | Inspect the completion selected for review | `room result WORK_ID --completion EVENT_ID` |
 | Check your exact write | `room receipt OPERATION_ID` |
+| Read the text of an already recorded draft | `room result WORK_ID --draft MESSAGE_ID` |
 | Reopen the submitted result after losing the response | `room receipt OPERATION_ID --submit`, then follow the exact `nextRead` |
 | Read a formal request | `room read REQUEST_ID [--cursor TOKEN]` |
 | Begin the selected assignment | `room begin --from work.json` |
@@ -187,6 +188,8 @@ room review --from review.json --fail --summary "Include the reconnect check."
 ## Submit a text result from the shell
 
 After beginning the work, save its current read with `room work WORK_ID > work.json`.
+If the selected work has changed, follow the refusal's `next.command` to read the Work Thread with the same saved connection. If Room had already saved the draft, `draftRead.command` opens that exact text. Review the new requirements before preparing a fresh submission. These reads leave your submission and the Work Thread untouched.
+
 Run `room submit --from work.json < result.json` with these fields:
 
 ```json

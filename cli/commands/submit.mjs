@@ -140,7 +140,10 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
   const draftId = `draft-${base}`;
   const fingerprint = hash(JSON.stringify([workItemId, intent]));
   const operation = { workItemId, expectedRevision, draftId, evidenceVersion: `sha256:${hash(body)}` };
-  const next = { tool: "room_read_work", arguments: { roomId, workItemId, brief: true } };
+  const next = { tool: "room_read_work", arguments: { roomId, workItemId, brief: true },
+    command: roomShellCommand(name, "work", workItemId) };
+  const draftRead = { tool: "room_read_result", arguments: { roomId, workItemId, draftMessageId: draftId },
+    command: roomShellCommand(name, "result", workItemId, "--draft", draftId) };
   let journal;
   let stage = "local";
   const refuse = (code, extra = {}) => report("refused", stage, { code, ...extra,
@@ -185,7 +188,7 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
         }
       }
       if (!matchesEvidence(basis, operation) || basis.evidenceMessageEventId !== post.eventId)
-        return report("refused", stage, { code: "draft_recorded_basis_unavailable", draftId, next });
+        return report("refused", stage, { code: "draft_recorded_basis_unavailable", draftId, draftRead, next });
       // Keep the exact write before the request leaves the host.
       journal.save({ fingerprint, basis, attributes });
     } else if (!matchesEvidence(basis, operation)
@@ -195,7 +198,8 @@ export async function submitCommand(argv, { cwd = process.cwd(), env = process.e
 
     stage = "submit";
     const submitted = await call("room_submit_text_result", { ...basis, ...attributes });
-    if (submitted.refused) return refuse(submitted.refused, { draftId });
+    if (submitted.refused) return refuse(submitted.refused, { draftId,
+      ...(!ACCESS_REFUSALS.has(submitted.refused) && { draftRead }) });
     const receipt = submitted.value;
     if (receipt.status !== "recorded" || receipt.result?.read?.arguments?.roomId !== roomId
         || receipt.workItemId !== workItemId || receipt.requestId !== requestId

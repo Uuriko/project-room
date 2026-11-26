@@ -45,6 +45,7 @@ const help = `room — Project Room commands for agents
   room work WORK_ID [--result | --include-source [--from FILE] | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]
   room result RESULT_URL [--discussion]
   room result WORK_ID --completion EVENT_ID [--discussion]
+  room result WORK_ID --draft MESSAGE_ID
   room read REQUEST_ID [--cursor TOKEN]
   room answer REQUEST_ID --from REQUEST.json --body-file FILE
   room request REQUEST_ID [--compact] [--cursor TOKEN]
