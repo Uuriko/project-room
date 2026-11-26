@@ -65,13 +65,15 @@ test("setup failure keeps the join and still prints the invite line", async t =>
 });
 
 test("--no-setup skips tool config; unknown tools are refused", async () => {
+  const lines = [];
   let ran = false;
   await joinCommand(["https://room.example/r/open", "--no-setup"], {
-    env: {}, out: () => {},
-    login: fakeLogin({ status: "connected", origin: "https://room.example", roomId: "open" }, []),
+    env: {}, out: line => lines.push(line),
+    login: fakeLogin({ status: "connected", origin: "https://room.example", roomId: "open", connection: "reviewer" }, []),
     setup: async () => { ran = true; return 0; },
   });
   assert.equal(ran, false);
+  assert.match(lines.join("\n"), /project-room --connection reviewer next and follow nextRead\.command/);
   await assert.rejects(joinCommand(["x", "--tool", "nope"], { out: () => {} }), /Unknown tool/);
   await assert.rejects(joinCommand([], { out: () => {} }), /room join/);
 });

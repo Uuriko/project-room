@@ -22,7 +22,7 @@ room workspace list
 room workspace publish --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace watch --id ID --title TITLE --base COMMIT --file PREVIEW.html [--include-changes yes] [--output RUN.log] [--share-with MEMBER_ID]
 room workspace changes --id ID [--file PATH | --raw yes]
-room workspace changes --link URL [--connection NAME]
+room workspace changes --link URL [--connection NAME] [--viewer MEMBER_ID]
 room workspace inspect --link URL --viewer MEMBER_ID [--connection NAME]
 room workspace output --id ID
 room workspace remove --id ID
@@ -344,9 +344,14 @@ export async function workspaceCommand(argv, io = {}) {
     if (flags.id || flags.file || flags.raw) throw new Error("Choose --link or the ID and file options");
     const { target, hash } = artifactFromConnection(flags.link, conn);
     if (target.panel !== "changes") throw new Error("Choose a Changes artifact link");
+    const viewer = flags.viewer ?? conn.memberId;
+    if (flags.viewer && conn.memberId && flags.viewer !== conn.memberId)
+      throw new Error("Use the named viewer's saved Room connection.");
     const query = new URLSearchParams({ id: target.id, changes: "1", artifact: hash, view: target.file ? "file" : "summary" });
     if (target.file) query.set("path", target.file);
-    const { changes } = await call("GET", undefined, `?${query}`);
+    const { changes, roomId, viewerId } = await call("GET", undefined, `?${query}`);
+    if (viewer && (roomId !== conn.roomId || viewerId !== viewer))
+      throw new Error("The Room returned Changes for a different viewer.");
     out(changes);
     return 0;
   }

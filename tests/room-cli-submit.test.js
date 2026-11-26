@@ -70,7 +70,7 @@ async function fixture(t, representation) {
   const cli = async (argv, input, cwd = home, fetchImpl = fetch) => {
     const lines = [];
     const code = await main(argv, {
-      cwd, env, fetchImpl, stdin: Readable.from(input === undefined ? [] : [JSON.stringify(input)]),
+      cwd, env, fetchImpl, fetch: fetchImpl, stdin: Readable.from(input === undefined ? [] : [JSON.stringify(input)]),
       out: value => lines.push(JSON.parse(value))
     });
     assert.equal(lines.length, 1);
@@ -264,7 +264,7 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   assert.equal(shared.value.result.receipt.eventId, completionEventId);
   const [file] = shared.value.workspaceArtifacts;
   assert.equal(file.messageId, shared.value.result.text.messageId);
-  assert.deepEqual(file.command, ["room", "workspace", "changes", "--link", fileLink, "--connection", "reviewer"]);
+  assert.deepEqual(file.command, ["room", "workspace", "changes", "--link", fileLink, "--connection", "reviewer", "--viewer", reviewer.identityId]);
   Object.assign(env, { ROOM_ORIGIN: origin, ROOM_ID: "commons", PROJECT_ROOM_SECRET: "different-ambient-identity" });
   const changes = await cli(file.command.slice(1), undefined, reviewerProject);
   assert.equal(changes.value.file.hunks[0].changes.at(-1).content, "submitted");
@@ -333,11 +333,73 @@ test(`${representation} a colleague reads an exact shared result URL with their 
   assert.equal(followUp.value.discussion.workspaceArtifacts.length, 1);
   const [lateFile] = followUp.value.discussion.workspaceArtifacts;
   assert.equal(lateFile.messageId, "late-file");
-  assert.deepEqual(lateFile.command, ["room", "workspace", "changes", "--link", lateLink, "--connection", "reviewer"]);
+  assert.deepEqual(lateFile.command, ["room", "workspace", "changes", "--link", lateLink, "--connection", "reviewer", "--viewer", reviewer.identityId]);
   const lateChanges = await cli(lateFile.command.slice(1), undefined, reviewerProject);
   assert.equal(lateChanges.value.file.hunks[0].changes.at(-1).content, "replaced");
+  const otherRoom = await fixture(t, representation);
+  const otherDirectory = connectionHome("other-room", env);
+  const otherCheckout = join(reviewerProject, "other-checkout");
+  saveAgentConnection(otherDirectory, { version: 1, origin: otherRoom.origin, roomId: "commons",
+    memberId: otherRoom.reviewer.identityId, token: otherRoom.reviewer.secret });
+  writePointer("other-room", otherDirectory, env);
+  writeProject(otherCheckout, { connection: "other-room" });
+  const defaultPickup = await cli(["next"], undefined, otherCheckout);
+  assert.equal(defaultPickup.value.viewerId, otherRoom.reviewer.identityId);
+  const sourceId = "follow-up-evidence", taskId = "follow-up-review";
+  store.command(owner, "commons", { id: "follow-up-note", type: "message.posted", data: {
+    messageId: sourceId, toMemberId: reviewer.identityId,
+    body: ["Compare the revised document with the code.", lateLink, revisedUrl, revisedUrl,
+      revisedUrl.replace(origin, otherRoom.origin), "https://docs.example.test/appendix"].join("\n") } });
+  store.command(owner, "commons", { id: "follow-up-assignment", type: "work.proposed", data: {
+    workItemId: taskId, title: "Cross-check the revision", definitionOfDone: "Compare the file and document",
+    accountableMemberId: reviewer.identityId, sourceMessageId: sourceId, mode: "read" } });
+  const signedRead = (argv, stdin) => cli(argv, stdin, otherCheckout, (url, options) => {
+    assert.equal(new URL(url).origin, origin, "the selected connection must stay on its original host");
+    assert.equal(new Headers(options.headers).get("Authorization"), "Bearer " + reviewer.secret);
+    return fetch(url, options);
+  });
+  const explicit = ["--connection", "reviewer"];
+  const pickup = await signedRead([...explicit, "next"]);
+  const row = pickup.value.work.items.find(item => item.id === taskId);
+  assert.deepEqual(row.nextRead.command, ["room", ...explicit, "work", taskId]);
+  const brief = await signedRead(row.nextRead.command.slice(1));
+  const assignment = await signedRead(brief.value.sourceRead.command.slice(1));
+  const linked = assignment.value.context.source;
+  assert.equal(linked.message.id, sourceId);
+  assert.deepEqual(linked.workspaceArtifacts, [{ ...lateFile, messageId: sourceId }]);
+  assert.deepEqual(linked.resultLinks.map(entry => entry.href), [revisedUrl]);
+  assert.equal((await signedRead(linked.workspaceArtifacts[0].command.slice(1))).value.file.hunks[0].changes.at(-1).content, "replaced");
+  await assert.rejects(() => cli(linked.workspaceArtifacts[0].command.slice(1), undefined, otherCheckout, async (url, options) => {
+    const response = await fetch(url, options);
+    return Response.json({ ...await response.json(), viewerId: producer.identityId });
+  }), /different viewer/);
+  writePointer("reviewer", connectionHome("producer", env), env);
+  try {
+    await assert.rejects(() => cli(linked.workspaceArtifacts[0].command.slice(1), undefined, otherCheckout,
+      () => assert.fail("a changed local viewer must be refused before network access")), /named viewer/);
+  } finally {
+    writePointer("reviewer", connectionHome("reviewer", env), env);
+  }
+  const pinnedDoc = await signedRead(linked.resultLinks[0].command.slice(1));
+  assert.equal(pinnedDoc.value.result.receipt.eventId, current.value.result.receipt.eventId);
+  const returnToReply = await signedRead(pinnedDoc.value.discussionRead.command.slice(1));
+  assert.deepEqual(returnToReply.value.discussion.replies.map(reply => reply.id), ["late-file"]);
+  const refreshed = await signedRead(linked.cliRefresh.command.slice(1), assignment.value);
+  assert.equal(refreshed.value.context.source.status, "not_modified");
+  assert.equal(refreshed.value.context.source.resultLinks, undefined);
+  const wrongOrigin = await cli([...explicit, "result", revisedUrl.replace(origin, otherRoom.origin)], undefined, otherCheckout,
+    () => assert.fail("a foreign result link must be refused before network access"));
+  assert.equal(wrongOrigin.value.code, "room_selection_mismatch");
+  store.command(owner, "commons", { id: "withdraw-follow-up", type: "message.deleted", data: {
+    messageId: sourceId, expectedMessageRevision: 0 } });
+  const withdrawn = await signedRead(linked.cliRefresh.command.slice(1), assignment.value);
+  assert.equal(withdrawn.value.context.source.status, "unavailable");
+  assert.equal(withdrawn.value.context.source.workspaceArtifacts, undefined);
+  assert.equal(withdrawn.value.context.source.resultLinks, undefined);
+  assert.equal((await cli(["next"], undefined, otherCheckout)).value.viewerId, otherRoom.reviewer.identityId);
   await publish(updated.revision, patch.replace("+submitted", "+latest"));
   await assert.rejects(() => cli(lateFile.command.slice(1), undefined, reviewerProject), error => error.status === 409);
+  await assert.rejects(() => signedRead(linked.workspaceArtifacts[0].command.slice(1)), error => error.status === 409);
   const earlier = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject);
   assert.equal(earlier.value.discussion.replies[0].body, quoted);
   assert.equal(earlier.value.selection.status, "historical");

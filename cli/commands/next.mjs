@@ -1,9 +1,33 @@
 import { bearerHeader, loadSecret, mcpUrl } from "../auth.mjs";
-import { loadConnection } from "../paths.mjs";
+import { loadConnection, roomShellCommand } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { validId } from "../../src/events.js";
 
-const HELP = "room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow each partial source's nextRead.";
+const HELP = "room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow the preferred nextRead.command when present and continue each partial source.";
+
+function addSelectedReadCommand(read, roomId, shell, rowId) {
+  if (!read || typeof read !== "object") return;
+  delete read.command;
+  const args = read.arguments;
+  if (!args || (args.roomId !== undefined && args.roomId !== roomId)) return;
+  if (read.tool === "room_read_request" && validId(args.requestMessageId)
+      && (rowId === undefined || rowId === args.requestMessageId)
+      && (args.view === undefined || args.view === "compact")
+      && Object.keys(args).every(key => ["roomId", "requestMessageId", "view"].includes(key))) {
+    read.command = shell("read", args.requestMessageId);
+  }
+  if (read.tool === "room_read_work" && validId(args.workItemId)
+      && (rowId === undefined || rowId === args.workItemId)
+      && args.brief === true && args.includeDiscussion !== true
+      && Object.keys(args).every(key => ["roomId", "workItemId", "brief", "includeDiscussion", "includeResult"].includes(key))) {
+    read.command = shell("work", args.workItemId, ...(args.includeResult === true ? ["--result"] : []));
+  }
+  if (read.tool === "room_read_result" && args.roomId === roomId && validId(args.workItemId)
+      && (rowId === undefined || rowId === args.workItemId) && validId(args.completionEventId)
+      && Object.keys(args).every(key => ["roomId", "workItemId", "completionEventId"].includes(key))) {
+    read.command = shell("result", args.workItemId, "--completion", args.completionEventId);
+  }
+}
 
 function selectionOf(argv) {
   const args = {};
@@ -20,11 +44,12 @@ function selectionOf(argv) {
   return args;
 }
 
-export async function nextCommand(argv, { cwd = process.cwd(), env = process.env,
+export async function nextCommand(argv, { cwd = process.cwd(), env = process.env, connectionName,
   fetchImpl = fetch, out = console.log, err = console.error } = {}) {
   if (argv.length === 1 && argv[0] === "--help") { out(HELP); return 0; }
   const selection = selectionOf(argv);
-  const { config, name } = loadConnection({ project: cwd, env });
+  const { config, name } = loadConnection({ project: cwd, env, name: connectionName });
+  const shell = (...args) => roomShellCommand(connectionName, ...args);
   try {
     const secret = await loadSecret(name, config.token, env);
     const call = async (name, args) => {
@@ -67,36 +92,16 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
           && Object.keys(args).every(key => ["roomId", "source", "cursor", "view"].includes(key))
           && (args.view === undefined || args.view === "pickup")
           && (args.cursor === undefined || /^[A-Za-z0-9_-]{1,4096}$/.test(args.cursor))) {
-        read.command = ["room", "next", "--source", source, ...(args.cursor ? ["--cursor", args.cursor] : [])];
+        read.command = shell("next", "--source", source, ...(args.cursor ? ["--cursor", args.cursor] : []));
       }
     }
-    for (const row of value.work?.items ?? []) {
-      const args = row.nextRead?.arguments;
-      if (row.nextRead?.tool === "room_read_result" && args?.roomId === config.roomId
-          && args.workItemId === row.id && validId(args.workItemId) && validId(args.completionEventId)
-          && Object.keys(args).every(key => ["roomId", "workItemId", "completionEventId"].includes(key))) {
-        row.nextRead.command = ["room", "result", args.workItemId, "--completion", args.completionEventId];
-      }
-      if (row.nextRead?.tool === "room_read_work" && validId(args?.workItemId)
-          && (args.roomId === undefined || args.roomId === config.roomId)
-          && args.brief === true && args.includeDiscussion !== true
-          && Object.keys(args).every(key => ["roomId", "workItemId", "brief", "includeDiscussion", "includeResult"].includes(key))) {
-        row.nextRead.command = ["room", "work", args.workItemId, ...(args.includeResult === true ? ["--result"] : [])];
-      }
-    }
-    for (const row of value.requests?.items ?? []) {
-      const args = row.nextRead?.arguments;
-      if (row.nextRead?.tool === "room_read_request" && validId(args?.requestMessageId)
-          && (args.roomId === undefined || args.roomId === config.roomId)
-          && (args.view === undefined || args.view === "compact")
-          && Object.keys(args).every(key => ["roomId", "requestMessageId", "view"].includes(key))) {
-        row.nextRead.command = ["room", "read", args.requestMessageId];
-      }
-    }
+    for (const row of [...(value.work?.items ?? []), ...(value.requests?.items ?? [])])
+      addSelectedReadCommand(row.nextRead, config.roomId, shell, row.id);
     // The wire schema keeps newer exact reads in the open ifIdle extension.
     // Shell consumers have always followed the preferred action at nextRead.
     if (value.nextRead === null)
       value.nextRead = value.ifIdle?.discoveryReview?.nextRead ?? value.ifIdle?.investigation?.nextRead ?? null;
+    addSelectedReadCommand(value.nextRead, config.roomId, shell);
     const output = JSON.stringify(value);
     if (output.includes(secret) || output.includes(config.token)) {
       err("Room returned invalid credential content.");

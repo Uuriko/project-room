@@ -138,6 +138,8 @@ export async function joinCommand(argv, io = {}) {
     const pickup = "npx -y github:Uuriko/project-room next";
     const command = flags.project ? `cd -- ${shellQuote(flags.project)} && ${pickup}` : pickup;
     out(scrub(`Find your assignments: run ${command} and follow the selected item's nextRead.`));
+  } else if (typeof joined.connection === "string" && joined.connection) {
+    out(scrub(`Find your assignments: run npx -y github:Uuriko/project-room --connection ${shellQuote(joined.connection)} next and follow nextRead.command.`));
   } else {
     out(scrub(`Select this saved connection before pickup: run npx -y github:Uuriko/project-room setup ${setupArgs.map(shellQuote).join(" ")}.`));
   }
