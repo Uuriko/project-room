@@ -492,6 +492,12 @@ test("signed-in coworker links an existing agent and it picks up the first assig
   await f.page.locator("#agent-setup").waitFor({ state: "visible" });
   assert.equal(exactRetry, true);
   assert.equal(linkCount(), 1);
+  const recovery = f.page.getByText("MCP setup needs a replacement token", { exact: true });
+  await recovery.waitFor({ timeout: 1500 });
+  assert.equal(await f.page.locator("#agent-host-snippets").isVisible(), false);
+  await f.capture("friend-mobile-mcp-recovery");
+  const rotatePath = await f.page.locator("#agent-mcp-recovery-path").textContent();
+  assert.equal(rotatePath, "/api/agent-rooms/commons/token/rotate");
   assert.equal(await proofInput.inputValue(), "");
   const config = await f.config();
   assert.equal(f.store.bonds.identityForMember("commons", config.memberId), existing.identityId);
@@ -505,6 +511,26 @@ test("signed-in coworker links an existing agent and it picks up the first assig
   const pickup = await new RoomAgentClient(config).orient({ focus: "needs_me", paginate: true });
   assert.equal(pickup.viewerId, config.memberId);
   assert.ok(pickup.work.some(item => item.id === "check-release-note" && item.nextRead));
+
+  const replacement = await fetch(new URL(rotatePath, f.origin), {
+    method: "POST", headers: { authorization: `Bearer ${existing.secret}` },
+  });
+  assert.equal(replacement.status, 200);
+  const { mcpToken } = await replacement.json();
+  const mcp = async (name, args) => {
+    const response = await fetch(new URL("/mcp", f.origin), {
+      method: "POST", headers: { authorization: `Bearer ${mcpToken.credential}`, "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: name, method: "tools/call", params: { name, arguments: args } }),
+    });
+    assert.equal(response.status, 200);
+    return (await response.json()).result?.structuredContent;
+  };
+  const access = await mcp("room_check_access", { roomId: "commons" });
+  assert.equal(access.identityId, existing.identityId);
+  assert.equal(access.memberId, config.memberId);
+  const next = await mcp("room_next", { roomId: "commons", view: "pickup" });
+  assert.equal(next.nextRead.arguments.workItemId, "check-release-note");
+  assert.equal(linkCount(), 1);
 
   // A separate browser signs in using only the agent's original identity.
   const agentPage = await f.browser.newPage();

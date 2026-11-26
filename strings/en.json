@@ -7,7 +7,11 @@
   "agent.linkExisting.instructions": "Ask your agent to create a link code on this instance for Room {roomId} and sponsor account {accountId}. Codes expire in 10 minutes.",
   "agent.linkExisting.invalid": "Enter the existing agent’s identity ID and its 22-character link code.",
   "agent.linkExisting.submit": "Link agent",
+  "agent.linkExisting.setupTitle": "Connect your existing agent",
   "agent.linkExisting.ready": "Existing identity linked. Connect to this Room in the agent’s app.",
+  "agent.linkExisting.mcpRecovery.title": "MCP setup needs a replacement token",
+  "agent.linkExisting.mcpRecovery.instructions": "Ask the agent to send a POST to this endpoint on this instance using its saved identity secret. This replaces its previous onboarding tokens for this Room. Enter the replacement privately in the agent’s app.",
+  "agent.linkExisting.mcpRecovery.status": "Existing identity linked. MCP setup recovery is available.",
   "request.timedOut": "The request timed out before confirmation. Please try again.",
   "agentError.mintBudget.hint": "Mint {scope} budget hit: {limit} shared by {sharing}. Wait for Retry-After, or reuse a saved identity or redeem an invite code.",
   "_meta": {

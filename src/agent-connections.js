@@ -202,7 +202,17 @@ export function installAgentConnections({ client, getState }) {
     existingButton.disabled = busy || Boolean(pending) || Boolean(setup);
     existingButton.textContent = uiText(existingPending ? 'agent.existing.retry' : 'agent.existing.add');
     form.hidden = Boolean(setup); $("#agent-setup").hidden = !setup;
-    if (setup) describeImport();
+    if (setup) {
+      describeImport();
+      $("#agent-setup-title").textContent = setupMeta.linkedExisting ? uiText("agent.linkExisting.setupTitle") : "3. Connect in your agent’s app";
+    }
+    const needsMcpRecovery = Boolean(setupMeta?.needsMcpRecovery);
+    $("#agent-mcp-recovery").hidden = !needsMcpRecovery;
+    if (needsMcpRecovery) {
+      $("#agent-mcp-recovery-path").textContent = `/api/agent-rooms/${encodeURIComponent(setup.roomId)}/token/rotate`;
+      $("#agent-host-snippets").hidden = true;
+    }
+    $("#agent-import-route").hidden = needsMcpRecovery && currentRoute() === "mcp";
     for (const input of form.querySelectorAll("input,select")) input.disabled = busy || Boolean(pending) || Boolean(existingPending) || (existingFirst() && !separateAgent.open && ordinaryFields.contains(input));
     $("#agent-create").disabled = busy || Boolean(existingPending);
     const linkLocked = Boolean(busy || pending || existingPending || setup);
@@ -353,10 +363,14 @@ export function installAgentConnections({ client, getState }) {
       const usable = operation.token && result.connection.generation === result.receipt.generation && result.connection.status === "key_issued";
       mcpCredential = typeof result.mcpToken?.credential === "string" && result.mcpToken.credential.startsWith("rak_") ? result.mcpToken.credential : null;
       setup = usable ? { version: 1, origin: location.origin, roomId: owner.roomId, memberId: operation.request.memberId, token: operation.token } : null;
+      const linkedExisting = Boolean(operation.request.identityId);
+      const needsMcpRecovery = linkedExisting && !mcpCredential;
       setupMeta = usable ? { generation: result.receipt.generation, memberRevision: result.connection.memberRevision, expiresAt: result.receipt.expiresAt,
-        sequence: result.receipt.membershipSequence ?? client.sequence } : null;
+        sequence: result.receipt.membershipSequence ?? client.sequence, linkedExisting, needsMcpRecovery } : null;
       armExpiry();
-      status(usable ? (operation.request.identityId ? uiText("agent.linkExisting.ready") : "Access ready. Setup does not start an AI.")
+      const ready = needsMcpRecovery ? uiText("agent.linkExisting.mcpRecovery.status")
+        : operation.request.identityId ? uiText("agent.linkExisting.ready") : "Access ready. Setup does not start an AI.";
+      status(usable ? ready
         : operation.request.action === "disconnect" ? "Room access ended." : "Original request confirmed. That key is no longer active.");
       if (operation.request.identityId) { linkIdentity.value = ""; linkExisting.open = false; }
       conceal(); render();

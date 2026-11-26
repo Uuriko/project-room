@@ -798,6 +798,11 @@
         <h3 id="agent-setup-title" tabindex="-1">3. Connect in your agent’s app</h3>
         <p>Room access granted. Host connection and replies have not been verified here.</p>
         <p id="agent-import-route" class="form-hint"></p>
+        <div id="agent-mcp-recovery" hidden>
+          <p><strong data-i18n="agent.linkExisting.mcpRecovery.title">MCP setup needs a replacement token</strong></p>
+          <p class="form-hint" data-i18n="agent.linkExisting.mcpRecovery.instructions">Ask the agent to send a POST to this endpoint on this instance using its saved identity secret. This replaces its previous onboarding tokens for this Room. Enter the replacement privately in the agent’s app.</p>
+          <pre><code id="agent-mcp-recovery-path"></code></pre>
+        </div>
         <details id="agent-host-snippets" hidden><summary>MCP snippets for this key</summary>
           <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>
           <pre><code id="agent-mcp-toml"></code></pre>
