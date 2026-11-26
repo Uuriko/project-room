@@ -9,6 +9,7 @@ import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { mcpCallError } from "../server/mcp-arg-errors.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -680,6 +681,147 @@ test(`${representation} commands cover pickup, correction, review, requests and 
   assert.equal(answered.code, 0, JSON.stringify(answered));
   assert.doesNotMatch(JSON.stringify([accepted, answered]), new RegExp(producer.secret));
 
+});
+
+test(`${representation} a newly attempted stale or closed submit is refused before any draft is posted`, async t => {
+  const { home, env, store, owner, producer, rpc, cli, origin } = await fixture(t, representation);
+  const alternate = await fixture(t, representation);
+  const alternateDir = connectionHome("alternate-room", env), alternateCheckout = join(home, "alternate-checkout");
+  saveAgentConnection(alternateDir, { version: 1, origin: alternate.origin, roomId: "commons",
+    memberId: alternate.reviewer.identityId, token: alternate.reviewer.secret });
+  writePointer("alternate-room", alternateDir, env);
+  writeProject(alternateCheckout, { connection: "alternate-room" });
+  const explicit = ["--connection", "producer"];
+  const initialAlternateHead = alternate.store.headSequence("commons");
+
+  const propose = workItemId => store.command(owner, "commons", { id: "propose-" + workItemId, type: "work.proposed", data: {
+    workItemId, title: "Ship the fix", definitionOfDone: "Land the patch",
+    accountableMemberId: producer.identityId, mode: "read",
+    independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
+  const begin = async workItemId => {
+    propose(workItemId);
+    const selected = (await cli(["work", workItemId])).value;
+    assert.equal((await cli(["begin", "--from", "-"], selected)).value.working, true);
+    return (await cli(["work", workItemId])).value;
+  };
+  const attempt = async (workItemId, operation, expectedRevision, fetchImpl = fetch) => {
+    const calls = [];
+    const outputs = [];
+    const code = await main([...explicit, "submit", workItemId, "--operation", operation], {
+      cwd: alternateCheckout, env, out: value => outputs.push(JSON.parse(value)),
+      stdin: Readable.from([JSON.stringify({ body: "Late contribution.", summary: "Did the work",
+        nextAction: "Review it", producerId: producer.identityId, expectedRevision })]),
+      fetchImpl: async (url, init) => {
+        assert.equal(new URL(url).origin, origin);
+        assert.equal(new Headers(init.headers).get("Authorization"), "Bearer " + producer.secret);
+        calls.push(JSON.parse(init.body).params.name);
+        return fetchImpl(url, init);
+      }
+    });
+    assert.equal(outputs.length, 1);
+    return { code, output: outputs[0], calls };
+  };
+
+  // Stale: a different operation (room_block_work) moves the item on after
+  // this attempt's basis was read. The never-before-posted draft must be
+  // refused, not recorded, and not left around for later reconciliation.
+  const stale = await begin("stale-new-op");
+  await rpc("room_block_work", { workItemId: "stale-new-op", reason: "Scope changed", nextAction: "Re-plan" });
+  const beforeStale = store.headSequence("commons");
+  const staleAttempt = await attempt("stale-new-op", "stale-new-op-attempt", stale.revision);
+  assert.equal(staleAttempt.code, 1, JSON.stringify(staleAttempt));
+  assert.equal(staleAttempt.output.status, "refused");
+  assert.equal(staleAttempt.output.code, "stale_revision");
+  assert.deepEqual(staleAttempt.calls, ["room_post_message"]);
+  assert.equal(store.headSequence("commons"), beforeStale, "a stale new draft must not be recorded");
+  assert.equal((await cli(["receipt", "stale-new-op-attempt", "--draft"])).value.status, "not_recorded");
+
+  // Lost response: retrying the identical stale attempt (as if the first
+  // reply never arrived) must stay refused on both storage backends, never
+  // posting a draft merely because the client retried.
+  const lostReplyStale = await attempt("stale-new-op", "stale-new-op-attempt", stale.revision,
+    async (url, init) => { const response = await fetch(url, init); await response.arrayBuffer();
+      throw new Error("simulated lost reply after server handled request"); });
+  assert.equal(lostReplyStale.output.status, "unknown");
+  assert.equal(store.headSequence("commons"), beforeStale, "the uncertain stale attempt recorded nothing either");
+  assert.deepEqual(lostReplyStale.output.receiptCommand.slice(0, 3), ["room", ...explicit]);
+  const absent = await cli(lostReplyStale.output.receiptCommand.slice(1), undefined, alternateCheckout);
+  assert.equal(absent.value.status, "not_recorded");
+  const recoveredStale = await attempt("stale-new-op", "stale-new-op-attempt", stale.revision);
+  assert.equal(recoveredStale.output.status, "refused");
+  assert.equal(recoveredStale.output.code, "stale_revision");
+  assert.equal(store.headSequence("commons"), beforeStale, "the retried stale attempt still recorded nothing");
+
+  // Closed: a different, already-recorded operation completes the item
+  // first. A second, brand-new operation holding the pre-completion
+  // revision is a newly attempted result against a closed item, and must
+  // not post a draft either.
+  const closed = await begin("closed-new-op");
+  const finishedFirst = await attempt("closed-new-op", "closed-new-op-first", closed.revision);
+  assert.equal(finishedFirst.code, 0, JSON.stringify(finishedFirst));
+  assert.deepEqual(finishedFirst.calls, ["room_post_message", "room_submit_text_result"]);
+  const beforeClosed = store.headSequence("commons");
+  const closedAttempt = await attempt("closed-new-op", "closed-new-op-second", closed.revision);
+  assert.equal(closedAttempt.output.status, "refused");
+  assert.equal(closedAttempt.output.code, "stale_revision");
+  assert.deepEqual(closedAttempt.calls, ["room_post_message"]);
+  assert.equal(store.headSequence("commons"), beforeClosed, "a closed item must not accept a fresh draft");
+  assert.equal((await cli(["receipt", "closed-new-op-second", "--draft"])).value.status, "not_recorded");
+
+  const upgraded = await begin("upgrade-during-retry");
+  const lostLegacyPost = await attempt("upgrade-during-retry", "legacy-retry", upgraded.revision, async (url, init) => {
+    const request = JSON.parse(init.body);
+    delete request.params.arguments.expectedRevision;
+    const response = await fetch(url, { ...init, body: JSON.stringify(request) });
+    await response.arrayBuffer();
+    throw new Error("Lost legacy draft receipt");
+  });
+  assert.equal(lostLegacyPost.output.status, "unknown");
+  const originalPost = (await cli(["receipt", "legacy-retry", "--draft"])).value;
+  assert.equal(originalPost.status, "recorded");
+  const resumed = await attempt("upgrade-during-retry", "legacy-retry", upgraded.revision);
+  assert.equal(resumed.output.status, "recorded");
+  assert.deepEqual(resumed.calls, ["room_post_message", "room_read_result", "room_submit_text_result"]);
+  assert.equal((await cli(["receipt", "legacy-retry", "--draft"])).value.eventId, originalPost.eventId);
+
+  const legacy = await begin("previous-room");
+  const oldServer = async (url, init) => {
+    const frame = JSON.parse(init.body);
+    if (frame.params.name === "room_post_message" && frame.params.arguments.expectedRevision !== undefined)
+      return Response.json(mcpCallError(frame.id, { tool: frame.params.name, reason: "invalid_arguments", unexpected: ["expectedRevision"] }));
+    return fetch(url, init);
+  };
+  const beforeAmbiguous = store.headSequence("commons");
+  const ambiguous = await attempt("previous-room", "ambiguous-frame", legacy.revision, async (url, init) => {
+    const frame = await (await oldServer(url, init)).json();
+    return Response.json({ ...frame, result: { structuredContent: { contractVersion: 1, status: "posted" } } });
+  });
+  assert.equal(ambiguous.output.status, "unknown");
+  assert.deepEqual(ambiguous.calls, ["room_post_message"]);
+  assert.equal(store.headSequence("commons"), beforeAmbiguous);
+
+  const oldValid = await attempt("previous-room", "old-valid", legacy.revision, oldServer);
+  assert.equal(oldValid.output.status, "recorded", JSON.stringify(oldValid));
+  const oldHead = store.headSequence("commons");
+  const oldStale = await attempt("previous-room", "old-stale", legacy.revision, oldServer);
+  assert.equal(oldStale.output.code, "result_draft_unavailable");
+  assert.equal(store.headSequence("commons"), oldHead);
+
+  const currentClosed = (await cli(["work", "closed-new-op"])).value;
+  const beforeLate = store.headSequence("commons");
+  const late = await attempt("closed-new-op", "closed-at-current", currentClosed.revision);
+  assert.equal(late.output.status, "refused");
+  assert.equal(store.headSequence("commons"), beforeLate, JSON.stringify(late.output));
+  assert.equal((await cli(["receipt", "closed-at-current", "--draft"])).value.status, "not_recorded");
+
+  // Ordinary room chat (no workItemId, so no expectedRevision applies) keeps
+  // posting normally, even right after the refusals above.
+  const chat = await rpc("room_post_message", { id: "plain-chat-1", body: "Status update for everyone." });
+  assert.equal(chat.status, "posted");
+  assert.equal(chat.event.data.workItemId, undefined);
+  assert.equal(alternate.store.headSequence("commons"), initialAlternateHead);
+  assert.equal((await cli(["next"], undefined, alternateCheckout)).value.viewerId, alternate.reviewer.identityId);
 });
 
 test(`${representation} answers use the saved request, stop at a correction and recover a lost response`, async t => {

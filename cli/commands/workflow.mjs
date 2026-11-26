@@ -65,7 +65,7 @@ async function exchange(tool, args, config, secret, fetchImpl) {
   return { value };
 }
 
-function matchesOperationReceipt(value, { roomId, memberId }, id) {
+export function matchesOperationReceipt(value, { roomId, memberId }, id) {
   return value?.contractVersion === 1 && value.roomId === roomId && value.viewerId === memberId
     && value.operationId === id && hasRevision(value.checkedThrough) && value.currentStateVerified === false
     && (value.status === "recorded"
