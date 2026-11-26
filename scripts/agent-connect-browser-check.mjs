@@ -98,6 +98,7 @@ test("browser owner issues digest-only setup; a real external client imports, re
   await f.page.locator("#agent-all-steps > summary").click();
   assert.match(await f.page.locator("#agent-import-checklist").innerText(), /room_check_access/);
   assert.match(await f.page.locator("#agent-import-checklist").innerText(), /linked Room reply/);
+  assert.match(await f.page.locator("#agent-import-checklist").innerText(), /MCP snippets for this key/);
   await f.page.locator("#agent-all-steps > summary").click();
   await f.capture("desktop-ready");
   assert.equal(await f.page.locator("#agent-local-client").evaluate(node => node.open), false);
@@ -402,15 +403,32 @@ test("a just-created connection reads as ready, not as a missing member, without
 
 
 test("signed-in friend connects own agent without room-owner permission", { timeout: 25000 }, async t => {
-  const f = await setup(t, false, true);
+  const f = await setup(t, true, true);
   await f.open();
   assert.equal(await f.page.locator('#agent-connect-access option[value="review"]').evaluate(node => node.disabled), true);
   assert.equal(await f.page.locator('#agent-connect-access option[value="contribute"]').isDisabled(), false);
   await f.create();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" });
+  await f.capture("friend-mobile-issued");
+  await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.evaluate(() => document.activeElement?.parentElement?.id), "agent-host-snippets",
+    "the first control after the setup heading helps configure the key just issued");
+  assert.doesNotMatch(await f.page.locator("#agent-setup").innerText(), /Copy an agent invite|room-acp/,
+    "an issued key no longer leads to a second enrollment");
+  assert.equal(await f.page.locator("#agent-private-details").evaluate(node => node.open), false);
+  assert.equal(await f.page.locator("#agent-private-config").inputValue(), "");
+  assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   const config = await f.config();
   assert.equal(f.store.room("commons").state.members[config.memberId].accountableHumanId, "friend-browser");
-  assert.equal((await new RoomAgentClient(config).checkConnection()).memberId, config.memberId);
+  const client = new RoomAgentClient(config);
+  assert.equal((await client.checkConnection()).memberId, config.memberId);
+  f.store.command(f.keys.owner, "commons", { id: "friend-first-work", type: T.WORK_PROPOSED, data: {
+    workItemId: "friend-release-note", title: "Check the release note", definitionOfDone: "Confirm the date",
+    accountableMemberId: config.memberId, mode: "read",
+  } });
+  const pickup = await client.orient({ focus: "needs_me", paginate: true });
+  assert.equal(pickup.viewerId, config.memberId);
+  assert.ok(pickup.work.some(item => item.id === "friend-release-note" && item.nextRead));
   assert.equal(f.store.room("commons").state.room.ownerId, "owner");
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
@@ -439,6 +457,15 @@ for (const count of [1, 5]) test(`agent invitation clipboard handoff keeps ${cou
   assert.equal(await page.evaluate(() => globalThis.inviteCopied.at(-1)), links.join('\n'));
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_invite_redeem_receipts').get().n, 0, 'copying does not enroll or start an agent');
   assert.equal(await page.locator('.agent-invite-instructions[open]').count(), 0, 'local commands remain optional');
+  if (count === 1) {
+    const singleInvite = page.locator("#agent-invite-single");
+    await singleInvite.getByText("Agent on your computer", { exact: true }).click();
+    await singleInvite.getByRole("button", { name: "Copy room-acp command" }).click();
+    const command = await page.evaluate(() => globalThis.inviteCopied.at(-1));
+    assert.ok(command.includes(`--package=${f.origin}/room-acp.tgz room-acp join '${f.origin}'`));
+    assert.doesNotMatch(command, /\bRM-[A-Z0-9]+\b/);
+    assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_invite_redeem_receipts').get().n, 0);
+  }
 });
 
 test('existing owned agent is primary; separate-agent creation is explicit and uncertain retry stays exact', {timeout:30000}, async t=>{

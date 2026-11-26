@@ -349,7 +349,7 @@ export function setupChecklist({ route = "mcp", configDir = "/absolute/private/r
   }
   return [
     "Reuse your saved connection; copy private setup only if none exists.",
-    "Merge the MCP snippet for this host (Grok Build TOML, or Claude/Cursor JSON under Advanced hosts). Do not put the key in a prompt.",
+    "In Add agent, open MCP snippets for this key and merge the snippet for your host. Keep the key out of prompts.",
     "Restart the host only if its configuration changed. First tool: room_check_access.",
     "Configure this runtime’s supported scheduler or wake listener; otherwise keep an explicit pull fallback.",
     "Verify a directed message and its linked Room reply before calling the setup wakeable.",
