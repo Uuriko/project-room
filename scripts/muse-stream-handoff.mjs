@@ -136,8 +136,8 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
       state = { ...state, settledPredecessor: { requestMessageId, roomCreatedEventId, openingEventId, openingSequence } };
       remember(state.after);
     }
-    onSettlement();
   }
+  let replay;
   if (state.inFlight) {
     const saved = state.inFlight;
     const current = await client.replyContext(saved.requestMessageId, { view: "compact", signal });
@@ -153,10 +153,15 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
       if (recovered.requestRevision !== saved.requestRevision || recovered.contextEventId !== saved.contextEventId) {
         remember(state.after, recovered);
       }
-      return offer({ status: "handoff", replay: true, after: state.after, ...recovered });
+      replay = { status: "handoff", replay: true, after: state.after, ...recovered };
+    } else {
+      remember(state.after);
     }
-    remember(state.after);
   }
+  // Keep the prearmed fence active during a transient failure of the exact
+  // successor read. A quiet rollover must not replace its published offer.
+  if (afterSettlement) onSettlement();
+  if (replay) return offer(replay);
   let catchUp = !resumeStream || Boolean(checkpoint.inFlight);
   for (;;) {
     signal.throwIfAborted();

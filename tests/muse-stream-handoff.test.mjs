@@ -135,7 +135,7 @@ for (const interruption of ["before_ack", "after_ack"]) {
     const next = request("next", { contextEventId: "next-basis" });
     const pending = { requestMessageId: first.id, requesterId: first.requesterId, recipientId: first.recipientId,
       roomCreatedEventId: "room-birth", openingEventId: first.openingEventId, openingSequence: 11, requestRevision: 0 };
-    put("handoff.json", policy);
+    put("handoff.json", { ...policy, windowSeconds: 1 });
     put("stream-checkpoint.json", { version: 1,
       binding: [policy.origin, policy.roomId, policy.memberId, policy.requesters, policy.workItems, policy.requests, policy.bootstrapAfter],
       after: 11, inFlight: pending });
@@ -145,19 +145,25 @@ for (const interruption of ["before_ack", "after_ack"]) {
     writeFileSync(preload, `
       import { RoomAgentClient } from ${JSON.stringify(new URL("../client/room-agent.mjs", import.meta.url).href)};
       import assert from "node:assert/strict";
+      import { setTimeout } from "node:timers/promises";
       import { existsSync, readFileSync, writeFileSync } from "node:fs";
       import { fileURLToPath } from "node:url";
       const ackFile = fileURLToPath(new URL("fixture-ack.json", import.meta.url));
       const phase = process.env.MUSE_RESTART_FIXTURE_PHASE;
       const first = ${JSON.stringify({ ...context(first, 11), evaluatedThrough: 15 })};
       const next = ${JSON.stringify(context(next, 15))};
-      RoomAgentClient.prototype.replyContext = async id => {
+      let nextReads = 0;
+      RoomAgentClient.prototype.replyContext = async (id, { signal }) => {
         if (id === first.request.id) {
           if (phase === "changed_birth") first.roomCreatedEventId = "replacement-room";
           if (phase === "changed_opening") first.page.items[0].sequence = 12;
           return first;
         }
         assert.equal(id, next.request.id);
+        if (nextReads++ === 0) {
+          if (phase === "retry_published") throw Object.assign(Error("temporarily unavailable"), { status: 503 });
+          if (phase === "rollover_published") await setTimeout(60000, null, { signal });
+        }
         if (existsSync(ackFile)) {
           const ack = JSON.parse(readFileSync(ackFile));
           next.request.contextEventId = "acknowledged-basis";
@@ -208,10 +214,14 @@ for (const interruption of ["before_ack", "after_ack"]) {
     assert.equal(handoff.receiverAcknowledgment.duplicate, interruption === "after_ack");
     assert.equal(read("receiver-status.json").openingEventId, next.openingEventId);
     assert.equal(read("fixture-ack.json").id, "muse-seen-open-next");
-    const published = run("resume");
-    assert.equal(published.status, 1);
-    assert.match(published.stderr, /muse_successor_offer_already_published/);
-    assert.equal(published.stdout, "");
+    const publishedOffer = read("receiver-status.json");
+    for (const phase of ["resume", "retry_published", "rollover_published"]) {
+      const published = run(phase);
+      assert.equal(published.status, 1, `a published offer must not be reissued during ${phase}`);
+      assert.match(published.stderr, /muse_successor_offer_already_published/);
+      assert.equal(published.stdout, "");
+      assert.deepEqual(read("receiver-status.json"), publishedOffer);
+    }
   });
 }
 
