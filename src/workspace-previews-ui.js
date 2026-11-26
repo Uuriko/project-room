@@ -63,8 +63,8 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
           <div class="workspace-change-columns"><section data-workspace-primary></section><section data-workspace-peer hidden></section></div>
         </section>
         <section id="workspace-panel-output" role="tabpanel" aria-labelledby="workspace-tab-output" hidden>
-          <p data-workspace-output-status class="form-hint" role="status"></p>
-          <pre data-workspace-output tabindex="0"></pre>
+          <p id="workspace-output-status" data-workspace-output-status class="form-hint" role="status"></p>
+          <pre data-workspace-output aria-describedby="workspace-output-status" tabindex="0"></pre>
         </section>
         <section id="workspace-panel-preview" role="tabpanel" aria-labelledby="workspace-tab-preview" hidden>
         </section>
@@ -218,7 +218,9 @@ export function installWorkspacePreviews({ client, toolbar, memberLabel, capture
       const value = await client.roomRead(`/workspace-previews?${query}`);
       if (!value || !ownsOutput()) return;
       output.textContent = value.run.output ?? "";
-      outputStatus.textContent = "";
+      outputStatus.textContent = uiText("workspace.output.source", {
+        name: memberLabel(current.publisherId) || current.publisherId,
+      });
       renderedOutput = key;
     } catch (error) {
       if (ownsOutput()) outputStatus.textContent = error.message || "Could not read run output.";

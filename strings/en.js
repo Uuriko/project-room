@@ -868,6 +868,7 @@ export default {
   "work.focus.resultHtml": "<p class=\"definition work-focus-summary\" data-work-focus-result>Current result: {summary}</p>",
   "workspace.preview.frameTitle": "Shared project preview",
   "workspace.preview.source": "{name} · {head} · Revision {revision}",
+  "workspace.output.source": "Run output shared by {name}",
   "workspace.live.open": "Open live preview",
   "workspace.live.popupBlocked": "Allow pop-ups to open the live preview.",
   "workspace.live.unavailable": "This live preview is unavailable. The saved preview is still here.",

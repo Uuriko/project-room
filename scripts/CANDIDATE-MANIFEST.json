@@ -198,9 +198,9 @@
     "src/workspace-change-view.js": "sha256:0d48219f7b3043f95718c4004542032afe9e46d284c9f822a81176c5ebd6cda7",
     "src/workspace-diff-parser.js": "sha256:5b14a2e51bea66139855f64f426776ef87267330495c7b929590518855972f06",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "src/workspace-previews-ui.js": "sha256:69588222a374d67631bfed4b61331b910da8b5256dbaad463c485d821454a053",
-    "strings/en.js": "sha256:bd6fb98d9c2605288eb58cd16259e6ee540383d2c24a15f6aecc756ee7cb8658",
-    "strings/en.json": "sha256:6292192d7e3eb95e9257678af9a65ec75ad34a7e583352ecf61a7f39c938bfde"
+    "src/workspace-previews-ui.js": "sha256:0c18c95bf6ba1da8099771927a1c7ccbf1021432b9eebea956fec53e129cd491",
+    "strings/en.js": "sha256:df0fc317f4ecf7f33b53e719b29df25cd9aa3622b084e688c687efe8cc6583bc",
+    "strings/en.json": "sha256:43f6d779644189b4433244501e7ebd42c409719551e545b662e258fa804ec817"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:aee5a959e01e571b70b634ce65f1aec49e6c03c812ffafd76bcb2f6bfb6157df",

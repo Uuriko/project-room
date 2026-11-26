@@ -576,14 +576,14 @@ for (const patchOnly of [false, true]) test(`a returning reviewer can finish the
   const oldFile = origin => origin + "/?room=commons#pr-workspace/"
     + [oldId, 1, "changes", oldDigest, "producer", oldHead, "brief.md"].join("/");
   const f = await setup(t, 390, { firstBody: origin => "Result A\nOwner undecided\n" + oldFile(origin) });
-  const publish = async (id, head, patch) => {
+  const publish = async (id, head, patch, output) => {
     const response = await fetch(f.origin + "/api/rooms/commons/workspace-previews", {
       method: "POST", headers: { Authorization: "Bearer " + f.keys.producer, "Content-Type": "application/json" },
-      body: JSON.stringify({ id, expectedRevision: 0, patch, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
+      body: JSON.stringify({ id, expectedRevision: 0, patch, output, base: "b".repeat(40), head, title: "Brief", html: "<p>Brief</p>" })
     });
     assert.ok(response.ok, await response.text());
   };
-  await publish(oldId, oldHead, oldPatch);
+  await publish(oldId, oldHead, oldPatch, "Initial publisher run");
   const original = f.origin + "/?room=commons#pr-record/result/revision-journey/" + f.first.event.id;
   const reviewer = await f.login("human-checker", original);
   await reviewer.locator("#result-work-action").click();
@@ -597,7 +597,7 @@ for (const patchOnly of [false, true]) test(`a returning reviewer can finish the
   const file = f.origin + "/?room=commons#pr-workspace/"
     + [previewId, 1, "changes", digest, "producer", head, ...(patchOnly ? [] : ["brief.md"])].join("/");
   const label = patchOnly ? "View changes" : "brief.md";
-  await publish(previewId, head, patch);
+  await publish(previewId, head, patch, "Revised publisher run: checks passed");
   const revisedBody = "Result B\nOwner: Maya · Friday\n" + file;
   const second = f.complete(revisedBody);
   await f.restart();
@@ -631,6 +631,18 @@ for (const patchOnly of [false, true]) test(`a returning reviewer can finish the
   if (patchOnly) await filePanel.locator('[data-file="brief.md"]').press("Enter");
   await filePanel.getByText("+Owner: Maya · Friday", { exact: true }).waitFor();
   assert.equal(await filePanel.getByText("+Owner: tentative", { exact: true }).count(), 0);
+  const changesTab = filePage.getByRole("tab", { name: "Changes", exact: true });
+  await changesTab.press("ArrowRight");
+  const output = filePage.getByRole("tabpanel", { name: "Run output", exact: true });
+  await output.getByText("Revised publisher run: checks passed", { exact: true }).waitFor();
+  assert.equal(await output.getByText("Initial publisher run", { exact: true }).count(), 0);
+  if (patchOnly && process.env.ROOM_GIT_RESULT_CAPTURE) {
+    await filePage.screenshot({ path: join(process.env.ROOM_GIT_RESULT_CAPTURE, "run-output.png") });
+  }
+  const publisher = f.store.room("commons").state.members.producer.displayName;
+  assert.equal(await output.getByText(`Run output shared by ${publisher}`, { exact: true }).isVisible(), true);
+  assert.notEqual(f.item().verification?.completionEventId, second.event.id,
+    "Viewing the publisher's passing output does not record an independent verification");
   await filePage.close();
   assert.equal(await returning.locator('#action-fields [name="summary"]').inputValue(), "Checked Maya against the Friday deadline.");
   if (process.env.ROOM_REVIEW_CUE_CAPTURE) await returning.screenshot({ path: join(process.env.ROOM_REVIEW_CUE_CAPTURE, "revised-file-in-review.png") });
