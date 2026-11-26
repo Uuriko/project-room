@@ -1197,7 +1197,12 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
     let headKnown = after;
     let lastFullAt = 0, lastWriteAt = Date.now();
     let wakeQueued = false, unsubscribe = null, drainPending = false;
-    const cleanup = () => { clearInterval(timer); unsubscribe?.(); streams.delete(entry); signal?.removeEventListener("abort", abort); };
+    const cleanup = () => {
+      clearInterval(timer);
+      unsubscribe?.();
+      if (streams.delete(entry) && agentReceiver) server.emit("agentReceiverDisconnected", roomId);
+      signal?.removeEventListener("abort", abort);
+    };
     const end = data => { cleanup(); if (!res.destroyed && !res.writableEnded) res.end(data); };
     const abort = () => end();
     // Per-connection send queue: a consumer whose unsent bytes exceed the cap
@@ -5526,13 +5531,14 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
       }
       if (route === "agent-pause" && req.method === "POST") {
         // C6: pause or resume a member's queued wakes (own row, or owner over
-        // another member). Draft class: nothing is sent, launched or spent.
+        // another member). An enabled private completion plan can react to this change.
         const data = await body(req);
         const fields = data.action === "resume" ? ["action", "memberId", "requestId"] : ["action", "memberId", "requestId", "reason"];
         if (!["pause", "resume"].includes(data.action) || !exact(data, fields) || typeof data.memberId !== "string") reject(422, "invalid_pause_command", "Supply action (pause or resume), memberId, requestId and, for pause, reason or null");
         const target = { memberId: data.memberId };
         const result = data.action === "pause" ? store.wakeQueue.pause(selected.token, roomId, { requestId: data.requestId, reason: data.reason }, fence, target)
           : store.wakeQueue.resume(selected.token, roomId, { requestId: data.requestId }, fence, target);
+        if (!result.duplicate) server.emit("agentCapacityChanged", roomId);
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "access-review" && req.method === "GET") {

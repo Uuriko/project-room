@@ -9,6 +9,7 @@ import { setImmediate } from "node:timers/promises";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { CAPACITY_STOP, compileCapacityWork, capacityWorkHandoff } from "../server/completion-capacity.mjs";
 import { startCompletionPickup, startReloadableCompletionPickup } from "../server/completion-pickup.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -436,4 +437,170 @@ test("a validated continuation plan replaces only its subscriber and preserves o
   t.mock.timers.tick(1000);
   await setImmediate();
   assert.equal(receipt("second-next").status, "recorded", "a broken lane does not consume another lane's retry");
+});
+
+for (const representation of [undefined, "normalized-current-v1"]) {
+  test(`verified provider stop transfers a queued request and recovery refills once (${representation ?? "legacy"})`, async t => {
+    const directory = mkdtempSync(join(tmpdir(), "room-capacity-handoff-"));
+    const store = new RoomStore(join(directory, "room.sqlite"));
+    const roomId = "commons", requesterId = "owner", recipientId = "primary", workItemId = "qa-capacity";
+    const identity = { roomId, memberId: requesterId };
+    store.initialize(initialRoom(), representation ? { representation } : {});
+    const owner = store.issueAccessKey(roomId, requesterId);
+    const primary = store.identities.create("Primary QA");
+    const alternate = store.identities.create("Alternate QA");
+    linkWithProof(store, owner, roomId, primary, { memberId: recipientId, permissions: ["accept_work"] });
+    linkWithProof(store, owner, roomId, alternate, { memberId: "alternate", permissions: ["accept_work"] });
+    store.command(owner, roomId, { id: "capacity-work", type: "work.proposed", data: {
+      workItemId, title: "Review capacity handoff", definitionOfDone: "Return source evidence.",
+      accountableMemberId: requesterId, mode: "read"
+    } });
+    const after = store.headSequence(roomId);
+    const plan = join(directory, "plan.json"), checkpointPath = join(directory, "checkpoint.json");
+    const credentialPath = join(directory, "owner.json");
+    atomicPrivateJson(credentialPath, { identitySecret: owner });
+    atomicPrivateJson(plan, { checkpointPath, routes: [{
+      roomId, requesterId, recipientId, workItemId, credentialPath, after,
+      capacityHandoff: { sourceOperationId: "capacity-source", replacementOperationId: "capacity-alternate",
+        replacementMemberId: "alternate", body: "Review the public setup instructions at the pinned revision." },
+      idleRefill: { requestId: "capacity-restored", ...(representation ? { discover: true } : { body: "Review a different installation example." }) }
+    }] });
+    const source = buildReplyCommand(identity, "room_request_reply", { requestId: "capacity-source",
+      toMemberId: recipientId, workItemId, body: "Original private text must not be forwarded." });
+    store.command(owner, roomId, source);
+    const receiver = createRoomServer({ store });
+    receiver.listen(0, "127.0.0.1");
+    await once(receiver, "listening");
+    const origin = `http://127.0.0.1:${receiver.address().port}`;
+    const connect = async (secret, scope = workItemId) => {
+      const response = await fetch(`${origin}/api/rooms/${roomId}/stream?after=${store.headSequence(roomId)}`, { headers: {
+        Authorization: "Bearer " + secret, "X-Project-Room-Receiver-State": "waiting_for_work",
+        "X-Project-Room-Receiver-Scope": JSON.stringify({ requesters: [requesterId], workItems: [scope], requests: [] })
+      } });
+      assert.equal(response.status, 200);
+      return response;
+    };
+    const capacityChange = async (action, requestId, reason) => {
+      const response = await fetch(`${origin}/api/rooms/${roomId}/agent-pause`, {
+        method: "POST", headers: { Authorization: "Bearer " + primary.secret, "Content-Type": "application/json" },
+        body: JSON.stringify({ action, requestId, memberId: recipientId, reason })
+      });
+      assert.equal(response.status, 201, await response.text());
+    };
+    const logs = [];
+    const start = () => startCompletionPickup(store, plan, text => logs.push(JSON.parse(text)), receiver);
+    let stop = start();
+    t.after(async () => {
+      stop();
+      receiver.closeStreams();
+      receiver.closeAllConnections();
+      await new Promise(resolve => receiver.close(resolve));
+      store.close();
+      rmSync(directory, { recursive: true, force: true });
+    });
+    const receipt = id => store.operationReceipt(owner, roomId, id);
+    const latest = id => logs.filter(entry => entry.event === id).at(-1)?.state;
+    const selected = () => store.replyRequests.selected(owner, roomId, source.data.messageId, { view: "compact" }).request;
+    await setImmediate();
+    assert.equal(latest("completion_pickup.refill"), "pending_work");
+    // Ordinary pause is not evidence about whether the provider ran the task.
+    await capacityChange("pause", "manual-stop", "Personal pause");
+    await setImmediate();
+    assert.equal(latest("completion_pickup.capacity"), "paused");
+    assert.equal(selected().status, "open");
+    await capacityChange("resume", "manual-resume");
+    await capacityChange("pause", "provider-stop", CAPACITY_STOP);
+    await setImmediate();
+    assert.equal(latest("completion_pickup.capacity"), "replacement_unreachable");
+    assert.equal(latest("completion_pickup.refill"), "capacity_blocked");
+    assert.equal(selected().status, "open");
+    const otherScope = await connect(alternate.secret, "other-scope");
+    await setImmediate();
+    assert.equal(receipt("capacity-alternate").status, "not_recorded");
+    await otherScope.body.cancel();
+    await connect(alternate.secret);
+    await setImmediate();
+    assert.equal(receipt("capacity-alternate").status, "recorded");
+    assert.equal(receipt("capacity-restored").status, "not_recorded");
+    assert.equal(selected().status, "cancelled");
+    const next = buildReplyCommand(identity, "room_request_reply", { requestId: "capacity-alternate",
+      toMemberId: "alternate", workItemId, body: "Only the ID matters for lookup." });
+    const fallback = store.replyRequests.selected(alternate.secret, roomId, next.data.messageId, { view: "compact" });
+    assert.match(fallback.page.items[0].message.body, /public setup instructions/);
+    assert.doesNotMatch(fallback.page.items[0].message.body, /Original private/);
+    const fallbackEvent = receipt("capacity-alternate").eventId;
+    await capacityChange("resume", "provider-recovered");
+    await setImmediate();
+    assert.equal(latest("completion_pickup.refill"), "receiver_unconfirmed");
+    await connect(primary.secret);
+    await setImmediate();
+    assert.equal(receipt("capacity-restored").status, "recorded");
+    assert.equal(receipt("capacity-alternate").eventId, fallbackEvent);
+    const recoveredEvent = receipt("capacity-restored").eventId;
+    const fresh = buildReplyCommand(identity, "room_request_reply", { requestId: "capacity-restored",
+      toMemberId: recipientId, workItemId, body: "Only the ID matters for lookup." });
+    assert.match(store.replyRequests.selected(primary.secret, roomId, fresh.data.messageId).page.items[0].message.body,
+      representation ? /one bounded task/ : /different installation example/);
+    stop(); stop = start();
+    await setImmediate();
+    assert.equal(receipt("capacity-restored").eventId, recoveredEvent);
+    assert.equal(receipt("capacity-alternate").eventId, fallbackEvent);
+  });
+}
+
+test("a stopped provider's unopened Work Thread becomes an authorized successor atomically", t => {
+  const store = new RoomStore(":memory:");
+  t.after(() => store.close());
+  const roomId = "commons", requesterId = "owner", recipientId = "primary", workItemId = "old-work";
+  store.initialize(initialRoom(), { representation: "normalized-current-v1" });
+  const secret = store.issueAccessKey(roomId, requesterId);
+  const primary = store.identities.create("Primary agent");
+  const replacement = store.identities.create("Replacement agent");
+  const verifier = store.identities.create("Independent verifier");
+  linkWithProof(store, secret, roomId, primary, { memberId: recipientId, permissions: ["accept_work"] });
+  linkWithProof(store, secret, roomId, replacement, { memberId: "replacement", permissions: ["accept_work"] });
+  linkWithProof(store, secret, roomId, verifier, { memberId: "verifier", permissions: ["verify"] });
+  const propose = id => store.command(secret, roomId, { id: "create-" + id, type: "work.proposed", data: {
+    workItemId: id, title: "Original task", definitionOfDone: "Check exact files", accountableMemberId: recipientId,
+    verifierMemberId: "verifier", independentVerificationRequired: true, mode: "read"
+  } });
+  propose(workItemId);
+  const route = { roomId, requesterId, recipientId, workItemId, after: store.headSequence(roomId),
+    capacityWork: { operationId: "move-unopened-work", replacementMemberId: "replacement",
+      replacementWorkItemId: "replacement-work", expectedRevision: 0,
+      title: "Check the installation guide", definitionOfDone: "Report a public reproducible check." } };
+  const binding = { route, secret, workHandoff: compileCapacityWork(route), hasOpenRequest: () => false };
+  const receiver = { hasRecoveryReceiver: request => request.recipientId === "replacement" && request.workItemId === "replacement-work" };
+  propose("started-work");
+  store.command(primary.secret, roomId, { id: "old-accept", type: "work.accepted", data: { workItemId: "started-work", expectedRevision: 0 } });
+  store.command(primary.secret, roomId, { id: "old-start", type: "work.started", data: { workItemId: "started-work", expectedRevision: 1 } });
+  store.wakeQueue.pause(primary.secret, roomId, { requestId: "provider-work-hold", reason: CAPACITY_STOP });
+  const originalCommand = store.command.bind(store);
+  store.command = (token, room, command) => {
+    if (command.type === "message.posted") throw new Error("injected write failure");
+    return originalCommand(token, room, command);
+  };
+  assert.throws(() => capacityWorkHandoff(store, binding, receiver), /injected write failure/);
+  store.command = originalCommand;
+  assert.equal(store.workContext(secret, roomId, workItemId).work.state, "proposed");
+  assert.equal(store.operationReceipt(secret, roomId, "move-unopened-work").status, "not_recorded");
+  assert.equal(capacityWorkHandoff(store, binding, receiver).state, "work_handed_off");
+  const original = store.workContext(secret, roomId, workItemId);
+  assert.equal(original.work.state, "superseded");
+  assert.equal(original.next.replacement.workItemId, "replacement-work");
+  const next = store.workContext(replacement.secret, roomId, "replacement-work");
+  assert.equal(next.work.accountableMemberId, "replacement");
+  assert.equal(next.work.verifierMemberId, "verifier");
+  assert.equal(next.work.independentVerificationRequired, true);
+  assert.equal(next.work.state, "proposed");
+  assert.equal(store.operationReceipt(secret, roomId, "move-unopened-work-pickup").status, "recorded");
+  const [notice] = store.replyRequests.list(replacement.secret, roomId, { direction: "incoming", status: "open" }).requests;
+  assert.equal(notice.workItemId, "replacement-work");
+  assert.throws(() => store.command(primary.secret, roomId, { id: "late-primary", type: "work.accepted",
+    data: { workItemId, expectedRevision: original.work.revision } }));
+  const head = store.headSequence(roomId);
+  assert.equal(capacityWorkHandoff(store, binding, receiver).state, "work_handed_off");
+  assert.equal(store.headSequence(roomId), head);
+  const started = { ...route, workItemId: "started-work", capacityWork: { ...route.capacityWork, operationId: "move-started-work", expectedRevision: 2 } };
+  assert.equal(capacityWorkHandoff(store, { ...binding, route: started, workHandoff: compileCapacityWork(started) }, receiver).state, "inspect_existing_work");
 });

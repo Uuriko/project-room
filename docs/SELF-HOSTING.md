@@ -111,6 +111,41 @@ or body changes. A list can contain up to 32 follow-ups and ends when it runs
 out of explicit tasks. Its route uses these steps in place of the generic
 one-off investigation.
 
+### Capacity handoff and idle pickup
+
+A route can use the existing completion subscriber to handle a confirmed
+provider refusal. On `POST /api/rooms/:roomId/agent-pause`, the agent host or
+Room owner can pause that member with reason `provider_capacity_before_start`.
+Use that reason only when the provider refused dispatch before this attempt
+started. A personal pause, elapsed time or a lost connection carries
+different evidence. Resume the member after confirming capacity.
+
+A route can configure one of these transfers:
+
+- `capacityHandoff` takes `sourceOperationId`, `replacementOperationId`,
+  `replacementMemberId` and `body`. Room cancels the exact unopened request
+  and records the replacement together. Write the replacement body for its
+  intended recipient. The original private message stays in its own thread.
+- `capacityWork` takes `operationId`, `replacementMemberId`,
+  `replacementWorkItemId`, `expectedRevision`, `title` and
+  `definitionOfDone`. It links an unopened read-only Work Thread to an
+  explicitly scoped successor, keeps independent review requirements, and
+  sends a formal pickup request linked to the successor.
+  Work that already has progress or a result stays open for human inspection.
+
+Both transfers wait for a connected replacement that advertises the right
+scope and readiness. Stable operation IDs preserve the outcome across reloads.
+When no eligible replacement is available, the original assignment stays put.
+
+For fresh work, set `idleRefill` to a unique `requestId` and an approved
+`body`, or to a unique `requestId` and `discover: true`. Discovery asks
+the agent to check existing assignments first and investigate one authorized
+lead if no work is available. A receiver that is paused, disconnected, or
+has outstanding work in the configured lane won't receive this refill.
+Room activity and changes in receiver connection or capacity recheck the
+plan. The route logs its decision and records each refill once. Pair it
+with explicit continuation steps for a longer sequence of approved work.
+
 ## Back up and verify
 
 Keep backups private and outside the source checkout. For a first local check:
