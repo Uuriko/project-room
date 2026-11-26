@@ -403,7 +403,10 @@ for (const storage of ["legacy", "normalized"]) {
     if (process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT && storage === 'normalized') {
       await page.screenshot({ path: process.env.ROOM_PRIVATE_SEARCH_SCREENSHOT + '-found.png' });
     }
-    await found.press('Enter');
+    await page.keyboard.press('Tab');
+    assert.equal(await found.evaluate(node => node === document.activeElement), true,
+      'the next Tab from the earlier-search action reaches the newly found answer');
+    await page.keyboard.press('Enter');
     const row = page.locator(`[data-message-record-id="${messageId}"]`);
     await row.getByText("I finished reviewing the project brief.", { exact: true }).waitFor();
     assert.equal(await row.evaluate(node => node === document.activeElement), true);
