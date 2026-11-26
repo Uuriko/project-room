@@ -75,11 +75,37 @@ async function inspect(client, policy, after, signal, receiverAck = false) {
   return { next, through };
 }
 
-async function waitForSettlement({ client, policy, saved, requestId, signal, observation }) {
+async function waitForCheckpointChange(client, observation, signal) {
+  const change = await client.waitForChange(observation.through, { timeoutMs: 12000, signal })
+    .catch(error => { throw Object.assign(error, { handoffStage: "room_stream" }); });
+  const through = change.sequence ?? change.through;
+  if (integer(through) && through > observation.through) observation.through = through;
+  return change.changed;
+}
+
+async function readCheckpointedRequest(client, saved, { signal, wait, observation, setCheckpointWaiting }) {
+  for (;;) {
+    signal.throwIfAborted();
+    try {
+      const current = await client.replyContext(saved.requestMessageId, { view: "compact", signal });
+      setCheckpointWaiting(false);
+      return current;
+    } catch (error) {
+      if (!wait || !requestNotFound(error)) throw error;
+      // Keep the saved offer and defer the same read to the existing Room
+      // wait. A missing read cannot establish settlement or spare capacity.
+      setCheckpointWaiting(true);
+      observation.through = Math.max(observation.through, saved.openingSequence);
+      await waitForCheckpointChange(client, observation, signal);
+    }
+  }
+}
+
+async function waitForSettlement({ client, policy, saved, requestId, signal, observation, setCheckpointWaiting }) {
   if (saved?.requestMessageId !== requestId) throw Error("muse_settlement_checkpoint_mismatch");
   for (;;) {
     signal.throwIfAborted();
-    const current = await client.replyContext(requestId, { view: "compact", signal });
+    const current = await readCheckpointedRequest(client, saved, { signal, wait: true, observation, setCheckpointWaiting });
     const request = current.request;
     if (current.roomId !== policy.roomId || current.viewerId !== policy.memberId
       || current.roomCreatedEventId !== saved.roomCreatedEventId || request.id !== saved.requestMessageId
@@ -95,16 +121,12 @@ async function waitForSettlement({ client, policy, saved, requestId, signal, obs
     // The queued successor may have opened while this work was still active.
     observation.through = Math.max(observation.through, current.evaluatedThrough);
     for (;;) {
-      const change = await client.waitForChange(observation.through, { timeoutMs: 12000, signal })
-        .catch(error => { throw Object.assign(error, { handoffStage: "room_stream" }); });
-      const through = change.sequence ?? change.through;
-      if (integer(through) && through > observation.through) observation.through = through;
-      if (change.changed) break;
+      if (await waitForCheckpointChange(client, observation, signal)) break;
     }
   }
 }
 
-export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, afterSettlement, settlementObservation = { through: 0 }, onSettlement = () => {}, hasPublishedOffer = () => false, setWaiting = () => {} }) {
+export async function holdMuseHandoff({ client, policy, checkpoint, save, signal, wait = true, resumeStream = false, receiverAck = false, advertiseScope = false, afterSettlement, settlementObservation = { through: 0 }, onSettlement = () => {}, hasPublishedOffer = () => false, setWaiting = () => {}, setCheckpointWaiting = () => {} }) {
   let state = checkpoint;
   const remember = (after, inFlight = null) => { state = { ...state, after, inFlight }; save(state); };
   const offer = async handoff => {
@@ -127,7 +149,7 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
   if (afterSettlement) {
     setWaiting(false);
     const predecessor = resumedSettlement ? state.settledPredecessor : state.inFlight;
-    await waitForSettlement({ client, policy, saved: predecessor, requestId: afterSettlement, signal, observation: settlementObservation });
+    await waitForSettlement({ client, policy, saved: predecessor, requestId: afterSettlement, signal, observation: settlementObservation, setCheckpointWaiting });
     if (resumedSettlement) {
       if (state.inFlight && state.inFlight.roomCreatedEventId !== predecessor.roomCreatedEventId)
         throw Error("muse_handoff_identity_changed");
@@ -140,7 +162,8 @@ export async function holdMuseHandoff({ client, policy, checkpoint, save, signal
   let replay;
   if (state.inFlight) {
     const saved = state.inFlight;
-    const current = await client.replyContext(saved.requestMessageId, { view: "compact", signal });
+    setWaiting(false);
+    const current = await readCheckpointedRequest(client, saved, { signal, wait, observation: settlementObservation, setCheckpointWaiting });
     if (current.roomCreatedEventId !== saved.roomCreatedEventId || current.request.openingEventId !== saved.openingEventId)
       throw Error("muse_handoff_identity_changed");
     const recovered = pointer(current, { id: saved.requestMessageId, openingEventId: saved.openingEventId }, policy, saved.openingSequence - 1, receiverAck);
@@ -232,14 +255,16 @@ function loadCheckpoint(file, policy) {
 
 export async function runMuseHandoff({ mode, windowMs, stop, run, onRollover = () => {}, makeWindow = AbortSignal.timeout }) {
   const startedAt = new Date().toISOString();
-  let quietWindows = 0, lastQuietAt = null, resumeStream = false;
-  const facts = () => ({ startedAt, quietWindows, lastQuietAt });
+  let quietWindows = 0, lastQuietAt = null, resumeStream = false, checkpointWaiting = false;
+  const facts = () => ({ startedAt, quietWindows, lastQuietAt,
+    ...(checkpointWaiting ? { waitingFor: "exact_request_read" } : {}) });
   for (;;) {
     const window = makeWindow(windowMs), signal = AbortSignal.any([stop, window]);
     for (;;) {
       let waiting = false;
       try {
-        const result = await run(signal, { resumeStream, setWaiting(value) { waiting = value; } });
+        const result = await run(signal, { resumeStream, setWaiting(value) { waiting = value; },
+          setCheckpointWaiting(value) { checkpointWaiting = value; } });
         return { ...result, ...facts() };
       } catch (error) {
         if (stop.aborted) return { status: "stopped", ...facts() };

@@ -61,6 +61,61 @@ for (const outcome of ["answered", "declined", "cancelled"]) {
     () => checkSuccessorAfterSettlement(outcome));
 }
 
+test("a saved predecessor resumes when its missing exact read becomes available", async () => {
+  const first = request("first"), successor = request("successor");
+  const checkpoint = { after: 11, inFlight: { requestMessageId: first.id, openingEventId: first.openingEventId,
+    roomCreatedEventId: "room-birth", openingSequence: 11 } };
+  const saves = [], acknowledgments = [], exactReads = [];
+  let reappeared = false;
+  const result = await holdMuseHandoff({ policy, checkpoint, receiverAck: true, advertiseScope: true,
+    afterSettlement: first.id, signal: AbortSignal.timeout(3000), save: value => saves.push(value), client: {
+      async replyContext(id, options) {
+        exactReads.push(id);
+        assert.equal(options.view, "compact");
+        if (id === first.id) {
+          if (!reappeared) throw new RoomClientError(404, "reply_request_not_found", "Request not found in this Room");
+          return { ...context({ ...first, status: "answered" }, 11), evaluatedThrough: 19 };
+        }
+        return context({ ...successor, contextEventId: "successor-basis" }, 15);
+      },
+      async waitForChange(after, options) {
+        assert.equal(after, 11);
+        assert.equal(options.waitingForWork, undefined);
+        assert.deepEqual(saves, []);
+        reappeared = true;
+        return { changed: true, sequence: 19 };
+      },
+      async replyRequests() {
+        assert.equal(reappeared, true);
+        return { requests: [successor], evaluatedThrough: 19 };
+      },
+      async command(command) {
+        acknowledgments.push(command.data.requestMessageId);
+        return { event: { id: "seen-successor" }, sequence: 20 };
+      },
+    } });
+  assert.deepEqual(exactReads, [first.id, first.id, successor.id]);
+  assert.deepEqual(saves.map(value => value.after), [11, 15]);
+  assert.deepEqual(acknowledgments, [successor.id]);
+  assert.equal(result.requestMessageId, successor.id);
+});
+
+test("a checkpoint only waits for the specific missing read in armed mode", async () => {
+  const first = request("first");
+  const checkpoint = { after: 11, inFlight: { requestMessageId: first.id, openingEventId: first.openingEventId,
+    roomCreatedEventId: "room-birth", openingSequence: 11 } };
+  for (const [wait, status, code] of [
+    [true, 403, "access_denied"], [true, 404, "not_found"], [false, 404, "reply_request_not_found"]
+  ]) {
+    const error = new RoomClientError(status, code, "Refused");
+    await assert.rejects(holdMuseHandoff({ policy, checkpoint, wait, signal: AbortSignal.timeout(3000),
+      save: () => { throw Error("Checkpoint cannot change on refusal"); },
+      client: { async replyContext() { throw error; },
+        async waitForChange() { throw Error("The refused read cannot start a wait"); } }
+    }), { status, code });
+  }
+});
+
 test("prearming refuses a different request before opening a stream", async () => {
   await assert.rejects(holdMuseHandoff({ policy, client: {}, checkpoint: { after: 11,
     inFlight: { requestMessageId: "first" } }, signal: AbortSignal.timeout(3000), afterSettlement: "other" }),
@@ -88,7 +143,11 @@ test("a prearmed receiver preserves the unresolved offer through rollover and st
     import { RoomAgentClient, RoomClientError } from ${JSON.stringify(new URL("../client/room-agent.mjs", import.meta.url).href)};
     import { setTimeout } from "node:timers/promises";
     const read = async () => (${JSON.stringify({ ...context(first, 11), evaluatedThrough: 12 })});
-    RoomAgentClient.prototype.replyContext = read;
+    RoomAgentClient.prototype.replyContext = async () => {
+      if (process.env.ROOM_FIXTURE_DENY_CHECKPOINT === "1")
+        throw new RoomClientError(404, "reply_request_not_found", "Request not found in this Room");
+      return read();
+    };
     RoomAgentClient.prototype.replyContextForHint = async id => {
       appendFileSync(${JSON.stringify(exactTrace)}, id + "\\n");
       if (process.env.ROOM_FIXTURE_DENY_EXACT === "1")
@@ -101,7 +160,9 @@ test("a prearmed receiver preserves the unresolved offer through rollover and st
   const args = ["--import", pathToFileURL(preload).href,
     fileURLToPath(new URL("../scripts/muse-stream-handoff.mjs", import.meta.url)), join(directory, "handoff.json"), "-"];
   const connectionInput = JSON.stringify({ ...connection, version: 1, token: "T".repeat(43) });
-  const child = spawn(process.execPath, [...args, "--stay-armed", "--receiver-ack", "--after-settlement=first"]);
+  const child = spawn(process.execPath, [...args, "--stay-armed", "--receiver-ack", "--after-settlement=first"], {
+    env: { ...process.env, ROOM_FIXTURE_DENY_CHECKPOINT: "1" }
+  });
   let stderr = "";
   child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
   const exited = once(child, "exit");
@@ -117,6 +178,7 @@ test("a prearmed receiver preserves the unresolved offer through rollover and st
   assert.deepEqual(rolledOffer, offer);
   assert.equal(prearmedReceiver?.status, "rolled_over", stderr || "prearmed receiver status was not recorded");
   assert.equal(prearmedReceiver.pid, child.pid);
+  assert.equal(prearmedReceiver.waitingFor, "exact_request_read");
   child.kill();
   assert.deepEqual(await exited, [0, null]);
   const { prearmedReceiver: stopped, ...stoppedOffer } = status();
