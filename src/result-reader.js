@@ -78,7 +78,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
         workItemId: view.workItemId, receipt: view.receipt }));
     } catch { forgetSelection(); }
   }
-  $("#result-options > summary").setAttribute("aria-label", uiText("result.previewActions"));
+  const resultOptions = $("#result-options");
+  const optionsToggle = resultOptions.querySelector("summary");
+  optionsToggle.setAttribute("aria-label", uiText("result.previewActions"));
+  resultOptions.addEventListener("focusout", event => {
+    if (event.relatedTarget && !resultOptions.contains(event.relatedTarget) && !resultView?.copying) resultOptions.open = false;
+  });
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
   function showCorrection(correction, pending = false) {
     resultElement("result-correction-title").textContent = uiText(pending ? "result.pendingCorrection" : "result.previousReview");
@@ -570,7 +575,14 @@ export function installResultReader({ client, getState, getSession, sameSession,
     onOriginal(view.originalId);
   });
   resultReader.addEventListener("keydown", event => {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (resultView?.focused) onReturn(); else closeResult(); }
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (resultOptions.open) {
+      resultOptions.open = false;
+      optionsToggle.focus({ preventScroll: true });
+    } else if (resultView?.focused) onReturn();
+    else closeResult();
   });
   function loadExactResult(view) {
     const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);

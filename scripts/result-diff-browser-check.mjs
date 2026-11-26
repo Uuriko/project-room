@@ -1209,6 +1209,17 @@ test("a reviewer can return to the exact revised result after its file is withdr
   await reviewer.keyboard.press("Escape");
   await link.waitFor();
   assert.equal(reviewer.url(), exact);
+
+  const actions = reviewer.locator("#result-options");
+  const toggle = actions.locator("summary");
+  await toggle.press("Enter");
+  await actions.locator("#result-copy-link").press("Escape");
+  assert.equal(await actions.getAttribute("open"), null);
+  assert.equal(await toggle.evaluate(el => el === document.activeElement), true);
+  assert.equal(reviewer.url(), exact);
+  assert.ok(await link.isVisible());
+  await reviewer.keyboard.press("Tab");
+  assert.equal(await reviewer.evaluate(() => document.activeElement?.id), "result-current-version");
 });
 
 for (const browserType of process.env.ROOM_TEST_WEBKIT ? [chromium, webkit] : [chromium]) {

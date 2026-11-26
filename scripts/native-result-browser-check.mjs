@@ -108,13 +108,31 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
-  await f.page.locator("#result-options > summary").focus(); await f.page.keyboard.press("Enter");
-  await f.page.keyboard.press("Tab");
-  assert.equal(await f.page.locator("#result-copy-text").evaluate(el => el === document.activeElement), true);
-  await f.page.keyboard.press("Tab");
-  assert.equal(await f.page.locator("#result-download").evaluate(el => el === document.activeElement), true);
-  await f.page.keyboard.press("Tab");
-  assert.equal(await f.page.locator("#close-result").evaluate(el => el === document.activeElement), true);
+  const actions = f.page.locator("#result-options");
+  const toggle = actions.locator("summary");
+  const focusIs = async selector => assert.equal(
+    await f.page.evaluate(() => document.activeElement?.id), selector);
+  const capture = async step => {
+    if (process.env.ROOM_RESULT_KEYS_CAPTURE)
+      await f.page.screenshot({ path: join(process.env.ROOM_RESULT_KEYS_CAPTURE, `${mobile ? "phone" : "desktop"}-${step}.png`) });
+  };
+  await toggle.press("Enter");
+  for (const id of ["result-copy-text", "result-download", "result-copy-link"]) {
+    await f.page.keyboard.press("Tab");
+    await focusIs(id);
+  }
+  await capture("actions");
+  await f.page.keyboard.press("Escape");
+  await capture("escape");
+  assert.equal(await f.page.locator("#result-dialog").isVisible(), true, "Escape dismisses actions before leaving the exact result");
+  assert.equal(await actions.getAttribute("open"), null);
+  assert.equal(await toggle.evaluate(el => el === document.activeElement), true);
+  await toggle.press("Enter");
+  for (const id of ["result-copy-text", "result-download", "result-copy-link", "close-result"]) {
+    await f.page.keyboard.press("Tab");
+    await focusIs(id);
+  }
+  assert.equal(await actions.getAttribute("open"), null, "Tab out dismisses actions without changing focus");
   await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-body").evaluate(el => el === document.activeElement), true, "scrollable exact text remains keyboard reachable");
   await f.page.keyboard.press("Tab");
@@ -125,7 +143,7 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
   f.mutate(T.WORK_BLOCKED, { reason: "Synthetic follow-up", nextAction: "Revisit later" });
   await f.page.waitForFunction(id => document.querySelector(`[data-work-record-id='${id}']`).textContent.includes("Synthetic follow-up"), f.workItemId);
-  await f.page.locator("#close-result").click(); assert.equal(await f.page.locator("#result-body").textContent(), "");
+  await f.page.keyboard.press("Escape"); assert.equal(await f.page.locator("#result-body").textContent(), "");
   assert.equal(await f.page.locator(`[data-read-result='${f.workItemId}']`).evaluate(el => el === document.activeElement), true);
 });
 
