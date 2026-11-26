@@ -3,8 +3,8 @@ import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
 import { validId } from "../src/events.js";
 import { listRoomWork } from "./mcp-room-profile.mjs";
+import { capacityHandoff, capacityWorkHandoff, compileCapacityHandoff, compileCapacityWork, compileIdleRefill, idleRefill, investigation } from "./completion-capacity.mjs";
 
-const investigation = "Room investigation pass.";
 const pickupRetryDelaysMs = [1000, 2000, 4000, 8000, 16000, 32000];
 const routeKey = ({ roomId, requesterId, recipientId, workItemId }) =>
   JSON.stringify([roomId, requesterId, recipientId, workItemId]);
@@ -31,7 +31,7 @@ function compileContinuation(route) {
   return { requests, position: 0 };
 }
 
-function recipientHasOpenRequest(store, secret, { roomId, recipientId }) {
+function recipientHasOpenRequest(store, secret, { roomId, recipientId }, includeStale = false) {
   let cursor;
   do {
     const open = store.replyRequests.list(secret, roomId, { direction: "outgoing", status: "open", states: true,
@@ -40,7 +40,7 @@ function recipientHasOpenRequest(store, secret, { roomId, recipientId }) {
     // Staleness measures time since progress. An acknowledged request may
     // still be executing, even when the receiver has stopped reporting.
     if (open.requests.some(item => item.recipientId === recipientId &&
-        (item.lifecycle?.state !== "stale" || item.lifecycle.unresponsive !== true))) return true;
+        (includeStale || item.lifecycle?.state !== "stale" || item.lifecycle.unresponsive !== true))) return true;
     if (!open.page?.hasMore) return false;
     if (!open.page.nextCursor || open.page.nextCursor === cursor) return true;
     cursor = open.page.nextCursor;
@@ -144,11 +144,16 @@ function readCompletionPickupPlan(store, configPath) {
         || route.allowUnadvertisedReceiver !== undefined && typeof route.allowUnadvertisedReceiver !== "boolean"
         || firstLine !== undefined && (typeof firstLine !== "string" || !firstLine.length || firstLine.length > 120
           || firstLine.trim() !== firstLine || /[\r\n\u2028\u2029]/.test(firstLine))
+        || route.capacityHandoff !== undefined && route.capacityWork !== undefined
         || bindings.has(routeKey(route))) throw Error("Invalid completion pickup route");
     const credential = readPrivateJson(credentialPath);
     const secret = credential.identitySecret ?? credential.token;
     if (store.authenticate(secret, roomId).member.id !== requesterId) throw Error("Invalid completion pickup requester");
-    bindings.set(routeKey(route), { route, secret, continuation: compileContinuation(route) });
+    bindings.set(routeKey(route), {
+      route, secret, continuation: compileContinuation(route), capacity: compileCapacityHandoff(route),
+      refill: compileIdleRefill(route), workHandoff: compileCapacityWork(route),
+      hasOpenRequest: selection => recipientHasOpenRequest(store, secret, selection, true)
+    });
   }
   const configDigest = createHash("sha256").update(JSON.stringify(config)).digest("hex");
   return { bindings, checkpointPath, configDigest };
@@ -218,10 +223,24 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
         defer(roomId, roomId, error);
       }
       for (const binding of bindings.values()) {
-        if (binding.route.roomId !== roomId || !binding.continuation) continue;
+        if (binding.route.roomId !== roomId || !binding.continuation && !binding.capacity && !binding.refill && !binding.workHandoff) continue;
         try {
-          const opening = advanceContinuation(store, binding, receiverServer);
-          if (opening !== undefined) log(JSON.stringify({ event: "completion_pickup.continued", roomId, opening }));
+          if (binding.capacity || binding.workHandoff) {
+            const decision = binding.capacity ? capacityHandoff(store, binding, receiverServer) : capacityWorkHandoff(store, binding, receiverServer);
+            if (decision.state !== binding.capacityState || decision.opening !== undefined) {
+              log(JSON.stringify({ event: "completion_pickup.capacity", roomId, memberId: binding.route.recipientId, ...decision }));
+              binding.capacityState = decision.state;
+            }
+          }
+          const opening = binding.continuation && advanceContinuation(store, binding, receiverServer);
+          if (binding.refill) {
+            const refill = idleRefill(store, binding, receiverServer);
+            if (refill.state !== binding.refillState || refill.opening !== undefined) {
+              log(JSON.stringify({ event: "completion_pickup.refill", roomId, memberId: binding.route.recipientId, ...refill }));
+              binding.refillState = refill.state;
+            }
+          }
+          if (typeof opening === "number") log(JSON.stringify({ event: "completion_pickup.continued", roomId, opening }));
           clearRetry(binding);
         } catch (error) {
           defer(binding, roomId, error);
@@ -231,12 +250,16 @@ function subscribeCompletionPickup(store, { bindings, checkpointPath }, log, rec
   }
   const unsubscribe = store.onEventAppended(wake);
   receiverServer?.on("agentReceiverConnected", wake);
+  receiverServer?.on("agentReceiverDisconnected", wake);
+  receiverServer?.on("agentCapacityChanged", wake);
   for (const roomId of rooms.keys()) wake(roomId);
   return () => {
     stopped = true;
     for (const scope of retries.keys()) clearRetry(scope);
     unsubscribe();
     receiverServer?.off("agentReceiverConnected", wake);
+    receiverServer?.off("agentReceiverDisconnected", wake);
+    receiverServer?.off("agentCapacityChanged", wake);
   };
 }
 
