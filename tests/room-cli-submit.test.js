@@ -223,7 +223,7 @@ test(`a document reviewer receives the exact earlier finding with the revision (
 
 for (const representation of ["legacy", "normalized-current-v1"])
 test(`an invitation redeems into the first exact assignment and accepted result (${representation})`, async t => {
-  const { cli, env, origin, owner, producer, reviewer, reviewerProject, save, store } = await fixture(t, representation);
+  const { cli, env, origin, owner, producer, reviewer, reviewerProject, rpc, save, store } = await fixture(t, representation);
   const mint = await fetch(`${origin}/api/rooms/commons/agent-invites`, {
     method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${owner}` },
     body: JSON.stringify({ profile: "contribute", displayName: "New coworker" }),
@@ -361,13 +361,34 @@ test(`an invitation redeems into the first exact assignment and accepted result 
     sourceMessageId: decisionSourceId, evidenceVersion: textVersion(revisedBody), reason: "The reviewed brief names the owner."
   });
   const resultLink = exactResultHref({ roomId: "commons", workItemId, completionEventId: revisedId }, new URL(origin));
+  const acceptedMessageId = (await command(second.next.command.slice(1))).result.text.messageId;
+  assert.ok(acceptedMessageId);
+  const firstMessageId = ownResult.result.text.messageId;
+  send("message.posted", { messageId: "old-brief-discussion", replyToId: firstMessageId, body: "This comment belongs to the earlier result." });
+  const continuation = await rpc("room_post_message", {
+    id: "accepted-brief-discussion", replyToId: acceptedMessageId, body: "Use this accepted version for the release notes.", compact: true,
+  }, reviewer);
+  send("message.posted", { messageId: "private-brief-discussion", replyToId: acceptedMessageId,
+    toMemberId: saved.memberId, body: "Private context for the author." });
+  send("message.posted", { messageId: "later-room-chat", body: "This newer message belongs to the room timeline." });
+  const beforeReturn = store.headSequence("commons");
   const cold = await promisify(execFile)(process.execPath,
-    [fileURLToPath(new URL("../bin/room.mjs", import.meta.url)), "result", resultLink], { cwd: reviewerProject, env });
+    [fileURLToPath(new URL("../bin/room.mjs", import.meta.url)), "result", resultLink, "--discussion"], { cwd: reviewerProject, env });
   const reopened = JSON.parse(cold.stdout);
   assert.equal(reopened.viewerId, reviewer.identityId);
   assert.equal(reopened.result.receipt.eventId, revisedId);
   assert.equal(reopened.result.text.body, revisedBody);
   assert.equal(reopened.workThread.decisionSource.decisionEventId, approved.event.id);
+  assert.equal(reopened.discussion.messageId, acceptedMessageId);
+  assert.deepEqual(reopened.discussion.replies.map(reply => reply.id), [continuation.messageId]);
+  const connector = await rpc(reopened.discussionRead.tool, reopened.discussionRead.arguments, reviewer);
+  assert.equal(connector.completionEventId, revisedId);
+  assert.deepEqual(connector.discussion, reopened.discussion);
+  assert.doesNotMatch(JSON.stringify(reopened), /Private context for the author/);
+  assert.equal(store.headSequence("commons"), beforeReturn, "return reads do not write");
+  t.diagnostic(JSON.stringify({ representation, workItemId, originalCompletion: firstId,
+    acceptedCompletion: revisedId, acceptedMessage: acceptedMessageId, acceptanceDecision: approved.event.id,
+    visibleReplies: [continuation.messageId], privateDiscussionVisible: false, returnWrites: 0 }));
 
   store.identities.unlink(owner, "commons", saved.memberId);
   const revoked = await cli([...prefix, "work", "first-coworker-task", "--include-source", "--from", "-"], packet);
