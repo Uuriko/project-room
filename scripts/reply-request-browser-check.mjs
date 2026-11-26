@@ -12,6 +12,9 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { event } from "../src/events.js";
+import { textVersion } from "../server/text-results.mjs";
+import { workThreadHref } from "../src/workflow.js";
+import { exactResultHref } from "../src/record-link.js";
 import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, viewport = { width: 1280, height: 900 }) {
@@ -245,6 +248,67 @@ test("current room shows a durable start report without polling host attempts", 
   assert.deepEqual(f.errors, []);
 });
 
+
+for (const representation of [null, "normalized-current-v1"]) {
+  test(`shared private work link keeps the recipient’s access and status on ${representation ?? "legacy"}`, { timeout: 30000 }, async t => {
+    const f = await setup(t, { width: 390, height: 844 });
+    const roomId = "handoff-room", workItemId = "document-handoff";
+    const participant = (memberId, kind, permissions = [], accountableHumanId) => event({
+      roomId, actorId: "owner", type: "member.added", data: { memberId, displayName: memberId, kind, permissions,
+        ...(accountableHumanId ? { accountableHumanId } : {}) },
+    });
+    f.store.initialize([...initialRoom(roomId), participant("colleague", "human"), participant("reader", "human", ["verify"]),
+      participant("writer", "agent", ["accept_work", "complete_work"], "colleague")], { representation });
+    const keys = Object.fromEntries(["owner", "colleague", "reader", "writer"].map(member => [member, f.store.issueAccessKey(roomId, member)]));
+    const command = (actor, type, data) => f.store.command(keys[actor], roomId, { id: crypto.randomUUID(), type, data });
+    command("owner", "message.posted", { messageId: "private-brief", body: "Private source marker", toMemberId: "writer" });
+    command("owner", "work.proposed", { workItemId, title: "Check the release note", definitionOfDone: "Confirm the date", mode: "read",
+      sourceMessageId: "private-brief", accountableMemberId: "writer", verifierMemberId: "reader", independentVerificationRequired: true });
+    command("owner", "message.posted", { messageId: "agent-only-ask", body: "Private request marker", toMemberId: "writer", workItemId, requestKind: "reply" });
+    const openLink = async who => {
+      const page = await f.login(who, { roomId, key: keys[who] });
+      const target = new URL(page.url());
+      target.hash = workThreadHref(workItemId);
+      await page.goto(target.href);
+      return page;
+    };
+    const outsider = await openLink("colleague"), notice = outsider.locator("#status[role=alert]");
+    await notice.waitFor();
+    const shots = process.env.ROOM_WORK_LINK_CAPTURE;
+    if (shots) await outsider.screenshot({ path: join(shots, `${representation ?? "legacy"}-denied.png`) });
+    assert.equal(await notice.locator(".status-text").textContent(), "Work unavailable. Ask the sender for a reference you can open.");
+    assert.equal(await outsider.locator(`[data-work-record-id="${workItemId}"]`).count(), 0);
+    assert.throws(() => f.store.workContext(keys.colleague, roomId, workItemId), { code: "work_private" });
+
+    const reviewer = await openLink("reader"), card = reviewer.locator(`[data-work-record-id="${workItemId}"]`);
+    await card.locator(".state").getByText("Awaiting acceptance", { exact: true }).waitFor();
+    assert.doesNotMatch(await card.innerText(), /Private source marker|Private request marker/);
+    assert.throws(() => f.store.replyRequests.selected(keys.reader, roomId, "agent-only-ask"), { code: "reply_request_not_found" });
+    const transition = (type, data = {}) => command("writer", type, { workItemId,
+      expectedRevision: f.store.workContext(keys.writer, roomId, workItemId).work.revision, ...data });
+    transition("work.accepted");
+    await card.locator(".state").getByText("Accepted", { exact: true }).waitFor();
+    transition("work.started");
+    await card.locator(".state").getByText("Working · reported", { exact: true }).waitFor();
+    const body = "Private final document marker";
+    const post = command("writer", "message.posted", { messageId: "private-result", workItemId, body, toMemberId: "owner" });
+    const completion = transition("work.completed", { summary: "Date confirmed", nextAction: "Review the saved note", producerId: "writer",
+      evidenceKind: "room_text", evidenceMessageId: "private-result", evidenceMessageEventId: post.event.id,
+      evidenceVersion: textVersion(body), previousCompletionEventId: null });
+    await card.locator(".state").getByText("Awaiting verification", { exact: true }).waitFor();
+    assert.doesNotMatch(await card.innerText(), /Private final document marker/);
+    if (shots) await reviewer.screenshot({ path: join(shots, `${representation ?? "legacy"}-review.png`) });
+    const exactResult = exactResultHref({ roomId, workItemId, completionEventId: completion.event.id }, new URL(reviewer.url()));
+    const deniedResult = reviewer.waitForResponse(response => new URL(response.url()).pathname.endsWith("/work-result"));
+    await reviewer.goto(exactResult);
+    const response = await deniedResult;
+    assert.equal(response.status(), 422);
+    assert.equal((await response.json()).error.code, "result_unavailable");
+    await reviewer.getByText("Ask the sender to share the intended result version somewhere you can read it.", { exact: true }).waitFor();
+    assert.equal(await reviewer.locator("#result-body").textContent(), "");
+    assert.deepEqual(f.errors, []);
+  });
+}
 
 for (const width of [1280, 390]) test(`coding result stays readable and escaped at ${width}px`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width, height: 900 });

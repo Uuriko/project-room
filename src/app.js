@@ -3529,7 +3529,8 @@ function workRecord(id) {
 // message thread. Leave the thread through the normal draft-saving path before
 // looking up its card; close attention/settings overlays before focusing it.
 function revealWorkTimeline(id) {
-  if (!state?.workItems[id] || busy) return null;
+  const item = state?.workItems[id];
+  if (!item || item.title === null || busy) return null;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   workspaceUI?.showRooms();
@@ -3564,7 +3565,7 @@ function revealWork(id, expandDetails = false) {
   const card = revealWorkTimeline(id);
   if (!card) {
     activeWorkNavigationId = null; activeWorkNavigation = null;
-    if (state && !busy) notice("That work is not available in this room.", true);
+    if (state && !busy) notice(uiText("work.link.unavailable"), true);
     syncWorkReturnControl(); return null;
   }
   activeWorkNavigationId = id;
@@ -3610,7 +3611,8 @@ async function readSelectedWorkRecord(id, expandDetails, { restoreInPlace = fals
     } catch (error) {
       if (!current()) return null;
       if (held !== state) continue;
-      notice(error.code === "work_private" ? SOURCE_UNAVAILABLE_NOTICE : error.message || SOURCE_UNAVAILABLE_NOTICE, true);
+      const unavailable = error.code === "work_private" || error.code === "work_not_found";
+      notice(unavailable ? uiText("work.link.unavailable") : error.message || SOURCE_UNAVAILABLE_NOTICE, true);
       return null;
     }
   }
